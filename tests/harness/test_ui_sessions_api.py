@@ -1,9 +1,20 @@
+import time
+
 from fastapi.testclient import TestClient
 
 from gpt2giga.harness.config import HarnessConfig
+from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.project import project_id_for_root
-from gpt2giga.harness.registry import create_default_registry
+from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga.harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga.harness.types import (
+    Availability,
+    HarnessCapability,
+    HarnessContext,
+    HarnessRequest,
+    HarnessResult,
+    HarnessSpec,
+)
 from gpt2giga.harness.ui.app import create_app
 
 
@@ -113,10 +124,95 @@ def test_sessions_api_events_polling_after_id():
     assert response.json()["events"][0]["id"] != first_event_id
 
 
-def _client() -> TestClient:
+def test_sessions_api_start_run_returns_stream_urls_and_sse_replay():
+    client = _client()
+
+    started = client.post(
+        "/api/sessions/run/start",
+        json={"harness_id": "echo", "prompt": "hello", "stream": True},
+    )
+
+    assert started.status_code == 200
+    body = started.json()
+    assert body["run"]["id"].startswith("run_")
+    assert body["stream_url"] == f"/api/runs/{body['run']['id']}/events/stream"
+    assert body["cancel_url"] == f"/api/runs/{body['run']['id']}/cancel"
+
+    with client.stream("GET", body["stream_url"]) as response:
+        assert response.status_code == 200
+        text = "".join(response.iter_text())
+
+    assert "run_started" in text
+    assert "run_finished" in text
+
+
+def test_sessions_api_cancel_active_headless_run():
+    store = InMemoryHarnessSessionStore()
+    registry = HarnessRegistry()
+    registry.register(_CancellableHarness())
+    client = _client(registry=registry, store=store)
+
+    started = client.post(
+        "/api/sessions/run/start",
+        json={"harness_id": "slow", "prompt": "wait", "stream": True},
+    )
+    assert started.status_code == 200
+    body = started.json()
+    run_id = body["run"]["id"]
+    session_id = body["session"]["id"]
+
+    canceled = client.post(f"/api/runs/{run_id}/cancel")
+
+    assert canceled.status_code == 200
+    assert canceled.json()["cancel_requested"] is True
+    for _ in range(100):
+        bundle = client.get(f"/api/sessions/{session_id}").json()
+        run = bundle["runs"][-1]
+        if run["status"] == "canceled":
+            break
+        time.sleep(0.02)
+    assert run["status"] == "canceled"
+    event_types = {event["type"] for event in bundle["events"]}
+    assert {"cancel_requested", "run_canceled", "run_finished"} <= event_types
+
+
+def _client(
+    *,
+    registry: HarnessRegistry | None = None,
+    store: InMemoryHarnessSessionStore | None = None,
+) -> TestClient:
     app = create_app(
         HarnessConfig(default_model="ConfiguredModel"),
-        registry=create_default_registry(include_entry_points=False),
-        store=InMemoryHarnessSessionStore(),
+        registry=registry or create_default_registry(include_entry_points=False),
+        store=store or InMemoryHarnessSessionStore(),
     )
     return TestClient(app)
+
+
+class _CancellableHarness(BaseHarness):
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="slow",
+            title="Slow",
+            kind="test",
+            description="Slow cancellable harness",
+            capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
+            supports_streaming=True,
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available("test")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            cancel_event = request.cancel_event
+            if cancel_event is not None and cancel_event.is_set():
+                return HarnessResult(ok=False, text="", error="cancelled")
+            time.sleep(0.01)
+        return HarnessResult(ok=True, text="finished")

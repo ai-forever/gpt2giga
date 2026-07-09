@@ -38,6 +38,26 @@ class AvailabilityStatus(str, Enum):
     ERROR = "error"
 
 
+class HarnessEventType(str, Enum):
+    """Stable event names stored and streamed for harness runs."""
+
+    RUN_STARTED = "run_started"
+    MESSAGE_DELTA = "message_delta"
+    STDOUT_DELTA = "stdout_delta"
+    STDERR_DELTA = "stderr_delta"
+    TOOL_CALL_STARTED = "tool_call_started"
+    TOOL_CALL_FINISHED = "tool_call_finished"
+    FILE_CHANGED = "file_changed"
+    RAW_REQUEST = "raw_request"
+    RAW_RESPONSE = "raw_response"
+    WARNING = "warning"
+    ERROR = "error"
+    MESSAGE_COMPLETED = "message_completed"
+    CANCEL_REQUESTED = "cancel_requested"
+    RUN_CANCELED = "run_canceled"
+    RUN_FINISHED = "run_finished"
+
+
 @dataclass(frozen=True)
 class Availability:
     """Represent whether a harness can run in the current environment."""
@@ -112,6 +132,7 @@ class HarnessRequest:
     session_id: str | None = None
     run_id: str | None = None
     native_session_id: str | None = None
+    cancel_event: Any | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
 
 

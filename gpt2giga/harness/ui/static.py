@@ -839,6 +839,7 @@ INDEX_HTML = """<!doctype html>
           <div id="attachment-list" class="attachment-list" aria-live="polite"></div>
           <div class="inline-actions">
             <button id="run-button" type="button">Run</button>
+            <button id="cancel-run-button" class="danger" type="button" hidden>Cancel</button>
             <button id="copy-cli-button" class="secondary" type="button">Copy CLI</button>
             <button id="copy-curl-button" class="secondary" type="button">Copy curl</button>
             <button id="reset-button" class="secondary" type="button">Reset</button>
@@ -942,6 +943,8 @@ INDEX_HTML = """<!doctype html>
       fileMentionQuery: null,
       currentSessionId: null,
       currentBundle: null,
+      activeHeadlessRun: null,
+      headlessEventSource: null,
       lastPayload: null
     };
 
@@ -1871,6 +1874,10 @@ INDEX_HTML = """<!doctype html>
         await startNativeProcess(payload);
         return;
       }
+      if (payload.stream) {
+        await startHeadlessStream(payload);
+        return;
+      }
       state.lastPayload = payload;
       setText("raw-request-panel", pretty(payload));
       setText("raw-response-panel", "{}");
@@ -1903,6 +1910,138 @@ INDEX_HTML = """<!doctype html>
         byId("run-button").disabled = false;
         byId("run-button").textContent = "Run";
       }
+    }
+
+    async function startHeadlessStream(payload) {
+      state.lastPayload = payload;
+      closeHeadlessEventSource();
+      setText("raw-request-panel", pretty(payload));
+      setText("raw-response-panel", "{}");
+      setText("command-panel", commandPreview(payload));
+      setText("diff-panel", "No diff captured.");
+      setText("run-panel", "Starting streamed run...");
+      renderEvents([]);
+      setHeadlessRunning(true);
+      try {
+        const url = state.currentSessionId ? `/api/sessions/${encodeURIComponent(state.currentSessionId)}/run/start` : "/api/sessions/run/start";
+        const result = await getJson(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const body = result.data || {};
+        if (!result.ok || !body.run) {
+          setText("raw-response-panel", pretty(body));
+          setText("run-panel", body.detail || `Stream start failed with HTTP ${result.status}`);
+          setHeadlessRunning(false);
+          return;
+        }
+        state.currentSessionId = body.session && body.session.id ? body.session.id : state.currentSessionId;
+        state.activeHeadlessRun = body.run;
+        if (Array.isArray(body.events) && body.events.length) renderEvents(body.events);
+        setText("run-panel", pretty(body.run));
+        if (state.currentSessionId) {
+          await loadSession(state.currentSessionId);
+          persistProjectState({ last_selected_session: state.currentSessionId });
+        }
+        openHeadlessEventStream(body.run.id);
+      } catch (error) {
+        setText("run-panel", "Stream start failed.");
+        setHeadlessRunning(false);
+      }
+    }
+
+    function openHeadlessEventStream(runId) {
+      closeHeadlessEventSource();
+      if (!window.EventSource) {
+        setText("run-panel", "This browser does not support EventSource.");
+        setHeadlessRunning(false);
+        return;
+      }
+      const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events/stream`);
+      state.headlessEventSource = source;
+      source.onmessage = (event) => {
+        let payload = {};
+        try {
+          payload = JSON.parse(event.data || "{}");
+        } catch (error) {
+          payload = { type: "warning", message: "Invalid event payload", payload: {} };
+        }
+        appendStreamEvent(payload);
+        if (payload.type === "run_finished") {
+          finishHeadlessStream();
+        }
+      };
+      source.onerror = () => {
+        const run = state.activeHeadlessRun || {};
+        if (run.status === "succeeded" || run.status === "failed" || run.status === "canceled") {
+          finishHeadlessStream();
+        }
+      };
+    }
+
+    function appendStreamEvent(event) {
+      if (!state.currentBundle) state.currentBundle = { events: [], runs: [] };
+      if (!Array.isArray(state.currentBundle.events)) state.currentBundle.events = [];
+      const exists = event.id && state.currentBundle.events.some((item) => item.id === event.id);
+      if (!exists) state.currentBundle.events.push(event);
+      renderEvents(state.currentBundle.events);
+      if (event.type === "run_finished" && event.payload && event.payload.status) {
+        state.activeHeadlessRun = {
+          ...(state.activeHeadlessRun || {}),
+          status: event.payload.status
+        };
+      }
+      if (event.type === "error" || event.type === "run_canceled") showTab("events");
+    }
+
+    async function finishHeadlessStream() {
+      closeHeadlessEventSource();
+      setHeadlessRunning(false);
+      if (state.currentSessionId) {
+        await loadSession(state.currentSessionId);
+        await loadSessions();
+      }
+      byId("prompt-input").value = "";
+      state.attachments = [];
+      renderAttachments();
+    }
+
+    function closeHeadlessEventSource() {
+      if (state.headlessEventSource) {
+        state.headlessEventSource.close();
+        state.headlessEventSource = null;
+      }
+    }
+
+    function setHeadlessRunning(running) {
+      byId("run-button").disabled = running;
+      byId("run-button").textContent = running ? "Running..." : "Run";
+      byId("cancel-run-button").hidden = !running;
+      byId("cancel-run-button").disabled = !running;
+    }
+
+    async function cancelHeadlessRun() {
+      const run = state.activeHeadlessRun || {};
+      if (!run.id) return;
+      byId("cancel-run-button").disabled = true;
+      const result = await getJson(`/api/runs/${encodeURIComponent(run.id)}/cancel`, {
+        method: "POST"
+      });
+      if (!result.ok) {
+        appendStreamEvent({
+          type: "error",
+          message: result.data.detail || "Cancel failed.",
+          payload: { status: result.status }
+        });
+        byId("cancel-run-button").disabled = false;
+        return;
+      }
+      appendStreamEvent({
+        type: "cancel_requested",
+        message: "Harness run cancellation requested.",
+        payload: { active: result.data.active === true }
+      });
     }
 
     async function startNativeProcess(payload) {
@@ -2343,6 +2482,8 @@ INDEX_HTML = """<!doctype html>
       byId("prompt-input").value = "";
       byId("dry-run-checkbox").checked = false;
       byId("stream-checkbox").checked = false;
+      closeHeadlessEventSource();
+      setHeadlessRunning(false);
       state.attachments = [];
       renderAttachments();
     }
@@ -2416,6 +2557,7 @@ INDEX_HTML = """<!doctype html>
         if (!byId("model-picker").contains(event.target)) closeModelList();
       });
       byId("run-button").addEventListener("click", runHarness);
+      byId("cancel-run-button").addEventListener("click", cancelHeadlessRun);
       byId("reset-button").addEventListener("click", resetComposer);
       byId("attach-file-button").addEventListener("click", () => byId("attachment-file-input").click());
       byId("attachment-file-input").addEventListener("change", (event) => {

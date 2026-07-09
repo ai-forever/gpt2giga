@@ -229,6 +229,9 @@ class FilesystemHarnessSessionStore:
         )
         return updated
 
+    def get_run(self, run_id: str) -> HarnessRun:
+        return self._find_run(run_id)[2]
+
     def list_runs(self, session_id: str) -> tuple[HarnessRun, ...]:
         self.get_session(session_id)
         return tuple(

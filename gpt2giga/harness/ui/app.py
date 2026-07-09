@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
+from dataclasses import dataclass
+import json
+import threading
 from typing import Any, Mapping
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from gpt2giga.harness import proxy
 from gpt2giga.harness.attachments import (
@@ -78,17 +83,20 @@ from gpt2giga.harness.sessions.redaction import redact_for_storage
 from gpt2giga.harness.sessions.models import (
     HarnessMessage,
     HarnessNativeLink,
+    HarnessRun,
     HarnessSession,
     HarnessStoredEvent,
     bundle_to_dict,
+    event_to_dict,
     message_to_dict,
     native_link_to_dict,
     run_to_dict,
     session_to_dict,
 )
-from gpt2giga.harness.sessions.store import new_id, utc_now
+from gpt2giga.harness.sessions.store import new_id, title_from_prompt, utc_now
 from gpt2giga.harness.types import (
     HarnessCapability,
+    HarnessEventType,
     HarnessRequest,
     availability_to_dict,
     parse_api_mode,
@@ -102,6 +110,12 @@ from gpt2giga.harness.workspace import (
     workspace_file_metadata,
     workspace_tree,
 )
+
+
+@dataclass
+class _ActiveHeadlessRun:
+    task: asyncio.Task[Any]
+    cancel_event: threading.Event
 
 
 def create_app(
@@ -132,6 +146,7 @@ def create_app(
         store=store,
         attachment_store=attachment_store,
     )
+    active_headless_runs: dict[str, _ActiveHeadlessRun] = {}
     app = FastAPI(title="gpt2giga Unified Harness", docs_url=None, redoc_url=None)
     app.state.harness_config = config
     app.state.harness_registry = registry
@@ -830,6 +845,194 @@ def create_app(
             "file": metadata,
         }
 
+    async def _start_headless_run(
+        session_id: str,
+        payload: Mapping[str, Any],
+    ) -> HarnessRun:
+        before_run_ids = {run.id for run in store.list_runs(session_id)}
+        cancel_event = threading.Event()
+        task = asyncio.create_task(
+            run_in_threadpool(
+                runner.run_in_session,
+                session_id,
+                payload,
+                cancel_event=cancel_event,
+            )
+        )
+        run = await _wait_for_started_run(
+            store=store,
+            session_id=session_id,
+            before_run_ids=before_run_ids,
+            task=task,
+        )
+        active_headless_runs[run.id] = _ActiveHeadlessRun(
+            task=task,
+            cancel_event=cancel_event,
+        )
+        task.add_done_callback(
+            lambda _task, run_id=run.id: active_headless_runs.pop(run_id, None)
+        )
+        return run
+
+    def _run_start_response(run: HarnessRun) -> dict[str, Any]:
+        events = store.list_events(run.session_id, run_id=run.id)
+        return {
+            "session": _session_summary(store, run.session_id),
+            "run": run_to_dict(run),
+            "events": [_event_response(event) for event in events],
+            "stream_url": f"/api/runs/{run.id}/events/stream",
+            "cancel_url": f"/api/runs/{run.id}/cancel",
+        }
+
+    @app.post("/api/sessions/run/start")
+    async def create_session_and_start_run(
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            harness_id = str(payload.get("harness_id") or "echo")
+            registry.get(harness_id)
+            session = runner.create_session(
+                title=_optional_text(payload.get("title"))
+                or title_from_prompt(str(payload.get("prompt") or "")),
+                workspace=_optional_text(payload.get("workspace")),
+                default_harness_id=harness_id,
+                default_model=_optional_text(payload.get("model")),
+                default_api_mode=payload.get("api_mode") or config.default_api_mode,
+                default_mode=str(payload.get("mode") or "plan"),
+            )
+            run = await _start_headless_run(session.id, payload)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return _run_start_response(run)
+
+    @app.post("/api/sessions/{session_id}/run/start")
+    async def start_run_in_session(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            store.get_session(session_id)
+            run = await _start_headless_run(session_id, payload)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return _run_start_response(run)
+
+    @app.get("/api/runs/{run_id}/events/stream")
+    async def run_events_stream(
+        run_id: str,
+        after_id: str | None = Query(default=None),
+    ) -> StreamingResponse:
+        try:
+            store.get_run(run_id)
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+
+        async def stream_events():
+            last_id = _optional_text(after_id)
+            while True:
+                try:
+                    current_run = store.get_run(run_id)
+                    events = store.list_events(
+                        current_run.session_id,
+                        run_id=run_id,
+                        after_id=last_id,
+                    )
+                except (RunNotFoundError, SessionNotFoundError):
+                    break
+                for event in events:
+                    last_id = event.id
+                    yield _sse_event(event)
+                if _run_status_is_terminal(current_run.status) and not events:
+                    break
+                await asyncio.sleep(0.25)
+
+        return StreamingResponse(
+            stream_events(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.post("/api/runs/{run_id}/cancel")
+    async def cancel_run(run_id: str) -> dict[str, Any]:
+        try:
+            run = store.get_run(run_id)
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        if _run_status_is_terminal(run.status):
+            return {
+                "cancel_requested": False,
+                "active": False,
+                "run": run_to_dict(run),
+            }
+        active = active_headless_runs.get(run.id)
+        already_requested = bool(run.metadata.get("cancel_requested"))
+        if active is not None:
+            active.cancel_event.set()
+            metadata = {**dict(run.metadata), "cancel_requested": True}
+            run = store.update_run(run.id, metadata=metadata)
+        else:
+            metadata = {**dict(run.metadata), "cancel_requested": True}
+            run = store.update_run(
+                run.id,
+                status="canceled",
+                finished_at=utc_now(),
+                error="Harness run canceled.",
+                metadata=metadata,
+            )
+        if not already_requested:
+            store.append_event(
+                HarnessStoredEvent(
+                    id=new_id("evt"),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    type=HarnessEventType.CANCEL_REQUESTED.value,
+                    message="Harness run cancellation requested.",
+                    payload={"active": active is not None},
+                    created_at=utc_now(),
+                )
+            )
+            if active is None:
+                store.append_event(
+                    HarnessStoredEvent(
+                        id=new_id("evt"),
+                        session_id=run.session_id,
+                        run_id=run.id,
+                        type=HarnessEventType.RUN_CANCELED.value,
+                        message="Harness run canceled.",
+                        payload={},
+                        created_at=utc_now(),
+                    )
+                )
+                store.append_event(
+                    HarnessStoredEvent(
+                        id=new_id("evt"),
+                        session_id=run.session_id,
+                        run_id=run.id,
+                        type=HarnessEventType.RUN_FINISHED.value,
+                        message="Harness run finished.",
+                        payload={"status": "canceled"},
+                        created_at=utc_now(),
+                    )
+                )
+        return {
+            "cancel_requested": True,
+            "active": active is not None,
+            "run": run_to_dict(run),
+        }
+
     @app.post("/api/sessions/run")
     async def create_session_and_run(
         payload: dict[str, Any] = Body(...),
@@ -938,6 +1141,40 @@ def validate_ui_bind(host: str, *, allow_remote: bool) -> None:
             "Refusing to bind UI to 0.0.0.0 without --allow-remote. "
             "The UI may expose local harness execution."
         )
+
+
+async def _wait_for_started_run(
+    *,
+    store: HarnessSessionStore,
+    session_id: str,
+    before_run_ids: set[str],
+    task: asyncio.Task[Any],
+) -> HarnessRun:
+    for _ in range(200):
+        runs = [
+            run for run in store.list_runs(session_id) if run.id not in before_run_ids
+        ]
+        if runs:
+            return runs[-1]
+        if task.done():
+            await task
+            break
+        await asyncio.sleep(0.01)
+    raise RuntimeError("Harness run did not start")
+
+
+def _event_response(event: HarnessStoredEvent) -> dict[str, Any]:
+    return event_to_dict(event)
+
+
+def _sse_event(event: HarnessStoredEvent) -> str:
+    payload = _event_response(event)
+    data = json.dumps(payload, ensure_ascii=False)
+    return f"id: {event.id}\ndata: {data}\n\n"
+
+
+def _run_status_is_terminal(status: str) -> bool:
+    return status in {"succeeded", "failed", "canceled"}
 
 
 def _native_project_id(

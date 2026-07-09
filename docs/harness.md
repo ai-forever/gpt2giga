@@ -329,10 +329,12 @@ Session history survives browser refreshes and UI restarts. New runs are stored
 in the selected session, and `direct-chat` receives previous user and assistant
 messages from that session as multi-turn context.
 
-The stream checkbox passes `stream=true` to the harness request when the harness
-declares streaming support. The browser page still renders the final result
-after the backend call completes; it does not implement SSE or WebSocket event
-streaming yet.
+The stream checkbox starts a background headless run, subscribes to
+`/api/runs/{run_id}/events/stream` with SSE, and appends persisted run events to
+the Events inspector while the run is active. The Cancel button calls
+`/api/runs/{run_id}/cancel`; harnesses that observe the in-memory cancel token
+can stop cooperatively, while older blocking subprocess paths may continue until
+the subprocess returns.
 
 ## Project Cockpit Attachments
 
@@ -494,6 +496,9 @@ Use this when validating the project cockpit manually:
 - [ ] No secret-looking values appear in UI raw JSON.
 - [ ] Old sessions still load.
 - [ ] Archived and pinned sessions still work.
+- [ ] A streamed headless run appends Events inspector rows before completion.
+- [ ] Cancel on a streamed headless run writes `cancel_requested`,
+  `run_canceled`, and `run_finished` events without exposing secrets.
 - [ ] Native sessions are separate from normalized GPT2Giga chats.
 - [ ] `Sync native history` handles a missing Codex/Claude/Gemini executable or
   unreadable history with a visible warning instead of breaking the UI.

@@ -103,6 +103,9 @@ class HarnessSessionStore(Protocol):
     def update_run(self, run_id: str, **patch: Any) -> HarnessRun:
         """Patch one run."""
 
+    def get_run(self, run_id: str) -> HarnessRun:
+        """Return one run by id."""
+
     def list_runs(self, session_id: str) -> tuple[HarnessRun, ...]:
         """List runs for one session."""
 
@@ -317,6 +320,9 @@ class InMemoryHarnessSessionStore:
         updated = _patch_run(run, patch)
         self._runs[session_id][index] = updated
         return updated
+
+    def get_run(self, run_id: str) -> HarnessRun:
+        return self._find_run(run_id)[2]
 
     def list_runs(self, session_id: str) -> tuple[HarnessRun, ...]:
         self.get_session(session_id)

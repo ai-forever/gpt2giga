@@ -149,7 +149,7 @@ this status to choose the next vertical slice.
 | Slice 00: architecture note | Covered by this document. |
 | Slice 01: project-first cockpit | Implemented for project identity, config, mutable local state, project-scoped sessions, native history scoping, and UI header/default restoration. |
 | Slice 02: `giga init` and `.giga/harness.toml` | Implemented for config, defaults, presets, and attachment settings. Prompt template files and richer preset/runbook execution remain future work. |
-| Slice 03: live run event stream | Partially implemented. Events are persisted and can be polled with `/api/sessions/{session_id}/events`; headless run SSE, live deltas, and cancel are still open. |
+| Slice 03: live run event stream | Implemented as an MVP for headless UI runs: `/api/sessions/*/run/start` starts runs in the background, `/api/runs/{run_id}/events/stream` replays and streams persisted SSE events, and `/api/runs/{run_id}/cancel` requests cooperative cancellation. True stdout/message deltas still depend on individual harnesses emitting them. |
 | Slice 04: native terminal pane | Implemented with native process manager, API, and UI terminal polling. SSE/WebSocket and resize can still be added later. |
 | Slice 05: native session discovery/import | Implemented for Codex, Claude Code, and Gemini CLI with project scoping and UI/CLI flows. |
 | Slice 06: attachment store | Implemented. |
@@ -199,19 +199,20 @@ opaque stores.
 
 ## Next Recommended Slice
 
-The highest-value next implementation slice is Slice 03 for headless live run
-events:
+The highest-value next implementation slice is Slice 09 for worktree-safe
+edit/apply flow:
 
-- define a stable event enum or constants around the existing stored event
-  records;
-- create a run before execution and stream persisted events over SSE;
-- add a cancel model for long-running headless harnesses;
-- keep `/api/sessions/{session_id}/events` as the replay/polling fallback;
-- update the UI output panel to append events live and reconnect from persisted
-  events.
+- add an execution policy for current workspace vs isolated git worktree vs temp
+  copy;
+- default external `edit` runs inside git repositories to an isolated worktree;
+- store base branch/commit, worktree path, changed files, patch, and untracked
+  files as run metadata/artifacts;
+- expose diff/apply/discard endpoints for runs;
+- add UI controls for changed files, patch review, apply, discard, and optional
+  branch creation.
 
-After that, Slice 09 should make edit mode trustworthy by defaulting external
-edit runs to an isolated worktree and exposing diff/apply/discard actions.
+Slice 03 can continue later with richer per-harness stdout/message delta
+emission, but the MVP stream/cancel contract is now in place.
 
 ## Safety Rules
 

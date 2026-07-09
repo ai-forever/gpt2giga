@@ -36,6 +36,7 @@ from gpt2giga.harness.sessions.store import (
 from gpt2giga.harness.types import (
     GigaChatApiMode,
     HarnessChatMessage,
+    HarnessEventType,
     HarnessRequest,
     HarnessResult,
     event_to_dict,
@@ -122,6 +123,8 @@ class HarnessSessionRunner:
     def create_and_run(
         self,
         payload: Mapping[str, Any],
+        *,
+        cancel_event: Any | None = None,
     ) -> HarnessSessionRunResult:
         """Create a session from a prompt and immediately run it."""
         options = self._run_options(payload, session=None)
@@ -136,12 +139,14 @@ class HarnessSessionRunner:
             default_api_mode=options["api_mode"],
             default_mode=options["mode"],
         )
-        return self.run_in_session(session.id, payload)
+        return self.run_in_session(session.id, payload, cancel_event=cancel_event)
 
     def run_in_session(
         self,
         session_id: str,
         payload: Mapping[str, Any],
+        *,
+        cancel_event: Any | None = None,
     ) -> HarnessSessionRunResult:
         """Run one prompt inside an existing session."""
         session = self.store.get_session(session_id)
@@ -210,7 +215,7 @@ class HarnessSessionRunner:
         self._append_event(
             session.id,
             run.id,
-            "run_started",
+            HarnessEventType.RUN_STARTED.value,
             "Harness run started.",
             {
                 "harness_id": options["harness_id"],
@@ -240,6 +245,7 @@ class HarnessSessionRunner:
             session_id=session.id,
             run_id=run.id,
             native_session_id=options["native_session_id"],
+            cancel_event=cancel_event,
             extra=_request_extra(
                 options["extra"],
                 attachment_payloads,
@@ -275,7 +281,7 @@ class HarnessSessionRunner:
         self._append_event(
             session.id,
             run.id,
-            "raw_request",
+            HarnessEventType.RAW_REQUEST.value,
             "Stored redacted harness request.",
             {
                 "message_count": len(request_messages),
@@ -283,9 +289,22 @@ class HarnessSessionRunner:
             },
         )
         try:
-            result = harness.run(request, self.config.to_context())
+            result = (
+                HarnessResult(ok=False, text="", error="Harness run canceled.")
+                if _cancel_requested(cancel_event)
+                else harness.run(request, self.config.to_context())
+            )
         except Exception as exc:
             result = HarnessResult(ok=False, text="", error=str(exc))
+        if _cancel_requested(cancel_event):
+            result = HarnessResult(
+                ok=False,
+                text="",
+                raw=result.raw,
+                events=result.events,
+                command=result.command,
+                error="Harness run canceled.",
+            )
 
         self.store.append_raw_response(
             session_id=session.id,
@@ -295,7 +314,7 @@ class HarnessSessionRunner:
         self._append_event(
             session.id,
             run.id,
-            "raw_response",
+            HarnessEventType.RAW_RESPONSE.value,
             "Stored redacted harness response.",
             {"ok": result.ok},
         )
@@ -308,18 +327,25 @@ class HarnessSessionRunner:
                 event_to_dict(event)["payload"],
             )
 
-        if result.ok:
+        if _cancel_requested(cancel_event):
+            status = "canceled"
+            role = "error"
+            content = "Harness run canceled."
+            event_type = HarnessEventType.RUN_CANCELED.value
+            event_message = "Harness run canceled."
+            error = content
+        elif result.ok:
             status = "succeeded"
             role = "assistant"
             content = result.text
-            event_type = "message_completed"
+            event_type = HarnessEventType.MESSAGE_COMPLETED.value
             event_message = "Assistant message completed."
             error = None
         else:
             status = "failed"
             role = "error"
             content = result.error or result.text or "Harness run failed"
-            event_type = "error"
+            event_type = HarnessEventType.ERROR.value
             event_message = "Harness run failed."
             error = content
         self.store.append_message(
@@ -360,7 +386,7 @@ class HarnessSessionRunner:
         self._append_event(
             session.id,
             run.id,
-            "run_finished",
+            HarnessEventType.RUN_FINISHED.value,
             "Harness run finished.",
             {"status": status},
         )
@@ -601,3 +627,10 @@ def _capture_git_diff(workspace: str | None, *, enabled: bool) -> str | None:
     if not text:
         return "No diff captured."
     return text[-20000:]
+
+
+def _cancel_requested(cancel_event: Any | None) -> bool:
+    if cancel_event is None:
+        return False
+    is_set = getattr(cancel_event, "is_set", None)
+    return bool(is_set()) if callable(is_set) else False
