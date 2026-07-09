@@ -362,6 +362,49 @@ POST /api/runs/{run_id}/replay
 POST /api/runs/{run_id}/fork
 ```
 
+### Editor Bridge
+
+Projects can define a non-secret editor command in `.giga/harness.toml`:
+
+```toml
+[editor]
+command = "code"
+```
+
+The command is parsed into argv and executed without a shell. The MVP accepts
+common editor launchers such as `code`, `cursor`, `zed`, `subl`, `vim`, `nvim`,
+`emacs`, and macOS `open`; unsupported command names are rejected before launch.
+
+Open project context from the CLI:
+
+```bash
+giga open session <session_id>
+giga open run <run_id>
+giga open run <run_id> --diff
+giga open file src/foo.py --workspace .
+giga open file src/foo.py --workspace . --line 42
+```
+
+Every command supports `--dry-run --json` to inspect the shell-free command
+without starting the editor.
+
+The browser UI exposes the same bridge in the `Editor` inspector tab. It can
+open the current project workspace, a run workspace/worktree, a generated diff
+file, or a workspace file. The tab also copies local `giga open session ...` and
+`giga open run ...` commands for reopening the same context.
+
+The matching API surface is:
+
+```text
+POST /api/editor/open-workspace
+POST /api/editor/open-file
+POST /api/editor/open-diff
+```
+
+`open-file` rejects paths outside the selected workspace. `open-diff` writes the
+stored run patch to `GPT2GIGA_HARNESS_DATA_DIR/editor/diffs/<run_id>.diff` before
+launching the editor.
+
 ## Built-in Harnesses
 
 | Harness | Status | Purpose |

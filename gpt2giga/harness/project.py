@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from gpt2giga.harness.config import DEFAULT_HARNESS_DATA_DIR
+from gpt2giga.harness.editor import DEFAULT_EDITOR_COMMAND
 from gpt2giga.harness.native.models import (
     HarnessInvocationMode,
     parse_invocation_mode,
@@ -175,6 +176,13 @@ class ProjectToolProfile:
 
 
 @dataclass(frozen=True)
+class ProjectEditorSettings:
+    """Non-secret editor bridge settings loaded from `.giga/harness.toml`."""
+
+    command: str = DEFAULT_EDITOR_COMMAND
+
+
+@dataclass(frozen=True)
 class RenderedProjectPreset:
     """Preset after applying project variables to its prompt template."""
 
@@ -218,6 +226,7 @@ class HarnessProjectConfig:
     enabled_harnesses: tuple[str, ...] = DEFAULT_ENABLED_HARNESSES
     presets: Mapping[str, ProjectPreset] = field(default_factory=dict)
     tool_profiles: Mapping[str, ProjectToolProfile] = field(default_factory=dict)
+    editor: ProjectEditorSettings = field(default_factory=ProjectEditorSettings)
     attachments: ProjectAttachmentSettings = field(
         default_factory=ProjectAttachmentSettings
     )
@@ -343,6 +352,7 @@ def load_project_config(project_root: str | Path) -> HarnessProjectConfig:
     project_data = _mapping(data.get("project"))
     defaults_data = _mapping(data.get("defaults"))
     harnesses_data = _mapping(data.get("harnesses"))
+    editor_data = _mapping(data.get("editor"))
     attachments_data = _mapping(data.get("attachments"))
     tools_data = _mapping(data.get("tools"))
     return HarnessProjectConfig(
@@ -356,6 +366,7 @@ def load_project_config(project_root: str | Path) -> HarnessProjectConfig:
         ),
         presets=_parse_presets(_mapping(data.get("presets"))),
         tool_profiles=_parse_tool_profiles(tools_data),
+        editor=_parse_editor_settings(editor_data),
         attachments=_parse_attachment_settings(attachments_data),
     )
 
@@ -443,6 +454,9 @@ def default_project_config_text(project_name: str) -> str:
         "\n"
         "[harnesses]\n"
         f"enabled = [{enabled}]\n"
+        "\n"
+        "[editor]\n"
+        f'command = "{DEFAULT_EDITOR_COMMAND}"\n'
         "\n"
         "[presets.ask]\n"
         'title = "Ask"\n'
@@ -560,6 +574,7 @@ def project_config_to_dict(config: HarnessProjectConfig) -> dict[str, Any]:
             name: project_tool_profile_to_dict(name, profile)
             for name, profile in config.tool_profiles.items()
         },
+        "editor": {"command": config.editor.command},
         "attachments": {
             "max_file_mb": config.attachments.max_file_mb,
             "max_total_mb_per_run": config.attachments.max_total_mb_per_run,
@@ -812,6 +827,12 @@ def _parse_tool_profiles(data: Mapping[str, Any]) -> Mapping[str, ProjectToolPro
             config=config,
         )
     return profiles
+
+
+def _parse_editor_settings(data: Mapping[str, Any]) -> ProjectEditorSettings:
+    return ProjectEditorSettings(
+        command=_optional_text(data.get("command")) or DEFAULT_EDITOR_COMMAND,
+    )
 
 
 def _parse_preset_workspace_policy(value: Any) -> str | None:

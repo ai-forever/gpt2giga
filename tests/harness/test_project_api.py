@@ -53,6 +53,7 @@ def test_project_config_api_returns_parsed_config(tmp_path):
     assert body["config"]["defaults"]["harness"] == "codex-cli"
     assert "plan" in body["config"]["presets"]
     assert "github" in body["config"]["tools"]
+    assert body["config"]["editor"]["command"] == "code"
 
 
 def test_project_presets_api_lists_and_renders_presets(tmp_path):

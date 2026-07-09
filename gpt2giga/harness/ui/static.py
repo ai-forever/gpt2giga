@@ -984,6 +984,7 @@ INDEX_HTML = """<!doctype html>
               <button class="tab" type="button" data-tab="diff">Diff</button>
               <button class="tab" type="button" data-tab="pr">PR</button>
               <button class="tab" type="button" data-tab="provenance">Provenance</button>
+              <button class="tab" type="button" data-tab="editor">Editor</button>
               <button class="tab" type="button" data-tab="attachments">Attachments</button>
               <button class="tab" type="button" data-tab="memory">Memory</button>
               <button class="tab" type="button" data-tab="tools">Tools</button>
@@ -1023,6 +1024,22 @@ INDEX_HTML = """<!doctype html>
                 <button id="fork-run-button" class="secondary" type="button" disabled>Fork chat</button>
               </div>
               <pre id="provenance-text">No provenance selected.</pre>
+            </div>
+            <div id="editor-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <button id="open-editor-workspace-button" type="button" disabled>Open workspace</button>
+                <button id="open-editor-run-button" class="secondary" type="button" disabled>Open run workspace</button>
+                <button id="open-editor-diff-button" class="secondary" type="button" disabled>Open diff</button>
+              </div>
+              <div class="inline-actions">
+                <input id="open-editor-file-input" placeholder="workspace file" autocomplete="off">
+                <button id="open-editor-file-button" class="secondary" type="button" disabled>Open file</button>
+              </div>
+              <div class="inline-actions">
+                <button id="copy-session-open-command-button" class="secondary" type="button" disabled>Copy session link</button>
+                <button id="copy-run-open-command-button" class="secondary" type="button" disabled>Copy run link</button>
+              </div>
+              <pre id="editor-text">No editor action yet.</pre>
             </div>
             <pre id="attachments-panel" class="mono-panel tab-panel">No attachments selected.</pre>
             <div id="memory-panel" class="mono-panel tab-panel">
@@ -3334,6 +3351,7 @@ INDEX_HTML = """<!doctype html>
       renderDiffInspector(run);
       renderPrInspector(run);
       renderProvenanceInspector(run);
+      renderEditorInspector(run);
       setText("attachments-panel", run ? attachmentInspectorText(run, rawRequests[rawRequests.length - 1]) : "No attachments selected.");
       setNativeSummary(nativeInspectorText(bundle));
       setText("storage-panel", pretty(bundle.storage || {}));
@@ -3471,6 +3489,40 @@ INDEX_HTML = """<!doctype html>
       setText("provenance-text", pretty(provenance));
     }
 
+    function renderEditorInspector(run) {
+      const workspace = state.project && state.project.root ? state.project.root : byId("workspace-input").value.trim();
+      const runWorkspace = editorWorkspaceFromRun(run);
+      const patch = editorPatchFromRun(run);
+      const hasSession = Boolean(state.currentBundle && state.currentBundle.session && state.currentBundle.session.id);
+      const hasRun = Boolean(run && run.id);
+      byId("open-editor-workspace-button").disabled = !workspace;
+      byId("open-editor-run-button").disabled = !runWorkspace;
+      byId("open-editor-diff-button").disabled = !(hasRun && patch && patch !== "No diff captured.");
+      byId("open-editor-file-button").disabled = !workspace;
+      byId("copy-session-open-command-button").disabled = !hasSession;
+      byId("copy-run-open-command-button").disabled = !hasRun;
+      const lines = [
+        `Project workspace: ${workspace || "-"}`,
+        `Run workspace: ${runWorkspace || "-"}`,
+        `Run diff: ${patch && patch !== "No diff captured." ? "available" : "unavailable"}`,
+        "Editor command comes from [editor].command in .giga/harness.toml."
+      ];
+      setText("editor-text", lines.join("\\n"));
+    }
+
+    function editorWorkspaceFromRun(run) {
+      if (!run || !run.id) return "";
+      const execution = run.metadata && run.metadata.workspace_execution ? run.metadata.workspace_execution : {};
+      return execution.worktree_path || execution.effective_workspace || execution.source_workspace || run.workspace || "";
+    }
+
+    function editorPatchFromRun(run) {
+      if (!run || !run.id) return "";
+      const metadata = run.metadata || {};
+      const execution = metadata.workspace_execution || {};
+      return execution.patch || metadata.diff || "";
+    }
+
     function prArtifactFromRun(run) {
       if (!run || !run.id) return null;
       const metadata = run.metadata || {};
@@ -3552,16 +3604,81 @@ INDEX_HTML = """<!doctype html>
     async function openRunWorktree() {
       const run = currentRun();
       if (!run || !run.id) return;
-      const result = await getJson(`/api/runs/${encodeURIComponent(run.id)}/open-worktree`, {
-        method: "POST"
+      const workspace = editorWorkspaceFromRun(run);
+      if (!workspace) return;
+      const result = await getJson("/api/editor/open-workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace })
       });
       if (!result.ok) {
         setText("diff-text", result.data.detail || `Open worktree failed with HTTP ${result.status}`);
+        setText("editor-text", result.data.detail || `Open worktree failed with HTTP ${result.status}`);
         return;
       }
-      const worktree = result.data.worktree || {};
-      setText("model-status", worktree.exists ? `Worktree: ${worktree.path}` : "Worktree path is unavailable.");
+      setText("model-status", `Opened editor for ${result.data.editor.target_path}.`);
+      setText("editor-text", pretty(result.data.editor));
+      showTab("editor");
       await refreshRunDiff(run.id);
+    }
+
+    async function openEditorWorkspace(useRunWorkspace = false) {
+      const run = currentRun();
+      const workspace = useRunWorkspace ? editorWorkspaceFromRun(run) : (state.project && state.project.root ? state.project.root : byId("workspace-input").value.trim());
+      if (!workspace) return;
+      const result = await getJson("/api/editor/open-workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace })
+      });
+      renderEditorResult(result, "Open workspace failed");
+    }
+
+    async function openEditorFile() {
+      const path = byId("open-editor-file-input").value.trim();
+      const workspace = state.project && state.project.root ? state.project.root : byId("workspace-input").value.trim();
+      if (!path || !workspace) return;
+      const result = await getJson("/api/editor/open-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace, path })
+      });
+      renderEditorResult(result, "Open file failed");
+    }
+
+    async function openEditorDiff() {
+      const run = currentRun();
+      if (!run || !run.id) return;
+      const result = await getJson("/api/editor/open-diff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ run_id: run.id })
+      });
+      renderEditorResult(result, "Open diff failed");
+    }
+
+    function renderEditorResult(result, fallback) {
+      if (!result.ok) {
+        setText("editor-text", result.data.detail || `${fallback} with HTTP ${result.status}`);
+        showTab("editor");
+        return;
+      }
+      const editor = result.data.editor || {};
+      setText("editor-text", pretty(editor));
+      setText("model-status", editor.executed ? `Opened editor for ${editor.target_path}.` : editor.command_display || "Editor command ready.");
+      showTab("editor");
+    }
+
+    function copySessionOpenCommand() {
+      const session = state.currentBundle && state.currentBundle.session ? state.currentBundle.session : null;
+      if (!session || !session.id) return;
+      copyText(`giga open session ${shellQuote(session.id)}`, "Copied session open command.");
+    }
+
+    function copyRunOpenCommand() {
+      const run = currentRun();
+      if (!run || !run.id) return;
+      copyText(`giga open run ${shellQuote(run.id)}`, "Copied run open command.");
     }
 
     async function createPrBranch() {
@@ -4096,6 +4213,12 @@ INDEX_HTML = """<!doctype html>
       byId("refresh-provenance-button").addEventListener("click", refreshRunProvenance);
       byId("replay-run-button").addEventListener("click", replayCurrentRun);
       byId("fork-run-button").addEventListener("click", forkCurrentRun);
+      byId("open-editor-workspace-button").addEventListener("click", () => openEditorWorkspace(false));
+      byId("open-editor-run-button").addEventListener("click", () => openEditorWorkspace(true));
+      byId("open-editor-diff-button").addEventListener("click", openEditorDiff);
+      byId("open-editor-file-button").addEventListener("click", openEditorFile);
+      byId("copy-session-open-command-button").addEventListener("click", copySessionOpenCommand);
+      byId("copy-run-open-command-button").addEventListener("click", copyRunOpenCommand);
       byId("reset-button").addEventListener("click", resetComposer);
       byId("attach-file-button").addEventListener("click", () => byId("attachment-file-input").click());
       byId("attachment-file-input").addEventListener("change", (event) => {

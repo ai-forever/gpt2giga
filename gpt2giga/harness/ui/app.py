@@ -52,6 +52,14 @@ from gpt2giga.harness.evals import (
     load_eval_spec,
     run_eval,
 )
+from gpt2giga.harness.editor import (
+    build_open_diff_plan,
+    build_open_file_plan,
+    build_open_workspace_plan,
+    editor_open_plan_to_dict,
+    execute_editor_plan,
+    workspace_for_run,
+)
 from gpt2giga.harness.native.base import (
     NativeCommandPlan,
     discovery_error_to_dict,
@@ -367,6 +375,93 @@ def create_app(
         return {
             "project": project_to_dict(project_context),
             "state": project_state_to_dict(state),
+        }
+
+    @app.post("/api/editor/open-workspace")
+    async def editor_open_workspace(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(payload.get("workspace")),
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+            loaded = load_project_config(project_context.root)
+            command = _optional_text(payload.get("command")) or loaded.editor.command
+            plan = build_open_workspace_plan(project_context.root, command=command)
+            result = execute_editor_plan(
+                plan,
+                dry_run=bool(payload.get("dry_run", False)),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "project": project_to_dict(project_context),
+            "editor": editor_open_plan_to_dict(result),
+        }
+
+    @app.post("/api/editor/open-file")
+    async def editor_open_file(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(payload.get("workspace")),
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+            loaded = load_project_config(project_context.root)
+            command = _optional_text(payload.get("command")) or loaded.editor.command
+            plan = build_open_file_plan(
+                project_context.root,
+                _required_text(payload.get("path"), "path is required"),
+                command=command,
+                line=_optional_int(payload.get("line")),
+                column=_optional_int(payload.get("column")),
+            )
+            result = execute_editor_plan(
+                plan,
+                dry_run=bool(payload.get("dry_run", False)),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "project": project_to_dict(project_context),
+            "editor": editor_open_plan_to_dict(result),
+        }
+
+    @app.post("/api/editor/open-diff")
+    async def editor_open_diff(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            run_id = _required_text(payload.get("run_id"), "run_id is required")
+            run = store.get_run(run_id)
+            project_context = resolve_project(
+                workspace_for_run(run),
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+            loaded = load_project_config(project_context.root)
+            command = _optional_text(payload.get("command")) or loaded.editor.command
+            plan = build_open_diff_plan(
+                run,
+                data_dir=config.data_dir,
+                command=command,
+            )
+            result = execute_editor_plan(
+                plan,
+                dry_run=bool(payload.get("dry_run", False)),
+            )
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "run": run_to_dict(run),
+            "project": project_to_dict(project_context),
+            "editor": editor_open_plan_to_dict(result),
         }
 
     @app.get("/api/project/memory")
@@ -2664,6 +2759,12 @@ def _optional_float(value: Any) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or str(value).strip() == "":
+        return None
+    return int(value)
 
 
 def _decode_attachment_payload(value: Any) -> bytes:

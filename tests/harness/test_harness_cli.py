@@ -288,6 +288,82 @@ def test_cli_run_pr_summary_and_patch(capsys, tmp_path, monkeypatch):
     assert "diff --git a/app.txt b/app.txt" in patch_output
 
 
+def test_cli_open_file_session_and_run_diff_dry_run_json(
+    capsys,
+    tmp_path,
+    monkeypatch,
+):
+    data_dir = tmp_path / "data"
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    (workspace / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    config_path = workspace / ".giga" / "harness.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        '[editor]\ncommand = "code --reuse-window"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(data_dir))
+    store = FilesystemHarnessSessionStore(data_dir)
+    session = store.create_session(title="Editor demo", workspace=str(workspace))
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="change file",
+        model="GigaChat-2-Max",
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="edit",
+        workspace=str(workspace),
+        status="succeeded",
+        metadata={
+            "workspace_execution": {
+                "policy": "worktree",
+                "source_workspace": str(workspace),
+                "patch": "diff --git a/app.py b/app.py\n",
+                "changed_files": ["app.py"],
+            }
+        },
+    )
+
+    file_code = cli.main(
+        [
+            "open",
+            "file",
+            "app.py",
+            "--workspace",
+            str(workspace),
+            "--line",
+            "4",
+            "--dry-run",
+            "--json",
+        ]
+    )
+    file_payload = json.loads(capsys.readouterr().out)
+
+    assert file_code == 0
+    assert file_payload["editor"]["command"][:3] == [
+        "code",
+        "--reuse-window",
+        "--goto",
+    ]
+    assert file_payload["editor"]["command"][3].endswith("app.py:4:1")
+
+    session_code = cli.main(["open", "session", session.id, "--dry-run", "--json"])
+    session_payload = json.loads(capsys.readouterr().out)
+
+    assert session_code == 0
+    assert session_payload["editor"]["kind"] == "workspace"
+    assert session_payload["editor"]["target_path"] == str(workspace)
+
+    run_code = cli.main(["open", "run", run.id, "--diff", "--dry-run", "--json"])
+    run_payload = json.loads(capsys.readouterr().out)
+
+    assert run_code == 0
+    assert run_payload["editor"]["kind"] == "diff"
+    assert run_payload["editor"]["target_path"].endswith(f"{run.id}.diff")
+
+
 def test_cli_run_provenance_and_replay(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
     store = FilesystemHarnessSessionStore(tmp_path / "data")

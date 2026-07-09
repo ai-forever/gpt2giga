@@ -11,6 +11,15 @@ import uvicorn
 
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.doctor import run_doctor
+from gpt2giga.harness.editor import (
+    build_open_diff_plan,
+    build_open_file_plan,
+    build_open_run_workspace_plan,
+    build_open_workspace_plan,
+    editor_open_plan_to_dict,
+    execute_editor_plan,
+    workspace_for_run,
+)
 from gpt2giga.harness.evals import (
     EvalSpecNotFoundError,
     FilesystemHarnessEvalStore,
@@ -338,6 +347,31 @@ def build_parser() -> argparse.ArgumentParser:
     eval_run.add_argument("--dry-run", action="store_true")
     eval_run.add_argument("--json", action="store_true")
     eval_run.set_defaults(handler=_handle_eval_run)
+
+    open_parser = subparsers.add_parser("open")
+    open_subparsers = open_parser.add_subparsers(dest="open_command")
+
+    open_session = open_subparsers.add_parser("session")
+    open_session.add_argument("session_id")
+    open_session.add_argument("--dry-run", action="store_true")
+    open_session.add_argument("--json", action="store_true")
+    open_session.set_defaults(handler=_handle_open_session)
+
+    open_run = open_subparsers.add_parser("run")
+    open_run.add_argument("run_id")
+    open_run.add_argument("--diff", action="store_true")
+    open_run.add_argument("--dry-run", action="store_true")
+    open_run.add_argument("--json", action="store_true")
+    open_run.set_defaults(handler=_handle_open_run)
+
+    open_file = open_subparsers.add_parser("file")
+    open_file.add_argument("path")
+    open_file.add_argument("--workspace", default=None)
+    open_file.add_argument("--line", type=int, default=None)
+    open_file.add_argument("--column", type=int, default=None)
+    open_file.add_argument("--dry-run", action="store_true")
+    open_file.add_argument("--json", action="store_true")
+    open_file.set_defaults(handler=_handle_open_file)
 
     harness = subparsers.add_parser("harness")
     harness_subparsers = harness.add_subparsers(dest="harness_command")
@@ -1032,6 +1066,63 @@ def _handle_eval_run(args: argparse.Namespace, config: HarnessConfig) -> int:
     return 0 if eval_run.status == "passed" else 1
 
 
+def _handle_open_session(args: argparse.Namespace, config: HarnessConfig) -> int:
+    store = FilesystemHarnessSessionStore(config.data_dir)
+    session = store.get_session(args.session_id)
+    workspace = (
+        session.workspace or resolve_project(None, data_dir=config.data_dir).root
+    )
+    command = _editor_command_for_workspace(workspace, config)
+    plan = build_open_workspace_plan(workspace, command=command)
+    result = execute_editor_plan(plan, dry_run=args.dry_run)
+    payload = {
+        "session": session_to_dict(session),
+        "editor": editor_open_plan_to_dict(result),
+    }
+    _print_editor_open(payload, as_json=args.json)
+    return 0
+
+
+def _handle_open_run(args: argparse.Namespace, config: HarnessConfig) -> int:
+    store = FilesystemHarnessSessionStore(config.data_dir)
+    run = store.get_run(args.run_id)
+    command = _editor_command_for_workspace(workspace_for_run(run), config)
+    if args.diff:
+        plan = build_open_diff_plan(run, data_dir=config.data_dir, command=command)
+    else:
+        plan = build_open_run_workspace_plan(run, command=command)
+    result = execute_editor_plan(plan, dry_run=args.dry_run)
+    payload = {
+        "run": run_to_dict(run),
+        "editor": editor_open_plan_to_dict(result),
+    }
+    _print_editor_open(payload, as_json=args.json)
+    return 0
+
+
+def _handle_open_file(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(
+        args.workspace,
+        data_dir=config.data_dir,
+        load_config_name=False,
+    )
+    loaded = load_project_config(project.root)
+    plan = build_open_file_plan(
+        project.root,
+        args.path,
+        command=loaded.editor.command,
+        line=args.line,
+        column=args.column,
+    )
+    result = execute_editor_plan(plan, dry_run=args.dry_run)
+    payload = {
+        "project": project_to_dict(project),
+        "editor": editor_open_plan_to_dict(result),
+    }
+    _print_editor_open(payload, as_json=args.json)
+    return 0
+
+
 def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     config = config.with_overrides(ui_host=args.host, ui_port=args.port)
     validate_ui_bind(config.ui_host, allow_remote=args.allow_remote)
@@ -1212,6 +1303,17 @@ def _print_json(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2))
 
 
+def _print_editor_open(payload: Mapping[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        _print_json(payload)
+        return
+    editor = payload["editor"]
+    if editor.get("executed"):
+        print(f"Opened {editor['target_path']}")
+    else:
+        print(editor["command_display"])
+
+
 def _print_table(rows: list[dict[str, Any]]) -> None:
     print(f"{'ID':<16}{'Kind':<14}{'Status':<12}{'Native':<8}Description")
     for row in rows:
@@ -1345,6 +1447,18 @@ def _project_id_for_workspace(
         data_dir=config.data_dir,
         load_config_name=False,
     ).id
+
+
+def _editor_command_for_workspace(
+    workspace: str | None,
+    config: HarnessConfig,
+) -> str:
+    project = resolve_project(
+        workspace,
+        data_dir=config.data_dir,
+        load_config_name=False,
+    )
+    return load_project_config(project.root).editor.command
 
 
 def _latest_raw_request_for_run(
