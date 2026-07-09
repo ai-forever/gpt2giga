@@ -148,6 +148,36 @@ In the browser cockpit, preset chips fill the composer with the rendered prompt
 and preset defaults. They do not execute automatically; use `Run` or `Compare`
 after reviewing the filled request.
 
+### Tool Profiles
+
+Projects can define non-secret tool profiles in `.giga/harness.toml`:
+
+```toml
+[tools.github]
+enabled = true
+title = "GitHub"
+kind = "mcp"
+description = "Project issue and PR tools"
+harnesses = ["codex-cli", "claude-code", "gemini-cli"]
+
+[tools.github.config]
+readonly = true
+```
+
+Tool profiles are dry-run only in this milestone. The harness parses them,
+reports per-harness status in the UI Tools tab, and generates redacted config
+previews through:
+
+```text
+GET  /api/tools
+POST /api/tools/sync
+```
+
+No external tools are installed, authenticated, or written into Codex, Claude,
+or Gemini config files. Profile names are constrained to safe identifier
+characters, secret-looking keys are rejected while loading project config, and
+secret-looking values are redacted in API/UI output.
+
 ## Built-in Harnesses
 
 | Harness | Status | Purpose |

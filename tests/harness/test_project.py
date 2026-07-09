@@ -79,6 +79,7 @@ def test_load_project_config_returns_defaults_when_missing(tmp_path):
     assert config.defaults.api_mode.value == "v2"
     assert config.defaults.mode == "plan"
     assert config.enabled_harnesses == DEFAULT_ENABLED_HARNESSES
+    assert config.tool_profiles == {}
     assert config.attachments.ignore == DEFAULT_ATTACHMENT_IGNORE
 
 
@@ -94,6 +95,8 @@ def test_init_project_config_writes_non_secret_template(tmp_path):
     assert "TOKEN" not in text
     assert config.defaults.harness == "codex-cli"
     assert "plan" in config.presets
+    assert config.tool_profiles["github"].enabled is False
+    assert config.tool_profiles["postgres"].kind == "mcp"
     assert (tmp_path / ".giga" / "prompts" / "plan.md").exists()
 
 
@@ -113,6 +116,18 @@ mode = "read"
 
 [harnesses]
 enabled = ["echo", "direct-chat"]
+
+[tools.github]
+enabled = true
+title = "GitHub"
+kind = "mcp"
+description = "Project issue tracker"
+harnesses = ["codex-cli", "claude-code"]
+command = "github-mcp"
+
+[tools.github.config]
+header = "Bearer abcdefghijk"
+readonly = true
 
 [presets.ask]
 title = "Ask"
@@ -162,13 +177,21 @@ ignore = [
     assert config.presets["fix_tests"].workspace_policy == "worktree"
     assert config.presets["fix_tests"].prompt_file == ".giga/prompts/fix.md"
     assert config.presets["fix_tests"].selected_files == ("tests/test_demo.py",)
+    assert config.tool_profiles["github"].enabled is True
+    assert config.tool_profiles["github"].title == "GitHub"
+    assert config.tool_profiles["github"].kind == "mcp"
+    assert config.tool_profiles["github"].harnesses == ("codex-cli", "claude-code")
+    assert config.tool_profiles["github"].config["command"] == "github-mcp"
+    assert config.tool_profiles["github"].config["readonly"] is True
     assert config.attachments.max_file_mb == 10
     assert config.attachments.max_total_mb_per_run == 20
     assert config.attachments.allow_images is False
     assert config.attachments.allow_binary is True
     assert config.attachments.respect_gitignore is False
     assert config.attachments.ignore == (".env", "private/**")
-    assert project_config_to_dict(config)["defaults"]["api_mode"] == "v1"
+    config_payload = project_config_to_dict(config)
+    assert config_payload["defaults"]["api_mode"] == "v1"
+    assert config_payload["tools"]["github"]["config"]["header"] == "<redacted>"
 
 
 def test_render_project_preset_applies_safe_template_variables(tmp_path):
@@ -232,6 +255,22 @@ def test_load_project_config_rejects_secret_keys(tmp_path):
         """
 [defaults]
 api_key = "sk-test-secret"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="secret key"):
+        load_project_config(tmp_path)
+
+
+def test_load_project_config_rejects_secret_tool_keys(tmp_path):
+    config_path = tmp_path / ".giga" / "harness.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        """
+[tools.github]
+enabled = true
+access_token = "secret"
 """,
         encoding="utf-8",
     )

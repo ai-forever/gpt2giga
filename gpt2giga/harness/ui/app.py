@@ -120,6 +120,10 @@ from gpt2giga.harness.types import (
     result_to_dict,
     spec_to_dict,
 )
+from gpt2giga.harness.tool_profiles import (
+    build_tool_profile_statuses,
+    tool_profile_status_to_dict,
+)
 from gpt2giga.harness.ui.static import INDEX_HTML
 from gpt2giga.harness.worktrees import (
     WorktreeConflictError,
@@ -315,6 +319,49 @@ def create_app(
         return {
             "project": project_to_dict(project_context),
             "state": project_state_to_dict(state),
+        }
+
+    @app.get("/api/tools")
+    async def tools(workspace: str | None = Query(default=None)) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(workspace),
+                data_dir=config.data_dir,
+            )
+            loaded = load_project_config(project_context.root)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        statuses = build_tool_profile_statuses(
+            loaded.tool_profiles,
+            registry,
+            include_previews=False,
+        )
+        return {
+            "project": project_to_dict(project_context),
+            "profiles": [tool_profile_status_to_dict(status) for status in statuses],
+        }
+
+    @app.post("/api/tools/sync")
+    async def tools_sync(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(payload.get("workspace")),
+                data_dir=config.data_dir,
+            )
+            loaded = load_project_config(project_context.root)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        statuses = build_tool_profile_statuses(
+            loaded.tool_profiles,
+            registry,
+            include_previews=True,
+        )
+        return {
+            "dry_run": True,
+            "project": project_to_dict(project_context),
+            "profiles": [tool_profile_status_to_dict(status) for status in statuses],
         }
 
     @app.post("/api/project/init")
@@ -2287,6 +2334,7 @@ def _project_response(workspace: str | None, data_dir: str) -> dict[str, Any]:
         "state": project_state_to_dict(load_project_state(project_context)),
         "defaults": config_payload["defaults"],
         "presets": list(config_payload["presets"].values()),
+        "tools": list(config_payload["tools"].values()),
     }
 
 

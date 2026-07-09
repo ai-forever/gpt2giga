@@ -853,6 +853,7 @@ def _project_payload(
         "config": config_payload,
         "defaults": config_payload["defaults"],
         "presets": list(config_payload["presets"].values()),
+        "tools": list(config_payload["tools"].values()),
     }
 
 

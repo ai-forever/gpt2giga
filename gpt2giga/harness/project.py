@@ -20,6 +20,7 @@ from gpt2giga.harness.types import (
     SECRET_KEY_PARTS,
     GigaChatApiMode,
     parse_api_mode,
+    redact_secrets,
 )
 
 PROJECT_CONFIG_RELATIVE_PATH = Path(".giga") / "harness.toml"
@@ -78,6 +79,15 @@ DEFAULT_PROMPT_TEMPLATES = {
     ),
 }
 PRESET_WORKSPACE_POLICIES = {"auto", "current", "worktree", "temp_copy"}
+TOOL_PROFILE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+TOOL_PROFILE_RESERVED_KEYS = {
+    "enabled",
+    "title",
+    "kind",
+    "description",
+    "harnesses",
+    "config",
+}
 _PRESET_VARIABLE_NAMES = (
     "project_name",
     "branch",
@@ -131,6 +141,18 @@ class ProjectPreset:
 
 
 @dataclass(frozen=True)
+class ProjectToolProfile:
+    """Non-secret project tool profile loaded from `.giga/harness.toml`."""
+
+    enabled: bool = False
+    title: str | None = None
+    kind: str = "mcp"
+    description: str | None = None
+    harnesses: tuple[str, ...] = ()
+    config: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class RenderedProjectPreset:
     """Preset after applying project variables to its prompt template."""
 
@@ -173,6 +195,7 @@ class HarnessProjectConfig:
     defaults: ProjectDefaults = field(default_factory=ProjectDefaults)
     enabled_harnesses: tuple[str, ...] = DEFAULT_ENABLED_HARNESSES
     presets: Mapping[str, ProjectPreset] = field(default_factory=dict)
+    tool_profiles: Mapping[str, ProjectToolProfile] = field(default_factory=dict)
     attachments: ProjectAttachmentSettings = field(
         default_factory=ProjectAttachmentSettings
     )
@@ -299,6 +322,7 @@ def load_project_config(project_root: str | Path) -> HarnessProjectConfig:
     defaults_data = _mapping(data.get("defaults"))
     harnesses_data = _mapping(data.get("harnesses"))
     attachments_data = _mapping(data.get("attachments"))
+    tools_data = _mapping(data.get("tools"))
     return HarnessProjectConfig(
         path=str(path),
         exists=True,
@@ -309,6 +333,7 @@ def load_project_config(project_root: str | Path) -> HarnessProjectConfig:
             default=DEFAULT_ENABLED_HARNESSES,
         ),
         presets=_parse_presets(_mapping(data.get("presets"))),
+        tool_profiles=_parse_tool_profiles(tools_data),
         attachments=_parse_attachment_settings(attachments_data),
     )
 
@@ -449,6 +474,20 @@ def default_project_config_text(project_name: str) -> str:
         'api_mode = "v2"\n'
         'prompt_file = ".giga/prompts/pr-summary.md"\n'
         "\n"
+        "[tools.github]\n"
+        "enabled = false\n"
+        'title = "GitHub"\n'
+        'kind = "mcp"\n'
+        'description = "Dry-run placeholder for a project GitHub tool profile."\n'
+        'harnesses = ["codex-cli", "claude-code", "gemini-cli"]\n'
+        "\n"
+        "[tools.postgres]\n"
+        "enabled = false\n"
+        'title = "Postgres"\n'
+        'kind = "mcp"\n'
+        'description = "Dry-run placeholder for a project database tool profile."\n'
+        'harnesses = ["codex-cli", "claude-code"]\n'
+        "\n"
         "[attachments]\n"
         "max_file_mb = 25\n"
         "max_total_mb_per_run = 100\n"
@@ -494,6 +533,10 @@ def project_config_to_dict(config: HarnessProjectConfig) -> dict[str, Any]:
             name: project_preset_to_dict(name, preset)
             for name, preset in config.presets.items()
         },
+        "tools": {
+            name: project_tool_profile_to_dict(name, profile)
+            for name, profile in config.tool_profiles.items()
+        },
         "attachments": {
             "max_file_mb": config.attachments.max_file_mb,
             "max_total_mb_per_run": config.attachments.max_total_mb_per_run,
@@ -503,6 +546,22 @@ def project_config_to_dict(config: HarnessProjectConfig) -> dict[str, Any]:
             "respect_gitignore": config.attachments.respect_gitignore,
             "ignore": list(config.attachments.ignore),
         },
+    }
+
+
+def project_tool_profile_to_dict(
+    name: str,
+    profile: ProjectToolProfile,
+) -> dict[str, Any]:
+    """Serialize one project tool profile without exposing secrets."""
+    return {
+        "name": name,
+        "enabled": profile.enabled,
+        "title": profile.title,
+        "kind": profile.kind,
+        "description": profile.description,
+        "harnesses": list(profile.harnesses),
+        "config": redact_secrets(dict(profile.config)),
     }
 
 
@@ -700,6 +759,36 @@ def _parse_presets(data: Mapping[str, Any]) -> Mapping[str, ProjectPreset]:
             attachment_rules=_mapping(preset_data.get("attachments")),
         )
     return presets
+
+
+def _parse_tool_profiles(data: Mapping[str, Any]) -> Mapping[str, ProjectToolProfile]:
+    profiles: dict[str, ProjectToolProfile] = {}
+    for raw_name, value in data.items():
+        name = str(raw_name).strip()
+        if not name:
+            continue
+        if not TOOL_PROFILE_NAME_PATTERN.match(name):
+            raise ValueError(
+                "Tool profile names may only contain letters, numbers, dots, "
+                "underscores, and hyphens"
+            )
+        profile_data = _mapping(value)
+        nested_config = _mapping(profile_data.get("config"))
+        inline_config = {
+            str(key): item
+            for key, item in profile_data.items()
+            if str(key) not in TOOL_PROFILE_RESERVED_KEYS
+        }
+        config = {**inline_config, **dict(nested_config)}
+        profiles[name] = ProjectToolProfile(
+            enabled=_bool(profile_data.get("enabled"), False),
+            title=_optional_text(profile_data.get("title")),
+            kind=_optional_text(profile_data.get("kind")) or "mcp",
+            description=_optional_text(profile_data.get("description")),
+            harnesses=_string_tuple(profile_data.get("harnesses"), default=()),
+            config=config,
+        )
+    return profiles
 
 
 def _parse_preset_workspace_policy(value: Any) -> str | None:

@@ -52,6 +52,7 @@ def test_project_config_api_returns_parsed_config(tmp_path):
     assert body["config"]["exists"] is True
     assert body["config"]["defaults"]["harness"] == "codex-cli"
     assert "plan" in body["config"]["presets"]
+    assert "github" in body["config"]["tools"]
 
 
 def test_project_presets_api_lists_and_renders_presets(tmp_path):
@@ -103,6 +104,56 @@ prompt_file = ".giga/prompts/plan.md"
         "Plan api-demo for ship slice with gpt2giga/harness/project.py"
     )
     assert rendered["run"]["harness_id"] == "codex-cli"
+
+
+def test_project_tools_api_lists_and_dry_runs_profiles(tmp_path):
+    config_path = tmp_path / ".giga" / "harness.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        """
+[project]
+name = "tools-demo"
+
+[tools.github]
+enabled = true
+title = "GitHub"
+kind = "mcp"
+description = "Project issue tracker"
+harnesses = ["codex-cli", "direct-chat"]
+header = "Bearer abcdefghijk"
+""",
+        encoding="utf-8",
+    )
+    client = _client(tmp_path / "data")
+
+    list_response = client.get("/api/tools", params={"workspace": str(tmp_path)})
+
+    assert list_response.status_code == 200
+    listed = list_response.json()
+    assert listed["project"]["name"] == "tools-demo"
+    profile = listed["profiles"][0]
+    assert profile["name"] == "github"
+    assert profile["profile"]["config"]["header"] == "<redacted>"
+    assert {item["harness_id"] for item in profile["harnesses"]} == {
+        "codex-cli",
+        "direct-chat",
+    }
+
+    sync_response = client.post(
+        "/api/tools/sync",
+        json={"workspace": str(tmp_path)},
+    )
+
+    assert sync_response.status_code == 200
+    sync = sync_response.json()
+    assert sync["dry_run"] is True
+    by_harness = {item["harness_id"]: item for item in sync["profiles"][0]["harnesses"]}
+    assert by_harness["codex-cli"]["status"] == "ready"
+    assert (
+        by_harness["codex-cli"]["preview"]["mcp_servers"]["github"]["config"]["header"]
+        == "<redacted>"
+    )
+    assert by_harness["direct-chat"]["status"] == "unsupported"
 
 
 def test_project_state_api_persists_last_cockpit_selection(tmp_path):

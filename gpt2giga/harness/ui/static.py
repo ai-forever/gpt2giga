@@ -543,6 +543,31 @@ INDEX_HTML = """<!doctype html>
       gap: 6px;
       min-height: 48px;
     }
+    .tool-profile-list {
+      display: grid;
+      gap: 8px;
+      margin: 10px 0;
+    }
+    .tool-profile-card {
+      display: grid;
+      gap: 6px;
+      border: 1px solid #232830;
+      border-radius: 6px;
+      background: #111418;
+      padding: 8px;
+    }
+    .tool-profile-title {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      font-weight: 800;
+    }
+    .tool-profile-statuses {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
     .inspector-body {
       display: grid;
       gap: 10px;
@@ -935,6 +960,7 @@ INDEX_HTML = """<!doctype html>
               <button class="tab" type="button" data-tab="command">Command</button>
               <button class="tab" type="button" data-tab="diff">Diff</button>
               <button class="tab" type="button" data-tab="attachments">Attachments</button>
+              <button class="tab" type="button" data-tab="tools">Tools</button>
               <button class="tab" type="button" data-tab="native">Native</button>
               <button class="tab" type="button" data-tab="storage">Storage</button>
             </div>
@@ -954,6 +980,14 @@ INDEX_HTML = """<!doctype html>
               <pre id="diff-text">No diff captured.</pre>
             </div>
             <pre id="attachments-panel" class="mono-panel tab-panel">No attachments selected.</pre>
+            <div id="tools-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <span id="tools-status" class="badge info">Tools: loading</span>
+                <button id="sync-tools-button" class="secondary" type="button">Dry-run sync</button>
+              </div>
+              <div id="tool-profile-list" class="tool-profile-list"></div>
+              <pre id="tool-sync-preview">No tool sync preview.</pre>
+            </div>
             <div id="native-panel" class="mono-panel tab-panel">
               <div class="badge-row">
                 <span id="native-terminal-status" class="badge info">Native: idle</span>
@@ -1005,6 +1039,9 @@ INDEX_HTML = """<!doctype html>
       projectConfig: null,
       projectState: null,
       projectPresets: [],
+      toolProfiles: [],
+      toolSyncPreview: null,
+      toolError: null,
       applyingProjectState: false,
       selectedHarness: null,
       arenaSelectionTouched: false,
@@ -1071,7 +1108,11 @@ INDEX_HTML = """<!doctype html>
       state.projectConfig = result.data.config || null;
       state.projectState = result.data.state || null;
       state.projectPresets = Array.isArray(result.data.presets) ? result.data.presets : [];
+      state.toolProfiles = [];
+      state.toolSyncPreview = null;
+      state.toolError = null;
       applyProject();
+      await loadTools();
     }
 
     function applyProject() {
@@ -1124,7 +1165,11 @@ INDEX_HTML = """<!doctype html>
       state.projectConfig = result.data.config || null;
       state.projectState = result.data.state || null;
       state.projectPresets = Array.isArray(result.data.presets) ? result.data.presets : [];
+      state.toolProfiles = [];
+      state.toolSyncPreview = null;
+      state.toolError = null;
       applyProject();
+      await loadTools();
       await loadSessions();
     }
 
@@ -2153,6 +2198,129 @@ INDEX_HTML = """<!doctype html>
       setText("preset-status", `Preset: ${preset.title || preset.name}${warnings}`);
     }
 
+    async function loadTools() {
+      if (!state.project || !state.project.root) {
+        state.toolProfiles = [];
+        state.toolSyncPreview = null;
+        state.toolError = null;
+        renderToolsPanel();
+        return;
+      }
+      const result = await getJson(`/api/tools?workspace=${encodeURIComponent(state.project.root)}`);
+      if (!result.ok) {
+        state.toolProfiles = [];
+        state.toolSyncPreview = null;
+        state.toolError = result.data.detail || "Tools unavailable";
+        renderToolsPanel();
+        return;
+      }
+      state.toolProfiles = Array.isArray(result.data.profiles) ? result.data.profiles : [];
+      state.toolSyncPreview = null;
+      state.toolError = null;
+      renderToolsPanel();
+    }
+
+    async function syncTools() {
+      if (!state.project || !state.project.root) return;
+      setText("tools-status", "Tools: dry-run syncing");
+      const result = await getJson("/api/tools/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, dry_run: true })
+      });
+      if (!result.ok) {
+        setText("tools-status", result.data.detail || "Tool sync failed.");
+        return;
+      }
+      state.toolSyncPreview = result.data;
+      state.toolProfiles = Array.isArray(result.data.profiles) ? result.data.profiles : state.toolProfiles;
+      renderToolsPanel();
+      showTab("tools");
+    }
+
+    function renderToolsPanel() {
+      const list = byId("tool-profile-list");
+      if (!list) return;
+      list.textContent = "";
+      if (state.toolError) {
+        setText("tools-status", "Tools: unavailable");
+        byId("sync-tools-button").disabled = true;
+        const error = document.createElement("div");
+        error.className = "warning";
+        error.textContent = state.toolError;
+        list.appendChild(error);
+        setText("tool-sync-preview", "No tool sync preview.");
+        return;
+      }
+      const profiles = Array.isArray(state.toolProfiles) ? state.toolProfiles : [];
+      setText("tools-status", profiles.length ? `Tools: ${profiles.length}` : "Tools: none");
+      byId("sync-tools-button").disabled = !profiles.length;
+      if (!profiles.length) {
+        const empty = document.createElement("div");
+        empty.className = "status-line";
+        empty.textContent = "No project tool profiles configured.";
+        list.appendChild(empty);
+        setText("tool-sync-preview", "No tool sync preview.");
+        return;
+      }
+      for (const item of profiles) {
+        list.appendChild(toolProfileCard(item));
+      }
+      if (state.toolSyncPreview) {
+        setText("tool-sync-preview", pretty(state.toolSyncPreview));
+      } else {
+        setText("tool-sync-preview", "Dry-run sync preview has not been generated.");
+      }
+    }
+
+    function toolProfileCard(item) {
+      const profile = item.profile || {};
+      const card = document.createElement("div");
+      card.className = "tool-profile-card";
+      const title = document.createElement("div");
+      title.className = "tool-profile-title";
+      title.innerHTML = `
+        <span>${escapeHtml(profile.title || item.name || "tool")}</span>
+        <span class="${toolStatusBadgeClass(profile.enabled ? "ready" : "disabled")}">${escapeHtml(profile.enabled ? "enabled" : "disabled")}</span>
+        <span class="badge info">${escapeHtml(profile.kind || "mcp")}</span>
+      `;
+      card.appendChild(title);
+      if (profile.description) {
+        const description = document.createElement("div");
+        description.className = "details";
+        description.textContent = profile.description;
+        card.appendChild(description);
+      }
+      const statuses = document.createElement("div");
+      statuses.className = "tool-profile-statuses";
+      for (const status of item.harnesses || []) {
+        const badge = document.createElement("span");
+        badge.className = toolStatusBadgeClass(status.status);
+        badge.title = status.reason || "";
+        badge.textContent = `${harnessTitle(status.harness_id)}: ${status.status}`;
+        statuses.appendChild(badge);
+      }
+      card.appendChild(statuses);
+      const warnings = [
+        ...(Array.isArray(item.warnings) ? item.warnings : []),
+        ...(item.harnesses || []).flatMap((status) => Array.isArray(status.warnings) ? status.warnings : [])
+      ];
+      if (warnings.length) {
+        const warning = document.createElement("div");
+        warning.className = "warning";
+        warning.textContent = warnings.join(" ");
+        card.appendChild(warning);
+      }
+      return card;
+    }
+
+    function toolStatusBadgeClass(status) {
+      if (status === "ready") return "badge ok";
+      if (status === "disabled") return "badge";
+      if (status === "missing" || status === "unsupported") return "badge warn";
+      return "badge info";
+    }
+
     function selectedWorkspaceFiles() {
       return state.attachments
         .map((attachment) => attachment.workspace_path)
@@ -2454,6 +2622,7 @@ INDEX_HTML = """<!doctype html>
       renderMessages();
       renderInspector();
       renderSessions();
+      renderToolsPanel();
     }
 
     function renderMessages() {
@@ -3019,6 +3188,7 @@ INDEX_HTML = """<!doctype html>
       byId("refresh-models-button").addEventListener("click", loadModels);
       byId("init-project-button").addEventListener("click", initProject);
       byId("new-chat-button").addEventListener("click", newChat);
+      byId("sync-tools-button").addEventListener("click", syncTools);
       byId("harness-select").addEventListener("change", (event) => {
         selectHarness(event.target.value);
         renderRouteRecommendation(state.routeRecommendation);

@@ -171,6 +171,21 @@ roadmap.
 - The no-build UI renders preset chips that prefill the composer and run
   controls for review before execution.
 
+### Tools And MCP Profiles
+
+- Project config can define generic non-secret `[tools.<name>]` profiles with
+  enabled state, title, kind, description, target harnesses, and safe config
+  metadata.
+- `gpt2giga/harness/tool_profiles.py` builds side-effect-free dry-run sync
+  status for Codex CLI, Claude Code, and Gemini CLI managed config targets.
+- `/api/tools` reports profile and per-harness status for the current project;
+  `/api/tools/sync` returns redacted dry-run config previews without installing,
+  authenticating, or writing external tool config.
+- The browser UI exposes a Tools inspector tab with status chips and a
+  `Dry-run sync` action.
+- Secret-looking keys are rejected from project config and secret-looking values
+  are redacted before API/UI output.
+
 ## Open Roadmap Status
 
 The next work should not reimplement foundations that are already present. Use
@@ -191,7 +206,7 @@ this status to choose the next vertical slice.
 | Slice 10: multi-harness arena | Implemented as an MVP: `/api/arena/runs` creates a JSON parent record under `arenas/<arena_id>.json`, runs selected headless harnesses sequentially with isolated request history, links child `HarnessRun` ids, aggregates child events through `/api/arena/runs/{arena_id}/events/stream`, and renders side-by-side UI result cards. Parallel execution and arena cancellation remain future work. |
 | Slice 11: smart router | Implemented as an MVP: `gpt2giga/harness/routing.py` scores available harnesses deterministically from prompt text, attachments, workspace/selected files, requested mode, and harness capabilities; `/api/route/recommendation` exposes the result; the UI shows a Recommended badge with reasons/warnings and one-click apply. Edit-looking prompts remain non-edit unless `edit` was already selected explicitly. |
 | Slice 12: presets and runbooks | Implemented as an MVP: presets support prompt templates, safe variables, workspace policy, API/CLI listing and rendering, CLI dry-run execution, and UI preset chips that prefill run controls. Multi-step runbook orchestration remains future work. |
-| Slice 13: tools/MCP profiles | Open. |
+| Slice 13: tools/MCP profiles | Implemented as an MVP: `.giga/harness.toml` supports non-secret `[tools.<name>]` profiles; `/api/tools` and `/api/tools/sync` expose per-harness status plus redacted dry-run config previews; the UI has a Tools inspector tab. Actual external tool install/auth/config writes remain future work. |
 | Slice 14: issue/PR mode | Open. |
 | Slice 15: project memory and decision log | Open. |
 | Slice 16: provenance and replay | Partially implemented through stored runs, commands, raw records, attachments, events, and native links. Replay/fork behavior remains open. |
@@ -233,17 +248,14 @@ opaque stores.
 
 ## Next Recommended Slice
 
-The highest-value next implementation slice is Slice 13 for one-click tools/MCP
-profiles:
-
-- add a generic non-secret tool profile model;
-- start with dry-run config generation instead of installing or authenticating
-  tools;
-- expose tool profile status through API and UI with redacted previews.
+The highest-value next implementation slice is Slice 14 for issue/PR mode:
+turn stored diffs, changed files, and run context into PR-ready local artifacts
+without adding hosted GitHub/GitLab writes yet.
 
 Slice 03 can still be enriched later with richer per-harness stdout/message
-delta emission, Slice 10 can grow parallel execution and arena cancellation, and
-Slice 12 can later grow into multi-step runbook orchestration.
+delta emission, Slice 10 can grow parallel execution and arena cancellation,
+Slice 12 can later grow into multi-step runbook orchestration, and Slice 13 can
+later add real opt-in tool config writes after an explicit safety review.
 
 ## Safety Rules
 
