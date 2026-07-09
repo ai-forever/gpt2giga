@@ -58,10 +58,13 @@ from gpt2giga.harness.native.store import (
 )
 from gpt2giga.harness.project import (
     init_project_config,
+    load_project_state,
     load_project_config,
     project_config_to_dict,
+    project_state_to_dict,
     project_to_dict,
     resolve_project,
+    update_project_state,
 )
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga.harness.session_runner import HarnessSessionRunner
@@ -190,6 +193,40 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"config": project_config_to_dict(loaded)}
+
+    @app.get("/api/project/state")
+    async def project_state(
+        workspace: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(workspace),
+                data_dir=config.data_dir,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "project": project_to_dict(project_context),
+            "state": project_state_to_dict(load_project_state(project_context)),
+        }
+
+    @app.patch("/api/project/state")
+    async def update_state(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(payload.get("workspace")),
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+            state = update_project_state(project_context, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "project": project_to_dict(project_context),
+            "state": project_state_to_dict(state),
+        }
 
     @app.post("/api/project/init")
     async def project_init(
@@ -1627,6 +1664,7 @@ def _project_response(workspace: str | None, data_dir: str) -> dict[str, Any]:
     return {
         "project": project_to_dict(project_context),
         "config": config_payload,
+        "state": project_state_to_dict(load_project_state(project_context)),
         "defaults": config_payload["defaults"],
         "presets": list(config_payload["presets"].values()),
     }

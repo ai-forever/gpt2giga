@@ -8,11 +8,15 @@ from gpt2giga.harness.project import (
     DEFAULT_ATTACHMENT_IGNORE,
     DEFAULT_ENABLED_HARNESSES,
     init_project_config,
+    load_project_state,
     load_project_config,
     project_config_to_dict,
     project_id_for_root,
+    project_state_path,
+    project_state_to_dict,
     project_to_dict,
     resolve_project,
+    update_project_state,
 )
 
 
@@ -169,3 +173,53 @@ def test_resolve_project_uses_configured_project_name(tmp_path):
 
     assert project.name == "configured-name"
     assert project.config_path == str(tmp_path / ".giga" / "harness.toml")
+
+
+def test_project_state_persists_mutable_cockpit_defaults(tmp_path):
+    project = resolve_project(tmp_path, data_dir=tmp_path / "data")
+
+    empty = load_project_state(project)
+    assert project_state_to_dict(empty) == {
+        "last_harness": None,
+        "last_model": None,
+        "last_api_mode": None,
+        "last_run_mode": None,
+        "last_invocation_mode": None,
+        "last_selected_session": None,
+        "trusted": None,
+    }
+
+    state = update_project_state(
+        project,
+        {
+            "last_harness": "codex-cli",
+            "last_model": "GigaChat-2-Max",
+            "last_api_mode": "v1",
+            "last_run_mode": "edit",
+            "last_invocation_mode": "native",
+            "last_selected_session": "sess_demo",
+            "trusted": True,
+            "ignored": "value",
+        },
+    )
+
+    assert project_state_path(project).exists()
+    assert project_state_to_dict(state) == {
+        "last_harness": "codex-cli",
+        "last_model": "GigaChat-2-Max",
+        "last_api_mode": "v1",
+        "last_run_mode": "edit",
+        "last_invocation_mode": "native",
+        "last_selected_session": "sess_demo",
+        "trusted": True,
+    }
+    assert load_project_state(project) == state
+
+
+def test_project_state_tolerates_corrupt_json(tmp_path):
+    project = resolve_project(tmp_path, data_dir=tmp_path / "data")
+    path = project_state_path(project)
+    path.parent.mkdir(parents=True)
+    path.write_text("not json", encoding="utf-8")
+
+    assert project_state_to_dict(load_project_state(project))["last_harness"] is None

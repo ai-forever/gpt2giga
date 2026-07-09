@@ -54,6 +54,44 @@ def test_project_config_api_returns_parsed_config(tmp_path):
     assert "plan" in body["config"]["presets"]
 
 
+def test_project_state_api_persists_last_cockpit_selection(tmp_path):
+    data_dir = tmp_path / "data"
+    client = _client(data_dir)
+
+    response = client.patch(
+        "/api/project/state",
+        json={
+            "workspace": str(tmp_path),
+            "last_harness": "claude-code",
+            "last_model": "GigaChat-2-Max",
+            "last_api_mode": "v1",
+            "last_run_mode": "review",
+            "last_invocation_mode": "native",
+            "last_selected_session": "sess_demo",
+            "trusted": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["project"]["root"] == str(tmp_path)
+    assert body["state"] == {
+        "last_harness": "claude-code",
+        "last_model": "GigaChat-2-Max",
+        "last_api_mode": "v1",
+        "last_run_mode": "review",
+        "last_invocation_mode": "native",
+        "last_selected_session": "sess_demo",
+        "trusted": True,
+    }
+    state_path = data_dir / "projects" / body["project"]["id"] / "state.json"
+    assert state_path.exists()
+
+    project_response = client.get("/api/project", params={"workspace": str(tmp_path)})
+    assert project_response.status_code == 200
+    assert project_response.json()["state"]["last_harness"] == "claude-code"
+
+
 def test_project_api_rejects_secret_project_config(tmp_path):
     config_path = tmp_path / ".giga" / "harness.toml"
     config_path.parent.mkdir()

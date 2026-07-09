@@ -116,6 +116,11 @@ API mode, mode, enabled harnesses, presets, and future attachment safety
 defaults. It must not contain API keys, tokens, cookies, credentials, private
 keys, certificates, or `.env` contents.
 
+`giga ui` also keeps mutable, non-secret cockpit state per project under the
+harness data directory. This includes the last selected harness, model, API
+mode, run mode, invocation mode, and selected session. It is intentionally local
+state, not repository config.
+
 Use JSON output when wiring tools or checking what `giga ui` will use:
 
 ```bash
@@ -442,14 +447,15 @@ sessions/<year>/<month>/<session_id>/events.jsonl
 sessions/<year>/<month>/<session_id>/raw_requests.jsonl
 sessions/<year>/<month>/<session_id>/raw_responses.jsonl
 sessions/<year>/<month>/<session_id>/attachments.jsonl
+projects/<project_id>/state.json
 projects/<project_id>/attachments/<sha256>/original
 projects/<project_id>/attachments/<sha256>/metadata.json
 ```
 
 Stored fields include session title, workspace path, selected harness, model,
 API mode, mode, prompts, assistant/error outputs, events, raw request/response
-metadata, command arrays, attachment metadata, render plans, status, timestamps,
-and storage metadata.
+metadata, command arrays, attachment metadata, render plans, per-project cockpit
+state, status, timestamps, and storage metadata.
 
 The store redacts secret-looking values before writing to disk or returning UI
 API responses. It must not store API keys, authorization headers, cookies,

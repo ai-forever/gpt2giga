@@ -926,6 +926,8 @@ INDEX_HTML = """<!doctype html>
       modelSource: "",
       project: null,
       projectConfig: null,
+      projectState: null,
+      applyingProjectState: false,
       selectedHarness: null,
       nativeSessions: [],
       nativeVisibleLimit: NATIVE_SESSION_PAGE_SIZE,
@@ -983,12 +985,15 @@ INDEX_HTML = """<!doctype html>
       }
       state.project = result.data.project || null;
       state.projectConfig = result.data.config || null;
+      state.projectState = result.data.state || null;
       applyProject();
     }
 
     function applyProject() {
       const project = state.project || {};
       const config = state.projectConfig || {};
+      const projectState = state.projectState || {};
+      state.applyingProjectState = true;
       setText("project-name", project.name || "Unassigned");
       const branch = project.git_branch ? `branch ${project.git_branch}` : "no git branch";
       const dirty = project.dirty_summary || {};
@@ -1000,13 +1005,22 @@ INDEX_HTML = """<!doctype html>
         byId("workspace-input").value = project.root;
       }
       if (config.exists && config.defaults) {
-        byId("model-input").value = config.defaults.model || byId("model-input").value;
-        byId("mode-select").value = config.defaults.mode || "plan";
-        const mode = config.defaults.api_mode || "v2";
+        byId("model-input").value = projectState.last_model || config.defaults.model || byId("model-input").value;
+        byId("mode-select").value = projectState.last_run_mode || config.defaults.mode || "plan";
+        const mode = projectState.last_api_mode || config.defaults.api_mode || "v2";
         const apiMode = byId(`api-mode-${mode}`);
         if (apiMode) apiMode.checked = true;
-        updateRouteNote();
+      } else {
+        if (projectState.last_model) byId("model-input").value = projectState.last_model;
+        if (projectState.last_run_mode) byId("mode-select").value = projectState.last_run_mode;
+        if (projectState.last_api_mode) {
+          const apiMode = byId(`api-mode-${projectState.last_api_mode}`);
+          if (apiMode) apiMode.checked = true;
+        }
       }
+      if (projectState.last_invocation_mode) byId("invocation-select").value = projectState.last_invocation_mode;
+      updateRouteNote();
+      state.applyingProjectState = false;
     }
 
     async function initProject() {
@@ -1022,6 +1036,7 @@ INDEX_HTML = """<!doctype html>
       }
       state.project = result.data.project || null;
       state.projectConfig = result.data.config || null;
+      state.projectState = result.data.state || null;
       applyProject();
       await loadSessions();
     }
@@ -1100,6 +1115,7 @@ INDEX_HTML = """<!doctype html>
       renderModelList();
       closeModelList();
       updateHeaderBadges();
+      persistProjectState();
       byId("model-input").focus();
     }
 
@@ -1168,8 +1184,12 @@ INDEX_HTML = """<!doctype html>
 
     function chooseInitialHarness() {
       const configDefaults = state.projectConfig && state.projectConfig.exists ? state.projectConfig.defaults || {} : {};
-      const preferred = configDefaults.harness || byId("harness-select").value || "echo";
+      const projectState = state.projectState || {};
+      const preferred = projectState.last_harness || configDefaults.harness || byId("harness-select").value || "echo";
       const first = state.harnesses.find((item) => item.spec && item.spec.id === preferred) || state.harnesses[0];
+      if (first && first.spec) {
+        byId("invocation-select").value = projectState.last_invocation_mode || first.spec.default_invocation_mode || "headless";
+      }
       if (first && first.spec) selectHarness(first.spec.id);
     }
 
@@ -1184,6 +1204,7 @@ INDEX_HTML = """<!doctype html>
       const capabilities = Array.isArray(item.spec.capabilities) ? item.spec.capabilities.join(", ") : "";
       setText("harness-details", `${item.spec.title || harnessId} - ${item.spec.description || ""}${capabilities ? " Capabilities: " + capabilities : ""}`);
       loadNativeSessions(false);
+      persistProjectState();
     }
 
     function renderCapabilityOptions(spec) {
@@ -1205,7 +1226,7 @@ INDEX_HTML = """<!doctype html>
       invocation.disabled = !supportsNative;
       if (!supportsNative) {
         invocation.value = "headless";
-      } else if (!invocation.value || invocation.value === "headless") {
+      } else if (!invocation.value) {
         invocation.value = spec.default_invocation_mode || "native";
       }
       byId("model-input").disabled = spec.supports_model_selection === false;
@@ -1566,6 +1587,7 @@ INDEX_HTML = """<!doctype html>
       state.currentBundle = result.data;
       await loadAttachments(sessionId);
       applySessionDefaults(result.data.session || {});
+      persistProjectState({ last_selected_session: sessionId });
       renderAll();
       await loadSessions();
     }
@@ -1872,6 +1894,7 @@ INDEX_HTML = """<!doctype html>
           renderAttachments();
           renderAll();
           await loadSessions();
+          persistProjectState({ last_selected_session: body.session.id });
         } else {
           setText("raw-response-panel", pretty(body));
           setText("run-panel", body.detail || `Request failed with HTTP ${result.status}`);
@@ -2207,6 +2230,7 @@ INDEX_HTML = """<!doctype html>
         renderAttachments();
         renderAll();
         await loadSessions();
+        persistProjectState({ last_selected_session: null });
       }
     }
 
@@ -2242,6 +2266,26 @@ INDEX_HTML = """<!doctype html>
       const model = byId("model-input").value.trim() || "unset";
       setText("current-model-badge", `Model: ${model}`);
       setText("current-route-badge", `Route: /${currentApiMode()}/chat/completions`);
+    }
+
+    async function persistProjectState(patch = {}) {
+      if (state.applyingProjectState || !state.project || !state.project.root) return;
+      const payload = {
+        workspace: state.project.root,
+        last_harness: currentHarnessId(),
+        last_model: byId("model-input").value.trim() || null,
+        last_api_mode: currentApiMode(),
+        last_run_mode: byId("mode-select").value,
+        last_invocation_mode: currentInvocationMode(),
+        last_selected_session: state.currentSessionId || null,
+        ...patch
+      };
+      const result = await getJson("/api/project/state", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (result.ok) state.projectState = result.data.state || state.projectState;
     }
 
     function commandPreview(payload) {
@@ -2324,7 +2368,10 @@ INDEX_HTML = """<!doctype html>
       byId("init-project-button").addEventListener("click", initProject);
       byId("new-chat-button").addEventListener("click", newChat);
       byId("harness-select").addEventListener("change", (event) => selectHarness(event.target.value));
-      byId("invocation-select").addEventListener("change", updateHarnessDrivenControls);
+      byId("invocation-select").addEventListener("change", () => {
+        updateHarnessDrivenControls();
+        persistProjectState();
+      });
       byId("sync-native-button").addEventListener("click", () => loadNativeSessions(true, { openModal: true, resetVisible: true }));
       byId("open-native-history-button").addEventListener("click", () => openNativeHistory(true));
       byId("load-more-native-button").addEventListener("click", loadMoreNativeSessions);
@@ -2340,14 +2387,16 @@ INDEX_HTML = """<!doctype html>
       byId("send-native-input-button").addEventListener("click", sendNativeInput);
       byId("stop-native-process-button").addEventListener("click", stopNativeProcess);
       byId("clear-native-terminal-button").addEventListener("click", clearNativeTerminal);
-      byId("api-mode-v1").addEventListener("change", () => { updateRouteNote(); loadModels(); });
-      byId("api-mode-v2").addEventListener("change", () => { updateRouteNote(); loadModels(); });
+      byId("api-mode-v1").addEventListener("change", () => { updateRouteNote(); loadModels(); persistProjectState(); });
+      byId("api-mode-v2").addEventListener("change", () => { updateRouteNote(); loadModels(); persistProjectState(); });
+      byId("mode-select").addEventListener("change", () => persistProjectState());
       byId("model-menu-button").addEventListener("click", toggleModelList);
       byId("model-input").addEventListener("focus", openModelList);
       byId("model-input").addEventListener("input", () => {
         updateHeaderBadges();
         openModelList();
       });
+      byId("model-input").addEventListener("change", () => persistProjectState());
       byId("model-input").addEventListener("keydown", (event) => {
         if (event.key === "Escape") closeModelList();
         if (event.key === "ArrowDown") {
@@ -2435,6 +2484,9 @@ INDEX_HTML = """<!doctype html>
       await loadProject();
       await Promise.all([loadHarnesses(), refreshHealth(), loadModels()]);
       await loadSessions();
+      if (!state.currentSessionId && state.projectState && state.projectState.last_selected_session) {
+        await loadSession(state.projectState.last_selected_session);
+      }
       await loadNativeSessions(false);
       renderAll();
     }

@@ -94,6 +94,9 @@ roadmap.
   presets, and attachment limits.
 - `giga init`, `giga project init`, `/api/project`, `/api/project/config`, and
   `/api/project/init`.
+- Mutable per-project cockpit state in `projects/<project_id>/state.json` for
+  the last selected harness, model, API mode, run mode, invocation mode, and
+  selected session.
 - Project-scoped sessions and native history filtering in the browser UI.
 
 ### Sessions And Run Inspection
@@ -144,7 +147,7 @@ this status to choose the next vertical slice.
 | Roadmap slice | Status on this branch |
 | --- | --- |
 | Slice 00: architecture note | Covered by this document. |
-| Slice 01: project-first cockpit | Mostly implemented. Remaining work is per-project mutable UI state such as last selected harness/model/API mode/run mode if not already implicit in sessions. |
+| Slice 01: project-first cockpit | Implemented for project identity, config, mutable local state, project-scoped sessions, native history scoping, and UI header/default restoration. |
 | Slice 02: `giga init` and `.giga/harness.toml` | Implemented for config, defaults, presets, and attachment settings. Prompt template files and richer preset/runbook execution remain future work. |
 | Slice 03: live run event stream | Partially implemented. Events are persisted and can be polled with `/api/sessions/{session_id}/events`; headless run SSE, live deltas, and cancel are still open. |
 | Slice 04: native terminal pane | Implemented with native process manager, API, and UI terminal polling. SSE/WebSocket and resize can still be added later. |
@@ -181,6 +184,7 @@ Project and session state should remain transparent JSON/JSONL:
     native_links.jsonl
     attachments.jsonl
   projects/<project_id>/
+    state.json
     attachments/<sha256>/original
     attachments/<sha256>/metadata.json
   native/

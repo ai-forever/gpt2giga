@@ -377,6 +377,7 @@ def test_ui_index_contains_control_panel_elements():
     for text in (
         "+ New chat",
         "/api/project",
+        "/api/project/state",
         "project_id",
         "Project Cockpit",
         "GPT2Giga chats",
@@ -405,6 +406,7 @@ def test_ui_index_contains_control_panel_elements():
         "/attachments",
         "dragover",
         "clipboardData",
+        "persistProjectState",
     ):
         assert text in html
 
