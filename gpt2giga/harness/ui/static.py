@@ -315,8 +315,7 @@ INDEX_HTML = """<!doctype html>
       gap: 8px;
     }
     .session-list,
-    #harness-list,
-    #native-session-list {
+    #harness-list {
       display: grid;
       gap: 6px;
       padding: 10px;
@@ -553,6 +552,74 @@ INDEX_HTML = """<!doctype html>
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
         "Liberation Mono", monospace;
     }
+    .native-history-modal {
+      position: fixed;
+      z-index: 80;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgb(0 0 0 / 0.58);
+    }
+    .native-history-modal[hidden] {
+      display: none;
+    }
+    .native-history-dialog {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      width: min(760px, calc(100vw - 32px));
+      max-height: min(760px, calc(100vh - 48px));
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 24px 80px rgb(0 0 0 / 0.55);
+      overflow: hidden;
+    }
+    .native-history-header,
+    .native-history-footer {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .native-history-footer {
+      border-top: 1px solid var(--border);
+      border-bottom: 0;
+    }
+    .native-history-title {
+      display: grid;
+      gap: 4px;
+    }
+    .native-session-list {
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      min-height: 0;
+      overflow: auto;
+      padding: 12px;
+    }
+    .native-session-list .native-session-row {
+      min-width: 0;
+      background: var(--panel-soft);
+    }
+    .native-session-list .session-title,
+    .native-session-list .session-meta,
+    .native-session-list .badge-row {
+      min-width: 0;
+    }
+    .native-session-list .inline-actions {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .native-session-list .inline-actions button {
+      width: 100%;
+      min-width: 0;
+    }
     .tab-panel {
       display: none;
     }
@@ -606,6 +673,21 @@ INDEX_HTML = """<!doctype html>
       }
       .message {
         max-width: 100%;
+      }
+      .native-history-modal {
+        align-items: stretch;
+        padding: 12px;
+      }
+      .native-history-dialog {
+        width: 100%;
+        max-height: calc(100vh - 24px);
+      }
+      .native-session-list .inline-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .native-session-list .inline-actions button {
+        padding-right: 6px;
+        padding-left: 6px;
       }
     }
   </style>
@@ -664,6 +746,7 @@ INDEX_HTML = """<!doctype html>
               <h2>Native sessions</h2>
               <span id="native-count" class="badge info">0</span>
               <button id="sync-native-button" class="secondary" type="button">Sync native history</button>
+              <button id="open-native-history-button" class="secondary" type="button">Browse history</button>
             </div>
             <label class="choice" for="native-all-workspaces-checkbox">
               <input id="native-all-workspaces-checkbox" type="checkbox">
@@ -671,7 +754,6 @@ INDEX_HTML = """<!doctype html>
             </label>
             <div id="native-status" class="status-line">Native history not synced</div>
           </div>
-          <div id="native-session-list"></div>
           <div class="section">
             <div class="inline-actions">
               <h2>Harnesses</h2>
@@ -816,9 +898,26 @@ INDEX_HTML = """<!doctype html>
         </div>
       </aside>
     </main>
+    <div id="native-history-modal" class="native-history-modal" role="dialog" aria-modal="true" aria-labelledby="native-history-title" hidden>
+      <div class="native-history-dialog">
+        <div class="native-history-header">
+          <div class="native-history-title">
+            <h2 id="native-history-title">Native sessions</h2>
+            <div id="native-modal-status" class="status-line">Native history not synced</div>
+          </div>
+          <button id="close-native-history-button" class="secondary" type="button" aria-label="Close native history">Close</button>
+        </div>
+        <div id="native-session-list" class="native-session-list"></div>
+        <div class="native-history-footer">
+          <div id="native-page-status" class="status-line">Showing 0 of 0</div>
+          <button id="load-more-native-button" class="secondary" type="button">Load 5 more</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
+    const NATIVE_SESSION_PAGE_SIZE = 5;
     const state = {
       defaults: {},
       harnesses: [],
@@ -829,6 +928,8 @@ INDEX_HTML = """<!doctype html>
       projectConfig: null,
       selectedHarness: null,
       nativeSessions: [],
+      nativeVisibleLimit: NATIVE_SESSION_PAGE_SIZE,
+      nativeModalOpen: false,
       selectedNativeRefId: null,
       nativePreview: null,
       activeNativeProcess: null,
@@ -1136,7 +1237,8 @@ INDEX_HTML = """<!doctype html>
       renderSessions();
     }
 
-    async function loadNativeSessions(sync) {
+    async function loadNativeSessions(sync, options = {}) {
+      if (sync || options.resetVisible) resetNativeVisibleLimit();
       const showAllWorkspaces = byId("native-all-workspaces-checkbox").checked;
       const workspace = showAllWorkspaces ? "" : byId("session-workspace-filter").value.trim() || byId("workspace-input").value.trim();
       const includeExternal = true;
@@ -1153,6 +1255,7 @@ INDEX_HTML = """<!doctype html>
         if (!synced.ok) {
           state.nativeSessions = [];
           renderNativeSessions(synced.data.detail || "Native history sync failed.");
+          if (options.openModal) openNativeHistory(false);
           return;
         }
         const errors = Array.isArray(synced.data.errors) ? synced.data.errors : [];
@@ -1167,10 +1270,12 @@ INDEX_HTML = """<!doctype html>
       if (!result.ok) {
         state.nativeSessions = [];
         renderNativeSessions(result.data.detail || "Native history unavailable.");
+        if (options.openModal) openNativeHistory(false);
         return;
       }
       state.nativeSessions = result.data.sessions || [];
       renderNativeSessions();
+      if (options.openModal) openNativeHistory(false);
     }
 
     function renderSessions() {
@@ -1214,9 +1319,17 @@ INDEX_HTML = """<!doctype html>
       byId("native-count").textContent = String(state.nativeSessions.length);
       if (error) {
         setText("native-status", error);
+        setText("native-modal-status", error);
       } else {
-        setText("native-status", state.nativeSessions.length ? "Native history loaded" : "No native sessions cached");
+        const status = state.nativeSessions.length ? "Native history loaded" : "No native sessions cached";
+        setText("native-status", status);
+        setText("native-modal-status", status);
       }
+      const visibleLimit = Math.min(state.nativeVisibleLimit, state.nativeSessions.length);
+      setText("native-page-status", `Showing ${visibleLimit} of ${state.nativeSessions.length}`);
+      const loadMoreButton = byId("load-more-native-button");
+      loadMoreButton.disabled = !state.nativeSessions.length || visibleLimit >= state.nativeSessions.length;
+      loadMoreButton.textContent = visibleLimit >= state.nativeSessions.length ? "All loaded" : "Load 5 more";
       if (!state.nativeSessions.length) {
         const empty = document.createElement("div");
         empty.className = "empty";
@@ -1224,7 +1337,7 @@ INDEX_HTML = """<!doctype html>
         list.appendChild(empty);
         return;
       }
-      const groups = groupByHarness(state.nativeSessions);
+      const groups = groupByHarness(state.nativeSessions.slice(0, visibleLimit));
       for (const [harnessId, sessions] of groups) {
         const title = document.createElement("div");
         title.className = "group-title sidebar-heading";
@@ -1264,6 +1377,31 @@ INDEX_HTML = """<!doctype html>
       return row;
     }
 
+    function resetNativeVisibleLimit() {
+      state.nativeVisibleLimit = NATIVE_SESSION_PAGE_SIZE;
+    }
+
+    function loadMoreNativeSessions() {
+      state.nativeVisibleLimit = Math.min(
+        state.nativeVisibleLimit + NATIVE_SESSION_PAGE_SIZE,
+        state.nativeSessions.length
+      );
+      renderNativeSessions();
+    }
+
+    function openNativeHistory(resetVisible = true) {
+      if (resetVisible) resetNativeVisibleLimit();
+      state.nativeModalOpen = true;
+      byId("native-history-modal").hidden = false;
+      renderNativeSessions();
+      byId("close-native-history-button").focus();
+    }
+
+    function closeNativeHistory() {
+      state.nativeModalOpen = false;
+      byId("native-history-modal").hidden = true;
+    }
+
     function nativeActionButton(label, handler, disabled) {
       const button = document.createElement("button");
       button.className = "secondary";
@@ -1272,6 +1410,7 @@ INDEX_HTML = """<!doctype html>
       button.disabled = Boolean(disabled);
       button.addEventListener("click", (event) => {
         event.stopPropagation();
+        closeNativeHistory();
         handler();
       });
       return button;
@@ -2186,8 +2325,17 @@ INDEX_HTML = """<!doctype html>
       byId("new-chat-button").addEventListener("click", newChat);
       byId("harness-select").addEventListener("change", (event) => selectHarness(event.target.value));
       byId("invocation-select").addEventListener("change", updateHarnessDrivenControls);
-      byId("sync-native-button").addEventListener("click", () => loadNativeSessions(true));
-      byId("native-all-workspaces-checkbox").addEventListener("change", () => loadNativeSessions(false));
+      byId("sync-native-button").addEventListener("click", () => loadNativeSessions(true, { openModal: true, resetVisible: true }));
+      byId("open-native-history-button").addEventListener("click", () => openNativeHistory(true));
+      byId("load-more-native-button").addEventListener("click", loadMoreNativeSessions);
+      byId("close-native-history-button").addEventListener("click", closeNativeHistory);
+      byId("native-history-modal").addEventListener("click", (event) => {
+        if (event.target === byId("native-history-modal")) closeNativeHistory();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && state.nativeModalOpen) closeNativeHistory();
+      });
+      byId("native-all-workspaces-checkbox").addEventListener("change", () => loadNativeSessions(false, { resetVisible: true }));
       byId("poll-native-output-button").addEventListener("click", pollNativeOutput);
       byId("send-native-input-button").addEventListener("click", sendNativeInput);
       byId("stop-native-process-button").addEventListener("click", stopNativeProcess);
