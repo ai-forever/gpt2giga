@@ -148,6 +148,46 @@ In the browser cockpit, preset chips fill the composer with the rendered prompt
 and preset defaults. They do not execute automatically; use `Run` or `Compare`
 after reviewing the filled request.
 
+### Project Memory
+
+Project memory stores explicit, user-approved project facts and decisions under
+the harness data directory:
+
+```text
+projects/<project_id>/memory.jsonl
+```
+
+Only enabled entries are injected into future session runs for the same project.
+The injected entries are also recorded in `run.metadata.project_memory` and the
+redacted raw request, so each run shows exactly which memory was included.
+Disabled entries remain visible for review but are not sent to harnesses.
+
+Manage memory from the CLI:
+
+```bash
+giga memory list --workspace . --json
+giga memory add "Use Alembic migrations" --workspace . --tag decision
+giga memory disable <memory_id> --workspace .
+giga memory enable <memory_id> --workspace .
+giga memory delete <memory_id> --workspace .
+```
+
+The browser cockpit exposes the same workflow in the `Memory` inspector tab,
+including adding entries, editing text, enabling/disabling, deleting, and
+promoting the latest chat message to memory.
+
+The matching API surface is:
+
+```text
+GET    /api/project/memory
+POST   /api/project/memory
+PATCH  /api/project/memory/{memory_id}
+DELETE /api/project/memory/{memory_id}
+```
+
+Memory text, tags, and metadata pass through the same secret-looking value
+redaction used by sessions and raw records before storage or API/UI output.
+
 ### Tool Profiles
 
 Projects can define non-secret tool profiles in `.giga/harness.toml`:
@@ -637,6 +677,7 @@ sessions/<year>/<month>/<session_id>/raw_requests.jsonl
 sessions/<year>/<month>/<session_id>/raw_responses.jsonl
 sessions/<year>/<month>/<session_id>/attachments.jsonl
 projects/<project_id>/state.json
+projects/<project_id>/memory.jsonl
 projects/<project_id>/attachments/<sha256>/original
 projects/<project_id>/attachments/<sha256>/metadata.json
 worktrees/<session_id>/<run_id>/

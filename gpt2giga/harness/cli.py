@@ -38,6 +38,11 @@ from gpt2giga.harness.project import (
     rendered_project_preset_to_dict,
     resolve_project,
 )
+from gpt2giga.harness.project_memory import (
+    FilesystemProjectMemoryStore,
+    ProjectMemoryNotFoundError,
+    memory_entry_to_dict,
+)
 from gpt2giga.harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
 from gpt2giga.harness.registry import UnknownHarnessError, create_default_registry
 from gpt2giga.harness.sessions import (
@@ -100,6 +105,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except RunNotFoundError as exc:
         print(f"Unknown run: {exc.args[0]}", file=sys.stderr)
+        return 2
+    except ProjectMemoryNotFoundError as exc:
+        print(f"Unknown memory: {exc.args[0]}", file=sys.stderr)
         return 2
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
@@ -235,6 +243,43 @@ def build_parser() -> argparse.ArgumentParser:
     preset_run.add_argument("--json", action="store_true")
     preset_run.add_argument("--dry-run", action="store_true")
     preset_run.set_defaults(handler=_handle_preset_run)
+
+    memory = subparsers.add_parser("memory")
+    memory_subparsers = memory.add_subparsers(dest="memory_command")
+
+    memory_list = memory_subparsers.add_parser("list")
+    memory_list.add_argument("--workspace", default=None)
+    memory_list.add_argument("--include-disabled", action="store_true")
+    memory_list.add_argument("--json", action="store_true")
+    memory_list.set_defaults(handler=_handle_memory_list)
+
+    memory_add = memory_subparsers.add_parser("add")
+    memory_add.add_argument("text", nargs="+")
+    memory_add.add_argument("--workspace", default=None)
+    memory_add.add_argument("--tag", action="append", default=[])
+    memory_add.add_argument("--session-id", default=None)
+    memory_add.add_argument("--run-id", default=None)
+    memory_add.add_argument("--disabled", action="store_true")
+    memory_add.add_argument("--json", action="store_true")
+    memory_add.set_defaults(handler=_handle_memory_add)
+
+    memory_disable = memory_subparsers.add_parser("disable")
+    memory_disable.add_argument("memory_id")
+    memory_disable.add_argument("--workspace", default=None)
+    memory_disable.add_argument("--json", action="store_true")
+    memory_disable.set_defaults(handler=_handle_memory_disable)
+
+    memory_enable = memory_subparsers.add_parser("enable")
+    memory_enable.add_argument("memory_id")
+    memory_enable.add_argument("--workspace", default=None)
+    memory_enable.add_argument("--json", action="store_true")
+    memory_enable.set_defaults(handler=_handle_memory_enable)
+
+    memory_delete = memory_subparsers.add_parser("delete")
+    memory_delete.add_argument("memory_id")
+    memory_delete.add_argument("--workspace", default=None)
+    memory_delete.add_argument("--json", action="store_true")
+    memory_delete.set_defaults(handler=_handle_memory_delete)
 
     harness = subparsers.add_parser("harness")
     harness_subparsers = harness.add_subparsers(dest="harness_command")
@@ -704,6 +749,100 @@ def _handle_preset_run(args: argparse.Namespace, config: HarnessConfig) -> int:
     return 0 if result.ok else 1
 
 
+def _handle_memory_list(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(
+        args.workspace,
+        data_dir=config.data_dir,
+        load_config_name=False,
+    )
+    memories = FilesystemProjectMemoryStore().list(
+        project,
+        include_disabled=args.include_disabled,
+    )
+    rows = [memory_entry_to_dict(memory) for memory in memories]
+    if args.json:
+        _print_json({"project": project_to_dict(project), "memories": rows})
+    else:
+        _print_memory_table(rows)
+    return 0
+
+
+def _handle_memory_add(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(
+        args.workspace,
+        data_dir=config.data_dir,
+        load_config_name=False,
+    )
+    memory = FilesystemProjectMemoryStore().add(
+        project,
+        text=" ".join(args.text),
+        tags=tuple(args.tag or ()),
+        source_session_id=args.session_id,
+        source_run_id=args.run_id,
+        enabled=not args.disabled,
+    )
+    payload = {
+        "project": project_to_dict(project),
+        "memory": memory_entry_to_dict(memory),
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Added memory: {memory.id}")
+    return 0
+
+
+def _handle_memory_disable(args: argparse.Namespace, config: HarnessConfig) -> int:
+    return _set_memory_enabled(args, config, enabled=False)
+
+
+def _handle_memory_enable(args: argparse.Namespace, config: HarnessConfig) -> int:
+    return _set_memory_enabled(args, config, enabled=True)
+
+
+def _handle_memory_delete(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(
+        args.workspace,
+        data_dir=config.data_dir,
+        load_config_name=False,
+    )
+    FilesystemProjectMemoryStore().delete(project, args.memory_id)
+    payload = {"deleted": True, "project": project_to_dict(project)}
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Deleted memory: {args.memory_id}")
+    return 0
+
+
+def _set_memory_enabled(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+    *,
+    enabled: bool,
+) -> int:
+    project = resolve_project(
+        args.workspace,
+        data_dir=config.data_dir,
+        load_config_name=False,
+    )
+    memory = FilesystemProjectMemoryStore().update(
+        project,
+        args.memory_id,
+        enabled=enabled,
+    )
+    payload = {
+        "project": project_to_dict(project),
+        "memory": memory_entry_to_dict(memory),
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        action = "Enabled" if enabled else "Disabled"
+        print(f"{action} memory: {memory.id}")
+    return 0
+
+
 def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     config = config.with_overrides(ui_host=args.host, ui_port=args.port)
     validate_ui_bind(config.ui_host, allow_remote=args.allow_remote)
@@ -853,6 +992,17 @@ def _print_preset_table(rows: list[dict[str, Any]]) -> None:
             f"{row['name']:<18}{(row.get('harness') or '-'):<16}"
             f"{(row.get('mode') or '-'):<8}"
             f"{(row.get('workspace_policy') or '-'):<10}{row['title']}"
+        )
+
+
+def _print_memory_table(rows: list[dict[str, Any]]) -> None:
+    print(f"{'ID':<38}{'Enabled':<10}{'Tags':<24}Text")
+    for row in rows:
+        tags = ",".join(row.get("tags") or ())
+        preview = " ".join(str(row.get("text") or "").split())[:100]
+        print(
+            f"{row['id']:<38}{str(row.get('enabled', True)):<10}"
+            f"{tags[:23]:<24}{preview}"
         )
 
 

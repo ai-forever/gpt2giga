@@ -4,7 +4,8 @@ from pathlib import Path
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.native import HarnessInvocationMode
-from gpt2giga.harness.project import project_id_for_root
+from gpt2giga.harness.project import project_id_for_root, resolve_project
+from gpt2giga.harness.project_memory import FilesystemProjectMemoryStore
 from gpt2giga.harness.registry import HarnessRegistry
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import InMemoryHarnessSessionStore
@@ -123,6 +124,44 @@ def test_session_runner_persists_invocation_mode_metadata():
     assert result.bundle.raw_requests[0].payload["invocation_mode"] == "native"
 
 
+def test_session_runner_injects_enabled_project_memory(tmp_path):
+    harness = _CaptureHarness()
+    data_dir = tmp_path / "data"
+    project = resolve_project(tmp_path, data_dir=data_dir)
+    memory_store = FilesystemProjectMemoryStore()
+    enabled = memory_store.add(
+        project,
+        text="Use Alembic migrations",
+        tags=("decision",),
+    )
+    disabled = memory_store.add(
+        project,
+        text="Do not include this",
+        enabled=False,
+    )
+    runner = _runner(harness, data_dir=data_dir, memory_store=memory_store)
+
+    result = runner.create_and_run(
+        {
+            "harness_id": "capture",
+            "prompt": "plan database change",
+            "workspace": str(tmp_path),
+        }
+    )
+
+    assert harness.last_request is not None
+    assert "Project memory to honor for this run" in harness.last_request.prompt
+    assert "Use Alembic migrations" in harness.last_request.prompt
+    assert "Do not include this" not in harness.last_request.prompt
+    memory = result.run.metadata["project_memory"]
+    assert memory["count"] == 1
+    assert memory["entries"][0]["id"] == enabled.id
+    assert disabled.id not in str(result.bundle.raw_requests[0].payload)
+    assert result.bundle.raw_requests[0].payload["original_prompt"] == (
+        "plan database change"
+    )
+
+
 def test_session_runner_defaults_agent_edit_to_isolated_worktree(tmp_path):
     repo = _git_repo(tmp_path / "repo")
     harness = _WorkspaceEditHarness()
@@ -181,6 +220,7 @@ def _runner(
     *,
     store: InMemoryHarnessSessionStore | None = None,
     data_dir=None,
+    memory_store: FilesystemProjectMemoryStore | None = None,
 ) -> HarnessSessionRunner:
     registry = HarnessRegistry()
     registry.register(harness)
@@ -191,6 +231,7 @@ def _runner(
             data_dir=str(data_dir) if data_dir is not None else "~/.gpt2giga/harness",
         ),
         store=store or InMemoryHarnessSessionStore(),
+        memory_store=memory_store,
     )
 
 

@@ -186,6 +186,22 @@ roadmap.
 - Secret-looking keys are rejected from project config and secret-looking values
   are redacted before API/UI output.
 
+### Project Memory And Decision Log
+
+- Explicit project memory is stored as transparent JSONL in
+  `projects/<project_id>/memory.jsonl`.
+- `gpt2giga/harness/project_memory.py` provides CRUD, enabled-only prompt
+  selection, prompt rendering, and redacted serialization.
+- `/api/project/memory` plus item `PATCH`/`DELETE` expose project memory to the
+  cockpit.
+- `giga memory list|add|enable|disable|delete` exposes the same store from the
+  CLI.
+- Session runs load enabled memory for the resolved project workspace, inject it
+  into the effective harness prompt, and record `run.metadata.project_memory`
+  plus raw-request provenance for audit.
+- The no-build UI has a Memory inspector tab for add/edit/delete/toggle and
+  promoting the latest chat message to memory.
+
 ## Open Roadmap Status
 
 The next work should not reimplement foundations that are already present. Use
@@ -208,7 +224,7 @@ this status to choose the next vertical slice.
 | Slice 12: presets and runbooks | Implemented as an MVP: presets support prompt templates, safe variables, workspace policy, API/CLI listing and rendering, CLI dry-run execution, and UI preset chips that prefill run controls. Multi-step runbook orchestration remains future work. |
 | Slice 13: tools/MCP profiles | Implemented as an MVP: `.giga/harness.toml` supports non-secret `[tools.<name>]` profiles; `/api/tools` and `/api/tools/sync` expose per-harness status plus redacted dry-run config previews; the UI has a Tools inspector tab. Actual external tool install/auth/config writes remain future work. |
 | Slice 14: issue/PR mode | Implemented as an MVP: every completed run stores `run.metadata.pr_artifact` with deterministic PR title/body/patch/changed-file data, `/api/runs/{run_id}/pr`, `/api/runs/{run_id}/patch`, and `/api/runs/{run_id}/branch` expose local artifact workflows, `giga run pr-summary|patch <run_id>` exports them from the CLI, and the UI has a PR inspector tab with copy actions plus guarded local branch creation. Hosted GitHub/GitLab writes remain future work. |
-| Slice 15: project memory and decision log | Open. |
+| Slice 15: project memory and decision log | Implemented as an MVP: explicit memory entries are stored in `projects/<project_id>/memory.jsonl`, exposed through `/api/project/memory`, `giga memory`, and the UI Memory inspector, and enabled entries are injected into session runs with `run.metadata.project_memory` plus raw-request provenance. Automatic extraction and richer decision-log workflows remain future work. |
 | Slice 16: provenance and replay | Partially implemented through stored runs, commands, raw records, attachments, events, and native links. Replay/fork behavior remains open. |
 | Slice 17: secrets firewall and context budget inspector | Partially implemented through redaction and attachment safety checks. Pre-run scanner and budget inspector remain open. |
 | Slice 18: local evals/benchmarks | Open. |
@@ -232,6 +248,7 @@ Project and session state should remain transparent JSON/JSONL:
     attachments.jsonl
   projects/<project_id>/
     state.json
+    memory.jsonl
     attachments/<sha256>/original
     attachments/<sha256>/metadata.json
   arenas/<arena_id>.json
@@ -248,15 +265,18 @@ opaque stores.
 
 ## Next Recommended Slice
 
-The highest-value next implementation slice is Slice 15 for project memory and
-decision log: persist explicit project knowledge, expose CRUD in the UI/CLI, and
-inject only enabled memory into run metadata with visible provenance.
+The highest-value next implementation slice is Slice 16 for provenance and
+replay: consolidate the already stored run/session records into a first-class
+provenance model, add replay reconstruction without secrets, and expose replay
+or fork controls in the UI.
 
 Slice 03 can still be enriched later with richer per-harness stdout/message
 delta emission, Slice 10 can grow parallel execution and arena cancellation,
 Slice 12 can later grow into multi-step runbook orchestration, Slice 13 can
-later add real opt-in tool config writes after an explicit safety review, and
-Slice 14 can later add hosted issue/PR integrations behind explicit user action.
+later add real opt-in tool config writes after an explicit safety review, Slice
+14 can later add hosted issue/PR integrations behind explicit user action, and
+Slice 15 can later add automatic memory suggestions after an explicit approval
+flow.
 
 ## Safety Rules
 

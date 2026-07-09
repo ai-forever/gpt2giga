@@ -961,6 +961,7 @@ INDEX_HTML = """<!doctype html>
               <button class="tab" type="button" data-tab="diff">Diff</button>
               <button class="tab" type="button" data-tab="pr">PR</button>
               <button class="tab" type="button" data-tab="attachments">Attachments</button>
+              <button class="tab" type="button" data-tab="memory">Memory</button>
               <button class="tab" type="button" data-tab="tools">Tools</button>
               <button class="tab" type="button" data-tab="native">Native</button>
               <button class="tab" type="button" data-tab="storage">Storage</button>
@@ -991,6 +992,20 @@ INDEX_HTML = """<!doctype html>
               <pre id="pr-text">No PR artifact.</pre>
             </div>
             <pre id="attachments-panel" class="mono-panel tab-panel">No attachments selected.</pre>
+            <div id="memory-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <span id="memory-status" class="badge info">Memory: loading</span>
+                <button id="remember-message-button" class="secondary" type="button" disabled>Remember last message</button>
+              </div>
+              <label>Project memory
+                <textarea id="memory-input" spellcheck="true"></textarea>
+              </label>
+              <div class="inline-actions">
+                <input id="memory-tags-input" placeholder="tags comma-separated" autocomplete="off">
+                <button id="add-memory-button" type="button">Add memory</button>
+              </div>
+              <div id="memory-list" class="tool-profile-list"></div>
+            </div>
             <div id="tools-panel" class="mono-panel tab-panel">
               <div class="inline-actions">
                 <span id="tools-status" class="badge info">Tools: loading</span>
@@ -1050,6 +1065,8 @@ INDEX_HTML = """<!doctype html>
       projectConfig: null,
       projectState: null,
       projectPresets: [],
+      projectMemory: [],
+      memoryError: null,
       toolProfiles: [],
       toolSyncPreview: null,
       toolError: null,
@@ -1119,10 +1136,13 @@ INDEX_HTML = """<!doctype html>
       state.projectConfig = result.data.config || null;
       state.projectState = result.data.state || null;
       state.projectPresets = Array.isArray(result.data.presets) ? result.data.presets : [];
+      state.projectMemory = [];
+      state.memoryError = null;
       state.toolProfiles = [];
       state.toolSyncPreview = null;
       state.toolError = null;
       applyProject();
+      await loadMemory();
       await loadTools();
     }
 
@@ -1176,10 +1196,13 @@ INDEX_HTML = """<!doctype html>
       state.projectConfig = result.data.config || null;
       state.projectState = result.data.state || null;
       state.projectPresets = Array.isArray(result.data.presets) ? result.data.presets : [];
+      state.projectMemory = [];
+      state.memoryError = null;
       state.toolProfiles = [];
       state.toolSyncPreview = null;
       state.toolError = null;
       applyProject();
+      await loadMemory();
       await loadTools();
       await loadSessions();
     }
@@ -2209,6 +2232,177 @@ INDEX_HTML = """<!doctype html>
       setText("preset-status", `Preset: ${preset.title || preset.name}${warnings}`);
     }
 
+    async function loadMemory() {
+      if (!state.project || !state.project.root) {
+        state.projectMemory = [];
+        state.memoryError = null;
+        renderMemoryPanel();
+        return;
+      }
+      const result = await getJson(`/api/project/memory?workspace=${encodeURIComponent(state.project.root)}&include_disabled=true`);
+      if (!result.ok) {
+        state.projectMemory = [];
+        state.memoryError = result.data.detail || "Memory unavailable";
+        renderMemoryPanel();
+        return;
+      }
+      state.projectMemory = Array.isArray(result.data.memories) ? result.data.memories : [];
+      state.memoryError = null;
+      renderMemoryPanel();
+    }
+
+    async function addMemoryFromInput() {
+      if (!state.project || !state.project.root) return;
+      const text = byId("memory-input").value.trim();
+      if (!text) return;
+      const result = await getJson("/api/project/memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspace: state.project.root,
+          text,
+          tags: memoryTagsFromInput(),
+          source_session_id: state.currentSessionId || null,
+          source_run_id: currentRun() && currentRun().id ? currentRun().id : null
+        })
+      });
+      if (!result.ok) {
+        state.memoryError = result.data.detail || "Memory add failed.";
+        renderMemoryPanel();
+        return;
+      }
+      byId("memory-input").value = "";
+      byId("memory-tags-input").value = "";
+      await loadMemory();
+      showTab("memory");
+    }
+
+    async function rememberLastMessage() {
+      const messages = state.currentBundle && Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
+      const message = [...messages].reverse().find((item) => item.content);
+      if (!message) return;
+      byId("memory-input").value = message.content || "";
+      byId("memory-tags-input").value = "message";
+      await addMemoryFromInput();
+    }
+
+    async function setMemoryEnabled(memoryId, enabled) {
+      if (!state.project || !state.project.root || !memoryId) return;
+      const result = await getJson(`/api/project/memory/${encodeURIComponent(memoryId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, enabled })
+      });
+      if (!result.ok) {
+        state.memoryError = result.data.detail || "Memory update failed.";
+        renderMemoryPanel();
+        return;
+      }
+      await loadMemory();
+    }
+
+    async function editMemory(memoryId) {
+      const memory = state.projectMemory.find((item) => item.id === memoryId);
+      if (!memory || !state.project || !state.project.root) return;
+      const text = window.prompt("Edit memory", memory.text || "");
+      if (text == null) return;
+      const result = await getJson(`/api/project/memory/${encodeURIComponent(memoryId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, text })
+      });
+      if (!result.ok) {
+        state.memoryError = result.data.detail || "Memory edit failed.";
+        renderMemoryPanel();
+        return;
+      }
+      await loadMemory();
+    }
+
+    async function deleteMemory(memoryId) {
+      if (!state.project || !state.project.root || !memoryId) return;
+      const params = new URLSearchParams({ workspace: state.project.root });
+      const result = await getJson(`/api/project/memory/${encodeURIComponent(memoryId)}?${params.toString()}`, {
+        method: "DELETE"
+      });
+      if (!result.ok) {
+        state.memoryError = result.data.detail || "Memory delete failed.";
+        renderMemoryPanel();
+        return;
+      }
+      await loadMemory();
+    }
+
+    function memoryTagsFromInput() {
+      return byId("memory-tags-input").value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    function renderMemoryPanel() {
+      const list = byId("memory-list");
+      if (!list) return;
+      list.textContent = "";
+      const memories = Array.isArray(state.projectMemory) ? state.projectMemory : [];
+      const enabledCount = memories.filter((memory) => memory.enabled !== false).length;
+      setText("memory-status", state.memoryError || (memories.length ? `Memory: ${enabledCount}/${memories.length} enabled` : "Memory: none"));
+      byId("remember-message-button").disabled = !lastPromotableMessage();
+      if (state.memoryError) {
+        const error = document.createElement("div");
+        error.className = "warning";
+        error.textContent = state.memoryError;
+        list.appendChild(error);
+        return;
+      }
+      if (!memories.length) {
+        const empty = document.createElement("div");
+        empty.className = "status-line";
+        empty.textContent = "No project memory saved.";
+        list.appendChild(empty);
+        return;
+      }
+      for (const memory of memories) {
+        list.appendChild(memoryCard(memory));
+      }
+    }
+
+    function memoryCard(memory) {
+      const card = document.createElement("div");
+      card.className = "tool-profile-card";
+      const tags = Array.isArray(memory.tags) && memory.tags.length ? memory.tags.join(", ") : "untagged";
+      const enabled = memory.enabled !== false;
+      card.innerHTML = `
+        <div class="tool-profile-title">
+          <span>${escapeHtml(memory.id || "memory")}</span>
+          <span class="${enabled ? "badge ok" : "badge"}">${enabled ? "enabled" : "disabled"}</span>
+          <span class="badge info">${escapeHtml(tags)}</span>
+        </div>
+        <div class="details">${escapeHtml(memory.text || "")}</div>
+      `;
+      const actions = document.createElement("div");
+      actions.className = "inline-actions";
+      actions.appendChild(memoryActionButton(enabled ? "Disable" : "Enable", () => setMemoryEnabled(memory.id, !enabled)));
+      actions.appendChild(memoryActionButton("Edit", () => editMemory(memory.id)));
+      actions.appendChild(memoryActionButton("Delete", () => deleteMemory(memory.id), "danger"));
+      card.appendChild(actions);
+      return card;
+    }
+
+    function memoryActionButton(label, handler, className = "secondary") {
+      const button = document.createElement("button");
+      button.className = className;
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", handler);
+      return button;
+    }
+
+    function lastPromotableMessage() {
+      const messages = state.currentBundle && Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
+      return [...messages].reverse().find((item) => item.content);
+    }
+
     async function loadTools() {
       if (!state.project || !state.project.root) {
         state.toolProfiles = [];
@@ -2636,6 +2830,7 @@ INDEX_HTML = """<!doctype html>
       renderMessages();
       renderInspector();
       renderSessions();
+      renderMemoryPanel();
       renderToolsPanel();
     }
 
@@ -3286,6 +3481,8 @@ INDEX_HTML = """<!doctype html>
       byId("refresh-models-button").addEventListener("click", loadModels);
       byId("init-project-button").addEventListener("click", initProject);
       byId("new-chat-button").addEventListener("click", newChat);
+      byId("add-memory-button").addEventListener("click", addMemoryFromInput);
+      byId("remember-message-button").addEventListener("click", rememberLastMessage);
       byId("sync-tools-button").addEventListener("click", syncTools);
       byId("harness-select").addEventListener("change", (event) => {
         selectHarness(event.target.value);

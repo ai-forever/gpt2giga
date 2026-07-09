@@ -128,6 +128,50 @@ prompt = "Ask {{project_name}}: {{user_prompt}}"
     assert payload["result"]["text"] == "Ask cli-demo: hello"
 
 
+def test_cli_memory_add_list_disable_delete_json(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+
+    add_code = cli.main(
+        [
+            "memory",
+            "add",
+            "Use Alembic migrations",
+            "--workspace",
+            str(tmp_path),
+            "--tag",
+            "decision",
+            "--json",
+        ]
+    )
+    added = json.loads(capsys.readouterr().out)
+
+    assert add_code == 0
+    memory_id = added["memory"]["id"]
+    assert added["memory"]["tags"] == ["decision"]
+
+    list_code = cli.main(["memory", "list", "--workspace", str(tmp_path), "--json"])
+    listed = json.loads(capsys.readouterr().out)
+
+    assert list_code == 0
+    assert [item["id"] for item in listed["memories"]] == [memory_id]
+
+    disable_code = cli.main(
+        ["memory", "disable", memory_id, "--workspace", str(tmp_path), "--json"]
+    )
+    disabled = json.loads(capsys.readouterr().out)
+
+    assert disable_code == 0
+    assert disabled["memory"]["enabled"] is False
+
+    delete_code = cli.main(
+        ["memory", "delete", memory_id, "--workspace", str(tmp_path), "--json"]
+    )
+    deleted = json.loads(capsys.readouterr().out)
+
+    assert delete_code == 0
+    assert deleted["deleted"] is True
+
+
 def test_cli_run_pr_summary_and_patch(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
     store = FilesystemHarnessSessionStore(tmp_path / "data")

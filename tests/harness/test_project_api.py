@@ -194,6 +194,56 @@ def test_project_state_api_persists_last_cockpit_selection(tmp_path):
     assert project_response.json()["state"]["last_harness"] == "claude-code"
 
 
+def test_project_memory_api_crud_redacts_and_filters(tmp_path):
+    data_dir = tmp_path / "data"
+    client = _client(data_dir)
+
+    add_response = client.post(
+        "/api/project/memory",
+        json={
+            "workspace": str(tmp_path),
+            "text": "Use Alembic migrations with sk-memory-secret-123456",
+            "tags": ["decision", "DB"],
+        },
+    )
+
+    assert add_response.status_code == 200
+    memory = add_response.json()["memory"]
+    assert memory["enabled"] is True
+    assert memory["tags"] == ["decision", "db"]
+    assert "<redacted>" in memory["text"]
+    assert "sk-memory-secret" not in memory["text"]
+
+    patch_response = client.patch(
+        f"/api/project/memory/{memory['id']}",
+        json={"workspace": str(tmp_path), "enabled": False},
+    )
+
+    assert patch_response.status_code == 200
+    assert patch_response.json()["memory"]["enabled"] is False
+
+    enabled_response = client.get(
+        "/api/project/memory",
+        params={"workspace": str(tmp_path), "include_disabled": False},
+    )
+    all_response = client.get(
+        "/api/project/memory",
+        params={"workspace": str(tmp_path), "include_disabled": True},
+    )
+
+    assert enabled_response.status_code == 200
+    assert enabled_response.json()["memories"] == []
+    assert len(all_response.json()["memories"]) == 1
+
+    delete_response = client.delete(
+        f"/api/project/memory/{memory['id']}",
+        params={"workspace": str(tmp_path)},
+    )
+
+    assert delete_response.status_code == 200
+    assert delete_response.json()["deleted"] is True
+
+
 def test_project_api_rejects_secret_project_config(tmp_path):
     config_path = tmp_path / ".giga" / "harness.toml"
     config_path.parent.mkdir()

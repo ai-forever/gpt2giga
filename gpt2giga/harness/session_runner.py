@@ -16,6 +16,12 @@ from gpt2giga.harness.attachments import (
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.native.models import parse_invocation_mode
 from gpt2giga.harness.project import resolve_project
+from gpt2giga.harness.project_memory import (
+    FilesystemProjectMemoryStore,
+    ProjectMemoryEntry,
+    memory_entries_to_context,
+    memory_entries_to_prompt,
+)
 from gpt2giga.harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
 from gpt2giga.harness.registry import HarnessRegistry
 from gpt2giga.harness.sessions.models import (
@@ -92,6 +98,7 @@ class HarnessSessionRunner:
         config: HarnessConfig,
         store: HarnessSessionStore,
         attachment_store: FilesystemAttachmentStore | None = None,
+        memory_store: FilesystemProjectMemoryStore | None = None,
     ) -> None:
         self.registry = registry
         self.config = config
@@ -99,6 +106,7 @@ class HarnessSessionRunner:
         self.attachment_store = attachment_store or FilesystemAttachmentStore(
             config.data_dir
         )
+        self.memory_store = memory_store or FilesystemProjectMemoryStore()
 
     def create_session(
         self,
@@ -184,10 +192,20 @@ class HarnessSessionRunner:
             if attachment_render_plan is not None
             else None
         )
+        project_memory = self._load_project_memory(options["workspace"])
+        project_memory_payload = (
+            memory_entries_to_context(project_memory) if project_memory else None
+        )
+        effective_prompt = _prompt_with_project_memory(
+            options["prompt"],
+            project_memory,
+        )
         run_metadata: dict[str, Any] = {
             "invocation_mode": options["invocation_mode"].value,
             "native_resume": _native_resume_metadata(options["harness_id"]),
         }
+        if project_memory_payload:
+            run_metadata["project_memory"] = project_memory_payload
         if attachment_payloads:
             run_metadata["attachment_ids"] = list(options["attachment_ids"])
             run_metadata["attachments"] = list(attachment_payloads)
@@ -262,7 +280,7 @@ class HarnessSessionRunner:
             )
         request_messages = self._build_request_messages(
             previous_messages,
-            prompt=options["prompt"],
+            prompt=effective_prompt,
         )
         request_extra = _request_extra(
             options["extra"],
@@ -270,8 +288,10 @@ class HarnessSessionRunner:
             attachment_render_plan_payload,
         )
         request_extra["workspace_execution"] = workspace_execution.to_metadata()
+        if project_memory_payload:
+            request_extra["project_memory"] = project_memory_payload
         request = HarnessRequest(
-            prompt=options["prompt"],
+            prompt=effective_prompt,
             model=options["model"],
             api_mode=options["api_mode"],
             capability=options["capability"],
@@ -290,7 +310,7 @@ class HarnessSessionRunner:
         )
         raw_request = {
             "harness_id": options["harness_id"],
-            "prompt": options["prompt"],
+            "prompt": effective_prompt,
             "model": options["model"],
             "api_mode": options["api_mode"].value,
             "capability": options["capability"].value,
@@ -307,6 +327,10 @@ class HarnessSessionRunner:
             ],
             "extra": options["extra"],
         }
+        if effective_prompt != options["prompt"]:
+            raw_request["original_prompt"] = options["prompt"]
+        if project_memory_payload:
+            raw_request["project_memory"] = project_memory_payload
         if attachment_payloads:
             raw_request["attachment_ids"] = list(options["attachment_ids"])
             raw_request["attachments"] = list(attachment_payloads)
@@ -325,6 +349,7 @@ class HarnessSessionRunner:
             {
                 "message_count": len(request_messages),
                 "attachment_count": len(attachment_payloads),
+                "memory_count": len(project_memory),
             },
         )
         try:
@@ -587,6 +612,22 @@ class HarnessSessionRunner:
             attachments.append(attachment)
         return tuple(attachments)
 
+    def _load_project_memory(
+        self,
+        workspace: str | None,
+    ) -> tuple[ProjectMemoryEntry, ...]:
+        if workspace is None:
+            return ()
+        try:
+            project = resolve_project(
+                workspace,
+                data_dir=self.config.data_dir,
+                load_config_name=False,
+            )
+        except ValueError:
+            return ()
+        return self.memory_store.enabled_for_prompt(project)
+
     def _append_event(
         self,
         session_id: str,
@@ -629,6 +670,18 @@ def _project_metadata(workspace: str | None, *, data_dir: str) -> dict[str, str]
         "project_root": project.root,
         "project_name": project.name,
     }
+
+
+def _prompt_with_project_memory(
+    prompt: str,
+    entries: tuple[ProjectMemoryEntry, ...],
+) -> str:
+    if not entries:
+        return prompt
+    memory_text = memory_entries_to_prompt(entries)
+    return (
+        f"Project memory to honor for this run:\n{memory_text}\n\nUser task:\n{prompt}"
+    )
 
 
 def _optional_text(value: Any) -> str | None:

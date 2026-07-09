@@ -83,6 +83,11 @@ from gpt2giga.harness.project import (
     resolve_project,
     update_project_state,
 )
+from gpt2giga.harness.project_memory import (
+    FilesystemProjectMemoryStore,
+    ProjectMemoryNotFoundError,
+    memory_entry_to_dict,
+)
 from gpt2giga.harness.pr_artifacts import (
     build_pr_artifact,
     create_pr_branch,
@@ -174,11 +179,13 @@ def create_app(
     )
     attachment_store = FilesystemAttachmentStore(config.data_dir)
     arena_store = FilesystemHarnessArenaStore(config.data_dir)
+    memory_store = FilesystemProjectMemoryStore()
     runner = HarnessSessionRunner(
         registry=registry,
         config=config,
         store=store,
         attachment_store=attachment_store,
+        memory_store=memory_store,
     )
     active_headless_runs: dict[str, _ActiveHeadlessRun] = {}
     app = FastAPI(title="gpt2giga Unified Harness", docs_url=None, redoc_url=None)
@@ -188,6 +195,7 @@ def create_app(
     app.state.harness_session_runner = runner
     app.state.harness_attachment_store = attachment_store
     app.state.harness_arena_store = arena_store
+    app.state.harness_project_memory_store = memory_store
     app.state.harness_native_registry = native_registry
     app.state.harness_native_index_store = native_index_store
     app.state.harness_native_process_manager = native_process_manager
@@ -324,6 +332,112 @@ def create_app(
         return {
             "project": project_to_dict(project_context),
             "state": project_state_to_dict(state),
+        }
+
+    @app.get("/api/project/memory")
+    async def project_memory(
+        workspace: str | None = Query(default=None),
+        include_disabled: bool = Query(default=True),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(workspace),
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        memories = memory_store.list(
+            project_context,
+            include_disabled=include_disabled,
+        )
+        return {
+            "project": project_to_dict(project_context),
+            "memories": [memory_entry_to_dict(entry) for entry in memories],
+        }
+
+    @app.post("/api/project/memory")
+    async def add_project_memory(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(payload.get("workspace")),
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+            memory = memory_store.add(
+                project_context,
+                text=_required_text(payload.get("text"), "memory text is required"),
+                tags=_text_tuple(payload.get("tags")),
+                source_session_id=_optional_text(payload.get("source_session_id")),
+                source_run_id=_optional_text(payload.get("source_run_id")),
+                enabled=bool(payload.get("enabled", True)),
+                manual=bool(payload.get("manual", True)),
+                confidence=_optional_float(payload.get("confidence")),
+                metadata=_metadata_mapping(payload.get("metadata")),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "project": project_to_dict(project_context),
+            "memory": memory_entry_to_dict(memory),
+        }
+
+    @app.patch("/api/project/memory/{memory_id}")
+    async def update_project_memory(
+        memory_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(payload.get("workspace")),
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+            update_kwargs: dict[str, Any] = {
+                "text": _optional_text(payload.get("text")),
+                "tags": _text_tuple(payload.get("tags")) if "tags" in payload else None,
+                "enabled": bool(payload["enabled"]) if "enabled" in payload else None,
+                "manual": bool(payload["manual"]) if "manual" in payload else None,
+            }
+            if "confidence" in payload:
+                update_kwargs["confidence"] = _optional_float(payload.get("confidence"))
+            if "metadata" in payload:
+                update_kwargs["metadata"] = _metadata_mapping(payload.get("metadata"))
+            memory = memory_store.update(
+                project_context,
+                memory_id,
+                **update_kwargs,
+            )
+        except ProjectMemoryNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Memory not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "project": project_to_dict(project_context),
+            "memory": memory_entry_to_dict(memory),
+        }
+
+    @app.delete("/api/project/memory/{memory_id}")
+    async def delete_project_memory(
+        memory_id: str,
+        workspace: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(workspace),
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+            memory_store.delete(project_context, memory_id)
+        except ProjectMemoryNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Memory not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "deleted": True,
+            "project": project_to_dict(project_context),
         }
 
     @app.get("/api/tools")
@@ -2232,6 +2346,12 @@ def _required_text(value: Any, message: str) -> str:
     if text is None:
         raise ValueError(message)
     return text
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 def _decode_attachment_payload(value: Any) -> bytes:
