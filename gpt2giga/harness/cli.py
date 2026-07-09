@@ -11,6 +11,16 @@ import uvicorn
 
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.doctor import run_doctor
+from gpt2giga.harness.evals import (
+    EvalSpecNotFoundError,
+    FilesystemHarnessEvalStore,
+    discover_eval_specs,
+    eval_run_to_dict,
+    eval_spec_load_error_to_dict,
+    eval_spec_to_dict,
+    load_eval_spec,
+    run_eval,
+)
 from gpt2giga.harness.native import HarnessInvocationMode
 from gpt2giga.harness.native.base import (
     discovery_error_to_dict,
@@ -119,6 +129,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except ProjectMemoryNotFoundError as exc:
         print(f"Unknown memory: {exc.args[0]}", file=sys.stderr)
+        return 2
+    except EvalSpecNotFoundError as exc:
+        print(f"Unknown eval: {exc.args[0]}", file=sys.stderr)
         return 2
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
@@ -291,6 +304,35 @@ def build_parser() -> argparse.ArgumentParser:
     memory_delete.add_argument("--workspace", default=None)
     memory_delete.add_argument("--json", action="store_true")
     memory_delete.set_defaults(handler=_handle_memory_delete)
+
+    eval_parser = subparsers.add_parser("eval")
+    eval_subparsers = eval_parser.add_subparsers(dest="eval_command")
+
+    eval_list = eval_subparsers.add_parser("list")
+    eval_list.add_argument("--workspace", default=None)
+    eval_list.add_argument("--json", action="store_true")
+    eval_list.set_defaults(handler=_handle_eval_list)
+
+    eval_run = eval_subparsers.add_parser("run", parents=[common])
+    eval_run.add_argument("eval_name")
+    eval_run.add_argument("--workspace", default=None)
+    eval_run.add_argument(
+        "--harness",
+        action="append",
+        default=[],
+        help="Comma-separated harness ids; can be repeated.",
+    )
+    eval_run.add_argument("--model", default=None)
+    eval_run.add_argument("--api-mode", choices=("v1", "v2"), default=None)
+    eval_run.add_argument("--mode", choices=("plan", "read", "edit"), default=None)
+    eval_run.add_argument(
+        "--workspace-policy",
+        choices=("auto", "current", "worktree", "temp_copy"),
+        default=None,
+    )
+    eval_run.add_argument("--dry-run", action="store_true")
+    eval_run.add_argument("--json", action="store_true")
+    eval_run.set_defaults(handler=_handle_eval_run)
 
     harness = subparsers.add_parser("harness")
     harness_subparsers = harness.add_subparsers(dest="harness_command")
@@ -897,6 +939,60 @@ def _set_memory_enabled(
     return 0
 
 
+def _handle_eval_list(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(
+        args.workspace,
+        data_dir=config.data_dir,
+        load_config_name=False,
+    )
+    specs, errors = discover_eval_specs(project.root)
+    payload = {
+        "project": project_to_dict(project),
+        "specs": [eval_spec_to_dict(spec, include_cases=False) for spec in specs],
+        "errors": [eval_spec_load_error_to_dict(error) for error in errors],
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        _print_eval_spec_table(payload["specs"])
+        for error in payload["errors"]:
+            print(f"{error['path']}: {error['message']}", file=sys.stderr)
+    return 0 if not errors else 1
+
+
+def _handle_eval_run(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(
+        args.workspace,
+        data_dir=config.data_dir,
+        load_config_name=False,
+    )
+    spec = load_eval_spec(project.root, args.eval_name)
+    store = FilesystemHarnessSessionStore(config.data_dir)
+    runner = HarnessSessionRunner(
+        registry=create_default_registry(),
+        config=config,
+        store=store,
+    )
+    eval_run = run_eval(
+        runner=runner,
+        eval_store=FilesystemHarnessEvalStore(config.data_dir),
+        project=project,
+        spec=spec,
+        harness_ids=_split_harness_args(args.harness),
+        model=args.model,
+        api_mode=args.api_mode,
+        mode=args.mode,
+        workspace_policy=args.workspace_policy,
+        dry_run=args.dry_run,
+    )
+    payload = eval_run_to_dict(eval_run)
+    if args.json:
+        _print_json(payload)
+    else:
+        _print_eval_run_summary(payload)
+    return 0 if eval_run.status == "passed" else 1
+
+
 def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     config = config.with_overrides(ui_host=args.host, ui_port=args.port)
     validate_ui_bind(config.ui_host, allow_remote=args.allow_remote)
@@ -1070,6 +1166,40 @@ def _print_memory_table(rows: list[dict[str, Any]]) -> None:
             f"{row['id']:<38}{str(row.get('enabled', True)):<10}"
             f"{tags[:23]:<24}{preview}"
         )
+
+
+def _print_eval_spec_table(rows: list[dict[str, Any]]) -> None:
+    print(f"{'Name':<20}{'Cases':<8}{'Harnesses':<28}Description")
+    for row in rows:
+        harnesses = ",".join(row.get("harnesses") or ()) or "echo"
+        print(
+            f"{row['name']:<20}{str(row.get('case_count') or 0):<8}"
+            f"{harnesses[:27]:<28}{row.get('description') or ''}"
+        )
+
+
+def _print_eval_run_summary(payload: Mapping[str, Any]) -> None:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    print(f"Eval: {payload.get('spec_name')} ({payload.get('id')})")
+    print(f"Status: {payload.get('status')}")
+    print(
+        "Score: "
+        f"{summary.get('passed', 0)}/{summary.get('total', 0)} "
+        f"passed, {summary.get('failed', 0)} failed, "
+        f"{summary.get('errors', 0)} errors"
+    )
+    for result in payload.get("results") or ():
+        print(
+            f"- {result['case_id']} / {result['harness_id']}: "
+            f"{result['status']} ({result['score']:.2f})"
+        )
+
+
+def _split_harness_args(values: list[str]) -> tuple[str, ...]:
+    items: list[str] = []
+    for value in values or ():
+        items.extend(part.strip() for part in str(value).split(",") if part.strip())
+    return tuple(dict.fromkeys(items))
 
 
 def _run_extra(*, dry_run: bool, workspace_policy: str | None) -> dict[str, Any]:

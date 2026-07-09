@@ -23,6 +23,7 @@ dependencies = [
     "anthropic>=0.79.0",
     "google-genai>=2.8.0,<3",
     "certifi>=2026.6.17",
+    "pyyaml>=6.0,<7",
 ]
 
 [project.scripts]

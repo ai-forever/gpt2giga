@@ -172,6 +172,50 @@ def test_cli_memory_add_list_disable_delete_json(capsys, tmp_path, monkeypatch):
     assert deleted["deleted"] is True
 
 
+def test_cli_eval_list_and_run_json(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    eval_path = tmp_path / ".giga" / "evals" / "smoke.yaml"
+    eval_path.parent.mkdir(parents=True)
+    eval_path.write_text(
+        """
+name: smoke
+harnesses: [echo]
+cases:
+  - id: echo_contains
+    prompt: "FastAPI gateway"
+    checks:
+      - type: contains
+        value: "FastAPI"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    list_code = cli.main(["eval", "list", "--workspace", str(tmp_path), "--json"])
+    listed = json.loads(capsys.readouterr().out)
+
+    assert list_code == 0
+    assert listed["specs"][0]["name"] == "smoke"
+
+    run_code = cli.main(
+        [
+            "eval",
+            "run",
+            "smoke",
+            "--workspace",
+            str(tmp_path),
+            "--harness",
+            "echo",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert run_code == 0
+    assert payload["status"] == "passed"
+    assert payload["summary"]["passed"] == 1
+
+
 def test_cli_run_pr_summary_and_patch(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
     store = FilesystemHarnessSessionStore(tmp_path / "data")

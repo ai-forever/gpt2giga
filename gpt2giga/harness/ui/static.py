@@ -987,6 +987,7 @@ INDEX_HTML = """<!doctype html>
               <button class="tab" type="button" data-tab="attachments">Attachments</button>
               <button class="tab" type="button" data-tab="memory">Memory</button>
               <button class="tab" type="button" data-tab="tools">Tools</button>
+              <button class="tab" type="button" data-tab="evals">Evals</button>
               <button class="tab" type="button" data-tab="native">Native</button>
               <button class="tab" type="button" data-tab="storage">Storage</button>
             </div>
@@ -1045,6 +1046,21 @@ INDEX_HTML = """<!doctype html>
               </div>
               <div id="tool-profile-list" class="tool-profile-list"></div>
               <pre id="tool-sync-preview">No tool sync preview.</pre>
+            </div>
+            <div id="evals-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <span id="evals-status" class="badge info">Evals: loading</span>
+                <button id="refresh-evals-button" class="secondary" type="button">Refresh evals</button>
+                <button id="run-eval-button" type="button" disabled>Run eval</button>
+              </div>
+              <label>Eval spec
+                <select id="eval-spec-select"></select>
+              </label>
+              <label>Override harnesses
+                <input id="eval-harness-input" placeholder="echo,codex-cli" autocomplete="off">
+              </label>
+              <div id="eval-spec-list" class="tool-profile-list"></div>
+              <pre id="eval-scorecard">No eval run selected.</pre>
             </div>
             <div id="native-panel" class="mono-panel tab-panel">
               <div class="badge-row">
@@ -1119,6 +1135,11 @@ INDEX_HTML = """<!doctype html>
       toolProfiles: [],
       toolSyncPreview: null,
       toolError: null,
+      evalSpecs: [],
+      evalRuns: [],
+      evalErrors: [],
+      currentEvalRun: null,
+      evalError: null,
       applyingProjectState: false,
       selectedHarness: null,
       arenaSelectionTouched: false,
@@ -1194,9 +1215,15 @@ INDEX_HTML = """<!doctype html>
       state.toolProfiles = [];
       state.toolSyncPreview = null;
       state.toolError = null;
+      state.evalSpecs = [];
+      state.evalRuns = [];
+      state.evalErrors = [];
+      state.currentEvalRun = null;
+      state.evalError = null;
       applyProject();
       await loadMemory();
       await loadTools();
+      await loadEvals();
     }
 
     function applyProject() {
@@ -1254,9 +1281,15 @@ INDEX_HTML = """<!doctype html>
       state.toolProfiles = [];
       state.toolSyncPreview = null;
       state.toolError = null;
+      state.evalSpecs = [];
+      state.evalRuns = [];
+      state.evalErrors = [];
+      state.currentEvalRun = null;
+      state.evalError = null;
       applyProject();
       await loadMemory();
       await loadTools();
+      await loadEvals();
       await loadSessions();
     }
 
@@ -2579,6 +2612,163 @@ INDEX_HTML = """<!doctype html>
       return "badge info";
     }
 
+    async function loadEvals() {
+      if (!state.project || !state.project.root) {
+        state.evalSpecs = [];
+        state.evalRuns = [];
+        state.evalErrors = [];
+        state.currentEvalRun = null;
+        state.evalError = null;
+        renderEvalsPanel();
+        return;
+      }
+      const result = await getJson(`/api/evals?workspace=${encodeURIComponent(state.project.root)}`);
+      if (!result.ok) {
+        state.evalSpecs = [];
+        state.evalRuns = [];
+        state.evalErrors = [];
+        state.currentEvalRun = null;
+        state.evalError = result.data.detail || "Evals unavailable";
+        renderEvalsPanel();
+        return;
+      }
+      state.evalSpecs = Array.isArray(result.data.specs) ? result.data.specs : [];
+      state.evalRuns = Array.isArray(result.data.runs) ? result.data.runs : [];
+      state.evalErrors = Array.isArray(result.data.errors) ? result.data.errors : [];
+      state.currentEvalRun = state.currentEvalRun || state.evalRuns[0] || null;
+      state.evalError = null;
+      renderEvalsPanel();
+    }
+
+    async function runSelectedEval() {
+      const select = byId("eval-spec-select");
+      const evalName = select && select.value ? select.value : "";
+      if (!evalName || !state.project || !state.project.root) return;
+      setText("evals-status", "Evals: running");
+      const result = await getJson(`/api/evals/${encodeURIComponent(evalName)}/runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspace: state.project.root,
+          harness_ids: evalHarnessOverride(),
+          model: byId("model-input").value.trim() || null,
+          api_mode: selectedApiMode(),
+          mode: byId("mode-select").value,
+          workspace_policy: byId("workspace-policy-select").value,
+          dry_run: byId("dry-run-checkbox").checked
+        })
+      });
+      if (!result.ok || !result.data.eval_run) {
+        state.evalError = result.data.detail || `Eval failed with HTTP ${result.status}`;
+        renderEvalsPanel();
+        showTab("evals");
+        return;
+      }
+      state.currentEvalRun = result.data.eval_run;
+      state.evalRuns = [result.data.eval_run, ...state.evalRuns.filter((item) => item.id !== result.data.eval_run.id)];
+      state.evalError = null;
+      renderEvalsPanel();
+      showTab("evals");
+    }
+
+    function evalHarnessOverride() {
+      const input = byId("eval-harness-input");
+      if (!input || !input.value.trim()) return [];
+      return input.value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    function renderEvalsPanel() {
+      const select = byId("eval-spec-select");
+      const list = byId("eval-spec-list");
+      if (!select || !list) return;
+      const selected = select.value;
+      select.textContent = "";
+      list.textContent = "";
+      const specs = Array.isArray(state.evalSpecs) ? state.evalSpecs : [];
+      const errors = Array.isArray(state.evalErrors) ? state.evalErrors : [];
+      const run = state.currentEvalRun || state.evalRuns[0] || null;
+      const statusText = state.evalError
+        || (specs.length ? `Evals: ${specs.length} spec${specs.length === 1 ? "" : "s"}` : "Evals: none");
+      setText("evals-status", statusText);
+      byId("run-eval-button").disabled = !specs.length;
+      if (!specs.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No eval specs";
+        select.appendChild(option);
+      }
+      for (const spec of specs) {
+        const option = document.createElement("option");
+        option.value = spec.name || "";
+        option.textContent = `${spec.name || "eval"} (${spec.case_count || 0})`;
+        select.appendChild(option);
+      }
+      if (selected && Array.from(select.options).some((option) => option.value === selected)) {
+        select.value = selected;
+      }
+      if (state.evalError) {
+        const error = document.createElement("div");
+        error.className = "warning";
+        error.textContent = state.evalError;
+        list.appendChild(error);
+      }
+      for (const errorItem of errors) {
+        const error = document.createElement("div");
+        error.className = "warning";
+        error.textContent = `${errorItem.path || "eval"}: ${errorItem.message || "parse failed"}`;
+        list.appendChild(error);
+      }
+      if (!specs.length && !errors.length && !state.evalError) {
+        const empty = document.createElement("div");
+        empty.className = "status-line";
+        empty.textContent = "No project eval specs found under .giga/evals.";
+        list.appendChild(empty);
+      }
+      for (const spec of specs) {
+        list.appendChild(evalSpecCard(spec));
+      }
+      setText("eval-scorecard", run ? evalRunScorecard(run) : "No eval run selected.");
+    }
+
+    function evalSpecCard(spec) {
+      const card = document.createElement("div");
+      card.className = "tool-profile-card";
+      const harnesses = Array.isArray(spec.harnesses) && spec.harnesses.length ? spec.harnesses.join(", ") : "echo";
+      card.innerHTML = `
+        <div class="tool-profile-title">
+          <span>${escapeHtml(spec.name || "eval")}</span>
+          <span class="badge info">${escapeHtml(String(spec.case_count || 0))} cases</span>
+          <span class="badge info">${escapeHtml(harnesses)}</span>
+        </div>
+        <div class="details">${escapeHtml(spec.description || spec.path || "")}</div>
+      `;
+      return card;
+    }
+
+    function evalRunScorecard(run) {
+      const summary = run.summary || {};
+      const lines = [
+        `Eval: ${run.spec_name || ""} (${run.id || ""})`,
+        `Status: ${run.status || "unknown"}`,
+        `Score: ${summary.passed || 0}/${summary.total || 0} passed, ${summary.failed || 0} failed, ${summary.errors || 0} errors`,
+        `Session: ${run.session_id || "-"}`,
+        ""
+      ];
+      const results = Array.isArray(run.results) ? run.results : [];
+      for (const item of results) {
+        lines.push(`${item.case_id || "case"} / ${item.harness_id || "harness"}: ${item.status || "unknown"} (${Number(item.score || 0).toFixed(2)})`);
+        const checks = Array.isArray(item.checks) ? item.checks : [];
+        for (const check of checks) {
+          lines.push(`  - ${check.passed ? "pass" : "fail"} ${check.type || "check"}: ${check.message || ""}`);
+        }
+        if (item.error) lines.push(`  error: ${item.error}`);
+      }
+      return lines.join("\\n");
+    }
+
     function selectedWorkspaceFiles() {
       return state.attachments
         .map((attachment) => attachment.workspace_path)
@@ -3015,6 +3205,7 @@ INDEX_HTML = """<!doctype html>
       renderSessions();
       renderMemoryPanel();
       renderToolsPanel();
+      renderEvalsPanel();
     }
 
     function renderMessages() {
@@ -3748,6 +3939,8 @@ INDEX_HTML = """<!doctype html>
       byId("add-memory-button").addEventListener("click", addMemoryFromInput);
       byId("remember-message-button").addEventListener("click", rememberLastMessage);
       byId("sync-tools-button").addEventListener("click", syncTools);
+      byId("refresh-evals-button").addEventListener("click", loadEvals);
+      byId("run-eval-button").addEventListener("click", runSelectedEval);
       byId("harness-select").addEventListener("change", (event) => {
         selectHarness(event.target.value);
         renderRouteRecommendation(state.routeRecommendation);

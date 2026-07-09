@@ -98,6 +98,7 @@ def test_init_project_config_writes_non_secret_template(tmp_path):
     assert config.tool_profiles["github"].enabled is False
     assert config.tool_profiles["postgres"].kind == "mcp"
     assert (tmp_path / ".giga" / "prompts" / "plan.md").exists()
+    assert (tmp_path / ".giga" / "evals" / "smoke.yaml").exists()
 
 
 def test_load_project_config_parses_defaults_presets_and_attachments(tmp_path):

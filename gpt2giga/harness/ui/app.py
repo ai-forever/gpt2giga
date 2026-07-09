@@ -41,6 +41,17 @@ from gpt2giga.harness.config import (
     HarnessConfig,
     pass_model_env_note,
 )
+from gpt2giga.harness.evals import (
+    EvalRunNotFoundError,
+    EvalSpecNotFoundError,
+    FilesystemHarnessEvalStore,
+    discover_eval_specs,
+    eval_run_to_dict,
+    eval_spec_load_error_to_dict,
+    eval_spec_to_dict,
+    load_eval_spec,
+    run_eval,
+)
 from gpt2giga.harness.native.base import (
     NativeCommandPlan,
     discovery_error_to_dict,
@@ -190,6 +201,7 @@ def create_app(
     )
     attachment_store = FilesystemAttachmentStore(config.data_dir)
     arena_store = FilesystemHarnessArenaStore(config.data_dir)
+    eval_store = FilesystemHarnessEvalStore(config.data_dir)
     memory_store = FilesystemProjectMemoryStore()
     runner = HarnessSessionRunner(
         registry=registry,
@@ -206,6 +218,7 @@ def create_app(
     app.state.harness_session_runner = runner
     app.state.harness_attachment_store = attachment_store
     app.state.harness_arena_store = arena_store
+    app.state.harness_eval_store = eval_store
     app.state.harness_project_memory_store = memory_store
     app.state.harness_native_registry = native_registry
     app.state.harness_native_index_store = native_index_store
@@ -493,6 +506,66 @@ def create_app(
             "project": project_to_dict(project_context),
             "profiles": [tool_profile_status_to_dict(status) for status in statuses],
         }
+
+    @app.get("/api/evals")
+    async def evals(workspace: str | None = Query(default=None)) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(workspace),
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+            specs, errors = discover_eval_specs(project_context.root)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "project": project_to_dict(project_context),
+            "specs": [eval_spec_to_dict(spec) for spec in specs],
+            "errors": [eval_spec_load_error_to_dict(error) for error in errors],
+            "runs": [
+                eval_run_to_dict(eval_run)
+                for eval_run in eval_store.list_runs(project_context)
+            ],
+        }
+
+    @app.get("/api/evals/runs/{eval_run_id}")
+    async def get_eval_run(eval_run_id: str) -> dict[str, Any]:
+        try:
+            eval_run = eval_store.get_any(eval_run_id)
+        except EvalRunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Eval run not found") from exc
+        return _eval_run_response(eval_run, store)
+
+    @app.post("/api/evals/{eval_name}/runs")
+    async def create_eval_run(
+        eval_name: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(payload.get("workspace")),
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+            spec = load_eval_spec(project_context.root, eval_name)
+            eval_run = await run_in_threadpool(
+                run_eval,
+                runner=runner,
+                eval_store=eval_store,
+                project=project_context,
+                spec=spec,
+                harness_ids=_text_tuple(payload.get("harness_ids")),
+                model=_optional_text(payload.get("model")),
+                api_mode=payload.get("api_mode"),
+                mode=_optional_text(payload.get("mode")),
+                workspace_policy=_optional_text(payload.get("workspace_policy")),
+                dry_run=bool(payload.get("dry_run")),
+            )
+        except EvalSpecNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Eval spec not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _eval_run_response(eval_run, store)
 
     @app.post("/api/project/init")
     async def project_init(
@@ -1907,6 +1980,18 @@ def _arena_response(
     except SessionNotFoundError:
         payload["session"] = None
     return {"arena": payload}
+
+
+def _eval_run_response(
+    eval_run,
+    store: HarnessSessionStore,
+) -> dict[str, Any]:
+    payload = eval_run_to_dict(eval_run)
+    try:
+        payload["session"] = _session_summary(store, eval_run.session_id)
+    except SessionNotFoundError:
+        payload["session"] = None
+    return {"eval_run": payload}
 
 
 def _arena_child_response(

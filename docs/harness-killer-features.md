@@ -227,7 +227,7 @@ this status to choose the next vertical slice.
 | Slice 15: project memory and decision log | Implemented as an MVP: explicit memory entries are stored in `projects/PROJECT_ID/memory.jsonl`, exposed through `/api/project/memory`, `giga memory`, and the UI Memory inspector, and enabled entries are injected into session runs with `run.metadata.project_memory` plus raw-request provenance. Automatic extraction and richer decision-log workflows remain future work. |
 | Slice 16: provenance and replay | Implemented as an MVP: completed session-backed runs store `run.metadata.provenance` with project/git, harness, request, redacted command/env, raw-record, event, attachment, and replay metadata; `/api/runs/{run_id}/provenance`, `/api/runs/{run_id}/replay`, and `/api/runs/{run_id}/fork` expose inspection and local replay/fork workflows; `giga run provenance|replay RUN_ID` exposes the same from the CLI; the UI has a Provenance inspector tab. Richer time-travel replay, benchmark integration, and native terminal replay remain future work. |
 | Slice 17: secrets firewall and context budget inspector | Implemented as an MVP: `/api/preflight/run` scans prompt/history/memory/attachments, hard-blocks private keys and credential-looking content before run persistence or harness invocation, records warning-level reports in `run.metadata.preflight`, and surfaces context budget details plus attachment exclude/path-only remediation in the browser UI. |
-| Slice 18: local evals/benchmarks | Open. |
+| Slice 18: local evals/benchmarks | Implemented as an MVP: project eval specs are loaded from `.giga/evals/*.yaml`, `giga init` creates a safe smoke spec, `giga eval list|run` and `/api/evals*` expose local runs, deterministic checks produce redacted scorecards under `projects/PROJECT_ID/eval-runs/`, and the UI has an Evals inspector tab. Parallel/long-running benchmark orchestration and richer metrics remain future work. |
 | Slice 19: plugin/marketplace-ready harness format | Partially implemented through entry point loading and scaffold output. Metadata schema, validation, and UI config forms remain open. |
 | Slice 20: editor bridge | Open. |
 
@@ -249,6 +249,7 @@ Project and session state should remain transparent JSON/JSONL:
   projects/<project_id>/
     state.json
     memory.jsonl
+    eval-runs/<eval_run_id>.json
     attachments/<sha256>/original
     attachments/<sha256>/metadata.json
   arenas/<arena_id>.json
@@ -265,10 +266,10 @@ opaque stores.
 
 ## Next Recommended Slice
 
-The highest-value next implementation slice is Slice 18 for local evals and
-benchmark mode: add repeatable project eval specs, run selected harnesses
-against the same cases, persist scorecards, and expose CLI/UI comparison
-surfaces.
+The highest-value next implementation slice is Slice 19 for a
+plugin/marketplace-ready harness format: harden entry-point harness metadata,
+add validation/inspection commands, and make plugin capability metadata visible
+without editing the core registry or no-build UI for every new harness.
 
 Slice 03 can still be enriched later with richer per-harness stdout/message
 delta emission, Slice 10 can grow parallel execution and arena cancellation,
@@ -277,7 +278,8 @@ later add real opt-in tool config writes after an explicit safety review, Slice
 14 can later add hosted issue/PR integrations behind explicit user action, and
 Slice 15 can later add automatic memory suggestions after an explicit approval
 flow. Slice 17 can later add deeper language-aware detectors and per-harness
-budget limits.
+budget limits. Slice 18 can later add parallel benchmark execution, richer
+aggregate metrics, and trend comparisons across saved scorecards.
 
 ## Safety Rules
 

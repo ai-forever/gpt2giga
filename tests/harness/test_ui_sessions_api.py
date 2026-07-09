@@ -198,6 +198,55 @@ def test_preflight_api_reports_large_attachment_warning(tmp_path):
     assert "exclude_attachment" in finding["actions"]
 
 
+def test_evals_api_lists_and_runs_project_eval(tmp_path):
+    data_dir = tmp_path / "data"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    eval_path = workspace / ".giga" / "evals" / "smoke.yaml"
+    eval_path.parent.mkdir(parents=True)
+    eval_path.write_text(
+        """
+name: smoke
+harnesses: [echo]
+cases:
+  - id: echo_contains
+    prompt: "FastAPI gateway"
+    checks:
+      - type: contains
+        value: "FastAPI"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    client = _client(
+        config=HarnessConfig(data_dir=str(data_dir)),
+        store=FilesystemHarnessSessionStore(data_dir),
+    )
+
+    listed = client.get("/api/evals", params={"workspace": str(workspace)})
+
+    assert listed.status_code == 200
+    assert listed.json()["specs"][0]["name"] == "smoke"
+    assert listed.json()["specs"][0]["case_count"] == 1
+
+    created = client.post(
+        "/api/evals/smoke/runs",
+        json={"workspace": str(workspace), "harness_ids": ["echo"]},
+    )
+
+    assert created.status_code == 200
+    eval_run = created.json()["eval_run"]
+    assert eval_run["status"] == "passed"
+    assert eval_run["summary"]["passed"] == 1
+    assert eval_run["results"][0]["run_id"].startswith("run_")
+    assert "session" in eval_run
+
+    fetched = client.get(f"/api/evals/runs/{eval_run['id']}")
+
+    assert fetched.status_code == 200
+    assert fetched.json()["eval_run"]["id"] == eval_run["id"]
+
+
 def test_preflight_api_hard_blocks_private_key_prompt_without_echoing_secret():
     client = _client()
     prompt = "-----BEGIN PRIVATE KEY-----\nnot-real-secret\n-----END PRIVATE KEY-----"
