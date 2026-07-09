@@ -603,28 +603,35 @@ harnesses appear in the browser without frontend code changes. It shows each
 harness' availability status, kind, capabilities, tags, and missing/error
 details when discovery fails.
 
-The UI is a chat-like harness cockpit with:
+The UI uses a task-first workspace: session history stays in a slim sidebar,
+the prompt and the four common run choices stay in the main canvas, and
+specialized controls move into `Advanced` and the off-canvas `Run details`
+drawer. On narrow screens, session history also becomes a drawer.
 
-- persistent session sidebar with search, workspace and harness filters, pin,
-  archive, and delete controls;
+It includes:
+
+- persistent session sidebar with search; workspace/harness filters and native
+  history are available from the sidebar filter menu;
 - harness selection;
 - model input with proxy-backed model suggestions when available;
 - explicit API mode selection: `v1` maps to `/v1/chat/completions`, and `v2`
   maps to `/v2/chat/completions`;
-- capability, mode, and workspace execution policy selection;
+- mode selection in the primary configuration bar;
+- capability, workspace execution policy, arena selection, dry-run, streaming,
+  router recommendations, and presets in `Advanced`;
 - optional workspace path for harnesses that declare workspace support;
-- dry-run and stream toggles where the selected harness supports them;
 - prompt input;
 - file and image attachments in the composer;
 - `@file` workspace references from the current project;
 - pre-run safety warnings and context budget estimates;
-- smart router recommendation badge with reasons and one-click apply;
 - user, assistant, and error messages in the selected session;
 - multi-harness arena comparison for running the same prompt against several
   headless harnesses;
 - run, arena, events, raw request, raw response, command, diff, PR,
-  provenance, attachments, and storage inspector panels;
-- copy buttons for the equivalent CLI command and direct-chat curl command.
+  provenance, attachments, memory, tools, evals, native terminal, and storage
+  panels in the `Run details` drawer;
+- copy buttons for the equivalent CLI command and direct-chat curl command in
+  the composer's secondary action menu.
 
 Echo runs entirely locally and does not require credentials. Direct-chat sends
 requests through the configured local proxy or auto-started local sidecar and

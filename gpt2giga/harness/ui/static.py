@@ -5,7 +5,7 @@ INDEX_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gpt2giga Harness Chat Cockpit</title>
+  <title>gpt2giga Harness</title>
   <style>
     :root {
       color-scheme: dark;
@@ -778,123 +778,1171 @@ INDEX_HTML = """<!doctype html>
         padding-left: 6px;
       }
     }
+
+    /* Calm, task-first harness workspace. */
+    :root {
+      color-scheme: dark;
+      --bg: #0c1119;
+      --panel: #101721;
+      --panel-soft: #151e2b;
+      --panel-strong: #1a2635;
+      --border: #273344;
+      --text: #f7f9fc;
+      --muted: #8d9aaf;
+      --accent: #2bb9bd;
+      --accent-strong: #43cbd0;
+      --blue: #74a9ff;
+      --amber: #f5bf58;
+      --red: #f17878;
+      --green: #68d391;
+      --violet: #aa92f6;
+      --mono-bg: #090e15;
+      --header-height: 68px;
+      --sidebar-width: 286px;
+    }
+    body {
+      overflow: hidden;
+      background: var(--bg);
+      font-size: 14px;
+    }
+    button {
+      min-height: 38px;
+      border-color: #258f94;
+      border-radius: 10px;
+      padding: 8px 14px;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+    }
+    button.secondary,
+    button.tab {
+      background: transparent;
+    }
+    button.secondary:hover:not(:disabled),
+    button.tab:hover:not(:disabled) {
+      border-color: #41526a;
+      background: #182231;
+    }
+    input,
+    select,
+    textarea {
+      min-height: 42px;
+      border-color: var(--border);
+      border-radius: 10px;
+      background: #0e151f;
+      padding: 9px 12px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 140ms ease, box-shadow 140ms ease;
+    }
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: #3caeb3;
+      box-shadow: 0 0 0 3px rgb(43 185 189 / 0.12);
+    }
+    label {
+      gap: 7px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .app {
+      height: 100vh;
+      min-height: 0;
+      grid-template-rows: var(--header-height) minmax(0, 1fr);
+    }
+    .topbar {
+      position: relative;
+      z-index: 50;
+      min-height: var(--header-height);
+      padding: 0 20px;
+      border-color: #202b3a;
+      background: #0a1018;
+    }
+    .brand-lockup,
+    .project-context,
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .brand-lockup h1 {
+      font-size: 19px;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+    .project-context {
+      padding-left: 16px;
+      border-left: 1px solid var(--border);
+    }
+    .project-context .project-title {
+      max-width: 220px;
+      font-size: 14px;
+    }
+    .project-context .session-meta {
+      flex-wrap: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .mobile-only {
+      display: none;
+    }
+    .icon-button {
+      width: 40px;
+      min-width: 40px;
+      padding: 0;
+      font-size: 18px;
+    }
+    .proxy-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      color: var(--muted);
+      font-weight: 650;
+    }
+    .proxy-indicator::before {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      content: "";
+    }
+    .proxy-indicator.ok {
+      color: var(--green);
+    }
+    .proxy-indicator.warn {
+      color: var(--amber);
+    }
+    .proxy-indicator.error {
+      color: var(--red);
+    }
+    .settings-menu,
+    .session-tools,
+    .advanced-settings {
+      position: relative;
+    }
+    .settings-menu > summary,
+    .session-tools > summary,
+    .advanced-settings > summary {
+      list-style: none;
+      cursor: pointer;
+    }
+    .settings-menu > summary::-webkit-details-marker,
+    .session-tools > summary::-webkit-details-marker,
+    .advanced-settings > summary::-webkit-details-marker {
+      display: none;
+    }
+    .settings-menu > summary {
+      display: grid;
+      width: 40px;
+      height: 40px;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--muted);
+      font-size: 19px;
+    }
+    .settings-popover {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      display: grid;
+      width: min(360px, calc(100vw - 24px));
+      gap: 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #101721;
+      box-shadow: 0 24px 60px rgb(0 0 0 / 0.36);
+      padding: 14px;
+    }
+    .settings-statuses {
+      display: grid;
+      gap: 6px;
+    }
+    .settings-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .settings-actions button {
+      min-width: 0;
+    }
+    .top-summary {
+      display: grid;
+      gap: 4px;
+      margin: 0;
+    }
+    .top-summary .badge {
+      min-height: 0;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      white-space: normal;
+    }
+    .shell {
+      position: relative;
+      grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+      min-height: 0;
+    }
+    .sidebar {
+      grid-template-rows: auto minmax(0, 1fr);
+      min-height: 0;
+      border-color: #202b3a;
+      background: #0a1018;
+    }
+    .sidebar .section {
+      border: 0;
+    }
+    .sidebar-controls {
+      gap: 12px;
+      padding: 16px;
+    }
+    .new-session-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+    #new-chat-button {
+      width: 100%;
+      min-height: 46px;
+      font-size: 15px;
+    }
+    #session-count {
+      align-self: center;
+      min-width: 28px;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      color: var(--muted);
+    }
+    .session-search-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 42px;
+      gap: 8px;
+    }
+    .session-tools > summary {
+      display: grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+    .session-tools-panel {
+      position: absolute;
+      z-index: 30;
+      top: calc(100% + 8px);
+      right: 0;
+      display: grid;
+      width: 250px;
+      max-height: min(620px, calc(100vh - 180px));
+      gap: 12px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #101721;
+      box-shadow: 0 20px 50px rgb(0 0 0 / 0.36);
+      padding: 14px;
+    }
+    .session-tools-panel .section {
+      display: grid;
+      gap: 10px;
+      padding: 0;
+    }
+    .session-tools-panel #harness-list {
+      max-height: 220px;
+      overflow: auto;
+      padding: 0;
+    }
+    .sidebar-scroll {
+      padding: 4px 8px 18px;
+    }
+    .session-list {
+      gap: 2px;
+      padding: 0;
+    }
+    .group-title {
+      margin: 16px 10px 7px;
+      font-size: 12px;
+      font-weight: 650;
+      text-transform: none;
+    }
+    .session-row,
+    .native-session-row,
+    .harness-card {
+      border-radius: 9px;
+      padding: 10px 12px;
+    }
+    .session-row {
+      position: relative;
+      padding-right: 26px;
+    }
+    .session-row::after {
+      position: absolute;
+      top: 50%;
+      right: 12px;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #59667a;
+      content: "";
+      transform: translateY(-50%);
+    }
+    .session-row.active::after {
+      background: var(--accent-strong);
+    }
+    .session-row.active {
+      border-color: #2d6e74;
+      background: #121e29;
+    }
+    .session-title {
+      font-size: 14px;
+      font-weight: 650;
+    }
+    .session-meta {
+      margin-top: 3px;
+      font-size: 11px;
+    }
+    .session-meta span:nth-child(n + 3) {
+      display: none;
+    }
+    .center {
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      background: radial-gradient(circle at 55% 18%, #121e2d 0, #0c131d 42%, #0b1119 78%);
+    }
+    .config-section {
+      width: min(960px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 34px 0 0;
+      border: 0;
+    }
+    .workspace-welcome {
+      display: none;
+      margin: 34px auto 28px;
+      text-align: center;
+    }
+    .workspace-welcome h2 {
+      color: var(--text);
+      font-size: clamp(30px, 3.2vw, 46px);
+      font-weight: 730;
+      letter-spacing: -0.035em;
+      text-transform: none;
+    }
+    .workspace-welcome p {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+    body.new-session .workspace-welcome {
+      display: block;
+    }
+    .quick-config {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(150px, 1fr) minmax(190px, 1.2fr) 128px 104px auto;
+      align-items: end;
+      border: 1px solid #314055;
+      border-radius: 12px;
+      background: rgb(15 23 34 / 0.78);
+      backdrop-filter: blur(12px);
+      padding: 7px;
+    }
+    .quick-config > label,
+    .quick-config > fieldset {
+      min-width: 0;
+      padding: 0 7px;
+    }
+    .quick-config label > span,
+    .quick-config legend {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+    .quick-config input,
+    .quick-config select,
+    .quick-config .model-menu-button {
+      min-height: 42px;
+      border-color: transparent;
+      background: transparent;
+      box-shadow: none;
+      font-weight: 650;
+    }
+    .quick-config input:hover,
+    .quick-config select:hover,
+    .quick-config .model-menu-button:hover:not(:disabled) {
+      background: #182332;
+    }
+    .quick-config fieldset {
+      align-self: stretch;
+    }
+    .quick-harness {
+      order: 1;
+    }
+    .quick-model {
+      order: 2;
+    }
+    .quick-mode {
+      order: 3;
+    }
+    .quick-api {
+      order: 4;
+    }
+    .quick-config > .advanced-control,
+    .quick-api > .advanced-control {
+      display: none;
+    }
+    .quick-config.advanced-open {
+      grid-template-columns: minmax(150px, 1fr) minmax(190px, 1.2fr) 128px 104px auto;
+    }
+    .quick-config.advanced-open > .advanced-control {
+      display: grid;
+      order: 6;
+      margin: 8px 7px 0;
+    }
+    .quick-config.advanced-open > .check-row {
+      display: flex;
+    }
+    .quick-config.advanced-open > .warning,
+    .quick-config.advanced-open > .details {
+      display: block;
+    }
+    .quick-config.advanced-open .quick-api > .advanced-control {
+      display: block;
+    }
+    .quick-config.advanced-open > .span-2 {
+      grid-column: span 2;
+    }
+    .quick-config.advanced-open > .span-4 {
+      grid-column: 1 / -1;
+    }
+    .advanced-settings-button {
+      order: 5;
+      min-height: 42px;
+      border-color: transparent !important;
+      border-left-color: var(--border) !important;
+      border-radius: 0;
+      color: var(--muted) !important;
+      padding: 6px 10px;
+    }
+    .advanced-settings-button::after {
+      margin-left: 7px;
+      content: "+";
+      font-size: 17px;
+    }
+    .advanced-settings-button[aria-expanded="true"]::after {
+      content: "−";
+    }
+    .quick-config.advanced-open .advanced-settings-button {
+      background: #172533;
+      color: #7ce5e9 !important;
+    }
+    .api-mode-switch {
+      display: grid;
+      height: 100%;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: center;
+      gap: 3px;
+      border-left: 1px solid var(--border);
+      padding-left: 8px;
+    }
+    .api-mode-switch .choice {
+      justify-content: center;
+      min-height: 34px;
+      border-radius: 8px;
+      color: var(--muted);
+    }
+    .api-mode-switch .choice:has(input:checked) {
+      background: #173039;
+      color: #7ce5e9;
+    }
+    .api-mode-switch input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .advanced-settings > summary {
+      display: flex;
+      min-height: 42px;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border-left: 1px solid var(--border);
+      color: var(--muted);
+      font-weight: 650;
+    }
+    .advanced-settings > summary::after {
+      content: "+";
+      font-size: 17px;
+    }
+    .advanced-settings[open] > summary::after {
+      content: "−";
+    }
+    .advanced-panel {
+      position: absolute;
+      z-index: 25;
+      top: calc(100% + 10px);
+      right: 0;
+      left: 0;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      max-height: min(540px, calc(100vh - 260px));
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #101721;
+      box-shadow: 0 24px 60px rgb(0 0 0 / 0.4);
+      padding: 16px;
+    }
+    .advanced-panel[hidden] {
+      display: none;
+    }
+    .advanced-panel .span-2 {
+      grid-column: span 2;
+    }
+    .advanced-panel .span-4,
+    .advanced-panel .advanced-full {
+      grid-column: 1 / -1;
+    }
+    .advanced-panel .route-recommendation {
+      padding-top: 4px;
+      border-top: 1px solid var(--border);
+    }
+    .chat-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      padding: 10px 0;
+    }
+    .message-list {
+      width: min(960px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 18px 0;
+    }
+    .message-list .empty {
+      display: none;
+    }
+    body.new-session .chat-scroll {
+      flex: 0 0 auto;
+      padding: 0;
+    }
+    .message {
+      max-width: min(760px, 88%);
+      border-radius: 12px;
+      padding: 13px 15px;
+    }
+    .composer {
+      width: min(960px, calc(100% - 48px));
+      margin: 0 auto 22px;
+      gap: 10px;
+      border: 1px solid #314055;
+      border-radius: 14px;
+      background: rgb(17 25 36 / 0.94);
+      box-shadow: 0 18px 46px rgb(0 0 0 / 0.22);
+      padding: 14px;
+    }
+    body.new-session .composer {
+      margin-top: 20px;
+      margin-bottom: 8px;
+    }
+    .composer-main label {
+      color: transparent;
+      font-size: 0;
+    }
+    #prompt-input {
+      min-height: 112px;
+      border: 0;
+      background: transparent;
+      padding: 8px;
+      color: var(--text);
+      font-size: 16px;
+      line-height: 1.55;
+      box-shadow: none;
+    }
+    #prompt-input::placeholder {
+      color: #68768b;
+    }
+    .composer-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .composer-actions,
+    .composer-utilities {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .composer-more {
+      position: relative;
+    }
+    .composer-more > summary {
+      display: grid;
+      min-height: 38px;
+      place-items: center;
+      list-style: none;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      color: var(--muted);
+      padding: 7px 9px;
+      cursor: pointer;
+      font-weight: 650;
+    }
+    .composer-more > summary::-webkit-details-marker {
+      display: none;
+    }
+    .composer-more > summary:hover {
+      border-color: var(--border);
+      color: var(--text);
+    }
+    .composer-more-menu {
+      position: absolute;
+      z-index: 24;
+      bottom: calc(100% + 8px);
+      left: 0;
+      display: grid;
+      width: 150px;
+      gap: 4px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #101721;
+      box-shadow: 0 16px 38px rgb(0 0 0 / 0.34);
+      padding: 6px;
+    }
+    .composer-more-menu button {
+      width: 100%;
+      justify-content: flex-start;
+      text-align: left;
+    }
+    #run-button {
+      min-width: 92px;
+    }
+    .utility-action {
+      min-height: 34px;
+      border-color: transparent !important;
+      color: var(--muted) !important;
+      padding: 6px 8px;
+    }
+    .attachment-toolbar {
+      min-width: 0;
+    }
+    #attachment-status {
+      max-width: 250px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .example-prompts {
+      display: none;
+      width: min(700px, calc(100% - 48px));
+      margin: 12px auto 24px;
+      text-align: center;
+    }
+    body.new-session .example-prompts {
+      display: grid;
+      gap: 8px;
+    }
+    .example-prompts p {
+      margin: 0 0 2px;
+      color: var(--muted);
+    }
+    .example-prompt {
+      min-height: 0;
+      border: 0;
+      background: transparent;
+      color: #5fd7dc;
+      padding: 3px;
+      font-weight: 500;
+    }
+    .example-prompt:hover:not(:disabled) {
+      background: transparent;
+      color: #8be9ec;
+      text-decoration: underline;
+    }
+    .details-toggle {
+      position: fixed;
+      z-index: 41;
+      right: 0;
+      bottom: 44%;
+      min-height: 126px;
+      border-color: var(--border);
+      border-right: 0;
+      border-radius: 12px 0 0 12px;
+      background: #111a26;
+      color: var(--muted);
+      padding: 10px 8px;
+      writing-mode: vertical-rl;
+    }
+    .details-toggle:hover:not(:disabled) {
+      border-color: #3d586f;
+      background: #172231;
+      color: var(--text);
+    }
+    .inspector {
+      position: fixed;
+      z-index: 70;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      display: grid;
+      width: min(520px, calc(100vw - 36px));
+      min-height: 0;
+      grid-template-rows: auto minmax(0, 1fr);
+      border: 0;
+      border-left: 1px solid var(--border);
+      background: #0f1620;
+      box-shadow: -20px 0 70px rgb(0 0 0 / 0.42);
+      transform: translateX(105%);
+      transition: transform 180ms ease;
+    }
+    body.inspector-open .inspector {
+      transform: translateX(0);
+    }
+    .inspector-header {
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .inspector-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .inspector-title-row h2 {
+      color: var(--text);
+      font-size: 17px;
+      text-transform: none;
+    }
+    .inspector-backdrop,
+    .sidebar-backdrop {
+      position: fixed;
+      z-index: 60;
+      inset: 0;
+      display: none;
+      border: 0;
+      border-radius: 0;
+      background: rgb(0 0 0 / 0.54) !important;
+      color: transparent !important;
+      padding: 0;
+    }
+    .inspector-backdrop:hover,
+    .sidebar-backdrop:hover {
+      background: rgb(0 0 0 / 0.54) !important;
+    }
+    body.inspector-open .inspector-backdrop {
+      display: block;
+    }
+    .inspector-scroll {
+      min-height: 0;
+    }
+    .inspector-body {
+      gap: 14px;
+      padding: 14px;
+    }
+    .tabs {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 4px;
+      overflow-x: auto;
+      padding-bottom: 5px;
+    }
+    button.tab {
+      flex: 0 0 auto;
+      min-height: 34px;
+      border-color: transparent;
+      border-radius: 8px;
+      padding: 6px 9px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    button.tab.active {
+      border-color: transparent;
+      background: #173039;
+      color: #7ce5e9;
+    }
+    .mono-panel {
+      border-radius: 10px;
+    }
+    @media (max-width: 980px) {
+      :root {
+        --sidebar-width: 252px;
+      }
+      .quick-config {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .quick-config.advanced-open {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .quick-config > * {
+        border-bottom: 1px solid var(--border);
+      }
+      .quick-config > *:nth-last-child(-n + 2) {
+        border-bottom: 0;
+      }
+      .api-mode-switch,
+      .advanced-settings > summary,
+      .advanced-settings-button {
+        border-left: 0;
+      }
+      .advanced-panel {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 720px) {
+      :root {
+        --header-height: 64px;
+      }
+      body {
+        overflow: hidden;
+      }
+      .topbar {
+        display: flex;
+        width: 100%;
+        padding: 0 12px;
+      }
+      .mobile-only {
+        display: inline-grid;
+      }
+      .brand-lockup {
+        gap: 9px;
+      }
+      .brand-lockup h1 {
+        font-size: 16px;
+      }
+      .project-context,
+      .proxy-indicator span,
+      .top-actions > .proxy-indicator {
+        display: none;
+      }
+      .shell {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        min-height: 0;
+      }
+      .sidebar {
+        position: fixed;
+        z-index: 70;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        display: grid;
+        width: min(330px, calc(100vw - 44px));
+        min-height: 0;
+        border-right: 1px solid var(--border);
+        box-shadow: 20px 0 70px rgb(0 0 0 / 0.46);
+        transform: translateX(-105%);
+        transition: transform 180ms ease;
+      }
+      body.sidebar-open .sidebar {
+        transform: translateX(0);
+      }
+      body.sidebar-open .sidebar-backdrop {
+        display: block;
+      }
+      .center {
+        height: calc(100vh - var(--header-height));
+        min-height: 0;
+      }
+      body.new-session .center {
+        overflow-y: auto;
+        padding-bottom: 66px;
+      }
+      .config-section,
+      .message-list,
+      .composer {
+        width: calc(100% - 28px);
+      }
+      .config-section {
+        padding-top: 16px;
+      }
+      .workspace-welcome {
+        margin: 14px auto 20px;
+        text-align: left;
+      }
+      .workspace-welcome h2 {
+        font-size: 30px;
+        line-height: 1.08;
+      }
+      .workspace-welcome p {
+        font-size: 14px;
+        line-height: 1.45;
+      }
+      .quick-config {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .quick-config.advanced-open {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        max-height: calc(100vh - 96px);
+        overflow: auto;
+      }
+      .quick-config > label,
+      .quick-config > fieldset,
+      .quick-config > details,
+      .quick-config > button {
+        padding: 3px;
+      }
+      .quick-config input,
+      .quick-config select,
+      .quick-config .model-menu-button {
+        font-size: 13px;
+      }
+      #model-input {
+        font-size: 12px;
+      }
+      .advanced-panel {
+        position: fixed;
+        z-index: 80;
+        top: var(--header-height);
+        right: 8px;
+        bottom: 8px;
+        left: 8px;
+        display: grid;
+        grid-template-columns: 1fr;
+        max-height: none;
+        align-content: start;
+      }
+      .advanced-panel .span-2,
+      .advanced-panel .span-4,
+      .advanced-panel .advanced-full {
+        grid-column: auto;
+      }
+      .chat-scroll {
+        padding: 0;
+      }
+      .composer {
+        margin-bottom: 12px;
+        padding: 10px;
+      }
+      body.new-session .composer {
+        margin-top: 14px;
+      }
+      #prompt-input {
+        min-height: 126px;
+        font-size: 15px;
+      }
+      .composer-footer {
+        display: grid;
+        gap: 10px;
+      }
+      .composer-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr);
+        order: -1;
+      }
+      #compare-button,
+      #run-button {
+        width: 100%;
+        min-height: 44px;
+      }
+      .composer-utilities {
+        justify-content: space-between;
+      }
+      .example-prompts {
+        width: calc(100% - 36px);
+        margin-top: 8px;
+        text-align: left;
+      }
+      .example-prompt {
+        min-height: 36px;
+        border-bottom: 1px solid #202b3a;
+        text-align: left;
+      }
+      .details-toggle {
+        right: 0;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        min-height: 54px;
+        border-right: 0;
+        border-bottom: 0;
+        border-left: 0;
+        border-radius: 12px 12px 0 0;
+        background: #111a26;
+        padding: 10px 14px;
+        writing-mode: horizontal-tb;
+      }
+      .inspector {
+        width: 100vw;
+      }
+      .native-history-modal,
+      .preflight-modal {
+        padding: 8px;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
   </style>
 </head>
 <body>
   <div class="app">
     <header class="topbar">
-      <div>
-        <h1>gpt2giga Project Cockpit</h1>
-        <div id="project-status" class="status-line">Loading project...</div>
-        <div class="top-summary">
-          <span id="current-model-badge" class="badge info">Model: loading</span>
-          <span id="current-route-badge" class="badge info">Route: /v2/chat/completions</span>
-          <span id="model-status" class="badge">Models: loading</span>
+      <div class="brand-lockup">
+        <button id="session-drawer-button" class="secondary icon-button mobile-only" type="button" aria-label="Open sessions">
+          <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <path d="M4 6h16M4 12h16M4 18h10"/>
+          </svg>
+        </button>
+        <h1>gpt2giga Harness</h1>
+        <div class="project-context">
+          <div id="project-name" class="project-title">Loading...</div>
+          <div id="project-meta" class="session-meta"></div>
         </div>
       </div>
       <div class="top-actions">
-        <span id="proxy-status" class="badge warn">Proxy: checking</span>
-        <button id="init-project-button" class="secondary" type="button" hidden>Init project</button>
-        <button id="refresh-health-button" class="secondary" type="button">Refresh proxy</button>
-        <button id="refresh-models-button" class="secondary" type="button">Refresh models</button>
+        <span id="proxy-status" class="proxy-indicator warn">Proxy: checking</span>
+        <details class="settings-menu">
+          <summary aria-label="Open settings">
+            <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-4v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H3v-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3.1V3h4v.1A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9A1.7 1.7 0 0 0 20.9 10h.1v4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>
+            </svg>
+          </summary>
+          <div class="settings-popover">
+            <div class="settings-statuses">
+              <div id="project-status" class="status-line">Loading project...</div>
+              <div class="top-summary">
+                <span id="current-model-badge" class="badge info">Model: loading</span>
+                <span id="current-route-badge" class="badge info">Route: /v2/chat/completions</span>
+                <span id="model-status" class="badge">Models: loading</span>
+              </div>
+            </div>
+            <div class="settings-actions">
+              <button id="init-project-button" class="secondary" type="button" hidden>Init project</button>
+              <button id="refresh-health-button" class="secondary" type="button">Refresh proxy</button>
+              <button id="refresh-models-button" class="secondary" type="button">Refresh models</button>
+            </div>
+          </div>
+        </details>
       </div>
     </header>
 
     <main class="shell">
       <aside class="sidebar" aria-label="Session history">
         <div class="section sidebar-controls">
-          <div class="project-panel">
-            <h2>Project</h2>
-            <div id="project-name" class="project-title">Loading...</div>
-            <div id="project-meta" class="session-meta"></div>
-          </div>
-          <div class="inline-actions">
-            <button id="new-chat-button" type="button">+ New chat</button>
+          <div class="new-session-row">
+            <button id="new-chat-button" type="button">+ New session</button>
             <span id="session-count" class="badge info">0</span>
           </div>
-          <input id="session-search" placeholder="Search" autocomplete="off">
-          <label>Workspace
-            <input id="session-workspace-filter" placeholder="All workspaces" autocomplete="off">
-          </label>
-          <label>Harness
-            <select id="session-harness-filter">
-              <option value="">All harnesses</option>
-            </select>
-          </label>
-          <label class="choice" for="include-archived-checkbox">
-            <input id="include-archived-checkbox" type="checkbox">
-            Include archived
-          </label>
+          <div class="session-search-row">
+            <input id="session-search" placeholder="Search sessions..." autocomplete="off">
+            <details class="session-tools">
+              <summary aria-label="Filters and history">
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                  <path d="M4 7h10M18 7h2M4 17h2M10 17h10M8 4v6M8 14v6M16 4v6M16 14v6"/>
+                </svg>
+              </summary>
+              <div class="session-tools-panel">
+                <label>Workspace
+                  <input id="session-workspace-filter" placeholder="All workspaces" autocomplete="off">
+                </label>
+                <label>Harness
+                  <select id="session-harness-filter">
+                    <option value="">All harnesses</option>
+                  </select>
+                </label>
+                <label class="choice" for="include-archived-checkbox">
+                  <input id="include-archived-checkbox" type="checkbox">
+                  Include archived
+                </label>
+                <div class="section">
+                  <div class="inline-actions">
+                    <h2>Native sessions</h2>
+                    <span id="native-count" class="badge info">0</span>
+                  </div>
+                  <button id="sync-native-button" class="secondary" type="button">Sync native history</button>
+                  <button id="open-native-history-button" class="secondary" type="button">Browse history</button>
+                  <label class="choice" for="native-all-workspaces-checkbox">
+                    <input id="native-all-workspaces-checkbox" type="checkbox">
+                    Show all workspaces
+                  </label>
+                  <div id="native-status" class="status-line">Native history not synced</div>
+                </div>
+                <div class="section">
+                  <div class="inline-actions">
+                    <h2>Harnesses</h2>
+                    <span id="harness-count" class="badge info">0</span>
+                  </div>
+                  <div id="harness-list"></div>
+                </div>
+              </div>
+            </details>
+          </div>
         </div>
         <div class="sidebar-scroll">
-          <div class="group-title sidebar-heading">GPT2Giga chats</div>
           <div id="session-list" class="session-list"></div>
-          <div class="section">
-            <div class="inline-actions">
-              <h2>Native sessions</h2>
-              <span id="native-count" class="badge info">0</span>
-              <button id="sync-native-button" class="secondary" type="button">Sync native history</button>
-              <button id="open-native-history-button" class="secondary" type="button">Browse history</button>
-            </div>
-            <label class="choice" for="native-all-workspaces-checkbox">
-              <input id="native-all-workspaces-checkbox" type="checkbox">
-              Show all workspaces
-            </label>
-            <div id="native-status" class="status-line">Native history not synced</div>
-          </div>
-          <div class="section">
-            <div class="inline-actions">
-              <h2>Harnesses</h2>
-              <span id="harness-count" class="badge info">0</span>
-            </div>
-            <div id="harness-list"></div>
-          </div>
         </div>
       </aside>
 
       <section class="center" aria-label="Chat and run surface">
-        <div class="section">
-          <div class="config-grid">
-            <label>Harness
+        <div class="section config-section">
+          <div id="workspace-welcome" class="workspace-welcome">
+            <h2>What do you want to work on?</h2>
+            <p>Ask a question, plan a task, or describe what you would like to build.</p>
+          </div>
+          <div class="config-grid quick-config">
+            <label class="quick-harness"><span>Harness</span>
               <select id="harness-select"></select>
             </label>
-            <label class="span-2">Arena harnesses
+            <label class="span-2 advanced-control">Arena harnesses
               <select id="arena-harness-select" multiple size="4" aria-label="Arena harnesses"></select>
             </label>
-            <label>Invocation
+            <label class="advanced-control">Invocation
               <select id="invocation-select">
                 <option value="headless">Headless</option>
                 <option value="native">Native</option>
               </select>
             </label>
-            <label>Model
+            <label class="quick-model"><span>Model</span>
               <div id="model-picker" class="model-picker">
                 <input id="model-input" placeholder="GigaChat-2-Max" autocomplete="off" aria-controls="model-list">
-                <button id="model-menu-button" class="model-menu-button" type="button" aria-label="Show model suggestions">v</button>
+                <button id="model-menu-button" class="model-menu-button" type="button" aria-label="Show model suggestions">
+                  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m7 10 5 5 5-5"/></svg>
+                </button>
                 <div id="model-list" class="model-list" role="listbox" hidden></div>
               </div>
             </label>
-            <fieldset aria-label="API mode">
-              <div class="badge-row">
+            <fieldset class="quick-api" aria-label="API mode"><legend>API mode</legend>
+              <div class="api-mode-switch">
                 <label class="choice" for="api-mode-v2">
                   <input id="api-mode-v2" name="api-mode" type="radio" value="v2" checked>
-                  v2
+                  /v2
                 </label>
                 <label class="choice" for="api-mode-v1">
                   <input id="api-mode-v1" name="api-mode" type="radio" value="v1">
-                  v1
+                  /v1
                 </label>
               </div>
-              <div id="route-note" class="hint">Current route: /v2/chat/completions</div>
+              <div id="route-note" class="hint advanced-control">Current route: /v2/chat/completions</div>
             </fieldset>
-            <label>Mode
+            <label class="quick-mode"><span>Mode</span>
               <select id="mode-select">
                 <option value="plan">plan</option>
                 <option value="read">read</option>
                 <option value="edit">edit</option>
               </select>
             </label>
-            <label>Workspace policy
+            <label class="advanced-control">Workspace policy
               <select id="workspace-policy-select">
                 <option value="auto">auto</option>
                 <option value="current">current</option>
@@ -902,13 +1950,13 @@ INDEX_HTML = """<!doctype html>
                 <option value="temp_copy">temp copy</option>
               </select>
             </label>
-            <label>Capability
+            <label class="advanced-control">Capability
               <select id="capability-select"></select>
             </label>
-            <label class="span-2">Workspace
+            <label class="span-2 advanced-control">Workspace
               <input id="workspace-input" placeholder="." autocomplete="off">
             </label>
-            <div class="check-row">
+            <div class="check-row advanced-control">
               <label class="choice" for="dry-run-checkbox">
                 <input id="dry-run-checkbox" type="checkbox">
                 dry run
@@ -918,53 +1966,76 @@ INDEX_HTML = """<!doctype html>
                 stream
               </label>
             </div>
-            <div id="harness-warning" class="warning span-4"></div>
-            <div id="harness-details" class="details span-4"></div>
-            <div id="route-recommendation" class="route-recommendation span-4">
+            <div id="harness-warning" class="warning span-4 advanced-control"></div>
+            <div id="harness-details" class="details span-4 advanced-control"></div>
+            <div id="route-recommendation" class="route-recommendation span-4 advanced-control">
               <div class="inline-actions">
                 <span id="route-recommendation-badge" class="badge info">Recommended: pending</span>
                 <button id="apply-route-recommendation-button" class="secondary" type="button" disabled>Apply recommendation</button>
               </div>
               <div id="route-recommendation-reasons" class="details">Type a prompt or attach context to refresh the recommendation.</div>
             </div>
-            <div class="span-4">
+            <div class="span-4 advanced-control">
               <div class="inline-actions">
                 <h2>Presets</h2>
                 <span id="preset-status" class="badge info">Presets: loading</span>
               </div>
               <div id="preset-list" class="preset-list"></div>
             </div>
+            <button id="advanced-settings-button" class="advanced-settings-button secondary" type="button" aria-expanded="false">Advanced</button>
           </div>
         </div>
         <div id="output-panel" class="chat-scroll">
           <div id="message-list" class="message-list"></div>
         </div>
         <div id="composer" class="composer">
-          <label>Prompt
-            <textarea id="prompt-input" spellcheck="true"></textarea>
-          </label>
+          <div class="composer-main">
+            <label>Prompt
+              <textarea id="prompt-input" placeholder="Ask, plan, or describe a task..." spellcheck="true"></textarea>
+            </label>
+          </div>
           <div id="workspace-file-menu" class="workspace-file-menu" hidden></div>
-          <div class="attachment-toolbar">
-            <input id="attachment-file-input" type="file" multiple hidden>
-            <button id="attach-file-button" class="secondary" type="button">Attach</button>
-            <span id="attachment-status" class="status-line">No attachments</span>
-          </div>
           <div id="attachment-list" class="attachment-list" aria-live="polite"></div>
-          <div class="inline-actions">
-            <button id="run-button" type="button">Run</button>
-            <button id="compare-button" class="secondary" type="button">Compare</button>
-            <button id="cancel-run-button" class="danger" type="button" hidden>Cancel</button>
-            <button id="copy-cli-button" class="secondary" type="button">Copy CLI</button>
-            <button id="copy-curl-button" class="secondary" type="button">Copy curl</button>
-            <button id="reset-button" class="secondary" type="button">Reset</button>
+          <div class="composer-footer">
+            <div class="composer-utilities">
+              <div class="attachment-toolbar">
+                <input id="attachment-file-input" type="file" multiple hidden>
+                <button id="attach-file-button" class="secondary" type="button">Attach</button>
+                <span id="attachment-status" class="status-line">No attachments</span>
+              </div>
+              <details class="composer-more">
+                <summary aria-label="More composer actions">More</summary>
+                <div class="composer-more-menu">
+                  <button id="copy-cli-button" class="secondary utility-action" type="button">Copy CLI</button>
+                  <button id="copy-curl-button" class="secondary utility-action" type="button">Copy curl</button>
+                  <button id="reset-button" class="secondary utility-action" type="button">Reset</button>
+                </div>
+              </details>
+            </div>
+            <div class="composer-actions">
+              <button id="compare-button" class="secondary" type="button">Compare</button>
+              <button id="run-button" type="button">Run</button>
+              <button id="cancel-run-button" class="danger" type="button" hidden>Cancel</button>
+            </div>
           </div>
+        </div>
+        <div class="example-prompts" aria-label="Example prompts">
+          <p>Try an example to get started</p>
+          <button class="example-prompt" type="button">Explain this codebase architecture</button>
+          <button class="example-prompt" type="button">Write tests for the selected function</button>
+          <button class="example-prompt" type="button">Refactor this module for clarity</button>
         </div>
       </section>
 
+      <button id="details-toggle-button" class="details-toggle" type="button" aria-expanded="false">Run details</button>
+
       <aside class="inspector" aria-label="Inspector">
-        <div class="section">
+        <div class="inspector-header">
+          <div class="inspector-title-row">
+            <h2>Run details</h2>
+            <button id="close-inspector-button" class="secondary icon-button" type="button" aria-label="Close run details">×</button>
+          </div>
           <div class="inline-actions">
-            <h2>Inspector</h2>
             <button id="rename-session-button" class="secondary" type="button">Rename</button>
             <button id="pin-session-button" class="secondary" type="button">Pin</button>
             <button id="archive-session-button" class="secondary" type="button">Archive</button>
@@ -1101,6 +2172,8 @@ INDEX_HTML = """<!doctype html>
           </div>
         </div>
       </aside>
+      <button id="inspector-backdrop" class="inspector-backdrop" type="button" aria-label="Close run details"></button>
+      <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Close sessions"></button>
     </main>
     <div id="native-history-modal" class="native-history-modal" role="dialog" aria-modal="true" aria-labelledby="native-history-title" hidden>
       <div class="native-history-dialog">
@@ -1316,10 +2389,10 @@ INDEX_HTML = """<!doctype html>
       const result = await getJson("/api/health");
       const badge = byId("proxy-status");
       if (result.ok && result.data.ok) {
-        badge.className = "badge ok";
+        badge.className = "proxy-indicator ok";
         badge.textContent = `Proxy: ${result.data.path || "ok"}`;
       } else {
-        badge.className = "badge warn";
+        badge.className = "proxy-indicator warn";
         badge.textContent = "Proxy: unavailable";
       }
     }
@@ -1957,6 +3030,7 @@ INDEX_HTML = """<!doctype html>
       applySessionDefaults(result.data.session || {});
       persistProjectState({ last_selected_session: sessionId });
       renderAll();
+      setSidebarOpen(false);
       await loadSessions();
     }
 
@@ -3303,6 +4377,7 @@ INDEX_HTML = """<!doctype html>
       const list = byId("message-list");
       list.textContent = "";
       const messages = state.currentBundle && Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
+      document.body.classList.toggle("new-session", !messages.length);
       if (!messages.length) {
         const empty = document.createElement("div");
         empty.className = "empty";
@@ -4100,6 +5175,38 @@ INDEX_HTML = """<!doctype html>
       if (panel) panel.classList.add("active");
     }
 
+    function setInspectorOpen(open) {
+      document.body.classList.toggle("inspector-open", open);
+      byId("details-toggle-button").setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) setSidebarOpen(false);
+    }
+
+    function setSidebarOpen(open) {
+      document.body.classList.toggle("sidebar-open", open);
+      byId("session-drawer-button").setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
+    function prepareAdvancedPanel() {
+      const grid = document.querySelector(".quick-config");
+      const panel = document.createElement("div");
+      panel.id = "advanced-settings-panel";
+      panel.className = "advanced-panel";
+      panel.hidden = true;
+      for (const control of Array.from(grid.querySelectorAll(".advanced-control"))) {
+        panel.appendChild(control);
+      }
+      grid.appendChild(panel);
+      byId("advanced-settings-button").setAttribute("aria-controls", panel.id);
+    }
+
+    function toggleAdvancedSettings() {
+      const grid = document.querySelector(".quick-config");
+      const open = !grid.classList.contains("advanced-open");
+      grid.classList.toggle("advanced-open", open);
+      byId("advanced-settings-button").setAttribute("aria-expanded", open ? "true" : "false");
+      byId("advanced-settings-panel").hidden = !open;
+    }
+
     function resetComposer() {
       byId("prompt-input").value = "";
       byId("dry-run-checkbox").checked = false;
@@ -4136,6 +5243,19 @@ INDEX_HTML = """<!doctype html>
     function bindEvents() {
       bindTabEvents();
       const composer = byId("composer");
+      byId("details-toggle-button").addEventListener("click", () => setInspectorOpen(true));
+      byId("close-inspector-button").addEventListener("click", () => setInspectorOpen(false));
+      byId("inspector-backdrop").addEventListener("click", () => setInspectorOpen(false));
+      byId("session-drawer-button").addEventListener("click", () => setSidebarOpen(true));
+      byId("sidebar-backdrop").addEventListener("click", () => setSidebarOpen(false));
+      byId("advanced-settings-button").addEventListener("click", toggleAdvancedSettings);
+      for (const example of document.querySelectorAll(".example-prompt")) {
+        example.addEventListener("click", () => {
+          byId("prompt-input").value = example.textContent.trim();
+          byId("prompt-input").focus();
+          scheduleRouteRecommendation();
+        });
+      }
       byId("refresh-health-button").addEventListener("click", refreshHealth);
       byId("refresh-models-button").addEventListener("click", loadModels);
       byId("init-project-button").addEventListener("click", initProject);
@@ -4171,6 +5291,8 @@ INDEX_HTML = """<!doctype html>
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && state.nativeModalOpen) closeNativeHistory();
         if (event.key === "Escape" && state.preflightModalOpen) closePreflightModal(false);
+        if (event.key === "Escape" && document.body.classList.contains("inspector-open")) setInspectorOpen(false);
+        if (event.key === "Escape" && document.body.classList.contains("sidebar-open")) setSidebarOpen(false);
       });
       byId("native-all-workspaces-checkbox").addEventListener("change", () => loadNativeSessions(false, { resetVisible: true }));
       byId("poll-native-output-button").addEventListener("click", pollNativeOutput);
@@ -4296,6 +5418,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function boot() {
+      prepareAdvancedPanel();
       bindEvents();
       renderNativeTerminalStatus("idle");
       await loadDefaults();
