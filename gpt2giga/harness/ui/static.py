@@ -158,6 +158,7 @@ INDEX_HTML = """<!doctype html>
     .hint {
       color: var(--muted);
       font-size: 12px;
+      overflow-wrap: anywhere;
     }
     .top-summary {
       display: flex;
@@ -252,6 +253,7 @@ INDEX_HTML = """<!doctype html>
       display: inline-flex;
       align-items: center;
       gap: 4px;
+      max-width: 100%;
       min-height: 24px;
       border: 1px solid var(--border);
       border-radius: 999px;
@@ -633,6 +635,23 @@ INDEX_HTML = """<!doctype html>
     .event-row:last-child {
       border-bottom: 0;
     }
+    .arena-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .arena-card {
+      min-width: 0;
+      border: 1px solid #232830;
+      border-radius: 6px;
+      background: #0f1216;
+      padding: 10px;
+    }
+    .arena-card pre {
+      margin-top: 8px;
+      max-height: 220px;
+    }
     .empty {
       color: var(--muted);
       padding: 18px;
@@ -656,6 +675,11 @@ INDEX_HTML = """<!doctype html>
       .topbar,
       .shell {
         display: block;
+        width: 100%;
+        max-width: 100%;
+      }
+      .top-summary .badge {
+        white-space: normal;
       }
       .sidebar,
       .center,
@@ -770,6 +794,9 @@ INDEX_HTML = """<!doctype html>
             <label>Harness
               <select id="harness-select"></select>
             </label>
+            <label class="span-2">Arena harnesses
+              <select id="arena-harness-select" multiple size="4" aria-label="Arena harnesses"></select>
+            </label>
             <label>Invocation
               <select id="invocation-select">
                 <option value="headless">Headless</option>
@@ -847,6 +874,7 @@ INDEX_HTML = """<!doctype html>
           <div id="attachment-list" class="attachment-list" aria-live="polite"></div>
           <div class="inline-actions">
             <button id="run-button" type="button">Run</button>
+            <button id="compare-button" class="secondary" type="button">Compare</button>
             <button id="cancel-run-button" class="danger" type="button" hidden>Cancel</button>
             <button id="copy-cli-button" class="secondary" type="button">Copy CLI</button>
             <button id="copy-curl-button" class="secondary" type="button">Copy curl</button>
@@ -870,6 +898,7 @@ INDEX_HTML = """<!doctype html>
           <div class="inspector-body">
             <div class="tabs" role="tablist">
               <button class="tab active" type="button" data-tab="run">Run</button>
+              <button class="tab" type="button" data-tab="arena">Arena</button>
               <button class="tab" type="button" data-tab="events">Events</button>
               <button class="tab" type="button" data-tab="raw-request">Raw request</button>
               <button class="tab" type="button" data-tab="raw-response">Raw response</button>
@@ -880,6 +909,7 @@ INDEX_HTML = """<!doctype html>
               <button class="tab" type="button" data-tab="storage">Storage</button>
             </div>
             <pre id="run-panel" class="mono-panel tab-panel active">No run selected.</pre>
+            <div id="arena-panel" class="mono-panel tab-panel">No arena selected.</div>
             <div id="events-panel" class="mono-panel tab-panel">No events yet.</div>
             <pre id="raw-request-panel" class="mono-panel tab-panel">{}</pre>
             <pre id="raw-response-panel" class="mono-panel tab-panel">{}</pre>
@@ -946,6 +976,7 @@ INDEX_HTML = """<!doctype html>
       projectState: null,
       applyingProjectState: false,
       selectedHarness: null,
+      arenaSelectionTouched: false,
       nativeSessions: [],
       nativeVisibleLimit: NATIVE_SESSION_PAGE_SIZE,
       nativeModalOpen: false,
@@ -959,6 +990,7 @@ INDEX_HTML = """<!doctype html>
       fileMentionQuery: null,
       currentSessionId: null,
       currentBundle: null,
+      currentArena: null,
       activeHeadlessRun: null,
       headlessEventSource: null,
       lastPayload: null
@@ -1152,8 +1184,11 @@ INDEX_HTML = """<!doctype html>
 
     function renderHarnessSelect() {
       const select = byId("harness-select");
+      const arenaSelect = byId("arena-harness-select");
       const filter = byId("session-harness-filter");
       select.textContent = "";
+      arenaSelect.textContent = "";
+      state.arenaSelectionTouched = false;
       filter.textContent = "";
       const all = document.createElement("option");
       all.value = "";
@@ -1165,6 +1200,8 @@ INDEX_HTML = """<!doctype html>
         option.value = spec.id;
         option.textContent = spec.title || spec.id;
         select.appendChild(option);
+        const arenaOption = option.cloneNode(true);
+        arenaSelect.appendChild(arenaOption);
         const filterOption = option.cloneNode(true);
         filter.appendChild(filterOption);
       }
@@ -1217,6 +1254,7 @@ INDEX_HTML = """<!doctype html>
       if (!item) return;
       state.selectedHarness = item;
       byId("harness-select").value = harnessId;
+      ensureArenaSelection(harnessId);
       renderCapabilityOptions(item.spec);
       updateHarnessDrivenControls();
       renderAttachments();
@@ -1224,6 +1262,20 @@ INDEX_HTML = """<!doctype html>
       setText("harness-details", `${item.spec.title || harnessId} - ${item.spec.description || ""}${capabilities ? " Capabilities: " + capabilities : ""}`);
       loadNativeSessions(false);
       persistProjectState();
+    }
+
+    function ensureArenaSelection(harnessId) {
+      if (state.arenaSelectionTouched) return;
+      const select = byId("arena-harness-select");
+      for (const option of select.options) {
+        option.selected = option.value === harnessId;
+      }
+    }
+
+    function arenaSelectedHarnessIds() {
+      return Array.from(byId("arena-harness-select").selectedOptions)
+        .map((option) => option.value)
+        .filter(Boolean);
     }
 
     function renderCapabilityOptions(spec) {
@@ -1604,6 +1656,7 @@ INDEX_HTML = """<!doctype html>
       if (!result.ok) return;
       state.currentSessionId = sessionId;
       state.currentBundle = result.data;
+      if (state.currentArena && state.currentArena.session_id !== sessionId) state.currentArena = null;
       await loadAttachments(sessionId);
       applySessionDefaults(result.data.session || {});
       persistProjectState({ last_selected_session: sessionId });
@@ -1884,6 +1937,18 @@ INDEX_HTML = """<!doctype html>
       return payload;
     }
 
+    function buildArenaPayload() {
+      const payload = {
+        ...buildSessionDefaults(),
+        prompt: byId("prompt-input").value,
+        harness_ids: arenaSelectedHarnessIds(),
+        session_id: state.currentSessionId || null
+      };
+      const attachmentIds = state.attachments.map((attachment) => attachment.id).filter(Boolean);
+      if (attachmentIds.length) payload.attachment_ids = attachmentIds;
+      return payload;
+    }
+
     async function runHarness() {
       const payload = buildPayload();
       if (!payload.prompt.trim()) return;
@@ -1911,6 +1976,7 @@ INDEX_HTML = """<!doctype html>
         });
         const body = result.data || {};
         if (result.ok) {
+          state.currentArena = null;
           state.currentSessionId = body.session.id;
           state.currentBundle = body;
           byId("prompt-input").value = "";
@@ -1926,6 +1992,52 @@ INDEX_HTML = """<!doctype html>
       } finally {
         byId("run-button").disabled = false;
         byId("run-button").textContent = "Run";
+      }
+    }
+
+    async function runArena() {
+      const payload = buildArenaPayload();
+      if (!payload.prompt.trim()) return;
+      if (!payload.harness_ids.length) {
+        setText("arena-panel", "Select at least one arena harness.");
+        showTab("arena");
+        return;
+      }
+      state.lastPayload = payload;
+      setText("raw-request-panel", pretty(payload));
+      setText("raw-response-panel", "{}");
+      setText("command-panel", "Arena runs use normalized headless harness execution.");
+      renderDiffInspector(null);
+      setText("arena-panel", "Arena is starting...");
+      showTab("arena");
+      byId("compare-button").disabled = true;
+      byId("compare-button").textContent = "Comparing...";
+      try {
+        const result = await getJson("/api/arena/runs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const body = result.data || {};
+        if (!result.ok || !body.arena) {
+          setText("raw-response-panel", pretty(body));
+          setText("arena-panel", body.detail || `Arena failed with HTTP ${result.status}`);
+          return;
+        }
+        state.currentArena = body.arena;
+        state.currentSessionId = body.arena.session_id || state.currentSessionId;
+        if (state.currentSessionId) await loadSession(state.currentSessionId);
+        byId("prompt-input").value = "";
+        state.attachments = [];
+        renderAttachments();
+        renderArenaInspector(state.currentArena);
+        setText("raw-response-panel", pretty(body));
+        showTab("arena");
+        await loadSessions();
+        persistProjectState({ last_selected_session: state.currentSessionId });
+      } finally {
+        byId("compare-button").disabled = false;
+        byId("compare-button").textContent = "Compare";
       }
     }
 
@@ -1954,6 +2066,7 @@ INDEX_HTML = """<!doctype html>
           return;
         }
         state.currentSessionId = body.session && body.session.id ? body.session.id : state.currentSessionId;
+        state.currentArena = null;
         state.activeHeadlessRun = body.run;
         if (Array.isArray(body.events) && body.events.length) renderEvents(body.events);
         setText("run-panel", pretty(body.run));
@@ -2169,6 +2282,7 @@ INDEX_HTML = """<!doctype html>
       const run = runs[runs.length - 1] || null;
       setText("selected-session-line", session ? `${session.title} - ${session.id}` : "No session selected");
       setText("run-panel", run ? pretty(run) : "No run selected.");
+      renderArenaInspector(state.currentArena);
       renderEvents(events);
       setText("raw-request-panel", rawRequests.length ? pretty(rawRequests[rawRequests.length - 1].payload) : "{}");
       setText("raw-response-panel", rawResponses.length ? pretty(rawResponses[rawResponses.length - 1].payload) : "{}");
@@ -2179,6 +2293,57 @@ INDEX_HTML = """<!doctype html>
       setText("storage-panel", pretty(bundle.storage || {}));
       byId("pin-session-button").textContent = session && session.pinned ? "Unpin" : "Pin";
       byId("archive-session-button").textContent = session && session.archived ? "Unarchive" : "Archive";
+    }
+
+    function renderArenaInspector(arena) {
+      const panel = byId("arena-panel");
+      if (!panel) return;
+      panel.textContent = "";
+      if (!arena || !arena.id) {
+        panel.textContent = "No arena selected.";
+        return;
+      }
+      const header = document.createElement("div");
+      header.innerHTML = `
+        <div class="badge-row">
+          <span class="badge info">Arena</span>
+          <span class="badge ${arena.status === "succeeded" ? "ok" : arena.status === "partial" ? "warn" : arena.status === "failed" ? "warn" : "info"}">${escapeHtml(arena.status || "unknown")}</span>
+        </div>
+        <div class="session-meta">
+          <span>${escapeHtml(arena.id)}</span>
+          <span>${escapeHtml(arena.harness_ids ? arena.harness_ids.join(", ") : "")}</span>
+          <span>/api/arena/runs/${escapeHtml(arena.id)}/events/stream</span>
+        </div>
+      `;
+      panel.appendChild(header);
+      const children = Array.isArray(arena.child_runs) ? arena.child_runs : [];
+      if (!children.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "Arena is waiting for child runs.";
+        panel.appendChild(empty);
+        return;
+      }
+      const grid = document.createElement("div");
+      grid.className = "arena-grid";
+      for (const child of children) {
+        const card = document.createElement("div");
+        card.className = "arena-card";
+        const message = child.message && child.message.content ? child.message.content : child.result_text || child.error || "No output";
+        card.innerHTML = `
+          <div class="badge-row">
+            <span class="badge info">${escapeHtml(child.harness_id || "harness")}</span>
+            <span class="badge ${child.status === "succeeded" ? "ok" : "warn"}">${escapeHtml(child.status || "unknown")}</span>
+          </div>
+          <div class="session-meta">
+            <span>${escapeHtml(child.run_id || "no run")}</span>
+            <span>${escapeHtml(String(child.event_count || 0))} events</span>
+          </div>
+          <pre>${escapeHtml(message)}</pre>
+        `;
+        grid.appendChild(card);
+      }
+      panel.appendChild(grid);
     }
 
     function renderDiffInspector(run) {
@@ -2201,8 +2366,8 @@ INDEX_HTML = """<!doctype html>
       if (execution.fallback_reason) lines.push(`Fallback: ${execution.fallback_reason}`);
       if (changedFiles.length) lines.push(`Changed files: ${changedFiles.join(", ")}`);
       if (untrackedFiles.length) lines.push(`Untracked files: ${untrackedFiles.join(", ")}`);
-      const summary = lines.length ? lines.join("\n") : "No run selected.";
-      setText("diff-text", `${summary}\n\n${patch || "No diff captured."}`);
+      const summary = lines.length ? lines.join("\\n") : "No run selected.";
+      setText("diff-text", `${summary}\\n\\n${patch || "No diff captured."}`);
       const canApply = Boolean(run && run.id && execution.policy === "worktree" && patch && patch !== "No diff captured." && !execution.applied_at && !execution.discarded_at);
       const canDiscard = Boolean(run && run.id && execution.policy === "worktree" && !execution.discarded_at);
       byId("apply-run-diff-button").disabled = !canApply;
@@ -2480,6 +2645,7 @@ INDEX_HTML = """<!doctype html>
       if (result.ok) {
         state.currentSessionId = null;
         state.currentBundle = null;
+        state.currentArena = null;
         state.attachments = [];
         renderAttachments();
         renderAll();
@@ -2634,6 +2800,9 @@ INDEX_HTML = """<!doctype html>
       byId("init-project-button").addEventListener("click", initProject);
       byId("new-chat-button").addEventListener("click", newChat);
       byId("harness-select").addEventListener("change", (event) => selectHarness(event.target.value));
+      byId("arena-harness-select").addEventListener("change", () => {
+        state.arenaSelectionTouched = true;
+      });
       byId("invocation-select").addEventListener("change", () => {
         updateHarnessDrivenControls();
         persistProjectState();
@@ -2683,6 +2852,7 @@ INDEX_HTML = """<!doctype html>
         if (!byId("model-picker").contains(event.target)) closeModelList();
       });
       byId("run-button").addEventListener("click", runHarness);
+      byId("compare-button").addEventListener("click", runArena);
       byId("cancel-run-button").addEventListener("click", cancelHeadlessRun);
       byId("apply-run-diff-button").addEventListener("click", applyRunDiff);
       byId("discard-run-worktree-button").addEventListener("click", discardRunWorktree);

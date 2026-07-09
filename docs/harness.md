@@ -315,8 +315,10 @@ The UI is a chat-like harness cockpit with:
 - file and image attachments in the composer;
 - `@file` workspace references from the current project;
 - user, assistant, and error messages in the selected session;
-- run, events, raw request, raw response, command, diff, attachments, and storage
-  inspector panels;
+- multi-harness arena comparison for running the same prompt against several
+  headless harnesses;
+- run, arena, events, raw request, raw response, command, diff, attachments, and
+  storage inspector panels;
 - copy buttons for the equivalent CLI command and direct-chat curl command.
 
 Echo runs entirely locally and does not require credentials. Direct-chat sends
@@ -335,6 +337,32 @@ the Events inspector while the run is active. The Cancel button calls
 `/api/runs/{run_id}/cancel`; harnesses that observe the in-memory cancel token
 can stop cooperatively, while older blocking subprocess paths may continue until
 the subprocess returns.
+
+## Multi-Harness Arena
+
+The arena controls let the same prompt run through multiple selected harnesses
+in sequence. The first MVP intentionally uses headless normalized runs rather
+than native terminals so every child run is persisted in the same transparent
+session store as normal chat runs.
+
+The API surface is:
+
+```text
+POST /api/arena/runs
+GET  /api/arena/runs/{arena_id}
+GET  /api/arena/runs/{arena_id}/events/stream
+```
+
+Arena parent records live under:
+
+```text
+GPT2GIGA_HARNESS_DATA_DIR/arenas/<arena_id>.json
+```
+
+Each child is still a regular `HarnessRun`, with raw request/response records,
+messages, events, attachment metadata, and worktree metadata where applicable.
+Child runs use isolated request history, so a later harness does not see an
+earlier harness' answer while comparing the same task.
 
 ## Worktree-Safe Edit Flow
 

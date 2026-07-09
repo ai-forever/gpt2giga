@@ -178,6 +178,108 @@ def test_sessions_api_cancel_active_headless_run():
     assert {"cancel_requested", "run_canceled", "run_finished"} <= event_types
 
 
+def test_arena_api_creates_child_runs_without_shared_history(tmp_path):
+    store = InMemoryHarnessSessionStore()
+    first = _ArenaCaptureHarness("arena-first")
+    second = _ArenaCaptureHarness("arena-second")
+    registry = HarnessRegistry()
+    registry.register(first)
+    registry.register(second)
+    client = _client(
+        config=HarnessConfig(data_dir=str(tmp_path / "data")),
+        registry=registry,
+        store=store,
+    )
+
+    response = client.post(
+        "/api/arena/runs",
+        json={
+            "prompt": "compare this",
+            "harness_ids": ["arena-first", "arena-second"],
+            "api_mode": "v2",
+            "mode": "plan",
+        },
+    )
+
+    assert response.status_code == 200
+    arena = response.json()["arena"]
+    assert arena["status"] == "succeeded"
+    assert arena["session"]["id"] == arena["session_id"]
+    assert [child["harness_id"] for child in arena["child_runs"]] == [
+        "arena-first",
+        "arena-second",
+    ]
+    assert all(child["run_id"].startswith("run_") for child in arena["child_runs"])
+    assert [request.prompt for request in first.requests] == ["compare this"]
+    assert [request.prompt for request in second.requests] == ["compare this"]
+    assert [
+        (message.role, message.content) for message in first.requests[0].messages
+    ] == [("user", "compare this")]
+    assert [
+        (message.role, message.content) for message in second.requests[0].messages
+    ] == [("user", "compare this")]
+
+    fetched = client.get(f"/api/arena/runs/{arena['id']}")
+
+    assert fetched.status_code == 200
+    assert fetched.json()["arena"]["id"] == arena["id"]
+
+
+def test_arena_api_child_failure_does_not_stop_remaining_harnesses(tmp_path):
+    store = InMemoryHarnessSessionStore()
+    succeeding = _ArenaCaptureHarness("arena-ok")
+    registry = HarnessRegistry()
+    registry.register(_FailingArenaHarness())
+    registry.register(succeeding)
+    client = _client(
+        config=HarnessConfig(data_dir=str(tmp_path / "data")),
+        registry=registry,
+        store=store,
+    )
+
+    response = client.post(
+        "/api/arena/runs",
+        json={
+            "prompt": "compare failures",
+            "harness_ids": ["arena-fail", "arena-ok"],
+        },
+    )
+
+    assert response.status_code == 200
+    arena = response.json()["arena"]
+    assert arena["status"] == "partial"
+    assert [child["status"] for child in arena["child_runs"]] == [
+        "failed",
+        "succeeded",
+    ]
+    assert succeeding.requests[0].prompt == "compare failures"
+
+
+def test_arena_events_stream_replays_child_events(tmp_path):
+    registry = HarnessRegistry()
+    registry.register(_ArenaCaptureHarness("arena-stream"))
+    client = _client(
+        config=HarnessConfig(data_dir=str(tmp_path / "data")),
+        registry=registry,
+        store=InMemoryHarnessSessionStore(),
+    )
+    created = client.post(
+        "/api/arena/runs",
+        json={"prompt": "stream arena", "harness_ids": ["arena-stream"]},
+    )
+    assert created.status_code == 200
+    arena_id = created.json()["arena"]["id"]
+
+    with client.stream("GET", f"/api/arena/runs/{arena_id}/events/stream") as stream:
+        assert stream.status_code == 200
+        text = "".join(stream.iter_text())
+
+    assert arena_id in text
+    assert "arena-stream" in text
+    assert "run_started" in text
+    assert "run_finished" in text
+
+
 def test_runs_api_diff_apply_and_open_worktree(tmp_path):
     repo = _git_repo(tmp_path / "repo")
     registry = HarnessRegistry()
@@ -299,6 +401,58 @@ class _CancellableHarness(BaseHarness):
                 return HarnessResult(ok=False, text="", error="cancelled")
             time.sleep(0.01)
         return HarnessResult(ok=True, text="finished")
+
+
+class _ArenaCaptureHarness(BaseHarness):
+    def __init__(self, harness_id: str) -> None:
+        self.harness_id = harness_id
+        self.requests: list[HarnessRequest] = []
+
+    def spec(self) -> HarnessSpec:
+        return HarnessSpec(
+            id=self.harness_id,
+            title=f"Arena {self.harness_id}",
+            kind="test",
+            description="Capture arena request",
+            capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available("test")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        self.requests.append(request)
+        return HarnessResult(
+            ok=True,
+            text=f"{self.harness_id}: {request.prompt}",
+            raw={"harness_id": self.harness_id},
+        )
+
+
+class _FailingArenaHarness(BaseHarness):
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="arena-fail",
+            title="Arena Fail",
+            kind="test",
+            description="Fail arena request",
+            capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available("test")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        return HarnessResult(ok=False, text="", error="arena boom")
 
 
 class _FileEditHarness(BaseHarness):

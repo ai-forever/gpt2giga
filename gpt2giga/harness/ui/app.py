@@ -14,6 +14,15 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
+from gpt2giga.harness.arena import (
+    ArenaNotFoundError,
+    FilesystemHarnessArenaStore,
+    HarnessArenaChildRun,
+    HarnessArenaRun,
+    arena_child_to_dict,
+    arena_to_dict,
+    run_arena,
+)
 from gpt2giga.harness import proxy
 from gpt2giga.harness.attachments import (
     AttachmentLimits,
@@ -148,6 +157,7 @@ def create_app(
         session_store=store
     )
     attachment_store = FilesystemAttachmentStore(config.data_dir)
+    arena_store = FilesystemHarnessArenaStore(config.data_dir)
     runner = HarnessSessionRunner(
         registry=registry,
         config=config,
@@ -161,6 +171,7 @@ def create_app(
     app.state.harness_session_store = store
     app.state.harness_session_runner = runner
     app.state.harness_attachment_store = attachment_store
+    app.state.harness_arena_store = arena_store
     app.state.harness_native_registry = native_registry
     app.state.harness_native_index_store = native_index_store
     app.state.harness_native_process_manager = native_process_manager
@@ -1183,6 +1194,66 @@ def create_app(
             ]
         }
 
+    @app.post("/api/arena/runs")
+    async def create_arena_run(
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            arena = await run_in_threadpool(
+                run_arena,
+                runner=runner,
+                arena_store=arena_store,
+                payload=payload,
+                session_id=_optional_text(payload.get("session_id")),
+            )
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _arena_response(arena, store)
+
+    @app.get("/api/arena/runs/{arena_id}")
+    async def get_arena_run(arena_id: str) -> dict[str, Any]:
+        try:
+            arena = arena_store.get(arena_id)
+        except ArenaNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        return _arena_response(arena, store)
+
+    @app.get("/api/arena/runs/{arena_id}/events/stream")
+    async def arena_events_stream(
+        arena_id: str,
+        after_id: str | None = Query(default=None),
+    ) -> StreamingResponse:
+        try:
+            arena_store.get(arena_id)
+        except ArenaNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Arena run not found") from exc
+
+        async def stream_events():
+            last_id = _optional_text(after_id)
+            while True:
+                try:
+                    current_arena = arena_store.get(arena_id)
+                except ArenaNotFoundError:
+                    break
+                events = _arena_events(current_arena, store, after_id=last_id)
+                for child, event in events:
+                    last_id = event.id
+                    yield _arena_sse_event(current_arena, child, event)
+                if _arena_status_is_terminal(current_arena.status) and not events:
+                    break
+                await asyncio.sleep(0.25)
+
+        return StreamingResponse(
+            stream_events(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @app.post("/api/run")
     async def run(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         harness_id = str(payload.get("harness_id") or "echo")
@@ -1271,8 +1342,106 @@ def _sse_event(event: HarnessStoredEvent) -> str:
     return f"id: {event.id}\ndata: {data}\n\n"
 
 
+def _arena_response(
+    arena: HarnessArenaRun,
+    store: HarnessSessionStore,
+) -> dict[str, Any]:
+    payload = arena_to_dict(arena)
+    payload["child_runs"] = [
+        _arena_child_response(child, store) for child in arena.child_runs
+    ]
+    try:
+        payload["session"] = _session_summary(store, arena.session_id)
+    except SessionNotFoundError:
+        payload["session"] = None
+    return {"arena": payload}
+
+
+def _arena_child_response(
+    child: HarnessArenaChildRun,
+    store: HarnessSessionStore,
+) -> dict[str, Any]:
+    payload = arena_child_to_dict(child)
+    if child.run_id is None:
+        return payload
+    try:
+        run = store.get_run(child.run_id)
+        payload["run"] = run_to_dict(run)
+        payload["message"] = _last_run_message(store, run)
+        payload["event_count"] = len(store.list_events(run.session_id, run_id=run.id))
+    except (RunNotFoundError, SessionNotFoundError):
+        payload["missing"] = True
+    return payload
+
+
+def _last_run_message(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+) -> dict[str, Any] | None:
+    messages = [
+        message
+        for message in store.list_messages(run.session_id)
+        if message.run_id == run.id and message.role in {"assistant", "error"}
+    ]
+    if not messages:
+        return None
+    return message_to_dict(messages[-1])
+
+
+def _arena_events(
+    arena: HarnessArenaRun,
+    store: HarnessSessionStore,
+    *,
+    after_id: str | None = None,
+) -> list[tuple[HarnessArenaChildRun, HarnessStoredEvent]]:
+    events: list[tuple[HarnessArenaChildRun, HarnessStoredEvent]] = []
+    for child in arena.child_runs:
+        if child.run_id is None or child.session_id is None:
+            continue
+        try:
+            child_events = store.list_events(child.session_id, run_id=child.run_id)
+        except SessionNotFoundError:
+            continue
+        events.extend((child, event) for event in child_events)
+    events.sort(key=lambda item: (item[1].created_at, item[0].index, item[1].id))
+    if after_id is None:
+        return events
+    seen = False
+    filtered: list[tuple[HarnessArenaChildRun, HarnessStoredEvent]] = []
+    for item in events:
+        if seen:
+            filtered.append(item)
+        elif item[1].id == after_id:
+            seen = True
+    return filtered
+
+
+def _arena_sse_event(
+    arena: HarnessArenaRun,
+    child: HarnessArenaChildRun,
+    event: HarnessStoredEvent,
+) -> str:
+    payload = {
+        "id": event.id,
+        "arena_id": arena.id,
+        "child_index": child.index,
+        "harness_id": child.harness_id,
+        "type": event.type,
+        "message": event.message,
+        "payload": dict(event.payload),
+        "created_at": event.created_at,
+        "event": event_to_dict(event),
+    }
+    data = json.dumps(payload, ensure_ascii=False)
+    return f"id: {event.id}\ndata: {data}\n\n"
+
+
 def _run_status_is_terminal(status: str) -> bool:
     return status in {"succeeded", "failed", "canceled"}
+
+
+def _arena_status_is_terminal(status: str) -> bool:
+    return status in {"succeeded", "failed", "partial", "canceled"}
 
 
 def _native_project_id(

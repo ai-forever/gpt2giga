@@ -156,7 +156,11 @@ class HarnessSessionRunner:
         session = self.store.get_session(session_id)
         options = self._run_options(payload, session=session)
         harness = self.registry.get(options["harness_id"])
-        previous_messages = self.store.list_messages(session.id)
+        previous_messages = (
+            ()
+            if bool(_mapping(options["extra"]).get("isolated_history"))
+            else self.store.list_messages(session.id)
+        )
         attachments = self._load_attachments(
             session.id,
             options["attachment_ids"],
@@ -603,6 +607,12 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
 
 
 def _attachment_ids(value: Any) -> tuple[str, ...]:

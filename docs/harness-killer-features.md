@@ -159,7 +159,7 @@ this status to choose the next vertical slice.
 | Slice 07: attachment API and composer UI | Implemented, except thumbnail generation and a separate thumbnail endpoint are still future work. |
 | Slice 08: per-harness attachment rendering | Implemented. |
 | Slice 09: worktree-safe edit/apply flow | Implemented as an MVP for headless external agent edit runs: `auto` policy creates an isolated git worktree, captures changed/untracked files and patch metadata, exposes diff/apply/discard/open-worktree endpoints, and wires Apply/Discard/Open controls into the Diff inspector. `temp_copy` remains a future fallback policy. |
-| Slice 10: multi-harness arena | Open. |
+| Slice 10: multi-harness arena | Implemented as an MVP: `/api/arena/runs` creates a JSON parent record under `arenas/<arena_id>.json`, runs selected headless harnesses sequentially with isolated request history, links child `HarnessRun` ids, aggregates child events through `/api/arena/runs/{arena_id}/events/stream`, and renders side-by-side UI result cards. Parallel execution and arena cancellation remain future work. |
 | Slice 11: smart router | Open. |
 | Slice 12: presets and runbooks | Partially implemented as config parsing and UI preset defaults; template variables, preset CLI execution, and runbook behavior remain open. |
 | Slice 13: tools/MCP profiles | Open. |
@@ -190,6 +190,7 @@ Project and session state should remain transparent JSON/JSONL:
     state.json
     attachments/<sha256>/original
     attachments/<sha256>/metadata.json
+  arenas/<arena_id>.json
   worktrees/<session_id>/<run_id>/
   native/
     index.json
@@ -203,16 +204,18 @@ opaque stores.
 
 ## Next Recommended Slice
 
-The highest-value next implementation slice is Slice 10 for the multi-harness
-arena:
+The highest-value next implementation slice is Slice 11 for the smart router:
 
-- create an arena parent object that links child runs for the same prompt;
-- start with sequential execution to reduce process and cancellation risk;
-- aggregate child run events into a parent stream;
-- render side-by-side result cards with per-run inspector links.
+- add deterministic recommendations from prompt text, attachment kinds,
+  workspace availability, selected files, desired mode, and harness
+  capabilities;
+- show a Recommended badge and short reasons in the UI;
+- keep edit-mode recommendations advisory until the user explicitly confirms
+  the mode.
 
-Slice 03 can continue later with richer per-harness stdout/message delta
-emission, but the MVP stream/cancel contract is now in place.
+Slice 03 can still be enriched later with richer per-harness stdout/message
+delta emission, and Slice 10 can grow parallel execution and arena cancellation
+after the sequential MVP has settled.
 
 ## Safety Rules
 
