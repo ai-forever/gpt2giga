@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from gpt2giga.harness.config import DEFAULT_HARNESS_DATA_DIR
-from gpt2giga.harness.editor import DEFAULT_EDITOR_COMMAND
+from gpt2giga.harness.editor import DEFAULT_EDITOR_COMMAND, DEFAULT_TERMINAL_COMMAND
 from gpt2giga.harness.native.models import (
     HarnessInvocationMode,
     parse_invocation_mode,
@@ -180,6 +180,7 @@ class ProjectEditorSettings:
     """Non-secret editor bridge settings loaded from `.giga/harness.toml`."""
 
     command: str = DEFAULT_EDITOR_COMMAND
+    terminal_command: str = DEFAULT_TERMINAL_COMMAND
 
 
 @dataclass(frozen=True)
@@ -457,6 +458,7 @@ def default_project_config_text(project_name: str) -> str:
         "\n"
         "[editor]\n"
         f'command = "{DEFAULT_EDITOR_COMMAND}"\n'
+        f'terminal_command = "{DEFAULT_TERMINAL_COMMAND}"\n'
         "\n"
         "[presets.ask]\n"
         'title = "Ask"\n'
@@ -574,7 +576,10 @@ def project_config_to_dict(config: HarnessProjectConfig) -> dict[str, Any]:
             name: project_tool_profile_to_dict(name, profile)
             for name, profile in config.tool_profiles.items()
         },
-        "editor": {"command": config.editor.command},
+        "editor": {
+            "command": config.editor.command,
+            "terminal_command": config.editor.terminal_command,
+        },
         "attachments": {
             "max_file_mb": config.attachments.max_file_mb,
             "max_total_mb_per_run": config.attachments.max_total_mb_per_run,
@@ -832,6 +837,9 @@ def _parse_tool_profiles(data: Mapping[str, Any]) -> Mapping[str, ProjectToolPro
 def _parse_editor_settings(data: Mapping[str, Any]) -> ProjectEditorSettings:
     return ProjectEditorSettings(
         command=_optional_text(data.get("command")) or DEFAULT_EDITOR_COMMAND,
+        terminal_command=(
+            _optional_text(data.get("terminal_command")) or DEFAULT_TERMINAL_COMMAND
+        ),
     )
 
 

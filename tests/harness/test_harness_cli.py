@@ -300,7 +300,7 @@ def test_cli_open_file_session_and_run_diff_dry_run_json(
     config_path = workspace / ".giga" / "harness.toml"
     config_path.parent.mkdir()
     config_path.write_text(
-        '[editor]\ncommand = "code --reuse-window"\n',
+        '[editor]\ncommand = "code --reuse-window"\nterminal_command = "wezterm"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(data_dir))
@@ -362,6 +362,20 @@ def test_cli_open_file_session_and_run_diff_dry_run_json(
     assert run_code == 0
     assert run_payload["editor"]["kind"] == "diff"
     assert run_payload["editor"]["target_path"].endswith(f"{run.id}.diff")
+
+    terminal_code = cli.main(
+        ["open", "run", run.id, "--terminal", "--dry-run", "--json"]
+    )
+    terminal_payload = json.loads(capsys.readouterr().out)
+
+    assert terminal_code == 0
+    assert terminal_payload["editor"]["kind"] == "terminal"
+    assert terminal_payload["editor"]["command"] == [
+        "wezterm",
+        "start",
+        "--cwd",
+        str(workspace),
+    ]
 
 
 def test_cli_run_provenance_and_replay(capsys, tmp_path, monkeypatch):

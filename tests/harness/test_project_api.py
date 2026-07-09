@@ -54,6 +54,7 @@ def test_project_config_api_returns_parsed_config(tmp_path):
     assert "plan" in body["config"]["presets"]
     assert "github" in body["config"]["tools"]
     assert body["config"]["editor"]["command"] == "code"
+    assert body["config"]["editor"]["terminal_command"] == "auto"
 
 
 def test_project_presets_api_lists_and_renders_presets(tmp_path):

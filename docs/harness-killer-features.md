@@ -229,7 +229,7 @@ this status to choose the next vertical slice.
 | Slice 17: secrets firewall and context budget inspector | Implemented as an MVP: `/api/preflight/run` scans prompt/history/memory/attachments, hard-blocks private keys and credential-looking content before run persistence or harness invocation, records warning-level reports in `run.metadata.preflight`, and surfaces context budget details plus attachment exclude/path-only remediation in the browser UI. |
 | Slice 18: local evals/benchmarks | Implemented as an MVP: project eval specs are loaded from `.giga/evals/*.yaml`, `giga init` creates a safe smoke spec, `giga eval list|run` and `/api/evals*` expose local runs, deterministic checks produce redacted scorecards under `projects/PROJECT_ID/eval-runs/`, and the UI has an Evals inspector tab. Parallel/long-running benchmark orchestration and richer metrics remain future work. |
 | Slice 19: plugin/marketplace-ready harness format | Implemented as an MVP: entry-point harnesses are loaded into the registry, `HarnessSpec` exposes marketplace-friendly icon/config-schema/metadata fields, `giga harness scaffold|inspect|validate` cover plugin authoring and validation, unknown capability fields are ignored safely in API/UI serialization, and the browser renders simple config schema fields from plugin metadata. Runtime plugin config persistence and a full marketplace installer remain future work. |
-| Slice 20: editor bridge | Implemented as an MVP: `.giga/harness.toml` supports a non-secret `[editor].command`, `giga open session|run|file` exposes shell-free editor plans with dry-run JSON, `/api/editor/open-workspace`, `/api/editor/open-file`, and `/api/editor/open-diff` open project/run/file/diff targets through an allowlisted editor launcher, and the browser has an Editor inspector tab with workspace, run workspace, diff, file, and copy-link actions. Rich IDE terminal integration and URL deep-link routing remain future work. |
+| Slice 20: editor bridge | Implemented and extended: `.giga/harness.toml` supports non-secret editor and terminal launchers, `giga open session|run|file` exposes shell-free plans with dry-run JSON, `/api/editor/open-workspace`, `/api/editor/open-file`, `/api/editor/open-diff`, and `/api/editor/open-terminal` open project/run/file/diff/worktree-terminal targets through allowlisted launchers, and the browser has matching Editor and Diff inspector actions. URL deep-link routing remains future work. |
 
 ## Target Data Boundaries
 
@@ -266,10 +266,10 @@ opaque stores.
 
 ## Next Recommended Slice
 
-The highest-value next implementation slice is Slice 20 for an editor bridge:
-add safe editor command builders, dry-run/open endpoints, and UI/CLI actions for
-opening a workspace, changed file, diff, terminal, or deep link from a session
-or run.
+All roadmap slices are implemented. The first post-roadmap editor follow-up adds
+the previously missing safe terminal-in-worktree action. The next editor bridge
+follow-up can add local URL deep links for sessions and runs without changing
+the transparent storage model.
 
 Slice 03 can still be enriched later with richer per-harness stdout/message
 delta emission, Slice 10 can grow parallel execution and arena cancellation,

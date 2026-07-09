@@ -15,6 +15,7 @@ from gpt2giga.harness.editor import (
     build_open_diff_plan,
     build_open_file_plan,
     build_open_run_workspace_plan,
+    build_open_terminal_plan,
     build_open_workspace_plan,
     editor_open_plan_to_dict,
     execute_editor_plan,
@@ -359,7 +360,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     open_run = open_subparsers.add_parser("run")
     open_run.add_argument("run_id")
-    open_run.add_argument("--diff", action="store_true")
+    open_run_target = open_run.add_mutually_exclusive_group()
+    open_run_target.add_argument("--diff", action="store_true")
+    open_run_target.add_argument("--terminal", action="store_true")
     open_run.add_argument("--dry-run", action="store_true")
     open_run.add_argument("--json", action="store_true")
     open_run.set_defaults(handler=_handle_open_run)
@@ -1086,10 +1089,17 @@ def _handle_open_session(args: argparse.Namespace, config: HarnessConfig) -> int
 def _handle_open_run(args: argparse.Namespace, config: HarnessConfig) -> int:
     store = FilesystemHarnessSessionStore(config.data_dir)
     run = store.get_run(args.run_id)
-    command = _editor_command_for_workspace(workspace_for_run(run), config)
-    if args.diff:
+    workspace = workspace_for_run(run)
+    if args.terminal:
+        if workspace is None:
+            raise ValueError("Run does not have a workspace to open in a terminal.")
+        command = _terminal_command_for_workspace(workspace, config)
+        plan = build_open_terminal_plan(workspace, command=command)
+    elif args.diff:
+        command = _editor_command_for_workspace(workspace, config)
         plan = build_open_diff_plan(run, data_dir=config.data_dir, command=command)
     else:
+        command = _editor_command_for_workspace(workspace, config)
         plan = build_open_run_workspace_plan(run, command=command)
     result = execute_editor_plan(plan, dry_run=args.dry_run)
     payload = {
@@ -1459,6 +1469,18 @@ def _editor_command_for_workspace(
         load_config_name=False,
     )
     return load_project_config(project.root).editor.command
+
+
+def _terminal_command_for_workspace(
+    workspace: str | None,
+    config: HarnessConfig,
+) -> str:
+    project = resolve_project(
+        workspace,
+        data_dir=config.data_dir,
+        load_config_name=False,
+    )
+    return load_project_config(project.root).editor.terminal_command
 
 
 def _latest_raw_request_for_run(

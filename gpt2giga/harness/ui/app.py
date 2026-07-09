@@ -55,6 +55,7 @@ from gpt2giga.harness.evals import (
 from gpt2giga.harness.editor import (
     build_open_diff_plan,
     build_open_file_plan,
+    build_open_terminal_plan,
     build_open_workspace_plan,
     editor_open_plan_to_dict,
     execute_editor_plan,
@@ -450,6 +451,40 @@ def create_app(
                 data_dir=config.data_dir,
                 command=command,
             )
+            result = execute_editor_plan(
+                plan,
+                dry_run=bool(payload.get("dry_run", False)),
+            )
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "run": run_to_dict(run),
+            "project": project_to_dict(project_context),
+            "editor": editor_open_plan_to_dict(result),
+        }
+
+    @app.post("/api/editor/open-terminal")
+    async def editor_open_terminal(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            run_id = _required_text(payload.get("run_id"), "run_id is required")
+            run = store.get_run(run_id)
+            workspace = workspace_for_run(run)
+            if workspace is None:
+                raise ValueError("Run does not have a workspace to open in a terminal.")
+            project_context = resolve_project(
+                workspace,
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+            loaded = load_project_config(project_context.root)
+            command = (
+                _optional_text(payload.get("command")) or loaded.editor.terminal_command
+            )
+            plan = build_open_terminal_plan(workspace, command=command)
             result = execute_editor_plan(
                 plan,
                 dry_run=bool(payload.get("dry_run", False)),

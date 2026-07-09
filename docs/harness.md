@@ -369,11 +369,17 @@ Projects can define a non-secret editor command in `.giga/harness.toml`:
 ```toml
 [editor]
 command = "code"
+terminal_command = "auto"
 ```
 
 The command is parsed into argv and executed without a shell. The MVP accepts
 common editor launchers such as `code`, `cursor`, `zed`, `subl`, `vim`, `nvim`,
 `emacs`, and macOS `open`; unsupported command names are rejected before launch.
+`terminal_command = "auto"` selects the platform terminal. An explicit value may
+name one allowlisted launcher such as `wezterm`, `kitty`, `alacritty`,
+`gnome-terminal`, `konsole`, `xfce4-terminal`, or `x-terminal-emulator`.
+macOS also accepts `open -a Terminal`, `open -a iTerm`, or `open -a Warp`.
+Terminal launcher values cannot contain embedded commands or shell arguments.
 
 Open project context from the CLI:
 
@@ -381,6 +387,7 @@ Open project context from the CLI:
 giga open session <session_id>
 giga open run <run_id>
 giga open run <run_id> --diff
+giga open run <run_id> --terminal
 giga open file src/foo.py --workspace .
 giga open file src/foo.py --workspace . --line 42
 ```
@@ -390,8 +397,9 @@ without starting the editor.
 
 The browser UI exposes the same bridge in the `Editor` inspector tab. It can
 open the current project workspace, a run workspace/worktree, a generated diff
-file, or a workspace file. The tab also copies local `giga open session ...` and
-`giga open run ...` commands for reopening the same context.
+file, a terminal rooted in the selected run worktree, or a workspace file. The
+tab also copies local `giga open session ...` and `giga open run ...` commands
+for reopening the same context.
 
 The matching API surface is:
 
@@ -399,11 +407,13 @@ The matching API surface is:
 POST /api/editor/open-workspace
 POST /api/editor/open-file
 POST /api/editor/open-diff
+POST /api/editor/open-terminal
 ```
 
 `open-file` rejects paths outside the selected workspace. `open-diff` writes the
 stored run patch to `GPT2GIGA_HARNESS_DATA_DIR/editor/diffs/<run_id>.diff` before
-launching the editor.
+launching the editor. `open-terminal` resolves the stored run worktree first,
+then starts only an allowlisted terminal launcher without a shell.
 
 ## Built-in Harnesses
 

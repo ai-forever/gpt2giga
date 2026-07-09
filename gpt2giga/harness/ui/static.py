@@ -1004,6 +1004,7 @@ INDEX_HTML = """<!doctype html>
                 <button id="apply-run-diff-button" type="button" disabled>Apply</button>
                 <button id="discard-run-worktree-button" class="danger" type="button" disabled>Discard</button>
                 <button id="open-run-worktree-button" class="secondary" type="button" disabled>Open worktree</button>
+                <button id="open-run-terminal-button" class="secondary" type="button" disabled>Open terminal</button>
               </div>
               <pre id="diff-text">No diff captured.</pre>
             </div>
@@ -1030,6 +1031,7 @@ INDEX_HTML = """<!doctype html>
                 <button id="open-editor-workspace-button" type="button" disabled>Open workspace</button>
                 <button id="open-editor-run-button" class="secondary" type="button" disabled>Open run workspace</button>
                 <button id="open-editor-diff-button" class="secondary" type="button" disabled>Open diff</button>
+                <button id="open-editor-terminal-button" class="secondary" type="button" disabled>Open run terminal</button>
               </div>
               <div class="inline-actions">
                 <input id="open-editor-file-input" placeholder="workspace file" autocomplete="off">
@@ -3438,6 +3440,7 @@ INDEX_HTML = """<!doctype html>
       byId("apply-branch-input").disabled = !canApply;
       byId("discard-run-worktree-button").disabled = !canDiscard;
       byId("open-run-worktree-button").disabled = !(run && run.id && execution.worktree_path);
+      byId("open-run-terminal-button").disabled = !(run && run.id && execution.worktree_path);
     }
 
     function renderPrInspector(run) {
@@ -3498,6 +3501,7 @@ INDEX_HTML = """<!doctype html>
       byId("open-editor-workspace-button").disabled = !workspace;
       byId("open-editor-run-button").disabled = !runWorkspace;
       byId("open-editor-diff-button").disabled = !(hasRun && patch && patch !== "No diff captured.");
+      byId("open-editor-terminal-button").disabled = !runWorkspace;
       byId("open-editor-file-button").disabled = !workspace;
       byId("copy-session-open-command-button").disabled = !hasSession;
       byId("copy-run-open-command-button").disabled = !hasRun;
@@ -3505,7 +3509,7 @@ INDEX_HTML = """<!doctype html>
         `Project workspace: ${workspace || "-"}`,
         `Run workspace: ${runWorkspace || "-"}`,
         `Run diff: ${patch && patch !== "No diff captured." ? "available" : "unavailable"}`,
-        "Editor command comes from [editor].command in .giga/harness.toml."
+        "Editor and terminal commands come from [editor] in .giga/harness.toml."
       ];
       setText("editor-text", lines.join("\\n"));
     }
@@ -3657,6 +3661,17 @@ INDEX_HTML = """<!doctype html>
       renderEditorResult(result, "Open diff failed");
     }
 
+    async function openRunTerminal() {
+      const run = currentRun();
+      if (!run || !run.id) return;
+      const result = await getJson("/api/editor/open-terminal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ run_id: run.id })
+      });
+      renderEditorResult(result, "Open terminal failed");
+    }
+
     function renderEditorResult(result, fallback) {
       if (!result.ok) {
         setText("editor-text", result.data.detail || `${fallback} with HTTP ${result.status}`);
@@ -3665,7 +3680,7 @@ INDEX_HTML = """<!doctype html>
       }
       const editor = result.data.editor || {};
       setText("editor-text", pretty(editor));
-      setText("model-status", editor.executed ? `Opened editor for ${editor.target_path}.` : editor.command_display || "Editor command ready.");
+      setText("model-status", editor.executed ? `Opened ${editor.kind || "launcher"} for ${editor.target_path}.` : editor.command_display || "Editor command ready.");
       showTab("editor");
     }
 
@@ -4206,6 +4221,7 @@ INDEX_HTML = """<!doctype html>
       byId("apply-run-diff-button").addEventListener("click", applyRunDiff);
       byId("discard-run-worktree-button").addEventListener("click", discardRunWorktree);
       byId("open-run-worktree-button").addEventListener("click", openRunWorktree);
+      byId("open-run-terminal-button").addEventListener("click", openRunTerminal);
       byId("copy-pr-title-button").addEventListener("click", () => copyCurrentPrField("title", "Copied PR title."));
       byId("copy-pr-body-button").addEventListener("click", () => copyCurrentPrField("body", "Copied PR body."));
       byId("copy-pr-patch-button").addEventListener("click", () => copyCurrentPrField("patch", "Copied PR patch."));
@@ -4216,6 +4232,7 @@ INDEX_HTML = """<!doctype html>
       byId("open-editor-workspace-button").addEventListener("click", () => openEditorWorkspace(false));
       byId("open-editor-run-button").addEventListener("click", () => openEditorWorkspace(true));
       byId("open-editor-diff-button").addEventListener("click", openEditorDiff);
+      byId("open-editor-terminal-button").addEventListener("click", openRunTerminal);
       byId("open-editor-file-button").addEventListener("click", openEditorFile);
       byId("copy-session-open-command-button").addEventListener("click", copySessionOpenCommand);
       byId("copy-run-open-command-button").addEventListener("click", copyRunOpenCommand);

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+import shutil
 import shlex
 import subprocess
+import sys
 from typing import Any, Mapping
 
 from gpt2giga.harness.sessions.models import HarnessRun
 
 DEFAULT_EDITOR_COMMAND = "code"
+DEFAULT_TERMINAL_COMMAND = "auto"
 SUPPORTED_EDITOR_COMMANDS = {
     "atom",
     "code",
@@ -26,6 +29,19 @@ SUPPORTED_EDITOR_COMMANDS = {
     "vim",
     "zed",
 }
+SUPPORTED_TERMINAL_COMMANDS = {
+    "alacritty",
+    "foot",
+    "gnome-terminal",
+    "kitty",
+    "konsole",
+    "open",
+    "wezterm",
+    "wt",
+    "x-terminal-emulator",
+    "xfce4-terminal",
+}
+SUPPORTED_MACOS_TERMINAL_APPS = {"iTerm", "iTerm2", "Terminal", "Warp"}
 
 
 class EditorOpenError(ValueError):
@@ -64,6 +80,48 @@ def parse_editor_command(command: str | None = None) -> tuple[str, ...]:
         raise EditorOpenError(
             "Unsupported editor command. Supported commands: "
             f"{', '.join(sorted(SUPPORTED_EDITOR_COMMANDS))}"
+        )
+    return parts
+
+
+def parse_terminal_command(command: str | None = None) -> tuple[str, ...]:
+    """Parse a terminal launcher without allowing an embedded shell command."""
+    text = (command or DEFAULT_TERMINAL_COMMAND).strip()
+    if text == DEFAULT_TERMINAL_COMMAND:
+        return _default_terminal_command()
+    if not text:
+        raise EditorOpenError("Terminal command must not be empty.")
+    if any(ord(char) < 32 for char in text):
+        raise EditorOpenError("Terminal command must not contain control characters.")
+    try:
+        parts = tuple(shlex.split(text, posix=True))
+    except ValueError as exc:
+        raise EditorOpenError(f"Invalid terminal command: {exc}") from exc
+    if not parts:
+        raise EditorOpenError("Terminal command must not be empty.")
+    executable = Path(parts[0]).name
+    if executable not in SUPPORTED_TERMINAL_COMMANDS:
+        raise EditorOpenError(
+            "Unsupported terminal command. Supported commands: "
+            f"{', '.join(sorted(SUPPORTED_TERMINAL_COMMANDS))}"
+        )
+    if parts[0] != executable:
+        raise EditorOpenError(
+            "Terminal command must use an allowlisted launcher name without a path."
+        )
+    if executable == "open":
+        if (
+            len(parts) != 3
+            or parts[1] != "-a"
+            or parts[2] not in SUPPORTED_MACOS_TERMINAL_APPS
+        ):
+            raise EditorOpenError(
+                "macOS terminal command must be 'open -a' followed by one of: "
+                f"{', '.join(sorted(SUPPORTED_MACOS_TERMINAL_APPS))}"
+            )
+    elif len(parts) != 1:
+        raise EditorOpenError(
+            "Terminal command must contain only an allowlisted launcher name."
         )
     return parts
 
@@ -127,6 +185,27 @@ def build_open_run_workspace_plan(
     return build_open_workspace_plan(workspace, command=command)
 
 
+def build_open_terminal_plan(
+    workspace: str | Path,
+    *,
+    command: str | None = None,
+) -> EditorOpenPlan:
+    """Build a shell-free plan that opens a terminal in a workspace."""
+    path = Path(workspace).expanduser().resolve()
+    if not path.exists() or not path.is_dir():
+        raise EditorOpenError(f"Workspace does not exist: {path}")
+    command_parts = _terminal_command_for_workspace(
+        parse_terminal_command(command),
+        path,
+    )
+    return _plan(
+        kind="terminal",
+        target_path=path,
+        workspace=path,
+        command=command_parts,
+    )
+
+
 def build_open_diff_plan(
     run: HarnessRun,
     *,
@@ -172,7 +251,7 @@ def execute_editor_plan(
             start_new_session=True,
         )
     except OSError as exc:
-        raise EditorOpenError(f"Could not start editor: {exc}") from exc
+        raise EditorOpenError(f"Could not start {plan.kind} launcher: {exc}") from exc
     return replace(plan, dry_run=False, executed=True)
 
 
@@ -247,6 +326,46 @@ def _target_arg_for_editor(
 
 def _supports_goto(executable: str) -> bool:
     return Path(executable).name in {"code", "code-insiders", "codium", "cursor"}
+
+
+def _default_terminal_command() -> tuple[str, ...]:
+    if sys.platform == "darwin":
+        return ("open", "-a", "Terminal")
+    if sys.platform == "win32":
+        return ("wt",)
+    for executable in (
+        "x-terminal-emulator",
+        "gnome-terminal",
+        "konsole",
+        "xfce4-terminal",
+        "kitty",
+        "wezterm",
+        "alacritty",
+        "foot",
+    ):
+        if shutil.which(executable):
+            return (executable,)
+    return ("x-terminal-emulator",)
+
+
+def _terminal_command_for_workspace(
+    command: tuple[str, ...],
+    workspace: Path,
+) -> tuple[str, ...]:
+    executable = Path(command[0]).name
+    if executable == "open":
+        return (*command, str(workspace))
+    if executable in {"alacritty", "foot", "gnome-terminal", "xfce4-terminal"}:
+        return (*command, "--working-directory", str(workspace))
+    if executable == "kitty":
+        return (*command, "--directory", str(workspace))
+    if executable == "konsole":
+        return (*command, "--workdir", str(workspace))
+    if executable == "wezterm":
+        return (*command, "start", "--cwd", str(workspace))
+    if executable == "wt":
+        return (*command, "-d", str(workspace))
+    return command
 
 
 def _patch_for_run(run: HarnessRun) -> str:

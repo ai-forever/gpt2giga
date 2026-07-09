@@ -92,6 +92,48 @@ def test_editor_open_diff_api_writes_patch_file(tmp_path):
     ).read_text(encoding="utf-8")
 
 
+def test_editor_open_terminal_api_uses_run_worktree_dry_run(tmp_path):
+    store = InMemoryHarnessSessionStore()
+    workspace = tmp_path / "repo"
+    worktree = tmp_path / "worktree"
+    workspace.mkdir()
+    worktree.mkdir()
+    _write_editor_config(worktree, 'terminal_command = "kitty"\n')
+    session = store.create_session(title="Terminal", workspace=str(workspace))
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="edit",
+        model=None,
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="edit",
+        workspace=str(workspace),
+        status="succeeded",
+        metadata={
+            "workspace_execution": {
+                "policy": "worktree",
+                "worktree_path": str(worktree),
+                "source_workspace": str(workspace),
+            }
+        },
+    )
+    client = _client(tmp_path / "data", store=store)
+
+    response = client.post(
+        "/api/editor/open-terminal",
+        json={"run_id": run.id, "dry_run": True},
+    )
+
+    assert response.status_code == 200
+    editor = response.json()["editor"]
+    assert editor["kind"] == "terminal"
+    assert editor["target_path"] == str(worktree)
+    assert editor["workspace"] == str(worktree)
+    assert editor["command"] == ["kitty", "--directory", str(worktree)]
+    assert editor["executed"] is False
+
+
 def _client(
     data_dir,
     *,

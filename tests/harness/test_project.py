@@ -94,6 +94,8 @@ def test_init_project_config_writes_non_secret_template(tmp_path):
     assert "API_KEY" not in text
     assert "TOKEN" not in text
     assert config.defaults.harness == "codex-cli"
+    assert config.editor.command == "code"
+    assert config.editor.terminal_command == "auto"
     assert "plan" in config.presets
     assert config.tool_profiles["github"].enabled is False
     assert config.tool_profiles["postgres"].kind == "mcp"
@@ -117,6 +119,10 @@ mode = "read"
 
 [harnesses]
 enabled = ["echo", "direct-chat"]
+
+[editor]
+command = "cursor"
+terminal_command = "wezterm"
 
 [tools.github]
 enabled = true
@@ -170,6 +176,8 @@ ignore = [
     assert config.defaults.api_mode.value == "v1"
     assert config.defaults.mode == "read"
     assert config.enabled_harnesses == ("echo", "direct-chat")
+    assert config.editor.command == "cursor"
+    assert config.editor.terminal_command == "wezterm"
     assert config.presets["ask"].harness == "direct-chat"
     assert config.presets["ask"].api_mode.value == "v2"
     assert config.presets["ask"].prompt == "Ask {{project_name}}: {{user_prompt}}"
@@ -192,6 +200,7 @@ ignore = [
     assert config.attachments.ignore == (".env", "private/**")
     config_payload = project_config_to_dict(config)
     assert config_payload["defaults"]["api_mode"] == "v1"
+    assert config_payload["editor"]["terminal_command"] == "wezterm"
     assert config_payload["tools"]["github"]["config"]["header"] == "<redacted>"
 
 

@@ -4,6 +4,7 @@ from gpt2giga.harness.editor import (
     EditorOpenError,
     build_open_diff_plan,
     build_open_file_plan,
+    build_open_terminal_plan,
     editor_open_plan_to_dict,
     execute_editor_plan,
 )
@@ -50,6 +51,42 @@ def test_editor_rejects_unsupported_command(tmp_path):
 
     with pytest.raises(EditorOpenError, match="Unsupported editor command"):
         build_open_file_plan(workspace, "app.py", command="python -c print")
+
+
+def test_terminal_plan_uses_allowlisted_shell_free_launcher(tmp_path):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    plan = build_open_terminal_plan(workspace, command="wezterm")
+    payload = editor_open_plan_to_dict(execute_editor_plan(plan, dry_run=True))
+
+    assert payload["kind"] == "terminal"
+    assert payload["target_path"] == str(workspace)
+    assert payload["workspace"] == str(workspace)
+    assert payload["command"] == [
+        "wezterm",
+        "start",
+        "--cwd",
+        str(workspace),
+    ]
+    assert payload["executed"] is False
+
+
+def test_terminal_plan_rejects_embedded_command_arguments(tmp_path):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    with pytest.raises(EditorOpenError, match="only an allowlisted launcher"):
+        build_open_terminal_plan(
+            workspace,
+            command="wezterm start --cwd /tmp",
+        )
+
+    with pytest.raises(EditorOpenError, match="without a path"):
+        build_open_terminal_plan(
+            workspace,
+            command="/tmp/wezterm",
+        )
 
 
 def test_editor_diff_plan_writes_transparent_patch_file(tmp_path):
