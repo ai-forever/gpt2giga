@@ -595,7 +595,8 @@ INDEX_HTML = """<!doctype html>
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
         "Liberation Mono", monospace;
     }
-    .native-history-modal {
+    .native-history-modal,
+    .preflight-modal {
       position: fixed;
       z-index: 80;
       inset: 0;
@@ -604,10 +605,12 @@ INDEX_HTML = """<!doctype html>
       padding: 24px;
       background: rgb(0 0 0 / 0.58);
     }
-    .native-history-modal[hidden] {
+    .native-history-modal[hidden],
+    .preflight-modal[hidden] {
       display: none;
     }
-    .native-history-dialog {
+    .native-history-dialog,
+    .preflight-dialog {
       display: grid;
       grid-template-rows: auto minmax(0, 1fr) auto;
       width: min(760px, calc(100vw - 32px));
@@ -619,7 +622,9 @@ INDEX_HTML = """<!doctype html>
       overflow: hidden;
     }
     .native-history-header,
-    .native-history-footer {
+    .native-history-footer,
+    .preflight-header,
+    .preflight-footer {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -628,21 +633,37 @@ INDEX_HTML = """<!doctype html>
       padding: 12px;
       border-bottom: 1px solid var(--border);
     }
-    .native-history-footer {
+    .native-history-footer,
+    .preflight-footer {
       border-top: 1px solid var(--border);
       border-bottom: 0;
     }
-    .native-history-title {
+    .native-history-title,
+    .preflight-title {
       display: grid;
       gap: 4px;
     }
-    .native-session-list {
+    .native-session-list,
+    .preflight-list {
       display: grid;
       align-content: start;
       gap: 8px;
       min-height: 0;
       overflow: auto;
       padding: 12px;
+    }
+    .preflight-finding {
+      display: grid;
+      gap: 6px;
+      border: 1px solid #232830;
+      border-radius: 6px;
+      background: #111418;
+      padding: 8px;
+    }
+    .preflight-budget {
+      max-height: 160px;
+      min-height: 120px;
+      margin: 0 12px 12px;
     }
     .native-session-list .native-session-row {
       min-width: 0;
@@ -739,11 +760,13 @@ INDEX_HTML = """<!doctype html>
       .message {
         max-width: 100%;
       }
-      .native-history-modal {
+      .native-history-modal,
+      .preflight-modal {
         align-items: stretch;
         padding: 12px;
       }
-      .native-history-dialog {
+      .native-history-dialog,
+      .preflight-dialog {
         width: 100%;
         max-height: calc(100vh - 24px);
       }
@@ -1060,6 +1083,23 @@ INDEX_HTML = """<!doctype html>
         </div>
       </div>
     </div>
+    <div id="preflight-modal" class="preflight-modal" role="dialog" aria-modal="true" aria-labelledby="preflight-title" hidden>
+      <div class="preflight-dialog">
+        <div class="preflight-header">
+          <div class="preflight-title">
+            <h2 id="preflight-title">Preflight</h2>
+            <div id="preflight-status" class="status-line">Checking run context</div>
+          </div>
+          <button id="close-preflight-button" class="secondary" type="button" aria-label="Close preflight">Close</button>
+        </div>
+        <div id="preflight-finding-list" class="preflight-list"></div>
+        <pre id="preflight-budget" class="mono-panel preflight-budget">No preflight report.</pre>
+        <div class="preflight-footer">
+          <div id="preflight-footer-status" class="status-line">Review findings before running.</div>
+          <button id="continue-preflight-button" type="button">Continue anyway</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -1085,6 +1125,10 @@ INDEX_HTML = """<!doctype html>
       nativeSessions: [],
       nativeVisibleLimit: NATIVE_SESSION_PAGE_SIZE,
       nativeModalOpen: false,
+      preflightModalOpen: false,
+      preflightDecisionResolver: null,
+      pendingPreflight: null,
+      pendingPreflightPayload: null,
       selectedNativeRefId: null,
       nativePreview: null,
       activeNativeProcess: null,
@@ -2541,6 +2585,135 @@ INDEX_HTML = """<!doctype html>
         .filter(Boolean);
     }
 
+    async function confirmRunPreflight(payload) {
+      const result = await getJson("/api/preflight/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          session_id: state.currentSessionId || null
+        })
+      });
+      const body = result.data || {};
+      if (!result.ok || !body.preflight) {
+        setText("run-panel", body.detail || `Preflight failed with HTTP ${result.status}`);
+        showTab("run");
+        return false;
+      }
+      const report = body.preflight;
+      state.pendingPreflight = report;
+      state.pendingPreflightPayload = payload;
+      if (!Array.isArray(report.findings) || !report.findings.length) return true;
+      return openPreflightModal(report, payload);
+    }
+
+    function openPreflightModal(report, payload) {
+      renderPreflightModal(report, payload);
+      byId("preflight-modal").hidden = false;
+      state.preflightModalOpen = true;
+      return new Promise((resolve) => {
+        state.preflightDecisionResolver = resolve;
+      });
+    }
+
+    function closePreflightModal(allowRun = false) {
+      byId("preflight-modal").hidden = true;
+      state.preflightModalOpen = false;
+      const resolver = state.preflightDecisionResolver;
+      state.preflightDecisionResolver = null;
+      if (resolver) resolver(Boolean(allowRun));
+    }
+
+    function renderPreflightModal(report, payload) {
+      const findings = Array.isArray(report.findings) ? report.findings : [];
+      const hardBlock = report.hard_block === true || findings.some((finding) => finding.severity === "block");
+      setText("preflight-status", hardBlock ? "Hard block: remove blocked context first" : `${findings.length} warning${findings.length === 1 ? "" : "s"}`);
+      setText("preflight-footer-status", hardBlock ? "Blocked findings cannot be continued." : "Only warning-level findings can continue.");
+      byId("continue-preflight-button").hidden = hardBlock;
+      byId("continue-preflight-button").disabled = hardBlock;
+      setText("preflight-budget", preflightBudgetText(report.context_budget || {}));
+      const list = byId("preflight-finding-list");
+      list.textContent = "";
+      for (const finding of findings) {
+        list.appendChild(preflightFindingCard(finding));
+      }
+      if (!findings.length) {
+        const empty = document.createElement("div");
+        empty.className = "status-line";
+        empty.textContent = "No preflight findings.";
+        list.appendChild(empty);
+      }
+      setText("raw-request-panel", pretty({ ...payload, preflight: report }));
+    }
+
+    function preflightFindingCard(finding) {
+      const card = document.createElement("div");
+      card.className = "preflight-finding";
+      const badgeClass = finding.severity === "block" ? "badge error" : finding.severity === "warning" ? "badge warn" : "badge info";
+      card.innerHTML = `
+        <div class="tool-profile-title">
+          <span class="${badgeClass}">${escapeHtml(finding.severity || "info")}</span>
+          <span>${escapeHtml(finding.message || finding.code || "Preflight finding")}</span>
+        </div>
+        <div class="details">${escapeHtml(finding.subject || finding.workspace_path || finding.code || "")}</div>
+      `;
+      const actions = document.createElement("div");
+      actions.className = "inline-actions";
+      const allowedActions = Array.isArray(finding.actions) ? finding.actions : [];
+      if (finding.attachment_id && allowedActions.includes("exclude_attachment")) {
+        actions.appendChild(preflightActionButton("Exclude file", () => excludePreflightAttachment(finding.attachment_id)));
+      }
+      if (finding.attachment_id && finding.workspace_path && allowedActions.includes("send_path_only")) {
+        actions.appendChild(preflightActionButton("Send path only", () => sendPreflightPathOnly(finding.attachment_id, finding.workspace_path)));
+      }
+      if (actions.childNodes.length) card.appendChild(actions);
+      return card;
+    }
+
+    function preflightActionButton(label, handler) {
+      const button = document.createElement("button");
+      button.className = "secondary";
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", handler);
+      return button;
+    }
+
+    function excludePreflightAttachment(attachmentId) {
+      state.attachments = state.attachments.filter((attachment) => attachment.id !== attachmentId);
+      renderAttachments();
+      scheduleRouteRecommendation();
+      closePreflightModal(false);
+    }
+
+    function sendPreflightPathOnly(attachmentId, workspacePath) {
+      state.attachments = state.attachments.filter((attachment) => attachment.id !== attachmentId);
+      const prompt = byId("prompt-input");
+      const line = `Reference path only: @${workspacePath}`;
+      prompt.value = prompt.value.trim() ? `${prompt.value.trim()}\\n\\n${line}` : line;
+      renderAttachments();
+      scheduleRouteRecommendation();
+      closePreflightModal(false);
+    }
+
+    function preflightBudgetText(budget) {
+      const lines = [
+        `Estimated tokens: ${budget.total_estimated_tokens || 0}`,
+        `Prompt: ${budget.prompt_tokens || 0} tokens / ${budget.prompt_chars || 0} chars`,
+        `Project memory: ${budget.project_memory_count || 0} entries / ${budget.project_memory_tokens || 0} tokens`,
+        `Previous chat: ${budget.included_previous_message_count || 0}/${budget.previous_message_count || 0} messages / ${budget.previous_message_tokens || 0} tokens`,
+        `Attachments: ${budget.attached_file_count || 0} files / ${formatBytes(budget.attached_file_bytes || 0)} / ${budget.attachment_tokens || 0} estimated tokens`,
+        `Images: ${budget.image_count || 0} / ${formatBytes(budget.image_bytes || 0)}`
+      ];
+      const warnings = Array.isArray(budget.truncation_warnings) ? budget.truncation_warnings : [];
+      if (warnings.length) {
+        lines.push("");
+        lines.push("Truncation warnings:");
+        for (const warning of warnings) lines.push(`- ${warning}`);
+      }
+      return lines.join("\\n");
+    }
+
     function currentLastDiff() {
       const runs = state.currentBundle && Array.isArray(state.currentBundle.runs) ? state.currentBundle.runs : [];
       for (let index = runs.length - 1; index >= 0; index -= 1) {
@@ -2554,6 +2727,7 @@ INDEX_HTML = """<!doctype html>
     async function runHarness() {
       const payload = buildPayload();
       if (!payload.prompt.trim()) return;
+      if (!(await confirmRunPreflight(payload))) return;
       if (payload.invocation_mode === "native" && currentHarnessSupportsNative()) {
         await startNativeProcess(payload);
         return;
@@ -3592,8 +3766,14 @@ INDEX_HTML = """<!doctype html>
       byId("native-history-modal").addEventListener("click", (event) => {
         if (event.target === byId("native-history-modal")) closeNativeHistory();
       });
+      byId("preflight-modal").addEventListener("click", (event) => {
+        if (event.target === byId("preflight-modal")) closePreflightModal(false);
+      });
+      byId("close-preflight-button").addEventListener("click", () => closePreflightModal(false));
+      byId("continue-preflight-button").addEventListener("click", () => closePreflightModal(true));
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && state.nativeModalOpen) closeNativeHistory();
+        if (event.key === "Escape" && state.preflightModalOpen) closePreflightModal(false);
       });
       byId("native-all-workspaces-checkbox").addEventListener("change", () => loadNativeSessions(false, { resetVisible: true }));
       byId("poll-native-output-button").addEventListener("click", pollNativeOutput);

@@ -1,3 +1,4 @@
+import base64
 import subprocess
 import time
 from pathlib import Path
@@ -8,7 +9,10 @@ from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.project import project_id_for_root
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
-from gpt2giga.harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga.harness.sessions import (
+    FilesystemHarnessSessionStore,
+    InMemoryHarnessSessionStore,
+)
 from gpt2giga.harness.types import (
     Availability,
     HarnessCapability,
@@ -146,6 +150,84 @@ def test_sessions_api_start_run_returns_stream_urls_and_sse_replay():
 
     assert "run_started" in text
     assert "run_finished" in text
+
+
+def test_preflight_api_reports_large_attachment_warning(tmp_path):
+    data_dir = tmp_path / "data"
+    client = _client(
+        config=HarnessConfig(data_dir=str(data_dir)),
+        store=FilesystemHarnessSessionStore(data_dir),
+    )
+    created = client.post(
+        "/api/sessions",
+        json={"title": "Preflight", "harness_id": "echo"},
+    )
+    assert created.status_code == 200
+    session_id = created.json()["session"]["id"]
+    payload = base64.b64encode(b"a" * 1_000_001).decode("ascii")
+    attachment = client.post(
+        f"/api/sessions/{session_id}/attachments",
+        json={
+            "filename": "large.txt",
+            "mime_type": "text/plain",
+            "data_base64": payload,
+        },
+    )
+    assert attachment.status_code == 200
+    attachment_id = attachment.json()["attachment"]["id"]
+
+    response = client.post(
+        "/api/preflight/run",
+        json={
+            "session_id": session_id,
+            "harness_id": "echo",
+            "prompt": "review",
+            "attachment_ids": [attachment_id],
+        },
+    )
+
+    assert response.status_code == 200
+    preflight = response.json()["preflight"]
+    assert preflight["hard_block"] is False
+    assert preflight["context_budget"]["attached_file_bytes"] == 1_000_001
+    finding = next(
+        item for item in preflight["findings"] if item["code"] == "large_attachment"
+    )
+    assert finding["severity"] == "warning"
+    assert "continue" in finding["actions"]
+    assert "exclude_attachment" in finding["actions"]
+
+
+def test_preflight_api_hard_blocks_private_key_prompt_without_echoing_secret():
+    client = _client()
+    prompt = "-----BEGIN PRIVATE KEY-----\nnot-real-secret\n-----END PRIVATE KEY-----"
+
+    response = client.post(
+        "/api/preflight/run",
+        json={"harness_id": "echo", "prompt": prompt},
+    )
+
+    assert response.status_code == 200
+    preflight = response.json()["preflight"]
+    assert preflight["hard_block"] is True
+    assert "private_key_material" in {
+        finding["code"] for finding in preflight["findings"]
+    }
+    assert "not-real-secret" not in response.text
+
+
+def test_sessions_api_blocks_private_key_prompt_before_run():
+    client = _client()
+    prompt = "-----BEGIN PRIVATE KEY-----\nnot-real-secret\n-----END PRIVATE KEY-----"
+
+    response = client.post(
+        "/api/sessions/run",
+        json={"harness_id": "echo", "prompt": prompt},
+    )
+
+    assert response.status_code == 400
+    assert "Preflight blocked" in response.json()["detail"]
+    assert "not-real-secret" not in response.text
 
 
 def test_sessions_api_cancel_active_headless_run():

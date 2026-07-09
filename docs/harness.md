@@ -188,6 +188,30 @@ DELETE /api/project/memory/{memory_id}
 Memory text, tags, and metadata pass through the same secret-looking value
 redaction used by sessions and raw records before storage or API/UI output.
 
+### Run Preflight
+
+Session-backed runs pass through a local pre-run safety check before a harness is
+invoked. The report scans prompt text, enabled project memory, previous chat
+messages, and selected attachments for private-key material, token-looking
+values, credential assignments, `.env`-style files, deny-listed paths,
+git-ignored workspace files, and large attachments.
+
+Hard-block findings stop the run before `HarnessRun`, messages, raw requests,
+or external CLI processes are written. Warning findings are saved in
+`run.metadata.preflight`, included in the redacted raw request, and emitted as a
+warning event when a run continues. The browser UI calls the same check through:
+
+```text
+POST /api/preflight/run
+```
+
+The response includes `hard_block`, a list of findings with safe remediation
+actions, and a context budget estimate covering prompt length, enabled memory,
+attached files, image count/size, previous chat turns, and truncation warnings.
+For attachment findings, the UI can remove the file from the current composer
+selection or send only an `@path` reference. `Continue anyway` is shown only for
+warning-level findings, not hard blocks.
+
 ### Tool Profiles
 
 Projects can define non-secret tool profiles in `.giga/harness.toml`:
@@ -467,6 +491,7 @@ The UI is a chat-like harness cockpit with:
 - prompt input;
 - file and image attachments in the composer;
 - `@file` workspace references from the current project;
+- pre-run safety warnings and context budget estimates;
 - smart router recommendation badge with reasons and one-click apply;
 - user, assistant, and error messages in the selected session;
 - multi-harness arena comparison for running the same prompt against several

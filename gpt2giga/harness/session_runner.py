@@ -22,6 +22,11 @@ from gpt2giga.harness.project_memory import (
     memory_entries_to_context,
     memory_entries_to_prompt,
 )
+from gpt2giga.harness.preflight import (
+    PreflightBlockedError,
+    build_preflight_report,
+    preflight_report_to_dict,
+)
 from gpt2giga.harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
 from gpt2giga.harness.provenance import (
     build_run_provenance,
@@ -112,6 +117,39 @@ class HarnessSessionRunner:
         )
         self.memory_store = memory_store or FilesystemProjectMemoryStore()
 
+    def preflight(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        session_id: str | None = None,
+    ):
+        """Build a pre-run safety report without invoking a harness."""
+        session = self.store.get_session(session_id) if session_id is not None else None
+        options = self._run_options(payload, session=session)
+        previous_messages = (
+            ()
+            if session is None
+            or bool(_mapping(options["extra"]).get("isolated_history"))
+            else self.store.list_messages(session.id)
+        )
+        if options["attachment_ids"] and session is None:
+            raise ValueError("session_id is required for attachment preflight")
+        attachments = (
+            self._load_attachments(session.id, options["attachment_ids"])
+            if session is not None
+            else ()
+        )
+        project_memory = self._load_project_memory(options["workspace"])
+        return build_preflight_report(
+            prompt=options["prompt"],
+            workspace=options["workspace"],
+            previous_messages=previous_messages,
+            attachments=attachments,
+            project_memory=project_memory,
+            data_dir=self.config.data_dir,
+            max_history_messages=MAX_HISTORY_MESSAGES,
+        )
+
     def create_session(
         self,
         *,
@@ -200,6 +238,18 @@ class HarnessSessionRunner:
         project_memory_payload = (
             memory_entries_to_context(project_memory) if project_memory else None
         )
+        preflight = build_preflight_report(
+            prompt=options["prompt"],
+            workspace=options["workspace"],
+            previous_messages=previous_messages,
+            attachments=attachments,
+            project_memory=project_memory,
+            data_dir=self.config.data_dir,
+            max_history_messages=MAX_HISTORY_MESSAGES,
+        )
+        if preflight.hard_block:
+            raise PreflightBlockedError(preflight)
+        preflight_payload = preflight_report_to_dict(preflight)
         effective_prompt = _prompt_with_project_memory(
             options["prompt"],
             project_memory,
@@ -207,6 +257,7 @@ class HarnessSessionRunner:
         run_metadata: dict[str, Any] = {
             "invocation_mode": options["invocation_mode"].value,
             "native_resume": _native_resume_metadata(options["harness_id"]),
+            "preflight": preflight_payload,
         }
         if project_memory_payload:
             run_metadata["project_memory"] = project_memory_payload
@@ -294,6 +345,7 @@ class HarnessSessionRunner:
         request_extra["workspace_execution"] = workspace_execution.to_metadata()
         if project_memory_payload:
             request_extra["project_memory"] = project_memory_payload
+        request_extra["preflight"] = preflight_payload
         request = HarnessRequest(
             prompt=effective_prompt,
             model=options["model"],
@@ -340,6 +392,7 @@ class HarnessSessionRunner:
             raw_request["attachments"] = list(attachment_payloads)
         if attachment_render_plan_payload:
             raw_request["attachment_render_plan"] = attachment_render_plan_payload
+        raw_request["preflight"] = preflight_payload
         raw_request_record = self.store.append_raw_request(
             session_id=session.id,
             run_id=run.id,
@@ -354,8 +407,21 @@ class HarnessSessionRunner:
                 "message_count": len(request_messages),
                 "attachment_count": len(attachment_payloads),
                 "memory_count": len(project_memory),
+                "preflight_finding_count": len(preflight.findings),
             },
         )
+        if preflight.findings:
+            self._append_event(
+                session.id,
+                run.id,
+                HarnessEventType.WARNING.value,
+                "Preflight completed with warnings.",
+                {
+                    "max_severity": preflight.max_severity,
+                    "finding_count": len(preflight.findings),
+                    "codes": sorted({finding.code for finding in preflight.findings}),
+                },
+            )
         try:
             result = (
                 HarnessResult(ok=False, text="", error="Harness run canceled.")

@@ -1,9 +1,12 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.native import HarnessInvocationMode
+from gpt2giga.harness.preflight import PreflightBlockedError
 from gpt2giga.harness.project import project_id_for_root, resolve_project
 from gpt2giga.harness.project_memory import FilesystemProjectMemoryStore
 from gpt2giga.harness.registry import HarnessRegistry
@@ -47,6 +50,21 @@ def test_session_runner_create_and_run_persists_success():
         "message_completed",
         "run_finished",
     }
+    assert result.run.metadata["preflight"]["ok"] is True
+    assert result.run.metadata["preflight"]["context_budget"]["prompt_chars"] == 5
+    assert bundle.raw_requests[0].payload["preflight"]["ok"] is True
+
+
+def test_session_runner_blocks_private_key_before_harness_invocation():
+    harness = _CaptureHarness()
+    runner = _runner(harness)
+    prompt = "-----BEGIN PRIVATE KEY-----\nnot-real-secret\n-----END PRIVATE KEY-----"
+
+    with pytest.raises(PreflightBlockedError) as exc_info:
+        runner.create_and_run({"harness_id": "capture", "prompt": prompt})
+
+    assert harness.last_request is None
+    assert "private_key_material" in str(exc_info.value)
 
 
 def test_session_runner_failed_harness_stores_error_message():

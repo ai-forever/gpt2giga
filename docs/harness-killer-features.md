@@ -219,14 +219,14 @@ this status to choose the next vertical slice.
 | Slice 07: attachment API and composer UI | Implemented, except thumbnail generation and a separate thumbnail endpoint are still future work. |
 | Slice 08: per-harness attachment rendering | Implemented. |
 | Slice 09: worktree-safe edit/apply flow | Implemented as an MVP for headless external agent edit runs: `auto` policy creates an isolated git worktree, captures changed/untracked files and patch metadata, exposes diff/apply/discard/open-worktree endpoints, and wires Apply/Discard/Open controls into the Diff inspector. `temp_copy` remains a future fallback policy. |
-| Slice 10: multi-harness arena | Implemented as an MVP: `/api/arena/runs` creates a JSON parent record under `arenas/<arena_id>.json`, runs selected headless harnesses sequentially with isolated request history, links child `HarnessRun` ids, aggregates child events through `/api/arena/runs/{arena_id}/events/stream`, and renders side-by-side UI result cards. Parallel execution and arena cancellation remain future work. |
+| Slice 10: multi-harness arena | Implemented as an MVP: `/api/arena/runs` creates a JSON parent record under `arenas/{arena_id}.json`, runs selected headless harnesses sequentially with isolated request history, links child `HarnessRun` ids, aggregates child events through `/api/arena/runs/{arena_id}/events/stream`, and renders side-by-side UI result cards. Parallel execution and arena cancellation remain future work. |
 | Slice 11: smart router | Implemented as an MVP: `gpt2giga/harness/routing.py` scores available harnesses deterministically from prompt text, attachments, workspace/selected files, requested mode, and harness capabilities; `/api/route/recommendation` exposes the result; the UI shows a Recommended badge with reasons/warnings and one-click apply. Edit-looking prompts remain non-edit unless `edit` was already selected explicitly. |
 | Slice 12: presets and runbooks | Implemented as an MVP: presets support prompt templates, safe variables, workspace policy, API/CLI listing and rendering, CLI dry-run execution, and UI preset chips that prefill run controls. Multi-step runbook orchestration remains future work. |
-| Slice 13: tools/MCP profiles | Implemented as an MVP: `.giga/harness.toml` supports non-secret `[tools.<name>]` profiles; `/api/tools` and `/api/tools/sync` expose per-harness status plus redacted dry-run config previews; the UI has a Tools inspector tab. Actual external tool install/auth/config writes remain future work. |
-| Slice 14: issue/PR mode | Implemented as an MVP: every completed run stores `run.metadata.pr_artifact` with deterministic PR title/body/patch/changed-file data, `/api/runs/{run_id}/pr`, `/api/runs/{run_id}/patch`, and `/api/runs/{run_id}/branch` expose local artifact workflows, `giga run pr-summary|patch <run_id>` exports them from the CLI, and the UI has a PR inspector tab with copy actions plus guarded local branch creation. Hosted GitHub/GitLab writes remain future work. |
-| Slice 15: project memory and decision log | Implemented as an MVP: explicit memory entries are stored in `projects/<project_id>/memory.jsonl`, exposed through `/api/project/memory`, `giga memory`, and the UI Memory inspector, and enabled entries are injected into session runs with `run.metadata.project_memory` plus raw-request provenance. Automatic extraction and richer decision-log workflows remain future work. |
-| Slice 16: provenance and replay | Implemented as an MVP: completed session-backed runs store `run.metadata.provenance` with project/git, harness, request, redacted command/env, raw-record, event, attachment, and replay metadata; `/api/runs/{run_id}/provenance`, `/api/runs/{run_id}/replay`, and `/api/runs/{run_id}/fork` expose inspection and local replay/fork workflows; `giga run provenance|replay <run_id>` exposes the same from the CLI; the UI has a Provenance inspector tab. Richer time-travel replay, benchmark integration, and native terminal replay remain future work. |
-| Slice 17: secrets firewall and context budget inspector | Partially implemented through redaction and attachment safety checks. Pre-run scanner and budget inspector remain open. |
+| Slice 13: tools/MCP profiles | Implemented as an MVP: `.giga/harness.toml` supports non-secret `[tools.NAME]` profiles; `/api/tools` and `/api/tools/sync` expose per-harness status plus redacted dry-run config previews; the UI has a Tools inspector tab. Actual external tool install/auth/config writes remain future work. |
+| Slice 14: issue/PR mode | Implemented as an MVP: every completed run stores `run.metadata.pr_artifact` with deterministic PR title/body/patch/changed-file data, `/api/runs/{run_id}/pr`, `/api/runs/{run_id}/patch`, and `/api/runs/{run_id}/branch` expose local artifact workflows, `giga run pr-summary|patch RUN_ID` exports them from the CLI, and the UI has a PR inspector tab with copy actions plus guarded local branch creation. Hosted GitHub/GitLab writes remain future work. |
+| Slice 15: project memory and decision log | Implemented as an MVP: explicit memory entries are stored in `projects/PROJECT_ID/memory.jsonl`, exposed through `/api/project/memory`, `giga memory`, and the UI Memory inspector, and enabled entries are injected into session runs with `run.metadata.project_memory` plus raw-request provenance. Automatic extraction and richer decision-log workflows remain future work. |
+| Slice 16: provenance and replay | Implemented as an MVP: completed session-backed runs store `run.metadata.provenance` with project/git, harness, request, redacted command/env, raw-record, event, attachment, and replay metadata; `/api/runs/{run_id}/provenance`, `/api/runs/{run_id}/replay`, and `/api/runs/{run_id}/fork` expose inspection and local replay/fork workflows; `giga run provenance|replay RUN_ID` exposes the same from the CLI; the UI has a Provenance inspector tab. Richer time-travel replay, benchmark integration, and native terminal replay remain future work. |
+| Slice 17: secrets firewall and context budget inspector | Implemented as an MVP: `/api/preflight/run` scans prompt/history/memory/attachments, hard-blocks private keys and credential-looking content before run persistence or harness invocation, records warning-level reports in `run.metadata.preflight`, and surfaces context budget details plus attachment exclude/path-only remediation in the browser UI. |
 | Slice 18: local evals/benchmarks | Open. |
 | Slice 19: plugin/marketplace-ready harness format | Partially implemented through entry point loading and scaffold output. Metadata schema, validation, and UI config forms remain open. |
 | Slice 20: editor bridge | Open. |
@@ -265,10 +265,10 @@ opaque stores.
 
 ## Next Recommended Slice
 
-The highest-value next implementation slice is Slice 17 for the secrets
-firewall and context budget inspector: add a pre-run scanner for risky files
-and credential-looking content, surface context-size estimates before execution,
-and make hard blocks versus warnings explicit in the UI/API.
+The highest-value next implementation slice is Slice 18 for local evals and
+benchmark mode: add repeatable project eval specs, run selected harnesses
+against the same cases, persist scorecards, and expose CLI/UI comparison
+surfaces.
 
 Slice 03 can still be enriched later with richer per-harness stdout/message
 delta emission, Slice 10 can grow parallel execution and arena cancellation,
@@ -276,7 +276,8 @@ Slice 12 can later grow into multi-step runbook orchestration, Slice 13 can
 later add real opt-in tool config writes after an explicit safety review, Slice
 14 can later add hosted issue/PR integrations behind explicit user action, and
 Slice 15 can later add automatic memory suggestions after an explicit approval
-flow.
+flow. Slice 17 can later add deeper language-aware detectors and per-harness
+budget limits.
 
 ## Safety Rules
 

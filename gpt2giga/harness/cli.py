@@ -43,6 +43,11 @@ from gpt2giga.harness.project_memory import (
     ProjectMemoryNotFoundError,
     memory_entry_to_dict,
 )
+from gpt2giga.harness.preflight import (
+    build_preflight_report,
+    format_preflight_block_message,
+    preflight_report_to_dict,
+)
 from gpt2giga.harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
 from gpt2giga.harness.provenance import (
     build_replay_request,
@@ -968,6 +973,18 @@ def _run_harness(
         workspace=resolve_workspace(workspace),
         extra=_run_extra(dry_run=dry_run, workspace_policy=workspace_policy),
     )
+    preflight = build_preflight_report(
+        prompt=request.prompt,
+        workspace=request.workspace,
+        data_dir=config.data_dir,
+    )
+    if preflight.hard_block:
+        return HarnessResult(
+            ok=False,
+            text="",
+            raw={"preflight": preflight_report_to_dict(preflight)},
+            error=format_preflight_block_message(preflight),
+        )
     if native:
         if not spec.supports_native_sessions:
             return HarnessResult(

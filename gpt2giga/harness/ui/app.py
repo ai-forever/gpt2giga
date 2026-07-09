@@ -88,6 +88,12 @@ from gpt2giga.harness.project_memory import (
     ProjectMemoryNotFoundError,
     memory_entry_to_dict,
 )
+from gpt2giga.harness.preflight import (
+    PreflightBlockedError,
+    build_preflight_report,
+    format_preflight_block_message,
+    preflight_report_to_dict,
+)
 from gpt2giga.harness.pr_artifacts import (
     build_pr_artifact,
     create_pr_branch,
@@ -555,6 +561,23 @@ def create_app(
             "status_code": status.status_code,
             "error": status.error,
         }
+
+    @app.post("/api/preflight/run")
+    async def preflight_run(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            report = runner.preflight(
+                payload,
+                session_id=_optional_text(payload.get("session_id")),
+            )
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"preflight": preflight_report_to_dict(report)}
 
     @app.post("/api/route/recommendation")
     async def route_recommendation(
@@ -1682,6 +1705,16 @@ def create_app(
             workspace=resolve_workspace(_optional_text(payload.get("workspace"))),
             extra=extra,
         )
+        preflight = build_preflight_report(
+            prompt=request.prompt,
+            workspace=request.workspace,
+            data_dir=config.data_dir,
+        )
+        if preflight.hard_block:
+            raise HTTPException(
+                status_code=400,
+                detail=format_preflight_block_message(preflight),
+            )
         try:
             result = harness.run(request, config.to_context())
         except Exception as exc:
@@ -2073,6 +2106,15 @@ def _native_process_new_options(
         session.id,
         attachment_ids,
     )
+    preflight = build_preflight_report(
+        prompt=prompt,
+        workspace=workspace,
+        attachments=attachments,
+        data_dir=config.data_dir,
+    )
+    if preflight.hard_block:
+        raise PreflightBlockedError(preflight)
+    preflight_payload = preflight_report_to_dict(preflight)
     attachment_payloads = tuple(
         _native_attachment_metadata(attachment) for attachment in attachments
     )
@@ -2096,6 +2138,7 @@ def _native_process_new_options(
         attachment_payloads,
         attachment_render_plan_payload,
     )
+    extra["preflight"] = preflight_payload
     request = HarnessRequest(
         prompt=prompt,
         model=model,
@@ -2126,6 +2169,7 @@ def _native_process_new_options(
         "attachment_ids": attachment_ids,
         "attachments": attachment_payloads,
         "attachment_render_plan": attachment_render_plan_payload,
+        "preflight": preflight_payload,
     }
 
 
@@ -2221,6 +2265,9 @@ def _native_process_run_metadata(
     attachment_render_plan = options.get("attachment_render_plan")
     if isinstance(attachment_render_plan, Mapping):
         metadata["attachment_render_plan"] = dict(attachment_render_plan)
+    preflight = options.get("preflight")
+    if isinstance(preflight, Mapping):
+        metadata["preflight"] = dict(preflight)
     return metadata
 
 

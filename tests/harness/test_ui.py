@@ -270,6 +270,24 @@ def test_ui_run_rejects_invalid_capability_with_400():
     assert "capability" in response.json()["detail"].lower()
 
 
+def test_ui_run_blocks_private_key_prompt_without_echoing_secret():
+    app = create_app(
+        HarnessConfig(),
+        registry=create_default_registry(include_entry_points=False),
+    )
+    client = TestClient(app)
+    prompt = "-----BEGIN PRIVATE KEY-----\nnot-real-secret\n-----END PRIVATE KEY-----"
+
+    response = client.post(
+        "/api/run",
+        json={"harness_id": "echo", "prompt": prompt},
+    )
+
+    assert response.status_code == 400
+    assert "Preflight blocked" in response.json()["detail"]
+    assert "not-real-secret" not in response.text
+
+
 def test_ui_run_unknown_harness_returns_404():
     app = create_app(
         HarnessConfig(),
@@ -379,6 +397,13 @@ def test_ui_index_contains_control_panel_elements():
         "native-session-list",
         "load-more-native-button",
         "close-native-history-button",
+        "preflight-modal",
+        "preflight-status",
+        "preflight-finding-list",
+        "preflight-budget",
+        "preflight-footer-status",
+        "continue-preflight-button",
+        "close-preflight-button",
         "native-terminal-status",
         "native-process-summary",
         "native-terminal-output",
@@ -489,6 +514,13 @@ def test_ui_index_contains_control_panel_elements():
         "toolProfiles",
         "syncTools",
         "Storage",
+        "Preflight",
+        "Continue anyway",
+        "Checking run context",
+        "/api/preflight/run",
+        "confirmRunPreflight",
+        "Exclude file",
+        "Send path only",
         "Attach",
         "Cancel",
         "EventSource",
