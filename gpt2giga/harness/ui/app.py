@@ -105,6 +105,14 @@ from gpt2giga.harness.types import (
     spec_to_dict,
 )
 from gpt2giga.harness.ui.static import INDEX_HTML
+from gpt2giga.harness.worktrees import (
+    WorktreeConflictError,
+    WorktreeError,
+    apply_run_diff,
+    discard_run_worktree,
+    open_worktree_response,
+    run_diff_response,
+)
 from gpt2giga.harness.workspace import (
     resolve_workspace,
     workspace_file_metadata,
@@ -1032,6 +1040,96 @@ def create_app(
             "active": active is not None,
             "run": run_to_dict(run),
         }
+
+    @app.get("/api/runs/{run_id}/diff")
+    async def run_diff(run_id: str) -> dict[str, Any]:
+        try:
+            run = store.get_run(run_id)
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        return {"run": run_to_dict(run), "diff": run_diff_response(run.metadata)}
+
+    @app.post("/api/runs/{run_id}/apply")
+    async def apply_run_patch(
+        run_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            run = store.get_run(run_id)
+            workspace_execution = apply_run_diff(
+                run.metadata,
+                branch_name=_optional_text(payload.get("branch_name")),
+            )
+            metadata = {
+                **dict(run.metadata),
+                "workspace_execution": workspace_execution,
+            }
+            run = store.update_run(run.id, metadata=metadata)
+            store.append_event(
+                HarnessStoredEvent(
+                    id=new_id("evt"),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    type="worktree_applied",
+                    message="Applied isolated worktree diff to the source checkout.",
+                    payload={
+                        "changed_files": workspace_execution.get("changed_files", []),
+                        "applied_branch": workspace_execution.get("applied_branch"),
+                    },
+                    created_at=utc_now(),
+                )
+            )
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        except WorktreeConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except WorktreeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "applied": True,
+            "run": run_to_dict(run),
+            "diff": run_diff_response(run.metadata),
+        }
+
+    @app.post("/api/runs/{run_id}/discard")
+    async def discard_run_worktree_endpoint(run_id: str) -> dict[str, Any]:
+        try:
+            run = store.get_run(run_id)
+            workspace_execution = discard_run_worktree(run.metadata)
+            metadata = {
+                **dict(run.metadata),
+                "workspace_execution": workspace_execution,
+            }
+            run = store.update_run(run.id, metadata=metadata)
+            store.append_event(
+                HarnessStoredEvent(
+                    id=new_id("evt"),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    type="worktree_discarded",
+                    message="Discarded isolated worktree for this run.",
+                    payload={"worktree_path": workspace_execution.get("worktree_path")},
+                    created_at=utc_now(),
+                )
+            )
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        except WorktreeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "discarded": True,
+            "run": run_to_dict(run),
+            "diff": run_diff_response(run.metadata),
+        }
+
+    @app.post("/api/runs/{run_id}/open-worktree")
+    async def open_run_worktree(run_id: str) -> dict[str, Any]:
+        try:
+            run = store.get_run(run_id)
+            response = open_worktree_response(run.metadata)
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        return {"run": run_to_dict(run), "worktree": response}
 
     @app.post("/api/sessions/run")
     async def create_session_and_run(

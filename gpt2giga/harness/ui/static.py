@@ -803,6 +803,14 @@ INDEX_HTML = """<!doctype html>
                 <option value="edit">edit</option>
               </select>
             </label>
+            <label>Workspace policy
+              <select id="workspace-policy-select">
+                <option value="auto">auto</option>
+                <option value="current">current</option>
+                <option value="worktree">worktree</option>
+                <option value="temp_copy">temp copy</option>
+              </select>
+            </label>
             <label>Capability
               <select id="capability-select"></select>
             </label>
@@ -876,7 +884,15 @@ INDEX_HTML = """<!doctype html>
             <pre id="raw-request-panel" class="mono-panel tab-panel">{}</pre>
             <pre id="raw-response-panel" class="mono-panel tab-panel">{}</pre>
             <pre id="command-panel" class="mono-panel tab-panel">No command yet.</pre>
-            <pre id="diff-panel" class="mono-panel tab-panel">No diff captured.</pre>
+            <div id="diff-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <input id="apply-branch-input" placeholder="optional branch" autocomplete="off" disabled>
+                <button id="apply-run-diff-button" type="button" disabled>Apply</button>
+                <button id="discard-run-worktree-button" class="danger" type="button" disabled>Discard</button>
+                <button id="open-run-worktree-button" class="secondary" type="button" disabled>Open worktree</button>
+              </div>
+              <pre id="diff-text">No diff captured.</pre>
+            </div>
             <pre id="attachments-panel" class="mono-panel tab-panel">No attachments selected.</pre>
             <div id="native-panel" class="mono-panel tab-panel">
               <div class="badge-row">
@@ -1849,6 +1865,7 @@ INDEX_HTML = """<!doctype html>
         model: byId("model-input").value.trim() || null,
         api_mode: currentApiMode(),
         mode: byId("mode-select").value,
+        workspace_policy: byId("workspace-policy-select").value || "auto",
         workspace: byId("workspace-input").value.trim() || null
       };
     }
@@ -1882,7 +1899,7 @@ INDEX_HTML = """<!doctype html>
       setText("raw-request-panel", pretty(payload));
       setText("raw-response-panel", "{}");
       setText("command-panel", commandPreview(payload));
-      setText("diff-panel", "No diff captured.");
+      renderDiffInspector(null);
       byId("run-button").disabled = true;
       byId("run-button").textContent = "Running...";
       try {
@@ -1918,7 +1935,7 @@ INDEX_HTML = """<!doctype html>
       setText("raw-request-panel", pretty(payload));
       setText("raw-response-panel", "{}");
       setText("command-panel", commandPreview(payload));
-      setText("diff-panel", "No diff captured.");
+      renderDiffInspector(null);
       setText("run-panel", "Starting streamed run...");
       renderEvents([]);
       setHeadlessRunning(true);
@@ -2156,13 +2173,111 @@ INDEX_HTML = """<!doctype html>
       setText("raw-request-panel", rawRequests.length ? pretty(rawRequests[rawRequests.length - 1].payload) : "{}");
       setText("raw-response-panel", rawResponses.length ? pretty(rawResponses[rawResponses.length - 1].payload) : "{}");
       setText("command-panel", run && run.command && run.command.length ? run.command.join(" ") : commandPreview(state.lastPayload));
-      const diff = run && run.metadata ? run.metadata.diff : "";
-      setText("diff-panel", diff || "No diff captured.");
+      renderDiffInspector(run);
       setText("attachments-panel", run ? attachmentInspectorText(run, rawRequests[rawRequests.length - 1]) : "No attachments selected.");
       setNativeSummary(nativeInspectorText(bundle));
       setText("storage-panel", pretty(bundle.storage || {}));
       byId("pin-session-button").textContent = session && session.pinned ? "Unpin" : "Pin";
       byId("archive-session-button").textContent = session && session.archived ? "Unarchive" : "Archive";
+    }
+
+    function renderDiffInspector(run) {
+      const metadata = run && run.metadata ? run.metadata : {};
+      const execution = metadata.workspace_execution || {};
+      const patch = execution.patch || metadata.diff || "";
+      const changedFiles = Array.isArray(execution.changed_files) ? execution.changed_files : [];
+      const untrackedFiles = Array.isArray(execution.untracked_files) ? execution.untracked_files : [];
+      const lines = [];
+      if (run && run.id) lines.push(`Run: ${run.id}`);
+      if (execution.policy) lines.push(`Policy: ${execution.policy}`);
+      if (execution.requested_policy && execution.requested_policy !== execution.policy) {
+        lines.push(`Requested: ${execution.requested_policy}`);
+      }
+      if (execution.base_branch) lines.push(`Base branch: ${execution.base_branch}`);
+      if (execution.base_commit) lines.push(`Base commit: ${execution.base_commit}`);
+      if (execution.worktree_path) lines.push(`Worktree: ${execution.worktree_path}`);
+      if (execution.applied_at) lines.push(`Applied: ${execution.applied_at}`);
+      if (execution.discarded_at) lines.push(`Discarded: ${execution.discarded_at}`);
+      if (execution.fallback_reason) lines.push(`Fallback: ${execution.fallback_reason}`);
+      if (changedFiles.length) lines.push(`Changed files: ${changedFiles.join(", ")}`);
+      if (untrackedFiles.length) lines.push(`Untracked files: ${untrackedFiles.join(", ")}`);
+      const summary = lines.length ? lines.join("\n") : "No run selected.";
+      setText("diff-text", `${summary}\n\n${patch || "No diff captured."}`);
+      const canApply = Boolean(run && run.id && execution.policy === "worktree" && patch && patch !== "No diff captured." && !execution.applied_at && !execution.discarded_at);
+      const canDiscard = Boolean(run && run.id && execution.policy === "worktree" && !execution.discarded_at);
+      byId("apply-run-diff-button").disabled = !canApply;
+      byId("apply-branch-input").disabled = !canApply;
+      byId("discard-run-worktree-button").disabled = !canDiscard;
+      byId("open-run-worktree-button").disabled = !(run && run.id && execution.worktree_path);
+    }
+
+    function currentRun() {
+      const bundle = state.currentBundle || {};
+      const runs = Array.isArray(bundle.runs) ? bundle.runs : [];
+      return runs[runs.length - 1] || null;
+    }
+
+    async function refreshRunDiff(runId) {
+      const result = await getJson(`/api/runs/${encodeURIComponent(runId)}/diff`);
+      if (!result.ok) {
+        setText("diff-text", result.data.detail || `Diff request failed with HTTP ${result.status}`);
+        return null;
+      }
+      const run = result.data.run || null;
+      renderDiffInspector(run);
+      return run;
+    }
+
+    async function applyRunDiff() {
+      const run = currentRun();
+      if (!run || !run.id) return;
+      const branchName = byId("apply-branch-input").value.trim();
+      byId("apply-run-diff-button").disabled = true;
+      const result = await getJson(`/api/runs/${encodeURIComponent(run.id)}/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch_name: branchName || null })
+      });
+      if (!result.ok) {
+        setText("diff-text", result.data.detail || `Apply failed with HTTP ${result.status}`);
+        renderDiffInspector(run);
+        return;
+      }
+      setText("model-status", "Applied run diff.");
+      if (state.currentSessionId) await loadSession(state.currentSessionId);
+      await refreshRunDiff(run.id);
+    }
+
+    async function discardRunWorktree() {
+      const run = currentRun();
+      if (!run || !run.id) return;
+      byId("discard-run-worktree-button").disabled = true;
+      const result = await getJson(`/api/runs/${encodeURIComponent(run.id)}/discard`, {
+        method: "POST"
+      });
+      if (!result.ok) {
+        setText("diff-text", result.data.detail || `Discard failed with HTTP ${result.status}`);
+        renderDiffInspector(run);
+        return;
+      }
+      setText("model-status", "Discarded run worktree.");
+      if (state.currentSessionId) await loadSession(state.currentSessionId);
+      await refreshRunDiff(run.id);
+    }
+
+    async function openRunWorktree() {
+      const run = currentRun();
+      if (!run || !run.id) return;
+      const result = await getJson(`/api/runs/${encodeURIComponent(run.id)}/open-worktree`, {
+        method: "POST"
+      });
+      if (!result.ok) {
+        setText("diff-text", result.data.detail || `Open worktree failed with HTTP ${result.status}`);
+        return;
+      }
+      const worktree = result.data.worktree || {};
+      setText("model-status", worktree.exists ? `Worktree: ${worktree.path}` : "Worktree path is unavailable.");
+      await refreshRunDiff(run.id);
     }
 
     function nativeInspectorText(bundle) {
@@ -2494,6 +2609,15 @@ INDEX_HTML = """<!doctype html>
       return `'${text.replace(/'/g, "'\\\\''")}'`;
     }
 
+    function bindTabEvents() {
+      for (const tabs of document.querySelectorAll(".tabs")) {
+        tabs.addEventListener("click", (event) => {
+          const tab = event.target && event.target.closest ? event.target.closest(".tab") : null;
+          if (tab && tabs.contains(tab)) showTab(tab.dataset.tab);
+        });
+      }
+    }
+
     function escapeHtml(value) {
       return String(value == null ? "" : value)
         .replace(/&/g, "&amp;")
@@ -2503,6 +2627,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     function bindEvents() {
+      bindTabEvents();
       const composer = byId("composer");
       byId("refresh-health-button").addEventListener("click", refreshHealth);
       byId("refresh-models-button").addEventListener("click", loadModels);
@@ -2531,6 +2656,7 @@ INDEX_HTML = """<!doctype html>
       byId("api-mode-v1").addEventListener("change", () => { updateRouteNote(); loadModels(); persistProjectState(); });
       byId("api-mode-v2").addEventListener("change", () => { updateRouteNote(); loadModels(); persistProjectState(); });
       byId("mode-select").addEventListener("change", () => persistProjectState());
+      byId("workspace-policy-select").addEventListener("change", () => persistProjectState());
       byId("model-menu-button").addEventListener("click", toggleModelList);
       byId("model-input").addEventListener("focus", openModelList);
       byId("model-input").addEventListener("input", () => {
@@ -2558,6 +2684,9 @@ INDEX_HTML = """<!doctype html>
       });
       byId("run-button").addEventListener("click", runHarness);
       byId("cancel-run-button").addEventListener("click", cancelHeadlessRun);
+      byId("apply-run-diff-button").addEventListener("click", applyRunDiff);
+      byId("discard-run-worktree-button").addEventListener("click", discardRunWorktree);
+      byId("open-run-worktree-button").addEventListener("click", openRunWorktree);
       byId("reset-button").addEventListener("click", resetComposer);
       byId("attach-file-button").addEventListener("click", () => byId("attachment-file-input").click());
       byId("attachment-file-input").addEventListener("change", (event) => {
@@ -2614,9 +2743,6 @@ INDEX_HTML = """<!doctype html>
           .filter((file) => file && String(file.type || "").startsWith("image/"));
         if (files.length) attachFiles(files, "paste");
       });
-      for (const tab of document.querySelectorAll(".tab")) {
-        tab.addEventListener("click", () => showTab(tab.dataset.tab));
-      }
     }
 
     async function boot() {

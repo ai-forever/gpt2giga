@@ -1,4 +1,6 @@
+import subprocess
 import time
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -176,13 +178,94 @@ def test_sessions_api_cancel_active_headless_run():
     assert {"cancel_requested", "run_canceled", "run_finished"} <= event_types
 
 
+def test_runs_api_diff_apply_and_open_worktree(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    registry = HarnessRegistry()
+    registry.register(_FileEditHarness())
+    client = _client(
+        config=HarnessConfig(
+            default_model="ConfiguredModel",
+            data_dir=str(tmp_path / "data"),
+        ),
+        registry=registry,
+    )
+
+    response = client.post(
+        "/api/sessions/run",
+        json={
+            "harness_id": "edit-file",
+            "prompt": "change file",
+            "mode": "edit",
+            "workspace": str(repo),
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    run_id = body["run"]["id"]
+    assert (repo / "app.txt").read_text(encoding="utf-8") == "base\n"
+
+    diff = client.get(f"/api/runs/{run_id}/diff")
+
+    assert diff.status_code == 200
+    diff_body = diff.json()["diff"]
+    assert diff_body["can_apply"] is True
+    assert diff_body["workspace_execution"]["policy"] == "worktree"
+    assert "app.txt" in diff_body["changed_files"]
+    assert "diff --git a/app.txt b/app.txt" in diff_body["patch"]
+
+    opened = client.post(f"/api/runs/{run_id}/open-worktree")
+    assert opened.status_code == 200
+    assert opened.json()["worktree"]["exists"] is True
+
+    applied = client.post(f"/api/runs/{run_id}/apply", json={})
+
+    assert applied.status_code == 200
+    assert applied.json()["applied"] is True
+    assert applied.json()["diff"]["can_apply"] is False
+    assert (repo / "app.txt").read_text(encoding="utf-8") == "changed\n"
+
+
+def test_runs_api_discard_removes_worktree_without_touching_repo(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    registry = HarnessRegistry()
+    registry.register(_FileEditHarness())
+    client = _client(
+        config=HarnessConfig(data_dir=str(tmp_path / "data")),
+        registry=registry,
+    )
+
+    response = client.post(
+        "/api/sessions/run",
+        json={
+            "harness_id": "edit-file",
+            "prompt": "change file",
+            "mode": "edit",
+            "workspace": str(repo),
+        },
+    )
+    assert response.status_code == 200
+    run = response.json()["run"]
+    worktree_path = Path(run["metadata"]["workspace_execution"]["worktree_path"])
+    assert worktree_path.exists()
+
+    discarded = client.post(f"/api/runs/{run['id']}/discard")
+
+    assert discarded.status_code == 200
+    assert discarded.json()["discarded"] is True
+    assert discarded.json()["diff"]["can_discard"] is False
+    assert not worktree_path.exists()
+    assert (repo / "app.txt").read_text(encoding="utf-8") == "base\n"
+
+
 def _client(
     *,
+    config: HarnessConfig | None = None,
     registry: HarnessRegistry | None = None,
     store: InMemoryHarnessSessionStore | None = None,
 ) -> TestClient:
     app = create_app(
-        HarnessConfig(default_model="ConfiguredModel"),
+        config or HarnessConfig(default_model="ConfiguredModel"),
         registry=registry or create_default_registry(include_entry_points=False),
         store=store or InMemoryHarnessSessionStore(),
     )
@@ -216,3 +299,48 @@ class _CancellableHarness(BaseHarness):
                 return HarnessResult(ok=False, text="", error="cancelled")
             time.sleep(0.01)
         return HarnessResult(ok=True, text="finished")
+
+
+class _FileEditHarness(BaseHarness):
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="edit-file",
+            title="Edit File",
+            kind="agent-cli",
+            description="Edit a file in the workspace",
+            capabilities=(HarnessCapability.AGENT_CLI,),
+            supports_workspace=True,
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available("test")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        workspace = Path(request.workspace or "")
+        (workspace / "app.txt").write_text("changed\n", encoding="utf-8")
+        return HarnessResult(ok=True, text="edited")
+
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir()
+    _git(path, "init")
+    _git(path, "config", "user.email", "test@example.com")
+    _git(path, "config", "user.name", "Test User")
+    (path / "app.txt").write_text("base\n", encoding="utf-8")
+    _git(path, "add", "app.txt")
+    _git(path, "commit", "-m", "initial")
+    return path
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(
+        ("git", "-C", str(cwd), *args),
+        check=True,
+        capture_output=True,
+        text=True,
+    )

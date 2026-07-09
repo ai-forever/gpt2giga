@@ -308,7 +308,7 @@ The UI is a chat-like harness cockpit with:
 - model input with proxy-backed model suggestions when available;
 - explicit API mode selection: `v1` maps to `/v1/chat/completions`, and `v2`
   maps to `/v2/chat/completions`;
-- capability and mode selection;
+- capability, mode, and workspace execution policy selection;
 - optional workspace path for harnesses that declare workspace support;
 - dry-run and stream toggles where the selected harness supports them;
 - prompt input;
@@ -335,6 +335,47 @@ the Events inspector while the run is active. The Cancel button calls
 `/api/runs/{run_id}/cancel`; harnesses that observe the in-memory cancel token
 can stop cooperatively, while older blocking subprocess paths may continue until
 the subprocess returns.
+
+## Worktree-Safe Edit Flow
+
+Headless external agent runs in `edit` mode default to an isolated git worktree
+when the selected workspace is inside a git repository. The runner stores the
+original workspace on the session and passes the worktree path to the harness,
+so Codex CLI, Claude Code, and Gemini CLI can edit without mutating the user's
+current checkout.
+
+The workspace policy selector supports:
+
+- `auto`: use an isolated worktree for external agent `edit` runs in git
+  repositories, otherwise use the current workspace;
+- `current`: run in the selected workspace;
+- `worktree`: request an isolated git worktree and fall back with a recorded
+  warning when the workspace is not a git repository;
+- `temp_copy`: reserved for a future non-git copy policy; current MVP records a
+  fallback to the current workspace.
+
+Worktrees live under:
+
+```text
+GPT2GIGA_HARNESS_DATA_DIR/worktrees/<session_id>/<run_id>/
+```
+
+After an edit run, the Diff inspector shows the workspace policy, base branch,
+base commit, worktree path, changed files, untracked files, and captured patch.
+The UI calls:
+
+```text
+GET  /api/runs/{run_id}/diff
+POST /api/runs/{run_id}/apply
+POST /api/runs/{run_id}/discard
+POST /api/runs/{run_id}/open-worktree
+```
+
+`apply` is intentionally guarded: it refuses to patch the source checkout when
+the checkout has local changes or no longer points at the run's base commit.
+The optional branch field creates a new branch before applying when the target
+checkout is clean and still at the base commit. `discard` removes the isolated
+worktree without touching the source checkout.
 
 ## Project Cockpit Attachments
 
@@ -452,12 +493,14 @@ sessions/<year>/<month>/<session_id>/attachments.jsonl
 projects/<project_id>/state.json
 projects/<project_id>/attachments/<sha256>/original
 projects/<project_id>/attachments/<sha256>/metadata.json
+worktrees/<session_id>/<run_id>/
 ```
 
 Stored fields include session title, workspace path, selected harness, model,
 API mode, mode, prompts, assistant/error outputs, events, raw request/response
 metadata, command arrays, attachment metadata, render plans, per-project cockpit
-state, status, timestamps, and storage metadata.
+state, worktree execution metadata, captured edit patches, status, timestamps,
+and storage metadata.
 
 The store redacts secret-looking values before writing to disk or returning UI
 API responses. It must not store API keys, authorization headers, cookies,

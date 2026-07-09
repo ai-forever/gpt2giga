@@ -110,6 +110,9 @@ roadmap.
 - Redaction before storing raw request/response data.
 - UI inspector panels for run data, events, raw request, raw response, command,
   diff, attachments, storage, and native session/process data.
+- Worktree-safe edit metadata under `run.metadata.workspace_execution`, with
+  isolated worktree creation, changed/untracked file capture, patch storage,
+  guarded apply, discard cleanup, and open-worktree path responses.
 
 ### Attachments And Workspace References
 
@@ -155,7 +158,7 @@ this status to choose the next vertical slice.
 | Slice 06: attachment store | Implemented. |
 | Slice 07: attachment API and composer UI | Implemented, except thumbnail generation and a separate thumbnail endpoint are still future work. |
 | Slice 08: per-harness attachment rendering | Implemented. |
-| Slice 09: worktree-safe edit/apply flow | Open. Current edit mode can capture a bounded git diff after a run, but it does not yet isolate edits in a worktree or expose apply/discard endpoints. |
+| Slice 09: worktree-safe edit/apply flow | Implemented as an MVP for headless external agent edit runs: `auto` policy creates an isolated git worktree, captures changed/untracked files and patch metadata, exposes diff/apply/discard/open-worktree endpoints, and wires Apply/Discard/Open controls into the Diff inspector. `temp_copy` remains a future fallback policy. |
 | Slice 10: multi-harness arena | Open. |
 | Slice 11: smart router | Open. |
 | Slice 12: presets and runbooks | Partially implemented as config parsing and UI preset defaults; template variables, preset CLI execution, and runbook behavior remain open. |
@@ -187,6 +190,7 @@ Project and session state should remain transparent JSON/JSONL:
     state.json
     attachments/<sha256>/original
     attachments/<sha256>/metadata.json
+  worktrees/<session_id>/<run_id>/
   native/
     index.json
     codex/homes/<project_id>/
@@ -199,17 +203,13 @@ opaque stores.
 
 ## Next Recommended Slice
 
-The highest-value next implementation slice is Slice 09 for worktree-safe
-edit/apply flow:
+The highest-value next implementation slice is Slice 10 for the multi-harness
+arena:
 
-- add an execution policy for current workspace vs isolated git worktree vs temp
-  copy;
-- default external `edit` runs inside git repositories to an isolated worktree;
-- store base branch/commit, worktree path, changed files, patch, and untracked
-  files as run metadata/artifacts;
-- expose diff/apply/discard endpoints for runs;
-- add UI controls for changed files, patch review, apply, discard, and optional
-  branch creation.
+- create an arena parent object that links child runs for the same prompt;
+- start with sequential execution to reduce process and cancellation risk;
+- aggregate child run events into a parent stream;
+- render side-by-side result cards with per-run inspector links.
 
 Slice 03 can continue later with richer per-harness stdout/message delta
 emission, but the MVP stream/cancel contract is now in place.

@@ -1,3 +1,6 @@
+import subprocess
+from pathlib import Path
+
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.native import HarnessInvocationMode
@@ -120,6 +123,59 @@ def test_session_runner_persists_invocation_mode_metadata():
     assert result.bundle.raw_requests[0].payload["invocation_mode"] == "native"
 
 
+def test_session_runner_defaults_agent_edit_to_isolated_worktree(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    harness = _WorkspaceEditHarness()
+    runner = _runner(harness, data_dir=tmp_path / "data")
+
+    result = runner.create_and_run(
+        {
+            "harness_id": "edit-workspace",
+            "prompt": "change it",
+            "mode": "edit",
+            "workspace": str(repo),
+        }
+    )
+
+    assert harness.last_request is not None
+    assert harness.last_request.workspace != str(repo)
+    assert result.run.workspace == str(repo)
+    workspace_execution = result.run.metadata["workspace_execution"]
+    assert workspace_execution["requested_policy"] == "auto"
+    assert workspace_execution["policy"] == "worktree"
+    assert workspace_execution["source_git_root"] == str(repo)
+    assert workspace_execution["effective_workspace"] == harness.last_request.workspace
+    assert "app.txt" in workspace_execution["changed_files"]
+    assert "diff --git a/app.txt b/app.txt" in workspace_execution["patch"]
+    assert (repo / "app.txt").read_text(encoding="utf-8") == "base\n"
+
+
+def test_session_runner_edit_falls_back_for_non_git_workspace(tmp_path):
+    workspace = tmp_path / "plain"
+    workspace.mkdir()
+    (workspace / "app.txt").write_text("base\n", encoding="utf-8")
+    harness = _WorkspaceEditHarness()
+    runner = _runner(harness, data_dir=tmp_path / "data")
+
+    result = runner.create_and_run(
+        {
+            "harness_id": "edit-workspace",
+            "prompt": "change it",
+            "mode": "edit",
+            "workspace": str(workspace),
+        }
+    )
+
+    assert harness.last_request is not None
+    assert harness.last_request.workspace == str(workspace)
+    workspace_execution = result.run.metadata["workspace_execution"]
+    assert workspace_execution["policy"] == "current"
+    assert workspace_execution["fallback_reason"] == (
+        "workspace is not inside a git repository"
+    )
+    assert (workspace / "app.txt").read_text(encoding="utf-8") == "changed\n"
+
+
 def _runner(
     harness: BaseHarness,
     *,
@@ -189,3 +245,52 @@ class _FailingHarness(BaseHarness):
         context: HarnessContext,
     ) -> HarnessResult:
         return HarnessResult(ok=False, text="", error="boom")
+
+
+class _WorkspaceEditHarness(BaseHarness):
+    def __init__(self) -> None:
+        self.last_request: HarnessRequest | None = None
+
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="edit-workspace",
+            title="Edit Workspace",
+            kind="agent-cli",
+            description="Edit a workspace file",
+            capabilities=(HarnessCapability.AGENT_CLI,),
+            supports_workspace=True,
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available("test")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        self.last_request = request
+        workspace = Path(request.workspace or "")
+        (workspace / "app.txt").write_text("changed\n", encoding="utf-8")
+        return HarnessResult(ok=True, text="edited")
+
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir()
+    _git(path, "init")
+    _git(path, "config", "user.email", "test@example.com")
+    _git(path, "config", "user.name", "Test User")
+    (path / "app.txt").write_text("base\n", encoding="utf-8")
+    _git(path, "add", "app.txt")
+    _git(path, "commit", "-m", "initial")
+    return path
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(
+        ("git", "-C", str(cwd), *args),
+        check=True,
+        capture_output=True,
+        text=True,
+    )

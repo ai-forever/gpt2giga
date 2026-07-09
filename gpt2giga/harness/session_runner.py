@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import subprocess
 from typing import Any, Mapping
 
 from gpt2giga.harness.attachments import (
@@ -43,6 +42,11 @@ from gpt2giga.harness.types import (
     parse_api_mode,
     parse_capability,
     result_to_dict,
+)
+from gpt2giga.harness.worktrees import (
+    capture_workspace_diff,
+    parse_workspace_policy,
+    prepare_workspace_execution,
 )
 from gpt2giga.harness.workspace import resolve_workspace
 
@@ -198,6 +202,18 @@ class HarnessSessionRunner:
             started_at=utc_now(),
             metadata=run_metadata,
         )
+        workspace_execution = prepare_workspace_execution(
+            requested_policy=options["workspace_policy"],
+            harness_kind=options["harness_kind"],
+            mode=options["mode"],
+            workspace=options["workspace"],
+            data_dir=self.config.data_dir,
+            session_id=session.id,
+            run_id=run.id,
+            dry_run=bool(options["extra"].get("dry_run")),
+        )
+        run_metadata["workspace_execution"] = workspace_execution.to_metadata()
+        run = self.store.update_run(run.id, metadata=run_metadata)
         self.store.append_message(
             HarnessMessage(
                 id=new_id("msg"),
@@ -223,13 +239,32 @@ class HarnessSessionRunner:
                 "api_mode": options["api_mode"].value,
                 "mode": options["mode"],
                 "invocation_mode": options["invocation_mode"].value,
+                "workspace_policy": workspace_execution.policy.value,
+                "requested_workspace_policy": workspace_execution.requested_policy.value,
                 "attachment_count": len(attachment_payloads),
             },
         )
+        if workspace_execution.fallback_reason:
+            self._append_event(
+                session.id,
+                run.id,
+                HarnessEventType.WARNING.value,
+                "Workspace execution policy fell back to current workspace.",
+                {
+                    "requested_policy": workspace_execution.requested_policy.value,
+                    "fallback_reason": workspace_execution.fallback_reason,
+                },
+            )
         request_messages = self._build_request_messages(
             previous_messages,
             prompt=options["prompt"],
         )
+        request_extra = _request_extra(
+            options["extra"],
+            attachment_payloads,
+            attachment_render_plan_payload,
+        )
+        request_extra["workspace_execution"] = workspace_execution.to_metadata()
         request = HarnessRequest(
             prompt=options["prompt"],
             model=options["model"],
@@ -238,7 +273,7 @@ class HarnessSessionRunner:
             mode=options["mode"],
             invocation_mode=options["invocation_mode"],
             stream=options["stream"],
-            workspace=options["workspace"],
+            workspace=workspace_execution.request_workspace,
             messages=request_messages,
             attachments=attachment_payloads,
             attachment_render_plan=attachment_render_plan_payload,
@@ -246,11 +281,7 @@ class HarnessSessionRunner:
             run_id=run.id,
             native_session_id=options["native_session_id"],
             cancel_event=cancel_event,
-            extra=_request_extra(
-                options["extra"],
-                attachment_payloads,
-                attachment_render_plan_payload,
-            ),
+            extra=request_extra,
         )
         raw_request = {
             "harness_id": options["harness_id"],
@@ -262,6 +293,9 @@ class HarnessSessionRunner:
             "invocation_mode": options["invocation_mode"].value,
             "stream": options["stream"],
             "workspace": options["workspace"],
+            "effective_workspace": workspace_execution.request_workspace,
+            "workspace_policy": workspace_execution.policy.value,
+            "requested_workspace_policy": workspace_execution.requested_policy.value,
             "messages": [
                 {"role": message.role, "content": message.content}
                 for message in request_messages
@@ -369,12 +403,28 @@ class HarnessSessionRunner:
             {"role": role},
         )
         metadata = dict(run_metadata)
-        diff = _capture_git_diff(
-            options["workspace"], enabled=options["mode"] == "edit"
-        )
-        if diff is not None:
-            metadata["diff"] = diff
-            metadata["diff_captured"] = bool(diff.strip())
+        if options["mode"] == "edit":
+            workspace_diff = capture_workspace_diff(workspace_execution)
+            if workspace_diff is not None:
+                workspace_metadata = {
+                    **dict(metadata.get("workspace_execution", {})),
+                    **workspace_diff.to_metadata(),
+                }
+                metadata["workspace_execution"] = workspace_metadata
+                metadata["diff"] = workspace_diff.patch
+                metadata["diff_captured"] = workspace_diff.captured
+                if workspace_diff.captured:
+                    self._append_event(
+                        session.id,
+                        run.id,
+                        HarnessEventType.FILE_CHANGED.value,
+                        "Captured workspace diff.",
+                        {
+                            "changed_files": list(workspace_diff.changed_files),
+                            "untracked_files": list(workspace_diff.untracked_files),
+                            "workspace_policy": workspace_execution.policy.value,
+                        },
+                    )
         updated_run = self.store.update_run(
             run.id,
             status=status,
@@ -452,9 +502,13 @@ class HarnessSessionRunner:
         if "continue_native" in payload:
             extra["continue_native"] = bool(payload.get("continue_native"))
         attachment_ids = _attachment_ids(payload.get("attachment_ids"))
+        workspace_policy = parse_workspace_policy(
+            payload.get("workspace_policy") or extra.get("workspace_policy")
+        )
         return {
             "prompt": prompt,
             "harness_id": harness_id,
+            "harness_kind": spec.kind,
             "model": model,
             "api_mode": api_mode,
             "capability": capability,
@@ -465,6 +519,7 @@ class HarnessSessionRunner:
             "extra": extra,
             "native_session_id": _optional_text(payload.get("native_session_id")),
             "attachment_ids": attachment_ids,
+            "workspace_policy": workspace_policy,
         }
 
     def _build_request_messages(
@@ -597,36 +652,6 @@ def _request_extra(
     if attachment_render_plan:
         payload["attachment_render_plan"] = dict(attachment_render_plan)
     return payload
-
-
-def _capture_git_diff(workspace: str | None, *, enabled: bool) -> str | None:
-    if not enabled or workspace is None:
-        return None
-    try:
-        root = subprocess.run(
-            ["git", "-C", workspace, "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        if root.returncode != 0:
-            return "No diff captured."
-        diff = subprocess.run(
-            ["git", "-C", workspace, "diff", "--"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return "No diff captured."
-    if diff.returncode != 0:
-        return "No diff captured."
-    text = diff.stdout.strip()
-    if not text:
-        return "No diff captured."
-    return text[-20000:]
 
 
 def _cancel_requested(cancel_event: Any | None) -> bool:
