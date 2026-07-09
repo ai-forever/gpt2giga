@@ -314,6 +314,7 @@ The UI is a chat-like harness cockpit with:
 - prompt input;
 - file and image attachments in the composer;
 - `@file` workspace references from the current project;
+- smart router recommendation badge with reasons and one-click apply;
 - user, assistant, and error messages in the selected session;
 - multi-harness arena comparison for running the same prompt against several
   headless harnesses;
@@ -337,6 +338,40 @@ the Events inspector while the run is active. The Cancel button calls
 `/api/runs/{run_id}/cancel`; harnesses that observe the in-memory cancel token
 can stop cooperatively, while older blocking subprocess paths may continue until
 the subprocess returns.
+
+## Smart Router
+
+The browser UI calls a deterministic local router to recommend a harness for the
+current prompt, selected mode, workspace, selected files, and attachment
+metadata. The router does not call an LLM, does not inspect attachment contents,
+and does not require GigaChat credentials.
+
+The API surface is:
+
+```text
+POST /api/route/recommendation
+```
+
+The response contains:
+
+```json
+{
+  "recommendation": {
+    "harness_id": "codex-cli",
+    "mode": "plan",
+    "invocation_mode": "headless",
+    "confidence": 0.82,
+    "reasons": ["The prompt looks like project code work."],
+    "warnings": []
+  }
+}
+```
+
+Recommendations are advisory. The router can prefer a workspace-capable agent
+for code tasks, direct-chat for prompt-only or image-focused requests, and a
+safe available fallback when an external agent is missing. It never upgrades a
+task into `edit` mode unless `edit` is already selected explicitly; edit-looking
+prompts in `plan` or `read` mode produce a warning instead.
 
 ## Multi-Harness Arena
 

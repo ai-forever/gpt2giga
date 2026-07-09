@@ -81,6 +81,10 @@ from gpt2giga.harness.project import (
     update_project_state,
 )
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
+from gpt2giga.harness.routing import (
+    recommend_harness_route,
+    route_recommendation_to_dict,
+)
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
@@ -329,6 +333,29 @@ def create_app(
             "status_code": status.status_code,
             "error": status.error,
         }
+
+    @app.post("/api/route/recommendation")
+    async def route_recommendation(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            attachments = _route_recommendation_attachments(
+                payload,
+                attachment_store=attachment_store,
+            )
+            recommendation = recommend_harness_route(
+                registry,
+                prompt=str(payload.get("prompt") or ""),
+                mode=_optional_text(payload.get("mode")),
+                workspace=_optional_text(payload.get("workspace")),
+                attachments=attachments,
+                selected_files=_text_tuple(payload.get("selected_files")),
+            )
+        except AttachmentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Attachment not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"recommendation": route_recommendation_to_dict(recommendation)}
 
     @app.get("/api/sessions")
     async def sessions(
@@ -1334,6 +1361,44 @@ async def _wait_for_started_run(
 
 def _event_response(event: HarnessStoredEvent) -> dict[str, Any]:
     return event_to_dict(event)
+
+
+def _route_recommendation_attachments(
+    payload: Mapping[str, Any],
+    *,
+    attachment_store: FilesystemAttachmentStore,
+) -> tuple[Mapping[str, Any], ...]:
+    attachments: list[Mapping[str, Any]] = []
+    raw_attachments = payload.get("attachments")
+    if raw_attachments is not None:
+        if not isinstance(raw_attachments, list):
+            raise ValueError("attachments must be a list")
+        attachments.extend(
+            dict(item) for item in raw_attachments if isinstance(item, Mapping)
+        )
+    raw_ids = payload.get("attachment_ids")
+    if raw_ids is not None:
+        if not isinstance(raw_ids, list):
+            raise ValueError("attachment_ids must be a list")
+        for attachment_id in _text_tuple(raw_ids):
+            attachment = attachment_store.get_attachment(attachment_id)
+            attachment_payload = attachment_to_dict(attachment)
+            attachment_payload.pop("storage_path", None)
+            attachments.append(attachment_payload)
+    return tuple(attachments)
+
+
+def _text_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("expected a list of strings")
+    items: list[str] = []
+    for item in value:
+        text = _optional_text(item)
+        if text is not None:
+            items.append(text)
+    return tuple(items)
 
 
 def _sse_event(event: HarnessStoredEvent) -> str:

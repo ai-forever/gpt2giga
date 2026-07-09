@@ -132,6 +132,36 @@ def test_ui_models_uses_selected_versioned_endpoint_only(monkeypatch):
     }
 
 
+def test_ui_route_recommendation_endpoint_returns_safe_response():
+    app = create_app(
+        HarnessConfig(),
+        registry=create_default_registry(include_entry_points=False),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/route/recommendation",
+        json={
+            "prompt": "Explain this screenshot",
+            "mode": "read",
+            "attachments": [
+                {
+                    "kind": "image",
+                    "filename": "secret-token-screen.png",
+                    "mime_type": "image/png",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()["recommendation"]
+    assert body["harness_id"] == "direct-chat"
+    assert body["mode"] == "read"
+    assert body["invocation_mode"] == "headless"
+    assert "secret-token-screen.png" not in response.text
+
+
 def test_ui_can_run_echo_harness():
     app = create_app(
         HarnessConfig(),
@@ -366,6 +396,10 @@ def test_ui_index_contains_control_panel_elements():
         "proxy-status",
         "model-status",
         "harness-details",
+        "route-recommendation",
+        "route-recommendation-badge",
+        "route-recommendation-reasons",
+        "apply-route-recommendation-button",
         "output-panel",
         "run-panel",
         "arena-panel",
@@ -408,6 +442,9 @@ def test_ui_index_contains_control_panel_elements():
         "Stop process",
         "Arena",
         "Compare",
+        "Recommended",
+        "Apply recommendation",
+        "/api/route/recommendation",
         "Attachments",
         "Storage",
         "Attach",

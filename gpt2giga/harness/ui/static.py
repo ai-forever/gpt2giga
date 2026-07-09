@@ -527,6 +527,11 @@ INDEX_HTML = """<!doctype html>
     .warning {
       color: var(--amber);
     }
+    .route-recommendation {
+      display: grid;
+      gap: 6px;
+      min-height: 48px;
+    }
     .inspector-body {
       display: grid;
       gap: 10px;
@@ -856,6 +861,13 @@ INDEX_HTML = """<!doctype html>
             </div>
             <div id="harness-warning" class="warning span-4"></div>
             <div id="harness-details" class="details span-4"></div>
+            <div id="route-recommendation" class="route-recommendation span-4">
+              <div class="inline-actions">
+                <span id="route-recommendation-badge" class="badge info">Recommended: pending</span>
+                <button id="apply-route-recommendation-button" class="secondary" type="button" disabled>Apply recommendation</button>
+              </div>
+              <div id="route-recommendation-reasons" class="details">Type a prompt or attach context to refresh the recommendation.</div>
+            </div>
           </div>
         </div>
         <div id="output-panel" class="chat-scroll">
@@ -993,6 +1005,8 @@ INDEX_HTML = """<!doctype html>
       currentArena: null,
       activeHeadlessRun: null,
       headlessEventSource: null,
+      routeRecommendation: null,
+      routeRecommendationTimer: null,
       lastPayload: null
     };
 
@@ -1180,6 +1194,7 @@ INDEX_HTML = """<!doctype html>
       renderHarnessSelect();
       renderHarnessCards();
       chooseInitialHarness();
+      scheduleRouteRecommendation();
     }
 
     function renderHarnessSelect() {
@@ -1218,6 +1233,7 @@ INDEX_HTML = """<!doctype html>
         const extras = [];
         if (spec.supports_workspace) extras.push("workspace");
         if (spec.supports_streaming) extras.push("stream");
+        const recommended = state.routeRecommendation && state.routeRecommendation.harness_id === spec.id;
         const card = document.createElement("div");
         card.className = "harness-card";
         card.innerHTML = `
@@ -1225,6 +1241,7 @@ INDEX_HTML = """<!doctype html>
           <div class="session-meta">
             <span>${escapeHtml(spec.id || "")}</span>
             <span>${escapeHtml(availability.status || "unknown")}</span>
+            ${recommended ? '<span class="badge ok">Recommended</span>' : ''}
           </div>
           <div class="session-meta">
             <span>${escapeHtml(capabilities.join(", ") || "no capabilities")}</span>
@@ -1260,6 +1277,7 @@ INDEX_HTML = """<!doctype html>
       renderAttachments();
       const capabilities = Array.isArray(item.spec.capabilities) ? item.spec.capabilities.join(", ") : "";
       setText("harness-details", `${item.spec.title || harnessId} - ${item.spec.description || ""}${capabilities ? " Capabilities: " + capabilities : ""}`);
+      renderRouteRecommendation(state.routeRecommendation);
       loadNativeSessions(false);
       persistProjectState();
     }
@@ -1843,6 +1861,7 @@ INDEX_HTML = """<!doctype html>
       list.textContent = "";
       if (!state.attachments.length) {
         setText("attachment-status", "No attachments");
+        scheduleRouteRecommendation();
         return;
       }
       setText("attachment-status", `${state.attachments.length} attachment${state.attachments.length === 1 ? "" : "s"}`);
@@ -1864,6 +1883,7 @@ INDEX_HTML = """<!doctype html>
         card.appendChild(remove);
         list.appendChild(card);
       }
+      scheduleRouteRecommendation();
     }
 
     function attachmentWarning(attachment) {
@@ -1947,6 +1967,101 @@ INDEX_HTML = """<!doctype html>
       const attachmentIds = state.attachments.map((attachment) => attachment.id).filter(Boolean);
       if (attachmentIds.length) payload.attachment_ids = attachmentIds;
       return payload;
+    }
+
+    function buildRecommendationPayload() {
+      const attachments = state.attachments.map((attachment) => ({
+        id: attachment.id,
+        kind: attachment.kind,
+        filename: attachment.filename,
+        mime_type: attachment.mime_type,
+        size_bytes: attachment.size_bytes,
+        workspace_path: attachment.workspace_path || null,
+        source: attachment.source || null,
+        metadata: attachment.metadata || {}
+      }));
+      return {
+        prompt: byId("prompt-input").value,
+        mode: byId("mode-select").value,
+        workspace: byId("workspace-input").value.trim() || null,
+        current_harness_id: currentHarnessId(),
+        attachments,
+        selected_files: attachments.map((attachment) => attachment.workspace_path).filter(Boolean)
+      };
+    }
+
+    function scheduleRouteRecommendation() {
+      if (state.routeRecommendationTimer) clearTimeout(state.routeRecommendationTimer);
+      state.routeRecommendationTimer = window.setTimeout(refreshRouteRecommendation, 250);
+    }
+
+    async function refreshRouteRecommendation() {
+      if (!state.harnesses.length) return;
+      const payload = buildRecommendationPayload();
+      if (!payload.prompt.trim() && !payload.attachments.length && !payload.workspace) {
+        state.routeRecommendation = null;
+        renderRouteRecommendation(null);
+        return;
+      }
+      const result = await getJson("/api/route/recommendation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!result.ok || !result.data.recommendation) {
+        state.routeRecommendation = null;
+        setText("route-recommendation-badge", "Recommended: unavailable");
+        byId("route-recommendation-badge").className = "badge warn";
+        setText("route-recommendation-reasons", result.data.detail || "Recommendation failed.");
+        byId("apply-route-recommendation-button").disabled = true;
+        renderHarnessCards();
+        return;
+      }
+      state.routeRecommendation = result.data.recommendation;
+      renderRouteRecommendation(state.routeRecommendation);
+    }
+
+    function renderRouteRecommendation(recommendation) {
+      const badge = byId("route-recommendation-badge");
+      const applyButton = byId("apply-route-recommendation-button");
+      if (!recommendation) {
+        badge.className = "badge info";
+        badge.textContent = "Recommended: pending";
+        setText("route-recommendation-reasons", "Type a prompt or attach context to refresh the recommendation.");
+        applyButton.disabled = true;
+        renderHarnessCards();
+        return;
+      }
+      const current = recommendation.harness_id === currentHarnessId()
+        && recommendation.mode === byId("mode-select").value
+        && recommendation.invocation_mode === currentInvocationMode();
+      badge.className = current ? "badge ok" : "badge info";
+      const confidence = Math.round(Number(recommendation.confidence || 0) * 100);
+      badge.textContent = `Recommended: ${harnessTitle(recommendation.harness_id)} (${confidence}%)`;
+      const reasons = Array.isArray(recommendation.reasons) ? recommendation.reasons : [];
+      const warnings = Array.isArray(recommendation.warnings) ? recommendation.warnings : [];
+      const lines = [
+        ...reasons.map((reason) => `- ${reason}`),
+        ...warnings.map((warning) => `! ${warning}`)
+      ];
+      setText("route-recommendation-reasons", lines.join("\\n") || "No recommendation details.");
+      applyButton.disabled = current;
+      renderHarnessCards();
+    }
+
+    function applyRouteRecommendation() {
+      const recommendation = state.routeRecommendation;
+      if (!recommendation || !recommendation.harness_id) return;
+      selectHarness(recommendation.harness_id);
+      if (recommendation.mode && byId("mode-select").querySelector(`option[value="${recommendation.mode}"]`)) {
+        byId("mode-select").value = recommendation.mode;
+      }
+      if (recommendation.invocation_mode) {
+        byId("invocation-select").value = recommendation.invocation_mode;
+      }
+      updateHarnessDrivenControls();
+      renderRouteRecommendation(recommendation);
+      persistProjectState();
     }
 
     async function runHarness() {
@@ -2799,7 +2914,10 @@ INDEX_HTML = """<!doctype html>
       byId("refresh-models-button").addEventListener("click", loadModels);
       byId("init-project-button").addEventListener("click", initProject);
       byId("new-chat-button").addEventListener("click", newChat);
-      byId("harness-select").addEventListener("change", (event) => selectHarness(event.target.value));
+      byId("harness-select").addEventListener("change", (event) => {
+        selectHarness(event.target.value);
+        renderRouteRecommendation(state.routeRecommendation);
+      });
       byId("arena-harness-select").addEventListener("change", () => {
         state.arenaSelectionTouched = true;
       });
@@ -2824,8 +2942,16 @@ INDEX_HTML = """<!doctype html>
       byId("clear-native-terminal-button").addEventListener("click", clearNativeTerminal);
       byId("api-mode-v1").addEventListener("change", () => { updateRouteNote(); loadModels(); persistProjectState(); });
       byId("api-mode-v2").addEventListener("change", () => { updateRouteNote(); loadModels(); persistProjectState(); });
-      byId("mode-select").addEventListener("change", () => persistProjectState());
+      byId("mode-select").addEventListener("change", () => {
+        persistProjectState();
+        scheduleRouteRecommendation();
+      });
       byId("workspace-policy-select").addEventListener("change", () => persistProjectState());
+      byId("workspace-input").addEventListener("input", scheduleRouteRecommendation);
+      byId("workspace-input").addEventListener("change", () => {
+        persistProjectState();
+        scheduleRouteRecommendation();
+      });
       byId("model-menu-button").addEventListener("click", toggleModelList);
       byId("model-input").addEventListener("focus", openModelList);
       byId("model-input").addEventListener("input", () => {
@@ -2854,6 +2980,7 @@ INDEX_HTML = """<!doctype html>
       byId("run-button").addEventListener("click", runHarness);
       byId("compare-button").addEventListener("click", runArena);
       byId("cancel-run-button").addEventListener("click", cancelHeadlessRun);
+      byId("apply-route-recommendation-button").addEventListener("click", applyRouteRecommendation);
       byId("apply-run-diff-button").addEventListener("click", applyRunDiff);
       byId("discard-run-worktree-button").addEventListener("click", discardRunWorktree);
       byId("open-run-worktree-button").addEventListener("click", openRunWorktree);
@@ -2904,6 +3031,7 @@ INDEX_HTML = """<!doctype html>
       });
       byId("prompt-input").addEventListener("input", () => {
         searchWorkspaceFiles();
+        scheduleRouteRecommendation();
       });
       byId("prompt-input").addEventListener("paste", (event) => {
         const items = event.clipboardData && event.clipboardData.items ? Array.from(event.clipboardData.items) : [];
