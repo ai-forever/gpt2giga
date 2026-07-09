@@ -406,6 +406,47 @@ def test_runs_api_pr_artifact_patch_and_branch_creation(tmp_path):
     assert (repo / "app.txt").read_text(encoding="utf-8") == "changed\n"
 
 
+def test_runs_api_provenance_replay_and_fork():
+    client = _client()
+    response = client.post(
+        "/api/sessions/run",
+        json={"harness_id": "echo", "prompt": "hello provenance"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    session_id = body["session"]["id"]
+    run_id = body["run"]["id"]
+
+    provenance = client.get(f"/api/runs/{run_id}/provenance")
+
+    assert provenance.status_code == 200
+    provenance_body = provenance.json()["provenance"]
+    assert provenance_body["run_id"] == run_id
+    assert provenance_body["request"]["prompt"] == "hello provenance"
+    assert provenance_body["replay_request"]["prompt"] == "hello provenance"
+    assert provenance_body["replay_request"]["extra"]["isolated_history"] is True
+
+    replay = client.post(f"/api/runs/{run_id}/replay")
+
+    assert replay.status_code == 200
+    replay_body = replay.json()
+    assert replay_body["source_run"]["id"] == run_id
+    assert replay_body["result"]["text"] == "hello provenance"
+    assert replay_body["run"]["metadata"]["provenance"]["request"]["prompt"] == (
+        "hello provenance"
+    )
+    assert replay_body["session"]["id"] == session_id
+
+    fork = client.post(f"/api/runs/{run_id}/fork")
+
+    assert fork.status_code == 200
+    fork_body = fork.json()
+    assert fork_body["source_run"]["id"] == run_id
+    assert fork_body["session"]["id"] != session_id
+    assert fork_body["bundle"]["messages"][0]["content"] == "hello provenance"
+    assert fork_body["bundle"]["session"]["metadata"]["forked_from_run_id"] == run_id
+
+
 def _client(
     *,
     config: HarnessConfig | None = None,

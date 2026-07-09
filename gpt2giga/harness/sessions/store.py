@@ -552,7 +552,7 @@ def _patch_run(run: HarnessRun, patch: Mapping[str, Any]) -> HarnessRun:
         if key not in allowed:
             continue
         if key == "command":
-            value = tuple(str(item) for item in value)
+            value = tuple(str(redact_for_storage(item)) for item in value)
         elif key == "metadata":
             value = _redacted_mapping(value)
         elif key == "error":

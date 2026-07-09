@@ -960,6 +960,7 @@ INDEX_HTML = """<!doctype html>
               <button class="tab" type="button" data-tab="command">Command</button>
               <button class="tab" type="button" data-tab="diff">Diff</button>
               <button class="tab" type="button" data-tab="pr">PR</button>
+              <button class="tab" type="button" data-tab="provenance">Provenance</button>
               <button class="tab" type="button" data-tab="attachments">Attachments</button>
               <button class="tab" type="button" data-tab="memory">Memory</button>
               <button class="tab" type="button" data-tab="tools">Tools</button>
@@ -990,6 +991,14 @@ INDEX_HTML = """<!doctype html>
                 <button id="create-pr-branch-button" type="button" disabled>Create branch</button>
               </div>
               <pre id="pr-text">No PR artifact.</pre>
+            </div>
+            <div id="provenance-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <button id="refresh-provenance-button" class="secondary" type="button" disabled>Refresh provenance</button>
+                <button id="replay-run-button" type="button" disabled>Replay</button>
+                <button id="fork-run-button" class="secondary" type="button" disabled>Fork chat</button>
+              </div>
+              <pre id="provenance-text">No provenance selected.</pre>
             </div>
             <pre id="attachments-panel" class="mono-panel tab-panel">No attachments selected.</pre>
             <div id="memory-panel" class="mono-panel tab-panel">
@@ -2887,6 +2896,7 @@ INDEX_HTML = """<!doctype html>
       setText("command-panel", run && run.command && run.command.length ? run.command.join(" ") : commandPreview(state.lastPayload));
       renderDiffInspector(run);
       renderPrInspector(run);
+      renderProvenanceInspector(run);
       setText("attachments-panel", run ? attachmentInspectorText(run, rawRequests[rawRequests.length - 1]) : "No attachments selected.");
       setNativeSummary(nativeInspectorText(bundle));
       setText("storage-panel", pretty(bundle.storage || {}));
@@ -3007,6 +3017,23 @@ INDEX_HTML = """<!doctype html>
       byId("create-pr-branch-button").disabled = !canCreateBranch;
     }
 
+    function renderProvenanceInspector(run) {
+      const hasRun = Boolean(run && run.id);
+      byId("refresh-provenance-button").disabled = !hasRun;
+      byId("replay-run-button").disabled = !hasRun;
+      byId("fork-run-button").disabled = !hasRun;
+      if (!hasRun) {
+        setText("provenance-text", "No provenance selected.");
+        return;
+      }
+      const provenance = run.metadata && run.metadata.provenance ? run.metadata.provenance : null;
+      if (!provenance) {
+        setText("provenance-text", `Run: ${run.id}\\nProvenance snapshot is not stored yet. Refresh provenance to reconstruct it from session records.`);
+        return;
+      }
+      setText("provenance-text", pretty(provenance));
+    }
+
     function prArtifactFromRun(run) {
       if (!run || !run.id) return null;
       const metadata = run.metadata || {};
@@ -3125,6 +3152,69 @@ INDEX_HTML = """<!doctype html>
       const artifact = prArtifactFromRun(currentRun());
       if (!artifact) return;
       copyText(artifact[field] || "", status);
+    }
+
+    async function refreshRunProvenance() {
+      const run = currentRun();
+      if (!run || !run.id) return;
+      const result = await getJson(`/api/runs/${encodeURIComponent(run.id)}/provenance`);
+      if (!result.ok) {
+        setText("provenance-text", result.data.detail || `Provenance failed with HTTP ${result.status}`);
+        showTab("provenance");
+        return;
+      }
+      const provenance = result.data.provenance || {};
+      setText("provenance-text", pretty(provenance));
+      if (run.metadata) run.metadata.provenance = provenance;
+      showTab("provenance");
+    }
+
+    async function replayCurrentRun() {
+      const run = currentRun();
+      if (!run || !run.id) return;
+      byId("replay-run-button").disabled = true;
+      setText("provenance-text", `Replaying ${run.id}...`);
+      showTab("provenance");
+      const result = await getJson(`/api/runs/${encodeURIComponent(run.id)}/replay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stream: false })
+      });
+      if (!result.ok) {
+        setText("provenance-text", result.data.detail || `Replay failed with HTTP ${result.status}`);
+        renderProvenanceInspector(run);
+        return;
+      }
+      state.currentArena = null;
+      state.currentSessionId = result.data.session && result.data.session.id ? result.data.session.id : state.currentSessionId;
+      state.currentBundle = result.data;
+      state.attachments = [];
+      byId("prompt-input").value = "";
+      renderAll();
+      renderAttachments();
+      await loadSessions();
+      setText("model-status", "Replayed run.");
+      showTab("run");
+    }
+
+    async function forkCurrentRun() {
+      const run = currentRun();
+      if (!run || !run.id) return;
+      byId("fork-run-button").disabled = true;
+      setText("provenance-text", `Forking ${run.id}...`);
+      showTab("provenance");
+      const result = await getJson(`/api/runs/${encodeURIComponent(run.id)}/fork`, {
+        method: "POST"
+      });
+      if (!result.ok || !result.data.session) {
+        setText("provenance-text", result.data.detail || `Fork failed with HTTP ${result.status}`);
+        renderProvenanceInspector(run);
+        return;
+      }
+      await loadSession(result.data.session.id);
+      await loadSessions();
+      setText("model-status", "Forked run into a new chat.");
+      showTab("run");
     }
 
     function nativeInspectorText(bundle) {
@@ -3558,6 +3648,9 @@ INDEX_HTML = """<!doctype html>
       byId("copy-pr-body-button").addEventListener("click", () => copyCurrentPrField("body", "Copied PR body."));
       byId("copy-pr-patch-button").addEventListener("click", () => copyCurrentPrField("patch", "Copied PR patch."));
       byId("create-pr-branch-button").addEventListener("click", createPrBranch);
+      byId("refresh-provenance-button").addEventListener("click", refreshRunProvenance);
+      byId("replay-run-button").addEventListener("click", replayCurrentRun);
+      byId("fork-run-button").addEventListener("click", forkCurrentRun);
       byId("reset-button").addEventListener("click", resetComposer);
       byId("attach-file-button").addEventListener("click", () => byId("attachment-file-input").click());
       byId("attachment-file-input").addEventListener("change", (event) => {

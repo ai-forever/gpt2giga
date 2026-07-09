@@ -160,6 +160,13 @@ def test_session_runner_injects_enabled_project_memory(tmp_path):
     assert result.bundle.raw_requests[0].payload["original_prompt"] == (
         "plan database change"
     )
+    provenance = result.run.metadata["provenance"]
+    assert provenance["request"]["prompt"] == "plan database change"
+    assert provenance["request"]["prompt_was_augmented"] is True
+    assert provenance["request"]["project_memory"]["count"] == 1
+    assert provenance["replay_request"]["prompt"] == "plan database change"
+    assert provenance["replay_request"]["extra"]["isolated_history"] is True
+    assert provenance["project"]["id"] == project.id
 
 
 def test_session_runner_defaults_agent_edit_to_isolated_worktree(tmp_path):

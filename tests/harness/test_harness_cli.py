@@ -210,6 +210,40 @@ def test_cli_run_pr_summary_and_patch(capsys, tmp_path, monkeypatch):
     assert "diff --git a/app.txt b/app.txt" in patch_output
 
 
+def test_cli_run_provenance_and_replay(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    store = FilesystemHarnessSessionStore(tmp_path / "data")
+    session = store.create_session(title="Replay demo")
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="hello replay",
+        model="GigaChat-2-Max",
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=None,
+        status="succeeded",
+    )
+
+    provenance_code = cli.main(["run", "provenance", run.id, "--json"])
+    provenance = json.loads(capsys.readouterr().out)
+
+    assert provenance_code == 0
+    assert provenance["provenance"]["run_id"] == run.id
+    assert provenance["provenance"]["replay_request"]["prompt"] == "hello replay"
+
+    replay_code = cli.main(["run", "replay", run.id, "--json"])
+    replay = json.loads(capsys.readouterr().out)
+
+    assert replay_code == 0
+    assert replay["source_run"]["id"] == run.id
+    assert replay["result"]["text"] == "hello replay"
+    assert replay["run"]["metadata"]["provenance"]["request"]["prompt"] == (
+        "hello replay"
+    )
+
+
 def test_cli_chat_passes_api_mode_and_model(monkeypatch, capsys):
     captured = {}
 

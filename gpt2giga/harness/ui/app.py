@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import threading
 from typing import Any, Mapping
@@ -92,6 +92,11 @@ from gpt2giga.harness.pr_artifacts import (
     build_pr_artifact,
     create_pr_branch,
     pr_artifact_to_dict,
+)
+from gpt2giga.harness.provenance import (
+    build_replay_request,
+    build_run_provenance,
+    run_provenance_to_dict,
 )
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga.harness.routing import (
@@ -866,6 +871,19 @@ def create_app(
                 options=options,
                 process_ref=process_ref,
             )
+            provenance = _build_current_run_provenance(
+                store=store,
+                registry=registry,
+                config=config,
+                run=run,
+            )
+            run = store.update_run(
+                run.id,
+                metadata={
+                    **dict(run.metadata),
+                    "provenance": run_provenance_to_dict(provenance),
+                },
+            )
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except HTTPException:
@@ -1147,6 +1165,18 @@ def create_app(
             "cancel_url": f"/api/runs/{run.id}/cancel",
         }
 
+    def _run_provenance_response(run: HarnessRun) -> dict[str, Any]:
+        provenance = _build_current_run_provenance(
+            store=store,
+            registry=registry,
+            config=config,
+            run=run,
+        )
+        return {
+            "run": run_to_dict(run),
+            "provenance": run_provenance_to_dict(provenance),
+        }
+
     @app.post("/api/sessions/run/start")
     async def create_session_and_start_run(
         payload: dict[str, Any] = Body(...),
@@ -1314,6 +1344,55 @@ def create_app(
         return {
             "run": run_to_dict(run),
             "pr_artifact": pr_artifact_to_dict(artifact),
+        }
+
+    @app.get("/api/runs/{run_id}/provenance")
+    async def run_provenance(run_id: str) -> dict[str, Any]:
+        try:
+            run = store.get_run(run_id)
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        return _run_provenance_response(run)
+
+    @app.post("/api/runs/{run_id}/replay")
+    async def replay_run(
+        run_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            run = store.get_run(run_id)
+            raw_request = _latest_raw_request_for_run(store, run)
+            replay_payload = build_replay_request(run, raw_request=raw_request)
+            if "stream" in payload:
+                replay_payload["stream"] = bool(payload.get("stream"))
+            result = runner.run_in_session(run.session_id, replay_payload)
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        response = result.to_dict()
+        response["source_run"] = run_to_dict(run)
+        response["replay_request"] = replay_payload
+        return response
+
+    @app.post("/api/runs/{run_id}/fork")
+    async def fork_run(run_id: str) -> dict[str, Any]:
+        try:
+            run = store.get_run(run_id)
+            session = _fork_session_from_run(store, run)
+            bundle = store.get_session_bundle(session.id)
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        return {
+            "source_run": run_to_dict(run),
+            "session": _session_summary(store, session.id),
+            "bundle": bundle_to_dict(bundle),
         }
 
     @app.get("/api/runs/{run_id}/patch")
@@ -1622,6 +1701,96 @@ def validate_ui_bind(host: str, *, allow_remote: bool) -> None:
             "Refusing to bind UI to 0.0.0.0 without --allow-remote. "
             "The UI may expose local harness execution."
         )
+
+
+def _build_current_run_provenance(
+    *,
+    store: HarnessSessionStore,
+    registry: HarnessRegistry,
+    config: HarnessConfig,
+    run: HarnessRun,
+):
+    session = store.get_session(run.session_id)
+    try:
+        spec = registry.get(run.harness_id).spec()
+    except KeyError:
+        spec = None
+    return build_run_provenance(
+        run,
+        session=session,
+        spec=spec,
+        raw_requests=store.list_raw_requests(run.session_id),
+        raw_responses=store.list_raw_responses(run.session_id),
+        events=store.list_events(run.session_id, run_id=run.id),
+        data_dir=config.data_dir,
+    )
+
+
+def _latest_raw_request_for_run(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+):
+    records = [
+        record
+        for record in store.list_raw_requests(run.session_id)
+        if record.run_id == run.id
+    ]
+    return records[-1] if records else None
+
+
+def _fork_session_from_run(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+) -> HarnessSession:
+    source = store.get_session(run.session_id)
+    metadata = {
+        **dict(source.metadata),
+        "forked_from_session_id": source.id,
+        "forked_from_run_id": run.id,
+    }
+    fork = store.create_session(
+        title=f"Fork: {source.title}",
+        workspace=run.workspace or source.workspace,
+        default_harness_id=run.harness_id,
+        default_model=run.model,
+        default_api_mode=run.api_mode,
+        default_mode=run.mode,
+        metadata=metadata,
+    )
+    for message in _messages_through_run(store.list_messages(source.id), run.id):
+        store.append_message(
+            replace(
+                message,
+                id=new_id("msg"),
+                session_id=fork.id,
+                run_id=None,
+                created_at=utc_now(),
+                metadata={
+                    **dict(message.metadata),
+                    "forked_from_message_id": message.id,
+                    "forked_from_run_id": run.id,
+                },
+            )
+        )
+    return fork
+
+
+def _messages_through_run(
+    messages: tuple[HarnessMessage, ...],
+    run_id: str,
+) -> tuple[HarnessMessage, ...]:
+    selected: list[HarnessMessage] = []
+    seen_target_run = False
+    for message in messages:
+        selected.append(message)
+        if message.run_id == run_id:
+            seen_target_run = True
+            if message.role in {"assistant", "error"}:
+                break
+        elif seen_target_run:
+            selected.pop()
+            break
+    return tuple(selected)
 
 
 async def _wait_for_started_run(

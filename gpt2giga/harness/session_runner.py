@@ -23,6 +23,10 @@ from gpt2giga.harness.project_memory import (
     memory_entries_to_prompt,
 )
 from gpt2giga.harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
+from gpt2giga.harness.provenance import (
+    build_run_provenance,
+    run_provenance_to_dict,
+)
 from gpt2giga.harness.registry import HarnessRegistry
 from gpt2giga.harness.sessions.models import (
     HarnessMessage,
@@ -336,7 +340,7 @@ class HarnessSessionRunner:
             raw_request["attachments"] = list(attachment_payloads)
         if attachment_render_plan_payload:
             raw_request["attachment_render_plan"] = attachment_render_plan_payload
-        self.store.append_raw_request(
+        raw_request_record = self.store.append_raw_request(
             session_id=session.id,
             run_id=run.id,
             payload=raw_request,
@@ -370,7 +374,7 @@ class HarnessSessionRunner:
                 error="Harness run canceled.",
             )
 
-        self.store.append_raw_response(
+        raw_response_record = self.store.append_raw_response(
             session_id=session.id,
             run_id=run.id,
             payload=result_to_dict(result),
@@ -498,6 +502,20 @@ class HarnessSessionRunner:
             "Harness run finished.",
             {"status": status},
         )
+        provenance = build_run_provenance(
+            updated_run,
+            session=session,
+            spec=harness.spec(),
+            raw_requests=(raw_request_record,),
+            raw_responses=(raw_response_record,),
+            events=self.store.list_events(session.id, run_id=run.id),
+            data_dir=self.config.data_dir,
+        )
+        metadata = {
+            **dict(updated_run.metadata),
+            "provenance": run_provenance_to_dict(provenance),
+        }
+        updated_run = self.store.update_run(run.id, metadata=metadata)
         session_patch: dict[str, Any] = {
             "default_harness_id": options["harness_id"],
             "default_model": options["model"],

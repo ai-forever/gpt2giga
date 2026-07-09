@@ -44,7 +44,13 @@ from gpt2giga.harness.project_memory import (
     memory_entry_to_dict,
 )
 from gpt2giga.harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
+from gpt2giga.harness.provenance import (
+    build_replay_request,
+    build_run_provenance,
+    run_provenance_to_dict,
+)
 from gpt2giga.harness.registry import UnknownHarnessError, create_default_registry
+from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
     RunNotFoundError,
@@ -448,12 +454,12 @@ def _handle_chat(args: argparse.Namespace, config: HarnessConfig) -> int:
 
 def _handle_run_command(args: argparse.Namespace, config: HarnessConfig) -> int:
     action = args.prompt[0] if args.prompt else None
-    if args.agent is None and action in {"patch", "pr-summary"}:
+    if args.agent is None and action in {"patch", "pr-summary", "provenance", "replay"}:
         return _handle_run_artifact(args, config)
     if args.agent is None:
         print(
             "giga run requires --agent codex|claude|gemini or "
-            "patch|pr-summary <run_id>",
+            "patch|pr-summary|provenance|replay <run_id>",
             file=sys.stderr,
         )
         return 2
@@ -488,6 +494,49 @@ def _handle_run_artifact(args: argparse.Namespace, config: HarnessConfig) -> int
     action, run_id = args.prompt
     store = FilesystemHarnessSessionStore(config.data_dir)
     run = store.get_run(run_id)
+    if action == "replay":
+        registry = create_default_registry()
+        raw_request = _latest_raw_request_for_run(store, run)
+        replay_payload = build_replay_request(run, raw_request=raw_request)
+        runner = HarnessSessionRunner(registry=registry, config=config, store=store)
+        result = runner.run_in_session(run.session_id, replay_payload)
+        if args.json:
+            payload = result.to_dict()
+            payload["source_run"] = run_to_dict(run)
+            payload["replay_request"] = replay_payload
+            _print_json(payload)
+        else:
+            _print_result(result.result, as_json=False)
+        return 0 if result.result.ok else 1
+    if action == "provenance":
+        registry = create_default_registry()
+        session = store.get_session(run.session_id)
+        try:
+            spec = registry.get(run.harness_id).spec()
+        except UnknownHarnessError:
+            spec = None
+        provenance = build_run_provenance(
+            run,
+            session=session,
+            spec=spec,
+            raw_requests=store.list_raw_requests(run.session_id),
+            raw_responses=store.list_raw_responses(run.session_id),
+            events=store.list_events(run.session_id, run_id=run.id),
+            data_dir=config.data_dir,
+        )
+        payload = {
+            "run": run_to_dict(run),
+            "provenance": run_provenance_to_dict(provenance),
+        }
+        if args.json:
+            _print_json(payload)
+        else:
+            print(f"Run: {run.id}")
+            print(f"Harness: {run.harness_id}")
+            print(f"Status: {run.status}")
+            print(f"Workspace: {run.workspace or '-'}")
+            print(f"Replay: giga run replay {run.id}")
+        return 0
     artifact = build_pr_artifact(run)
     artifact_payload = pr_artifact_to_dict(artifact)
     if action == "patch":
@@ -1074,6 +1123,18 @@ def _project_id_for_workspace(
         data_dir=config.data_dir,
         load_config_name=False,
     ).id
+
+
+def _latest_raw_request_for_run(
+    store: FilesystemHarnessSessionStore,
+    run,
+):
+    records = [
+        record
+        for record in store.list_raw_requests(run.session_id)
+        if record.run_id == run.id
+    ]
+    return records[-1] if records else None
 
 
 def _print_native_table(rows: list[dict[str, Any]]) -> None:

@@ -251,6 +251,36 @@ POST /api/runs/{run_id}/branch
 `POST /api/runs/{run_id}/branch` accepts an optional `branch_name`; otherwise
 the artifact's safe branch-name suggestion is used.
 
+### Run Provenance And Replay
+
+Completed session-backed runs store a redacted provenance snapshot in
+`run.metadata.provenance`. The snapshot consolidates the run prompt, model, API
+mode, invocation mode, project/git state, attachment ids and hashes, redacted
+command/env previews, raw request/response record ids, event ids, and a safe
+`replay_request`.
+
+Inspect or replay a run from the CLI:
+
+```bash
+giga run provenance <run_id>
+giga run provenance <run_id> --json
+giga run replay <run_id>
+giga run replay <run_id> --json
+```
+
+The browser UI exposes the same data in the `Provenance` inspector tab. `Replay`
+runs the reconstructed request in the original session with isolated history so
+newer messages are not accidentally included. `Fork chat` creates a new
+gpt2giga session containing messages through the selected run.
+
+The matching API surface is:
+
+```text
+GET  /api/runs/{run_id}/provenance
+POST /api/runs/{run_id}/replay
+POST /api/runs/{run_id}/fork
+```
+
 ## Built-in Harnesses
 
 | Harness | Status | Purpose |
@@ -441,8 +471,8 @@ The UI is a chat-like harness cockpit with:
 - user, assistant, and error messages in the selected session;
 - multi-harness arena comparison for running the same prompt against several
   headless harnesses;
-- run, arena, events, raw request, raw response, command, diff, attachments, and
-  storage inspector panels;
+- run, arena, events, raw request, raw response, command, diff, PR,
+  provenance, attachments, and storage inspector panels;
 - copy buttons for the equivalent CLI command and direct-chat curl command.
 
 Echo runs entirely locally and does not require credentials. Direct-chat sends
@@ -686,8 +716,9 @@ worktrees/<session_id>/<run_id>/
 Stored fields include session title, workspace path, selected harness, model,
 API mode, mode, prompts, assistant/error outputs, events, raw request/response
 metadata, command arrays, attachment metadata, render plans, per-project cockpit
-state, worktree execution metadata, captured edit patches, status, timestamps,
-and storage metadata.
+state, worktree execution metadata, captured edit patches, PR artifacts,
+provenance snapshots, replay payloads, status, timestamps, and storage
+metadata.
 
 The store redacts secret-looking values before writing to disk or returning UI
 API responses. It must not store API keys, authorization headers, cookies,
