@@ -278,6 +278,7 @@ def _job_summary(
     )
     run_payload = _lightweight_run_summary(run) if run is not None else None
     artifacts = _artifact_summary(run)
+    workflow = _workflow_team_summary(runtime_store, job)
     return {
         "job": job_to_dict(job),
         "run": run_payload,
@@ -296,6 +297,7 @@ def _job_summary(
         ),
         "metrics": _selected_metrics(run),
         "artifacts": artifacts,
+        "workflow": workflow,
         "actions": {
             "open_task": f"/work/{job.session_id}",
             "open_run": f"/runs/{run_id}",
@@ -311,6 +313,65 @@ def _job_summary(
             if artifacts["pr"]
             else (f"/api/runs/{run_id}/diff" if artifacts["diff"] else None),
         },
+    }
+
+
+def _workflow_team_summary(
+    runtime_store: RuntimeCoordinationStore, job: RuntimeJob
+) -> dict[str, Any] | None:
+    if not job.workflow_id:
+        return None
+    from gpt2giga.harness.workflows import WorkflowRepository
+
+    repository = WorkflowRepository(runtime_store)
+    try:
+        workflow = repository.get_run(job.workflow_id)
+        steps = repository.list_steps(workflow.id)
+    except KeyError:
+        return None
+    items: list[dict[str, Any]] = []
+    active_steps: list[str] = []
+    for step in steps:
+        snapshot = dict(step.snapshot)
+        outputs = dict(step.outputs)
+        agent = outputs.get("agent")
+        agent = dict(agent) if isinstance(agent, Mapping) else {}
+        child_run_id = str(outputs.get("run_id") or "") or None
+        if step.status in {"queued", "running", "waiting_approval"}:
+            active_steps.append(step.step_id)
+        items.append(
+            {
+                "id": step.step_id,
+                "title": str(snapshot.get("title") or step.step_id),
+                "kind": step.kind.value,
+                "status": step.status,
+                "depends_on": list(snapshot.get("depends_on") or ()),
+                "agent": agent or None,
+                "job_id": step.job_id,
+                "run_id": child_run_id,
+                "artifact_count": len(step.artifact_refs),
+                "summary_available": bool(outputs.get("summary")),
+                "actions": {
+                    "open_task": f"/work/{workflow.session_id}",
+                    "open_run": f"/runs/{child_run_id}" if child_run_id else None,
+                },
+            }
+        )
+    completed = sum(
+        item["status"] in {"succeeded", "failed", "canceled", "skipped"}
+        for item in items
+    )
+    return {
+        "id": workflow.id,
+        "definition_id": workflow.workflow_id,
+        "definition_hash": workflow.definition_hash,
+        "status": workflow.status.value,
+        "session_id": workflow.session_id,
+        "max_concurrency": workflow.max_concurrency,
+        "active_steps": active_steps,
+        "completed_steps": completed,
+        "total_steps": len(items),
+        "steps": items,
     }
 
 

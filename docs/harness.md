@@ -223,7 +223,7 @@ after reviewing the filled request.
 Project agents are reusable role/configuration profiles over existing harnesses.
 They live in `.giga/agents/*.yaml`; `giga init` creates Planner, Explorer,
 Implementer, Reviewer, Test Runner, and Release Assistant starters. Profiles can
-bind instructions, harness/model/route, context and memory selectors, MCP tool
+bind instructions, harness/model/reasoning effort/route, context and memory selectors, MCP tool
 descriptor ids, permission/workspace policy, budgets, and an expected artifact.
 They never contain literal secrets or paths that escape the project.
 
@@ -283,6 +283,22 @@ manual Runs. Workflow cancellation persists first and propagates to every
 active child job. Explicit approval steps enter `waiting_approval` and reuse the
 Approval Center; no process or lease is created for the approval node itself.
 Safe transform/join nodes run locally without arbitrary code execution.
+
+The built-in Review Team is the first collaborative workflow rather than an
+Arena alias. Planner output is summarized and handed to three parallel
+reviewers; their summaries and selected artifact references are then handed to
+the Synthesizer. Handoffs are redacted and bounded to 8,000 characters and 16
+artifact references per dependency. Each child job retains its immutable agent
+profile snapshot, including its harness, model, reasoning effort, tools,
+permission profile, and budgets. Slice 32 rejects `edit` agent profiles before
+creating a workflow run; typed isolated editing handoffs are a separate safety
+boundary.
+
+Work exposes the selected run's team in the `Team` inspector tab. Runs exposes
+the same live parent/child tree with step status, active work, concurrency,
+model/budget metadata, artifact counts, and deep links to the shared task or an
+individual child run. The workflow-level concurrency cap continues to govern
+fan-out, and cancel propagates through the same durable job runtime.
 
 Authenticated APIs:
 

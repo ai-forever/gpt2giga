@@ -43,6 +43,7 @@ class AgentProfile:
     harness_id: str
     instructions: str
     model: str | None = None
+    reasoning_effort: str | None = None
     api_mode: str = "v2"
     invocation_mode: str = "headless"
     mode: str = "plan"
@@ -121,6 +122,7 @@ def parse_agent_profile(
         "harness_id",
         "instructions",
         "model",
+        "reasoning_effort",
         "api_mode",
         "invocation_mode",
         "mode",
@@ -166,6 +168,9 @@ def parse_agent_profile(
             budget_data.get("max_concurrency", 1), "max_concurrency"
         ),
     )
+    reasoning_effort = _optional_text(data.get("reasoning_effort"))
+    if reasoning_effort not in {None, "none", "low", "medium", "high"}:
+        raise ValueError("Unsupported reasoning_effort")
     return AgentProfile(
         id=agent_id,
         title=_required_text(data.get("title"), "title"),
@@ -174,6 +179,7 @@ def parse_agent_profile(
         harness_id=_required_text(data.get("harness_id"), "harness_id"),
         instructions=_required_text(data.get("instructions"), "instructions"),
         model=_optional_text(data.get("model")),
+        reasoning_effort=reasoning_effort,
         api_mode=api_mode,
         invocation_mode=invocation_mode,
         mode=mode,
@@ -299,6 +305,7 @@ def agent_run_payload(
             "memory_selectors": list(profile.memory_selectors),
             "context_selectors": list(profile.context_selectors),
             "max_tokens": profile.budgets.max_tokens,
+            "reasoning_effort": profile.reasoning_effort,
             "max_concurrency": profile.budgets.max_concurrency,
             "expected_artifact": profile.expected_artifact,
         },

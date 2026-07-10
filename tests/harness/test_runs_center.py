@@ -108,6 +108,8 @@ def test_runs_center_assets_expose_bounded_live_routable_surface():
         'id="runs-trace-list"',
         'id="runs-retry-button"',
         'id="runs-inspect-artifact-button"',
+        'id="runs-team-tree"',
+        'data-tab="team"',
     ):
         assert fragment in INDEX_HTML
     for fragment in (
@@ -116,6 +118,8 @@ def test_runs_center_assets_expose_bounded_live_routable_surface():
         "function loadRunsTrace",
         "function appendRunsLiveEvent",
         "function openRunsCenterEventStream",
+        "function renderAgentTeam",
+        "function loadWorkAgentTeam",
         "/events/stream",
     ):
         assert fragment in script

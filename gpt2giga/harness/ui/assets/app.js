@@ -647,10 +647,92 @@
       byId("runs-retry-button").disabled = !actions.retry;
       byId("runs-open-worktree-button").disabled = !actions.open_worktree;
       byId("runs-inspect-artifact-button").disabled = !actions.inspect_artifact;
+      renderAgentTeam(byId("runs-team-tree"), item && item.workflow, {
+        panel: byId("runs-team-panel"),
+        title: byId("runs-team-title"),
+        progress: byId("runs-team-progress")
+      });
       if (!item) {
         byId("runs-trace-list").textContent = "";
         byId("runs-payload-panel").hidden = true;
       }
+    }
+
+    function renderAgentTeam(container, workflow, elements = {}) {
+      container.textContent = "";
+      if (!workflow || !Array.isArray(workflow.steps)) {
+        if (elements.panel) elements.panel.hidden = true;
+        else container.textContent = "This run is not part of an agent team.";
+        return;
+      }
+      if (elements.panel) elements.panel.hidden = false;
+      if (elements.title) elements.title.textContent = workflow.definition_id || "Agent team";
+      if (elements.progress) {
+        elements.progress.textContent = `${workflow.completed_steps || 0}/${workflow.total_steps || workflow.steps.length} steps · concurrency ${workflow.max_concurrency || 1}`;
+      }
+      const known = new Set();
+      for (const step of workflow.steps) {
+        const node = document.createElement("li");
+        node.className = "agent-team-node";
+        node.dataset.status = step.status || "pending";
+        node.dataset.depth = (step.depends_on || []).some((id) => known.has(id)) ? "1" : "0";
+        known.add(step.id);
+        const row = document.createElement("div");
+        row.className = "agent-team-node-row";
+        const title = document.createElement("strong");
+        title.textContent = step.title || step.id;
+        const status = document.createElement("span");
+        status.className = `runs-status ${step.status === "succeeded" ? "completed" : step.status || "queued"}`;
+        status.textContent = step.status || "pending";
+        row.append(title, status);
+        const agent = step.agent || {};
+        const meta = document.createElement("div");
+        meta.className = "agent-team-node-meta";
+        for (const value of [
+          agent.harness_id || step.kind,
+          agent.model || "default model",
+          agent.reasoning_effort ? `reasoning ${agent.reasoning_effort}` : null,
+          agent.budgets && Number.isFinite(Number(agent.budgets.max_tokens)) ? `${agent.budgets.max_tokens} tokens` : null,
+          step.artifact_count ? `${step.artifact_count} artifacts` : null
+        ].filter(Boolean)) {
+          const label = document.createElement("span");
+          label.textContent = value;
+          meta.appendChild(label);
+        }
+        node.append(row, meta);
+        const actions = document.createElement("div");
+        actions.className = "agent-team-node-actions";
+        if (step.actions && step.actions.open_task) {
+          const openTask = document.createElement("button");
+          openTask.type = "button";
+          openTask.className = "secondary";
+          openTask.textContent = "Open task";
+          openTask.addEventListener("click", () => window.location.assign(step.actions.open_task));
+          actions.appendChild(openTask);
+        }
+        if (step.actions && step.actions.open_run) {
+          const openRun = document.createElement("button");
+          openRun.type = "button";
+          openRun.className = "secondary";
+          openRun.textContent = "Open child run";
+          openRun.addEventListener("click", () => window.location.assign(step.actions.open_run));
+          actions.appendChild(openRun);
+        }
+        if (actions.childElementCount) node.appendChild(actions);
+        container.appendChild(node);
+      }
+    }
+
+    async function loadWorkAgentTeam(run) {
+      const panel = byId("team-panel");
+      if (!run || !run.id) {
+        renderAgentTeam(panel, null);
+        return;
+      }
+      const selectedId = run.id;
+      const result = await getJson(`/api/runs/${encodeURIComponent(selectedId)}/summary`);
+      if (!currentRun() || currentRun().id !== selectedId) return;
+      renderAgentTeam(panel, result.ok && result.data.run ? result.data.run.workflow : null);
     }
 
     async function loadRunsTrace(older = false) {
@@ -3775,6 +3857,7 @@
       const run = runs[runs.length - 1] || null;
       setText("selected-session-line", session ? `${session.title} - ${session.id}` : "No session selected");
       renderRunSummary(run, events);
+      void loadWorkAgentTeam(run);
       renderArenaInspector(state.currentArena);
       renderEvents(events);
       setText("raw-request-panel", rawRequests.length ? pretty(rawRequests[rawRequests.length - 1].payload) : "{}");

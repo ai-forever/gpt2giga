@@ -187,6 +187,70 @@ steps:
     assert steps[0].artifact_refs[0]["type"] == "harness_run"
 
 
+def test_review_team_fans_out_bounded_handoffs_and_synthesizes(tmp_path: Path) -> None:
+    init_project_config(tmp_path)
+    for agent_id in ("planner", "reviewer", "test-runner"):
+        (tmp_path / ".giga" / "agents" / f"{agent_id}.yaml").write_text(
+            render_starter_agent(agent_id, harness_id="echo"), encoding="utf-8"
+        )
+    coordinator, config = _coordinator(tmp_path)
+
+    run = coordinator.start(
+        load_workflow(tmp_path, "review-team"), prompt="Review the parser"
+    )
+    worker = DurableJobWorker(config, worker_id="team-worker")
+    assert worker.run_once() is True
+
+    fanned_out = coordinator.repository.list_steps(run.id)
+    assert [item.status for item in fanned_out[1:4]] == ["queued"] * 3
+    assert (
+        len(
+            {
+                coordinator.runtime_store.get_job(item.job_id).id
+                for item in fanned_out[1:4]
+            }
+        )
+        == 3
+    )
+
+    for _ in range(4):
+        assert worker.run_once() is True
+
+    final = coordinator.repository.get_run(run.id)
+    steps = coordinator.repository.list_steps(run.id)
+    synthesis_run = coordinator.runner.store.get_run(steps[-1].outputs["run_id"])
+
+    assert final.status.value == "succeeded"
+    assert all(item.status == "succeeded" for item in steps)
+    assert all(item.outputs.get("summary") for item in steps)
+    assert "Bounded dependency handoffs:" in synthesis_run.prompt
+    assert '"step_id": "security"' in synthesis_run.prompt
+    assert all(len(item.outputs["summary"]) <= 8_000 for item in steps)
+    assert all(item.outputs["agent"]["mode"] in {"plan", "read"} for item in steps)
+
+
+def test_agent_team_rejects_edit_profile_before_creating_run(tmp_path: Path) -> None:
+    init_project_config(tmp_path)
+    (tmp_path / ".giga" / "agents" / "implementer.yaml").write_text(
+        render_starter_agent("implementer", harness_id="echo"), encoding="utf-8"
+    )
+    coordinator, _ = _coordinator(tmp_path)
+    definition = parse_workflow_definition(
+        """
+id: unsafe-team
+title: Unsafe team
+version: 1
+steps:
+  - {id: edit, kind: agent, agent_id: implementer}
+"""
+    )
+
+    with pytest.raises(ValueError, match="read-only profile"):
+        coordinator.start(definition, prompt="change the project")
+
+    assert coordinator.repository.list_runs() == ()
+
+
 def test_cancel_propagates_to_queued_child_job(tmp_path: Path) -> None:
     init_project_config(tmp_path)
     agent_path = tmp_path / ".giga" / "agents" / "reviewer.yaml"

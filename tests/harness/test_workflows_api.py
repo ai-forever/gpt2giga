@@ -38,6 +38,16 @@ def test_workflow_api_lists_validates_runs_status_and_cancels(tmp_path) -> None:
         assert run["definition_hash"]
         assert run["steps"][0]["status"] == "queued"
 
+        child_summary = client.get(
+            f"/api/runs/{run['steps'][0]['outputs']['run_id']}/summary"
+        )
+        assert child_summary.status_code == 200
+        team = child_summary.json()["run"]["workflow"]
+        assert team["definition_id"] == "review-team"
+        assert team["total_steps"] == 5
+        assert team["active_steps"] == ["plan"]
+        assert team["steps"][0]["actions"]["open_run"].startswith("/runs/")
+
         status = client.get(f"/api/workflow-runs/{run['id']}")
         assert status.status_code == 200
         assert status.json()["run"]["id"] == run["id"]

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=30.2">
+  <link rel="stylesheet" href="/assets/app.css?v=32.3">
 </head>
 <body>
   <div class="app">
@@ -359,6 +359,13 @@
                 <button id="runs-inspect-artifact-button" class="secondary" type="button" disabled>Inspect artifact</button>
               </div>
             </div>
+            <section id="runs-team-panel" class="agent-team-panel" hidden>
+              <div class="agent-team-heading">
+                <strong id="runs-team-title">Agent team</strong>
+                <span id="runs-team-progress" class="status-line"></span>
+              </div>
+              <ol id="runs-team-tree" class="agent-team-tree" aria-live="polite"></ol>
+            </section>
             <ol id="runs-trace-list" class="runs-trace-list" aria-live="polite"></ol>
             <button id="load-older-trace-button" class="secondary" type="button" hidden>Load older trace</button>
             <pre id="runs-payload-panel" class="runs-payload-panel" hidden></pre>
@@ -386,6 +393,7 @@
           <div class="inspector-body">
             <div class="tabs" role="tablist">
               <button class="tab active" type="button" data-tab="run">Run</button>
+              <button class="tab" type="button" data-tab="team">Team</button>
               <button class="tab" type="button" data-tab="arena">Arena</button>
               <button class="tab" type="button" data-tab="events">Events</button>
               <button class="tab" type="button" data-tab="raw-request">Raw request</button>
@@ -403,6 +411,7 @@
               <button class="tab" type="button" data-tab="storage">Storage</button>
             </div>
             <div id="run-panel" class="run-summary tab-panel active">No run selected.</div>
+            <div id="team-panel" class="mono-panel tab-panel">This run is not part of an agent team.</div>
             <div id="arena-panel" class="mono-panel tab-panel">No arena selected.</div>
             <div id="events-panel" class="mono-panel tab-panel">No events yet.</div>
             <pre id="raw-request-panel" class="mono-panel tab-panel">{}</pre>
@@ -562,6 +571,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=30.2"></script>
+  <script src="/assets/app.js?v=32.3"></script>
 </body>
 </html>

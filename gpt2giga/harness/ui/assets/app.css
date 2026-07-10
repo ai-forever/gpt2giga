@@ -2511,7 +2511,7 @@
     }
     .runs-trace-panel {
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto auto;
+      grid-template-rows: auto auto minmax(0, 1fr) auto auto;
       align-content: start;
       gap: 12px;
     }
@@ -2555,6 +2555,55 @@
       background: var(--mono-bg);
       padding: 12px;
       font-size: 11px;
+    }
+    .agent-team-panel {
+      display: grid;
+      gap: 9px;
+      border: 1px solid #31584f;
+      border-radius: 10px;
+      background: #11211f;
+      padding: 11px;
+    }
+    .agent-team-panel[hidden] { display: none; }
+    .agent-team-heading,
+    .agent-team-node-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .agent-team-tree {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .agent-team-node {
+      display: grid;
+      gap: 5px;
+      border-left: 2px solid #3f7469;
+      border-radius: 0 7px 7px 0;
+      background: #142925;
+      padding: 8px 9px;
+    }
+    .agent-team-node[data-status="succeeded"] { border-left-color: var(--green); }
+    .agent-team-node[data-status="failed"],
+    .agent-team-node[data-status="canceled"] { border-left-color: var(--red); }
+    .agent-team-node[data-status="pending"] { opacity: 0.72; }
+    .agent-team-node[data-depth="1"] { margin-left: 16px; }
+    .agent-team-node-meta,
+    .agent-team-node-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px 9px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .agent-team-node-actions button {
+      min-height: 24px;
+      padding: 2px 7px;
+      font-size: 10px;
     }
     .approvals-list {
       display: grid;

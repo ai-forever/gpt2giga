@@ -43,6 +43,8 @@ WORKFLOW_DIRECTORY = Path(".giga") / "workflows"
 WORKFLOW_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 MAX_WORKFLOW_STEPS = 64
 MAX_FAN_OUT = 16
+MAX_HANDOFF_SUMMARY_CHARS = 8_000
+MAX_HANDOFF_ARTIFACTS = 16
 TERMINAL_STEP_STATUSES = frozenset({"succeeded", "failed", "canceled", "skipped"})
 
 
@@ -82,6 +84,7 @@ class WorkflowStep:
     action: str | None = None
     transform: str | None = None
     select: tuple[str, ...] = ()
+    artifact_types: tuple[str, ...] = ()
     retries: int = 0
     timeout_seconds: int | None = None
     max_fan_out: int = 1
@@ -547,6 +550,15 @@ class WorkflowCoordinator:
         prompt: str | None = None,
     ) -> WorkflowRun:
         """Create and advance one immutable workflow definition snapshot."""
+        for step in definition.steps:
+            if step.kind is not WorkflowStepKind.AGENT:
+                continue
+            profile = load_agent_profile(self.project.root, step.agent_id or "")
+            if profile.mode == "edit":
+                raise ValueError(
+                    f"Agent step {step.id} must use a read-only profile before "
+                    "typed edit handoffs are enabled"
+                )
         effective_inputs = dict(definition.inputs)
         effective_inputs.update(dict(inputs or {}))
         if prompt is not None:
@@ -682,7 +694,15 @@ class WorkflowCoordinator:
                 run_id = self.runtime_store.list_attempts(job.id)[-1].run_id
                 output["run_id"] = run_id
                 output["job_id"] = job.id
-                artifacts.append({"type": "harness_run", "id": run_id})
+                summary = self._child_summary(run.session_id, run_id)
+                if summary:
+                    output["summary"] = summary
+                run_artifact = {"type": "harness_run", "id": run_id}
+                if run_artifact not in artifacts:
+                    artifacts.append(run_artifact)
+                output["artifacts"] = [
+                    dict(item) for item in artifacts[:MAX_HANDOFF_ARTIFACTS]
+                ]
             return self.repository.update_step(
                 attempt.id,
                 status=mapped,
@@ -775,6 +795,11 @@ class WorkflowCoordinator:
             )
         if step.kind is WorkflowStepKind.AGENT:
             profile = load_agent_profile(self.project.root, step.agent_id or "")
+            if profile.mode == "edit":
+                raise ValueError(
+                    f"Agent step {step.id} must use a read-only profile before "
+                    "typed edit handoffs are enabled"
+                )
             prompt = _render_step_prompt(step, run.inputs, dependencies)
             payload = agent_run_payload(profile, prompt, workspace=self.project.root)
             payload.update(
@@ -800,7 +825,21 @@ class WorkflowCoordinator:
                 status=submission.job.status.value,
                 job_id=submission.job.id,
                 inputs=resolved_inputs,
-                outputs={"run_id": submission.queued.run.id},
+                outputs={
+                    "run_id": submission.queued.run.id,
+                    "agent": {
+                        "id": profile.id,
+                        "title": profile.title,
+                        "harness_id": profile.harness_id,
+                        "model": profile.model,
+                        "reasoning_effort": profile.reasoning_effort,
+                        "mode": profile.mode,
+                        "permission_profile": profile.permission_profile,
+                        "tool_ids": list(profile.tool_ids),
+                        "budgets": asdict(profile.budgets),
+                        "profile_hash": profile.source_hash,
+                    },
+                },
             )
         if step.kind is WorkflowStepKind.ARENA:
             arena = queue_arena(
@@ -872,6 +911,22 @@ class WorkflowCoordinator:
         return self.repository.update_run(
             run.id, WorkflowStatus.CANCELED, request_cancel=True
         )
+
+    def _child_summary(self, session_id: str, run_id: str) -> str | None:
+        messages = [
+            message.content.strip()
+            for message in self.runner.store.list_messages(session_id)
+            if message.run_id == run_id
+            and message.role == "assistant"
+            and message.content.strip()
+        ]
+        if not messages:
+            return None
+        summary = messages[-1]
+        if len(summary) > MAX_HANDOFF_SUMMARY_CHARS:
+            summary = summary[: MAX_HANDOFF_SUMMARY_CHARS - 1].rstrip() + "…"
+        redacted = redact_for_storage(summary)
+        return str(redacted) if redacted else None
 
 
 def workflow_run_to_dict(
@@ -986,6 +1041,7 @@ def _parse_step(value: Any) -> WorkflowStep:
         "action",
         "transform",
         "select",
+        "artifact_types",
         "retries",
         "timeout_seconds",
         "max_fan_out",
@@ -1037,6 +1093,7 @@ def _parse_step(value: Any) -> WorkflowStep:
         action=action,
         transform=transform,
         select=_text_tuple(data.get("select"), "select"),
+        artifact_types=_text_tuple(data.get("artifact_types"), "artifact_types"),
         retries=_bounded_int(data.get("retries", 0), "retries", 0, 10),
         timeout_seconds=_optional_positive_int(
             data.get("timeout_seconds"), "timeout_seconds"
@@ -1165,13 +1222,33 @@ def _render_step_prompt(
         if isinstance(value, (str, int, float, bool))
     }
     prompt = Template(step.prompt or "${prompt}").safe_substitute(values).strip()
-    summaries = [
-        json.dumps(dict(item.outputs), ensure_ascii=False)
-        for item in dependencies
-        if item.outputs
-    ]
-    if summaries:
-        prompt += "\n\nDependency outputs:\n" + "\n".join(summaries)
+    handoffs: list[str] = []
+    remaining = MAX_HANDOFF_SUMMARY_CHARS
+    selected_types = set(step.artifact_types)
+    for item in dependencies:
+        summary = str(item.outputs.get("summary") or "").strip()
+        artifacts = [
+            dict(artifact)
+            for artifact in item.artifact_refs
+            if not selected_types or str(artifact.get("type") or "") in selected_types
+        ][:MAX_HANDOFF_ARTIFACTS]
+        handoff = {"step_id": item.step_id}
+        if summary:
+            handoff["summary"] = summary
+        if artifacts:
+            handoff["artifacts"] = artifacts
+        if len(handoff) == 1:
+            continue
+        rendered = json.dumps(handoff, ensure_ascii=False)
+        if len(rendered) > remaining:
+            rendered = rendered[: max(0, remaining - 1)].rstrip() + "…"
+        if rendered:
+            handoffs.append(rendered)
+            remaining -= len(rendered)
+        if remaining <= 0:
+            break
+    if handoffs:
+        prompt += "\n\nBounded dependency handoffs:\n" + "\n".join(handoffs)
     return prompt or step.title
 
 
