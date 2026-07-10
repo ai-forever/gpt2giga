@@ -169,7 +169,7 @@ from gpt2giga.harness.tool_profiles import (
     build_tool_profile_statuses,
     tool_profile_status_to_dict,
 )
-from gpt2giga.harness.ui.static import INDEX_HTML
+from gpt2giga.harness.ui.static import INDEX_HTML, UIAssetNotFoundError, load_asset
 from gpt2giga.harness.worktrees import (
     WorktreeConflictError,
     WorktreeError,
@@ -238,8 +238,30 @@ def create_app(
     app.state.harness_native_process_manager = native_process_manager
 
     @app.get("/", response_class=HTMLResponse)
-    async def index() -> str:
-        return INDEX_HTML
+    async def index() -> HTMLResponse:
+        return HTMLResponse(
+            INDEX_HTML,
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    @app.get("/assets/{asset_name:path}", include_in_schema=False)
+    async def ui_asset(asset_name: str) -> Response:
+        media_types = {
+            "app.css": "text/css; charset=utf-8",
+            "app.js": "text/javascript; charset=utf-8",
+        }
+        media_type = media_types.get(asset_name)
+        if media_type is None:
+            raise HTTPException(status_code=404, detail="UI asset not found")
+        try:
+            content = load_asset(asset_name)
+        except UIAssetNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="UI asset not found") from exc
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
 
     @app.get("/api/harnesses")
     async def harnesses() -> dict[str, Any]:

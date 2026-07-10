@@ -46,7 +46,8 @@ These entry points must stay stable while the killer features are added:
 | --- | --- |
 | CLI entrypoint | `gpt2giga/harness/cli.py` |
 | UI FastAPI app | `gpt2giga/harness/ui/app.py` |
-| Static no-build UI | `gpt2giga/harness/ui/static.py` |
+| Packaged no-build UI | `gpt2giga/harness/ui/assets/` |
+| UI asset compatibility loader | `gpt2giga/harness/ui/static.py` |
 | Harness registry | `gpt2giga/harness/registry.py` |
 | Harness contract | `gpt2giga/harness/types.py` |
 | Built-in harnesses | `gpt2giga/harness/harnesses/` |

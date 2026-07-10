@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gpt2giga Harness</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <button id="session-drawer-button" class="secondary icon-button mobile-only" type="button" aria-label="Open sessions">
+          <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <path d="M4 6h16M4 12h16M4 18h10"/>
+          </svg>
+        </button>
+        <h1>gpt2giga Harness</h1>
+        <div class="project-context">
+          <div id="project-name" class="project-title">Loading...</div>
+          <div id="project-meta" class="session-meta"></div>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="proxy-status" class="proxy-indicator warn">Proxy: checking</span>
+        <details class="settings-menu">
+          <summary aria-label="Open settings">
+            <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-4v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H3v-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3.1V3h4v.1A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9A1.7 1.7 0 0 0 20.9 10h.1v4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>
+            </svg>
+          </summary>
+          <div class="settings-popover">
+            <div class="settings-statuses">
+              <div id="project-status" class="status-line">Loading project...</div>
+              <div class="top-summary">
+                <span id="current-model-badge" class="badge info">Model: loading</span>
+                <span id="current-route-badge" class="badge info">Route: /v2/chat/completions</span>
+                <span id="model-status" class="badge">Models: loading</span>
+              </div>
+            </div>
+            <div class="settings-actions">
+              <button id="init-project-button" class="secondary" type="button" hidden>Init project</button>
+              <button id="refresh-health-button" class="secondary" type="button">Refresh proxy</button>
+              <button id="refresh-models-button" class="secondary" type="button">Refresh models</button>
+            </div>
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main class="shell">
+      <aside class="sidebar" aria-label="Session history">
+        <div class="section sidebar-controls">
+          <div class="new-session-row">
+            <button id="new-chat-button" type="button">+ New session</button>
+            <span id="session-count" class="badge info">0</span>
+          </div>
+          <div class="session-search-row">
+            <input id="session-search" placeholder="Search sessions..." autocomplete="off">
+            <details class="session-tools">
+              <summary aria-label="Filters and history">
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                  <path d="M4 7h10M18 7h2M4 17h2M10 17h10M8 4v6M8 14v6M16 4v6M16 14v6"/>
+                </svg>
+              </summary>
+              <div class="session-tools-panel">
+                <label>Workspace
+                  <input id="session-workspace-filter" placeholder="All workspaces" autocomplete="off">
+                </label>
+                <label>Harness
+                  <select id="session-harness-filter">
+                    <option value="">All harnesses</option>
+                  </select>
+                </label>
+                <label class="choice" for="include-archived-checkbox">
+                  <input id="include-archived-checkbox" type="checkbox">
+                  Include archived
+                </label>
+                <div class="section">
+                  <div class="inline-actions">
+                    <h2>Native sessions</h2>
+                    <span id="native-count" class="badge info">0</span>
+                  </div>
+                  <button id="sync-native-button" class="secondary" type="button">Sync native history</button>
+                  <button id="open-native-history-button" class="secondary" type="button">Browse history</button>
+                  <label class="choice" for="native-all-workspaces-checkbox">
+                    <input id="native-all-workspaces-checkbox" type="checkbox">
+                    Show all workspaces
+                  </label>
+                  <div id="native-status" class="status-line">Native history not synced</div>
+                </div>
+                <div class="section">
+                  <div class="inline-actions">
+                    <h2>Harnesses</h2>
+                    <span id="harness-count" class="badge info">0</span>
+                  </div>
+                  <div id="harness-list"></div>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+        <div class="sidebar-scroll">
+          <div id="session-list" class="session-list"></div>
+        </div>
+      </aside>
+
+      <section class="center" aria-label="Chat and run surface">
+        <div class="section config-section">
+          <div id="workspace-welcome" class="workspace-welcome">
+            <h2>What do you want to work on?</h2>
+            <p>Ask a question, plan a task, or describe what you would like to build.</p>
+          </div>
+          <div class="config-grid quick-config">
+            <label class="quick-harness"><span>Harness</span>
+              <select id="harness-select"></select>
+            </label>
+            <label class="span-2 advanced-control">Arena harnesses
+              <select id="arena-harness-select" multiple size="4" aria-label="Arena harnesses"></select>
+            </label>
+            <label class="advanced-control">Invocation
+              <select id="invocation-select">
+                <option value="headless">Headless</option>
+                <option value="native">Native</option>
+              </select>
+            </label>
+            <label class="quick-model"><span>Model</span>
+              <div id="model-picker" class="model-picker">
+                <input id="model-input" placeholder="GigaChat-2-Max" autocomplete="off" aria-controls="model-list">
+                <button id="model-menu-button" class="model-menu-button" type="button" aria-label="Show model suggestions">
+                  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m7 10 5 5 5-5"/></svg>
+                </button>
+                <div id="model-list" class="model-list" role="listbox" hidden></div>
+              </div>
+            </label>
+            <fieldset class="quick-api" aria-label="API mode"><legend>API mode</legend>
+              <div class="api-mode-switch">
+                <label class="choice" for="api-mode-v2">
+                  <input id="api-mode-v2" name="api-mode" type="radio" value="v2" checked>
+                  /v2
+                </label>
+                <label class="choice" for="api-mode-v1">
+                  <input id="api-mode-v1" name="api-mode" type="radio" value="v1">
+                  /v1
+                </label>
+              </div>
+              <div id="route-note" class="hint advanced-control">Current route: /v2/chat/completions</div>
+            </fieldset>
+            <label class="quick-mode"><span>Mode</span>
+              <select id="mode-select">
+                <option value="plan">plan</option>
+                <option value="read">read</option>
+                <option value="edit">edit</option>
+              </select>
+            </label>
+            <label class="advanced-control">Workspace policy
+              <select id="workspace-policy-select">
+                <option value="auto">auto</option>
+                <option value="current">current</option>
+                <option value="worktree">worktree</option>
+                <option value="temp_copy">temp copy</option>
+              </select>
+            </label>
+            <label class="advanced-control">Capability
+              <select id="capability-select"></select>
+            </label>
+            <label class="span-2 advanced-control">Workspace
+              <input id="workspace-input" placeholder="." autocomplete="off">
+            </label>
+            <div class="check-row advanced-control">
+              <label class="choice" for="dry-run-checkbox">
+                <input id="dry-run-checkbox" type="checkbox">
+                dry run
+              </label>
+              <label class="choice" for="stream-checkbox">
+                <input id="stream-checkbox" type="checkbox">
+                stream
+              </label>
+            </div>
+            <div id="harness-warning" class="warning span-4 advanced-control"></div>
+            <div id="harness-details" class="details span-4 advanced-control"></div>
+            <div id="route-recommendation" class="route-recommendation span-4 advanced-control">
+              <div class="inline-actions">
+                <span id="route-recommendation-badge" class="badge info">Recommended: pending</span>
+                <button id="apply-route-recommendation-button" class="secondary" type="button" disabled>Apply recommendation</button>
+              </div>
+              <div id="route-recommendation-reasons" class="details">Type a prompt or attach context to refresh the recommendation.</div>
+            </div>
+            <div class="span-4 advanced-control">
+              <div class="inline-actions">
+                <h2>Presets</h2>
+                <span id="preset-status" class="badge info">Presets: loading</span>
+              </div>
+              <div id="preset-list" class="preset-list"></div>
+            </div>
+            <button id="advanced-settings-button" class="advanced-settings-button secondary" type="button" aria-expanded="false">Advanced</button>
+          </div>
+        </div>
+        <div id="output-panel" class="chat-scroll">
+          <div id="message-list" class="message-list" aria-live="polite" aria-relevant="additions text"></div>
+        </div>
+        <div id="composer" class="composer">
+          <div class="composer-main">
+            <label>Prompt
+              <textarea id="prompt-input" placeholder="Ask, plan, or describe a task..." spellcheck="true"></textarea>
+            </label>
+          </div>
+          <div id="workspace-file-menu" class="workspace-file-menu" hidden></div>
+          <div id="attachment-list" class="attachment-list" aria-live="polite"></div>
+          <div class="composer-footer">
+            <div class="composer-utilities">
+              <div class="attachment-toolbar">
+                <input id="attachment-file-input" type="file" multiple hidden>
+                <button id="attach-file-button" class="secondary" type="button">Attach</button>
+                <span id="attachment-status" class="status-line">No attachments</span>
+              </div>
+              <details class="composer-more">
+                <summary aria-label="More composer actions">More</summary>
+                <div class="composer-more-menu">
+                  <button id="copy-cli-button" class="secondary utility-action" type="button">Copy CLI</button>
+                  <button id="copy-curl-button" class="secondary utility-action" type="button">Copy curl</button>
+                  <button id="reset-button" class="secondary utility-action" type="button">Reset</button>
+                </div>
+              </details>
+            </div>
+            <div class="composer-actions">
+              <button id="compare-button" class="secondary" type="button">Compare</button>
+              <button id="run-button" type="button">Run</button>
+              <button id="cancel-run-button" class="danger" type="button" hidden>Cancel</button>
+            </div>
+          </div>
+        </div>
+        <div class="example-prompts" aria-label="Example prompts">
+          <p>Try an example to get started</p>
+          <button class="example-prompt" type="button">Explain this codebase architecture</button>
+          <button class="example-prompt" type="button">Write tests for the selected function</button>
+          <button class="example-prompt" type="button">Refactor this module for clarity</button>
+        </div>
+      </section>
+
+      <button id="details-toggle-button" class="details-toggle" type="button" aria-expanded="false">Run details</button>
+
+      <aside class="inspector" aria-label="Inspector">
+        <div class="inspector-header">
+          <div class="inspector-title-row">
+            <h2>Run details</h2>
+            <button id="close-inspector-button" class="secondary icon-button" type="button" aria-label="Close run details">×</button>
+          </div>
+          <div class="inline-actions">
+            <button id="rename-session-button" class="secondary" type="button">Rename</button>
+            <button id="pin-session-button" class="secondary" type="button">Pin</button>
+            <button id="archive-session-button" class="secondary" type="button">Archive</button>
+            <button id="delete-session-button" class="danger" type="button">Delete</button>
+          </div>
+          <div id="selected-session-line" class="status-line">No session selected</div>
+        </div>
+        <div class="inspector-scroll">
+          <div class="inspector-body">
+            <div class="tabs" role="tablist">
+              <button class="tab active" type="button" data-tab="run">Run</button>
+              <button class="tab" type="button" data-tab="arena">Arena</button>
+              <button class="tab" type="button" data-tab="events">Events</button>
+              <button class="tab" type="button" data-tab="raw-request">Raw request</button>
+              <button class="tab" type="button" data-tab="raw-response">Raw response</button>
+              <button class="tab" type="button" data-tab="command">Command</button>
+              <button class="tab" type="button" data-tab="diff">Diff</button>
+              <button class="tab" type="button" data-tab="pr">PR</button>
+              <button class="tab" type="button" data-tab="provenance">Provenance</button>
+              <button class="tab" type="button" data-tab="editor">Editor</button>
+              <button class="tab" type="button" data-tab="attachments">Attachments</button>
+              <button class="tab" type="button" data-tab="memory">Memory</button>
+              <button class="tab" type="button" data-tab="tools">Tools</button>
+              <button class="tab" type="button" data-tab="evals">Evals</button>
+              <button class="tab" type="button" data-tab="native">Native</button>
+              <button class="tab" type="button" data-tab="storage">Storage</button>
+            </div>
+            <div id="run-panel" class="run-summary tab-panel active">No run selected.</div>
+            <div id="arena-panel" class="mono-panel tab-panel">No arena selected.</div>
+            <div id="events-panel" class="mono-panel tab-panel">No events yet.</div>
+            <pre id="raw-request-panel" class="mono-panel tab-panel">{}</pre>
+            <pre id="raw-response-panel" class="mono-panel tab-panel">{}</pre>
+            <pre id="command-panel" class="mono-panel tab-panel">No command yet.</pre>
+            <div id="diff-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <input id="apply-branch-input" placeholder="optional branch" autocomplete="off" disabled>
+                <button id="apply-run-diff-button" type="button" disabled>Apply</button>
+                <button id="discard-run-worktree-button" class="danger" type="button" disabled>Discard</button>
+                <button id="open-run-worktree-button" class="secondary" type="button" disabled>Open worktree</button>
+                <button id="open-run-terminal-button" class="secondary" type="button" disabled>Open terminal</button>
+              </div>
+              <pre id="diff-text">No diff captured.</pre>
+            </div>
+            <div id="pr-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <input id="pr-branch-input" placeholder="branch name" autocomplete="off" disabled>
+                <button id="copy-pr-title-button" class="secondary" type="button" disabled>Copy title</button>
+                <button id="copy-pr-body-button" class="secondary" type="button" disabled>Copy body</button>
+                <button id="copy-pr-patch-button" class="secondary" type="button" disabled>Copy patch</button>
+                <button id="create-pr-branch-button" type="button" disabled>Create branch</button>
+              </div>
+              <pre id="pr-text">No PR artifact.</pre>
+            </div>
+            <div id="provenance-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <button id="refresh-provenance-button" class="secondary" type="button" disabled>Refresh provenance</button>
+                <button id="replay-run-button" type="button" disabled>Replay</button>
+                <button id="fork-run-button" class="secondary" type="button" disabled>Fork chat</button>
+              </div>
+              <pre id="provenance-text">No provenance selected.</pre>
+            </div>
+            <div id="editor-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <button id="open-editor-workspace-button" type="button" disabled>Open workspace</button>
+                <button id="open-editor-run-button" class="secondary" type="button" disabled>Open run workspace</button>
+                <button id="open-editor-diff-button" class="secondary" type="button" disabled>Open diff</button>
+                <button id="open-editor-terminal-button" class="secondary" type="button" disabled>Open run terminal</button>
+              </div>
+              <div class="inline-actions">
+                <input id="open-editor-file-input" placeholder="workspace file" autocomplete="off">
+                <button id="open-editor-file-button" class="secondary" type="button" disabled>Open file</button>
+              </div>
+              <div class="inline-actions">
+                <button id="copy-session-open-command-button" class="secondary" type="button" disabled>Copy session link</button>
+                <button id="copy-run-open-command-button" class="secondary" type="button" disabled>Copy run link</button>
+              </div>
+              <pre id="editor-text">No editor action yet.</pre>
+            </div>
+            <pre id="attachments-panel" class="mono-panel tab-panel">No attachments selected.</pre>
+            <div id="memory-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <span id="memory-status" class="badge info">Memory: loading</span>
+                <button id="remember-message-button" class="secondary" type="button" disabled>Remember last message</button>
+              </div>
+              <label>Project memory
+                <textarea id="memory-input" spellcheck="true"></textarea>
+              </label>
+              <div class="inline-actions">
+                <input id="memory-tags-input" placeholder="tags comma-separated" autocomplete="off">
+                <button id="add-memory-button" type="button">Add memory</button>
+              </div>
+              <div id="memory-list" class="tool-profile-list"></div>
+            </div>
+            <div id="tools-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <span id="tools-status" class="badge info">Tools: loading</span>
+                <button id="sync-tools-button" class="secondary" type="button">Dry-run sync</button>
+              </div>
+              <div id="tool-profile-list" class="tool-profile-list"></div>
+              <pre id="tool-sync-preview">No tool sync preview.</pre>
+            </div>
+            <div id="evals-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <span id="evals-status" class="badge info">Evals: loading</span>
+                <button id="refresh-evals-button" class="secondary" type="button">Refresh evals</button>
+                <button id="run-eval-button" type="button" disabled>Run eval</button>
+              </div>
+              <label>Eval spec
+                <select id="eval-spec-select"></select>
+              </label>
+              <label>Override harnesses
+                <input id="eval-harness-input" placeholder="echo,codex-cli" autocomplete="off">
+              </label>
+              <div id="eval-spec-list" class="tool-profile-list"></div>
+              <pre id="eval-scorecard">No eval run selected.</pre>
+            </div>
+            <div id="native-panel" class="mono-panel tab-panel">
+              <div class="badge-row">
+                <span id="native-terminal-status" class="badge info">Native: idle</span>
+                <button id="poll-native-output-button" class="secondary" type="button">Poll output</button>
+                <button id="stop-native-process-button" class="danger" type="button">Stop process</button>
+                <button id="clear-native-terminal-button" class="secondary" type="button">Clear terminal</button>
+              </div>
+              <pre id="native-process-summary">No native session selected.</pre>
+              <pre id="native-terminal-output">Terminal output will appear here.</pre>
+              <label>Native stdin
+                <textarea id="native-terminal-input" spellcheck="false"></textarea>
+              </label>
+              <div class="inline-actions">
+                <button id="send-native-input-button" type="button">Send input</button>
+              </div>
+            </div>
+            <pre id="storage-panel" class="mono-panel tab-panel">No storage selected.</pre>
+          </div>
+        </div>
+      </aside>
+      <button id="inspector-backdrop" class="inspector-backdrop" type="button" aria-label="Close run details"></button>
+      <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Close sessions"></button>
+    </main>
+    <div id="native-history-modal" class="native-history-modal" role="dialog" aria-modal="true" aria-labelledby="native-history-title" hidden>
+      <div class="native-history-dialog">
+        <div class="native-history-header">
+          <div class="native-history-title">
+            <h2 id="native-history-title">Native sessions</h2>
+            <div id="native-modal-status" class="status-line">Native history not synced</div>
+          </div>
+          <button id="close-native-history-button" class="secondary" type="button" aria-label="Close native history">Close</button>
+        </div>
+        <div id="native-session-list" class="native-session-list"></div>
+        <div class="native-history-footer">
+          <div id="native-page-status" class="status-line">Showing 0 of 0</div>
+          <button id="load-more-native-button" class="secondary" type="button">Load 5 more</button>
+        </div>
+      </div>
+    </div>
+    <div id="preflight-modal" class="preflight-modal" role="dialog" aria-modal="true" aria-labelledby="preflight-title" hidden>
+      <div class="preflight-dialog">
+        <div class="preflight-header">
+          <div class="preflight-title">
+            <h2 id="preflight-title">Preflight</h2>
+            <div id="preflight-status" class="status-line">Checking run context</div>
+          </div>
+          <button id="close-preflight-button" class="secondary" type="button" aria-label="Close preflight">Close</button>
+        </div>
+        <div id="preflight-finding-list" class="preflight-list"></div>
+        <pre id="preflight-budget" class="mono-panel preflight-budget">No preflight report.</pre>
+        <div class="preflight-footer">
+          <div id="preflight-footer-status" class="status-line">Review findings before running.</div>
+          <button id="continue-preflight-button" type="button">Continue anyway</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>

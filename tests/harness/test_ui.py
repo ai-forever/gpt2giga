@@ -13,7 +13,57 @@ from gpt2giga.harness.types import (
     HarnessSpec,
 )
 from gpt2giga.harness.ui.app import create_app, validate_ui_bind
-from gpt2giga.harness.ui.static import INDEX_HTML
+from gpt2giga.harness.ui.static import (
+    INDEX_HTML,
+    UIAssetNotFoundError,
+    load_asset,
+    load_text_asset,
+)
+
+
+APP_CSS = load_text_asset("app.css")
+APP_JS = load_text_asset("app.js")
+UI_SOURCE = "\n".join((INDEX_HTML, APP_CSS, APP_JS))
+
+
+def test_ui_assets_load_from_package_resources():
+    assert load_asset("index.html").startswith(b"<!doctype html>")
+    assert "function boot()" in APP_JS
+    assert ".app {" in APP_CSS
+    with pytest.raises(UIAssetNotFoundError):
+        load_asset("missing.js")
+
+
+def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
+    app = create_app(
+        HarnessConfig(),
+        registry=create_default_registry(include_entry_points=False),
+    )
+    client = TestClient(app)
+
+    index_response = client.get("/")
+    css_response = client.get("/assets/app.css")
+    js_response = client.get("/assets/app.js")
+    missing_response = client.get("/assets/missing.js")
+    traversal_response = client.get("/assets/nested/app.js")
+
+    assert index_response.status_code == 200
+    assert index_response.headers["content-type"].startswith("text/html")
+    assert index_response.headers["cache-control"] == "no-cache"
+    assert '<link rel="stylesheet" href="/assets/app.css">' in index_response.text
+    assert '<script src="/assets/app.js"></script>' in index_response.text
+    assert "<style>" not in index_response.text
+    assert "<script>" not in index_response.text
+    assert css_response.status_code == 200
+    assert css_response.headers["content-type"] == "text/css; charset=utf-8"
+    assert css_response.headers["cache-control"] == "public, max-age=3600"
+    assert css_response.text == APP_CSS
+    assert js_response.status_code == 200
+    assert js_response.headers["content-type"] == "text/javascript; charset=utf-8"
+    assert js_response.headers["cache-control"] == "public, max-age=3600"
+    assert js_response.text == APP_JS
+    assert missing_response.status_code == 404
+    assert traversal_response.status_code == 404
 
 
 def test_ui_defaults_endpoint_does_not_expose_secrets(monkeypatch):
@@ -84,8 +134,8 @@ def test_ui_harnesses_endpoint_includes_plugin_metadata():
 
 
 def test_ui_static_includes_plugin_config_schema_renderer():
-    assert "function simpleConfigFields" in INDEX_HTML
-    assert "harness-config-" in INDEX_HTML
+    assert "function simpleConfigFields" in UI_SOURCE
+    assert "harness-config-" in UI_SOURCE
 
 
 def test_ui_static_includes_safe_dom_markdown_renderer():
@@ -107,10 +157,10 @@ def test_ui_static_includes_safe_dom_markdown_renderer():
         "resolved.origin === window.location.origin",
         'link.setAttribute("rel", "noopener noreferrer")',
     ):
-        assert fragment in INDEX_HTML
+        assert fragment in UI_SOURCE
 
-    markdown_source = INDEX_HTML[
-        INDEX_HTML.index("function isSafeMarkdownHref") : INDEX_HTML.index(
+    markdown_source = UI_SOURCE[
+        UI_SOURCE.index("function isSafeMarkdownHref") : UI_SOURCE.index(
             "function eventToolPayload"
         )
     ]
@@ -120,8 +170,8 @@ def test_ui_static_includes_safe_dom_markdown_renderer():
     assert '"javascript:"' not in markdown_source
     assert "<img" not in markdown_source
     assert "onerror" not in markdown_source
-    assert "cdn.jsdelivr" not in INDEX_HTML
-    assert "unpkg.com" not in INDEX_HTML
+    assert "cdn.jsdelivr" not in UI_SOURCE
+    assert "unpkg.com" not in UI_SOURCE
 
 
 def test_ui_static_includes_live_execution_renderer():
@@ -158,22 +208,22 @@ def test_ui_static_includes_live_execution_renderer():
         ".run-summary-grid",
         ".markdown-body",
     ):
-        assert fragment in INDEX_HTML
+        assert fragment in UI_SOURCE
 
 
 def test_ui_static_resumes_active_stream_after_session_reload():
-    load_session_source = INDEX_HTML[
-        INDEX_HTML.index("async function loadSession") : INDEX_HTML.index(
+    load_session_source = UI_SOURCE[
+        UI_SOURCE.index("async function loadSession") : UI_SOURCE.index(
             "async function loadAttachments"
         )
     ]
-    resume_source = INDEX_HTML[
-        INDEX_HTML.index("function activeHeadlessRunFromBundle") : INDEX_HTML.index(
+    resume_source = UI_SOURCE[
+        UI_SOURCE.index("function activeHeadlessRunFromBundle") : UI_SOURCE.index(
             "function finiteToken"
         )
     ]
-    stream_source = INDEX_HTML[
-        INDEX_HTML.index("function openHeadlessEventStream") : INDEX_HTML.index(
+    stream_source = UI_SOURCE[
+        UI_SOURCE.index("function openHeadlessEventStream") : UI_SOURCE.index(
             "function appendStreamEvent"
         )
     ]
@@ -201,27 +251,27 @@ def test_ui_static_resumes_active_stream_after_session_reload():
     assert (
         "if (!runId || !state.activeHeadlessRun || "
         "state.activeHeadlessRun.id !== runId) return;"
-    ) in INDEX_HTML
+    ) in UI_SOURCE
 
 
 def test_ui_static_handles_terminal_stream_edge_cases():
-    load_session_source = INDEX_HTML[
-        INDEX_HTML.index("async function loadSession") : INDEX_HTML.index(
+    load_session_source = UI_SOURCE[
+        UI_SOURCE.index("async function loadSession") : UI_SOURCE.index(
             "async function loadAttachments"
         )
     ]
-    message_source = INDEX_HTML[
-        INDEX_HTML.index("function buildMessageNode") : INDEX_HTML.index(
+    message_source = UI_SOURCE[
+        UI_SOURCE.index("function buildMessageNode") : UI_SOURCE.index(
             "function ensureLiveRun"
         )
     ]
-    cancel_source = INDEX_HTML[
-        INDEX_HTML.index("async function cancelHeadlessRun") : INDEX_HTML.index(
+    cancel_source = UI_SOURCE[
+        UI_SOURCE.index("async function cancelHeadlessRun") : UI_SOURCE.index(
             "async function startNativeProcess"
         )
     ]
-    partial_source = INDEX_HTML[
-        INDEX_HTML.index("function restoreTerminalPartialDrafts") : INDEX_HTML.index(
+    partial_source = UI_SOURCE[
+        UI_SOURCE.index("function restoreTerminalPartialDrafts") : UI_SOURCE.index(
             "function finiteToken"
         )
     ]
@@ -242,26 +292,26 @@ def test_ui_static_handles_terminal_stream_edge_cases():
         "draft.status = run.status",
     ):
         assert fragment in partial_source
-    assert "function preserveTerminalPartialDraft" in INDEX_HTML
-    assert "renderedPartialDrafts" in INDEX_HTML
+    assert "function preserveTerminalPartialDraft" in UI_SOURCE
+    assert "renderedPartialDrafts" in UI_SOURCE
 
 
 def test_ui_static_keeps_advanced_panel_above_chat_and_closes_it_for_runs():
-    run_source = INDEX_HTML[
-        INDEX_HTML.index("async function runHarness") : INDEX_HTML.index(
+    run_source = UI_SOURCE[
+        UI_SOURCE.index("async function runHarness") : UI_SOURCE.index(
             "async function runArena"
         )
     ]
-    arena_source = INDEX_HTML[
-        INDEX_HTML.index("async function runArena") : INDEX_HTML.index(
+    arena_source = UI_SOURCE[
+        UI_SOURCE.index("async function runArena") : UI_SOURCE.index(
             "async function startHeadlessStream"
         )
     ]
-    config_css = INDEX_HTML[
-        INDEX_HTML.index(".config-section {") : INDEX_HTML.index(".workspace-welcome {")
+    config_css = UI_SOURCE[
+        UI_SOURCE.index(".config-section {") : UI_SOURCE.index(".workspace-welcome {")
     ]
 
-    assert "function setAdvancedSettings(open)" in INDEX_HTML
+    assert "function setAdvancedSettings(open)" in UI_SOURCE
     assert "setAdvancedSettings(false);" in run_source
     assert "setAdvancedSettings(false);" in arena_source
     assert "position: relative;" in config_css
@@ -269,13 +319,13 @@ def test_ui_static_keeps_advanced_panel_above_chat_and_closes_it_for_runs():
 
 
 def test_ui_static_preserves_selected_defaults_while_stream_starts():
-    start_source = INDEX_HTML[
-        INDEX_HTML.index("async function startHeadlessStream") : INDEX_HTML.index(
+    start_source = UI_SOURCE[
+        UI_SOURCE.index("async function startHeadlessStream") : UI_SOURCE.index(
             "function openHeadlessEventStream"
         )
     ]
 
-    assert "function applyRunDefaults(payload)" in INDEX_HTML
+    assert "function applyRunDefaults(payload)" in UI_SOURCE
     assert "await loadSession(state.currentSessionId);" in start_source
     assert "applyRunDefaults(payload);" in start_source
     assert start_source.index(
@@ -284,13 +334,13 @@ def test_ui_static_preserves_selected_defaults_while_stream_starts():
 
 
 def test_ui_static_command_previews_describe_streaming_honestly():
-    command_source = INDEX_HTML[
-        INDEX_HTML.index("function commandPreview") : INDEX_HTML.index(
+    command_source = UI_SOURCE[
+        UI_SOURCE.index("function commandPreview") : UI_SOURCE.index(
             "function curlPreview"
         )
     ]
-    curl_source = INDEX_HTML[
-        INDEX_HTML.index("function curlPreview") : INDEX_HTML.index(
+    curl_source = UI_SOURCE[
+        UI_SOURCE.index("function curlPreview") : UI_SOURCE.index(
             "async function copyText"
         )
     ]
@@ -592,6 +642,13 @@ def test_ui_index_contains_control_panel_elements():
 
     assert response.status_code == 200
     html = response.text
+    source = "\n".join(
+        (
+            html,
+            client.get("/assets/app.css").text,
+            client.get("/assets/app.js").text,
+        )
+    )
     for element_id in (
         "new-chat-button",
         "session-list",
@@ -732,7 +789,7 @@ def test_ui_index_contains_control_panel_elements():
         "close-inspector-button",
         "session-drawer-button",
     ):
-        assert element_id in html
+        assert element_id in source
     for text in (
         "+ New session",
         "/api/project",
@@ -845,7 +902,7 @@ def test_ui_index_contains_control_panel_elements():
         "clipboardData",
         "persistProjectState",
     ):
-        assert text in html
+        assert text in source
 
 
 def test_ui_rejects_remote_bind_without_allow_remote():

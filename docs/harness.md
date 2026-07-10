@@ -594,9 +594,10 @@ giga session show <session_id> --json
 
 ## Browser UI
 
-`giga ui` serves the local Harness Control Panel as one no-build HTML page. It
-binds to `127.0.0.1:8091` by default. Remote binding is rejected unless you pass
-`--allow-remote`.
+`giga ui` serves the local Harness Control Panel from packaged HTML, CSS, and
+JavaScript assets without a frontend build step, runtime CDN, or network fetch.
+It binds to `127.0.0.1:8091` by default. Remote binding is rejected unless you
+pass `--allow-remote`.
 
 The UI is populated from `HarnessRegistry`, so built-in and entry-point
 harnesses appear in the browser without frontend code changes. It shows each

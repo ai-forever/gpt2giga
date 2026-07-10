@@ -58,6 +58,9 @@ phoenix = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+artifacts = ["gpt2giga/harness/ui/assets/**"]
+
 
 [tool.coverage.run]
 omit = [
