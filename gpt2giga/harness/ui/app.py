@@ -11,7 +11,7 @@ import threading
 from typing import Any, Mapping
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from gpt2giga.harness.arena import (
@@ -169,7 +169,13 @@ from gpt2giga.harness.tool_profiles import (
     build_tool_profile_statuses,
     tool_profile_status_to_dict,
 )
-from gpt2giga.harness.ui.static import INDEX_HTML, UIAssetNotFoundError, load_asset
+from gpt2giga.harness.ui.routers.runs import router as runs_router
+from gpt2giga.harness.ui.routers.shell import create_shell_router
+from gpt2giga.harness.ui.security import (
+    HarnessUISecurity,
+    HarnessUISecurityMiddleware,
+    is_loopback_host,
+)
 from gpt2giga.harness.worktrees import (
     WorktreeConflictError,
     WorktreeError,
@@ -225,6 +231,8 @@ def create_app(
     )
     active_headless_runs: dict[str, _ActiveHeadlessRun] = {}
     app = FastAPI(title="gpt2giga Unified Harness", docs_url=None, redoc_url=None)
+    ui_security = HarnessUISecurity(config)
+    app.add_middleware(HarnessUISecurityMiddleware, security=ui_security)
     app.state.harness_config = config
     app.state.harness_registry = registry
     app.state.harness_session_store = store
@@ -236,32 +244,6 @@ def create_app(
     app.state.harness_native_registry = native_registry
     app.state.harness_native_index_store = native_index_store
     app.state.harness_native_process_manager = native_process_manager
-
-    @app.get("/", response_class=HTMLResponse)
-    async def index() -> HTMLResponse:
-        return HTMLResponse(
-            INDEX_HTML,
-            headers={"Cache-Control": "no-cache"},
-        )
-
-    @app.get("/assets/{asset_name:path}", include_in_schema=False)
-    async def ui_asset(asset_name: str) -> Response:
-        media_types = {
-            "app.css": "text/css; charset=utf-8",
-            "app.js": "text/javascript; charset=utf-8",
-        }
-        media_type = media_types.get(asset_name)
-        if media_type is None:
-            raise HTTPException(status_code=404, detail="UI asset not found")
-        try:
-            content = load_asset(asset_name)
-        except UIAssetNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="UI asset not found") from exc
-        return Response(
-            content=content,
-            media_type=media_type,
-            headers={"Cache-Control": "public, max-age=3600"},
-        )
 
     @app.get("/api/harnesses")
     async def harnesses() -> dict[str, Any]:
@@ -2002,14 +1984,18 @@ def create_app(
             ) from exc
         return result_to_dict(result)
 
+    app.include_router(runs_router)
+    # The shell catch-all must remain last so unknown API and asset paths never
+    # become HTML responses.
+    app.include_router(create_shell_router(ui_security))
     return app
 
 
 def validate_ui_bind(host: str, *, allow_remote: bool) -> None:
     """Reject unsafe remote UI binding unless explicitly allowed."""
-    if host == "0.0.0.0" and not allow_remote:
+    if not is_loopback_host(host) and not allow_remote:
         raise ValueError(
-            "Refusing to bind UI to 0.0.0.0 without --allow-remote. "
+            f"Refusing to bind UI to {host} without --allow-remote. "
             "The UI may expose local harness execution."
         )
 

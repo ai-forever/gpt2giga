@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from gpt2giga.harness.types import GigaChatApiMode, HarnessContext, parse_api_mode
 
@@ -30,6 +30,8 @@ class HarnessConfig:
     default_api_mode: GigaChatApiMode = GigaChatApiMode.V2
     ui_host: str = DEFAULT_UI_HOST
     ui_port: int = DEFAULT_UI_PORT
+    ui_bootstrap_token: str | None = field(default=None, repr=False)
+    ui_allowed_hosts: tuple[str, ...] = ()
     timeout_seconds: float = 60.0
     auto_start_proxy: bool = True
     proxy_start_timeout_seconds: float = DEFAULT_PROXY_START_TIMEOUT_SECONDS
@@ -52,6 +54,8 @@ class HarnessConfig:
             _env_first("GPT2GIGA_HARNESS_UI_PORT"),
             DEFAULT_UI_PORT,
         )
+        ui_bootstrap_token = _env_first("GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN")
+        ui_allowed_hosts = _parse_csv(_env_first("GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS"))
         timeout = _parse_float(
             _env_first("GPT2GIGA_HARNESS_TIMEOUT_SECONDS"),
             60.0,
@@ -72,6 +76,8 @@ class HarnessConfig:
             default_api_mode=default_api_mode,
             ui_host=ui_host,
             ui_port=ui_port,
+            ui_bootstrap_token=ui_bootstrap_token,
+            ui_allowed_hosts=ui_allowed_hosts,
             timeout_seconds=timeout,
             auto_start_proxy=auto_start_proxy,
             proxy_start_timeout_seconds=proxy_start_timeout,
@@ -94,6 +100,8 @@ class HarnessConfig:
             default_api_mode=self.default_api_mode,
             ui_host=ui_host or self.ui_host,
             ui_port=ui_port if ui_port is not None else self.ui_port,
+            ui_bootstrap_token=self.ui_bootstrap_token,
+            ui_allowed_hosts=self.ui_allowed_hosts,
             timeout_seconds=self.timeout_seconds,
             auto_start_proxy=(
                 auto_start_proxy
@@ -169,3 +177,9 @@ def _parse_bool(value: str | None, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     return default
+
+
+def _parse_csv(value: str | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    return tuple(item.strip().lower() for item in value.split(",") if item.strip())

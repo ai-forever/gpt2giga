@@ -50,8 +50,8 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.status_code == 200
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
-    assert '<link rel="stylesheet" href="/assets/app.css">' in index_response.text
-    assert '<script src="/assets/app.js"></script>' in index_response.text
+    assert '<link rel="stylesheet" href="/assets/app.css?v=22">' in index_response.text
+    assert '<script src="/assets/app.js?v=22"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -912,6 +912,11 @@ def test_ui_rejects_remote_bind_without_allow_remote():
 
 def test_ui_allows_remote_bind_with_explicit_flag():
     validate_ui_bind("0.0.0.0", allow_remote=True)
+
+
+def test_ui_rejects_non_loopback_hostname_without_explicit_flag():
+    with pytest.raises(ValueError, match="harness.example"):
+        validate_ui_bind("harness.example", allow_remote=False)
 
 
 class _WorkspaceCaptureHarness(BaseHarness):

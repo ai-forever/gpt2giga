@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/app.css?v=22">
 </head>
 <body>
   <div class="app">
@@ -20,6 +20,10 @@
           <div id="project-name" class="project-title">Loading...</div>
           <div id="project-meta" class="session-meta"></div>
         </div>
+        <nav class="primary-nav" aria-label="Primary">
+          <a id="work-nav-link" class="primary-nav-link" href="/work">Work</a>
+          <a id="runs-nav-link" class="primary-nav-link" href="/runs">Runs</a>
+        </nav>
       </div>
       <div class="top-actions">
         <span id="proxy-status" class="proxy-indicator warn">Proxy: checking</span>
@@ -419,8 +423,21 @@
         </div>
       </div>
     </div>
+    <div id="auth-modal" class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" hidden>
+      <form id="auth-form" class="auth-dialog">
+        <div>
+          <h2 id="auth-title">Authenticate this browser</h2>
+          <p class="status-line">Enter the remote UI bootstrap token. It is exchanged for an HttpOnly session cookie and is not stored by the cockpit.</p>
+        </div>
+        <label>Bootstrap token
+          <input id="auth-token-input" type="password" autocomplete="current-password">
+        </label>
+        <div id="auth-status" class="status-line">A browser session is required.</div>
+        <button type="submit">Authenticate</button>
+      </form>
+    </div>
   </div>
 
-  <script src="/assets/app.js"></script>
+  <script src="/assets/app.js?v=22"></script>
 </body>
 </html>

@@ -65,14 +65,21 @@ giga project init
 giga init
 ```
 
-By default the UI binds to `127.0.0.1:8091`. To bind remotely you must opt in:
+By default the UI binds to `127.0.0.1:8091`. Local requests receive an opaque
+HttpOnly, `SameSite=Strict` browser-session cookie. To bind remotely, configure
+a strong bootstrap token in the environment and opt in explicitly:
 
 ```bash
+export GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN="$(openssl rand -hex 32)"
+export GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS=harness.example.internal
 giga ui --host 0.0.0.0 --allow-remote
 ```
 
-Remote binding can expose local harness execution. Use it only behind a trusted
-network boundary.
+Terminate TLS in front of a remote listener: remote cookies are `Secure`, the
+bootstrap token is exchanged through `Authorization: Bearer ...`, and it is
+never accepted in a URL. Without remote authentication, data APIs return `401`
+and mutating APIs fail closed with `403`. Host and same-origin checks apply to
+the shell, API, assets, and SSE connections.
 
 ## Configuration
 
@@ -85,6 +92,8 @@ GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max
 GPT2GIGA_HARNESS_DEFAULT_API_MODE=v2
 GPT2GIGA_HARNESS_UI_HOST=127.0.0.1
 GPT2GIGA_HARNESS_UI_PORT=8091
+GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN=<strong-random-secret-for-remote-ui>
+GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS=harness.example.internal
 GPT2GIGA_HARNESS_AUTO_START_PROXY=True
 GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS=15
 GPT2GIGA_HARNESS_DATA_DIR=~/.gpt2giga/harness
@@ -398,8 +407,9 @@ without starting the editor.
 The browser UI exposes the same bridge in the `Editor` inspector tab. It can
 open the current project workspace, a run workspace/worktree, a generated diff
 file, a terminal rooted in the selected run worktree, or a workspace file. The
-tab also copies local `giga open session ...` and `giga open run ...` commands
-for reopening the same context.
+tab also copies stable local `/work/<session_id>` and `/runs/<run_id>` deep links
+for reopening the same context. The CLI `giga open ...` commands remain
+available for editor-oriented flows.
 
 The matching API surface is:
 
@@ -597,7 +607,17 @@ giga session show <session_id> --json
 `giga ui` serves the local Harness Control Panel from packaged HTML, CSS, and
 JavaScript assets without a frontend build step, runtime CDN, or network fetch.
 It binds to `127.0.0.1:8091` by default. Remote binding is rejected unless you
-pass `--allow-remote`.
+pass `--allow-remote`; usable remote APIs additionally require
+`GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN` and TLS termination. The token is exchanged
+for an in-memory browser session and is never stored in project state, history,
+traces, or URLs.
+
+The shell exposes stable Work and Runs routes. `/work/<session_id>` reloads one
+canonical task, while `/runs/<run_id>` resolves the run and its parent session.
+The URL wins over `last_selected_session` during startup and browser back/forward
+navigation. Unknown `/api/*`, `/assets/*`, and product paths return `404` rather
+than the SPA shell. `/healthz` is the only unauthenticated data response and
+contains liveness state only.
 
 The UI is populated from `HarnessRegistry`, so built-in and entry-point
 harnesses appear in the browser without frontend code changes. It shows each

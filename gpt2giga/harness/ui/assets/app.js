@@ -38,6 +38,7 @@
       attachments: [],
       fileMentionQuery: null,
       currentSessionId: null,
+      selectedRunId: null,
       currentBundle: null,
       currentArena: null,
       activeHeadlessRun: null,
@@ -47,7 +48,8 @@
       renderedSessionId: null,
       routeRecommendation: null,
       routeRecommendationTimer: null,
-      lastPayload: null
+      lastPayload: null,
+      eventsBound: false
     };
 
     const byId = (id) => document.getElementById(id);
@@ -70,7 +72,7 @@
 
     async function loadDefaults() {
       const result = await getJson("/api/defaults");
-      if (!result.ok) return;
+      if (!result.ok) return result;
       state.defaults = result.data;
       byId("model-input").value = result.data.default_model || "GigaChat-2-Max";
       const mode = result.data.default_api_mode || "v2";
@@ -78,6 +80,43 @@
       updateRouteNote();
       updateHeaderBadges();
       if (result.data.note) setText("model-status", result.data.note);
+      return result;
+    }
+
+    function currentRoute() {
+      const path = window.location.pathname.replace(/\/+$/, "") || "/";
+      if (path === "/") return { area: "legacy", id: null };
+      if (path === "/work") return { area: "work", id: null };
+      if (path === "/runs") return { area: "runs", id: null };
+      const work = path.match(/^\/work\/([^/]+)$/);
+      const runs = path.match(/^\/runs\/([^/]+)$/);
+      try {
+        if (work) return { area: "work", id: decodeURIComponent(work[1]) };
+        if (runs) return { area: "runs", id: decodeURIComponent(runs[1]) };
+      } catch (error) {
+        return { area: "invalid", id: null };
+      }
+      return { area: "invalid", id: null };
+    }
+
+    function syncBrowserRoute(area, id, replace = false) {
+      const suffix = id ? `/${encodeURIComponent(id)}` : "";
+      const path = `/${area}${suffix}`;
+      if (window.location.pathname !== path) {
+        window.history[replace ? "replaceState" : "pushState"]({}, "", path);
+      }
+      syncNavigation();
+    }
+
+    function syncNavigation() {
+      const route = currentRoute();
+      const workLink = byId("work-nav-link");
+      const runsLink = byId("runs-nav-link");
+      workLink.classList.toggle("active", route.area === "work" || route.area === "legacy");
+      runsLink.classList.toggle("active", route.area === "runs");
+      workLink.href = state.currentSessionId ? `/work/${encodeURIComponent(state.currentSessionId)}` : "/work";
+      const run = currentRun();
+      runsLink.href = run && run.id ? `/runs/${encodeURIComponent(run.id)}` : "/runs";
     }
 
     async function loadProject() {
@@ -810,10 +849,11 @@
       showTab("native");
     }
 
-    async function loadSession(sessionId) {
+    async function loadSession(sessionId, options = {}) {
       const result = await getJson(`/api/sessions/${encodeURIComponent(sessionId)}`);
       if (!result.ok) return;
       state.currentSessionId = sessionId;
+      state.selectedRunId = options.runId || null;
       state.currentBundle = result.data;
       if (state.currentArena && state.currentArena.session_id !== sessionId) state.currentArena = null;
       await loadAttachments(sessionId);
@@ -823,7 +863,33 @@
       renderAll();
       resumeActiveHeadlessRun();
       setSidebarOpen(false);
+      if (options.syncRoute !== false) {
+        syncBrowserRoute(options.area || "work", options.runId || sessionId);
+      } else {
+        syncNavigation();
+      }
       await loadSessions();
+    }
+
+    async function loadRun(runId, options = {}) {
+      const result = await getJson(`/api/runs/${encodeURIComponent(runId)}`);
+      if (!result.ok || !result.data.session) return false;
+      const sessionId = result.data.session.id;
+      state.currentSessionId = sessionId;
+      state.selectedRunId = runId;
+      state.currentBundle = result.data;
+      if (state.currentArena && state.currentArena.session_id !== sessionId) state.currentArena = null;
+      await loadAttachments(sessionId);
+      applySessionDefaults(result.data.session);
+      persistProjectState({ last_selected_session: sessionId });
+      restoreTerminalPartialDrafts();
+      renderAll();
+      resumeActiveHeadlessRun();
+      setSidebarOpen(false);
+      if (options.syncRoute !== false) syncBrowserRoute("runs", runId);
+      else syncNavigation();
+      await loadSessions();
+      return true;
     }
 
     async function loadAttachments(sessionId) {
@@ -1914,11 +1980,14 @@
         if (result.ok) {
           state.currentArena = null;
           state.currentSessionId = body.session.id;
+          const completedRuns = Array.isArray(body.runs) ? body.runs : [];
+          state.selectedRunId = completedRuns.length ? completedRuns[completedRuns.length - 1].id : null;
           state.currentBundle = body;
           byId("prompt-input").value = "";
           state.attachments = [];
           renderAttachments();
           renderAll();
+          syncBrowserRoute("work", body.session.id);
           await loadSessions();
           persistProjectState({ last_selected_session: body.session.id });
         } else {
@@ -2190,6 +2259,7 @@
       renderMemoryPanel();
       renderToolsPanel();
       renderEvalsPanel();
+      syncNavigation();
     }
 
     function normalizeMessageRole(value) {
@@ -3254,6 +3324,10 @@
     function currentRun() {
       const bundle = state.currentBundle || {};
       const runs = Array.isArray(bundle.runs) ? bundle.runs : [];
+      if (state.selectedRunId) {
+        const selected = runs.find((run) => run.id === state.selectedRunId);
+        if (selected) return selected;
+      }
       return runs[runs.length - 1] || null;
     }
 
@@ -3389,13 +3463,15 @@
     function copySessionOpenCommand() {
       const session = state.currentBundle && state.currentBundle.session ? state.currentBundle.session : null;
       if (!session || !session.id) return;
-      copyText(`giga open session ${shellQuote(session.id)}`, "Copied session open command.");
+      const url = new URL(`/work/${encodeURIComponent(session.id)}`, window.location.origin);
+      copyText(url.toString(), "Copied session deep link.");
     }
 
     function copyRunOpenCommand() {
       const run = currentRun();
       if (!run || !run.id) return;
-      copyText(`giga open run ${shellQuote(run.id)}`, "Copied run open command.");
+      const url = new URL(`/runs/${encodeURIComponent(run.id)}`, window.location.origin);
+      copyText(url.toString(), "Copied run deep link.");
     }
 
     async function createPrBranch() {
@@ -3880,6 +3956,8 @@
     }
 
     function bindEvents() {
+      if (state.eventsBound) return;
+      state.eventsBound = true;
       bindTabEvents();
       const composer = byId("composer");
       byId("details-toggle-button").addEventListener("click", () => setInspectorOpen(true));
@@ -3927,6 +4005,8 @@
       });
       byId("close-preflight-button").addEventListener("click", () => closePreflightModal(false));
       byId("continue-preflight-button").addEventListener("click", () => closePreflightModal(true));
+      byId("auth-form").addEventListener("submit", authenticateBrowser);
+      window.addEventListener("popstate", () => applyCurrentRoute());
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && state.nativeModalOpen) closeNativeHistory();
         if (event.key === "Escape" && state.preflightModalOpen) closePreflightModal(false);
@@ -4056,15 +4136,76 @@
       });
     }
 
+    async function authenticateBrowser(event) {
+      event.preventDefault();
+      const input = byId("auth-token-input");
+      const token = input.value;
+      if (!token) {
+        setText("auth-status", "Enter the bootstrap token.");
+        return;
+      }
+      setText("auth-status", "Authenticating...");
+      const result = await getJson("/auth/session", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      input.value = "";
+      if (!result.ok) {
+        setText("auth-status", result.data.detail || "Authentication failed.");
+        return;
+      }
+      byId("auth-modal").hidden = true;
+      await boot();
+    }
+
+    function clearRouteSelection() {
+      closeHeadlessEventSource();
+      state.currentSessionId = null;
+      state.selectedRunId = null;
+      state.currentBundle = null;
+      state.currentArena = null;
+      state.attachments = [];
+      renderAttachments();
+      renderAll();
+    }
+
+    async function applyCurrentRoute() {
+      const route = currentRoute();
+      if (route.area === "work" && route.id) {
+        await loadSession(route.id, { syncRoute: false });
+        return true;
+      }
+      if (route.area === "runs" && route.id) {
+        const loaded = await loadRun(route.id, { syncRoute: false });
+        if (!loaded) setText("model-status", "Run deep link was not found.");
+        return true;
+      }
+      if (route.area === "work" || route.area === "runs") {
+        clearRouteSelection();
+        syncNavigation();
+        return true;
+      }
+      syncNavigation();
+      return false;
+    }
+
     async function boot() {
-      prepareAdvancedPanel();
+      if (!state.eventsBound) prepareAdvancedPanel();
       bindEvents();
       renderNativeTerminalStatus("idle");
-      await loadDefaults();
+      const defaults = await loadDefaults();
+      if (!defaults.ok) {
+        byId("auth-modal").hidden = false;
+        setText("auth-status", defaults.data.detail || "A browser session is required.");
+        byId("auth-token-input").focus();
+        return;
+      }
+      byId("auth-modal").hidden = true;
       await loadProject();
       await Promise.all([loadHarnesses(), refreshHealth(), loadModels()]);
       await loadSessions();
-      if (!state.currentSessionId && state.projectState && state.projectState.last_selected_session) {
+      const routed = await applyCurrentRoute();
+      if (!routed && !state.currentSessionId && state.projectState && state.projectState.last_selected_session) {
         await loadSession(state.projectState.last_selected_session);
       }
       await loadNativeSessions(false);

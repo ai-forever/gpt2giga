@@ -866,6 +866,24 @@
       padding-left: 16px;
       border-left: 1px solid var(--border);
     }
+    .primary-nav {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .primary-nav-link {
+      border-radius: 8px;
+      color: var(--muted);
+      padding: 7px 10px;
+      font-size: 13px;
+      font-weight: 750;
+      text-decoration: none;
+    }
+    .primary-nav-link:hover,
+    .primary-nav-link.active {
+      background: var(--panel-soft);
+      color: var(--text);
+    }
     .project-context .project-title {
       max-width: 220px;
       font-size: 14px;
@@ -875,6 +893,34 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .auth-modal {
+      position: fixed;
+      z-index: 120;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgb(2 6 12 / 0.82);
+      padding: 20px;
+    }
+    .auth-modal[hidden] {
+      display: none;
+    }
+    .auth-dialog {
+      display: grid;
+      width: min(440px, 100%);
+      gap: 18px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--panel);
+      box-shadow: 0 24px 80px rgb(0 0 0 / 0.5);
+      padding: 22px;
+    }
+    .auth-dialog h2 {
+      margin-bottom: 8px;
+      color: var(--text);
+      font-size: 17px;
+      text-transform: none;
     }
     .mobile-only {
       display: none;
@@ -2033,12 +2079,18 @@
         gap: 9px;
       }
       .brand-lockup h1 {
-        font-size: 16px;
+        display: none;
       }
       .project-context,
       .proxy-indicator span,
       .top-actions > .proxy-indicator {
         display: none;
+      }
+      .primary-nav {
+        gap: 0;
+      }
+      .primary-nav-link {
+        padding: 6px 7px;
       }
       .shell {
         display: block;

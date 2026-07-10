@@ -111,6 +111,7 @@ from gpt2giga.harness.types import (
     spec_to_dict,
 )
 from gpt2giga.harness.ui.app import create_app, validate_ui_bind
+from gpt2giga.harness.ui.security import is_loopback_host
 from gpt2giga.harness.workspace import resolve_workspace
 
 AGENT_ALIASES = {
@@ -1136,11 +1137,15 @@ def _handle_open_file(args: argparse.Namespace, config: HarnessConfig) -> int:
 def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     config = config.with_overrides(ui_host=args.host, ui_port=args.port)
     validate_ui_bind(config.ui_host, allow_remote=args.allow_remote)
-    if args.allow_remote and config.ui_host == "0.0.0.0":
-        print(
-            "Warning: UI is bound to 0.0.0.0 and may expose local harness execution.",
-            file=sys.stderr,
-        )
+    if args.allow_remote and not is_loopback_host(config.ui_host):
+        if config.ui_bootstrap_token:
+            warning = "Remote UI browser authentication is enabled."
+        else:
+            warning = (
+                "Remote UI APIs require GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN; "
+                "mutating APIs are disabled."
+            )
+        print(f"Warning: {warning}", file=sys.stderr)
     print(
         f"Starting gpt2giga Unified Harness UI at http://{config.ui_host}:{config.ui_port}/"
     )

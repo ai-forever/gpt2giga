@@ -67,7 +67,10 @@ def run_doctor(
             "",
             "UI:",
             f"  Default bind: {config.ui_host}:{config.ui_port}",
-            "  Remote bind requires --allow-remote",
+            (
+                "  Remote bind requires --allow-remote, TLS, and "
+                "GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN"
+            ),
         ]
     )
     return "\n".join(lines)
