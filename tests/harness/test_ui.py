@@ -50,8 +50,8 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.status_code == 200
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
-    assert '<link rel="stylesheet" href="/assets/app.css?v=24">' in index_response.text
-    assert '<script src="/assets/app.js?v=24"></script>' in index_response.text
+    assert '<link rel="stylesheet" href="/assets/app.css?v=25">' in index_response.text
+    assert '<script src="/assets/app.js?v=25"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200

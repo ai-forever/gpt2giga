@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=24">
+  <link rel="stylesheet" href="/assets/app.css?v=25">
 </head>
 <body>
   <div class="app">
@@ -242,6 +242,50 @@
         </div>
       </section>
 
+      <section id="runs-center" class="runs-center" aria-label="Durable runs" hidden>
+        <header class="runs-center-header">
+          <div>
+            <h2>Runs Center</h2>
+            <p id="runs-center-status" class="status-line">Loading durable work...</p>
+          </div>
+          <div class="runs-filter-bar" role="group" aria-label="Run status filters">
+            <button class="secondary active" type="button" data-run-status="">All</button>
+            <button class="secondary" type="button" data-run-status="queued">Queued</button>
+            <button class="secondary" type="button" data-run-status="running">Running</button>
+            <button class="secondary" type="button" data-run-status="blocked">Blocked</button>
+            <button class="secondary" type="button" data-run-status="approval-needed">Approval needed</button>
+            <button class="secondary" type="button" data-run-status="failed">Failed</button>
+            <button class="secondary" type="button" data-run-status="canceled">Canceled</button>
+            <button class="secondary" type="button" data-run-status="completed">Completed</button>
+            <button id="refresh-runs-center-button" class="secondary" type="button">Refresh</button>
+          </div>
+        </header>
+        <div class="runs-center-grid">
+          <div class="runs-queue-panel">
+            <div id="runs-center-list" class="runs-center-list" aria-live="polite"></div>
+            <button id="load-more-runs-button" class="secondary" type="button" hidden>Load more</button>
+          </div>
+          <div class="runs-trace-panel">
+            <div class="runs-trace-header">
+              <div>
+                <h3 id="runs-trace-title">Select a run</h3>
+                <div id="runs-trace-meta" class="status-line">Queue, ownership, retries, and trace details appear here.</div>
+              </div>
+              <div class="runs-action-bar">
+                <button id="runs-open-task-button" class="secondary" type="button" disabled>Open task</button>
+                <button id="runs-cancel-button" class="danger" type="button" disabled>Cancel</button>
+                <button id="runs-retry-button" type="button" disabled>Retry safe attempt</button>
+                <button id="runs-open-worktree-button" class="secondary" type="button" disabled>Open worktree</button>
+                <button id="runs-inspect-artifact-button" class="secondary" type="button" disabled>Inspect artifact</button>
+              </div>
+            </div>
+            <ol id="runs-trace-list" class="runs-trace-list" aria-live="polite"></ol>
+            <button id="load-older-trace-button" class="secondary" type="button" hidden>Load older trace</button>
+            <pre id="runs-payload-panel" class="runs-payload-panel" hidden></pre>
+          </div>
+        </div>
+      </section>
+
       <button id="details-toggle-button" class="details-toggle" type="button" aria-expanded="false">Run details</button>
 
       <aside class="inspector" aria-label="Inspector">
@@ -438,6 +482,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=24"></script>
+  <script src="/assets/app.js?v=25"></script>
 </body>
 </html>

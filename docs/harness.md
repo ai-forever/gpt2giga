@@ -68,6 +68,26 @@ do not auto-start a proxy: start `gpt2giga` yourself and configure
 `GPT2GIGA_HARNESS_API_KEY` when a harness needs the proxy. This avoids treating
 the UI process's temporary sidecar key cache as durable worker state.
 
+The `Runs` area is the durable queue and history view. It filters queued,
+running, blocked, approval-needed, failed, canceled, and completed jobs; shows
+attempt count, retries, duration, selected metrics, and worker ownership; and
+reconnects to active SSE streams after a browser or UI-server restart. Opening
+a run loads a bounded hierarchical trace first. Individual redacted event
+payloads and artifacts are fetched only when inspected, and model reasoning is
+never exposed by the trace API or rendered in the timeline. Safe retry is
+available only when the latest failed attempt declares a read-only,
+deterministic, or otherwise retry-safe idempotency class.
+
+The lightweight Runs Center API is cursor-paginated:
+
+```text
+GET  /api/runs?status=running&limit=25&cursor=...
+GET  /api/runs/{run_id}/summary
+GET  /api/runs/{run_id}/trace?limit=100&cursor=...
+GET  /api/runs/{run_id}/events/{event_id}
+POST /api/runs/{run_id}/retry
+```
+
 From a project directory, inspect or initialize the project cockpit config:
 
 ```bash

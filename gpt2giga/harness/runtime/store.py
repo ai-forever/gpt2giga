@@ -348,6 +348,47 @@ class RuntimeCoordinationStore:
             ).fetchall()
         return tuple(_job_from_row(row) for row in rows)
 
+    def list_jobs_page(
+        self,
+        *,
+        statuses: tuple[JobStatus | str, ...] = (),
+        project_id: str | None = None,
+        harness_id: str | None = None,
+        cursor: tuple[str, str] | None = None,
+        limit: int = 25,
+    ) -> tuple[tuple[RuntimeJob, ...], bool]:
+        """List a newest-first cursor page without loading task payloads."""
+        page_size = max(1, min(int(limit), 100))
+        clauses: list[str] = []
+        params: list[Any] = []
+        parsed_statuses = tuple(parse_job_status(status) for status in statuses)
+        if parsed_statuses:
+            placeholders = ", ".join("?" for _ in parsed_statuses)
+            clauses.append(f"status IN ({placeholders})")
+            params.extend(status.value for status in parsed_statuses)
+        if project_id is not None:
+            clauses.append("project_id = ?")
+            params.append(_required_text(project_id, "project_id"))
+        if harness_id is not None:
+            clauses.append("required_harness_id = ?")
+            params.append(_required_text(harness_id, "harness_id"))
+        if cursor is not None:
+            created_at, job_id = cursor
+            clauses.append("(created_at < ? OR (created_at = ? AND id < ?))")
+            params.extend((created_at, created_at, job_id))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(page_size + 1)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM jobs{where} ORDER BY created_at DESC, id DESC LIMIT ?",
+                tuple(params),
+            ).fetchall()
+        has_more = len(rows) > page_size
+        return (
+            tuple(_job_from_row(row) for row in rows[:page_size]),
+            has_more,
+        )
+
     def transition_job(
         self,
         job_id: str,
@@ -695,6 +736,62 @@ class RuntimeCoordinationStore:
         if row is None:
             raise JobNotFoundError(job_id)
         return _job_from_row(row)
+
+    def retry_safe_job(self, job_id: str) -> RuntimeJob:
+        """Requeue one failed job whose latest attempt is explicitly retry-safe."""
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            job_row = connection.execute(
+                "SELECT * FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            if job_row is None:
+                raise JobNotFoundError(job_id)
+            job = _job_from_row(job_row)
+            if job.status is not JobStatus.FAILED:
+                raise InvalidStateTransitionError(
+                    f"only failed jobs can be retried; {job_id} is {job.status.value}"
+                )
+            attempt_row = connection.execute(
+                """
+                SELECT * FROM job_attempts
+                WHERE job_id = ? ORDER BY attempt_number DESC LIMIT 1
+                """,
+                (job_id,),
+            ).fetchone()
+            if attempt_row is None:
+                raise InvalidStateTransitionError(
+                    f"job {job_id} has no completed attempt to retry"
+                )
+            attempt = _attempt_from_row(attempt_row)
+            if attempt.status not in {
+                JobAttemptStatus.FAILED,
+                JobAttemptStatus.INTERRUPTED,
+            } or not _retry_safe(attempt.idempotency_class):
+                raise InvalidStateTransitionError("latest attempt is not safe to retry")
+            next_max_attempts = max(job.max_attempts, attempt.attempt_number + 1)
+            connection.execute(
+                """
+                UPDATE jobs
+                SET status = ?, available_at = ?, terminal_at = NULL,
+                    cancel_requested_at = NULL, max_attempts = ?,
+                    error_summary = NULL, updated_at = ?, version = version + 1
+                WHERE id = ? AND status = ?
+                """,
+                (
+                    JobStatus.QUEUED.value,
+                    now,
+                    next_max_attempts,
+                    now,
+                    job_id,
+                    JobStatus.FAILED.value,
+                ),
+            )
+            if connection.execute("SELECT changes()").fetchone()[0] != 1:
+                raise ConcurrentUpdateError(f"job {job_id} changed concurrently")
+            updated = connection.execute(
+                "SELECT * FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+        return _job_from_row(updated)
 
     def requeue_due_jobs(self) -> int:
         """Move due retry-wait jobs back to the claimable queue."""

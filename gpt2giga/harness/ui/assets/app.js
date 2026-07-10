@@ -1,4 +1,6 @@
     const NATIVE_SESSION_PAGE_SIZE = 5;
+    const RUNS_CENTER_PAGE_SIZE = 25;
+    const RUNS_TRACE_DOM_LIMIT = 200;
     const state = {
       defaults: {},
       harnesses: [],
@@ -44,6 +46,14 @@
       activeHeadlessRun: null,
       headlessEventSource: null,
       headlessEventSourceRunId: null,
+      runsCenterItems: [],
+      runsCenterCursor: null,
+      runsCenterStatus: "",
+      runsCenterSelected: null,
+      runsTraceNodes: [],
+      runsTraceCursor: null,
+      runsEventSource: null,
+      runsEventSourceRunId: null,
       liveRuns: new Map(),
       renderedSessionId: null,
       routeRecommendation: null,
@@ -117,6 +127,295 @@
       workLink.href = state.currentSessionId ? `/work/${encodeURIComponent(state.currentSessionId)}` : "/work";
       const run = currentRun();
       runsLink.href = run && run.id ? `/runs/${encodeURIComponent(run.id)}` : "/runs";
+      const runsArea = route.area === "runs";
+      document.body.classList.toggle("runs-area", runsArea);
+      byId("runs-center").hidden = !runsArea;
+    }
+
+    async function loadRunsCenter(options = {}) {
+      const append = Boolean(options.append);
+      const params = new URLSearchParams({ limit: String(RUNS_CENTER_PAGE_SIZE) });
+      if (state.runsCenterStatus) params.set("status", state.runsCenterStatus);
+      if (append && state.runsCenterCursor) params.set("cursor", state.runsCenterCursor);
+      setText("runs-center-status", append ? "Loading more durable work..." : "Refreshing durable work...");
+      const result = await getJson(`/api/runs?${params.toString()}`);
+      if (!result.ok) {
+        setText("runs-center-status", result.data.detail || "Runs Center is unavailable.");
+        return false;
+      }
+      const items = Array.isArray(result.data.runs) ? result.data.runs : [];
+      state.runsCenterItems = append ? [...state.runsCenterItems, ...items] : items;
+      state.runsCenterCursor = result.data.next_cursor || null;
+      const workers = Array.isArray(result.data.workers) ? result.data.workers : [];
+      const online = workers.filter((worker) => worker.status === "online").length;
+      setText("runs-center-status", `${state.runsCenterItems.length} runs · ${online} workers online`);
+      byId("load-more-runs-button").hidden = !state.runsCenterCursor;
+      renderRunsCenterList();
+      return true;
+    }
+
+    function renderRunsCenterList() {
+      const list = byId("runs-center-list");
+      list.textContent = "";
+      if (!state.runsCenterItems.length) {
+        const empty = document.createElement("div");
+        empty.className = "status-line";
+        empty.textContent = "No durable runs match this filter.";
+        list.appendChild(empty);
+        return;
+      }
+      for (const item of state.runsCenterItems) {
+        const run = item.run || {};
+        const job = item.job || {};
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "runs-center-item";
+        button.classList.toggle("active", Boolean(state.runsCenterSelected && state.runsCenterSelected.job && state.runsCenterSelected.job.id === job.id));
+        button.addEventListener("click", () => selectRunsCenterItem(item));
+
+        const heading = document.createElement("div");
+        heading.className = "runs-center-item-row";
+        const title = document.createElement("span");
+        title.className = "runs-center-item-title";
+        title.textContent = item.session_title || "Untitled task";
+        const status = document.createElement("span");
+        status.className = `runs-status ${item.status_group || "queued"}`;
+        status.textContent = String(item.status_group || job.status || "queued").replace(/-/g, " ");
+        heading.append(title, status);
+
+        const meta = document.createElement("div");
+        meta.className = "runs-center-item-meta";
+        for (const value of [
+          run.harness_id || job.required_harness_id || "harness",
+          `attempts ${item.attempt_count || 0}`,
+          item.worker_id ? `worker ${item.worker_id}` : "unowned",
+          formatRunsDuration(item.duration_ms)
+        ]) {
+          const span = document.createElement("span");
+          span.textContent = value;
+          meta.appendChild(span);
+        }
+        const metrics = document.createElement("div");
+        metrics.className = "runs-metrics";
+        metrics.textContent = formatRunsMetrics(item.metrics);
+        button.append(heading, meta);
+        if (metrics.textContent) button.appendChild(metrics);
+        list.appendChild(button);
+      }
+    }
+
+    async function resolveRunsCenterItem(runId) {
+      const existing = state.runsCenterItems.find((item) => item.run_id === runId);
+      if (existing) return existing;
+      const result = await getJson(`/api/runs/${encodeURIComponent(runId)}/summary`);
+      if (!result.ok || !result.data.run) return null;
+      state.runsCenterItems = [result.data.run, ...state.runsCenterItems];
+      renderRunsCenterList();
+      return result.data.run;
+    }
+
+    async function selectRunsCenterItem(item, options = {}) {
+      state.runsCenterSelected = item;
+      renderRunsCenterList();
+      renderRunsCenterSelection();
+      if (options.syncRoute !== false) syncBrowserRoute("runs", item.run_id);
+      await loadRunsTrace(false);
+      openRunsCenterEventStream(item);
+    }
+
+    function renderRunsCenterSelection() {
+      const item = state.runsCenterSelected;
+      const actions = item && item.actions ? item.actions : {};
+      const job = item && item.job ? item.job : {};
+      const run = item && item.run ? item.run : {};
+      setText("runs-trace-title", item ? item.session_title : "Select a run");
+      setText(
+        "runs-trace-meta",
+        item
+          ? `${run.harness_id || job.required_harness_id || "harness"} · ${item.status_group} · ${item.retry_count || 0} retries · ${item.worker_id || "unowned"} · ${formatRunsDuration(item.duration_ms)}`
+          : "Queue, ownership, retries, and trace details appear here."
+      );
+      byId("runs-open-task-button").disabled = !actions.open_task;
+      byId("runs-cancel-button").disabled = !actions.cancel;
+      byId("runs-retry-button").disabled = !actions.retry;
+      byId("runs-open-worktree-button").disabled = !actions.open_worktree;
+      byId("runs-inspect-artifact-button").disabled = !actions.inspect_artifact;
+      if (!item) {
+        byId("runs-trace-list").textContent = "";
+        byId("runs-payload-panel").hidden = true;
+      }
+    }
+
+    async function loadRunsTrace(older = false) {
+      const item = state.runsCenterSelected;
+      if (!item || !item.run_id) return;
+      const params = new URLSearchParams({ limit: String(RUNS_TRACE_DOM_LIMIT) });
+      if (older && state.runsTraceCursor) params.set("cursor", state.runsTraceCursor);
+      const result = await getJson(`/api/runs/${encodeURIComponent(item.run_id)}/trace?${params.toString()}`);
+      if (!result.ok) {
+        setText("runs-trace-meta", result.data.detail || "Trace is unavailable.");
+        return;
+      }
+      const nodes = Array.isArray(result.data.nodes) ? result.data.nodes : [];
+      if (older) {
+        const existing = new Set(state.runsTraceNodes.map((node) => node.id));
+        state.runsTraceNodes = [...nodes.filter((node) => !existing.has(node.id)), ...state.runsTraceNodes];
+      } else {
+        state.runsTraceNodes = nodes.slice(-RUNS_TRACE_DOM_LIMIT);
+      }
+      state.runsTraceCursor = result.data.next_cursor || null;
+      byId("load-older-trace-button").hidden = !state.runsTraceCursor;
+      renderRunsTrace();
+    }
+
+    function renderRunsTrace() {
+      const list = byId("runs-trace-list");
+      list.textContent = "";
+      if (!state.runsTraceNodes.length) {
+        const empty = document.createElement("li");
+        empty.className = "status-line";
+        empty.textContent = "No trace spans recorded yet.";
+        list.appendChild(empty);
+        return;
+      }
+      for (const node of state.runsTraceNodes.slice(-RUNS_TRACE_DOM_LIMIT)) {
+        list.appendChild(createRunsTraceNode(node));
+      }
+    }
+
+    function createRunsTraceNode(node) {
+      const item = document.createElement("li");
+      item.className = "runs-trace-node";
+      item.dataset.depth = String(Math.min(Number(node.depth || 0), 2));
+      item.dataset.status = node.status || "";
+      const row = document.createElement("div");
+      row.className = "runs-trace-node-row";
+      const title = document.createElement("strong");
+      title.textContent = node.title || node.kind || "Trace span";
+      const badge = document.createElement("span");
+      badge.className = "runs-status";
+      badge.textContent = node.kind || "event";
+      row.append(title, badge);
+      const meta = document.createElement("div");
+      meta.className = "runs-center-item-meta";
+      meta.textContent = [node.status, node.worker_id, formatRunsDuration(node.duration_ms), node.created_at].filter(Boolean).join(" · ");
+      item.append(row, meta);
+      if (node.has_payload && node.event_id) {
+        const inspect = document.createElement("button");
+        inspect.type = "button";
+        inspect.className = "secondary runs-trace-payload-button";
+        inspect.textContent = "Inspect payload";
+        inspect.addEventListener("click", () => inspectRunsEventPayload(node.event_id));
+        item.appendChild(inspect);
+      }
+      return item;
+    }
+
+    async function inspectRunsEventPayload(eventId) {
+      const item = state.runsCenterSelected;
+      if (!item) return;
+      const result = await getJson(`/api/runs/${encodeURIComponent(item.run_id)}/events/${encodeURIComponent(eventId)}`);
+      const panel = byId("runs-payload-panel");
+      panel.hidden = false;
+      panel.textContent = pretty(result.data);
+    }
+
+    function appendRunsLiveEvent(event) {
+      const type = String(event.type || "").toLowerCase();
+      const kind = String(event.span_kind || "").toLowerCase();
+      if ([type, kind].some((value) => /reasoning|chain_of_thought|thinking|thought/.test(value))) return;
+      const node = {
+        id: `event:${event.id || Date.now()}`,
+        depth: event.parent_span_id ? 2 : 1,
+        event_id: event.id,
+        kind: event.span_kind || inferRunsEventKind(type),
+        status: event.span_status || (type.includes("failed") || type.includes("error") ? "failed" : type.includes("finished") ? "succeeded" : "running"),
+        title: event.message || type.replace(/_/g, " "),
+        created_at: event.created_at,
+        has_payload: Boolean(event.payload && Object.keys(event.payload).length)
+      };
+      if (state.runsTraceNodes.some((item) => item.id === node.id)) return;
+      state.runsTraceNodes.push(node);
+      if (state.runsTraceNodes.length > RUNS_TRACE_DOM_LIMIT) state.runsTraceNodes.shift();
+      const list = byId("runs-trace-list");
+      if (list.querySelector(".status-line")) list.textContent = "";
+      list.appendChild(createRunsTraceNode(node));
+      while (list.children.length > RUNS_TRACE_DOM_LIMIT) list.removeChild(list.firstElementChild);
+    }
+
+    function openRunsCenterEventStream(item) {
+      closeRunsCenterEventStream();
+      if (!item || !["queued", "running", "blocked", "approval-needed"].includes(item.status_group) || !window.EventSource) return;
+      const latest = [...state.runsTraceNodes].reverse().find((node) => node.event_id);
+      const query = latest ? `?after_id=${encodeURIComponent(latest.event_id)}` : "";
+      const source = new EventSource(`/api/runs/${encodeURIComponent(item.run_id)}/events/stream${query}`);
+      state.runsEventSource = source;
+      state.runsEventSourceRunId = item.run_id;
+      source.onmessage = (message) => {
+        if (!state.runsCenterSelected || state.runsCenterSelected.run_id !== item.run_id) return;
+        try {
+          const event = JSON.parse(message.data || "{}");
+          appendRunsLiveEvent(event);
+          if (event.type === "run_finished") {
+            closeRunsCenterEventStream();
+            loadRunsCenter().then(async () => {
+              const refreshed = await resolveRunsCenterItem(item.run_id);
+              if (refreshed) await selectRunsCenterItem(refreshed, { syncRoute: false });
+            });
+          }
+        } catch (error) {
+          setText("runs-trace-meta", "Received an invalid live trace event.");
+        }
+      };
+    }
+
+    function closeRunsCenterEventStream() {
+      if (state.runsEventSource) state.runsEventSource.close();
+      state.runsEventSource = null;
+      state.runsEventSourceRunId = null;
+    }
+
+    async function runCenterAction(name) {
+      const item = state.runsCenterSelected;
+      const actions = item && item.actions ? item.actions : {};
+      const url = actions[name];
+      if (!url) return;
+      if (name === "open_task") {
+        window.history.pushState({}, "", url);
+        await applyCurrentRoute();
+        return;
+      }
+      const result = await getJson(url, {
+        method: ["cancel", "retry", "open_worktree"].includes(name) ? "POST" : "GET"
+      });
+      const panel = byId("runs-payload-panel");
+      panel.hidden = false;
+      panel.textContent = pretty(result.data);
+      if (result.ok && ["cancel", "retry"].includes(name)) {
+        await loadRunsCenter();
+        const refreshed = await resolveRunsCenterItem(item.run_id);
+        if (refreshed) await selectRunsCenterItem(refreshed, { syncRoute: false });
+      }
+    }
+
+    function formatRunsDuration(value) {
+      if (value == null) return "duration pending";
+      if (value < 1000) return `${value} ms`;
+      const seconds = Math.round(value / 1000);
+      if (seconds < 60) return `${seconds} s`;
+      return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    }
+
+    function formatRunsMetrics(metrics) {
+      if (!metrics || typeof metrics !== "object") return "";
+      return Object.entries(metrics).map(([key, value]) => `${key.replace(/_/g, " ")} ${value}`).join(" · ");
+    }
+
+    function inferRunsEventKind(type) {
+      for (const kind of ["command", "tool", "mcp", "file", "approval", "test", "eval", "artifact"]) {
+        if (type.includes(kind)) return kind;
+      }
+      return "event";
     }
 
     async function loadProject() {
@@ -3935,6 +4234,27 @@
       }
       byId("refresh-health-button").addEventListener("click", refreshHealth);
       byId("refresh-models-button").addEventListener("click", loadModels);
+      byId("refresh-runs-center-button").addEventListener("click", () => loadRunsCenter());
+      byId("load-more-runs-button").addEventListener("click", () => loadRunsCenter({ append: true }));
+      byId("load-older-trace-button").addEventListener("click", () => loadRunsTrace(true));
+      byId("runs-open-task-button").addEventListener("click", () => runCenterAction("open_task"));
+      byId("runs-cancel-button").addEventListener("click", () => runCenterAction("cancel"));
+      byId("runs-retry-button").addEventListener("click", () => runCenterAction("retry"));
+      byId("runs-open-worktree-button").addEventListener("click", () => runCenterAction("open_worktree"));
+      byId("runs-inspect-artifact-button").addEventListener("click", () => runCenterAction("inspect_artifact"));
+      for (const filter of document.querySelectorAll("[data-run-status]")) {
+        filter.addEventListener("click", async () => {
+          state.runsCenterStatus = filter.dataset.runStatus || "";
+          for (const button of document.querySelectorAll("[data-run-status]")) {
+            button.classList.toggle("active", button === filter);
+          }
+          state.runsCenterSelected = null;
+          closeRunsCenterEventStream();
+          renderRunsCenterSelection();
+          syncBrowserRoute("runs", null);
+          await loadRunsCenter();
+        });
+      }
       byId("init-project-button").addEventListener("click", initProject);
       byId("new-chat-button").addEventListener("click", newChat);
       byId("add-memory-button").addEventListener("click", addMemoryFromInput);
@@ -4120,6 +4440,7 @@
 
     function clearRouteSelection() {
       closeHeadlessEventSource();
+      closeRunsCenterEventStream();
       state.currentSessionId = null;
       state.selectedRunId = null;
       state.currentBundle = null;
@@ -4131,16 +4452,29 @@
 
     async function applyCurrentRoute() {
       const route = currentRoute();
+      syncNavigation();
       if (route.area === "work" && route.id) {
+        closeRunsCenterEventStream();
         await loadSession(route.id, { syncRoute: false });
         return true;
       }
       if (route.area === "runs" && route.id) {
-        const loaded = await loadRun(route.id, { syncRoute: false });
-        if (!loaded) setText("model-status", "Run deep link was not found.");
+        await loadRunsCenter();
+        const item = await resolveRunsCenterItem(route.id);
+        if (item) await selectRunsCenterItem(item, { syncRoute: false });
+        else setText("runs-center-status", "Run deep link was not found.");
         return true;
       }
-      if (route.area === "work" || route.area === "runs") {
+      if (route.area === "runs") {
+        closeRunsCenterEventStream();
+        state.runsCenterSelected = null;
+        state.runsTraceNodes = [];
+        state.runsTraceCursor = null;
+        renderRunsCenterSelection();
+        await loadRunsCenter();
+        return true;
+      }
+      if (route.area === "work") {
         clearRouteSelection();
         syncNavigation();
         return true;
