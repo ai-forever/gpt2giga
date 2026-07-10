@@ -251,30 +251,25 @@ def test_session_runner_defaults_agent_edit_to_isolated_worktree(tmp_path):
     assert (repo / "app.txt").read_text(encoding="utf-8") == "base\n"
 
 
-def test_session_runner_edit_falls_back_for_non_git_workspace(tmp_path):
+def test_session_runner_edit_fails_closed_for_non_git_workspace(tmp_path):
     workspace = tmp_path / "plain"
     workspace.mkdir()
     (workspace / "app.txt").write_text("base\n", encoding="utf-8")
     harness = _WorkspaceEditHarness()
     runner = _runner(harness, data_dir=tmp_path / "data")
 
-    result = runner.create_and_run(
-        {
-            "harness_id": "edit-workspace",
-            "prompt": "change it",
-            "mode": "edit",
-            "workspace": str(workspace),
-        }
-    )
+    with pytest.raises(ValueError, match="requires a Git repository"):
+        runner.create_and_run(
+            {
+                "harness_id": "edit-workspace",
+                "prompt": "change it",
+                "mode": "edit",
+                "workspace": str(workspace),
+            }
+        )
 
-    assert harness.last_request is not None
-    assert harness.last_request.workspace == str(workspace)
-    workspace_execution = result.run.metadata["workspace_execution"]
-    assert workspace_execution["policy"] == "current"
-    assert workspace_execution["fallback_reason"] == (
-        "workspace is not inside a git repository"
-    )
-    assert (workspace / "app.txt").read_text(encoding="utf-8") == "changed\n"
+    assert harness.last_request is None
+    assert (workspace / "app.txt").read_text(encoding="utf-8") == "base\n"
 
 
 def _runner(

@@ -5773,7 +5773,7 @@ INDEX_HTML = """<!doctype html>
       if (untrackedFiles.length) lines.push(`Untracked files: ${untrackedFiles.join(", ")}`);
       const summary = lines.length ? lines.join("\\n") : "No run selected.";
       setText("diff-text", `${summary}\\n\\n${patch || "No diff captured."}`);
-      const canApply = Boolean(run && run.id && execution.policy === "worktree" && patch && patch !== "No diff captured." && !execution.applied_at && !execution.discarded_at);
+      const canApply = Boolean(run && run.id && execution.policy === "worktree" && patch && patch !== "No diff captured." && !execution.truncated && !execution.applied_at && !execution.discarded_at);
       const canDiscard = Boolean(run && run.id && execution.policy === "worktree" && !execution.discarded_at);
       byId("apply-run-diff-button").disabled = !canApply;
       byId("apply-branch-input").disabled = !canApply;
@@ -5785,7 +5785,7 @@ INDEX_HTML = """<!doctype html>
     function renderPrInspector(run) {
       const artifact = prArtifactFromRun(run);
       const execution = run && run.metadata ? (run.metadata.workspace_execution || {}) : {};
-      const canCreateBranch = Boolean(run && run.id && artifact && artifact.patch && artifact.patch !== "No diff captured." && execution.policy === "worktree" && !execution.applied_at && !execution.discarded_at);
+      const canCreateBranch = Boolean(run && run.id && artifact && artifact.patch && artifact.patch !== "No diff captured." && execution.policy === "worktree" && !execution.truncated && !execution.applied_at && !execution.discarded_at);
       if (!artifact) {
         setText("pr-text", "No PR artifact.");
         byId("pr-branch-input").disabled = true;

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 from typing import Any, Mapping
 
 from gpt2giga.harness.sessions.store import utc_now
@@ -23,7 +25,7 @@ class WorkspacePolicy(str, Enum):
     TEMP_COPY = "temp_copy"
 
 
-class WorktreeError(RuntimeError):
+class WorktreeError(ValueError):
     """Raised when worktree metadata cannot be used."""
 
 
@@ -123,11 +125,9 @@ def prepare_workspace_execution(
         parsed_policy == WorkspacePolicy.AUTO and harness_kind == "agent-cli"
     )
     if parsed_policy == WorkspacePolicy.TEMP_COPY:
-        return WorkspaceExecution(
-            requested_policy=parsed_policy,
-            policy=WorkspacePolicy.CURRENT,
-            source_workspace=source_workspace,
-            fallback_reason="temp_copy policy is not implemented yet",
+        raise WorktreeError(
+            "temp_copy workspace isolation is not implemented; refusing to run "
+            "in the current workspace."
         )
     if not should_use_worktree:
         return WorkspaceExecution(
@@ -138,20 +138,15 @@ def prepare_workspace_execution(
 
     git_root = _git_output(source_workspace, "rev-parse", "--show-toplevel")
     if git_root is None:
-        return WorkspaceExecution(
-            requested_policy=parsed_policy,
-            policy=WorkspacePolicy.CURRENT,
-            source_workspace=source_workspace,
-            fallback_reason="workspace is not inside a git repository",
+        raise WorktreeError(
+            "Workspace isolation requires a Git repository; refusing to run in "
+            "the current workspace."
         )
     base_commit = _git_output(git_root, "rev-parse", "HEAD")
     if base_commit is None:
-        return WorkspaceExecution(
-            requested_policy=parsed_policy,
-            policy=WorkspacePolicy.CURRENT,
-            source_workspace=source_workspace,
-            source_git_root=git_root,
-            fallback_reason="git repository has no base commit",
+        raise WorktreeError(
+            "Workspace isolation requires a Git base commit; refusing to run in "
+            "the current workspace."
         )
     base_branch = _git_output(git_root, "branch", "--show-current")
     worktree_path = _worktree_path(data_dir, session_id, run_id)
@@ -168,14 +163,10 @@ def prepare_workspace_execution(
         timeout=30,
     )
     if created.returncode != 0:
-        return WorkspaceExecution(
-            requested_policy=parsed_policy,
-            policy=WorkspacePolicy.CURRENT,
-            source_workspace=source_workspace,
-            source_git_root=git_root,
-            base_branch=base_branch,
-            base_commit=base_commit,
-            fallback_reason=_stderr(created) or "git worktree add failed",
+        reason = _stderr(created) or "git worktree add failed"
+        raise WorktreeError(
+            f"Could not create an isolated Git worktree ({reason}); refusing to "
+            "run in the current workspace."
         )
     return WorkspaceExecution(
         requested_policy=parsed_policy,
@@ -205,24 +196,7 @@ def capture_workspace_diff(execution: WorkspaceExecution) -> WorkspaceDiff | Non
         return WorkspaceDiff(patch="No diff captured.", error="git status failed")
     untracked = tuple(path for code, path in status if code == "??")
     changed = tuple(path for code, path in status if code != "??")
-    if untracked:
-        add_intent = _git_run(git_root, "add", "-N", "--", *untracked, timeout=10)
-        if add_intent.returncode != 0:
-            return WorkspaceDiff(
-                patch="No diff captured.",
-                changed_files=changed,
-                untracked_files=untracked,
-                error=_stderr(add_intent) or "git add -N failed",
-            )
-    diff = _git_run(
-        git_root,
-        "diff",
-        "--binary",
-        "--no-ext-diff",
-        "HEAD",
-        "--",
-        timeout=20,
-    )
+    diff = _capture_git_diff(git_root, untracked)
     if diff.returncode != 0:
         return WorkspaceDiff(
             patch="No diff captured.",
@@ -270,6 +244,8 @@ def apply_run_diff(
         raise WorktreeError("Run diff has already been applied.")
     if execution.get("discarded_at"):
         raise WorktreeError("Run worktree has already been discarded.")
+    if execution.get("truncated"):
+        raise WorktreeError("Run patch is truncated and cannot be applied safely.")
     source_root = _required_metadata_text(execution, "source_git_root")
     base_commit = _required_metadata_text(execution, "base_commit")
     patch = _required_metadata_text(execution, "patch")
@@ -419,6 +395,7 @@ def _git_run(
     cwd: str,
     *args: str,
     input_text: str | None = None,
+    env: Mapping[str, str] | None = None,
     timeout: float = 10,
 ) -> subprocess.CompletedProcess[str]:
     try:
@@ -429,6 +406,7 @@ def _git_run(
             text=True,
             timeout=timeout,
             check=False,
+            env={**os.environ, **dict(env or {})},
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return subprocess.CompletedProcess(
@@ -465,6 +443,48 @@ def _bounded_text(value: str) -> tuple[str, bool]:
     return value[-MAX_PATCH_CHARS:], True
 
 
+def _capture_git_diff(
+    git_root: str,
+    untracked: tuple[str, ...],
+) -> subprocess.CompletedProcess[str]:
+    if not untracked:
+        return _git_run(
+            git_root,
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            "HEAD",
+            "--",
+            timeout=20,
+        )
+    with tempfile.TemporaryDirectory(prefix="gpt2giga-index-") as temporary_dir:
+        index_env = {"GIT_INDEX_FILE": str(Path(temporary_dir) / "index")}
+        initialized = _git_run(git_root, "read-tree", "HEAD", env=index_env)
+        if initialized.returncode != 0:
+            return initialized
+        add_intent = _git_run(
+            git_root,
+            "add",
+            "-N",
+            "--",
+            *untracked,
+            timeout=10,
+            env=index_env,
+        )
+        if add_intent.returncode != 0:
+            return add_intent
+        return _git_run(
+            git_root,
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            "HEAD",
+            "--",
+            timeout=20,
+            env=index_env,
+        )
+
+
 def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -476,6 +496,7 @@ def _can_apply(execution: Mapping[str, Any], patch: str) -> bool:
         execution.get("policy") == WorkspacePolicy.WORKTREE.value
         and bool(patch.strip())
         and patch.strip() != "No diff captured."
+        and not execution.get("truncated")
         and not execution.get("applied_at")
         and not execution.get("discarded_at")
     )

@@ -731,13 +731,13 @@ current checkout.
 
 The workspace policy selector supports:
 
-- `auto`: use an isolated worktree for external agent `edit` runs in git
-  repositories, otherwise use the current workspace;
+- `auto`: use an isolated worktree for external agent `edit` runs and stop the
+  run if isolation cannot be created;
 - `current`: run in the selected workspace;
-- `worktree`: request an isolated git worktree and fall back with a recorded
-  warning when the workspace is not a git repository;
-- `temp_copy`: reserved for a future non-git copy policy; current MVP records a
-  fallback to the current workspace.
+- `worktree`: require an isolated git worktree and stop the run if the workspace
+  is not a git repository or worktree creation fails;
+- `temp_copy`: reserved for a future non-git copy policy and currently rejected
+  instead of silently running in the current workspace.
 
 Worktrees live under:
 
