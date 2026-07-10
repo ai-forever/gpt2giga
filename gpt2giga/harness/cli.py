@@ -10,6 +10,13 @@ from typing import Any, Mapping
 
 import uvicorn
 
+from gpt2giga.harness.agents import (
+    agent_profile_to_dict,
+    agent_run_payload,
+    discover_agent_profiles,
+    load_agent_profile,
+    parse_agent_profile,
+)
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.doctor import run_doctor
 from gpt2giga.harness.editor import (
@@ -384,6 +391,33 @@ def build_parser() -> argparse.ArgumentParser:
     eval_run.add_argument("--dry-run", action="store_true")
     eval_run.add_argument("--json", action="store_true")
     eval_run.set_defaults(handler=_handle_eval_run)
+
+    agent = subparsers.add_parser("agent")
+    agent_subparsers = agent.add_subparsers(dest="agent_command")
+
+    agent_list = agent_subparsers.add_parser("list")
+    agent_list.add_argument("--workspace", default=None)
+    agent_list.add_argument("--json", action="store_true")
+    agent_list.set_defaults(handler=_handle_agent_list)
+
+    agent_show = agent_subparsers.add_parser("show")
+    agent_show.add_argument("agent_id")
+    agent_show.add_argument("--workspace", default=None)
+    agent_show.add_argument("--json", action="store_true")
+    agent_show.set_defaults(handler=_handle_agent_show)
+
+    agent_validate = agent_subparsers.add_parser("validate")
+    agent_validate.add_argument("path")
+    agent_validate.add_argument("--json", action="store_true")
+    agent_validate.set_defaults(handler=_handle_agent_validate)
+
+    agent_run = agent_subparsers.add_parser("run", parents=[common])
+    agent_run.add_argument("agent_id")
+    agent_run.add_argument("--workspace", default=None)
+    agent_run.add_argument("--prompt", required=True)
+    agent_run.add_argument("--dry-run", action="store_true")
+    agent_run.add_argument("--json", action="store_true")
+    agent_run.set_defaults(handler=_handle_agent_profile_run)
 
     open_parser = subparsers.add_parser("open")
     open_subparsers = open_parser.add_subparsers(dest="open_command")
@@ -1186,6 +1220,69 @@ def _handle_eval_run(args: argparse.Namespace, config: HarnessConfig) -> int:
     else:
         _print_eval_run_summary(payload)
     return 0 if eval_run.status == "passed" else 1
+
+
+def _handle_agent_list(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(args.workspace, data_dir=config.data_dir)
+    profiles, errors = discover_agent_profiles(project.root)
+    payload = {
+        "project": project_to_dict(project),
+        "agents": [agent_profile_to_dict(profile) for profile in profiles],
+        "errors": [error.__dict__ for error in errors],
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"{'ID':<22}{'Harness':<18}{'Mode':<8}Title")
+        for profile in profiles:
+            print(
+                f"{profile.id:<22}{profile.harness_id:<18}{profile.mode:<8}{profile.title}"
+            )
+        for error in errors:
+            print(f"{error.path}: {error.error}", file=sys.stderr)
+    return 0 if not errors else 1
+
+
+def _handle_agent_show(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(args.workspace, data_dir=config.data_dir)
+    profile = load_agent_profile(project.root, args.agent_id)
+    payload = agent_profile_to_dict(profile)
+    if args.json:
+        _print_json(payload)
+    else:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _handle_agent_validate(args: argparse.Namespace, config: HarnessConfig) -> int:
+    path = Path(args.path).expanduser()
+    profile = parse_agent_profile(
+        path.read_text(encoding="utf-8"), source_path=str(path)
+    )
+    payload = {"valid": True, "profile": agent_profile_to_dict(profile)}
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Agent profile valid: {profile.id}")
+    return 0
+
+
+def _handle_agent_profile_run(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(args.workspace, data_dir=config.data_dir)
+    profile = load_agent_profile(project.root, args.agent_id)
+    payload = agent_run_payload(profile, args.prompt, workspace=project.root)
+    payload["dry_run"] = args.dry_run
+    runner = HarnessSessionRunner(
+        registry=create_default_registry(),
+        config=config,
+        store=FilesystemHarnessSessionStore(config.data_dir),
+    )
+    result = runner.create_and_run(payload)
+    if args.json:
+        _print_json(result.to_dict())
+    else:
+        _print_result(result.result, as_json=False)
+    return 0 if result.result.ok else 1
 
 
 def _handle_open_session(args: argparse.Namespace, config: HarnessConfig) -> int:

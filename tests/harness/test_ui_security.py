@@ -39,6 +39,7 @@ def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
         'id="work-nav-link"',
         'id="runs-nav-link"',
         'id="tools-nav-link"',
+        'id="agents-nav-link"',
         'id="approvals-nav-link"',
         'id="auth-form"',
         'id="auth-token-input" type="password"',
@@ -142,6 +143,7 @@ def test_shell_deep_links_and_unknown_paths_fail_closed():
         "/runs/run_123",
         "/approvals",
         "/tools",
+        "/agents",
     ):
         response = client.get(path)
         assert response.status_code == 200
@@ -149,7 +151,7 @@ def test_shell_deep_links_and_unknown_paths_fail_closed():
 
     unknown_api = client.get("/api/not-a-route")
     unknown_asset = client.get("/assets/nested/app.js")
-    unknown_page = client.get("/agents")
+    unknown_page = client.get("/workflows")
     assert unknown_api.status_code == 404
     assert not unknown_api.headers["content-type"].startswith("text/html")
     assert unknown_asset.status_code == 404

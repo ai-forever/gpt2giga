@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=28">
+  <link rel="stylesheet" href="/assets/app.css?v=29.1">
 </head>
 <body>
   <div class="app">
@@ -23,6 +23,7 @@
         <nav class="primary-nav" aria-label="Primary">
           <a id="work-nav-link" class="primary-nav-link" href="/work">Work</a>
           <a id="runs-nav-link" class="primary-nav-link" href="/runs">Runs</a>
+          <a id="agents-nav-link" class="primary-nav-link" href="/agents">Agents</a>
           <a id="tools-nav-link" class="primary-nav-link" href="/tools">Tools</a>
           <a id="approvals-nav-link" class="primary-nav-link" href="/approvals">Approvals <span id="approval-attention-count" class="nav-count" hidden>0</span></a>
         </nav>
@@ -247,6 +248,36 @@
           <button class="example-prompt" type="button">Explain this codebase architecture</button>
           <button class="example-prompt" type="button">Write tests for the selected function</button>
           <button class="example-prompt" type="button">Refactor this module for clarity</button>
+        </div>
+      </section>
+
+      <section id="agents-center" class="agents-center" aria-label="Agent Studio" hidden>
+        <header class="runs-center-header">
+          <div>
+            <h2>Agent Studio</h2>
+            <p id="agents-center-status" class="status-line">Loading reusable profiles...</p>
+          </div>
+          <button id="refresh-agents-button" class="secondary" type="button">Refresh</button>
+        </header>
+        <div class="agents-studio-grid">
+          <div>
+            <div id="agents-center-errors"></div>
+            <div id="agents-center-list" class="agents-center-list" aria-live="polite"></div>
+          </div>
+          <div class="agent-editor">
+            <div class="agent-editor-header">
+              <div><h3 id="agent-editor-title">Select an agent</h3><p id="agent-editor-meta" class="status-line">Profiles live in .giga/agents/*.yaml.</p></div>
+              <button id="duplicate-agent-button" class="secondary" type="button" disabled>Duplicate</button>
+            </div>
+            <label>Profile YAML<textarea id="agent-source-input" class="agent-source-input" spellcheck="false" disabled></textarea></label>
+            <label>Run prompt<textarea id="agent-run-prompt" placeholder="Describe the task for this agent" disabled></textarea></label>
+            <div class="inline-actions">
+              <button id="validate-agent-button" class="secondary" type="button" disabled>Validate &amp; preview</button>
+              <button id="apply-agent-button" type="button" disabled>Apply</button>
+              <button id="run-agent-button" type="button" disabled>Run as Agent</button>
+            </div>
+            <pre id="agent-diff-panel" class="runs-payload-panel" hidden></pre>
+          </div>
         </div>
       </section>
 
@@ -517,6 +548,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=28"></script>
+  <script src="/assets/app.js?v=29.1"></script>
 </body>
 </html>

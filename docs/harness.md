@@ -218,6 +218,40 @@ In the browser cockpit, preset chips fill the composer with the rendered prompt
 and preset defaults. They do not execute automatically; use `Run` or `Compare`
 after reviewing the filled request.
 
+### Reusable Agent Profiles
+
+Project agents are reusable role/configuration profiles over existing harnesses.
+They live in `.giga/agents/*.yaml`; `giga init` creates Planner, Explorer,
+Implementer, Reviewer, Test Runner, and Release Assistant starters. Profiles can
+bind instructions, harness/model/route, context and memory selectors, MCP tool
+descriptor ids, permission/workspace policy, budgets, and an expected artifact.
+They never contain literal secrets or paths that escape the project.
+
+```bash
+giga agent list --workspace .
+giga agent show reviewer --workspace . --json
+giga agent validate .giga/agents/reviewer.yaml
+giga agent run reviewer --workspace . --prompt "Review this patch" --dry-run
+```
+
+The first-class `/agents` Agent Studio lists and validates profiles, previews a
+redacted diff, checks the source SHA-256 ETag, and performs an explicit atomic
+Apply. Duplicate creates a draft until Apply is selected. The same reusable
+project authoring service is intended for later Workflow Builder and Schedule
+Wizard surfaces; those features must not write project YAML directly.
+
+`Run as Agent` submits a normal durable manual job. Each run stores an immutable
+redacted `agent_profile_snapshot` and `agent_id`, so later YAML edits do not
+rewrite history. Live activity remains in Work and Runs rather than being
+duplicated in Agent Studio.
+
+Authenticated APIs:
+
+- `GET /api/agents` and `GET /api/agents/{agent_id}`;
+- `POST /api/agents/validate`;
+- `POST /api/agents/{agent_id}/draft` and `/apply`;
+- `POST /api/agents/{agent_id}/duplicate` and `/run`.
+
 ### Project Memory
 
 Project memory stores explicit, user-approved project facts and decisions under

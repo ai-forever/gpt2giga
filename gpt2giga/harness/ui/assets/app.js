@@ -16,6 +16,10 @@
       toolProfiles: [],
       toolServers: [],
       toolServerErrors: [],
+      agents: [],
+      agentErrors: [],
+      selectedAgent: null,
+      agentDraft: null,
       toolSyncPreview: null,
       toolError: null,
       evalSpecs: [],
@@ -102,6 +106,7 @@
       if (path === "/") return { area: "legacy", id: null };
       if (path === "/work") return { area: "work", id: null };
       if (path === "/runs") return { area: "runs", id: null };
+      if (path === "/agents") return { area: "agents", id: null };
       if (path === "/approvals") return { area: "approvals", id: null };
       if (path === "/tools") return { area: "tools", id: null };
       const work = path.match(/^\/work\/([^/]+)$/);
@@ -130,22 +135,163 @@
       const runsLink = byId("runs-nav-link");
       const approvalsLink = byId("approvals-nav-link");
       const toolsLink = byId("tools-nav-link");
+      const agentsLink = byId("agents-nav-link");
       workLink.classList.toggle("active", route.area === "work" || route.area === "legacy");
       runsLink.classList.toggle("active", route.area === "runs");
       approvalsLink.classList.toggle("active", route.area === "approvals");
       toolsLink.classList.toggle("active", route.area === "tools");
+      agentsLink.classList.toggle("active", route.area === "agents");
       workLink.href = state.currentSessionId ? `/work/${encodeURIComponent(state.currentSessionId)}` : "/work";
       const run = currentRun();
       runsLink.href = run && run.id ? `/runs/${encodeURIComponent(run.id)}` : "/runs";
       const runsArea = route.area === "runs";
       const approvalsArea = route.area === "approvals";
       const toolsArea = route.area === "tools";
+      const agentsArea = route.area === "agents";
       document.body.classList.toggle("runs-area", runsArea);
       document.body.classList.toggle("approvals-area", approvalsArea);
       document.body.classList.toggle("tools-area", toolsArea);
+      document.body.classList.toggle("agents-area", agentsArea);
       byId("runs-center").hidden = !runsArea;
       byId("approvals-center").hidden = !approvalsArea;
       byId("tools-center").hidden = !toolsArea;
+      byId("agents-center").hidden = !agentsArea;
+    }
+
+    async function loadAgentsCenter() {
+      if (!state.project || !state.project.root) return false;
+      setText("agents-center-status", "Refreshing reusable profiles...");
+      const result = await getJson(`/api/agents?workspace=${encodeURIComponent(state.project.root)}`);
+      if (!result.ok) {
+        setText("agents-center-status", result.data.detail || "Agent Studio is unavailable.");
+        return false;
+      }
+      state.agents = Array.isArray(result.data.agents) ? result.data.agents : [];
+      state.agentErrors = Array.isArray(result.data.errors) ? result.data.errors : [];
+      setText("agents-center-status", `${state.agents.length} reusable profiles · immutable snapshots on runs`);
+      renderAgentsCenter();
+      return true;
+    }
+
+    function renderAgentsCenter() {
+      const list = byId("agents-center-list");
+      const errors = byId("agents-center-errors");
+      list.textContent = "";
+      errors.textContent = "";
+      for (const error of state.agentErrors) {
+        const row = document.createElement("div");
+        row.className = "warning";
+        row.textContent = `${error.path}: ${error.error}`;
+        errors.appendChild(row);
+      }
+      for (const agent of state.agents) {
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "agent-card";
+        card.classList.toggle("active", state.selectedAgent && state.selectedAgent.id === agent.id);
+        card.innerHTML = `<span><strong>${escapeHtml(agent.title)}</strong><small>${escapeHtml(agent.description || agent.instructions)}</small></span><span class="badge info">${escapeHtml(agent.mode)}</span><span class="runs-center-item-meta">${escapeHtml(agent.harness_id)} · ${escapeHtml(agent.workspace_policy)} · ${escapeHtml(agent.permission_profile)}</span>`;
+        card.addEventListener("click", () => selectAgent(agent.id));
+        list.appendChild(card);
+      }
+      if (!state.agents.length) {
+        const empty = document.createElement("div");
+        empty.className = "status-line";
+        empty.textContent = "No profiles found. Run giga init to generate starter agents.";
+        list.appendChild(empty);
+      }
+    }
+
+    async function selectAgent(agentId) {
+      const result = await getJson(`/api/agents/${encodeURIComponent(agentId)}?workspace=${encodeURIComponent(state.project.root)}`);
+      if (!result.ok) {
+        setText("agents-center-status", result.data.detail || "Agent profile could not be loaded.");
+        return;
+      }
+      state.selectedAgent = result.data.profile;
+      state.agentDraft = null;
+      byId("agent-source-input").value = result.data.source || "";
+      byId("agent-source-input").disabled = false;
+      byId("agent-run-prompt").disabled = false;
+      byId("validate-agent-button").disabled = false;
+      byId("duplicate-agent-button").disabled = false;
+      byId("run-agent-button").disabled = false;
+      byId("apply-agent-button").disabled = true;
+      byId("agent-diff-panel").hidden = true;
+      setText("agent-editor-title", state.selectedAgent.title);
+      setText("agent-editor-meta", `${state.selectedAgent.id} · ${state.selectedAgent.harness_id} · source ${String(state.selectedAgent.source_hash || "").slice(0, 12)}`);
+      renderAgentsCenter();
+    }
+
+    async function previewAgent() {
+      if (!state.selectedAgent) return;
+      const result = await getJson(`/api/agents/${encodeURIComponent(state.selectedAgent.id)}/draft`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, content: byId("agent-source-input").value, expected_hash: state.selectedAgent.source_hash })
+      });
+      if (!result.ok) {
+        setText("agents-center-status", result.data.detail || "Profile validation failed.");
+        return;
+      }
+      state.agentDraft = result.data;
+      byId("agent-diff-panel").textContent = result.data.redacted_diff || "No changes.";
+      byId("agent-diff-panel").hidden = false;
+      byId("apply-agent-button").disabled = false;
+      setText("agents-center-status", "Profile valid. Review the redacted diff before Apply.");
+    }
+
+    async function applyAgent() {
+      if (!state.selectedAgent || !state.agentDraft) return;
+      const result = await getJson(`/api/agents/${encodeURIComponent(state.selectedAgent.id)}/apply`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, content: byId("agent-source-input").value, expected_hash: state.agentDraft.source_hash })
+      });
+      if (!result.ok) {
+        setText("agents-center-status", result.data.detail || "Profile apply failed.");
+        return;
+      }
+      await loadAgentsCenter();
+      await selectAgent(result.data.profile.id);
+      setText("agents-center-status", "Profile applied atomically.");
+    }
+
+    async function duplicateAgent() {
+      if (!state.selectedAgent) return;
+      const newId = window.prompt("New agent id", `${state.selectedAgent.id}-copy`);
+      if (!newId) return;
+      const result = await getJson(`/api/agents/${encodeURIComponent(state.selectedAgent.id)}/duplicate`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, new_id: newId })
+      });
+      if (!result.ok) {
+        setText("agents-center-status", result.data.detail || "Duplicate preview failed.");
+        return;
+      }
+      state.selectedAgent = result.data.profile;
+      state.agentDraft = result.data;
+      byId("agent-source-input").value = result.data.content;
+      byId("agent-diff-panel").textContent = result.data.redacted_diff;
+      byId("agent-diff-panel").hidden = false;
+      byId("apply-agent-button").disabled = false;
+      setText("agent-editor-title", result.data.profile.title);
+      setText("agent-editor-meta", `${newId} · duplicate preview · Apply to create`);
+    }
+
+    async function runSelectedAgent() {
+      if (!state.selectedAgent) return;
+      const prompt = byId("agent-run-prompt").value.trim();
+      if (!prompt) {
+        setText("agents-center-status", "Enter a task before running the agent.");
+        return;
+      }
+      const result = await getJson(`/api/agents/${encodeURIComponent(state.selectedAgent.id)}/run`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, prompt })
+      });
+      if (!result.ok) {
+        setText("agents-center-status", result.data.detail || "Agent run could not be queued.");
+        return;
+      }
+      window.location.assign(`/runs/${encodeURIComponent(result.data.run.id)}`);
     }
 
     async function loadToolsCenter() {
@@ -4486,6 +4632,11 @@
       byId("remember-message-button").addEventListener("click", rememberLastMessage);
       byId("refresh-evals-button").addEventListener("click", loadEvals);
       byId("refresh-tools-center-button").addEventListener("click", loadToolsCenter);
+      byId("refresh-agents-button").addEventListener("click", loadAgentsCenter);
+      byId("validate-agent-button").addEventListener("click", previewAgent);
+      byId("apply-agent-button").addEventListener("click", applyAgent);
+      byId("duplicate-agent-button").addEventListener("click", duplicateAgent);
+      byId("run-agent-button").addEventListener("click", runSelectedAgent);
       byId("run-eval-button").addEventListener("click", runSelectedEval);
       byId("harness-select").addEventListener("change", (event) => {
         selectHarness(event.target.value);
@@ -4707,6 +4858,11 @@
       if (route.area === "tools") {
         closeRunsCenterEventStream();
         await loadToolsCenter();
+        return true;
+      }
+      if (route.area === "agents") {
+        closeRunsCenterEventStream();
+        await loadAgentsCenter();
         return true;
       }
       if (route.area === "work") {

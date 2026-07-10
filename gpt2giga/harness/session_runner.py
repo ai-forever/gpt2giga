@@ -240,6 +240,7 @@ class HarnessSessionRunner:
                 "invocation_mode": options["invocation_mode"].value,
                 "preflight": preflight_report_to_dict(report),
                 "durable": True,
+                **_agent_metadata(options),
             },
         )
         user_message = self.store.append_message(
@@ -344,6 +345,7 @@ class HarnessSessionRunner:
             "invocation_mode": options["invocation_mode"].value,
             "native_resume": _native_resume_metadata(options["harness_id"]),
             "preflight": preflight_payload,
+            **_agent_metadata(options),
         }
         if runtime_metadata:
             run_metadata["runtime"] = dict(runtime_metadata)
@@ -808,6 +810,12 @@ class HarnessSessionRunner:
             "native_session_id": _optional_text(payload.get("native_session_id")),
             "attachment_ids": attachment_ids,
             "workspace_policy": workspace_policy,
+            "agent_id": _optional_text(payload.get("agent_id")),
+            "agent_profile_snapshot": (
+                dict(payload["agent_profile_snapshot"])
+                if isinstance(payload.get("agent_profile_snapshot"), Mapping)
+                else None
+            ),
         }
 
     def _build_request_messages(
@@ -957,6 +965,18 @@ def _message_attachment_metadata(
     return {
         "attachment_ids": [str(attachment["id"]) for attachment in attachments],
         "attachments": [dict(attachment) for attachment in attachments],
+    }
+
+
+def _agent_metadata(options: Mapping[str, Any]) -> dict[str, Any]:
+    """Return immutable, redacted AgentProfile identity for run history."""
+    agent_id = _optional_text(options.get("agent_id"))
+    snapshot = options.get("agent_profile_snapshot")
+    if agent_id is None or not isinstance(snapshot, Mapping):
+        return {}
+    return {
+        "agent_id": agent_id,
+        "agent_profile_snapshot": dict(snapshot),
     }
 
 

@@ -136,6 +136,7 @@ class DurableJobDispatcher:
             idempotency_key=idempotency_key,
             origin=origin,
             project_id=str(queued.session.metadata.get("project_id") or "") or None,
+            agent_id=str(payload.get("agent_id") or "") or None,
             max_attempts=max_attempts,
             required_harness_id=harness_id,
             required_capability_fingerprint=_job_fingerprint_requirement(

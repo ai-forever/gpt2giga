@@ -186,6 +186,7 @@ from gpt2giga.harness.tool_profiles import (
     tool_profile_status_to_dict,
 )
 from gpt2giga.harness.ui.routers.runs import router as runs_router
+from gpt2giga.harness.ui.routers.agents import router as agents_router
 from gpt2giga.harness.ui.routers.approvals import router as approvals_router
 from gpt2giga.harness.ui.routers.tools import router as tools_router
 from gpt2giga.harness.ui.routers.shell import create_shell_router
@@ -2207,6 +2208,7 @@ def create_app(
             ) from exc
         return result_to_dict(result)
 
+    app.include_router(agents_router)
     app.include_router(approvals_router)
     app.include_router(tools_router)
     app.include_router(runs_router)

@@ -50,8 +50,10 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.status_code == 200
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
-    assert '<link rel="stylesheet" href="/assets/app.css?v=28">' in index_response.text
-    assert '<script src="/assets/app.js?v=28"></script>' in index_response.text
+    assert (
+        '<link rel="stylesheet" href="/assets/app.css?v=29.1">' in index_response.text
+    )
+    assert '<script src="/assets/app.js?v=29.1"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -785,6 +787,14 @@ def test_ui_index_contains_control_panel_elements():
         "tools-center-status",
         "refresh-tools-center-button",
         "tools-center-list",
+        "agents-nav-link",
+        "agents-center",
+        "agents-center-list",
+        "agent-source-input",
+        "validate-agent-button",
+        "apply-agent-button",
+        "duplicate-agent-button",
+        "run-agent-button",
         "evals-panel",
         "evals-status",
         "refresh-evals-button",

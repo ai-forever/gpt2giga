@@ -390,6 +390,7 @@ def init_project_config(
     path.write_text(default_project_config_text(name), encoding="utf-8")
     _write_default_prompt_templates(root, overwrite=overwrite)
     _write_default_eval_specs(root, overwrite=overwrite)
+    _write_default_agent_profiles(root, overwrite=overwrite)
     return load_project_config(project_root)
 
 
@@ -974,6 +975,22 @@ def _write_default_eval_specs(root: Path, *, overwrite: bool) -> None:
             continue
         rendered = _render_preset_template(text, variables)
         path.write_text(rendered, encoding="utf-8")
+
+
+def _write_default_agent_profiles(root: Path, *, overwrite: bool) -> None:
+    from gpt2giga.harness.agents import (
+        AGENT_DIRECTORY,
+        STARTER_AGENT_PROFILES,
+        render_starter_agent,
+    )
+
+    agent_dir = root / AGENT_DIRECTORY
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    for agent_id in STARTER_AGENT_PROFILES:
+        path = agent_dir / f"{agent_id}.yaml"
+        if path.exists() and not overwrite:
+            continue
+        path.write_text(render_starter_agent(agent_id), encoding="utf-8")
 
 
 def _parse_attachment_settings(
