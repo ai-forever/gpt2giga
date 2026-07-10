@@ -901,6 +901,7 @@ projects/<project_id>/memory.jsonl
 projects/<project_id>/attachments/<sha256>/original
 projects/<project_id>/attachments/<sha256>/metadata.json
 worktrees/<session_id>/<run_id>/
+runtime.sqlite3
 ```
 
 Stored fields include session title, workspace path, selected harness, model,
@@ -909,6 +910,28 @@ metadata, command arrays, attachment metadata, render plans, per-project cockpit
 state, worktree execution metadata, captured edit patches, PR artifacts,
 provenance snapshots, replay payloads, status, timestamps, and storage
 metadata.
+
+`runtime.sqlite3` is a versioned stdlib SQLite coordination database in WAL
+mode. It stores only mutable job/attempt state, leases and relationship indexes,
+idempotency-key hashes, trace sequence cursors, and the recovery outbox. Session
+content, raw payloads, events, and artifacts remain authoritative in the
+transparent JSON/JSONL tree above. Advisory per-file locks serialize legacy
+JSON/JSONL rewrites when the UI and future worker processes overlap.
+
+Inspect the schema/counts or export all coordination rows as safe JSON:
+
+```bash
+giga runtime inspect
+giga runtime inspect --json
+giga runtime export
+giga runtime export --output /tmp/harness-runtime.json
+```
+
+The submit idempotency key itself is never persisted; SQLite stores its SHA-256
+digest. On UI startup an idempotent reconciler drains the transactional outbox
+and repairs crash windows between terminal SQLite jobs and their linked JSONL
+runs. Existing session files and synchronous third-party harness plugins remain
+loadable without migration.
 
 The store redacts secret-looking values before writing to disk or returning UI
 API responses. It must not store API keys, authorization headers, cookies,

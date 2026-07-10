@@ -98,6 +98,8 @@ class HarnessSpec:
     supports_model_selection: bool = True
     supports_api_mode_selection: bool = True
     supports_streaming: bool = False
+    supports_structured_events: bool = False
+    supports_cancellation: bool = False
     supports_workspace: bool = False
     supports_attachments: bool = False
     accepted_attachment_kinds: tuple[str, ...] = field(default_factory=tuple)
@@ -358,6 +360,8 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         "supports_model_selection": spec.supports_model_selection,
         "supports_api_mode_selection": spec.supports_api_mode_selection,
         "supports_streaming": spec.supports_streaming,
+        "supports_structured_events": spec.supports_structured_events,
+        "supports_cancellation": spec.supports_cancellation,
         "supports_workspace": spec.supports_workspace,
         "supports_attachments": spec.supports_attachments,
         "accepted_attachment_kinds": accepted_attachment_kinds,
@@ -379,6 +383,8 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
                 "model_selection": spec.supports_model_selection,
                 "api_mode_selection": spec.supports_api_mode_selection,
                 "streaming": spec.supports_streaming,
+                "structured_events": spec.supports_structured_events,
+                "cancellation": spec.supports_cancellation,
                 "workspace": spec.supports_workspace,
                 "attachments": spec.supports_attachments,
                 "native_sessions": spec.supports_native_sessions,

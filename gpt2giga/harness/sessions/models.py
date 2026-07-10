@@ -10,6 +10,7 @@ from gpt2giga.harness.native.models import (
     NativeSessionStatus,
     parse_invocation_mode,
 )
+from gpt2giga.harness.runtime.models import RunStatus, parse_run_status
 from gpt2giga.harness.types import (
     GigaChatApiMode,
     HarnessCapability,
@@ -61,7 +62,7 @@ class HarnessRun:
     id: str
     session_id: str
     harness_id: str
-    status: str
+    status: RunStatus
     prompt: str
     model: str | None
     api_mode: GigaChatApiMode
@@ -78,6 +79,10 @@ class HarnessRun:
     native_session_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Normalize direct legacy constructors to the canonical enum."""
+        object.__setattr__(self, "status", parse_run_status(self.status))
+
 
 @dataclass(frozen=True)
 class HarnessStoredEvent:
@@ -90,6 +95,17 @@ class HarnessStoredEvent:
     message: str
     payload: Mapping[str, Any]
     created_at: str
+    trace_id: str | None = None
+    span_id: str | None = None
+    parent_span_id: str | None = None
+    sequence: int | None = None
+    job_id: str | None = None
+    attempt_id: str | None = None
+    workflow_id: str | None = None
+    workflow_step_id: str | None = None
+    agent_id: str | None = None
+    span_kind: str | None = None
+    span_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -213,7 +229,7 @@ def run_to_dict(run: HarnessRun) -> dict[str, Any]:
         "id": run.id,
         "session_id": run.session_id,
         "harness_id": run.harness_id,
-        "status": run.status,
+        "status": run.status.value,
         "prompt": run.prompt,
         "model": run.model,
         "api_mode": run.api_mode.value,
@@ -238,7 +254,7 @@ def run_from_dict(data: Mapping[str, Any]) -> HarnessRun:
         id=str(data["id"]),
         session_id=str(data["session_id"]),
         harness_id=str(data["harness_id"]),
-        status=str(data.get("status") or "queued"),
+        status=parse_run_status(data.get("status")),
         prompt=str(data.get("prompt") or ""),
         model=_optional_text(data.get("model")),
         api_mode=parse_api_mode(data.get("api_mode")),
@@ -259,7 +275,7 @@ def run_from_dict(data: Mapping[str, Any]) -> HarnessRun:
 
 def event_to_dict(event: HarnessStoredEvent) -> dict[str, Any]:
     """Serialize a stored event for disk and API responses."""
-    return {
+    payload = {
         "id": event.id,
         "session_id": event.session_id,
         "run_id": event.run_id,
@@ -268,6 +284,21 @@ def event_to_dict(event: HarnessStoredEvent) -> dict[str, Any]:
         "payload": dict(event.payload),
         "created_at": event.created_at,
     }
+    optional = {
+        "trace_id": event.trace_id,
+        "span_id": event.span_id,
+        "parent_span_id": event.parent_span_id,
+        "sequence": event.sequence,
+        "job_id": event.job_id,
+        "attempt_id": event.attempt_id,
+        "workflow_id": event.workflow_id,
+        "workflow_step_id": event.workflow_step_id,
+        "agent_id": event.agent_id,
+        "span_kind": event.span_kind,
+        "span_status": event.span_status,
+    }
+    payload.update({key: value for key, value in optional.items() if value is not None})
+    return payload
 
 
 def event_from_dict(data: Mapping[str, Any]) -> HarnessStoredEvent:
@@ -280,6 +311,17 @@ def event_from_dict(data: Mapping[str, Any]) -> HarnessStoredEvent:
         message=str(data.get("message") or ""),
         payload=_mapping(data.get("payload")),
         created_at=str(data["created_at"]),
+        trace_id=_optional_text(data.get("trace_id")),
+        span_id=_optional_text(data.get("span_id")),
+        parent_span_id=_optional_text(data.get("parent_span_id")),
+        sequence=_optional_int(data.get("sequence")),
+        job_id=_optional_text(data.get("job_id")),
+        attempt_id=_optional_text(data.get("attempt_id")),
+        workflow_id=_optional_text(data.get("workflow_id")),
+        workflow_step_id=_optional_text(data.get("workflow_step_id")),
+        agent_id=_optional_text(data.get("agent_id")),
+        span_kind=_optional_text(data.get("span_kind")),
+        span_status=_optional_text(data.get("span_status")),
     )
 
 
@@ -366,6 +408,12 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
     return {}
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
 
 
 def _parse_native_session_status(value: Any) -> NativeSessionStatus:

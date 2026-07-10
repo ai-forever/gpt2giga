@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from gpt2giga.harness.native.models import parse_invocation_mode
+from gpt2giga.harness.runtime.models import RunStatus, parse_run_status
 from gpt2giga.harness.sessions.models import (
     HarnessMessage,
     HarnessNativeLink,
@@ -32,6 +33,7 @@ from gpt2giga.harness.sessions.models import (
     session_from_dict,
     session_to_dict,
 )
+from gpt2giga.harness.sessions.locking import exclusive_file_lock
 from gpt2giga.harness.sessions.redaction import (
     redact_event_payload,
     redact_for_storage,
@@ -142,9 +144,12 @@ class FilesystemHarnessSessionStore:
             raise SessionNotFoundError(session_id) from exc
 
     def update_session(self, session_id: str, **patch: Any) -> HarnessSession:
-        session = self.get_session(session_id)
-        updated = _patch_session(session, patch)
-        self._write_session(updated, self._session_dir(session_id))
+        session_dir = self._session_dir(session_id)
+        path = session_dir / MANIFEST_FILE
+        with exclusive_file_lock(path):
+            session = session_from_dict(_read_json(path))
+            updated = _patch_session(session, patch)
+            _write_json_atomic_unlocked(path, session_to_dict(updated))
         return updated
 
     def delete_session(self, session_id: str) -> None:
@@ -196,7 +201,7 @@ class FilesystemHarnessSessionStore:
         mode: str,
         workspace: str | None,
         invocation_mode: Any = None,
-        status: str = "queued",
+        status: RunStatus | str = RunStatus.QUEUED,
         started_at: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> HarnessRun:
@@ -206,7 +211,7 @@ class FilesystemHarnessSessionStore:
             id=new_id("run"),
             session_id=session_id,
             harness_id=harness_id,
-            status=status,
+            status=parse_run_status(status),
             prompt=str(redact_for_storage(prompt)),
             model=model,
             api_mode=api_mode,
@@ -223,14 +228,21 @@ class FilesystemHarnessSessionStore:
         return run
 
     def update_run(self, run_id: str, **patch: Any) -> HarnessRun:
-        session_id, index, run, runs = self._find_run(run_id)
-        updated = _patch_run(run, patch)
-        runs[index] = updated
-        self._write_jsonl(
-            self._session_dir(session_id) / RUNS_FILE,
-            [run_to_dict(item) for item in runs],
-        )
-        return updated
+        session_id, _, _, _ = self._find_run(run_id)
+        path = self._session_dir(session_id) / RUNS_FILE
+        with exclusive_file_lock(path):
+            runs = _read_jsonl(path, run_from_dict)
+            for index, run in enumerate(runs):
+                if run.id != run_id:
+                    continue
+                updated = _patch_run(run, patch)
+                runs[index] = updated
+                _write_jsonl_atomic_unlocked(
+                    path,
+                    [redact_for_storage(run_to_dict(item)) for item in runs],
+                )
+                return updated
+        raise RunNotFoundError(run_id)
 
     def get_run(self, run_id: str) -> HarnessRun:
         return self._find_run(run_id)[2]
@@ -417,34 +429,33 @@ class FilesystemHarnessSessionStore:
 
     def _index(self) -> dict[str, Path]:
         try:
-            raw = _read_json(self.sessions_dir / INDEX_FILE)
-        except FileNotFoundError:
+            return _index_from_payload(_read_json(self.sessions_dir / INDEX_FILE))
+        except (FileNotFoundError, ValueError):
             return self._rebuild_index()
-        sessions = raw.get("sessions", [])
-        if not isinstance(sessions, list):
-            return self._rebuild_index()
-        index: dict[str, Path] = {}
-        for item in sessions:
-            if not isinstance(item, Mapping):
-                continue
-            session_id = item.get("id")
-            rel_path = item.get("path")
-            if session_id and rel_path:
-                index[str(session_id)] = Path(str(rel_path))
-        return index
 
     def _upsert_index(self, session_id: str, session_dir: Path) -> None:
-        index = self._index()
-        index[session_id] = session_dir.relative_to(self.sessions_dir)
-        self._write_index(index)
+        path = self.sessions_dir / INDEX_FILE
+        with exclusive_file_lock(path):
+            index = self._read_or_scan_index_unlocked(path)
+            index[session_id] = session_dir.relative_to(self.sessions_dir)
+            self._write_index_unlocked(index)
 
     def _remove_index_entry(self, session_id: str) -> None:
-        index = self._index()
-        if session_id in index:
-            index.pop(session_id, None)
-            self._write_index(index)
+        path = self.sessions_dir / INDEX_FILE
+        with exclusive_file_lock(path):
+            index = self._read_or_scan_index_unlocked(path)
+            if session_id in index:
+                index.pop(session_id, None)
+                self._write_index_unlocked(index)
 
     def _rebuild_index(self) -> dict[str, Path]:
+        path = self.sessions_dir / INDEX_FILE
+        with exclusive_file_lock(path):
+            index = self._scan_index_unlocked()
+            self._write_index_unlocked(index)
+        return index
+
+    def _scan_index_unlocked(self) -> dict[str, Path]:
         index: dict[str, Path] = {}
         if self.sessions_dir.exists():
             for manifest in self.sessions_dir.glob("*/*/*/" + MANIFEST_FILE):
@@ -453,15 +464,22 @@ class FilesystemHarnessSessionStore:
                 except (OSError, ValueError, json.JSONDecodeError, KeyError):
                     continue
                 index[session.id] = manifest.parent.relative_to(self.sessions_dir)
-        self._write_index(index)
         return index
 
-    def _write_index(self, index: Mapping[str, Path]) -> None:
+    def _read_or_scan_index_unlocked(self, path: Path) -> dict[str, Path]:
+        try:
+            return _index_from_payload(_read_json(path))
+        except (FileNotFoundError, ValueError, json.JSONDecodeError):
+            return self._scan_index_unlocked()
+
+    def _write_index_unlocked(self, index: Mapping[str, Path]) -> None:
         sessions = [
             {"id": session_id, "path": str(path)}
             for session_id, path in sorted(index.items())
         ]
-        _write_json_atomic(self.sessions_dir / INDEX_FILE, {"sessions": sessions})
+        _write_json_atomic_unlocked(
+            self.sessions_dir / INDEX_FILE, {"sessions": sessions}
+        )
 
     def _append_jsonl(self, path: Path, payload: Mapping[str, Any]) -> None:
         _append_jsonl(path, redact_for_storage(dict(payload)))
@@ -497,6 +515,11 @@ def _read_jsonl(path: Path, parser: Callable[[Mapping[str, Any]], Any]) -> list[
 
 
 def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
+    with exclusive_file_lock(path):
+        _write_json_atomic_unlocked(path, payload)
+
+
+def _write_json_atomic_unlocked(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f".{path.name}.{new_id('tmp')}")
     with temp_path.open("w", encoding="utf-8") as handle:
@@ -510,6 +533,11 @@ def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 def _write_jsonl_atomic(path: Path, payloads: list[Any]) -> None:
+    with exclusive_file_lock(path):
+        _write_jsonl_atomic_unlocked(path, payloads)
+
+
+def _write_jsonl_atomic_unlocked(path: Path, payloads: list[Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f".{path.name}.{new_id('tmp')}")
     with temp_path.open("w", encoding="utf-8") as handle:
@@ -522,12 +550,32 @@ def _write_jsonl_atomic(path: Path, payloads: list[Any]) -> None:
 
 
 def _append_jsonl(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(redact_for_storage(payload), ensure_ascii=False))
-        handle.write("\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+    with exclusive_file_lock(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        encoded = (
+            json.dumps(redact_for_storage(payload), ensure_ascii=False) + "\n"
+        ).encode("utf-8")
+        descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            os.write(descriptor, encoded)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
+def _index_from_payload(raw: Mapping[str, Any]) -> dict[str, Path]:
+    sessions = raw.get("sessions", [])
+    if not isinstance(sessions, list):
+        raise ValueError("session index does not contain a list")
+    index: dict[str, Path] = {}
+    for item in sessions:
+        if not isinstance(item, Mapping):
+            continue
+        session_id = item.get("id")
+        rel_path = item.get("path")
+        if session_id and rel_path:
+            index[str(session_id)] = Path(str(rel_path))
+    return index
 
 
 def _redacted_native_link(link: HarnessNativeLink) -> HarnessNativeLink:

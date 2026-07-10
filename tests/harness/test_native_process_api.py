@@ -197,8 +197,8 @@ def test_native_process_api_resume_uses_cached_native_ref(tmp_path):
     process_id = started.json()["process"]["id"]
     assert started.json()["run"]["native_session_id"] == "native-session-1"
     _wait_for_output(client, process_id, 0, "resumed:native-session-1")
-    completed = _wait_for_process_status(client, process_id, {"completed", "failed"})
-    assert completed["run"]["status"] == "completed"
+    completed = _wait_for_process_status(client, process_id, {"succeeded", "failed"})
+    assert completed["run"]["status"] == "succeeded"
 
 
 def test_native_process_api_resume_uses_stored_managed_link(tmp_path):
@@ -316,7 +316,7 @@ def test_native_process_api_redacts_start_output_and_events(tmp_path):
     assert secret not in str(started.json())
     assert REDACTED in str(started.json())
     process_id = started.json()["process"]["id"]
-    _wait_for_process_status(client, process_id, {"completed"})
+    _wait_for_process_status(client, process_id, {"succeeded"})
     output = client.get(f"/api/native/processes/{process_id}/output").json()
 
     assert secret not in str(output)

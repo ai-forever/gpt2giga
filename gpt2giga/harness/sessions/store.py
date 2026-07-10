@@ -8,6 +8,7 @@ from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from gpt2giga.harness.native.models import parse_invocation_mode
+from gpt2giga.harness.runtime.models import RunStatus, parse_run_status
 from gpt2giga.harness.sessions.models import (
     HarnessMessage,
     HarnessNativeLink,
@@ -97,7 +98,7 @@ class HarnessSessionStore(Protocol):
         mode: str,
         workspace: str | None,
         invocation_mode: Any = None,
-        status: str = "queued",
+        status: RunStatus | str = RunStatus.QUEUED,
         started_at: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> HarnessRun:
@@ -292,7 +293,7 @@ class InMemoryHarnessSessionStore:
         mode: str,
         workspace: str | None,
         invocation_mode: Any = None,
-        status: str = "queued",
+        status: RunStatus | str = RunStatus.QUEUED,
         started_at: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> HarnessRun:
@@ -302,7 +303,7 @@ class InMemoryHarnessSessionStore:
             id=new_id("run"),
             session_id=session_id,
             harness_id=harness_id,
-            status=status,
+            status=parse_run_status(status),
             prompt=str(redact_for_storage(prompt)),
             model=model,
             api_mode=api_mode,
@@ -560,6 +561,8 @@ def _patch_run(run: HarnessRun, patch: Mapping[str, Any]) -> HarnessRun:
             value = _redacted_mapping(value)
         elif key == "error":
             value = None if value is None else str(redact_for_storage(value))
+        elif key == "status":
+            value = parse_run_status(value)
         changes[key] = value
     return replace(run, **changes)
 

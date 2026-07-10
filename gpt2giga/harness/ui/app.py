@@ -133,6 +133,9 @@ from gpt2giga.harness.routing import (
     recommend_harness_route,
     route_recommendation_to_dict,
 )
+from gpt2giga.harness.runtime.models import RunStatus
+from gpt2giga.harness.runtime.reconcile import RuntimeReconciler
+from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
@@ -204,11 +207,19 @@ def create_app(
     native_registry: NativeHistoryConnectorRegistry | None = None,
     native_index_store: NativeSessionIndexStore | None = None,
     native_process_manager: NativeProcessManager | None = None,
+    runtime_store: RuntimeCoordinationStore | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
     registry = registry or create_default_registry()
     store = store or FilesystemHarnessSessionStore(config.data_dir)
+    if runtime_store is None and isinstance(store, FilesystemHarnessSessionStore):
+        runtime_store = RuntimeCoordinationStore(store.data_dir)
+    reconciliation_report = (
+        RuntimeReconciler(runtime_store, store).reconcile()
+        if runtime_store is not None
+        else None
+    )
     native_registry = native_registry or create_default_native_registry(
         data_dir=config.data_dir
     )
@@ -236,6 +247,8 @@ def create_app(
     app.state.harness_config = config
     app.state.harness_registry = registry
     app.state.harness_session_store = store
+    app.state.harness_runtime_store = runtime_store
+    app.state.harness_runtime_reconciliation = reconciliation_report
     app.state.harness_session_runner = runner
     app.state.harness_attachment_store = attachment_store
     app.state.harness_arena_store = arena_store
@@ -2762,16 +2775,16 @@ def _existing_run_metadata(
     return {}
 
 
-def _run_status_from_process(process_ref: NativeProcessRef) -> str:
+def _run_status_from_process(process_ref: NativeProcessRef) -> RunStatus:
     if process_ref.status is NativeProcessStatus.RUNNING:
-        return "running"
+        return RunStatus.RUNNING
     if process_ref.status is NativeProcessStatus.STOPPED:
-        return "stopped"
+        return RunStatus.CANCELED
     if process_ref.status is NativeProcessStatus.FAILED:
-        return "failed"
+        return RunStatus.FAILED
     if process_ref.exit_code == 0:
-        return "completed"
-    return "failed"
+        return RunStatus.SUCCEEDED
+    return RunStatus.FAILED
 
 
 def _native_transcript_message_to_dict(

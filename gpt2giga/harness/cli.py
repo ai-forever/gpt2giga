@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import sys
 from typing import Any, Mapping
 
@@ -79,6 +80,7 @@ from gpt2giga.harness.provenance import (
     run_provenance_to_dict,
 )
 from gpt2giga.harness.registry import UnknownHarnessError, create_default_registry
+from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
@@ -218,6 +220,17 @@ def build_parser() -> argparse.ArgumentParser:
     session_show.add_argument("session_id")
     session_show.add_argument("--json", action="store_true")
     session_show.set_defaults(handler=_handle_session_show)
+
+    runtime = subparsers.add_parser("runtime")
+    runtime_subparsers = runtime.add_subparsers(dest="runtime_command")
+
+    runtime_inspect = runtime_subparsers.add_parser("inspect")
+    runtime_inspect.add_argument("--json", action="store_true")
+    runtime_inspect.set_defaults(handler=_handle_runtime_inspect)
+
+    runtime_export = runtime_subparsers.add_parser("export")
+    runtime_export.add_argument("--output", default=None)
+    runtime_export.set_defaults(handler=_handle_runtime_export)
 
     native = subparsers.add_parser("native")
     native_subparsers = native.add_subparsers(dest="native_command")
@@ -657,7 +670,7 @@ def _handle_run_artifact(args: argparse.Namespace, config: HarnessConfig) -> int
         else:
             print(f"Run: {run.id}")
             print(f"Harness: {run.harness_id}")
-            print(f"Status: {run.status}")
+            print(f"Status: {run.status.value}")
             print(f"Workspace: {run.workspace or '-'}")
             print(f"Replay: giga run replay {run.id}")
         return 0
@@ -712,6 +725,39 @@ def _handle_session_show(args: argparse.Namespace, config: HarnessConfig) -> int
         print(f"Updated: {session['updated_at']}")
         print(f"Messages: {len(bundle['messages'])}")
         print(f"Runs: {len(bundle['runs'])}")
+    return 0
+
+
+def _handle_runtime_inspect(args: argparse.Namespace, config: HarnessConfig) -> int:
+    store = RuntimeCoordinationStore(config.data_dir)
+    payload = store.inspect()
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Runtime database: {payload['path']}")
+        print(f"Schema version: {payload['schema_version']}")
+        print(f"Journal mode: {payload['journal_mode']}")
+        print(f"Pending outbox: {payload['pending_outbox']}")
+        for name, count in payload["counts"].items():
+            print(f"{name}: {count}")
+    return 0
+
+
+def _handle_runtime_export(args: argparse.Namespace, config: HarnessConfig) -> int:
+    store = RuntimeCoordinationStore(config.data_dir)
+    payload = store.export()
+    if args.output is None:
+        _print_json(payload)
+        return 0
+    output = Path(args.output).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temp = output.with_name(f".{output.name}.tmp")
+    temp.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temp.replace(output)
+    print(f"Exported runtime coordination state to {output}")
     return 0
 
 
