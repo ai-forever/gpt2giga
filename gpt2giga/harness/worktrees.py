@@ -152,7 +152,17 @@ def prepare_workspace_execution(
     worktree_path = _worktree_path(data_dir, session_id, run_id)
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
     if worktree_path.exists():
-        shutil.rmtree(worktree_path)
+        removed = _git_run(
+            git_root,
+            "worktree",
+            "remove",
+            "--force",
+            str(worktree_path),
+            timeout=30,
+        )
+        if removed.returncode != 0 and worktree_path.exists():
+            shutil.rmtree(worktree_path)
+            _git_run(git_root, "worktree", "prune", timeout=30)
     created = _git_run(
         git_root,
         "worktree",
@@ -312,6 +322,100 @@ def discard_run_worktree(run_metadata: Mapping[str, Any]) -> dict[str, Any]:
     updated["discarded_at"] = utc_now()
     updated["worktree_exists"] = path.exists()
     return updated
+
+
+def detect_overlapping_run_diffs(
+    run_metadatas: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Return conservative file-level conflicts across isolated run patches."""
+    owners: dict[str, list[str]] = {}
+    for run_id, metadata in run_metadatas.items():
+        execution = _workspace_execution_metadata(metadata)
+        for path in execution.get("changed_files", ()):
+            owners.setdefault(str(path), []).append(str(run_id))
+        for path in execution.get("untracked_files", ()):
+            owners.setdefault(str(path), []).append(str(run_id))
+    return tuple(
+        {"path": path, "run_ids": sorted(set(run_ids))}
+        for path, run_ids in sorted(owners.items())
+        if len(set(run_ids)) > 1
+    )
+
+
+def prepare_run_diff_merge(
+    run_metadatas: Mapping[str, Mapping[str, Any]],
+    *,
+    data_dir: str | Path,
+    session_id: str,
+    merge_id: str,
+) -> dict[str, Any]:
+    """Build a reviewable combined patch in a retained isolated worktree."""
+    if not run_metadatas:
+        raise WorktreeError("Merge queue has no selected run patches.")
+    conflicts = detect_overlapping_run_diffs(run_metadatas)
+    if conflicts:
+        paths = ", ".join(item["path"] for item in conflicts)
+        raise WorktreeConflictError(f"Selected patches overlap: {paths}")
+    executions = {
+        run_id: _workspace_execution_metadata(metadata)
+        for run_id, metadata in run_metadatas.items()
+    }
+    source_roots = {
+        _required_metadata_text(execution, "source_git_root")
+        for execution in executions.values()
+    }
+    base_commits = {
+        _required_metadata_text(execution, "base_commit")
+        for execution in executions.values()
+    }
+    if len(source_roots) != 1 or len(base_commits) != 1:
+        raise WorktreeConflictError(
+            "Selected patches do not share one source checkout and base commit."
+        )
+    for execution in executions.values():
+        if execution.get("policy") != WorkspacePolicy.WORKTREE.value:
+            raise WorktreeError("Every merge candidate must use an isolated worktree.")
+        if execution.get("truncated"):
+            raise WorktreeError("A truncated patch cannot enter the merge queue.")
+        if execution.get("discarded_at"):
+            raise WorktreeError("A discarded worktree cannot enter the merge queue.")
+        if not str(execution.get("patch") or "").strip():
+            raise WorktreeError("Every merge candidate must contain a captured patch.")
+    source_root = next(iter(source_roots))
+    merged = prepare_workspace_execution(
+        requested_policy=WorkspacePolicy.WORKTREE,
+        harness_kind="agent-cli",
+        mode="edit",
+        workspace=source_root,
+        data_dir=data_dir,
+        session_id=session_id,
+        run_id=merge_id,
+    )
+    merge_workspace = merged.request_workspace or ""
+    for run_id in sorted(executions):
+        patch = str(executions[run_id].get("patch") or "")
+        checked = _git_apply(merge_workspace, patch, "--check")
+        if checked.returncode != 0:
+            raise WorktreeConflictError(
+                f"Patch {run_id} does not apply cleanly in the merge queue: "
+                f"{_stderr(checked) or 'git apply --check failed'}"
+            )
+        applied = _git_apply(merge_workspace, patch)
+        if applied.returncode != 0:
+            raise WorktreeConflictError(
+                f"Patch {run_id} failed in the merge queue: "
+                f"{_stderr(applied) or 'git apply failed'}"
+            )
+    diff = capture_workspace_diff(merged)
+    if diff is None or not diff.captured:
+        raise WorktreeError("Merge queue did not produce a combined patch.")
+    return {
+        **merged.to_metadata(),
+        **diff.to_metadata(),
+        "source_run_ids": sorted(executions),
+        "prepared_at": utc_now(),
+        "conflicts": [],
+    }
 
 
 def open_worktree_response(run_metadata: Mapping[str, Any]) -> dict[str, Any]:

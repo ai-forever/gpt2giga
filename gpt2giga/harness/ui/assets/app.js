@@ -718,6 +718,56 @@
           openRun.addEventListener("click", () => window.location.assign(step.actions.open_run));
           actions.appendChild(openRun);
         }
+        if (step.actions && step.actions.choose) {
+          const choose = document.createElement("button");
+          choose.type = "button";
+          choose.className = step.handoff_selected ? "primary" : "secondary";
+          choose.textContent = step.handoff_selected ? "Chosen" : "Choose patch";
+          choose.addEventListener("click", async () => {
+            choose.disabled = true;
+            const result = await getJson(step.actions.choose, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ selected: !step.handoff_selected })
+            });
+            if (!result.ok) {
+              choose.disabled = false;
+              setStatus(result.error || "Could not update the merge selection.", "error");
+              return;
+            }
+            step.handoff_selected = !step.handoff_selected;
+            choose.className = step.handoff_selected ? "primary" : "secondary";
+            choose.textContent = step.handoff_selected ? "Chosen" : "Choose patch";
+            choose.disabled = false;
+          });
+          actions.appendChild(choose);
+        }
+        if (step.actions && step.actions.apply && step.actions.open_run) {
+          const reviewApply = document.createElement("button");
+          reviewApply.type = "button";
+          reviewApply.className = "secondary";
+          reviewApply.textContent = "Review / apply";
+          reviewApply.addEventListener("click", () => window.location.assign(step.actions.open_run));
+          actions.appendChild(reviewApply);
+        }
+        if (step.actions && step.actions.discard) {
+          const discard = document.createElement("button");
+          discard.type = "button";
+          discard.className = "danger";
+          discard.textContent = "Discard worktree";
+          discard.addEventListener("click", async () => {
+            if (!window.confirm(`Discard the retained worktree for ${step.title || step.id}?`)) return;
+            discard.disabled = true;
+            const result = await getJson(step.actions.discard, { method: "POST" });
+            if (!result.ok) {
+              discard.disabled = false;
+              setStatus(result.error || "Could not discard the worktree.", "error");
+              return;
+            }
+            discard.textContent = "Discarded";
+          });
+          actions.appendChild(discard);
+        }
         if (actions.childElementCount) node.appendChild(actions);
         container.appendChild(node);
       }

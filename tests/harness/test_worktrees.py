@@ -5,11 +5,14 @@ import pytest
 
 import gpt2giga.harness.worktrees as worktrees
 from gpt2giga.harness.worktrees import (
+    WorktreeConflictError,
     WorktreeError,
     WorkspacePolicy,
     apply_run_diff,
     capture_workspace_diff,
     discard_run_worktree,
+    detect_overlapping_run_diffs,
+    prepare_run_diff_merge,
     prepare_workspace_execution,
     run_diff_response,
 )
@@ -146,6 +149,61 @@ def test_truncated_patch_cannot_be_applied(tmp_path, monkeypatch):
     assert run_diff_response(metadata)["can_apply"] is False
     with pytest.raises(WorktreeError, match="truncated"):
         apply_run_diff(metadata)
+
+
+def test_merge_queue_detects_overlaps_and_combines_disjoint_patches(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    (repo / "second.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "second.txt")
+    _git(repo, "commit", "-m", "second")
+    metadatas = {}
+    for run_id, filename in (("run_a", "app.txt"), ("run_b", "second.txt")):
+        execution = prepare_workspace_execution(
+            requested_policy="worktree",
+            harness_kind="agent-cli",
+            mode="edit",
+            workspace=str(repo),
+            data_dir=tmp_path / "data",
+            session_id="sess_merge",
+            run_id=run_id,
+        )
+        Path(execution.request_workspace or "", filename).write_text(
+            f"changed by {run_id}\n", encoding="utf-8"
+        )
+        diff = capture_workspace_diff(execution)
+        metadatas[run_id] = {
+            "workspace_execution": {**execution.to_metadata(), **diff.to_metadata()}
+        }
+
+    assert detect_overlapping_run_diffs(metadatas) == ()
+    merged = prepare_run_diff_merge(
+        metadatas,
+        data_dir=tmp_path / "data",
+        session_id="sess_merge",
+        merge_id="workflow_merge",
+    )
+
+    assert merged["source_run_ids"] == ["run_a", "run_b"]
+    assert set(merged["changed_files"]) == {"app.txt", "second.txt"}
+    assert (repo / "app.txt").read_text(encoding="utf-8") == "base\n"
+    repeated = prepare_run_diff_merge(
+        metadatas,
+        data_dir=tmp_path / "data",
+        session_id="sess_merge",
+        merge_id="workflow_merge",
+    )
+    assert set(repeated["changed_files"]) == {"app.txt", "second.txt"}
+
+    overlapping = {"run_a": metadatas["run_a"], "run_c": metadatas["run_a"]}
+    conflicts = detect_overlapping_run_diffs(overlapping)
+    assert conflicts[0]["path"] == "app.txt"
+    with pytest.raises(WorktreeConflictError, match="overlap"):
+        prepare_run_diff_merge(
+            overlapping,
+            data_dir=tmp_path / "data",
+            session_id="sess_merge",
+            merge_id="workflow_conflict",
+        )
 
 
 def _git_repo(path: Path) -> Path:

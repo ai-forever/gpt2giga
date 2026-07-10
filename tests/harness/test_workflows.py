@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -229,12 +230,23 @@ def test_review_team_fans_out_bounded_handoffs_and_synthesizes(tmp_path: Path) -
     assert all(item.outputs["agent"]["mode"] in {"plan", "read"} for item in steps)
 
 
-def test_agent_team_rejects_edit_profile_before_creating_run(tmp_path: Path) -> None:
+def test_agent_team_forces_edit_profile_into_its_own_worktree(tmp_path: Path) -> None:
     init_project_config(tmp_path)
     (tmp_path / ".giga" / "agents" / "implementer.yaml").write_text(
         render_starter_agent("implementer", harness_id="echo"), encoding="utf-8"
     )
-    coordinator, _ = _coordinator(tmp_path)
+    subprocess.run(("git", "init", str(tmp_path)), check=True, capture_output=True)
+    subprocess.run(
+        ("git", "-C", str(tmp_path), "config", "user.email", "test@example.com"),
+        check=True,
+    )
+    subprocess.run(
+        ("git", "-C", str(tmp_path), "config", "user.name", "Test User"),
+        check=True,
+    )
+    subprocess.run(("git", "-C", str(tmp_path), "add", ".giga"), check=True)
+    subprocess.run(("git", "-C", str(tmp_path), "commit", "-m", "initial"), check=True)
+    coordinator, config = _coordinator(tmp_path)
     definition = parse_workflow_definition(
         """
 id: unsafe-team
@@ -245,10 +257,16 @@ steps:
 """
     )
 
-    with pytest.raises(ValueError, match="read-only profile"):
-        coordinator.start(definition, prompt="change the project")
+    run = coordinator.start(definition, prompt="change the project")
+    worker = DurableJobWorker(config, worker_id="edit-team-worker")
+    assert worker.run_once() is True
 
-    assert coordinator.repository.list_runs() == ()
+    step = coordinator.repository.list_steps(run.id)[0]
+    child_run = coordinator.runner.store.get_run(step.outputs["run_id"])
+    execution = child_run.metadata["workspace_execution"]
+    assert execution["policy"] == "worktree"
+    assert execution["worktree_path"] != str(tmp_path)
+    assert Path(execution["worktree_path"]).exists()
 
 
 def test_cancel_propagates_to_queued_child_job(tmp_path: Path) -> None:

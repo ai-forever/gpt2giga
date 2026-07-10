@@ -350,10 +350,43 @@ def _workflow_team_summary(
                 "job_id": step.job_id,
                 "run_id": child_run_id,
                 "artifact_count": len(step.artifact_refs),
+                "artifact_types": sorted(
+                    {
+                        str(item.get("type") or "")
+                        for item in step.artifact_refs
+                        if item.get("type")
+                    }
+                ),
                 "summary_available": bool(outputs.get("summary")),
+                "handoff_selected": bool(outputs.get("handoff_selected")),
                 "actions": {
                     "open_task": f"/work/{workflow.session_id}",
                     "open_run": f"/runs/{child_run_id}" if child_run_id else None,
+                    "choose": (
+                        f"/api/workflow-runs/{workflow.id}/handoffs/{step.step_id}/choose"
+                        if child_run_id
+                        and any(
+                            item.get("type") in {"patch", "diff"}
+                            for item in step.artifact_refs
+                        )
+                        else None
+                    ),
+                    "apply": (
+                        f"/api/runs/{child_run_id}/apply"
+                        if child_run_id
+                        and any(
+                            item.get("type") == "patch" for item in step.artifact_refs
+                        )
+                        else None
+                    ),
+                    "discard": (
+                        f"/api/workflow-runs/{workflow.id}/handoffs/{step.step_id}/discard"
+                        if child_run_id
+                        and any(
+                            item.get("type") == "patch" for item in step.artifact_refs
+                        )
+                        else None
+                    ),
                 },
             }
         )

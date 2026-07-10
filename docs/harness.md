@@ -290,9 +290,22 @@ reviewers; their summaries and selected artifact references are then handed to
 the Synthesizer. Handoffs are redacted and bounded to 8,000 characters and 16
 artifact references per dependency. Each child job retains its immutable agent
 profile snapshot, including its harness, model, reasoning effort, tools,
-permission profile, and budgets. Slice 32 rejects `edit` agent profiles before
-creating a workflow run; typed isolated editing handoffs are a separate safety
-boundary.
+permission profile, and budgets.
+
+Editing agents are always forced into a distinct detached Git worktree,
+regardless of a weaker policy in their profile. Worktree preparation fails
+closed and never falls back to the source checkout. Completed, failed, and
+interrupted worktrees remain available for review until explicitly discarded.
+Their visible output is projected into a strict handoff vocabulary: `plan`,
+`selected_files`, `patch`, `diff`, `test_report`, `review_findings`, and
+`pr_draft`. Read-only reviewers can receive bounded patch/test previews without
+write access or private reasoning.
+
+Patch selection is explicit. The runtime detects file-level overlap, refuses
+conflicting merge queues, and prepares non-overlapping combinations in another
+retained worktree. Choosing, reviewing/applying, and discarding remain user
+actions; applying a combined queue requires an auditable `git.apply` approval.
+The harness never auto-applies or auto-pushes team output.
 
 Work exposes the selected run's team in the `Team` inspector tab. Runs exposes
 the same live parent/child tree with step status, active work, concurrency,
@@ -306,7 +319,11 @@ Authenticated APIs:
 - `POST /api/workflows/validate` and
   `POST /api/workflows/{workflow_id}/run`;
 - `GET /api/workflow-runs/{run_id}` and
-  `POST /api/workflow-runs/{run_id}/cancel`.
+  `POST /api/workflow-runs/{run_id}/cancel`;
+- `GET /api/workflow-runs/{run_id}/handoffs`, plus explicit per-step `choose`
+  and `discard` actions;
+- `POST /api/workflow-runs/{run_id}/merge-queue` and approval-gated
+  `/merge-queue/apply`.
 
 The visual Workflow Catalog and builder are intentionally deferred; this slice
 ships one canonical execution model rather than a second UI-only workflow

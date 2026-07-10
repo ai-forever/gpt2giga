@@ -52,6 +52,18 @@ def test_workflow_api_lists_validates_runs_status_and_cancels(tmp_path) -> None:
         assert status.status_code == 200
         assert status.json()["run"]["id"] == run["id"]
 
+        handoffs = client.get(f"/api/workflow-runs/{run['id']}/handoffs")
+        assert handoffs.status_code == 200
+        assert handoffs.json()["candidates"] == []
+        assert (
+            client.post(f"/api/workflow-runs/{run['id']}/merge-queue").status_code
+            == 400
+        )
+        assert (
+            client.post(f"/api/workflow-runs/{run['id']}/merge-queue/apply").status_code
+            == 400
+        )
+
         canceled = client.post(f"/api/workflow-runs/{run['id']}/cancel")
         assert canceled.status_code == 200
         assert canceled.json()["run"]["status"] == "canceled"

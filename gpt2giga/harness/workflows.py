@@ -37,6 +37,13 @@ from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions.locking import exclusive_file_lock
 from gpt2giga.harness.sessions.redaction import redact_for_storage
 from gpt2giga.harness.sessions.store import title_from_prompt, utc_now
+from gpt2giga.harness.worktrees import (
+    WorktreeError,
+    apply_run_diff,
+    detect_overlapping_run_diffs,
+    discard_run_worktree,
+    prepare_run_diff_merge,
+)
 
 
 WORKFLOW_DIRECTORY = Path(".giga") / "workflows"
@@ -45,6 +52,18 @@ MAX_WORKFLOW_STEPS = 64
 MAX_FAN_OUT = 16
 MAX_HANDOFF_SUMMARY_CHARS = 8_000
 MAX_HANDOFF_ARTIFACTS = 16
+MAX_HANDOFF_PATCH_PREVIEW_CHARS = 6_000
+HANDOFF_ARTIFACT_TYPES = frozenset(
+    {
+        "plan",
+        "selected_files",
+        "patch",
+        "diff",
+        "test_report",
+        "review_findings",
+        "pr_draft",
+    }
+)
 TERMINAL_STEP_STATUSES = frozenset({"succeeded", "failed", "canceled", "skipped"})
 
 
@@ -551,14 +570,8 @@ class WorkflowCoordinator:
     ) -> WorkflowRun:
         """Create and advance one immutable workflow definition snapshot."""
         for step in definition.steps:
-            if step.kind is not WorkflowStepKind.AGENT:
-                continue
-            profile = load_agent_profile(self.project.root, step.agent_id or "")
-            if profile.mode == "edit":
-                raise ValueError(
-                    f"Agent step {step.id} must use a read-only profile before "
-                    "typed edit handoffs are enabled"
-                )
+            if step.kind is WorkflowStepKind.AGENT:
+                load_agent_profile(self.project.root, step.agent_id or "")
         effective_inputs = dict(definition.inputs)
         effective_inputs.update(dict(inputs or {}))
         if prompt is not None:
@@ -619,6 +632,13 @@ class WorkflowCoordinator:
             outputs = {
                 item.step_id: dict(item.outputs) for item in attempts if item.outputs
             }
+            outputs.update(
+                {
+                    key: value
+                    for key, value in run.outputs.items()
+                    if str(key).startswith("_")
+                }
+            )
             if statuses <= {"succeeded", "skipped"}:
                 return self.repository.update_run(
                     run_id, WorkflowStatus.SUCCEEDED, outputs=outputs
@@ -700,6 +720,10 @@ class WorkflowCoordinator:
                 run_artifact = {"type": "harness_run", "id": run_id}
                 if run_artifact not in artifacts:
                     artifacts.append(run_artifact)
+                child_run = self.runner.store.get_run(run_id)
+                for artifact in _typed_run_artifacts(child_run, output):
+                    if artifact not in artifacts:
+                        artifacts.append(artifact)
                 output["artifacts"] = [
                     dict(item) for item in artifacts[:MAX_HANDOFF_ARTIFACTS]
                 ]
@@ -795,13 +819,12 @@ class WorkflowCoordinator:
             )
         if step.kind is WorkflowStepKind.AGENT:
             profile = load_agent_profile(self.project.root, step.agent_id or "")
-            if profile.mode == "edit":
-                raise ValueError(
-                    f"Agent step {step.id} must use a read-only profile before "
-                    "typed edit handoffs are enabled"
-                )
             prompt = _render_step_prompt(step, run.inputs, dependencies)
             payload = agent_run_payload(profile, prompt, workspace=self.project.root)
+            if profile.mode == "edit":
+                # Agent teams never share the source checkout or another agent's
+                # worktree, even if a profile was authored with a weaker policy.
+                payload["workspace_policy"] = "worktree"
             payload.update(
                 {
                     "workflow_id": run.id,
@@ -838,6 +861,9 @@ class WorkflowCoordinator:
                         "tool_ids": list(profile.tool_ids),
                         "budgets": asdict(profile.budgets),
                         "profile_hash": profile.source_hash,
+                        "workspace_policy": "worktree"
+                        if profile.mode == "edit"
+                        else profile.workspace_policy,
                     },
                 },
             )
@@ -927,6 +953,222 @@ class WorkflowCoordinator:
             summary = summary[: MAX_HANDOFF_SUMMARY_CHARS - 1].rstrip() + "…"
         redacted = redact_for_storage(summary)
         return str(redacted) if redacted else None
+
+
+class WorkflowHandoffManager:
+    """Coordinate explicit patch selection, merge, apply, and cleanup actions."""
+
+    def __init__(self, coordinator: WorkflowCoordinator) -> None:
+        self.coordinator = coordinator
+        self.repository = coordinator.repository
+
+    def status(self, run_id: str) -> dict[str, Any]:
+        """Return selected edit steps, file conflicts, and merge state."""
+        run = self.repository.get_run(run_id)
+        steps = self.repository.list_steps(run_id)
+        candidates: list[dict[str, Any]] = []
+        selected_metadata: dict[str, Mapping[str, Any]] = {}
+        for step in steps:
+            child_run_id = str(step.outputs.get("run_id") or "")
+            if not child_run_id:
+                continue
+            child_run = self.coordinator.runner.store.get_run(child_run_id)
+            execution = _mapping(child_run.metadata.get("workspace_execution"))
+            if execution.get("policy") != "worktree":
+                continue
+            selected = bool(step.outputs.get("handoff_selected"))
+            if selected:
+                selected_metadata[child_run_id] = child_run.metadata
+            candidates.append(
+                {
+                    "step_id": step.step_id,
+                    "run_id": child_run_id,
+                    "selected": selected,
+                    "changed_files": list(execution.get("changed_files") or ()),
+                    "untracked_files": list(execution.get("untracked_files") or ()),
+                    "retained": bool(
+                        execution.get("worktree_path")
+                        and not execution.get("discarded_at")
+                    ),
+                    "applied": bool(execution.get("applied_at")),
+                    "actions": {
+                        "choose": f"/api/workflow-runs/{run_id}/handoffs/{step.step_id}/choose",
+                        "apply": f"/api/runs/{child_run_id}/apply",
+                        "discard": f"/api/workflow-runs/{run_id}/handoffs/{step.step_id}/discard",
+                    },
+                }
+            )
+        return {
+            "workflow_run_id": run_id,
+            "candidates": candidates,
+            "conflicts": list(detect_overlapping_run_diffs(selected_metadata)),
+            "merge_queue": dict(_mapping(run.outputs.get("_merge_queue"))),
+            "actions": {
+                "prepare_merge": f"/api/workflow-runs/{run_id}/merge-queue",
+                "apply_merge": f"/api/workflow-runs/{run_id}/merge-queue/apply",
+            },
+        }
+
+    def choose(self, run_id: str, step_id: str, *, selected: bool) -> dict[str, Any]:
+        """Choose or remove one retained edit patch from the merge queue."""
+        step = self._edit_step(run_id, step_id)
+        outputs = {**dict(step.outputs), "handoff_selected": selected}
+        self.repository.update_step(step.id, status=step.status, outputs=outputs)
+        run = self.repository.get_run(run_id)
+        if run.outputs.get("_merge_queue"):
+            self.repository.update_run(
+                run_id,
+                run.status,
+                outputs={
+                    **dict(run.outputs),
+                    "_merge_queue": {
+                        "stale": True,
+                        "reason": "selection changed",
+                    },
+                },
+            )
+        return self.status(run_id)
+
+    def prepare_merge(self, run_id: str) -> dict[str, Any]:
+        """Prepare a combined patch without changing the source checkout."""
+        run = self.repository.get_run(run_id)
+        selected: dict[str, Mapping[str, Any]] = {}
+        for step in self.repository.list_steps(run_id):
+            if not step.outputs.get("handoff_selected"):
+                continue
+            child_run_id = str(step.outputs.get("run_id") or "")
+            if child_run_id:
+                selected[child_run_id] = self.coordinator.runner.store.get_run(
+                    child_run_id
+                ).metadata
+        merged = prepare_run_diff_merge(
+            selected,
+            data_dir=self.coordinator.runtime_store.data_dir,
+            session_id=run.session_id,
+            merge_id=f"merge_{run.id}",
+        )
+        state = {
+            "status": "prepared",
+            "workspace_execution": merged,
+            "source_run_ids": list(merged["source_run_ids"]),
+            "changed_files": list(merged.get("changed_files") or ()),
+            "prepared_at": merged["prepared_at"],
+        }
+        self.repository.update_run(
+            run.id,
+            run.status,
+            outputs={**dict(run.outputs), "_merge_queue": state},
+        )
+        return self.status(run_id)
+
+    def apply_merge(self, run_id: str) -> dict[str, Any]:
+        """Apply a previously prepared combined patch to a clean source checkout."""
+        run = self.repository.get_run(run_id)
+        queue = _mapping(run.outputs.get("_merge_queue"))
+        execution = _mapping(queue.get("workspace_execution"))
+        if queue.get("status") != "prepared" or not execution:
+            raise WorktreeError("Merge queue is not prepared.")
+        applied = apply_run_diff({"workspace_execution": execution})
+        state = {**dict(queue), "status": "applied", "workspace_execution": applied}
+        self.repository.update_run(
+            run.id,
+            run.status,
+            outputs={**dict(run.outputs), "_merge_queue": state},
+        )
+        return self.status(run_id)
+
+    def discard(self, run_id: str, step_id: str) -> dict[str, Any]:
+        """Discard one retained child worktree without applying its patch."""
+        step = self._edit_step(run_id, step_id)
+        child_run = self.coordinator.runner.store.get_run(
+            str(step.outputs.get("run_id") or "")
+        )
+        execution = discard_run_worktree(child_run.metadata)
+        self.coordinator.runner.store.update_run(
+            child_run.id,
+            metadata={**dict(child_run.metadata), "workspace_execution": execution},
+        )
+        self.repository.update_step(
+            step.id,
+            status=step.status,
+            outputs={**dict(step.outputs), "handoff_selected": False},
+        )
+        return self.status(run_id)
+
+    def _edit_step(self, run_id: str, step_id: str) -> StepAttempt:
+        for step in self.repository.list_steps(run_id):
+            if step.step_id != step_id:
+                continue
+            child_run_id = str(step.outputs.get("run_id") or "")
+            if not child_run_id:
+                break
+            child_run = self.coordinator.runner.store.get_run(child_run_id)
+            execution = _mapping(child_run.metadata.get("workspace_execution"))
+            if execution.get("policy") == "worktree":
+                return step
+            break
+        raise WorktreeError(f"Workflow step {step_id} has no retained edit patch.")
+
+
+def _typed_run_artifacts(
+    child_run: Any, outputs: Mapping[str, Any]
+) -> tuple[dict[str, Any], ...]:
+    """Project one child run into the strict typed handoff artifact vocabulary."""
+    metadata = _mapping(child_run.metadata)
+    execution = _mapping(metadata.get("workspace_execution"))
+    agent = _mapping(outputs.get("agent"))
+    summary = str(outputs.get("summary") or "")
+    artifacts: list[dict[str, Any]] = []
+    mode = str(agent.get("mode") or "")
+    expected = str(
+        _mapping(metadata.get("agent_profile_snapshot")).get("expected_artifact") or ""
+    )
+    if mode == "plan" or expected == "plan":
+        artifacts.append({"type": "plan", "run_id": child_run.id, "preview": summary})
+    if mode == "read" or expected == "review_findings":
+        artifact_type = (
+            "test_report" if expected == "test_report" else "review_findings"
+        )
+        artifacts.append(
+            {"type": artifact_type, "run_id": child_run.id, "preview": summary}
+        )
+    changed_files = tuple(
+        dict.fromkeys(
+            str(item)
+            for item in (
+                *(execution.get("changed_files") or ()),
+                *(execution.get("untracked_files") or ()),
+            )
+        )
+    )
+    patch = str(execution.get("patch") or "")
+    if changed_files:
+        artifacts.append(
+            {
+                "type": "selected_files",
+                "run_id": child_run.id,
+                "paths": list(changed_files),
+            }
+        )
+    if patch:
+        preview = patch[:MAX_HANDOFF_PATCH_PREVIEW_CHARS]
+        for artifact_type in ("patch", "diff"):
+            artifacts.append(
+                {
+                    "type": artifact_type,
+                    "run_id": child_run.id,
+                    "changed_files": list(changed_files),
+                    "preview": preview,
+                    "truncated": len(patch) > len(preview),
+                }
+            )
+        if isinstance(metadata.get("pr_artifact"), Mapping):
+            artifacts.append(
+                {"type": "pr_draft", "run_id": child_run.id, "preview": summary}
+            )
+    return tuple(
+        artifact for artifact in artifacts if artifact["type"] in HANDOFF_ARTIFACT_TYPES
+    )
 
 
 def workflow_run_to_dict(
@@ -1080,6 +1322,13 @@ def _parse_step(value: Any) -> WorkflowStep:
     condition = str(data.get("condition") or "on_success")
     if condition not in {"on_success", "on_failure", "always"}:
         raise ValueError(f"Unsupported condition for step {step_id}: {condition}")
+    artifact_types = _text_tuple(data.get("artifact_types"), "artifact_types")
+    unsupported_artifacts = sorted(set(artifact_types) - HANDOFF_ARTIFACT_TYPES)
+    if unsupported_artifacts:
+        raise ValueError(
+            f"Unsupported handoff artifact types for step {step_id}: "
+            f"{', '.join(unsupported_artifacts)}"
+        )
     return WorkflowStep(
         id=step_id,
         kind=kind,
@@ -1093,7 +1342,7 @@ def _parse_step(value: Any) -> WorkflowStep:
         action=action,
         transform=transform,
         select=_text_tuple(data.get("select"), "select"),
-        artifact_types=_text_tuple(data.get("artifact_types"), "artifact_types"),
+        artifact_types=artifact_types,
         retries=_bounded_int(data.get("retries", 0), "retries", 0, 10),
         timeout_seconds=_optional_positive_int(
             data.get("timeout_seconds"), "timeout_seconds"
