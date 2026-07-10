@@ -23,6 +23,7 @@ from gpt2giga.harness.native.models import (
     NativeSessionStatus,
     NativeTranscriptMessage,
 )
+from gpt2giga.harness.managed_mcp import write_startup_config
 from gpt2giga.harness.project import project_id_for_root
 from gpt2giga.harness.types import GigaChatApiMode, HarnessContext, HarnessRequest
 
@@ -109,6 +110,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         project_id = _project_id(request.workspace)
         native_home = self.managed_home(project_id)
         native_home.mkdir(parents=True, exist_ok=True)
+        _write_claude_settings(native_home)
         session_name = _managed_session_name(request, project_id)
         command = [self._executable(), "-n", session_name]
         model = request.model or context.default_model
@@ -149,6 +151,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
             native_home = self.managed_home(_project_id(ref.workspace))
         api_mode = _api_mode_from_ref(ref)
         native_home.mkdir(parents=True, exist_ok=True)
+        _write_claude_settings(native_home)
         env = _claude_env(context, api_mode=api_mode, native_home=native_home)
         return NativeCommandPlan(
             command=(self._executable(), "--resume", ref.native_session_id),
@@ -201,6 +204,10 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
 
     def _executable(self) -> str:
         return self.executable or shutil.which("claude") or "claude"
+
+
+def _write_claude_settings(home: Path) -> None:
+    write_startup_config("claude-code", home, {})
 
 
 def _ref_from_file(

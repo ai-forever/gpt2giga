@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
+from pathlib import Path
 from typing import Any, Mapping
 
 from gpt2giga.harness.harnesses.agent_cli import (
@@ -27,6 +29,7 @@ from gpt2giga.harness.harnesses.attachment_plan import (
 )
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.native import HarnessInvocationMode
+from gpt2giga.harness.managed_mcp import write_startup_config
 from gpt2giga.harness.types import (
     Availability,
     HarnessCapability,
@@ -122,10 +125,13 @@ class ClaudeCodeHarness(BaseHarness):
         self,
         request: HarnessRequest,
         context: HarnessContext,
+        *,
+        home: str | None = None,
     ) -> dict[str, str]:
         """Build a sanitized environment for Claude Code."""
         return build_safe_env(
             context,
+            home=home,
             extra={
                 "ANTHROPIC_BASE_URL": context.api_base_url(request.api_mode),
                 "ANTHROPIC_API_KEY": context.api_key or "0",
@@ -140,13 +146,14 @@ class ClaudeCodeHarness(BaseHarness):
         context: HarnessContext,
     ) -> HarnessResult:
         command = self.build_command(request, context)
-        env = self.build_env(request, context)
         if request.extra.get("dry_run"):
             return HarnessResult(
                 ok=True,
                 text="dry run",
                 raw={
-                    "env": redact_secrets(env),
+                    "env": redact_secrets(
+                        self.build_env(request, context, home="<temp>")
+                    ),
                     "workspace": request.workspace,
                     **attachment_raw_metadata(request),
                 },
@@ -178,26 +185,35 @@ class ClaudeCodeHarness(BaseHarness):
         )
         if proxy_error is not None:
             return proxy_error
-        prepared_env = self.build_env(request, prepared_context)
-        if request.stream:
-            result = run_streaming_command(
-                label="Claude Code",
-                command=command,
-                env=prepared_env,
-                cwd=request.workspace,
-                timeout_seconds=context.timeout_seconds,
-                request=request,
-                parse_payload=_ClaudeStreamParser(),
+        with tempfile.TemporaryDirectory(prefix="gpt2giga-claude-") as temp_dir:
+            _write_claude_settings(Path(temp_dir))
+            prepared_env = self.build_env(request, prepared_context, home=temp_dir)
+            if request.stream:
+                result = run_streaming_command(
+                    label="Claude Code",
+                    command=command,
+                    env=prepared_env,
+                    cwd=request.workspace,
+                    timeout_seconds=context.timeout_seconds,
+                    request=request,
+                    parse_payload=_ClaudeStreamParser(),
+                )
+            else:
+                result = run_command(
+                    label="Claude Code",
+                    command=command,
+                    env=prepared_env,
+                    cwd=request.workspace,
+                    timeout_seconds=context.timeout_seconds,
+                )
+            return with_events(
+                result,
+                (*attachment_warning_events(request), *proxy_events),
             )
-        else:
-            result = run_command(
-                label="Claude Code",
-                command=command,
-                env=prepared_env,
-                cwd=request.workspace,
-                timeout_seconds=context.timeout_seconds,
-            )
-        return with_events(result, (*attachment_warning_events(request), *proxy_events))
+
+
+def _write_claude_settings(home: Path) -> None:
+    write_startup_config("claude-code", home, {})
 
 
 class _ClaudeStreamParser:

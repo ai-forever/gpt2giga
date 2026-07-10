@@ -16,6 +16,7 @@
       toolProfiles: [],
       toolServers: [],
       toolServerErrors: [],
+      managedToolConfigPlan: null,
       agents: [],
       agentErrors: [],
       selectedAgent: null,
@@ -389,6 +390,59 @@
       }
       button.disabled = false;
       button.textContent = "Probe";
+    }
+
+    async function previewManagedToolConfig() {
+      const harnessId = byId("tool-config-harness-select").value;
+      setText("tools-center-status", `Building redacted ${harnessId} config diff...`);
+      const result = await getJson("/api/tool-config/preview", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, harness_id: harnessId })
+      });
+      if (!result.ok) {
+        state.managedToolConfigPlan = null;
+        byId("apply-tool-config-button").disabled = true;
+        setText("tools-center-status", result.data.detail || "Managed config preview failed.");
+        return;
+      }
+      state.managedToolConfigPlan = result.data.plan;
+      byId("tool-config-diff-panel").hidden = false;
+      setText("tool-config-diff", result.data.plan.diff || "No config changes.");
+      byId("apply-tool-config-button").disabled = !result.data.plan.changed;
+      const warnings = result.data.plan.warnings || [];
+      setText("tools-center-status", `${result.data.plan.server_ids.length} trusted servers · delegated CLI enforcement${warnings.length ? ` · ${warnings.length} secret refs skipped` : ""}`);
+    }
+
+    async function applyManagedToolConfig() {
+      const plan = state.managedToolConfigPlan;
+      if (!plan) return;
+      const result = await getJson("/api/tool-config/apply", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, harness_id: plan.harness_id, expected_hash: plan.current_hash, server_ids: plan.server_ids })
+      });
+      if (!result.ok) {
+        setText("tools-center-status", result.data.detail || "Managed config apply failed.");
+        return;
+      }
+      state.managedToolConfigPlan = null;
+      byId("apply-tool-config-button").disabled = true;
+      setText("tools-center-status", `Applied managed config ${result.data.provenance.content_hash.slice(0, 12)} · CLI tool calls remain opaque`);
+    }
+
+    async function rollbackManagedToolConfig() {
+      const harnessId = byId("tool-config-harness-select").value;
+      const result = await getJson("/api/tool-config/rollback", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, harness_id: harnessId })
+      });
+      if (!result.ok) {
+        setText("tools-center-status", result.data.detail || "Managed config rollback failed.");
+        return;
+      }
+      state.managedToolConfigPlan = null;
+      byId("apply-tool-config-button").disabled = true;
+      setText("tools-center-status", "Managed config rolled back to the last Harness backup.");
+      await previewManagedToolConfig();
     }
 
     async function loadApprovals() {
@@ -4632,6 +4686,14 @@
       byId("remember-message-button").addEventListener("click", rememberLastMessage);
       byId("refresh-evals-button").addEventListener("click", loadEvals);
       byId("refresh-tools-center-button").addEventListener("click", loadToolsCenter);
+      byId("preview-tool-config-button").addEventListener("click", previewManagedToolConfig);
+      byId("apply-tool-config-button").addEventListener("click", applyManagedToolConfig);
+      byId("rollback-tool-config-button").addEventListener("click", rollbackManagedToolConfig);
+      byId("tool-config-harness-select").addEventListener("change", () => {
+        state.managedToolConfigPlan = null;
+        byId("apply-tool-config-button").disabled = true;
+        byId("tool-config-diff-panel").hidden = true;
+      });
       byId("refresh-agents-button").addEventListener("click", loadAgentsCenter);
       byId("validate-agent-button").addEventListener("click", previewAgent);
       byId("apply-agent-button").addEventListener("click", applyAgent);

@@ -332,17 +332,36 @@ harnesses = ["codex-cli", "claude-code", "gemini-cli"]
 readonly = true
 ```
 
-The legacy profile APIs remain a side-effect-free managed-config preview:
+The legacy profile APIs remain available as a side-effect-free compatibility
+preview:
 
 ```text
 GET  /api/tools
 POST /api/tools/sync
 ```
 
-No external tools are installed, authenticated, or written into Codex, Claude,
-or Gemini config files. Profile names are constrained to safe identifier
-characters, secret-looking keys are rejected while loading project config, and
-secret-looking values are redacted in API/UI output.
+The Tools area can also preview, apply, and roll back trusted MCP connections in
+Harness-owned Codex, Claude, and Gemini homes:
+
+```text
+POST /api/tool-config/preview
+POST /api/tool-config/apply
+POST /api/tool-config/rollback
+```
+
+Preview returns the exact redacted diff and a current-content hash. Apply
+requires that hash, takes a per-home lock, writes atomically, records an
+ownership marker and content hash, and keeps the previous content as a backup.
+Rollback succeeds only while the ownership marker and hash still match. Config
+changes are rejected while a managed native process owns the home. User-owned
+`~/.codex`, Claude, and Gemini settings are never changed.
+
+Only enabled, trusted servers are composed. Secret references are deliberately
+not copied into CLI config; preview reports them as skipped until a separate
+explicit secret flow exists. No package installation or OAuth occurs. Headless
+Claude now uses an isolated temporary HOME, matching the existing isolated
+Codex and Gemini execution model, and every CLI startup goes through the same
+composer so synchronized MCP entries are preserved.
 
 MCP profiles can additionally describe a stdio or Streamable HTTP connection:
 
@@ -399,8 +418,10 @@ GET  /api/tool-servers/{server_id}?workspace=...
 POST /api/tool-servers/{server_id}/probe
 ```
 
-MCP tool invocation and managed Codex/Claude/Gemini config apply remain
-disabled in this slice.
+MCP tool invocation remains disabled. External CLI MCP usage is labeled
+`delegated_to_cli_sandbox` and opaque unless a structured adapter emits explicit
+call/result events. Agent run snapshots record the bound server ids and this
+enforcement boundary as configuration provenance.
 
 ### Shared Tool And Secret Contracts
 

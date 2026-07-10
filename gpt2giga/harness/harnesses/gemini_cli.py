@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -30,6 +29,7 @@ from gpt2giga.harness.harnesses.attachment_plan import (
 )
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.native import HarnessInvocationMode
+from gpt2giga.harness.managed_mcp import write_startup_config
 from gpt2giga.harness.types import (
     Availability,
     HarnessCapability,
@@ -203,14 +203,10 @@ class GeminiCliHarness(BaseHarness):
 
 
 def _write_gemini_settings(home: Path) -> None:
-    settings_path = home / ".gemini" / "settings.json"
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(
-        json.dumps(
-            {"security": {"auth": {"selectedType": "gemini-api-key"}}},
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    write_startup_config(
+        "gemini-cli",
+        home,
+        {"security": {"auth": {"selectedType": "gemini-api-key"}}},
     )
 
 

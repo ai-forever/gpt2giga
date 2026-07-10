@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import Enum
 import os
+from pathlib import Path
 import subprocess
 import threading
 from typing import Any, IO, Mapping
@@ -292,6 +293,21 @@ class NativeProcessManager:
                 self._close_finished_resources_locked(record)
                 refs.append(record.ref)
         return tuple(refs)
+
+    def is_home_active(self, home: str | Path) -> bool:
+        """Return whether a running native process owns the managed home."""
+        target = Path(home).expanduser().resolve()
+        with self._lock:
+            for record in self._records.values():
+                self._refresh_locked(record)
+                native_home = record.ref.native_home
+                if (
+                    record.ref.status is NativeProcessStatus.RUNNING
+                    and native_home
+                    and Path(native_home).expanduser().resolve() == target
+                ):
+                    return True
+        return False
 
     def _popen(
         self,

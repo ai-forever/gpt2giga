@@ -16,6 +16,13 @@ from gpt2giga.harness.mcp import (
     mcp_probe_to_dict,
     probe_mcp_server,
 )
+from gpt2giga.harness.managed_mcp import (
+    ManagedConfigConflictError,
+    ManagedConfigOwnershipError,
+    ManagedMCPConfigService,
+    managed_config_plan_to_dict,
+    managed_config_result_to_dict,
+)
 from gpt2giga.harness.project import (
     load_project_config,
     project_to_dict,
@@ -76,7 +83,7 @@ async def tool_inventory(
         "servers": rows,
         "errors": list(errors),
         "execution_enabled": False,
-        "config_writes_enabled": False,
+        "config_writes_enabled": True,
     }
 
 
@@ -161,6 +168,91 @@ async def probe_tool_server(
     return {"probe": mcp_probe_to_dict(result)}
 
 
+@router.post("/api/tool-config/preview")
+async def preview_tool_config(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Return the exact redacted managed-home config diff before apply."""
+    workspace = str(payload.get("workspace") or "").strip() or None
+    harness_id = str(payload.get("harness_id") or "").strip()
+    project, descriptors, errors = _inventory(request, workspace)
+    selected = _select_descriptors(descriptors, payload.get("server_ids"))
+    if errors:
+        raise HTTPException(status_code=400, detail="MCP inventory contains errors")
+    try:
+        plan = _config_service(request).preview(harness_id, project.id, selected)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "project": project_to_dict(project),
+        "plan": managed_config_plan_to_dict(plan),
+        "enforcement": "delegated_to_cli_sandbox",
+        "tool_calls_observable": False,
+    }
+
+
+@router.post("/api/tool-config/apply")
+async def apply_tool_config(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Apply trusted MCP servers to one Harness-owned managed home."""
+    workspace = str(payload.get("workspace") or "").strip() or None
+    harness_id = str(payload.get("harness_id") or "").strip()
+    expected_hash = str(payload.get("expected_hash") or "").strip()
+    if not expected_hash:
+        raise HTTPException(status_code=400, detail="expected_hash is required")
+    project, descriptors, errors = _inventory(request, workspace)
+    selected = _select_descriptors(descriptors, payload.get("server_ids"))
+    if errors:
+        raise HTTPException(status_code=400, detail="MCP inventory contains errors")
+    untrusted = [item.id for item in selected if item.enabled and not item.trusted]
+    if untrusted:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only trusted MCP servers can be applied: {', '.join(untrusted)}",
+        )
+    try:
+        result = _config_service(request).apply(
+            harness_id,
+            project.id,
+            selected,
+            expected_hash=expected_hash,
+        )
+    except (ManagedConfigConflictError, ManagedConfigOwnershipError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "project": project_to_dict(project),
+        "provenance": managed_config_result_to_dict(result),
+        "enforcement": "delegated_to_cli_sandbox",
+        "tool_calls_observable": False,
+    }
+
+
+@router.post("/api/tool-config/rollback")
+async def rollback_tool_config(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Restore the last config backup for one managed home."""
+    workspace = str(payload.get("workspace") or "").strip() or None
+    harness_id = str(payload.get("harness_id") or "").strip()
+    project, _descriptors, _errors = _inventory(request, workspace)
+    try:
+        result = _config_service(request).rollback(harness_id, project.id)
+    except (ManagedConfigConflictError, ManagedConfigOwnershipError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "project": project_to_dict(project),
+        "provenance": managed_config_result_to_dict(result),
+    }
+
+
 def _inventory(request: Request, workspace: str | None):
     config = request.app.state.harness_config
     try:
@@ -184,3 +276,29 @@ def _runtime_store(request: Request) -> RuntimeCoordinationStore:
             detail="Durable runtime is required for MCP approvals",
         )
     return store
+
+
+def _config_service(request: Request) -> ManagedMCPConfigService:
+    manager = request.app.state.harness_native_process_manager
+    return ManagedMCPConfigService(
+        request.app.state.harness_config.data_dir,
+        home_active=manager.is_home_active,
+    )
+
+
+def _select_descriptors(descriptors, raw_ids):
+    if raw_ids is None:
+        return descriptors
+    if not isinstance(raw_ids, list) or not all(
+        isinstance(item, str) and item.strip() for item in raw_ids
+    ):
+        raise HTTPException(status_code=400, detail="server_ids must be a string list")
+    requested = set(raw_ids)
+    known = {item.id for item in descriptors}
+    missing = sorted(requested - known)
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"MCP servers not found: {', '.join(missing)}",
+        )
+    return tuple(item for item in descriptors if item.id in requested)

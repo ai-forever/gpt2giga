@@ -2115,7 +2115,10 @@
         flex: 0 0 auto;
       }
       .top-actions { flex: 0 0 auto; }
-      body.agents-area #session-drawer-button { display: none; }
+      body.agents-area #session-drawer-button,
+      body.runs-area #session-drawer-button,
+      body.approvals-area #session-drawer-button,
+      body.tools-area #session-drawer-button { display: none; }
       .shell {
         display: block;
         width: 100%;

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=29.1">
+  <link rel="stylesheet" href="/assets/app.css?v=30.2">
 </head>
 <body>
   <div class="app">
@@ -302,9 +302,23 @@
             <h2>Tools</h2>
             <p id="tools-center-status" class="status-line">Loading MCP connections...</p>
           </div>
-          <button id="refresh-tools-center-button" class="secondary" type="button">Refresh</button>
+          <div class="inline-actions">
+            <select id="tool-config-harness-select" aria-label="Managed MCP target">
+              <option value="codex-cli">Codex CLI</option>
+              <option value="claude-code">Claude Code</option>
+              <option value="gemini-cli">Gemini CLI</option>
+            </select>
+            <button id="preview-tool-config-button" class="secondary" type="button">Preview config</button>
+            <button id="apply-tool-config-button" class="primary" type="button" disabled>Apply</button>
+            <button id="rollback-tool-config-button" class="secondary" type="button">Rollback</button>
+            <button id="refresh-tools-center-button" class="secondary" type="button">Refresh</button>
+          </div>
         </header>
         <div id="tools-center-errors" class="tools-center-errors"></div>
+        <details id="tool-config-diff-panel" hidden>
+          <summary>Exact redacted managed config diff</summary>
+          <pre id="tool-config-diff"></pre>
+        </details>
         <div id="tools-center-list" class="tools-center-list" aria-live="polite"></div>
       </section>
 
@@ -548,6 +562,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=29.1"></script>
+  <script src="/assets/app.js?v=30.2"></script>
 </body>
 </html>

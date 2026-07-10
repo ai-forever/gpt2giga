@@ -23,6 +23,7 @@ from gpt2giga.harness.native.models import (
     NativeSessionStatus,
     NativeTranscriptMessage,
 )
+from gpt2giga.harness.managed_mcp import write_startup_config
 from gpt2giga.harness.project import project_id_for_root
 from gpt2giga.harness.types import GigaChatApiMode, HarnessContext, HarnessRequest
 
@@ -756,14 +757,10 @@ def _gemini_env(
 
 
 def _write_gemini_settings(home: Path) -> None:
-    settings_path = home / ".gemini" / "settings.json"
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(
-        json.dumps(
-            {"security": {"auth": {"selectedType": "gemini-api-key"}}},
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    write_startup_config(
+        "gemini-cli",
+        home,
+        {"security": {"auth": {"selectedType": "gemini-api-key"}}},
     )
 
 

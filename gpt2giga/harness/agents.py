@@ -286,6 +286,14 @@ def agent_run_payload(
         "extra": {
             "agent_id": profile.id,
             "tool_ids": list(profile.tool_ids),
+            "tool_bindings": [
+                {
+                    "server_id": server_id,
+                    "enforcement": "delegated_to_cli_sandbox",
+                    "observability": "opaque_unless_structured_adapter",
+                }
+                for server_id in profile.tool_ids
+            ],
             "skills": list(profile.skills),
             "prompt_files": list(profile.prompt_files),
             "memory_selectors": list(profile.memory_selectors),

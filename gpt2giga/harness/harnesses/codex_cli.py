@@ -28,6 +28,7 @@ from gpt2giga.harness.harnesses.attachment_plan import (
 )
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.native import HarnessInvocationMode
+from gpt2giga.harness.managed_mcp import write_startup_config
 from gpt2giga.harness.types import (
     Availability,
     HarnessCapability,
@@ -219,7 +220,7 @@ def _write_codex_config(
         'wire_api = "responses"\n'
         "supports_websockets = false\n"
     )
-    (codex_home / "config.toml").write_text(config, encoding="utf-8")
+    write_startup_config("codex-cli", codex_home, config)
 
 
 def _toml_escape(value: str) -> str:

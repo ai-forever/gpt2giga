@@ -22,6 +22,7 @@ from gpt2giga.harness.native.models import (
     NativeSessionStatus,
     NativeTranscriptMessage,
 )
+from gpt2giga.harness.managed_mcp import write_startup_config
 from gpt2giga.harness.project import project_id_for_root
 from gpt2giga.harness.types import GigaChatApiMode, HarnessContext, HarnessRequest
 
@@ -525,7 +526,7 @@ def _write_codex_config_values(
         'wire_api = "responses"\n'
         "supports_websockets = false\n"
     )
-    (codex_home / "config.toml").write_text(config, encoding="utf-8")
+    write_startup_config("codex-cli", codex_home, config)
 
 
 def _toml_escape(value: str) -> str:
