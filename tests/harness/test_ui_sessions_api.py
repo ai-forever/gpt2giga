@@ -152,6 +152,31 @@ def test_sessions_api_start_run_returns_stream_urls_and_sse_replay():
     assert "run_finished" in text
 
 
+def test_run_event_stream_synthesizes_terminal_event_for_legacy_run():
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Legacy terminal run")
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="hello",
+        model=None,
+        api_mode=session.default_api_mode,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=None,
+        status="succeeded",
+    )
+    client = _client(store=store)
+
+    with client.stream("GET", f"/api/runs/{run.id}/events/stream") as response:
+        assert response.status_code == 200
+        text = "".join(response.iter_text())
+
+    assert '"type": "run_finished"' in text
+    assert '"status": "succeeded"' in text
+    assert '"synthetic": true' in text
+
+
 def test_preflight_api_reports_large_attachment_warning(tmp_path):
     data_dir = tmp_path / "data"
     client = _client(
@@ -307,6 +332,32 @@ def test_sessions_api_cancel_active_headless_run():
     assert run["status"] == "canceled"
     event_types = {event["type"] for event in bundle["events"]}
     assert {"cancel_requested", "run_canceled", "run_finished"} <= event_types
+
+
+def test_cancel_does_not_overwrite_run_that_finished_during_lookup():
+    store = _FinishDuringCancelLookupStore()
+    session = store.create_session(title="Cancel race")
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="hello",
+        model=None,
+        api_mode=session.default_api_mode,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=None,
+        status="running",
+    )
+    store.finish_on_next_get(run.id)
+    client = _client(store=store)
+
+    response = client.post(f"/api/runs/{run.id}/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["cancel_requested"] is False
+    assert response.json()["run"]["status"] == "succeeded"
+    assert store.get_run(run.id).status == "succeeded"
+    assert store.list_events(session.id, run_id=run.id) == ()
 
 
 def test_arena_api_creates_child_runs_without_shared_history(tmp_path):
@@ -590,6 +641,22 @@ def _client(
         store=store or InMemoryHarnessSessionStore(),
     )
     return TestClient(app)
+
+
+class _FinishDuringCancelLookupStore(InMemoryHarnessSessionStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self._finish_run_id: str | None = None
+
+    def finish_on_next_get(self, run_id: str) -> None:
+        self._finish_run_id = run_id
+
+    def get_run(self, run_id: str):
+        run = super().get_run(run_id)
+        if self._finish_run_id == run_id:
+            self._finish_run_id = None
+            super().update_run(run_id, status="succeeded", finished_at=run.updated_at)
+        return run
 
 
 class _CancellableHarness(BaseHarness):

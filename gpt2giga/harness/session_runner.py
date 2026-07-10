@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
+import json
 from typing import Any, Mapping
 
 from gpt2giga.harness.attachments import (
@@ -51,6 +53,7 @@ from gpt2giga.harness.sessions.store import (
 from gpt2giga.harness.types import (
     GigaChatApiMode,
     HarnessChatMessage,
+    HarnessEvent,
     HarnessEventType,
     HarnessRequest,
     HarnessResult,
@@ -346,6 +349,22 @@ class HarnessSessionRunner:
         if project_memory_payload:
             request_extra["project_memory"] = project_memory_payload
         request_extra["preflight"] = preflight_payload
+        emitted_event_counts: Counter[str] = Counter()
+        latest_usage: dict[str, Any] = {}
+
+        def event_sink(event: HarnessEvent) -> None:
+            self._append_event(
+                session.id,
+                run.id,
+                event.type,
+                event.message,
+                event_to_dict(event)["payload"],
+            )
+            emitted_event_counts[_event_fingerprint(event)] += 1
+            usage = _usage_from_event(event)
+            if usage is not None:
+                _merge_usage(latest_usage, usage)
+
         request = HarnessRequest(
             prompt=effective_prompt,
             model=options["model"],
@@ -362,6 +381,7 @@ class HarnessSessionRunner:
             run_id=run.id,
             native_session_id=options["native_session_id"],
             cancel_event=cancel_event,
+            event_sink=event_sink,
             extra=request_extra,
         )
         raw_request = {
@@ -453,6 +473,10 @@ class HarnessSessionRunner:
             {"ok": result.ok},
         )
         for event in result.events:
+            fingerprint = _event_fingerprint(event)
+            if emitted_event_counts[fingerprint] > 0:
+                emitted_event_counts[fingerprint] -= 1
+                continue
             self._append_event(
                 session.id,
                 run.id,
@@ -460,6 +484,9 @@ class HarnessSessionRunner:
                 event.message,
                 event_to_dict(event)["payload"],
             )
+            usage = _usage_from_event(event)
+            if usage is not None:
+                _merge_usage(latest_usage, usage)
 
         if _cancel_requested(cancel_event):
             status = "canceled"
@@ -493,6 +520,9 @@ class HarnessSessionRunner:
                 harness_id=options["harness_id"],
                 model=options["model"],
                 api_mode=options["api_mode"],
+                metadata={"usage": dict(latest_usage)}
+                if role == "assistant" and latest_usage
+                else {},
             )
         )
         self._append_event(
@@ -503,6 +533,8 @@ class HarnessSessionRunner:
             {"role": role},
         )
         metadata = dict(run_metadata)
+        if latest_usage:
+            metadata["usage"] = dict(latest_usage)
         if options["mode"] == "edit":
             workspace_diff = capture_workspace_diff(workspace_execution)
             if workspace_diff is not None:
@@ -561,27 +593,6 @@ class HarnessSessionRunner:
             command=result.command,
             metadata=metadata,
         )
-        self._append_event(
-            session.id,
-            run.id,
-            HarnessEventType.RUN_FINISHED.value,
-            "Harness run finished.",
-            {"status": status},
-        )
-        provenance = build_run_provenance(
-            updated_run,
-            session=session,
-            spec=harness.spec(),
-            raw_requests=(raw_request_record,),
-            raw_responses=(raw_response_record,),
-            events=self.store.list_events(session.id, run_id=run.id),
-            data_dir=self.config.data_dir,
-        )
-        metadata = {
-            **dict(updated_run.metadata),
-            "provenance": run_provenance_to_dict(provenance),
-        }
-        updated_run = self.store.update_run(run.id, metadata=metadata)
         session_patch: dict[str, Any] = {
             "default_harness_id": options["harness_id"],
             "default_model": options["model"],
@@ -598,6 +609,27 @@ class HarnessSessionRunner:
         if session.title == "Untitled session":
             session_patch["title"] = title_from_prompt(options["prompt"])
         updated_session = self.store.update_session(session.id, **session_patch)
+        self._append_event(
+            session.id,
+            run.id,
+            HarnessEventType.RUN_FINISHED.value,
+            "Harness run finished.",
+            {"status": status},
+        )
+        provenance = build_run_provenance(
+            updated_run,
+            session=updated_session,
+            spec=harness.spec(),
+            raw_requests=(raw_request_record,),
+            raw_responses=(raw_response_record,),
+            events=self.store.list_events(session.id, run_id=run.id),
+            data_dir=self.config.data_dir,
+        )
+        metadata = {
+            **dict(updated_run.metadata),
+            "provenance": run_provenance_to_dict(provenance),
+        }
+        updated_run = self.store.update_run(run.id, metadata=metadata)
         bundle = self.store.get_session_bundle(session.id)
         return HarnessSessionRunResult(
             session=updated_session,
@@ -835,3 +867,69 @@ def _cancel_requested(cancel_event: Any | None) -> bool:
         return False
     is_set = getattr(cancel_event, "is_set", None)
     return bool(is_set()) if callable(is_set) else False
+
+
+def _event_fingerprint(event: HarnessEvent) -> str:
+    """Return a stable fingerprint used to suppress already-streamed events."""
+    return json.dumps(
+        event_to_dict(event),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _usage_from_event(event: HarnessEvent) -> dict[str, Any] | None:
+    """Extract safe token counters from one normalized usage event."""
+    if event.type != HarnessEventType.USAGE.value:
+        return None
+    payload = event_to_dict(event)["payload"]
+    aliases = {
+        "input_tokens": ("input_tokens", "prompt_tokens"),
+        "output_tokens": ("output_tokens", "completion_tokens"),
+        "total_tokens": ("total_tokens",),
+        "cached_input_tokens": ("cached_input_tokens", "cached_tokens"),
+        "reasoning_output_tokens": (
+            "reasoning_output_tokens",
+            "reasoning_tokens",
+            "thoughts_tokens",
+        ),
+    }
+    usage: dict[str, Any] = {}
+    for target, keys in aliases.items():
+        value = next(
+            (payload[key] for key in keys if _is_nonnegative_integer(payload.get(key))),
+            None,
+        )
+        if value is not None:
+            usage[target] = value
+    if (
+        "total_tokens" not in usage
+        and {
+            "input_tokens",
+            "output_tokens",
+        }
+        <= usage.keys()
+    ):
+        usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
+    source = payload.get("source")
+    if isinstance(source, str) and source:
+        usage["source"] = source
+    return usage or None
+
+
+def _is_nonnegative_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _merge_usage(target: dict[str, Any], update: Mapping[str, Any]) -> None:
+    """Merge partial usage snapshots and keep the aggregate total consistent."""
+    explicit_total = "total_tokens" in update
+    target.update(update)
+    if (
+        not explicit_total
+        and _is_nonnegative_integer(target.get("input_tokens"))
+        and _is_nonnegative_integer(target.get("output_tokens"))
+    ):
+        target["total_tokens"] = target["input_tokens"] + target["output_tokens"]

@@ -13,6 +13,7 @@ from gpt2giga.harness.types import (
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
+    redact_secrets,
     spec_to_dict,
 )
 
@@ -98,6 +99,45 @@ def test_spec_to_dict_ignores_unknown_capabilities_and_redacts_metadata():
         payload["plugin_metadata"]["config_schema"]["properties"]["endpoint"]["default"]
         == "<redacted>"
     )
+
+
+def test_redact_secrets_preserves_only_numeric_usage_token_fields():
+    payload = redact_secrets(
+        {
+            "input_tokens": 8,
+            "output_tokens": 3,
+            "total_tokens": 11,
+            "input_tokens_details": {"cached_tokens": 2, "token": "secret"},
+            "access_token": "secret-access-token",
+            "completion_tokens": "not-a-counter",
+        }
+    )
+
+    assert payload == {
+        "input_tokens": 8,
+        "output_tokens": 3,
+        "total_tokens": 11,
+        "input_tokens_details": {
+            "cached_tokens": 2,
+            "token": "<redacted>",
+        },
+        "access_token": "<redacted>",
+        "completion_tokens": "<redacted>",
+    }
+
+
+def test_redact_secrets_scrubs_secret_assignments_in_free_form_tool_output():
+    output = redact_secrets(
+        "FOO_SECRET=plain-secret\n"
+        'DATABASE_URL="postgresql://user:password@db.local/app"\n'
+        "safe=https://example.com/path"
+    )
+
+    assert "plain-secret" not in output
+    assert "user:password" not in output
+    assert "FOO_SECRET=<redacted>" in output
+    assert 'DATABASE_URL="<redacted>"' in output
+    assert "safe=https://example.com/path" in output
 
 
 class _PluginHarness(BaseHarness):

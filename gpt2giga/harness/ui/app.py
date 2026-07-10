@@ -1469,6 +1469,7 @@ def create_app(
 
         async def stream_events():
             last_id = _optional_text(after_id)
+            terminal_event_seen = False
             while True:
                 try:
                     current_run = store.get_run(run_id)
@@ -1481,8 +1482,37 @@ def create_app(
                     break
                 for event in events:
                     last_id = event.id
+                    if event.type == HarnessEventType.RUN_FINISHED.value:
+                        terminal_event_seen = True
                     yield _sse_event(event)
                 if _run_status_is_terminal(current_run.status) and not events:
+                    if not terminal_event_seen:
+                        terminal_event_seen = any(
+                            event.type == HarnessEventType.RUN_FINISHED.value
+                            for event in store.list_events(
+                                current_run.session_id,
+                                run_id=run_id,
+                            )
+                        )
+                    if not terminal_event_seen:
+                        yield _sse_event(
+                            HarnessStoredEvent(
+                                id=f"evt_terminal_{current_run.id}",
+                                session_id=current_run.session_id,
+                                run_id=current_run.id,
+                                type=HarnessEventType.RUN_FINISHED.value,
+                                message="Harness run reached a terminal state.",
+                                payload={
+                                    "status": current_run.status,
+                                    "synthetic": True,
+                                },
+                                created_at=(
+                                    current_run.finished_at
+                                    or current_run.updated_at
+                                    or current_run.created_at
+                                ),
+                            )
+                        )
                     break
                 await asyncio.sleep(0.25)
 
@@ -1508,6 +1538,18 @@ def create_app(
                 "run": run_to_dict(run),
             }
         active = active_headless_runs.get(run.id)
+        if active is not None and active.task.done():
+            active = None
+        # A headless task can finish and remove itself from the active map after
+        # the first read. Re-read before applying a synthetic cancellation so a
+        # completed run can never be overwritten with a stale canceled status.
+        run = store.get_run(run.id)
+        if _run_status_is_terminal(run.status):
+            return {
+                "cancel_requested": False,
+                "active": False,
+                "run": run_to_dict(run),
+            }
         already_requested = bool(run.metadata.get("cancel_requested"))
         if active is not None:
             active.cancel_event.set()

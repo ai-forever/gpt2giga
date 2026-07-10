@@ -212,7 +212,7 @@ this status to choose the next vertical slice.
 | Slice 00: architecture note | Covered by this document. |
 | Slice 01: project-first cockpit | Implemented for project identity, config, mutable local state, project-scoped sessions, native history scoping, and UI header/default restoration. |
 | Slice 02: `giga init` and `.giga/harness.toml` | Implemented for config, defaults, prompt template files, presets, and attachment settings. |
-| Slice 03: live run event stream | Implemented as an MVP for headless UI runs: `/api/sessions/*/run/start` starts runs in the background, `/api/runs/{run_id}/events/stream` replays and streams persisted SSE events, and `/api/runs/{run_id}/cancel` requests cooperative cancellation. True stdout/message deltas still depend on individual harnesses emitting them. |
+| Slice 03: live run event stream | Implemented and enriched for headless UI runs: `/api/sessions/*/run/start` starts runs in the background, `/api/runs/{run_id}/events/stream` replays persisted SSE events, and `/api/runs/{run_id}/cancel` requests cooperative cancellation. Direct Chat consumes OpenAI-compatible SSE, while Codex CLI, Claude Code, and Gemini CLI use structured JSONL streams. The chat surface renders live Markdown text, tool activity, and normalized usage; plugins that do not emit structured deltas still complete atomically. |
 | Slice 04: native terminal pane | Implemented with native process manager, API, and UI terminal polling. SSE/WebSocket and resize can still be added later. |
 | Slice 05: native session discovery/import | Implemented for Codex, Claude Code, and Gemini CLI with project scoping and UI/CLI flows. |
 | Slice 06: attachment store | Implemented. |
@@ -271,9 +271,9 @@ the previously missing safe terminal-in-worktree action. The next editor bridge
 follow-up can add local URL deep links for sessions and runs without changing
 the transparent storage model.
 
-Slice 03 can still be enriched later with richer per-harness stdout/message
-delta emission, Slice 10 can grow parallel execution and arena cancellation,
-Slice 12 can later grow into multi-step runbook orchestration, Slice 13 can
+Slice 03 can still gain lower-overhead event fan-out for very high-volume
+streams, Slice 10 can grow parallel execution and arena cancellation, Slice 12
+can later grow into multi-step runbook orchestration, Slice 13 can
 later add real opt-in tool config writes after an explicit safety review, Slice
 14 can later add hosted issue/PR integrations behind explicit user action, and
 Slice 15 can later add automatic memory suggestions after an explicit approval

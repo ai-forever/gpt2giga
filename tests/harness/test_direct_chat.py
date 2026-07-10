@@ -96,6 +96,176 @@ def test_direct_chat_sends_provided_history(monkeypatch):
     ]
 
 
+def test_direct_chat_streams_coalesced_message_tool_and_usage_events(monkeypatch):
+    captured = {}
+    emitted = []
+
+    def fake_stream_sse_json(
+        method,
+        url,
+        *,
+        payload,
+        api_key,
+        timeout,
+        cancel_event,
+        idle_callback,
+    ):
+        captured.update(
+            {
+                "method": method,
+                "url": url,
+                "payload": payload,
+                "api_key": api_key,
+                "timeout": timeout,
+                "cancel_event": cancel_event,
+                "idle_callback": idle_callback,
+            }
+        )
+        yield {
+            "id": "chatcmpl-1",
+            "model": "GigaChat",
+            "choices": [{"index": 0, "delta": {"content": "Hel"}}],
+        }
+        yield {
+            "id": "chatcmpl-1",
+            "model": "GigaChat",
+            "choices": [{"index": 0, "delta": {"content": "lo"}}],
+        }
+        yield {
+            "id": "chatcmpl-1",
+            "model": "GigaChat",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call-1",
+                                "type": "function",
+                                "function": {
+                                    "name": "weather",
+                                    "arguments": '{"city":',
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        }
+        yield {
+            "id": "chatcmpl-1",
+            "model": "GigaChat",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {"arguments": '"Moscow"}'},
+                            }
+                        ]
+                    },
+                }
+            ],
+        }
+        yield {
+            "id": "chatcmpl-1",
+            "model": "GigaChat",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+            "usage": {
+                "prompt_tokens": 8,
+                "completion_tokens": 3,
+                "total_tokens": 11,
+                "prompt_tokens_details": {"cached_tokens": 2},
+            },
+        }
+
+    monkeypatch.setattr(proxy, "stream_sse_json", fake_stream_sse_json)
+
+    result = DirectChatHarness().run(
+        HarnessRequest(
+            prompt="hello",
+            model="GigaChat",
+            stream=True,
+            event_sink=emitted.append,
+        ),
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            api_key="proxy-key",
+            timeout_seconds=12,
+        ),
+    )
+
+    assert result.ok is True
+    assert result.text == "Hello"
+    assert result.events == ()
+    assert captured["method"] == "POST"
+    assert captured["payload"]["stream"] is True
+    assert captured["api_key"] == "proxy-key"
+    assert [event.type for event in emitted] == [
+        "message_delta",
+        "tool_call_started",
+        "tool_call_delta",
+        "usage",
+        "tool_call_finished",
+    ]
+    assert (
+        "".join(
+            event.payload["delta"] for event in emitted if event.type == "message_delta"
+        )
+        == "Hello"
+    )
+    assert emitted[1].payload["name"] == "weather"
+    assert emitted[2].payload["arguments_delta"] == '"Moscow"}'
+    assert emitted[3].payload == {
+        "input_tokens": 8,
+        "output_tokens": 3,
+        "total_tokens": 11,
+        "source": "direct-chat",
+        "cached_input_tokens": 2,
+    }
+    assert emitted[4].payload["arguments"] == '{"city":"Moscow"}'
+
+
+def test_direct_chat_flushes_pending_text_during_upstream_pause(monkeypatch):
+    emitted = []
+    observed = {}
+
+    def fake_stream_sse_json(
+        method,
+        url,
+        *,
+        payload,
+        api_key,
+        timeout,
+        cancel_event,
+        idle_callback,
+    ):
+        yield {
+            "id": "chatcmpl-1",
+            "model": "GigaChat",
+            "choices": [{"index": 0, "delta": {"content": "A"}}],
+        }
+        idle_callback.__self__._started_at -= 1
+        idle_callback()
+        observed["event_count_during_pause"] = len(emitted)
+
+    monkeypatch.setattr(proxy, "stream_sse_json", fake_stream_sse_json)
+
+    result = DirectChatHarness().run(
+        HarnessRequest(prompt="hello", stream=True, event_sink=emitted.append),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert result.ok is True
+    assert result.text == "A"
+    assert observed["event_count_during_pause"] == 1
+    assert emitted[0].type == "message_delta"
+    assert emitted[0].payload["delta"] == "A"
+
+
 def test_direct_chat_autostart_uses_generated_sidecar_api_key(monkeypatch):
     captured = {}
 

@@ -16,9 +16,11 @@ from gpt2giga.harness.types import (
     Availability,
     HarnessCapability,
     HarnessContext,
+    HarnessEvent,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
+    emit_event,
 )
 
 
@@ -75,6 +77,41 @@ def test_session_runner_failed_harness_stores_error_message():
     assert result.run.status == "failed"
     assert result.bundle.messages[-1].role == "error"
     assert result.bundle.messages[-1].content == "boom"
+
+
+def test_session_runner_deduplicates_live_usage_and_merges_partial_metadata():
+    runner = _runner(_StreamingHarness())
+
+    result = runner.create_and_run(
+        {"harness_id": "streaming", "prompt": "hello", "stream": True}
+    )
+
+    usage_events = [event for event in result.bundle.events if event.type == "usage"]
+    assert [event.payload for event in usage_events] == [
+        {"input_tokens": 8, "source": "test"},
+        {"output_tokens": 3, "source": "test"},
+    ]
+    expected_usage = {
+        "input_tokens": 8,
+        "output_tokens": 3,
+        "total_tokens": 11,
+        "source": "test",
+    }
+    assert result.run.metadata["usage"] == expected_usage
+    assert result.bundle.messages[-1].metadata["usage"] == expected_usage
+
+
+def test_session_runner_updates_session_defaults_before_terminal_event():
+    store = _TerminalOrderingStore()
+    runner = _runner(_CaptureHarness(), store=store)
+    session = runner.create_session(default_harness_id="echo")
+
+    runner.run_in_session(
+        session.id,
+        {"harness_id": "capture", "prompt": "hello", "stream": True},
+    )
+
+    assert store.harness_at_run_finished == "capture"
 
 
 def test_session_runner_passes_previous_messages_to_chat_harness():
@@ -311,6 +348,67 @@ class _FailingHarness(BaseHarness):
         context: HarnessContext,
     ) -> HarnessResult:
         return HarnessResult(ok=False, text="", error="boom")
+
+
+class _StreamingHarness(BaseHarness):
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="streaming",
+            title="Streaming",
+            kind="test",
+            description="Emit live events",
+            capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
+            supports_streaming=True,
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available("test")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        events = (
+            HarnessEvent(
+                type="message_delta",
+                message="Assistant message delta.",
+                payload={"delta": "answer"},
+            ),
+            HarnessEvent(
+                type="usage",
+                message="Token usage updated.",
+                payload={
+                    "input_tokens": 8,
+                    "source": "test",
+                },
+            ),
+            HarnessEvent(
+                type="usage",
+                message="Token usage updated.",
+                payload={
+                    "output_tokens": 3,
+                    "source": "test",
+                },
+            ),
+        )
+        for event in events:
+            emit_event(request, event)
+        return HarnessResult(ok=True, text="answer", events=events)
+
+
+class _TerminalOrderingStore(InMemoryHarnessSessionStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.harness_at_run_finished: str | None = None
+
+    def append_event(self, event):
+        if event.type == "run_finished":
+            self.harness_at_run_finished = self.get_session(
+                event.session_id
+            ).default_harness_id
+        return super().append_event(event)
 
 
 class _WorkspaceEditHarness(BaseHarness):

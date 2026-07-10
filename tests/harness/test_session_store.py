@@ -229,3 +229,41 @@ def test_filesystem_store_redacts_secrets_on_disk(tmp_path, monkeypatch):
     assert json.loads(
         next(tmp_path.rglob("raw_responses.jsonl")).read_text(encoding="utf-8")
     )
+
+
+def test_filesystem_store_redacts_and_bounds_tool_output_events(tmp_path):
+    store = FilesystemHarnessSessionStore(tmp_path)
+    session = store.create_session(title="tool output")
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="codex-cli",
+        prompt="inspect",
+        model=None,
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.AGENT_CLI,
+        mode="plan",
+        workspace=None,
+    )
+
+    event = store.append_event(
+        HarnessStoredEvent(
+            id=new_id("evt"),
+            session_id=session.id,
+            run_id=run.id,
+            type="tool_call_finished",
+            message="Tool call finished.",
+            payload={
+                "tool_call_id": "tool-1",
+                "result": "FOO_SECRET=plain-secret\n" + ("x" * 20_000),
+            },
+            created_at=utc_now(),
+        )
+    )
+
+    assert "plain-secret" not in str(event.payload)
+    assert "<redacted>" in str(event.payload)
+    assert len(event.payload["result"]) <= 16_000
+    assert event.payload["result"].endswith("… <truncated>")
+    assert "plain-secret" not in next(tmp_path.rglob("events.jsonl")).read_text(
+        encoding="utf-8"
+    )

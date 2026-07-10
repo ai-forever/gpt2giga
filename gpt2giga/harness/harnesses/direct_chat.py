@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Mapping
 
 from gpt2giga.harness import proxy
@@ -18,13 +19,23 @@ from gpt2giga.harness.types import (
     HarnessCapability,
     HarnessContext,
     HarnessEvent,
+    HarnessEventType,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
+    emit_event,
+)
+from gpt2giga.protocols.normalized import NormalizedStreamEvent, NormalizedToolCall
+from gpt2giga.protocols.openai.stream_accumulator import (
+    OpenAIChatCompletionStreamAccumulator,
+    openai_usage_to_normalized_usage,
+    stream_tool_call_to_normalized_tool_call,
 )
 
 
 DEFAULT_MODEL = "GigaChat"
+MESSAGE_DELTA_FLUSH_CHARS = 64
+MESSAGE_DELTA_FLUSH_SECONDS = 0.08
 
 
 class DirectChatHarness(BaseHarness):
@@ -122,6 +133,17 @@ class DirectChatHarness(BaseHarness):
                     ),
                 )
         try:
+            if request.stream:
+                return self._run_stream(
+                    request=request,
+                    context=context,
+                    url=url,
+                    payload=payload,
+                    api_key=api_key,
+                    cli_command=cli_command,
+                    curl_command=curl_command,
+                    events=events,
+                )
             data = proxy.request_json(
                 "POST",
                 url,
@@ -143,6 +165,10 @@ class DirectChatHarness(BaseHarness):
                 events=events,
                 error=str(exc),
             )
+        events = list(events)
+        usage_event = _usage_event(data.get("usage"))
+        if usage_event is not None:
+            _emit_or_collect(request, events, usage_event)
         return HarnessResult(
             ok=True,
             text=proxy.extract_text(data),
@@ -152,8 +178,101 @@ class DirectChatHarness(BaseHarness):
                 "curl_command": curl_command,
                 **attachment_raw_metadata(request),
             },
-            events=events,
+            events=tuple(events),
             command=cli_command,
+        )
+
+    def _run_stream(
+        self,
+        *,
+        request: HarnessRequest,
+        context: HarnessContext,
+        url: str,
+        payload: dict[str, Any],
+        api_key: str | None,
+        cli_command: tuple[str, ...],
+        curl_command: tuple[str, ...],
+        events: tuple[HarnessEvent, ...],
+    ) -> HarnessResult:
+        pending_events: list[HarnessEvent] = []
+        for event in events:
+            _emit_or_collect(request, pending_events, event)
+        accumulator = OpenAIChatCompletionStreamAccumulator()
+        message_deltas = _MessageDeltaCoalescer(request, pending_events)
+        chunk_count = 0
+        last_payload: Mapping[str, Any] = {}
+        try:
+            for stream_payload in proxy.stream_sse_json(
+                "POST",
+                url,
+                payload=payload,
+                api_key=api_key,
+                timeout=context.timeout_seconds,
+                cancel_event=request.cancel_event,
+                idle_callback=message_deltas.flush_if_due,
+            ):
+                chunk_count += 1
+                last_payload = stream_payload
+                for normalized_event in accumulator.observe_payload(stream_payload):
+                    if normalized_event.type == "content_delta":
+                        message_deltas.push(normalized_event)
+                        continue
+                    message_deltas.flush()
+                    event = _normalized_harness_event(normalized_event)
+                    if event is not None:
+                        _emit_or_collect(request, pending_events, event)
+        except proxy.ProxyRequestError as exc:
+            message_deltas.flush()
+            return HarnessResult(
+                ok=False,
+                text="",
+                raw={
+                    "url": url,
+                    "payload": payload,
+                    "curl_command": curl_command,
+                    "stream": True,
+                    "chunk_count": chunk_count,
+                    **attachment_raw_metadata(request),
+                },
+                command=cli_command,
+                events=tuple(pending_events),
+                error=str(exc),
+            )
+
+        message_deltas.flush()
+        response = accumulator.to_normalized_response()
+        for index, raw_tool_call in sorted(accumulator.tool_calls.items()):
+            tool_call = stream_tool_call_to_normalized_tool_call(raw_tool_call)
+            tool_call.raw_extensions["index"] = index
+            _emit_or_collect(
+                request,
+                pending_events,
+                HarnessEvent(
+                    type=HarnessEventType.TOOL_CALL_FINISHED.value,
+                    message=f"Tool call {tool_call.name or tool_call.id or index} assembled.",
+                    payload={
+                        **_tool_call_payload(tool_call),
+                        "status": "requested",
+                        "source": "direct-chat",
+                    },
+                ),
+            )
+        error = response.error.message if response.error is not None else None
+        return HarnessResult(
+            ok=error is None,
+            text="".join(accumulator.content_parts),
+            raw={
+                "url": url,
+                "curl_command": curl_command,
+                "stream": True,
+                "chunk_count": chunk_count,
+                "last_payload": proxy.safe_raw(dict(last_payload)),
+                "response": response.to_json_dict(),
+                **attachment_raw_metadata(request),
+            },
+            events=tuple(pending_events),
+            command=cli_command,
+            error=error,
         )
 
 
@@ -230,3 +349,181 @@ def _content_with_attachments(
 
 def _join_text(*parts: str) -> str:
     return "\n\n".join(part for part in parts if part)
+
+
+def _emit_or_collect(
+    request: HarnessRequest,
+    events: list[HarnessEvent],
+    event: HarnessEvent,
+) -> None:
+    if not emit_event(request, event):
+        events.append(event)
+
+
+class _MessageDeltaCoalescer:
+    """Batch tiny token deltas before hitting the persistent session event store."""
+
+    def __init__(
+        self,
+        request: HarnessRequest,
+        events: list[HarnessEvent],
+    ) -> None:
+        self._request = request
+        self._events = events
+        self._parts: list[str] = []
+        self._character_count = 0
+        self._started_at: float | None = None
+        self._last_sequence: int | None = None
+
+    def push(self, event: NormalizedStreamEvent) -> None:
+        """Add one content delta and flush when the size/time budget is reached."""
+        delta = event.content_delta
+        if not delta:
+            return
+        now = time.monotonic()
+        if (
+            self._parts
+            and self._started_at is not None
+            and now - self._started_at >= MESSAGE_DELTA_FLUSH_SECONDS
+        ):
+            self.flush()
+        if not self._parts:
+            self._started_at = now
+        self._parts.append(delta)
+        self._character_count += len(delta)
+        self._last_sequence = event.sequence
+        if self._character_count >= MESSAGE_DELTA_FLUSH_CHARS:
+            self.flush()
+
+    def flush(self) -> None:
+        """Publish the buffered text as one normalized message event."""
+        if not self._parts:
+            return
+        payload: dict[str, Any] = {
+            "delta": "".join(self._parts),
+            "source": "direct-chat",
+        }
+        if self._last_sequence is not None:
+            payload["sequence"] = self._last_sequence
+        _emit_or_collect(
+            self._request,
+            self._events,
+            HarnessEvent(
+                type=HarnessEventType.MESSAGE_DELTA.value,
+                message="Assistant message delta.",
+                payload=payload,
+            ),
+        )
+        self._parts.clear()
+        self._character_count = 0
+        self._started_at = None
+        self._last_sequence = None
+
+    def flush_if_due(self) -> None:
+        """Publish pending text once its latency budget has elapsed."""
+        if (
+            self._parts
+            and self._started_at is not None
+            and time.monotonic() - self._started_at >= MESSAGE_DELTA_FLUSH_SECONDS
+        ):
+            self.flush()
+
+
+def _normalized_harness_event(event: NormalizedStreamEvent) -> HarnessEvent | None:
+    if event.type == "content_delta" and event.content_delta:
+        return HarnessEvent(
+            type=HarnessEventType.MESSAGE_DELTA.value,
+            message="Assistant message delta.",
+            payload={
+                "delta": event.content_delta,
+                "sequence": event.sequence,
+                "source": "direct-chat",
+            },
+        )
+    if event.type in {"tool_call_start", "tool_call_delta"}:
+        tool_call = event.tool_call
+        if tool_call is None:
+            return None
+        payload = {
+            **_tool_call_payload(tool_call),
+            "source": "direct-chat",
+        }
+        arguments_delta = tool_call.raw_extensions.get("arguments_delta")
+        if arguments_delta is not None:
+            payload["arguments_delta"] = arguments_delta
+        return HarnessEvent(
+            type=(
+                HarnessEventType.TOOL_CALL_STARTED.value
+                if event.type == "tool_call_start"
+                else HarnessEventType.TOOL_CALL_DELTA.value
+            ),
+            message=(
+                f"Tool call {tool_call.name or tool_call.id or 'tool'} started."
+                if event.type == "tool_call_start"
+                else f"Tool call {tool_call.name or tool_call.id or 'tool'} updated."
+            ),
+            payload=payload,
+        )
+    if event.type == "usage" and event.usage is not None:
+        return HarnessEvent(
+            type=HarnessEventType.USAGE.value,
+            message="Token usage updated.",
+            payload=_usage_payload(event.usage),
+        )
+    if event.type == "error" and event.error is not None:
+        return HarnessEvent(
+            type=HarnessEventType.ERROR.value,
+            message=event.error.message or "Direct chat stream failed.",
+            payload={
+                "type": event.error.type,
+                "code": event.error.code,
+                "source": "direct-chat",
+            },
+        )
+    return None
+
+
+def _usage_event(value: Any) -> HarnessEvent | None:
+    usage = openai_usage_to_normalized_usage(value)
+    if usage is None:
+        return None
+    return HarnessEvent(
+        type=HarnessEventType.USAGE.value,
+        message="Token usage updated.",
+        payload=_usage_payload(usage),
+    )
+
+
+def _usage_payload(usage: Any) -> dict[str, Any]:
+    payload = {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "total_tokens": usage.total_tokens,
+        "source": "direct-chat",
+    }
+    raw = dict(usage.raw_extensions)
+    prompt_details = raw.get("prompt_tokens_details")
+    completion_details = raw.get("completion_tokens_details")
+    if isinstance(prompt_details, Mapping):
+        payload["cached_input_tokens"] = prompt_details.get("cached_tokens")
+    if isinstance(completion_details, Mapping):
+        payload["reasoning_output_tokens"] = completion_details.get("reasoning_tokens")
+    for key in ("cached_input_tokens", "reasoning_output_tokens"):
+        if raw.get(key) is not None:
+            payload[key] = raw[key]
+    return {key: item for key, item in payload.items() if item is not None}
+
+
+def _tool_call_payload(tool_call: NormalizedToolCall) -> dict[str, Any]:
+    index = tool_call.raw_extensions.get("index")
+    tool_call_id = tool_call.id or (f"tool_{index}" if index is not None else None)
+    return {
+        key: value
+        for key, value in {
+            "tool_call_id": tool_call_id,
+            "name": tool_call.name,
+            "type": tool_call.type,
+            "arguments": tool_call.arguments,
+        }.items()
+        if value is not None
+    }

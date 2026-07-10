@@ -5,11 +5,18 @@ from __future__ import annotations
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any, Mapping
 
 from gpt2giga.harness.harnesses.agent_cli import (
+    StreamTerminalOutcome,
     build_safe_env,
+    message_delta_event,
     prepare_proxy_for_agent,
     run_command,
+    run_streaming_command,
+    stream_terminal_failure,
+    tool_call_event,
+    usage_event,
     with_events,
     workspace_error,
 )
@@ -25,6 +32,7 @@ from gpt2giga.harness.types import (
     Availability,
     HarnessCapability,
     HarnessContext,
+    HarnessEvent,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -51,6 +59,7 @@ class CodexCliHarness(BaseHarness):
             capabilities=(HarnessCapability.AGENT_CLI,),
             supports_model_selection=True,
             supports_api_mode_selection=True,
+            supports_streaming=True,
             supports_workspace=True,
             supports_attachments=True,
             accepted_attachment_kinds=("image", "text", "workspace_file"),
@@ -80,6 +89,7 @@ class CodexCliHarness(BaseHarness):
         sandbox = MODE_TO_SANDBOX.get(request.mode, MODE_TO_SANDBOX["plan"])
         model = request.model or context.default_model or "GigaChat"
         prompt = prompt_with_attachments(request)
+        stream_args = ("--json",) if request.stream else ()
         return (
             executable,
             "--ask-for-approval",
@@ -88,6 +98,7 @@ class CodexCliHarness(BaseHarness):
             "--sandbox",
             sandbox,
             "--ephemeral",
+            *stream_args,
             "-m",
             model,
             *cli_args_from_attachments(request),
@@ -164,13 +175,24 @@ class CodexCliHarness(BaseHarness):
             Path(codex_home).mkdir(parents=True, exist_ok=True)
             _write_codex_config(Path(codex_home), request, prepared_context)
             env = self.build_env(request, prepared_context, codex_home=codex_home)
-            result = run_command(
-                label="Codex CLI",
-                command=command,
-                env=env,
-                cwd=request.workspace or None,
-                timeout_seconds=context.timeout_seconds,
-            )
+            if request.stream:
+                result = run_streaming_command(
+                    label="Codex CLI",
+                    command=command,
+                    env=env,
+                    cwd=request.workspace or None,
+                    timeout_seconds=context.timeout_seconds,
+                    request=request,
+                    parse_payload=_CodexStreamParser(),
+                )
+            else:
+                result = run_command(
+                    label="Codex CLI",
+                    command=command,
+                    env=env,
+                    cwd=request.workspace or None,
+                    timeout_seconds=context.timeout_seconds,
+                )
             return with_events(
                 result,
                 (*attachment_warning_events(request), *proxy_events),
@@ -200,3 +222,170 @@ def _write_codex_config(
 
 def _toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+class _CodexStreamParser:
+    """Normalize Codex CLI JSONL events without repeating final message text."""
+
+    def __init__(self) -> None:
+        self._item_text: dict[str, str] = {}
+        self.terminal_outcome: StreamTerminalOutcome | None = None
+
+    def __call__(self, payload: Mapping[str, Any]) -> tuple[HarnessEvent, ...]:
+        events: list[HarnessEvent] = []
+        event_type = str(payload.get("type") or "")
+        item = _mapping(payload.get("item"))
+        item_type = str(item.get("type") or "")
+        item_id = str(item.get("id") or payload.get("item_id") or item_type or "item")
+
+        if item_type == "agent_message":
+            message_event = self._message_event(payload, item, item_id)
+            if message_event is not None:
+                events.append(message_event)
+        elif _is_codex_tool_item(item_type):
+            tool_event = _codex_tool_event(event_type, item, item_id)
+            if tool_event is not None:
+                events.append(tool_event)
+
+        normalized_usage = usage_event(payload.get("usage"))
+        if normalized_usage is not None:
+            events.append(normalized_usage)
+
+        if event_type in {"error", "turn.failed", "item.failed"}:
+            error = (
+                payload.get("message")
+                or payload.get("error")
+                or item.get("error")
+                or item.get("message")
+            )
+            failure = stream_terminal_failure(
+                error,
+                fallback={
+                    "error": "Codex CLI reported an error",
+                    "turn.failed": "Codex CLI turn failed",
+                    "item.failed": "Codex CLI item failed",
+                }[event_type],
+            )
+            if self.terminal_outcome is None:
+                self.terminal_outcome = failure
+            events.append(
+                HarnessEvent(
+                    type="stderr_delta",
+                    message="Codex CLI reported an error.",
+                    payload={"delta": failure.error or "Codex CLI failed"},
+                )
+            )
+        return tuple(events)
+
+    def _message_event(
+        self,
+        payload: Mapping[str, Any],
+        item: Mapping[str, Any],
+        item_id: str,
+    ) -> HarnessEvent | None:
+        explicit_delta = payload.get("delta")
+        if isinstance(explicit_delta, str) and explicit_delta:
+            previous = self._item_text.get(item_id, "")
+            self._item_text[item_id] = previous + explicit_delta
+            return message_delta_event(explicit_delta)
+
+        text = item.get("text") or item.get("content")
+        if not isinstance(text, str) or not text:
+            return None
+        previous = self._item_text.get(item_id, "")
+        if text == previous:
+            return None
+        if previous and text.startswith(previous):
+            delta = text[len(previous) :]
+        elif previous:
+            return None
+        else:
+            delta = text
+        self._item_text[item_id] = text
+        return message_delta_event(delta)
+
+
+def _is_codex_tool_item(item_type: str) -> bool:
+    return item_type in {
+        "command_execution",
+        "file_change",
+        "mcp_tool_call",
+        "web_search",
+        "dynamic_tool_call",
+    } or item_type.endswith("_tool_call")
+
+
+def _codex_tool_event(
+    event_type: str,
+    item: Mapping[str, Any],
+    item_id: str,
+) -> HarnessEvent | None:
+    item_type = str(item.get("type") or "tool")
+    name = _codex_tool_name(item_type, item)
+    arguments = _first_present(
+        item,
+        "arguments",
+        "input",
+        "command",
+        "query",
+        "changes",
+    )
+    status = item.get("status")
+    if event_type == "item.started":
+        return tool_call_event(
+            "tool_call_started",
+            tool_call_id=item_id,
+            name=name,
+            arguments=arguments,
+            status=status or "running",
+        )
+    if event_type == "item.updated":
+        arguments_delta = _first_present(item, "arguments_delta", "input_delta")
+        result_delta = _first_present(item, "output_delta", "delta")
+        if arguments_delta is None and result_delta is None and status is None:
+            return None
+        return tool_call_event(
+            "tool_call_delta",
+            tool_call_id=item_id,
+            name=name,
+            arguments=arguments_delta,
+            result=result_delta,
+            status=status,
+        )
+    if event_type in {"item.completed", "item.failed"}:
+        result = _first_present(
+            item,
+            "aggregated_output",
+            "output",
+            "result",
+            "error",
+        )
+        return tool_call_event(
+            "tool_call_finished",
+            tool_call_id=item_id,
+            name=name,
+            arguments=arguments,
+            result=result,
+            status=status or ("failed" if event_type == "item.failed" else "completed"),
+        )
+    return None
+
+
+def _codex_tool_name(item_type: str, item: Mapping[str, Any]) -> str:
+    explicit = item.get("name") or item.get("tool") or item.get("tool_name")
+    if explicit:
+        return str(explicit)
+    if item_type == "command_execution":
+        return "shell"
+    return item_type or "tool"
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _first_present(value: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if value.get(key) is not None:
+            return value[key]
+    return None

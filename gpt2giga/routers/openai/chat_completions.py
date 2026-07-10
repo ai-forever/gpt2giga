@@ -1,6 +1,5 @@
 """OpenAI chat completions endpoint."""
 
-import json
 from collections.abc import AsyncIterator, Mapping
 from copy import deepcopy
 from types import SimpleNamespace
@@ -35,16 +34,19 @@ from gpt2giga.protocol.response import adapt_chat_completion_to_chat_shape
 from gpt2giga.protocols.normalized import run_openai_chat_shadow_normalization
 from gpt2giga.protocols.normalized.models import (
     NormalizedChoice,
-    NormalizedError,
     NormalizedMessage,
     NormalizedResponse,
     NormalizedToolCall,
-    NormalizedUsage,
 )
 from gpt2giga.protocols.openai import (
     normalized_chat_response_to_openai,
     normalized_stream_done_sse,
     normalized_stream_event_to_openai_sse,
+)
+from gpt2giga.protocols.openai.stream_accumulator import (
+    OpenAIChatCompletionStreamAccumulator,
+    openai_usage_to_normalized_usage as _openai_usage_to_normalized_usage,
+    string_or_none as _string_or_none,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.routers.openai.helpers import populate_giga_functions
@@ -402,7 +404,7 @@ async def _observe_chat_completion_stream(
                     exc,
                 )
 
-    observer = _ChatCompletionStreamObserver()
+    observer = OpenAIChatCompletionStreamAccumulator()
     async for chunk in body_iterator:
         try:
             observer.observe_chunk(chunk)
@@ -516,155 +518,6 @@ async def _emit_chat_completion_observability(
             logger.warning("Chat completion observability emission failed: {}", exc)
 
 
-class _ChatCompletionStreamObserver:
-    def __init__(self) -> None:
-        self.has_observed_payload = False
-        self.response_id: str | None = None
-        self.model: str | None = None
-        self.finish_reason: str | None = None
-        self.content_parts: list[str] = []
-        self.reasoning_parts: list[str] = []
-        self.metadata: dict[str, Any] = {}
-        self.usage: NormalizedUsage | None = None
-        self.error: NormalizedError | None = None
-        self.tool_calls: dict[int, dict[str, Any]] = {}
-
-    def observe_chunk(self, chunk: Any) -> None:
-        for payload in _iter_sse_json_payloads(chunk):
-            self.observe_payload(payload)
-
-    def observe_payload(self, payload: Mapping[str, Any]) -> None:
-        self.has_observed_payload = True
-        self.response_id = _string_or_none(payload.get("id")) or self.response_id
-        self.model = _string_or_none(payload.get("model")) or self.model
-
-        metadata = payload.get("metadata")
-        if isinstance(metadata, Mapping):
-            self.metadata.update(dict(metadata))
-
-        usage = _openai_usage_to_normalized_usage(payload.get("usage"))
-        if usage is not None:
-            self.usage = usage
-
-        error = payload.get("error")
-        if isinstance(error, Mapping):
-            self.error = NormalizedError(
-                type=_string_or_none(error.get("type")) or "stream_error",
-                message=_string_or_none(error.get("message")) or "",
-                code=error.get("code"),
-                param=_string_or_none(error.get("param")),
-            )
-
-        for choice in payload.get("choices") or []:
-            if isinstance(choice, Mapping):
-                self._observe_choice(choice)
-
-    def to_normalized_response(self) -> NormalizedResponse:
-        message = NormalizedMessage(
-            role="assistant",
-            content="".join(self.content_parts),
-            tool_calls=[
-                _stream_tool_call_to_normalized_tool_call(tool_call)
-                for _, tool_call in sorted(self.tool_calls.items())
-            ],
-        )
-        if self.reasoning_parts:
-            message.raw_extensions["reasoning_content"] = "".join(self.reasoning_parts)
-        return NormalizedResponse(
-            id=self.response_id,
-            model=self.model,
-            provider="gigachat",
-            choices=[
-                NormalizedChoice(
-                    index=0,
-                    message=message,
-                    finish_reason=self.finish_reason,
-                )
-            ],
-            usage=self.usage,
-            error=self.error,
-            metadata=self.metadata,
-        )
-
-    def _observe_choice(self, choice: Mapping[str, Any]) -> None:
-        finish_reason = _string_or_none(choice.get("finish_reason"))
-        if finish_reason is not None:
-            self.finish_reason = finish_reason
-
-        delta = choice.get("delta")
-        if not isinstance(delta, Mapping):
-            return
-
-        content = delta.get("content")
-        if isinstance(content, str):
-            self.content_parts.append(content)
-
-        reasoning_content = delta.get("reasoning_content")
-        if isinstance(reasoning_content, str):
-            self.reasoning_parts.append(reasoning_content)
-
-        for raw_tool_call in delta.get("tool_calls") or []:
-            if isinstance(raw_tool_call, Mapping):
-                self._observe_tool_call(raw_tool_call)
-
-    def _observe_tool_call(self, raw_tool_call: Mapping[str, Any]) -> None:
-        index = raw_tool_call.get("index", len(self.tool_calls))
-        if not isinstance(index, int):
-            index = len(self.tool_calls)
-        tool_call = self.tool_calls.setdefault(
-            index,
-            {"function": {"arguments": ""}},
-        )
-        if raw_tool_call.get("id") is not None:
-            tool_call["id"] = raw_tool_call.get("id")
-        if raw_tool_call.get("type") is not None:
-            tool_call["type"] = raw_tool_call.get("type")
-        function = raw_tool_call.get("function")
-        if isinstance(function, Mapping):
-            target_function = tool_call.setdefault("function", {"arguments": ""})
-            if function.get("name") is not None:
-                target_function["name"] = function.get("name")
-            arguments = function.get("arguments")
-            if isinstance(arguments, str):
-                target_function["arguments"] = (
-                    target_function.get("arguments", "") + arguments
-                )
-
-
-def _stream_tool_call_to_normalized_tool_call(
-    value: Mapping[str, Any],
-) -> NormalizedToolCall:
-    function = value.get("function")
-    function = function if isinstance(function, Mapping) else {}
-    return NormalizedToolCall(
-        id=_string_or_none(value.get("id")),
-        type=_string_or_none(value.get("type")) or "function",
-        name=_string_or_none(function.get("name")),
-        arguments=function.get("arguments"),
-    )
-
-
-def _iter_sse_json_payloads(chunk: Any) -> list[Mapping[str, Any]]:
-    if isinstance(chunk, bytes):
-        text = chunk.decode("utf-8", errors="replace")
-    else:
-        text = str(chunk)
-    payloads: list[Mapping[str, Any]] = []
-    for line in text.splitlines():
-        if not line.startswith("data:"):
-            continue
-        data = line.removeprefix("data:").strip()
-        if not data or data == "[DONE]":
-            continue
-        try:
-            payload = json.loads(data)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, Mapping):
-            payloads.append(payload)
-    return payloads
-
-
 def _openai_chat_completion_to_normalized_response(
     payload: Mapping[str, Any],
 ) -> NormalizedResponse:
@@ -740,19 +593,3 @@ def _openai_tool_call_to_normalized_tool_call(
         name=_string_or_none(function.get("name")),
         arguments=function.get("arguments"),
     )
-
-
-def _openai_usage_to_normalized_usage(value: Any) -> NormalizedUsage | None:
-    if not isinstance(value, Mapping):
-        return None
-    return NormalizedUsage(
-        input_tokens=value.get("prompt_tokens", value.get("input_tokens")),
-        output_tokens=value.get("completion_tokens", value.get("output_tokens")),
-        total_tokens=value.get("total_tokens"),
-    )
-
-
-def _string_or_none(value: Any) -> str | None:
-    if value is None:
-        return None
-    return str(value)

@@ -624,7 +624,10 @@ It includes:
 - file and image attachments in the composer;
 - `@file` workspace references from the current project;
 - pre-run safety warnings and context budget estimates;
-- user, assistant, and error messages in the selected session;
+- user, assistant, and error messages in the selected session, with safe
+  Markdown rendering for assistant output;
+- live assistant text, tool activity, and actual input/output token usage for
+  headless harnesses that expose structured streaming events;
 - multi-harness arena comparison for running the same prompt against several
   headless harnesses;
 - run, arena, events, raw request, raw response, command, diff, PR,
@@ -643,12 +646,20 @@ Session history survives browser refreshes and UI restarts. New runs are stored
 in the selected session, and `direct-chat` receives previous user and assistant
 messages from that session as multi-turn context.
 
-The stream checkbox starts a background headless run, subscribes to
-`/api/runs/{run_id}/events/stream` with SSE, and appends persisted run events to
-the Events inspector while the run is active. The Cancel button calls
-`/api/runs/{run_id}/cancel`; harnesses that observe the in-memory cancel token
-can stop cooperatively, while older blocking subprocess paths may continue until
-the subprocess returns.
+The stream checkbox starts a background headless run and subscribes to
+`/api/runs/{run_id}/events/stream` with SSE. Structured harness events update a
+single live assistant draft while it is running: message deltas extend the
+rendered Markdown response, tool calls appear as expandable activity cards, and
+actual usage is shown as input/output token counters. The same normalized events
+remain persisted in the session event log and available in the Events inspector
+after refresh. Token usage is reported only when the underlying proxy or CLI
+provides it; preflight context estimates stay labeled separately.
+
+`direct-chat` consumes the OpenAI-compatible SSE response directly. Headless
+Codex CLI, Claude Code, and Gemini CLI runs use each CLI's structured JSONL
+stream mode. The Cancel button calls `/api/runs/{run_id}/cancel`; streaming
+subprocess harnesses terminate their child process, while other harnesses stop
+cooperatively when they observe the in-memory cancel token.
 
 ## Smart Router
 
@@ -915,7 +926,14 @@ Use this when validating the project cockpit manually:
 - [ ] No secret-looking values appear in UI raw JSON.
 - [ ] Old sessions still load.
 - [ ] Archived and pinned sessions still work.
-- [ ] A streamed headless run appends Events inspector rows before completion.
+- [ ] A streamed headless run renders assistant text before completion and
+  appends the same normalized events to the Events inspector.
+- [ ] Streamed Markdown renders headings, lists, links, inline code, and fenced
+  code without executing raw HTML or unsafe link protocols.
+- [ ] Tool calls move from running to completed/failed cards and remain visible
+  after refreshing the session.
+- [ ] Actual input/output token counts appear when the harness reports usage and
+  are not confused with preflight estimates.
 - [ ] Cancel on a streamed headless run writes `cancel_requested`,
   `run_canceled`, and `run_finished` events without exposing secrets.
 - [ ] Native sessions are separate from normalized GPT2Giga chats.
@@ -1111,5 +1129,6 @@ preview or import support for that connector is confirmed.
 
 Attachment support is intentionally conservative. Document and binary transport
 through external CLIs is path/reference based unless local CLI behavior has been
-verified. SSE/WebSocket streaming for live attachment run events remains future
-work; native terminal transport will be local-only when enabled.
+verified. Rich headless output uses persisted SSE events; native terminal output
+continues to use its separate local polling transport. Harnesses or plugins that
+do not emit structured deltas still appear atomically when their run completes.

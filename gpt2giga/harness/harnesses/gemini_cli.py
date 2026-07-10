@@ -6,12 +6,19 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any, Mapping
 
 from gpt2giga.harness.harnesses.agent_cli import (
+    StreamTerminalOutcome,
     build_safe_env,
     executable_availability,
+    message_delta_event,
     prepare_proxy_for_agent,
     run_command,
+    run_streaming_command,
+    stream_terminal_failure,
+    tool_call_event,
+    usage_event,
     with_events,
     workspace_error,
 )
@@ -27,6 +34,7 @@ from gpt2giga.harness.types import (
     Availability,
     HarnessCapability,
     HarnessContext,
+    HarnessEvent,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -52,6 +60,7 @@ class GeminiCliHarness(BaseHarness):
             capabilities=(HarnessCapability.AGENT_CLI,),
             supports_model_selection=True,
             supports_api_mode_selection=True,
+            supports_streaming=True,
             supports_workspace=True,
             supports_attachments=True,
             accepted_attachment_kinds=("text", "workspace_file", "document", "image"),
@@ -80,6 +89,7 @@ class GeminiCliHarness(BaseHarness):
         executable = shutil.which("gemini") or "gemini"
         model = request.model or context.default_model or "GigaChat"
         prompt = prompt_with_attachments(request)
+        output_format = "stream-json" if request.stream else "json"
         command = [
             executable,
             "-m",
@@ -88,7 +98,7 @@ class GeminiCliHarness(BaseHarness):
             "-p",
             prompt,
             "--output-format",
-            "json",
+            output_format,
             "--skip-trust",
         ]
         approval = MODE_TO_APPROVAL.get(request.mode)
@@ -166,13 +176,24 @@ class GeminiCliHarness(BaseHarness):
         with tempfile.TemporaryDirectory(prefix="gpt2giga-gemini-") as temp_dir:
             _write_gemini_settings(Path(temp_dir))
             env = self.build_env(request, prepared_context, home=temp_dir)
-            result = run_command(
-                label="Gemini CLI",
-                command=command,
-                env=env,
-                cwd=request.workspace,
-                timeout_seconds=context.timeout_seconds,
-            )
+            if request.stream:
+                result = run_streaming_command(
+                    label="Gemini CLI",
+                    command=command,
+                    env=env,
+                    cwd=request.workspace,
+                    timeout_seconds=context.timeout_seconds,
+                    request=request,
+                    parse_payload=_GeminiStreamParser(),
+                )
+            else:
+                result = run_command(
+                    label="Gemini CLI",
+                    command=command,
+                    env=env,
+                    cwd=request.workspace,
+                    timeout_seconds=context.timeout_seconds,
+                )
             return with_events(
                 result,
                 (*attachment_warning_events(request), *proxy_events),
@@ -189,3 +210,81 @@ def _write_gemini_settings(home: Path) -> None:
         ),
         encoding="utf-8",
     )
+
+
+class _GeminiStreamParser:
+    """Normalize Gemini CLI stream-json events."""
+
+    def __init__(self) -> None:
+        self.terminal_outcome: StreamTerminalOutcome | None = None
+
+    def __call__(self, payload: Mapping[str, Any]) -> tuple[HarnessEvent, ...]:
+        event_type = str(payload.get("type") or "")
+        events: list[HarnessEvent] = []
+        if event_type == "message" and payload.get("role") in {"assistant", "agent"}:
+            message = message_delta_event(payload.get("content"))
+            if message is not None:
+                events.append(message)
+        elif event_type == "tool_use":
+            events.append(
+                tool_call_event(
+                    "tool_call_started",
+                    tool_call_id=payload.get("tool_id"),
+                    name=payload.get("tool_name"),
+                    arguments=payload.get("parameters"),
+                    status="running",
+                )
+            )
+        elif event_type == "tool_result":
+            error = _mapping(payload.get("error"))
+            result = payload.get("output")
+            if result is None and error:
+                result = error.get("message")
+            events.append(
+                tool_call_event(
+                    "tool_call_finished",
+                    tool_call_id=payload.get("tool_id"),
+                    result=result,
+                    status=payload.get("status"),
+                )
+            )
+        elif event_type == "error" or (
+            event_type == "result" and _gemini_result_failed(payload)
+        ):
+            failure = stream_terminal_failure(
+                payload.get("error") or payload.get("message") or payload.get("status"),
+                fallback="Gemini CLI reported a failed result",
+            )
+            if self.terminal_outcome is None:
+                self.terminal_outcome = failure
+            events.append(
+                HarnessEvent(
+                    type="stderr_delta",
+                    message="Gemini CLI reported an error.",
+                    payload={"delta": failure.error or "Gemini CLI failed"},
+                )
+            )
+
+        usage = usage_event(payload.get("stats") or payload.get("usage"))
+        if usage is not None:
+            events.append(usage)
+        return tuple(events)
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _gemini_result_failed(payload: Mapping[str, Any]) -> bool:
+    status = str(payload.get("status") or "").strip().lower()
+    return status in {"error", "failed", "failure"} or _has_error_value(
+        payload.get("error")
+    )
+
+
+def _has_error_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (Mapping, list, tuple, set)):
+        return bool(value)
+    return value is not None and value is not False

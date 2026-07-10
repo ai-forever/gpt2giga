@@ -10,6 +10,7 @@ from gpt2giga.harness.types import (
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
+    emit_event,
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "HarnessResult",
     "HarnessSpec",
     "create_default_registry",
+    "emit_event",
 ]

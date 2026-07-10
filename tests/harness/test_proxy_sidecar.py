@@ -1,5 +1,99 @@
+import threading
+import time
+
 from gpt2giga.harness import proxy
 from gpt2giga.harness.types import GigaChatApiMode, HarnessContext
+
+
+def test_stream_sse_json_decodes_events_and_stops_at_done(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def __iter__(self):
+            return iter(
+                (
+                    b": keepalive\n",
+                    b'data: {"chunk": 1}\n',
+                    b"\n",
+                    b'data: {"chunk": 2}\n',
+                    b"\n",
+                    b"data: [DONE]\n",
+                    b"\n",
+                )
+            )
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(proxy, "urlopen", fake_urlopen)
+
+    events = list(
+        proxy.stream_sse_json(
+            "POST",
+            "http://127.0.0.1:8090/v2/chat/completions",
+            payload={"stream": True},
+            api_key="proxy-key",
+            timeout=12,
+        )
+    )
+
+    assert events == [{"chunk": 1}, {"chunk": 2}]
+    assert captured["timeout"] == 12
+    assert captured["request"].get_header("Accept") == "text/event-stream"
+    assert captured["request"].get_header("Authorization") == "Bearer proxy-key"
+    assert captured["request"].data == b'{"stream": true}'
+
+
+def test_stream_sse_json_cancellation_interrupts_blocked_read(monkeypatch):
+    closed = threading.Event()
+
+    class BlockingResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            self.close()
+            return False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            closed.wait(5)
+            raise StopIteration
+
+        def close(self):
+            closed.set()
+
+    monkeypatch.setattr(proxy, "urlopen", lambda request, timeout: BlockingResponse())
+    cancel_event = threading.Event()
+    timer = threading.Timer(0.1, cancel_event.set)
+    started_at = time.monotonic()
+    timer.start()
+    try:
+        events = list(
+            proxy.stream_sse_json(
+                "POST",
+                "http://127.0.0.1:8090/v2/chat/completions",
+                payload={"stream": True},
+                timeout=5,
+                cancel_event=cancel_event,
+            )
+        )
+    finally:
+        timer.cancel()
+
+    assert events == []
+    assert time.monotonic() - started_at < 0.75
+    assert closed.wait(0.2)
 
 
 def test_sidecar_preflight_requires_gigachat_credentials(monkeypatch):

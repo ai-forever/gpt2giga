@@ -88,6 +88,220 @@ def test_ui_static_includes_plugin_config_schema_renderer():
     assert "harness-config-" in INDEX_HTML
 
 
+def test_ui_static_includes_safe_dom_markdown_renderer():
+    for fragment in (
+        "function renderMarkdownInto",
+        "function appendMarkdownBlocks",
+        "function appendInlineMarkdown",
+        "function isSafeMarkdownHref",
+        "document.createElement(`h${heading[1].length}`)",
+        'document.createElement("blockquote")',
+        'document.createElement(isOrdered ? "ol" : "ul")',
+        'document.createElement("pre")',
+        'document.createElement("code")',
+        'document.createElement("strong")',
+        'document.createElement("em")',
+        'document.createElement("a")',
+        "document.createTextNode(buffer)",
+        '["http:", "https:", "mailto:"]',
+        "resolved.origin === window.location.origin",
+        'link.setAttribute("rel", "noopener noreferrer")',
+    ):
+        assert fragment in INDEX_HTML
+
+    markdown_source = INDEX_HTML[
+        INDEX_HTML.index("function isSafeMarkdownHref") : INDEX_HTML.index(
+            "function eventToolPayload"
+        )
+    ]
+    assert "innerHTML" not in markdown_source
+    assert "DOMParser" not in markdown_source
+    assert "insertAdjacentHTML" not in markdown_source
+    assert '"javascript:"' not in markdown_source
+    assert "<img" not in markdown_source
+    assert "onerror" not in markdown_source
+    assert "cdn.jsdelivr" not in INDEX_HTML
+    assert "unpkg.com" not in INDEX_HTML
+
+
+def test_ui_static_includes_live_execution_renderer():
+    for fragment in (
+        "liveRuns: new Map()",
+        "function consumeLiveEvent",
+        "function renderLiveDraft",
+        "function persistedMessageForRun",
+        "function toolsFromEvents",
+        "function renderRunSummary",
+        "function mergeUsage",
+        "usage = mergeUsage(usage, event.payload || {})",
+        "draft.usage = mergeUsage(draft.usage, payload)",
+        'event.type === "message_delta"',
+        'event.type === "stdout_delta"',
+        'event.type === "stderr_delta"',
+        '"tool_call_started", "tool_call_delta", "tool_call_finished"',
+        'event.type === "usage"',
+        "state.liveRuns.delete(runId)",
+        "isChatNearBottom()",
+        'class="message-list" aria-live="polite"',
+        'id="run-panel" class="run-summary tab-panel active"',
+        ".execution-rail-label",
+        ".tool-call-card",
+        ".live-cursor",
+        ".token-chip",
+        'tokenChip("Input", normalized.input_tokens)',
+        'tokenChip("Output", normalized.output_tokens)',
+        'tokenChip("Total", normalized.total_tokens)',
+        'payload.error ? "failed" : "completed"',
+        '"requested", "completed", "succeeded", "running"',
+        ".code-block-header",
+        ".code-block-copy",
+        ".run-summary-grid",
+        ".markdown-body",
+    ):
+        assert fragment in INDEX_HTML
+
+
+def test_ui_static_resumes_active_stream_after_session_reload():
+    load_session_source = INDEX_HTML[
+        INDEX_HTML.index("async function loadSession") : INDEX_HTML.index(
+            "async function loadAttachments"
+        )
+    ]
+    resume_source = INDEX_HTML[
+        INDEX_HTML.index("function activeHeadlessRunFromBundle") : INDEX_HTML.index(
+            "function finiteToken"
+        )
+    ]
+    stream_source = INDEX_HTML[
+        INDEX_HTML.index("function openHeadlessEventStream") : INDEX_HTML.index(
+            "function appendStreamEvent"
+        )
+    ]
+
+    assert "resumeActiveHeadlessRun();" in load_session_source
+    for fragment in (
+        '["queued", "running"].includes(run.status)',
+        'run.invocation_mode !== "native"',
+        "state.activeHeadlessRun = run",
+        "ensureLiveRun(run.id, run)",
+        "for (const event of eventsForRun(run.id)) consumeLiveEvent(event)",
+        "setHeadlessRunning(true)",
+        "renderLiveDraft(run.id)",
+        "openHeadlessEventStream(run.id)",
+    ):
+        assert fragment in resume_source
+    for fragment in (
+        "headlessEventSourceRunId",
+        "latestEventIdForRun(runId)",
+        "?after_id=",
+        "if (!state.activeHeadlessRun || state.activeHeadlessRun.id !== runId) return;",
+        "finishHeadlessStream(runId)",
+    ):
+        assert fragment in stream_source
+    assert (
+        "if (!runId || !state.activeHeadlessRun || "
+        "state.activeHeadlessRun.id !== runId) return;"
+    ) in INDEX_HTML
+
+
+def test_ui_static_handles_terminal_stream_edge_cases():
+    load_session_source = INDEX_HTML[
+        INDEX_HTML.index("async function loadSession") : INDEX_HTML.index(
+            "async function loadAttachments"
+        )
+    ]
+    message_source = INDEX_HTML[
+        INDEX_HTML.index("function buildMessageNode") : INDEX_HTML.index(
+            "function ensureLiveRun"
+        )
+    ]
+    cancel_source = INDEX_HTML[
+        INDEX_HTML.index("async function cancelHeadlessRun") : INDEX_HTML.index(
+            "async function startNativeProcess"
+        )
+    ]
+    partial_source = INDEX_HTML[
+        INDEX_HTML.index("function restoreTerminalPartialDrafts") : INDEX_HTML.index(
+            "function finiteToken"
+        )
+    ]
+
+    assert "restoreTerminalPartialDrafts();" in load_session_source
+    assert (
+        'const liveNonterminal = options.live && !["succeeded", "failed", '
+        '"canceled"].includes(options.liveStatus);'
+    ) in message_source
+    assert "} else if (liveNonterminal) {" in message_source
+    assert 'waiting.textContent = "Waiting for model output…";' in message_source
+    assert 'type: "cancel_requested"' not in cancel_source
+    for fragment in (
+        '["failed", "canceled"].includes(run.status)',
+        'event.type === "message_delta" && liveDelta(event)',
+        "ensureLiveRun(run.id, run)",
+        "for (const event of events) consumeLiveEvent(event)",
+        "draft.status = run.status",
+    ):
+        assert fragment in partial_source
+    assert "function preserveTerminalPartialDraft" in INDEX_HTML
+    assert "renderedPartialDrafts" in INDEX_HTML
+
+
+def test_ui_static_keeps_advanced_panel_above_chat_and_closes_it_for_runs():
+    run_source = INDEX_HTML[
+        INDEX_HTML.index("async function runHarness") : INDEX_HTML.index(
+            "async function runArena"
+        )
+    ]
+    arena_source = INDEX_HTML[
+        INDEX_HTML.index("async function runArena") : INDEX_HTML.index(
+            "async function startHeadlessStream"
+        )
+    ]
+    config_css = INDEX_HTML[
+        INDEX_HTML.index(".config-section {") : INDEX_HTML.index(".workspace-welcome {")
+    ]
+
+    assert "function setAdvancedSettings(open)" in INDEX_HTML
+    assert "setAdvancedSettings(false);" in run_source
+    assert "setAdvancedSettings(false);" in arena_source
+    assert "position: relative;" in config_css
+    assert "z-index: 30;" in config_css
+
+
+def test_ui_static_preserves_selected_defaults_while_stream_starts():
+    start_source = INDEX_HTML[
+        INDEX_HTML.index("async function startHeadlessStream") : INDEX_HTML.index(
+            "function openHeadlessEventStream"
+        )
+    ]
+
+    assert "function applyRunDefaults(payload)" in INDEX_HTML
+    assert "await loadSession(state.currentSessionId);" in start_source
+    assert "applyRunDefaults(payload);" in start_source
+    assert start_source.index(
+        "await loadSession(state.currentSessionId);"
+    ) < start_source.index("applyRunDefaults(payload);")
+
+
+def test_ui_static_command_previews_describe_streaming_honestly():
+    command_source = INDEX_HTML[
+        INDEX_HTML.index("function commandPreview") : INDEX_HTML.index(
+            "function curlPreview"
+        )
+    ]
+    curl_source = INDEX_HTML[
+        INDEX_HTML.index("function curlPreview") : INDEX_HTML.index(
+            "async function copyText"
+        )
+    ]
+
+    assert "giga harness run has no --stream flag" in command_source
+    assert 'args.push("--stream")' not in command_source
+    assert 'payload.stream ? "curl -sS -N" : "curl -sS"' in curl_source
+    assert 'shellQuote("Accept: text/event-stream")' in curl_source
+    assert "stream: Boolean(payload.stream)" in curl_source
+
+
 def test_ui_models_rejects_invalid_api_mode_non_fatally():
     app = create_app(
         HarnessConfig(default_model="ConfiguredModel"),

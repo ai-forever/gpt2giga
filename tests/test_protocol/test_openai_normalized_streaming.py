@@ -7,6 +7,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedUsage,
 )
 from gpt2giga.protocols.openai import (
+    OpenAIChatCompletionStreamAccumulator,
     normalized_stream_done_sse,
     normalized_stream_event_to_openai_chunk,
     normalized_stream_event_to_openai_sse,
@@ -105,3 +106,31 @@ def test_normalized_stream_event_prefers_legacy_openai_chunk_extension():
     )
 
     assert chunk is legacy_chunk
+
+
+def test_chat_completion_stream_accumulator_rebuilds_content_tools_and_usage():
+    accumulator = OpenAIChatCompletionStreamAccumulator()
+
+    events = accumulator.observe_chunk(
+        b'data: {"id":"req-1","model":"GigaChat","choices":'
+        b'[{"index":0,"delta":{"content":"Hi","tool_calls":'
+        b'[{"index":0,"id":"call-1","type":"function","function":'
+        b'{"name":"lookup","arguments":"{\\"q\\":"}}]}}]}\n\n'
+        b'data: {"choices":[{"index":0,"delta":{"tool_calls":'
+        b'[{"index":0,"function":{"arguments":"\\"ping\\"}"}}]},'
+        b'"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,'
+        b'"completion_tokens":2,"total_tokens":3}}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    response = accumulator.to_normalized_response()
+
+    assert [event.type for event in events] == [
+        "content_delta",
+        "tool_call_start",
+        "tool_call_delta",
+        "message_end",
+        "usage",
+    ]
+    assert response.choices[0].message.content == "Hi"
+    assert response.choices[0].message.tool_calls[0].arguments == '{"q":"ping"}'
+    assert response.usage.total_tokens == 3

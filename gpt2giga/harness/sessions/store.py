@@ -19,7 +19,10 @@ from gpt2giga.harness.sessions.models import (
     native_link_from_dict,
     native_link_to_dict,
 )
-from gpt2giga.harness.sessions.redaction import redact_for_storage
+from gpt2giga.harness.sessions.redaction import (
+    redact_event_payload,
+    redact_for_storage,
+)
 from gpt2giga.harness.types import GigaChatApiMode, HarnessCapability
 
 
@@ -333,7 +336,7 @@ class InMemoryHarnessSessionStore:
         stored = replace(
             event,
             message=str(redact_for_storage(event.message)),
-            payload=_redacted_mapping(event.payload),
+            payload=redact_event_payload(event.payload),
         )
         self._events.setdefault(event.session_id, []).append(stored)
         return stored

@@ -32,7 +32,10 @@ from gpt2giga.harness.sessions.models import (
     session_from_dict,
     session_to_dict,
 )
-from gpt2giga.harness.sessions.redaction import redact_for_storage
+from gpt2giga.harness.sessions.redaction import (
+    redact_event_payload,
+    redact_for_storage,
+)
 from gpt2giga.harness.sessions.store import (
     RunNotFoundError,
     SessionNotFoundError,
@@ -246,7 +249,7 @@ class FilesystemHarnessSessionStore:
         stored = replace(
             event,
             message=str(redact_for_storage(event.message)),
-            payload=_redacted_mapping(event.payload),
+            payload=redact_event_payload(event.payload),
         )
         self._append_jsonl(
             self._session_dir(event.session_id) / EVENTS_FILE,
