@@ -11,6 +11,9 @@ from typing import Any, Mapping
 import yaml
 
 from gpt2giga.harness.project import HarnessProject
+from gpt2giga.harness.runtime.worker import DurableJobDispatcher
+from gpt2giga.harness.sessions.locking import exclusive_file_lock
+from gpt2giga.harness.sessions.models import HarnessRun
 from gpt2giga.harness.sessions.redaction import redact_for_storage
 from gpt2giga.harness.sessions.store import new_id, utc_now
 from gpt2giga.harness.session_runner import HarnessSessionRunner
@@ -141,10 +144,41 @@ class FilesystemHarnessEvalStore:
         """Persist one eval run."""
         directory = self._project_runs_dir(project)
         directory.mkdir(parents=True, exist_ok=True)
-        _write_json_atomic(
-            directory / f"{eval_run.id}.json", eval_run_to_dict(eval_run)
-        )
+        path = directory / f"{eval_run.id}.json"
+        with exclusive_file_lock(path):
+            _write_json_atomic(path, eval_run_to_dict(eval_run))
         return eval_run
+
+    def upsert_result(
+        self, eval_run_id: str, result: EvalCaseRunResult
+    ) -> HarnessEvalRun:
+        """Process-safely replace one case/harness result and recompute summary."""
+        path = self._find_run_path(eval_run_id)
+        with exclusive_file_lock(path):
+            eval_run = eval_run_from_dict(_read_json(path))
+            results = [
+                item
+                for item in eval_run.results
+                if (item.case_id, item.harness_id)
+                != (result.case_id, result.harness_id)
+            ]
+            results.append(result)
+            order = {
+                (item.case_id, item.harness_id): index
+                for index, item in enumerate(eval_run.results)
+            }
+            results.sort(
+                key=lambda item: order.get((item.case_id, item.harness_id), len(order))
+            )
+            updated = replace(
+                eval_run,
+                status=_eval_run_status(results, expected_count=len(results)),
+                updated_at=utc_now(),
+                results=tuple(results),
+                summary=_eval_summary(results),
+            )
+            _write_json_atomic(path, eval_run_to_dict(updated))
+        return updated
 
     def get(self, project: HarnessProject, eval_run_id: str) -> HarnessEvalRun:
         """Return one eval run for a project."""
@@ -183,6 +217,14 @@ class FilesystemHarnessEvalStore:
 
     def _project_runs_dir(self, project: HarnessProject) -> Path:
         return Path(project.state_dir).expanduser() / EVAL_RUNS_DIR
+
+    def _find_run_path(self, eval_run_id: str) -> Path:
+        paths = sorted(
+            self.data_dir.glob(f"projects/*/{EVAL_RUNS_DIR}/{eval_run_id}.json")
+        )
+        if not paths:
+            raise EvalRunNotFoundError(eval_run_id)
+        return paths[0]
 
 
 def discover_eval_specs(
@@ -301,6 +343,151 @@ def run_eval(
         summary=_eval_summary(results),
     )
     return eval_store.save(project, eval_run)
+
+
+def queue_eval(
+    *,
+    runner: HarnessSessionRunner,
+    dispatcher: DurableJobDispatcher,
+    eval_store: FilesystemHarnessEvalStore,
+    project: HarnessProject,
+    spec: HarnessEvalSpec,
+    harness_ids: tuple[str, ...] = (),
+    model: str | None = None,
+    api_mode: GigaChatApiMode | str | None = None,
+    mode: str | None = None,
+    workspace_policy: str | None = None,
+    dry_run: bool = False,
+) -> HarnessEvalRun:
+    """Queue every eval case/harness pair as a durable job."""
+    selected_harnesses = _selected_harnesses(
+        harness_ids or spec.harnesses or DEFAULT_EVAL_HARNESSES
+    )
+    effective_model = model or spec.model
+    effective_api_mode = parse_api_mode(api_mode or spec.api_mode)
+    effective_mode = mode or spec.mode
+    effective_workspace_policy = workspace_policy or spec.workspace_policy
+    session = runner.create_session(
+        title=f"Eval: {spec.name}",
+        workspace=project.root,
+        default_harness_id=selected_harnesses[0],
+        default_model=effective_model,
+        default_api_mode=effective_api_mode,
+        default_mode=effective_mode,
+    )
+    now = utc_now()
+    eval_run = HarnessEvalRun(
+        id=new_id("eval"),
+        spec_name=spec.name,
+        spec_path=spec.path,
+        project_id=project.id,
+        project_root=project.root,
+        project_name=project.name,
+        session_id=session.id,
+        status="running",
+        model=effective_model,
+        api_mode=effective_api_mode,
+        mode=effective_mode,
+        workspace_policy=effective_workspace_policy,
+        harness_ids=selected_harnesses,
+        created_at=now,
+        updated_at=now,
+        metadata={"dry_run": dry_run, "durable": True},
+    )
+    eval_store.save(project, eval_run)
+    override_harnesses = bool(harness_ids)
+    queued_results: list[EvalCaseRunResult] = []
+    for case in spec.cases:
+        for harness_id in _case_harnesses(case, selected_harnesses, override_harnesses):
+            payload = {
+                "harness_id": harness_id,
+                "prompt": case.prompt,
+                "model": effective_model,
+                "api_mode": effective_api_mode.value,
+                "mode": effective_mode,
+                "workspace": project.root,
+                "workspace_policy": effective_workspace_policy,
+                "dry_run": dry_run,
+                "extra": {
+                    "isolated_history": True,
+                    "eval_run_id": eval_run.id,
+                    "eval_case_id": case.id,
+                    "eval_spec": eval_run.spec_name,
+                    "eval_checks": [
+                        {
+                            "type": check.type,
+                            "value": check.value,
+                            "name": check.name,
+                            "case_sensitive": check.case_sensitive,
+                        }
+                        for check in case.checks
+                    ],
+                },
+            }
+            submission = dispatcher.submit(
+                session.id,
+                payload,
+                idempotency_key=f"eval:{eval_run.id}:{case.id}:{harness_id}",
+                origin="manual",
+            )
+            queued_results.append(
+                EvalCaseRunResult(
+                    case_id=case.id,
+                    harness_id=harness_id,
+                    status="queued",
+                    ok=False,
+                    score=0.0,
+                    session_id=session.id,
+                    run_id=submission.queued.run.id,
+                )
+            )
+    eval_run = replace(
+        eval_run,
+        results=tuple(queued_results),
+        summary=_eval_summary(queued_results),
+        updated_at=utc_now(),
+    )
+    return eval_store.save(project, eval_run)
+
+
+def sync_durable_eval_case(
+    data_dir: str,
+    payload: Mapping[str, Any],
+    run: HarnessRun,
+    result_text: str,
+) -> None:
+    """Project one finished durable run into its eval scorecard."""
+    extra = payload.get("extra")
+    if not isinstance(extra, Mapping) or not extra.get("eval_run_id"):
+        return
+    checks = _parse_checks(extra.get("eval_checks"))
+    check_results = (
+        evaluate_checks(checks, result_text) if run.status == "succeeded" else ()
+    )
+    passed = run.status == "succeeded" and all(item.passed for item in check_results)
+    score = (
+        sum(1 for item in check_results if item.passed) / len(check_results)
+        if check_results
+        else (1.0 if passed else 0.0)
+    )
+    status = (
+        "passed" if passed else ("failed" if run.status == "succeeded" else "error")
+    )
+    FilesystemHarnessEvalStore(data_dir).upsert_result(
+        str(extra["eval_run_id"]),
+        EvalCaseRunResult(
+            case_id=str(extra.get("eval_case_id") or "case"),
+            harness_id=run.harness_id,
+            status=status,
+            ok=passed,
+            score=score,
+            checks=check_results,
+            session_id=run.session_id,
+            run_id=run.id,
+            output_text=_redacted_text(result_text),
+            error=(None if passed else run.error or "One or more checks failed."),
+        ),
+    )
 
 
 def eval_spec_from_mapping(
@@ -736,6 +923,8 @@ def _eval_run_status(
     expected_count: int,
 ) -> str:
     if len(results) < expected_count:
+        return "running"
+    if any(result.status in {"queued", "running", "retry_wait"} for result in results):
         return "running"
     if results and all(result.status == "passed" for result in results):
         return "passed"

@@ -81,6 +81,7 @@ from gpt2giga.harness.provenance import (
 )
 from gpt2giga.harness.registry import UnknownHarnessError, create_default_registry
 from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga.harness.runtime.worker import DurableJobWorker, worker_status
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
@@ -231,6 +232,27 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_export = runtime_subparsers.add_parser("export")
     runtime_export.add_argument("--output", default=None)
     runtime_export.set_defaults(handler=_handle_runtime_export)
+
+    worker = subparsers.add_parser("worker", parents=[common])
+    worker_subparsers = worker.add_subparsers(dest="worker_command")
+
+    worker_start = worker_subparsers.add_parser("start", parents=[common])
+    worker_start.add_argument("--once", action="store_true")
+    worker_start.add_argument("--poll-seconds", type=float, default=0.25)
+    worker_start.add_argument("--lease-seconds", type=float, default=15.0)
+    worker_start.add_argument("--heartbeat-seconds", type=float, default=2.0)
+    worker_start.set_defaults(handler=_handle_worker_start)
+
+    worker_status_parser = worker_subparsers.add_parser("status")
+    worker_status_parser.add_argument("--json", action="store_true")
+    worker_status_parser.set_defaults(handler=_handle_worker_status)
+
+    worker_idle = worker_subparsers.add_parser("stop-on-idle", parents=[common])
+    worker_idle.add_argument("--idle-seconds", type=float, default=5.0)
+    worker_idle.add_argument("--poll-seconds", type=float, default=0.25)
+    worker_idle.add_argument("--lease-seconds", type=float, default=15.0)
+    worker_idle.add_argument("--heartbeat-seconds", type=float, default=2.0)
+    worker_idle.set_defaults(handler=_handle_worker_stop_on_idle)
 
     native = subparsers.add_parser("native")
     native_subparsers = native.add_subparsers(dest="native_command")
@@ -758,6 +780,56 @@ def _handle_runtime_export(args: argparse.Namespace, config: HarnessConfig) -> i
     )
     temp.replace(output)
     print(f"Exported runtime coordination state to {output}")
+    return 0
+
+
+def _handle_worker_start(args: argparse.Namespace, config: HarnessConfig) -> int:
+    worker = DurableJobWorker(
+        config,
+        lease_seconds=args.lease_seconds,
+        heartbeat_seconds=args.heartbeat_seconds,
+    )
+    if args.once:
+        claimed = worker.run_once()
+        worker.runtime_store.stop_worker(worker.worker_id)
+        print("processed" if claimed else "idle")
+        return 0
+    print(f"Starting durable Harness worker {worker.worker_id}")
+    print("Proxy auto-start is disabled; configure a running proxy/API key if needed.")
+    try:
+        worker.run_forever(poll_seconds=args.poll_seconds)
+    except KeyboardInterrupt:
+        return 130
+    return 0
+
+
+def _handle_worker_status(args: argparse.Namespace, config: HarnessConfig) -> int:
+    payload = worker_status(RuntimeCoordinationStore(config.data_dir))
+    if args.json:
+        _print_json(payload)
+    elif not payload["workers"]:
+        print("No durable Harness workers registered.")
+    else:
+        print(f"Online workers: {payload['online']}")
+        for worker in payload["workers"]:
+            print(
+                f"{worker['id']}  {worker['status']}  "
+                f"pid={worker['process_id']}  heartbeat={worker['heartbeat_at']}"
+            )
+    return 0
+
+
+def _handle_worker_stop_on_idle(args: argparse.Namespace, config: HarnessConfig) -> int:
+    worker = DurableJobWorker(
+        config,
+        lease_seconds=args.lease_seconds,
+        heartbeat_seconds=args.heartbeat_seconds,
+    )
+    worker.run_forever(
+        poll_seconds=args.poll_seconds,
+        stop_on_idle_seconds=max(args.idle_seconds, 0.0),
+    )
+    print(f"Worker {worker.worker_id} stopped after idle timeout.")
     return 0
 
 

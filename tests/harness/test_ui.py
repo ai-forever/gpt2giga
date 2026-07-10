@@ -50,8 +50,8 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.status_code == 200
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
-    assert '<link rel="stylesheet" href="/assets/app.css?v=22">' in index_response.text
-    assert '<script src="/assets/app.js?v=22"></script>' in index_response.text
+    assert '<link rel="stylesheet" href="/assets/app.css?v=24">' in index_response.text
+    assert '<script src="/assets/app.js?v=24"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -313,6 +313,7 @@ def test_ui_static_keeps_advanced_panel_above_chat_and_closes_it_for_runs():
 
     assert "function setAdvancedSettings(open)" in UI_SOURCE
     assert "setAdvancedSettings(false);" in run_source
+    assert "await startHeadlessStream(payload);" in run_source
     assert "setAdvancedSettings(false);" in arena_source
     assert "position: relative;" in config_css
     assert "z-index: 30;" in config_css

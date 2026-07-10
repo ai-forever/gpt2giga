@@ -141,6 +141,7 @@ class HarnessRequest:
     native_session_id: str | None = None
     cancel_event: Any | None = None
     event_sink: Callable[["HarnessEvent"], None] | None = None
+    process_sink: Callable[[Mapping[str, Any]], None] | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
 
 

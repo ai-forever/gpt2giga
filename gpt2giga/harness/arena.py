@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from gpt2giga.harness.sessions.redaction import redact_for_storage
+from gpt2giga.harness.sessions.locking import exclusive_file_lock
 from gpt2giga.harness.sessions.store import new_id, title_from_prompt, utc_now
 from gpt2giga.harness.session_runner import HarnessSessionRunner
+from gpt2giga.harness.runtime.worker import DurableJobDispatcher
 from gpt2giga.harness.sessions.models import HarnessRun
 from gpt2giga.harness.sessions.store import SessionNotFoundError
 from gpt2giga.harness.types import GigaChatApiMode, parse_api_mode
@@ -115,8 +117,31 @@ class FilesystemHarnessArenaStore:
     def save(self, arena: HarnessArenaRun) -> HarnessArenaRun:
         """Persist one arena record."""
         self.arenas_dir.mkdir(parents=True, exist_ok=True)
-        _write_json_atomic(self._path(arena.id), arena_to_dict(arena))
+        path = self._path(arena.id)
+        with exclusive_file_lock(path):
+            _write_json_atomic(path, arena_to_dict(arena))
         return arena
+
+    def upsert_child(
+        self, arena_id: str, child: HarnessArenaChildRun
+    ) -> HarnessArenaRun:
+        """Process-safely insert or replace one arena child by index."""
+        path = self._path(arena_id)
+        with exclusive_file_lock(path):
+            arena = arena_from_dict(json.loads(path.read_text(encoding="utf-8")))
+            children = [item for item in arena.child_runs if item.index != child.index]
+            children.append(child)
+            children.sort(key=lambda item: item.index)
+            updated = replace(
+                arena,
+                child_runs=tuple(children),
+                status=_arena_status(
+                    tuple(children), expected_count=len(arena.harness_ids)
+                ),
+                updated_at=utc_now(),
+            )
+            _write_json_atomic(path, arena_to_dict(updated))
+        return updated
 
     def append_child(
         self,
@@ -170,6 +195,77 @@ def run_arena(
         )
         arena = arena_store.append_child(arena, child)
     return arena
+
+
+def queue_arena(
+    *,
+    runner: HarnessSessionRunner,
+    dispatcher: DurableJobDispatcher,
+    arena_store: FilesystemHarnessArenaStore,
+    payload: Mapping[str, Any],
+    session_id: str | None = None,
+) -> HarnessArenaRun:
+    """Queue arena children as independent durable jobs."""
+    request = arena_request_from_payload(payload)
+    session = (
+        runner.store.get_session(session_id)
+        if session_id is not None
+        else runner.create_session(
+            title=title_from_prompt(request.prompt),
+            workspace=request.workspace,
+            default_harness_id=request.harness_ids[0],
+            default_model=request.model,
+            default_api_mode=request.api_mode,
+            default_mode=request.mode,
+        )
+    )
+    arena = arena_store.create(request, session_id=session.id)
+    for index, harness_id in enumerate(request.harness_ids):
+        child_payload = _arena_child_payload(
+            arena=arena,
+            request=request,
+            harness_id=harness_id,
+            index=index,
+        )
+        submission = dispatcher.submit(
+            session.id,
+            child_payload,
+            idempotency_key=f"arena:{arena.id}:{index}",
+            origin="manual",
+        )
+        arena = arena_store.upsert_child(
+            arena.id,
+            HarnessArenaChildRun(
+                harness_id=harness_id,
+                index=index,
+                session_id=session.id,
+                run_id=submission.queued.run.id,
+                status="queued",
+            ),
+        )
+    return arena
+
+
+def sync_durable_arena_child(
+    data_dir: str,
+    payload: Mapping[str, Any],
+    run: HarnessRun,
+    result_text: str,
+) -> None:
+    """Project one finished durable run into its arena parent record."""
+    extra = payload.get("extra")
+    arena_meta = extra.get("arena") if isinstance(extra, Mapping) else None
+    if not isinstance(arena_meta, Mapping) or not arena_meta.get("arena_id"):
+        return
+    FilesystemHarnessArenaStore(data_dir).upsert_child(
+        str(arena_meta["arena_id"]),
+        _child_from_run(
+            run.harness_id,
+            int(arena_meta.get("child_index") or 0),
+            run,
+            result_text,
+        ),
+    )
 
 
 def arena_request_from_payload(payload: Mapping[str, Any]) -> HarnessArenaRequest:
@@ -273,7 +369,36 @@ def _run_arena_child(
     harness_id: str,
     index: int,
 ) -> HarnessArenaChildRun:
-    child_payload = {
+    child_payload = _arena_child_payload(
+        arena=arena,
+        request=request,
+        harness_id=harness_id,
+        index=index,
+    )
+    try:
+        result = runner.run_in_session(session_id, child_payload)
+    except SessionNotFoundError:
+        raise
+    except Exception as exc:
+        return HarnessArenaChildRun(
+            harness_id=harness_id,
+            index=index,
+            session_id=session_id,
+            run_id=None,
+            status="failed",
+            error=str(redact_for_storage(str(exc))),
+        )
+    return _child_from_run(harness_id, index, result.run, result.result.text)
+
+
+def _arena_child_payload(
+    *,
+    arena: HarnessArenaRun,
+    request: HarnessArenaRequest,
+    harness_id: str,
+    index: int,
+) -> dict[str, Any]:
+    return {
         "harness_id": harness_id,
         "prompt": request.prompt,
         "model": request.model,
@@ -293,20 +418,6 @@ def _run_arena_child(
             },
         },
     }
-    try:
-        result = runner.run_in_session(session_id, child_payload)
-    except SessionNotFoundError:
-        raise
-    except Exception as exc:
-        return HarnessArenaChildRun(
-            harness_id=harness_id,
-            index=index,
-            session_id=session_id,
-            run_id=None,
-            status="failed",
-            error=str(redact_for_storage(str(exc))),
-        )
-    return _child_from_run(harness_id, index, result.run, result.result.text)
 
 
 def _child_from_run(
@@ -336,6 +447,8 @@ def _arena_status(
     if len(children) < expected_count:
         return "running"
     statuses = {child.status for child in children}
+    if statuses & {"queued", "running", "retry_wait"}:
+        return "running"
     if statuses == {"succeeded"}:
         return "succeeded"
     if "succeeded" in statuses:

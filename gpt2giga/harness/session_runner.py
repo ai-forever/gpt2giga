@@ -100,6 +100,15 @@ class HarnessSessionRunResult:
         return payload
 
 
+@dataclass(frozen=True)
+class QueuedHarnessRun:
+    """Prepared durable run and its single logical user message."""
+
+    session: HarnessSession
+    run: HarnessRun
+    user_message: HarnessMessage
+
+
 class HarnessSessionRunner:
     """Create and run normalized harness sessions."""
 
@@ -199,12 +208,81 @@ class HarnessSessionRunner:
         )
         return self.run_in_session(session.id, payload, cancel_event=cancel_event)
 
+    def enqueue_in_session(
+        self,
+        session_id: str,
+        payload: Mapping[str, Any],
+        *,
+        run_id: str,
+    ) -> QueuedHarnessRun:
+        """Prepare one durable headless run without executing its harness."""
+        session = self.store.get_session(session_id)
+        options = self._run_options(payload, session=session)
+        if options["invocation_mode"].value != "headless":
+            raise ValueError("durable jobs currently support headless runs only")
+        report = self.preflight(payload, session_id=session_id)
+        if report.hard_block:
+            raise PreflightBlockedError(report)
+        message_id = new_id("msg")
+        run = self.store.create_run(
+            run_id=run_id,
+            session_id=session.id,
+            harness_id=options["harness_id"],
+            status="queued",
+            prompt=options["prompt"],
+            model=options["model"],
+            api_mode=options["api_mode"],
+            capability=options["capability"],
+            mode=options["mode"],
+            workspace=options["workspace"],
+            invocation_mode=options["invocation_mode"],
+            metadata={
+                "invocation_mode": options["invocation_mode"].value,
+                "preflight": preflight_report_to_dict(report),
+                "durable": True,
+            },
+        )
+        user_message = self.store.append_message(
+            HarnessMessage(
+                id=message_id,
+                session_id=session.id,
+                run_id=run.id,
+                role="user",
+                content=options["prompt"],
+                created_at=utc_now(),
+                harness_id=options["harness_id"],
+                model=options["model"],
+                api_mode=options["api_mode"],
+            )
+        )
+        updated_session = self.store.update_session(
+            session.id,
+            default_harness_id=options["harness_id"],
+            default_model=options["model"],
+            default_api_mode=options["api_mode"],
+            default_mode=options["mode"],
+            workspace=options["workspace"],
+            title=(
+                title_from_prompt(options["prompt"])
+                if session.title == "Untitled session"
+                else session.title
+            ),
+        )
+        return QueuedHarnessRun(
+            session=updated_session, run=run, user_message=user_message
+        )
+
     def run_in_session(
         self,
         session_id: str,
         payload: Mapping[str, Any],
         *,
         cancel_event: Any | None = None,
+        existing_run_id: str | None = None,
+        user_message_id: str | None = None,
+        excluded_history_run_ids: tuple[str, ...] = (),
+        runtime_metadata: Mapping[str, Any] | None = None,
+        process_sink: Any | None = None,
     ) -> HarnessSessionRunResult:
         """Run one prompt inside an existing session."""
         session = self.store.get_session(session_id)
@@ -213,7 +291,12 @@ class HarnessSessionRunner:
         previous_messages = (
             ()
             if bool(_mapping(options["extra"]).get("isolated_history"))
-            else self.store.list_messages(session.id)
+            else tuple(
+                message
+                for message in self.store.list_messages(session.id)
+                if message.id != user_message_id
+                and message.run_id not in excluded_history_run_ids
+            )
         )
         attachments = self._load_attachments(
             session.id,
@@ -262,6 +345,8 @@ class HarnessSessionRunner:
             "native_resume": _native_resume_metadata(options["harness_id"]),
             "preflight": preflight_payload,
         }
+        if runtime_metadata:
+            run_metadata["runtime"] = dict(runtime_metadata)
         if project_memory_payload:
             run_metadata["project_memory"] = project_memory_payload
         if attachment_payloads:
@@ -269,20 +354,47 @@ class HarnessSessionRunner:
             run_metadata["attachments"] = list(attachment_payloads)
         if attachment_render_plan_payload:
             run_metadata["attachment_render_plan"] = attachment_render_plan_payload
-        run = self.store.create_run(
-            session_id=session.id,
-            harness_id=options["harness_id"],
-            status="running",
-            prompt=options["prompt"],
-            model=options["model"],
-            api_mode=options["api_mode"],
-            capability=options["capability"],
-            mode=options["mode"],
-            workspace=options["workspace"],
-            invocation_mode=options["invocation_mode"],
-            started_at=utc_now(),
-            metadata=run_metadata,
-        )
+        if existing_run_id is not None:
+            try:
+                run = self.store.get_run(existing_run_id)
+            except KeyError:
+                run = self.store.create_run(
+                    run_id=existing_run_id,
+                    session_id=session.id,
+                    harness_id=options["harness_id"],
+                    status="running",
+                    prompt=options["prompt"],
+                    model=options["model"],
+                    api_mode=options["api_mode"],
+                    capability=options["capability"],
+                    mode=options["mode"],
+                    workspace=options["workspace"],
+                    invocation_mode=options["invocation_mode"],
+                    started_at=utc_now(),
+                    metadata=run_metadata,
+                )
+            else:
+                run = self.store.update_run(
+                    run.id,
+                    status="running",
+                    started_at=run.started_at or utc_now(),
+                    metadata={**dict(run.metadata), **run_metadata},
+                )
+        else:
+            run = self.store.create_run(
+                session_id=session.id,
+                harness_id=options["harness_id"],
+                status="running",
+                prompt=options["prompt"],
+                model=options["model"],
+                api_mode=options["api_mode"],
+                capability=options["capability"],
+                mode=options["mode"],
+                workspace=options["workspace"],
+                invocation_mode=options["invocation_mode"],
+                started_at=utc_now(),
+                metadata=run_metadata,
+            )
         workspace_execution = prepare_workspace_execution(
             requested_policy=options["workspace_policy"],
             harness_kind=options["harness_kind"],
@@ -295,20 +407,21 @@ class HarnessSessionRunner:
         )
         run_metadata["workspace_execution"] = workspace_execution.to_metadata()
         run = self.store.update_run(run.id, metadata=run_metadata)
-        self.store.append_message(
-            HarnessMessage(
-                id=new_id("msg"),
-                session_id=session.id,
-                run_id=run.id,
-                role="user",
-                content=options["prompt"],
-                created_at=utc_now(),
-                harness_id=options["harness_id"],
-                model=options["model"],
-                api_mode=options["api_mode"],
-                metadata=_message_attachment_metadata(attachment_payloads),
+        if user_message_id is None:
+            self.store.append_message(
+                HarnessMessage(
+                    id=new_id("msg"),
+                    session_id=session.id,
+                    run_id=run.id,
+                    role="user",
+                    content=options["prompt"],
+                    created_at=utc_now(),
+                    harness_id=options["harness_id"],
+                    model=options["model"],
+                    api_mode=options["api_mode"],
+                    metadata=_message_attachment_metadata(attachment_payloads),
+                )
             )
-        )
         self._append_event(
             session.id,
             run.id,
@@ -382,6 +495,7 @@ class HarnessSessionRunner:
             native_session_id=options["native_session_id"],
             cancel_event=cancel_event,
             event_sink=event_sink,
+            process_sink=process_sink,
             extra=request_extra,
         )
         raw_request = {

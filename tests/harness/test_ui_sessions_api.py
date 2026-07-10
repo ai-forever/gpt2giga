@@ -9,6 +9,7 @@ from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.project import project_id_for_root
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
+from gpt2giga.harness.runtime.worker import DurableJobWorker
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
     InMemoryHarnessSessionStore,
@@ -261,15 +262,24 @@ cases:
 
     assert created.status_code == 200
     eval_run = created.json()["eval_run"]
-    assert eval_run["status"] == "passed"
-    assert eval_run["summary"]["passed"] == 1
+    assert eval_run["status"] == "running"
+    assert eval_run["results"][0]["status"] == "queued"
     assert eval_run["results"][0]["run_id"].startswith("run_")
     assert "session" in eval_run
+
+    worker = DurableJobWorker(
+        HarnessConfig(data_dir=str(data_dir)),
+        registry=create_default_registry(include_entry_points=False),
+        worker_id="worker_eval_api",
+    )
+    assert worker.run_once() is True
 
     fetched = client.get(f"/api/evals/runs/{eval_run['id']}")
 
     assert fetched.status_code == 200
     assert fetched.json()["eval_run"]["id"] == eval_run["id"]
+    assert fetched.json()["eval_run"]["status"] == "passed"
+    assert fetched.json()["eval_run"]["summary"]["passed"] == 1
 
 
 def test_preflight_api_hard_blocks_private_key_prompt_without_echoing_secret():

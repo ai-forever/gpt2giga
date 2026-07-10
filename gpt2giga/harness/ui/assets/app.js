@@ -1957,47 +1957,7 @@
         await startNativeProcess(payload);
         return;
       }
-      if (payload.stream) {
-        await startHeadlessStream(payload);
-        return;
-      }
-      state.lastPayload = payload;
-      setText("raw-request-panel", pretty(payload));
-      setText("raw-response-panel", "{}");
-      setText("command-panel", commandPreview(payload));
-      renderDiffInspector(null);
-      renderPrInspector(null);
-      byId("run-button").disabled = true;
-      byId("run-button").textContent = "Running...";
-      try {
-        const url = state.currentSessionId ? `/api/sessions/${encodeURIComponent(state.currentSessionId)}/run` : "/api/sessions/run";
-        const result = await getJson(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        const body = result.data || {};
-        if (result.ok) {
-          state.currentArena = null;
-          state.currentSessionId = body.session.id;
-          const completedRuns = Array.isArray(body.runs) ? body.runs : [];
-          state.selectedRunId = completedRuns.length ? completedRuns[completedRuns.length - 1].id : null;
-          state.currentBundle = body;
-          byId("prompt-input").value = "";
-          state.attachments = [];
-          renderAttachments();
-          renderAll();
-          syncBrowserRoute("work", body.session.id);
-          await loadSessions();
-          persistProjectState({ last_selected_session: body.session.id });
-        } else {
-          setText("raw-response-panel", pretty(body));
-          setText("run-panel", body.detail || `Request failed with HTTP ${result.status}`);
-        }
-      } finally {
-        byId("run-button").disabled = false;
-        byId("run-button").textContent = "Run";
-      }
+      await startHeadlessStream(payload);
     }
 
     async function runArena() {
@@ -2056,7 +2016,7 @@
       setText("command-panel", commandPreview(payload));
       renderDiffInspector(null);
       renderPrInspector(null);
-      setText("run-panel", "Starting streamed run...");
+      setText("run-panel", "Queueing durable run...");
       renderEvents([]);
       setHeadlessRunning(true);
       try {

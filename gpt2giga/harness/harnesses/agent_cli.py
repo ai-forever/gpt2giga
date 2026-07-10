@@ -262,6 +262,19 @@ def run_streaming_command(
             error=f"{label} failed to start: {exc}",
         )
 
+    if request.process_sink is not None:
+        try:
+            request.process_sink(
+                {
+                    "process_id": process.pid,
+                    "process_group_id": (
+                        os.getpgid(process.pid) if os.name == "posix" else None
+                    ),
+                }
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            pass
+
     output_queue: Queue[tuple[str, str | None]] = Queue(maxsize=STREAM_QUEUE_MAX_ITEMS)
     reader_stop = threading.Event()
     readers = (

@@ -53,8 +53,20 @@ giga harness run direct-chat \
 Open the local UI:
 
 ```bash
+giga worker start
+# In another terminal:
 giga ui
 ```
+
+The standalone worker owns headless UI runs, leases, heartbeats, timeouts,
+retries, and cancellation, so a run survives a browser or UI-server restart.
+Arena children and Eval case/harness pairs use the same independent durable
+jobs and update their transparent parent JSON records as attempts finish.
+Use `giga worker status` to inspect registered workers, or run a temporary
+worker with `giga worker stop-on-idle --idle-seconds 30`. Workers deliberately
+do not auto-start a proxy: start `gpt2giga` yourself and configure
+`GPT2GIGA_HARNESS_API_KEY` when a harness needs the proxy. This avoids treating
+the UI process's temporary sidecar key cache as durable worker state.
 
 From a project directory, inspect or initialize the project cockpit config:
 
@@ -667,7 +679,8 @@ Session history survives browser refreshes and UI restarts. New runs are stored
 in the selected session, and `direct-chat` receives previous user and assistant
 messages from that session as multi-turn context.
 
-The stream checkbox starts a background headless run and subscribes to
+Every headless Run action submits an authenticated manual job to the durable
+worker queue and subscribes to
 `/api/runs/{run_id}/events/stream` with SSE. Structured harness events update a
 single live assistant draft while it is running: message deltas extend the
 rendered Markdown response, tool calls appear as expandable activity cards, and
@@ -676,11 +689,17 @@ remain persisted in the session event log and available in the Events inspector
 after refresh. Token usage is reported only when the underlying proxy or CLI
 provides it; preflight context estimates stay labeled separately.
 
+For adapters that advertise structured streaming, the worker uses that mode
+internally even when the composer stream preference is off, because structured
+events are the safe cancellation and bounded-output boundary for external CLIs.
+
 `direct-chat` consumes the OpenAI-compatible SSE response directly. Headless
 Codex CLI, Claude Code, and Gemini CLI runs use each CLI's structured JSONL
 stream mode. The Cancel button calls `/api/runs/{run_id}/cancel`; streaming
-subprocess harnesses terminate their child process, while other harnesses stop
-cooperatively when they observe the in-memory cancel token.
+subprocess harnesses terminate their recorded process group, while other
+harnesses stop cooperatively when they observe the worker cancellation token.
+Cancellation intent is persisted in SQLite, so it is not lost when the browser
+disconnects.
 
 ## Smart Router
 
@@ -902,6 +921,8 @@ projects/<project_id>/attachments/<sha256>/original
 projects/<project_id>/attachments/<sha256>/metadata.json
 worktrees/<session_id>/<run_id>/
 runtime.sqlite3
+runtime/job_payloads/<job_id>.json
+runtime/attempt_logs/<attempt_id>.jsonl
 ```
 
 Stored fields include session title, workspace path, selected harness, model,
@@ -912,11 +933,14 @@ provenance snapshots, replay payloads, status, timestamps, and storage
 metadata.
 
 `runtime.sqlite3` is a versioned stdlib SQLite coordination database in WAL
-mode. It stores only mutable job/attempt state, leases and relationship indexes,
-idempotency-key hashes, trace sequence cursors, and the recovery outbox. Session
+mode. It stores only mutable job/attempt/worker state, leases and relationship
+indexes, idempotency-key hashes, capability fingerprints, trace sequence
+cursors, and the recovery outbox. Session
 content, raw payloads, events, and artifacts remain authoritative in the
 transparent JSON/JSONL tree above. Advisory per-file locks serialize legacy
-JSON/JSONL rewrites when the UI and future worker processes overlap.
+JSON/JSONL rewrites when UI and worker processes overlap. Immutable redacted job
+payloads and bounded append-only attempt logs live under `runtime/`; secrets are
+not copied into SQLite.
 
 Inspect the schema/counts or export all coordination rows as safe JSON:
 
@@ -925,6 +949,8 @@ giga runtime inspect
 giga runtime inspect --json
 giga runtime export
 giga runtime export --output /tmp/harness-runtime.json
+giga worker status
+giga worker status --json
 ```
 
 The submit idempotency key itself is never persisted; SQLite stores its SHA-256
@@ -932,6 +958,14 @@ digest. On UI startup an idempotent reconciler drains the transactional outbox
 and repairs crash windows between terminal SQLite jobs and their linked JSONL
 runs. Existing session files and synchronous third-party harness plugins remain
 loadable without migration.
+
+Atomic claims create one `JobAttempt` and one `HarnessRun` per attempt. A retry
+does not append the logical user message again. Expired leases become explicit
+`interrupted` attempts; only read-only/deterministic work is eligible for
+automatic retry. Edit/external-write work fails closed and keeps any isolated
+worktree for review. Until policy profiles land, only authenticated manual or
+interactive origins may submit durable jobs, and native terminal processes are
+not scheduled by the worker.
 
 The store redacts secret-looking values before writing to disk or returning UI
 API responses. It must not store API keys, authorization headers, cookies,

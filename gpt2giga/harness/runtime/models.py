@@ -128,6 +128,7 @@ class RuntimeJob:
     status: JobStatus
     session_id: str
     user_message_id: str
+    initial_run_id: str
     created_at: str
     updated_at: str
     project_id: str | None = None
@@ -142,6 +143,9 @@ class RuntimeJob:
     priority: int = 0
     version: int = 0
     error_summary: str | None = None
+    required_harness_id: str | None = None
+    required_capability_fingerprint: Mapping[str, Any] | None = None
+    timeout_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -161,10 +165,34 @@ class JobAttempt:
     started_at: str | None = None
     finished_at: str | None = None
     process_id: int | None = None
+    process_group_id: int | None = None
     retry_reason: str | None = None
     idempotency_class: str = "unknown"
     error_summary: str | None = None
+    capability_fingerprint: Mapping[str, Any] | None = None
     version: int = 0
+
+
+@dataclass(frozen=True)
+class ClaimedJob:
+    """Atomic worker claim containing a logical job and concrete attempt."""
+
+    job: RuntimeJob
+    attempt: JobAttempt
+
+
+@dataclass(frozen=True)
+class RuntimeWorker:
+    """Durable worker liveness and capability snapshot."""
+
+    id: str
+    process_id: int
+    hostname: str
+    status: str
+    started_at: str
+    heartbeat_at: str
+    stopped_at: str | None
+    capability_fingerprint: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -200,6 +228,7 @@ def job_to_dict(job: RuntimeJob) -> dict[str, Any]:
         "status": job.status.value,
         "session_id": job.session_id,
         "user_message_id": job.user_message_id,
+        "initial_run_id": job.initial_run_id,
         "project_id": job.project_id,
         "workflow_id": job.workflow_id,
         "workflow_version": job.workflow_version,
@@ -212,6 +241,11 @@ def job_to_dict(job: RuntimeJob) -> dict[str, Any]:
         "priority": job.priority,
         "version": job.version,
         "error_summary": job.error_summary,
+        "required_harness_id": job.required_harness_id,
+        "required_capability_fingerprint": dict(
+            job.required_capability_fingerprint or {}
+        ),
+        "timeout_seconds": job.timeout_seconds,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }
@@ -231,9 +265,11 @@ def attempt_to_dict(attempt: JobAttempt) -> dict[str, Any]:
         "started_at": attempt.started_at,
         "finished_at": attempt.finished_at,
         "process_id": attempt.process_id,
+        "process_group_id": attempt.process_group_id,
         "retry_reason": attempt.retry_reason,
         "idempotency_class": attempt.idempotency_class,
         "error_summary": attempt.error_summary,
+        "capability_fingerprint": dict(attempt.capability_fingerprint or {}),
         "version": attempt.version,
         "created_at": attempt.created_at,
         "updated_at": attempt.updated_at,
@@ -253,4 +289,18 @@ def outbox_entry_to_dict(entry: RuntimeOutboxEntry) -> dict[str, Any]:
         "processed_at": entry.processed_at,
         "attempt_count": entry.attempt_count,
         "last_error": entry.last_error,
+    }
+
+
+def worker_to_dict(worker: RuntimeWorker) -> dict[str, Any]:
+    """Serialize one redaction-safe worker capability snapshot."""
+    return {
+        "id": worker.id,
+        "process_id": worker.process_id,
+        "hostname": worker.hostname,
+        "status": worker.status,
+        "started_at": worker.started_at,
+        "heartbeat_at": worker.heartbeat_at,
+        "stopped_at": worker.stopped_at,
+        "capability_fingerprint": dict(worker.capability_fingerprint),
     }

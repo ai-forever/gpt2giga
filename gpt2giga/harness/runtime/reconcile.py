@@ -81,11 +81,16 @@ class RuntimeReconciler:
             if run_status not in TERMINAL_RUN_STATUSES:
                 continue
             expected_attempt = _RUN_TO_ATTEMPT_STATUS[run_status]
+            attempt_was_terminal = attempt.status in TERMINAL_ATTEMPT_STATUSES
             if attempt.status not in TERMINAL_ATTEMPT_STATUSES:
                 self.runtime_store.transition_attempt(attempt.id, expected_attempt)
                 attempts_repaired += 1
             job = self.runtime_store.get_job(attempt.job_id)
-            if job.status not in TERMINAL_JOB_STATUSES:
+            retry_is_pending = attempt_was_terminal and job.status in {
+                JobStatus.RETRY_WAIT,
+                JobStatus.QUEUED,
+            }
+            if job.status not in TERMINAL_JOB_STATUSES and not retry_is_pending:
                 self.runtime_store.transition_job(
                     job.id,
                     _RUN_TO_JOB_STATUS[run_status],

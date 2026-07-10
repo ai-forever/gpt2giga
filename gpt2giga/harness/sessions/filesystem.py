@@ -192,6 +192,7 @@ class FilesystemHarnessSessionStore:
     def create_run(
         self,
         *,
+        run_id: str | None = None,
         session_id: str,
         harness_id: str,
         prompt: str,
@@ -208,7 +209,7 @@ class FilesystemHarnessSessionStore:
         self.get_session(session_id)
         now = utc_now()
         run = HarnessRun(
-            id=new_id("run"),
+            id=run_id or new_id("run"),
             session_id=session_id,
             harness_id=harness_id,
             status=parse_run_status(status),

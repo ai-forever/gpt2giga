@@ -21,6 +21,7 @@ from gpt2giga.harness.arena import (
     HarnessArenaRun,
     arena_child_to_dict,
     arena_to_dict,
+    queue_arena,
     run_arena,
 )
 from gpt2giga.harness import proxy
@@ -50,6 +51,7 @@ from gpt2giga.harness.evals import (
     eval_spec_load_error_to_dict,
     eval_spec_to_dict,
     load_eval_spec,
+    queue_eval,
     run_eval,
 )
 from gpt2giga.harness.editor import (
@@ -133,9 +135,11 @@ from gpt2giga.harness.routing import (
     recommend_harness_route,
     route_recommendation_to_dict,
 )
-from gpt2giga.harness.runtime.models import RunStatus
+from gpt2giga.harness.runtime.models import RunStatus, job_to_dict
+from gpt2giga.harness.runtime.payloads import DurableJobPayloadStore
 from gpt2giga.harness.runtime.reconcile import RuntimeReconciler
 from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga.harness.runtime.worker import DurableJobDispatcher
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
@@ -240,6 +244,16 @@ def create_app(
         attachment_store=attachment_store,
         memory_store=memory_store,
     )
+    durable_dispatcher = (
+        DurableJobDispatcher(
+            runtime_store=runtime_store,
+            payload_store=DurableJobPayloadStore(config.data_dir),
+            runner=runner,
+        )
+        if runtime_store is not None
+        and isinstance(store, FilesystemHarnessSessionStore)
+        else None
+    )
     active_headless_runs: dict[str, _ActiveHeadlessRun] = {}
     app = FastAPI(title="gpt2giga Unified Harness", docs_url=None, redoc_url=None)
     ui_security = HarnessUISecurity(config)
@@ -250,6 +264,7 @@ def create_app(
     app.state.harness_runtime_store = runtime_store
     app.state.harness_runtime_reconciliation = reconciliation_report
     app.state.harness_session_runner = runner
+    app.state.harness_job_dispatcher = durable_dispatcher
     app.state.harness_attachment_store = attachment_store
     app.state.harness_arena_store = arena_store
     app.state.harness_eval_store = eval_store
@@ -706,8 +721,9 @@ def create_app(
                 load_config_name=False,
             )
             spec = load_eval_spec(project_context.root, eval_name)
+            eval_runner = queue_eval if durable_dispatcher is not None else run_eval
             eval_run = await run_in_threadpool(
-                run_eval,
+                eval_runner,
                 runner=runner,
                 eval_store=eval_store,
                 project=project_context,
@@ -718,6 +734,11 @@ def create_app(
                 mode=_optional_text(payload.get("mode")),
                 workspace_policy=_optional_text(payload.get("workspace_policy")),
                 dry_run=bool(payload.get("dry_run")),
+                **(
+                    {"dispatcher": durable_dispatcher}
+                    if durable_dispatcher is not None
+                    else {}
+                ),
             )
         except EvalSpecNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Eval spec not found") from exc
@@ -1384,6 +1405,18 @@ def create_app(
         session_id: str,
         payload: Mapping[str, Any],
     ) -> HarnessRun:
+        if durable_dispatcher is not None:
+            idempotency_key = str(
+                payload.get("idempotency_key") or f"ui_{new_id('submit')}"
+            )
+            submission = await run_in_threadpool(
+                durable_dispatcher.submit,
+                session_id,
+                payload,
+                idempotency_key=idempotency_key,
+                origin="manual",
+            )
+            return submission.queued.run
         before_run_ids = {run.id for run in store.list_runs(session_id)}
         cancel_event = threading.Event()
         task = asyncio.create_task(
@@ -1411,13 +1444,17 @@ def create_app(
 
     def _run_start_response(run: HarnessRun) -> dict[str, Any]:
         events = store.list_events(run.session_id, run_id=run.id)
-        return {
+        payload = {
             "session": _session_summary(store, run.session_id),
             "run": run_to_dict(run),
             "events": [_event_response(event) for event in events],
             "stream_url": f"/api/runs/{run.id}/events/stream",
             "cancel_url": f"/api/runs/{run.id}/cancel",
         }
+        job = runtime_store.find_job_for_run(run.id) if runtime_store else None
+        if job is not None:
+            payload["job"] = job_to_dict(job)
+        return payload
 
     def _run_provenance_response(run: HarnessRun) -> dict[str, Any]:
         provenance = _build_current_run_provenance(
@@ -1552,6 +1589,58 @@ def create_app(
             return {
                 "cancel_requested": False,
                 "active": False,
+                "run": run_to_dict(run),
+            }
+        durable_job = (
+            runtime_store.find_job_for_run(run.id)
+            if runtime_store is not None
+            else None
+        )
+        if durable_job is not None:
+            job = runtime_store.request_cancel(durable_job.id)
+            attempts = runtime_store.list_attempts(job.id)
+            active_attempt = next(
+                (attempt for attempt in reversed(attempts) if attempt.run_id == run.id),
+                None,
+            )
+            if active_attempt is None and job.status.value == "queued":
+                job = runtime_store.transition_job(
+                    job.id, "canceled", expected_status="queued"
+                )
+                run = store.update_run(
+                    run.id,
+                    status="canceled",
+                    finished_at=utc_now(),
+                    error="Harness run canceled before worker claim.",
+                    metadata={**dict(run.metadata), "cancel_requested": True},
+                )
+            else:
+                run = store.update_run(
+                    run.id,
+                    metadata={**dict(run.metadata), "cancel_requested": True},
+                )
+            if not bool(run.metadata.get("cancel_event_recorded")):
+                store.append_event(
+                    HarnessStoredEvent(
+                        id=new_id("evt"),
+                        session_id=run.session_id,
+                        run_id=run.id,
+                        type=HarnessEventType.CANCEL_REQUESTED.value,
+                        message="Harness run cancellation requested.",
+                        payload={
+                            "job_id": job.id,
+                            "active": active_attempt is not None,
+                        },
+                        created_at=utc_now(),
+                        trace_id=job.id,
+                        job_id=job.id,
+                        attempt_id=active_attempt.id if active_attempt else None,
+                    )
+                )
+            return {
+                "cancel_requested": True,
+                "active": active_attempt is not None,
+                "job": job_to_dict(job),
                 "run": run_to_dict(run),
             }
         active = active_headless_runs.get(run.id)
@@ -1886,12 +1975,18 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
+            arena_runner = queue_arena if durable_dispatcher is not None else run_arena
             arena = await run_in_threadpool(
-                run_arena,
+                arena_runner,
                 runner=runner,
                 arena_store=arena_store,
                 payload=payload,
                 session_id=_optional_text(payload.get("session_id")),
+                **(
+                    {"dispatcher": durable_dispatcher}
+                    if durable_dispatcher is not None
+                    else {}
+                ),
             )
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
