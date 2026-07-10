@@ -183,7 +183,7 @@ def test_runtime_store_migrates_existing_v1_database(tmp_path):
             row[0] for row in reopened.execute("SELECT version FROM schema_migrations")
         }
     assert "workflow_version" in columns
-    assert versions == {1, 2, 3, 4}
+    assert versions == set(range(1, RUNTIME_SCHEMA_VERSION + 1))
 
 
 def test_reconciler_repairs_terminal_job_to_run_and_is_idempotent(tmp_path):

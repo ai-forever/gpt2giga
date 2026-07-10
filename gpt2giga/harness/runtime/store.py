@@ -45,7 +45,7 @@ from gpt2giga.harness.runtime.policy import (
 from gpt2giga.harness.sessions.redaction import redact_for_storage
 
 RUNTIME_DB_NAME = "runtime.sqlite3"
-RUNTIME_SCHEMA_VERSION = 4
+RUNTIME_SCHEMA_VERSION = 5
 SQLITE_TIMEOUT_SECONDS = 10.0
 
 
@@ -234,6 +234,57 @@ _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             )
             """,
             "CREATE INDEX approval_grant_match_idx ON approval_grants(action, scope_type, scope_id, expires_at)",
+        ),
+    ),
+    (
+        5,
+        "versioned workflow runs and step attempts",
+        (
+            """
+            CREATE TABLE workflow_runs (
+                id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                definition_hash TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                project_root TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                definition_json TEXT NOT NULL,
+                inputs_json TEXT NOT NULL DEFAULT '{}',
+                outputs_json TEXT NOT NULL DEFAULT '{}',
+                max_concurrency INTEGER NOT NULL DEFAULT 1,
+                cancel_requested_at TEXT,
+                error_summary TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                finished_at TEXT
+            )
+            """,
+            "CREATE INDEX workflow_runs_definition_idx ON workflow_runs(workflow_id, definition_hash, created_at)",
+            "CREATE INDEX workflow_runs_status_idx ON workflow_runs(status, updated_at)",
+            """
+            CREATE TABLE workflow_step_attempts (
+                id TEXT PRIMARY KEY,
+                workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+                step_id TEXT NOT NULL,
+                attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+                inputs_json TEXT NOT NULL DEFAULT '{}',
+                outputs_json TEXT NOT NULL DEFAULT '{}',
+                artifact_refs_json TEXT NOT NULL DEFAULT '[]',
+                error_summary TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                finished_at TEXT,
+                UNIQUE (workflow_run_id, step_id, attempt_number)
+            )
+            """,
+            "CREATE INDEX workflow_steps_run_status_idx ON workflow_step_attempts(workflow_run_id, status, step_id)",
+            "CREATE INDEX workflow_steps_job_idx ON workflow_step_attempts(job_id)",
         ),
     ),
 )
@@ -637,6 +688,29 @@ class RuntimeCoordinationStore:
                 (run_id, run_id),
             ).fetchone()
         return _job_from_row(row) if row is not None else None
+
+    def link_job_workflow(
+        self, job_id: str, *, workflow_id: str, workflow_version: str
+    ) -> RuntimeJob:
+        """Attach an already-submitted child job to its immutable workflow run."""
+        with self._connect() as connection, _transaction(connection):
+            connection.execute(
+                """
+                UPDATE jobs SET workflow_id = ?, workflow_version = ?,
+                    updated_at = ?, version = version + 1
+                WHERE id = ? AND (workflow_id IS NULL OR workflow_id = ?)
+                """,
+                (workflow_id, workflow_version, _utc_now(), job_id, workflow_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+        if row is None:
+            raise JobNotFoundError(job_id)
+        job = _job_from_row(row)
+        if job.workflow_id != workflow_id:
+            raise ConcurrentUpdateError(f"job {job_id} belongs to another workflow")
+        return job
 
     def claim_next_job(
         self,
@@ -1511,6 +1585,8 @@ class RuntimeCoordinationStore:
                     "workers",
                     "approval_requests",
                     "approval_grants",
+                    "workflow_runs",
+                    "workflow_step_attempts",
                 )
             }
             pending = int(
@@ -1536,6 +1612,12 @@ class RuntimeCoordinationStore:
             sequence_rows = connection.execute(
                 "SELECT trace_id, last_sequence FROM trace_sequences ORDER BY trace_id"
             ).fetchall()
+            workflow_rows = connection.execute(
+                "SELECT * FROM workflow_runs ORDER BY created_at, id"
+            ).fetchall()
+            workflow_step_rows = connection.execute(
+                "SELECT * FROM workflow_step_attempts ORDER BY workflow_run_id, created_at, id"
+            ).fetchall()
         return {
             "schema_version": self.schema_version,
             "exported_at": _utc_now(),
@@ -1555,6 +1637,10 @@ class RuntimeCoordinationStore:
             "trace_sequences": [
                 {"trace_id": str(row[0]), "last_sequence": int(row[1])}
                 for row in sequence_rows
+            ],
+            "workflow_runs": [_safe_workflow_export_row(row) for row in workflow_rows],
+            "workflow_step_attempts": [
+                _safe_workflow_export_row(row) for row in workflow_step_rows
             ],
         }
 
@@ -1856,6 +1942,19 @@ def _json_mapping(value: Any) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return dict(decoded) if isinstance(decoded, Mapping) else {}
+
+
+def _safe_workflow_export_row(row: sqlite3.Row) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in row.keys():
+        value = row[key]
+        if key.endswith("_json"):
+            try:
+                value = json.loads(str(value))
+            except (TypeError, ValueError):
+                value = {}
+        payload[str(key)] = redact_for_storage(value)
+    return payload
 
 
 def _fingerprint_matches(

@@ -136,6 +136,8 @@ class DurableJobDispatcher:
             idempotency_key=idempotency_key,
             origin=origin,
             project_id=str(queued.session.metadata.get("project_id") or "") or None,
+            workflow_id=str(payload.get("workflow_id") or "") or None,
+            workflow_version=str(payload.get("workflow_version") or "") or None,
             agent_id=str(payload.get("agent_id") or "") or None,
             max_attempts=max_attempts,
             required_harness_id=harness_id,
@@ -204,7 +206,13 @@ class DurableJobDispatcher:
             queued.run.id,
             metadata={
                 **dict(queued.run.metadata),
-                "runtime": {"job_id": ready_job.id, "attempt_number": 0},
+                "runtime": {
+                    "job_id": ready_job.id,
+                    "attempt_number": 0,
+                    "workflow_id": ready_job.workflow_id,
+                    "workflow_version": ready_job.workflow_version,
+                    "workflow_step_id": payload.get("workflow_step_id"),
+                },
             },
         )
         self.runner.store.append_event(
@@ -380,6 +388,7 @@ class DurableJobWorker:
             },
         )
         RuntimeReconciler(self.runtime_store, self.session_store).reconcile()
+        self._advance_parent_workflow(updated_job)
         return True
 
     def run_forever(
@@ -527,6 +536,34 @@ class DurableJobWorker:
 
         sync_durable_arena_child(self.config.data_dir, payload, run, result_text)
         sync_durable_eval_case(self.config.data_dir, payload, run, result_text)
+
+    def _advance_parent_workflow(self, job: RuntimeJob) -> None:
+        """Advance a parent workflow after one durable child settles."""
+        if not job.workflow_id:
+            return
+        from gpt2giga.harness.project import resolve_project
+        from gpt2giga.harness.workflows import WorkflowCoordinator, WorkflowRepository
+
+        try:
+            workflow_run = WorkflowRepository(self.runtime_store).get_run(
+                job.workflow_id
+            )
+        except KeyError:
+            return
+        project = resolve_project(
+            workflow_run.project_root, data_dir=self.config.data_dir
+        )
+        dispatcher = DurableJobDispatcher(
+            runtime_store=self.runtime_store,
+            payload_store=self.payload_store,
+            runner=self.runner,
+        )
+        WorkflowCoordinator(
+            project=project,
+            runtime_store=self.runtime_store,
+            runner=self.runner,
+            dispatcher=dispatcher,
+        ).advance(job.workflow_id)
 
 
 def worker_status(

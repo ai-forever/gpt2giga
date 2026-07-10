@@ -1,0 +1,234 @@
+from pathlib import Path
+
+import pytest
+
+from gpt2giga.harness.agents import render_starter_agent
+from gpt2giga.harness.config import HarnessConfig
+from gpt2giga.harness.project import init_project_config, resolve_project
+from gpt2giga.harness.registry import create_default_registry
+from gpt2giga.harness.runtime.payloads import DurableJobPayloadStore
+from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga.harness.runtime.worker import DurableJobDispatcher, DurableJobWorker
+from gpt2giga.harness.session_runner import HarnessSessionRunner
+from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga.harness.workflows import (
+    WorkflowCoordinator,
+    WorkflowRepository,
+    discover_workflows,
+    load_workflow,
+    parse_workflow_definition,
+    workflow_plan,
+)
+
+
+def _config(tmp_path: Path) -> HarnessConfig:
+    return HarnessConfig(
+        data_dir=str(tmp_path / "data"),
+        proxy_url="http://127.0.0.1:9",
+        auto_start_proxy=False,
+    )
+
+
+def _coordinator(tmp_path: Path) -> tuple[WorkflowCoordinator, HarnessConfig]:
+    config = _config(tmp_path)
+    registry = create_default_registry()
+    session_store = FilesystemHarnessSessionStore(config.data_dir)
+    runner = HarnessSessionRunner(registry=registry, config=config, store=session_store)
+    runtime_store = RuntimeCoordinationStore(config.data_dir)
+    dispatcher = DurableJobDispatcher(
+        runtime_store=runtime_store,
+        payload_store=DurableJobPayloadStore(config.data_dir),
+        runner=runner,
+    )
+    project = resolve_project(tmp_path, data_dir=config.data_dir)
+    return (
+        WorkflowCoordinator(
+            project=project,
+            runtime_store=runtime_store,
+            runner=runner,
+            dispatcher=dispatcher,
+        ),
+        config,
+    )
+
+
+def test_parse_workflow_supports_all_step_kinds_and_dependency_plan() -> None:
+    definition = parse_workflow_definition(
+        """
+id: all-kinds
+title: All kinds
+schema_version: 1
+version: 1.2.3
+budgets: {max_concurrency: 4, max_steps: 6}
+steps:
+  - {id: agent, kind: agent, agent_id: reviewer}
+  - {id: arena, kind: arena, harness_ids: [echo], depends_on: [agent]}
+  - {id: eval, kind: eval, eval_id: smoke, depends_on: [agent]}
+  - {id: approval, kind: approval, action: external.write, depends_on: [arena]}
+  - {id: transform, kind: transform, transform: select, select: [prompt], depends_on: [eval]}
+  - {id: join, kind: join, depends_on: [approval, transform]}
+"""
+    )
+
+    assert {step.kind.value for step in definition.steps} == {
+        "agent",
+        "arena",
+        "eval",
+        "approval",
+        "transform",
+        "join",
+    }
+    assert workflow_plan(definition)["levels"] == [
+        ["agent"],
+        ["arena", "eval"],
+        ["approval", "transform"],
+        ["join"],
+    ]
+
+
+@pytest.mark.parametrize(
+    "steps,error",
+    [
+        (
+            "- {id: aa, kind: join, depends_on: [bb]}\n  - {id: bb, kind: join, depends_on: [aa]}",
+            "cycle",
+        ),
+        ("- {id: aa, kind: agent}", "requires agent_id"),
+        (
+            "- {id: aa, kind: transform, transform: shell}",
+            "identity, select, or template",
+        ),
+    ],
+)
+def test_parse_workflow_rejects_unsafe_or_invalid_graphs(
+    steps: str, error: str
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        parse_workflow_definition(
+            f"id: invalid\ntitle: Invalid\nversion: 1\nsteps:\n  {steps}\n"
+        )
+
+
+def test_project_init_installs_valid_review_team(tmp_path: Path) -> None:
+    init_project_config(tmp_path)
+
+    definition = load_workflow(tmp_path, "review-team")
+    definitions, errors = discover_workflows(tmp_path)
+
+    assert definition.budgets.max_concurrency == 3
+    assert [item.id for item in definitions] == ["review-team"]
+    assert errors == ()
+
+
+def test_safe_transform_and_join_workflow_completes_without_child_jobs(
+    tmp_path: Path,
+) -> None:
+    coordinator, _ = _coordinator(tmp_path)
+    definition = parse_workflow_definition(
+        """
+id: local-flow
+title: Local flow
+schema_version: 1
+version: 1
+inputs: {prompt: default}
+steps:
+  - id: select
+    kind: transform
+    transform: select
+    select: [prompt]
+  - id: joined
+    kind: join
+    depends_on: [select]
+"""
+    )
+
+    run = coordinator.start(definition, inputs={"prompt": "hello"})
+    steps = coordinator.repository.list_steps(run.id)
+
+    assert run.status.value == "succeeded"
+    assert [item.status for item in steps] == ["succeeded", "succeeded"]
+    assert steps[0].outputs == {"prompt": "hello"}
+    assert steps[1].outputs == {"select": {"prompt": "hello"}}
+
+
+def test_agent_step_queues_durable_job_and_worker_advances_workflow(
+    tmp_path: Path,
+) -> None:
+    init_project_config(tmp_path)
+    agent_path = tmp_path / ".giga" / "agents" / "reviewer.yaml"
+    agent_path.write_text(
+        render_starter_agent("reviewer", harness_id="echo"), encoding="utf-8"
+    )
+    coordinator, config = _coordinator(tmp_path)
+    definition = parse_workflow_definition(
+        """
+id: worker-flow
+title: Worker flow
+schema_version: 1
+version: 1
+steps:
+  - {id: review, kind: agent, agent_id: reviewer, prompt: "Review ${prompt}"}
+  - {id: joined, kind: join, depends_on: [review]}
+"""
+    )
+
+    run = coordinator.start(definition, inputs={"prompt": "the change"})
+    queued = coordinator.repository.list_steps(run.id)[0]
+    assert queued.status == "queued"
+    assert queued.job_id
+
+    worker = DurableJobWorker(config, worker_id="workflow-test-worker")
+    assert worker.run_once() is True
+
+    final = WorkflowRepository(worker.runtime_store).get_run(run.id)
+    steps = WorkflowRepository(worker.runtime_store).list_steps(run.id)
+    assert final.status.value == "succeeded"
+    assert [item.status for item in steps] == ["succeeded", "succeeded"]
+    assert steps[0].artifact_refs[0]["type"] == "harness_run"
+
+
+def test_cancel_propagates_to_queued_child_job(tmp_path: Path) -> None:
+    init_project_config(tmp_path)
+    agent_path = tmp_path / ".giga" / "agents" / "reviewer.yaml"
+    agent_path.write_text(
+        render_starter_agent("reviewer", harness_id="echo"), encoding="utf-8"
+    )
+    coordinator, _ = _coordinator(tmp_path)
+    definition = parse_workflow_definition(
+        """
+id: cancel-flow
+title: Cancel flow
+schema_version: 1
+version: 1
+steps:
+  - {id: review, kind: agent, agent_id: reviewer}
+"""
+    )
+    run = coordinator.start(definition, inputs={"prompt": "cancel me"})
+    job_id = coordinator.repository.list_steps(run.id)[0].job_id
+
+    canceled = coordinator.cancel(run.id)
+
+    assert canceled.status.value == "canceled"
+    assert coordinator.runtime_store.get_job(job_id).cancel_requested_at
+    assert coordinator.repository.list_steps(run.id)[0].status == "canceled"
+
+
+def test_runtime_export_includes_redacted_workflow_coordination(tmp_path: Path) -> None:
+    coordinator, _ = _coordinator(tmp_path)
+    definition = parse_workflow_definition(
+        """
+id: export-flow
+title: Export
+version: 1
+steps:
+  - {id: value, kind: transform, transform: identity}
+"""
+    )
+    coordinator.start(definition, inputs={"token": "Bearer secret-value"})
+
+    exported = coordinator.runtime_store.export()
+
+    assert len(exported["workflow_runs"]) == 1
+    assert len(exported["workflow_step_attempts"]) == 1
+    assert "secret-value" not in str(exported)

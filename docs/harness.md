@@ -252,6 +252,50 @@ Authenticated APIs:
 - `POST /api/agents/{agent_id}/draft` and `/apply`;
 - `POST /api/agents/{agent_id}/duplicate` and `/run`.
 
+### Versioned Workflows
+
+Project workflows are bounded DAG definitions under `.giga/workflows/*.yaml`.
+`giga init` installs a read-only `review-team` starter that plans, fans out to
+security/test-gap/maintainability reviews, and synthesizes their results. Every
+run stores the exact SHA-256 definition hash plus immutable workflow and step
+snapshots, so later YAML edits cannot rewrite execution history.
+
+The version 1 IR supports `agent`, `arena`, `eval`, explicit `approval`, safe
+built-in `transform`, and `join` steps. Definitions may set dependencies,
+`on_success`/`on_failure`/`always` conditions, bounded concurrency and fan-out,
+retries, timeouts, typed input maps, output names, and artifact references.
+Cycles, unknown dependencies, arbitrary transform code, more than 64 steps, or
+fan-out above 16 fail validation. Arbitrary shell nodes are intentionally not
+part of the workflow IR.
+
+```bash
+giga workflow list --workspace .
+giga workflow show review-team --workspace . --json
+giga workflow validate .giga/workflows/review-team.yaml
+giga workflow run review-team --workspace . --prompt "Review this change" --dry-run
+giga workflow run review-team --workspace . --prompt "Review this change" --json
+giga workflow status <workflow_run_id> --json
+giga workflow cancel <workflow_run_id>
+```
+
+Agent, arena, and eval work is submitted through the same durable job worker as
+manual Runs. Workflow cancellation persists first and propagates to every
+active child job. Explicit approval steps enter `waiting_approval` and reuse the
+Approval Center; no process or lease is created for the approval node itself.
+Safe transform/join nodes run locally without arbitrary code execution.
+
+Authenticated APIs:
+
+- `GET /api/workflows` and `GET /api/workflows/{workflow_id}`;
+- `POST /api/workflows/validate` and
+  `POST /api/workflows/{workflow_id}/run`;
+- `GET /api/workflow-runs/{run_id}` and
+  `POST /api/workflow-runs/{run_id}/cancel`.
+
+The visual Workflow Catalog and builder are intentionally deferred; this slice
+ships one canonical execution model rather than a second UI-only workflow
+format.
+
 ### Project Memory
 
 Project memory stores explicit, user-approved project facts and decisions under
@@ -1122,10 +1166,10 @@ provenance snapshots, replay payloads, status, timestamps, and storage
 metadata.
 
 `runtime.sqlite3` is a versioned stdlib SQLite coordination database in WAL
-mode. It stores only mutable job/attempt/worker state, approval requests and
-scoped grants, leases and relationship
-indexes, idempotency-key hashes, capability fingerprints, trace sequence
-cursors, and the recovery outbox. Session
+mode. It stores only mutable job/attempt/worker state, workflow runs and step
+attempts, approval requests and scoped grants, leases and relationship indexes,
+idempotency-key hashes, capability fingerprints, trace sequence cursors, and
+the recovery outbox. Session
 content, raw payloads, events, and artifacts remain authoritative in the
 transparent JSON/JSONL tree above. Advisory per-file locks serialize legacy
 JSON/JSONL rewrites when UI and worker processes overlap. Immutable redacted job

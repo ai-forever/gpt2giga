@@ -391,6 +391,7 @@ def init_project_config(
     _write_default_prompt_templates(root, overwrite=overwrite)
     _write_default_eval_specs(root, overwrite=overwrite)
     _write_default_agent_profiles(root, overwrite=overwrite)
+    _write_default_workflows(root, overwrite=overwrite)
     return load_project_config(project_root)
 
 
@@ -991,6 +992,19 @@ def _write_default_agent_profiles(root: Path, *, overwrite: bool) -> None:
         if path.exists() and not overwrite:
             continue
         path.write_text(render_starter_agent(agent_id), encoding="utf-8")
+
+
+def _write_default_workflows(root: Path, *, overwrite: bool) -> None:
+    from gpt2giga.harness.workflows import (
+        WORKFLOW_DIRECTORY,
+        render_review_team_workflow,
+    )
+
+    workflow_dir = root / WORKFLOW_DIRECTORY
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    path = workflow_dir / "review-team.yaml"
+    if not path.exists() or overwrite:
+        path.write_text(render_review_team_workflow(), encoding="utf-8")
 
 
 def _parse_attachment_settings(

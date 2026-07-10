@@ -88,7 +88,12 @@ from gpt2giga.harness.provenance import (
 )
 from gpt2giga.harness.registry import UnknownHarnessError, create_default_registry
 from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
-from gpt2giga.harness.runtime.worker import DurableJobWorker, worker_status
+from gpt2giga.harness.runtime.payloads import DurableJobPayloadStore
+from gpt2giga.harness.runtime.worker import (
+    DurableJobDispatcher,
+    DurableJobWorker,
+    worker_status,
+)
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
@@ -123,6 +128,16 @@ from gpt2giga.harness.types import (
 from gpt2giga.harness.ui.app import create_app, validate_ui_bind
 from gpt2giga.harness.ui.security import is_loopback_host
 from gpt2giga.harness.workspace import resolve_workspace
+from gpt2giga.harness.workflows import (
+    WorkflowCoordinator,
+    WorkflowRepository,
+    discover_workflows,
+    load_workflow,
+    parse_workflow_definition,
+    workflow_definition_to_dict,
+    workflow_plan,
+    workflow_run_to_dict,
+)
 
 AGENT_ALIASES = {
     "codex": "codex-cli",
@@ -418,6 +433,44 @@ def build_parser() -> argparse.ArgumentParser:
     agent_run.add_argument("--dry-run", action="store_true")
     agent_run.add_argument("--json", action="store_true")
     agent_run.set_defaults(handler=_handle_agent_profile_run)
+
+    workflow = subparsers.add_parser("workflow")
+    workflow_subparsers = workflow.add_subparsers(dest="workflow_command")
+
+    workflow_list = workflow_subparsers.add_parser("list")
+    workflow_list.add_argument("--workspace", default=None)
+    workflow_list.add_argument("--json", action="store_true")
+    workflow_list.set_defaults(handler=_handle_workflow_list)
+
+    workflow_show = workflow_subparsers.add_parser("show")
+    workflow_show.add_argument("workflow_id")
+    workflow_show.add_argument("--workspace", default=None)
+    workflow_show.add_argument("--json", action="store_true")
+    workflow_show.set_defaults(handler=_handle_workflow_show)
+
+    workflow_validate = workflow_subparsers.add_parser("validate")
+    workflow_validate.add_argument("path")
+    workflow_validate.add_argument("--json", action="store_true")
+    workflow_validate.set_defaults(handler=_handle_workflow_validate)
+
+    workflow_run = workflow_subparsers.add_parser("run", parents=[common])
+    workflow_run.add_argument("workflow_id")
+    workflow_run.add_argument("--workspace", default=None)
+    workflow_run.add_argument("--prompt", default=None)
+    workflow_run.add_argument("--input", action="append", default=[])
+    workflow_run.add_argument("--dry-run", action="store_true")
+    workflow_run.add_argument("--json", action="store_true")
+    workflow_run.set_defaults(handler=_handle_workflow_run)
+
+    workflow_status = workflow_subparsers.add_parser("status", parents=[common])
+    workflow_status.add_argument("run_id")
+    workflow_status.add_argument("--json", action="store_true")
+    workflow_status.set_defaults(handler=_handle_workflow_status)
+
+    workflow_cancel = workflow_subparsers.add_parser("cancel", parents=[common])
+    workflow_cancel.add_argument("run_id")
+    workflow_cancel.add_argument("--json", action="store_true")
+    workflow_cancel.set_defaults(handler=_handle_workflow_cancel)
 
     open_parser = subparsers.add_parser("open")
     open_subparsers = open_parser.add_subparsers(dest="open_command")
@@ -1283,6 +1336,132 @@ def _handle_agent_profile_run(args: argparse.Namespace, config: HarnessConfig) -
     else:
         _print_result(result.result, as_json=False)
     return 0 if result.result.ok else 1
+
+
+def _handle_workflow_list(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(args.workspace, data_dir=config.data_dir)
+    definitions, errors = discover_workflows(project.root)
+    payload = {
+        "workflows": [workflow_definition_to_dict(item) for item in definitions],
+        "errors": [{"path": item.path, "error": item.error} for item in errors],
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        _print_table(payload["workflows"])
+        for error in payload["errors"]:
+            print(f"Invalid {error['path']}: {error['error']}", file=sys.stderr)
+    return 0 if not errors else 1
+
+
+def _handle_workflow_show(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(args.workspace, data_dir=config.data_dir)
+    definition = load_workflow(project.root, args.workflow_id)
+    payload = {
+        "workflow": workflow_definition_to_dict(definition),
+        "plan": workflow_plan(definition),
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _handle_workflow_validate(args: argparse.Namespace, config: HarnessConfig) -> int:
+    path = Path(args.path).expanduser()
+    definition = parse_workflow_definition(
+        path.read_text(encoding="utf-8"), source_path=str(path)
+    )
+    payload = {
+        "valid": True,
+        "workflow": workflow_definition_to_dict(definition),
+        "plan": workflow_plan(definition),
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Workflow valid: {definition.id} ({definition.source_hash})")
+    return 0
+
+
+def _handle_workflow_run(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(args.workspace, data_dir=config.data_dir)
+    definition = load_workflow(project.root, args.workflow_id)
+    inputs = _parse_workflow_inputs(args.input)
+    if args.dry_run:
+        payload = {
+            "workflow": workflow_definition_to_dict(definition),
+            "plan": workflow_plan(definition),
+            "inputs": inputs,
+        }
+    else:
+        coordinator = _workflow_coordinator(config, project)
+        run = coordinator.start(definition, inputs=inputs, prompt=args.prompt)
+        payload = {
+            "run": workflow_run_to_dict(run, coordinator.repository.list_steps(run.id))
+        }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _handle_workflow_status(args: argparse.Namespace, config: HarnessConfig) -> int:
+    repository = WorkflowRepository(RuntimeCoordinationStore(config.data_dir))
+    current = repository.get_run(args.run_id)
+    project = resolve_project(current.project_root, data_dir=config.data_dir)
+    coordinator = _workflow_coordinator(config, project)
+    run = coordinator.advance(args.run_id)
+    payload = workflow_run_to_dict(run, coordinator.repository.list_steps(run.id))
+    if args.json:
+        _print_json(payload)
+    else:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _handle_workflow_cancel(args: argparse.Namespace, config: HarnessConfig) -> int:
+    repository = WorkflowRepository(RuntimeCoordinationStore(config.data_dir))
+    current = repository.get_run(args.run_id)
+    project = resolve_project(current.project_root, data_dir=config.data_dir)
+    coordinator = _workflow_coordinator(config, project)
+    run = coordinator.cancel(args.run_id)
+    payload = workflow_run_to_dict(run, coordinator.repository.list_steps(run.id))
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Canceled workflow run: {run.id}")
+    return 0
+
+
+def _workflow_coordinator(config: HarnessConfig, project: Any) -> WorkflowCoordinator:
+    registry = create_default_registry()
+    store = FilesystemHarnessSessionStore(config.data_dir)
+    runner = HarnessSessionRunner(registry=registry, config=config, store=store)
+    runtime_store = RuntimeCoordinationStore(config.data_dir)
+    dispatcher = DurableJobDispatcher(
+        runtime_store=runtime_store,
+        payload_store=DurableJobPayloadStore(config.data_dir),
+        runner=runner,
+    )
+    return WorkflowCoordinator(
+        project=project,
+        runtime_store=runtime_store,
+        runner=runner,
+        dispatcher=dispatcher,
+    )
+
+
+def _parse_workflow_inputs(values: list[str]) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for item in values:
+        key, separator, value = item.partition("=")
+        if not separator or not key.strip():
+            raise ValueError("workflow --input values must use key=value")
+        parsed[key.strip()] = value
+    return parsed
 
 
 def _handle_open_session(args: argparse.Namespace, config: HarnessConfig) -> int:
