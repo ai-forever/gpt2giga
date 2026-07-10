@@ -306,6 +306,33 @@ or Gemini config files. Profile names are constrained to safe identifier
 characters, secret-looking keys are rejected while loading project config, and
 secret-looking values are redacted in API/UI output.
 
+### Shared Tool And Secret Contracts
+
+The execution-neutral `gpt2giga.tools` package defines the common vocabulary
+used by future Harness MCP connections and the proxy Tool Gateway:
+
+- `ToolProvider` and `ToolDescriptor` describe provider-owned tools without
+  discovering, starting, or invoking them;
+- `ToolRisk`, `ToolExecutionPolicy`, and the shared `PolicyDecision` resolve
+  tool-specific rules before risk defaults and return `allow`, `deny`, or
+  `ask` with an auditable source;
+- `SecretReference` persists only an environment or keychain pointer, while a
+  `SecretResolver` can return an opaque `ResolvedSecret` at a named owning
+  subprocess/request boundary.
+
+Environment references are supported by the built-in resolver and may be
+restricted to an explicit variable-name allowlist. Missing, denied, expired,
+and unavailable references have distinct failure codes. Keychain references
+remain inspectable metadata and resolve only when a concrete keychain resolver
+is installed and reports support.
+
+Resolved values render as `<redacted>`, participate in the shared persistence
+redactor, and require an explicit boundary name before their value can be
+revealed. Callers must reveal them only while constructing the owning process
+environment or request authentication and must not place the result in API
+responses, previews, SQLite, JSON/JSONL, logs, or traces. This foundation does
+not start MCP processes, connect to networks, execute tools, or write config.
+
 ### Local Evals
 
 Projects can define repeatable local eval specs under `.giga/evals/*.yaml`.

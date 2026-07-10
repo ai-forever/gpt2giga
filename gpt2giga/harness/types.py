@@ -293,6 +293,9 @@ def parse_capability(
 
 def redact_secrets(value: Any) -> Any:
     """Recursively redact secret-looking mapping values."""
+    redaction_hook = getattr(value, "__gpt2giga_redacted__", None)
+    if callable(redaction_hook):
+        return redaction_hook()
     if isinstance(value, Mapping):
         redacted: dict[str, Any] = {}
         for key, item in value.items():

@@ -8,6 +8,7 @@ from typing import Any, Mapping, Protocol
 
 from gpt2giga.harness.runtime.models import ApprovalStatus
 from gpt2giga.harness.sessions.redaction import redact_for_storage
+from gpt2giga.tools.policy import PolicyDecision
 
 
 class PermissionAction(str, Enum):
@@ -26,14 +27,6 @@ class PermissionAction(str, Enum):
     SCHEDULE_ENABLE = "schedule.enable"
     SCHEDULE_RUN_NOW = "schedule.run_now"
     SCHEDULE_UNATTENDED_EDIT = "schedule.unattended_edit"
-
-
-class PolicyDecision(str, Enum):
-    """Result returned by one permission rule."""
-
-    ALLOW = "allow"
-    DENY = "deny"
-    ASK = "ask"
 
 
 class EnforcementLevel(str, Enum):
