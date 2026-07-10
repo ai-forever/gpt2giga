@@ -54,6 +54,8 @@
       runsTraceCursor: null,
       runsEventSource: null,
       runsEventSourceRunId: null,
+      approvals: [],
+      approvalsStatus: "pending",
       liveRuns: new Map(),
       renderedSessionId: null,
       routeRecommendation: null,
@@ -98,6 +100,7 @@
       if (path === "/") return { area: "legacy", id: null };
       if (path === "/work") return { area: "work", id: null };
       if (path === "/runs") return { area: "runs", id: null };
+      if (path === "/approvals") return { area: "approvals", id: null };
       const work = path.match(/^\/work\/([^/]+)$/);
       const runs = path.match(/^\/runs\/([^/]+)$/);
       try {
@@ -122,14 +125,113 @@
       const route = currentRoute();
       const workLink = byId("work-nav-link");
       const runsLink = byId("runs-nav-link");
+      const approvalsLink = byId("approvals-nav-link");
       workLink.classList.toggle("active", route.area === "work" || route.area === "legacy");
       runsLink.classList.toggle("active", route.area === "runs");
+      approvalsLink.classList.toggle("active", route.area === "approvals");
       workLink.href = state.currentSessionId ? `/work/${encodeURIComponent(state.currentSessionId)}` : "/work";
       const run = currentRun();
       runsLink.href = run && run.id ? `/runs/${encodeURIComponent(run.id)}` : "/runs";
       const runsArea = route.area === "runs";
+      const approvalsArea = route.area === "approvals";
       document.body.classList.toggle("runs-area", runsArea);
+      document.body.classList.toggle("approvals-area", approvalsArea);
       byId("runs-center").hidden = !runsArea;
+      byId("approvals-center").hidden = !approvalsArea;
+    }
+
+    async function loadApprovals() {
+      const params = new URLSearchParams({ limit: "100" });
+      if (state.approvalsStatus) params.set("status", state.approvalsStatus);
+      setText("approvals-status", "Refreshing policy decisions...");
+      const result = await getJson(`/api/approvals?${params.toString()}`);
+      if (!result.ok) {
+        setText("approvals-status", result.data.detail || "Approval Center is unavailable.");
+        return false;
+      }
+      state.approvals = Array.isArray(result.data.approvals) ? result.data.approvals : [];
+      const pendingCount = Number(result.data.pending_count || 0);
+      const attention = byId("approval-attention-count");
+      attention.hidden = pendingCount < 1;
+      attention.textContent = String(pendingCount);
+      setText("approvals-status", `${state.approvals.length} decisions · ${pendingCount} pending`);
+      renderApprovals();
+      return true;
+    }
+
+    function renderApprovals() {
+      const list = byId("approvals-list");
+      list.textContent = "";
+      if (!state.approvals.length) {
+        const empty = document.createElement("div");
+        empty.className = "status-line approval-empty";
+        empty.textContent = state.approvalsStatus ? "No pending approvals." : "No approval history yet.";
+        list.appendChild(empty);
+        return;
+      }
+      for (const approval of state.approvals) {
+        const card = document.createElement("article");
+        card.className = "approval-card";
+        const header = document.createElement("div");
+        header.className = "approval-card-header";
+        const title = document.createElement("div");
+        const action = document.createElement("strong");
+        action.textContent = approval.action || "unknown action";
+        const reason = document.createElement("p");
+        reason.textContent = approval.reason || "Approval requested.";
+        title.append(action, reason);
+        const status = document.createElement("span");
+        status.className = `runs-status ${approval.status === "approved" ? "completed" : approval.status}`;
+        status.textContent = approval.status || "pending";
+        header.append(title, status);
+        const meta = document.createElement("div");
+        meta.className = "runs-center-item-meta";
+        meta.textContent = `${approval.enforcement} · ${approval.policy_source}${approval.run_id ? ` · run ${approval.run_id}` : ""}`;
+        const preview = document.createElement("pre");
+        preview.className = "approval-preview";
+        preview.textContent = pretty(approval.preview);
+        card.append(header, meta, preview);
+        if (approval.status === "pending") {
+          const actions = document.createElement("div");
+          actions.className = "approval-actions";
+          for (const [label, decision, className] of [
+            ["Allow once", "allow_once", ""],
+            ["Allow for run", "allow_run", "secondary"],
+            ["Allow project 24h", "allow_project", "secondary"],
+            ["Deny", "deny", "danger"]
+          ]) {
+            if (decision === "allow_project" && !approval.project_id) continue;
+            if (decision === "allow_run" && !approval.run_id) continue;
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = className;
+            button.textContent = label;
+            button.addEventListener("click", () => decideApproval(approval.id, decision));
+            actions.appendChild(button);
+          }
+          card.appendChild(actions);
+        }
+        list.appendChild(card);
+      }
+    }
+
+    async function decideApproval(approvalId, decision) {
+      const payload = { decision };
+      if (decision === "allow_project") payload.expires_in_seconds = 86400;
+      const result = await getJson(`/api/approvals/${encodeURIComponent(approvalId)}/decision`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!result.ok) {
+        setText("approvals-status", result.data.detail || `Decision failed with HTTP ${result.status}`);
+        return;
+      }
+      setText(
+        "model-status",
+        result.data.retry_action ? "Approval saved. Retry the original action." : `Approval saved; job is ${result.data.job_status || "updated"}.`
+      );
+      await loadApprovals();
     }
 
     async function loadRunsCenter(options = {}) {
@@ -1469,6 +1571,7 @@
         prompt: byId("prompt-input").value,
         capability: byId("capability-select").value || "chat_completions",
         invocation_mode: currentInvocationMode(),
+        permission_profile: byId("permission-profile-select").value || "interactive",
         stream: byId("stream-checkbox").checked,
         dry_run: byId("dry-run-checkbox").checked
       };
@@ -2345,6 +2448,13 @@
         for (const event of [...eventsForRun(body.run.id), ...initialEvents]) consumeLiveEvent(event);
         renderLiveDraft(body.run.id);
         renderRunSummary(runForId(body.run.id) || body.run, state.currentBundle && state.currentBundle.events ? state.currentBundle.events : initialEvents);
+        if (body.job && body.job.status === "waiting_approval") {
+          setHeadlessRunning(false);
+          await loadApprovals();
+          syncBrowserRoute("approvals", null);
+          await applyCurrentRoute();
+          return;
+        }
         openHeadlessEventStream(body.run.id);
       } catch (error) {
         setText("run-panel", "Stream start failed.");
@@ -3611,6 +3721,14 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch_name: branchName || null })
       });
+      if (result.data.approval_required) {
+        setText("model-status", "Apply is waiting for approval.");
+        await loadApprovals();
+        syncBrowserRoute("approvals", null);
+        await applyCurrentRoute();
+        renderDiffInspector(run);
+        return;
+      }
       if (!result.ok) {
         setText("diff-text", result.data.detail || `Apply failed with HTTP ${result.status}`);
         renderDiffInspector(run);
@@ -3743,6 +3861,14 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch_name: branchName || null })
       });
+      if (result.data.approval_required) {
+        setText("model-status", "Branch creation is waiting for approval.");
+        await loadApprovals();
+        syncBrowserRoute("approvals", null);
+        await applyCurrentRoute();
+        renderPrInspector(run);
+        return;
+      }
       if (!result.ok) {
         setText("pr-text", result.data.detail || `Branch creation failed with HTTP ${result.status}`);
         renderPrInspector(run);
@@ -4235,6 +4361,7 @@
       byId("refresh-health-button").addEventListener("click", refreshHealth);
       byId("refresh-models-button").addEventListener("click", loadModels);
       byId("refresh-runs-center-button").addEventListener("click", () => loadRunsCenter());
+      byId("refresh-approvals-button").addEventListener("click", () => loadApprovals());
       byId("load-more-runs-button").addEventListener("click", () => loadRunsCenter({ append: true }));
       byId("load-older-trace-button").addEventListener("click", () => loadRunsTrace(true));
       byId("runs-open-task-button").addEventListener("click", () => runCenterAction("open_task"));
@@ -4253,6 +4380,15 @@
           renderRunsCenterSelection();
           syncBrowserRoute("runs", null);
           await loadRunsCenter();
+        });
+      }
+      for (const filter of document.querySelectorAll("[data-approval-status]")) {
+        filter.addEventListener("click", async () => {
+          state.approvalsStatus = filter.dataset.approvalStatus || "";
+          for (const button of document.querySelectorAll("[data-approval-status]")) {
+            button.classList.toggle("active", button === filter);
+          }
+          await loadApprovals();
         });
       }
       byId("init-project-button").addEventListener("click", initProject);
@@ -4474,6 +4610,11 @@
         await loadRunsCenter();
         return true;
       }
+      if (route.area === "approvals") {
+        closeRunsCenterEventStream();
+        await loadApprovals();
+        return true;
+      }
       if (route.area === "work") {
         clearRouteSelection();
         syncNavigation();
@@ -4496,7 +4637,7 @@
       }
       byId("auth-modal").hidden = true;
       await loadProject();
-      await Promise.all([loadHarnesses(), refreshHealth(), loadModels()]);
+      await Promise.all([loadHarnesses(), refreshHealth(), loadModels(), loadApprovals()]);
       await loadSessions();
       const routed = await applyCurrentRoute();
       if (!routed && !state.currentSessionId && state.projectState && state.projectState.last_selected_session) {

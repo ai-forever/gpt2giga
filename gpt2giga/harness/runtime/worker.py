@@ -22,6 +22,14 @@ from gpt2giga.harness.runtime.models import (
     RuntimeJob,
 )
 from gpt2giga.harness.runtime.payloads import DurableJobPayloadStore
+from gpt2giga.harness.runtime.policy import (
+    EnforcementLevel,
+    PermissionAction,
+    PolicyContext,
+    PolicyDecision,
+    PolicyEngine,
+    permission_profile,
+)
 from gpt2giga.harness.runtime.reconcile import RuntimeReconciler
 from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga.harness.session_runner import HarnessSessionRunner, QueuedHarnessRun
@@ -60,6 +68,7 @@ class DurableJobDispatcher:
         self.payload_store = payload_store
         self.runner = runner
         self.submitter_fingerprint = build_worker_fingerprint(runner.registry)
+        self.policy_engine = PolicyEngine(runtime_store)
 
     def submit(
         self,
@@ -69,9 +78,17 @@ class DurableJobDispatcher:
         idempotency_key: str,
         origin: str = "manual",
     ) -> DurableSubmission:
-        """Submit an authenticated interactive job; unattended origins wait for Slice 26."""
-        if origin not in {"manual", "interactive"}:
-            raise ValueError("unattended durable jobs require a policy profile")
+        """Submit a durable job through the selected permission profile."""
+        selected_profile = permission_profile(
+            payload.get("permission_profile"), origin=origin
+        )
+        if (
+            origin not in {"manual", "interactive"}
+            and selected_profile.id != "unattended"
+        ):
+            raise ValueError(
+                "unattended durable jobs require the unattended policy profile"
+            )
         digest = hashlib.sha256(f"{origin}\0{idempotency_key}".encode()).hexdigest()
         lock_target = self.payload_store.root / "idempotency" / digest
         with exclusive_file_lock(lock_target):
@@ -128,11 +145,60 @@ class DurableJobDispatcher:
             initial_status="waiting_input",
         )
         self.payload_store.save(submission.job.id, payload)
-        ready_job = self.runtime_store.transition_job(
-            submission.job.id,
-            "queued",
-            expected_status="waiting_input",
+        selected_profile = permission_profile(
+            payload.get("permission_profile"), origin=origin
         )
+        context = PolicyContext(
+            project_id=str(queued.session.metadata.get("project_id") or "") or None,
+            session_id=session_id,
+            run_id=queued.run.id,
+            job_id=submission.job.id,
+            reason="Start a durable harness process.",
+            preview={
+                "harness_id": harness_id,
+                "mode": payload.get("mode") or "plan",
+                "workspace": payload.get("workspace"),
+                "origin": origin,
+            },
+        )
+        resolution = self.policy_engine.resolve(
+            PermissionAction.PROCESS_SPAWN,
+            profile=selected_profile,
+            context=context,
+            enforcement=EnforcementLevel.ENFORCED_BY_HARNESS,
+        )
+        approval = None
+        if resolution.decision is PolicyDecision.ALLOW:
+            ready_job = self.runtime_store.transition_job(
+                submission.job.id,
+                "queued",
+                expected_status="waiting_input",
+            )
+            event_type = "job_queued"
+            event_message = "Durable harness job queued."
+            span_status = "queued"
+        elif resolution.decision is PolicyDecision.ASK:
+            ready_job = self.runtime_store.transition_job(
+                submission.job.id,
+                "waiting_approval",
+                expected_status="waiting_input",
+            )
+            approval = self.runtime_store.create_approval_request(resolution, context)
+            ready_job = self.runtime_store.get_job(ready_job.id)
+            event_type = "approval_requested"
+            event_message = "Durable harness job is waiting for process approval."
+            span_status = "waiting_approval"
+        else:
+            ready_job = self.runtime_store.transition_job(
+                submission.job.id,
+                "canceled",
+                expected_status="waiting_input",
+                error_summary="process spawn denied by policy",
+            )
+            approval = None
+            event_type = "policy_denied"
+            event_message = "Durable harness job was denied by policy."
+            span_status = "canceled"
         run = self.runner.store.update_run(
             queued.run.id,
             metadata={
@@ -145,14 +211,20 @@ class DurableJobDispatcher:
                 id=new_id("evt"),
                 session_id=session_id,
                 run_id=run.id,
-                type="job_queued",
-                message="Durable harness job queued.",
-                payload={"job_id": ready_job.id},
+                type=event_type,
+                message=event_message,
+                payload={
+                    "job_id": ready_job.id,
+                    "action": PermissionAction.PROCESS_SPAWN.value,
+                    "policy_source": resolution.policy_source,
+                    "enforcement": resolution.enforcement.value,
+                    "approval_id": approval.id if approval is not None else None,
+                },
                 created_at=utc_now(),
                 trace_id=ready_job.id,
                 job_id=ready_job.id,
-                span_kind="run",
-                span_status="queued",
+                span_kind="approval" if approval is not None else "run",
+                span_status=span_status,
             )
         )
         return DurableSubmission(

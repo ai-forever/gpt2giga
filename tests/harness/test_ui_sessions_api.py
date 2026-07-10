@@ -9,6 +9,7 @@ from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.project import project_id_for_root
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
+from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga.harness.runtime.worker import DurableJobWorker
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
@@ -476,12 +477,14 @@ def test_runs_api_diff_apply_and_open_worktree(tmp_path):
     repo = _git_repo(tmp_path / "repo")
     registry = HarnessRegistry()
     registry.register(_FileEditHarness())
+    config = HarnessConfig(
+        default_model="ConfiguredModel",
+        data_dir=str(tmp_path / "data"),
+    )
     client = _client(
-        config=HarnessConfig(
-            default_model="ConfiguredModel",
-            data_dir=str(tmp_path / "data"),
-        ),
+        config=config,
         registry=registry,
+        runtime_store=RuntimeCoordinationStore(config.data_dir),
     )
 
     response = client.post(
@@ -514,6 +517,14 @@ def test_runs_api_diff_apply_and_open_worktree(tmp_path):
 
     applied = client.post(f"/api/runs/{run_id}/apply", json={})
 
+    assert applied.status_code == 202
+    approval_id = applied.json()["approval"]["id"]
+    decided = client.post(
+        f"/api/approvals/{approval_id}/decision",
+        json={"decision": "allow_once"},
+    )
+    assert decided.status_code == 200
+    applied = client.post(f"/api/runs/{run_id}/apply", json={})
     assert applied.status_code == 200
     assert applied.json()["applied"] is True
     assert applied.json()["diff"]["can_apply"] is False
@@ -556,9 +567,11 @@ def test_runs_api_pr_artifact_patch_and_branch_creation(tmp_path):
     repo = _git_repo(tmp_path / "repo")
     registry = HarnessRegistry()
     registry.register(_FileEditHarness())
+    config = HarnessConfig(data_dir=str(tmp_path / "data"))
     client = _client(
-        config=HarnessConfig(data_dir=str(tmp_path / "data")),
+        config=config,
         registry=registry,
+        runtime_store=RuntimeCoordinationStore(config.data_dir),
     )
     response = client.post(
         "/api/sessions/run",
@@ -590,6 +603,17 @@ def test_runs_api_pr_artifact_patch_and_branch_creation(tmp_path):
         json={"branch_name": "codex/pr-artifact-test"},
     )
 
+    assert branched.status_code == 202
+    approval_id = branched.json()["approval"]["id"]
+    decided = client.post(
+        f"/api/approvals/{approval_id}/decision",
+        json={"decision": "allow_once"},
+    )
+    assert decided.status_code == 200
+    branched = client.post(
+        f"/api/runs/{run_id}/branch",
+        json={"branch_name": "codex/pr-artifact-test"},
+    )
     assert branched.status_code == 200
     assert branched.json()["branch_created"] is True
     assert branched.json()["branch_name"] == "codex/pr-artifact-test"
@@ -644,11 +668,13 @@ def _client(
     config: HarnessConfig | None = None,
     registry: HarnessRegistry | None = None,
     store: InMemoryHarnessSessionStore | None = None,
+    runtime_store: RuntimeCoordinationStore | None = None,
 ) -> TestClient:
     app = create_app(
         config or HarnessConfig(default_model="ConfiguredModel"),
         registry=registry or create_default_registry(include_entry_points=False),
         store=store or InMemoryHarnessSessionStore(),
+        runtime_store=runtime_store,
     )
     return TestClient(app)
 

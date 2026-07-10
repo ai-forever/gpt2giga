@@ -11,7 +11,7 @@ import threading
 from typing import Any, Mapping
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from gpt2giga.harness.arena import (
@@ -137,8 +137,17 @@ from gpt2giga.harness.routing import (
 )
 from gpt2giga.harness.runtime.models import RunStatus, job_to_dict
 from gpt2giga.harness.runtime.payloads import DurableJobPayloadStore
+from gpt2giga.harness.runtime.policy import (
+    EnforcementLevel,
+    INTERACTIVE_PROFILE,
+    PermissionAction,
+    PolicyContext,
+    PolicyDecision,
+    PolicyEngine,
+    approval_request_to_dict,
+)
 from gpt2giga.harness.runtime.reconcile import RuntimeReconciler
-from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga.harness.runtime.store import JobNotFoundError, RuntimeCoordinationStore
 from gpt2giga.harness.runtime.worker import DurableJobDispatcher
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
@@ -177,6 +186,7 @@ from gpt2giga.harness.tool_profiles import (
     tool_profile_status_to_dict,
 )
 from gpt2giga.harness.ui.routers.runs import router as runs_router
+from gpt2giga.harness.ui.routers.approvals import router as approvals_router
 from gpt2giga.harness.ui.routers.shell import create_shell_router
 from gpt2giga.harness.ui.security import (
     HarnessUISecurity,
@@ -254,6 +264,7 @@ def create_app(
         and isinstance(store, FilesystemHarnessSessionStore)
         else None
     )
+    policy_engine = PolicyEngine(runtime_store)
     active_headless_runs: dict[str, _ActiveHeadlessRun] = {}
     app = FastAPI(title="gpt2giga Unified Harness", docs_url=None, redoc_url=None)
     ui_security = HarnessUISecurity(config)
@@ -265,6 +276,7 @@ def create_app(
     app.state.harness_runtime_reconciliation = reconciliation_report
     app.state.harness_session_runner = runner
     app.state.harness_job_dispatcher = durable_dispatcher
+    app.state.harness_policy_engine = policy_engine
     app.state.harness_attachment_store = attachment_store
     app.state.harness_arena_store = arena_store
     app.state.harness_eval_store = eval_store
@@ -272,6 +284,82 @@ def create_app(
     app.state.harness_native_registry = native_registry
     app.state.harness_native_index_store = native_index_store
     app.state.harness_native_process_manager = native_process_manager
+
+    def _approval_gate(
+        action: PermissionAction,
+        run: HarnessRun,
+        *,
+        reason: str,
+        preview: Mapping[str, Any],
+    ) -> JSONResponse | None:
+        if runtime_store is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Durable runtime is required for policy-gated actions",
+            )
+        session = store.get_session(run.session_id)
+        runtime_metadata = run.metadata.get("runtime")
+        job_id = (
+            str(runtime_metadata.get("job_id") or "") or None
+            if isinstance(runtime_metadata, Mapping)
+            else None
+        )
+        if job_id is not None:
+            try:
+                runtime_store.get_job(job_id)
+            except JobNotFoundError:
+                job_id = None
+        context = PolicyContext(
+            project_id=str(session.metadata.get("project_id") or "") or None,
+            session_id=run.session_id,
+            run_id=run.id,
+            job_id=job_id,
+            reason=reason,
+            preview=preview,
+        )
+        resolution = policy_engine.resolve(
+            action,
+            profile=INTERACTIVE_PROFILE,
+            context=context,
+            enforcement=EnforcementLevel.ENFORCED_BY_HARNESS,
+        )
+        if resolution.decision is PolicyDecision.DENY:
+            raise HTTPException(status_code=403, detail="Action denied by policy")
+        if resolution.decision is PolicyDecision.ALLOW:
+            return None
+        approval = runtime_store.create_approval_request(resolution, context)
+        existing = any(
+            event.type == "approval_requested"
+            and event.payload.get("approval_id") == approval.id
+            for event in store.list_events(run.session_id, run_id=run.id)
+        )
+        if not existing:
+            store.append_event(
+                HarnessStoredEvent(
+                    id=new_id("evt"),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    type="approval_requested",
+                    message=f"Approval required for {action.value}.",
+                    payload={
+                        "approval_id": approval.id,
+                        "action": action.value,
+                        "enforcement": resolution.enforcement.value,
+                    },
+                    created_at=utc_now(),
+                    trace_id=context.job_id or run.id,
+                    job_id=context.job_id,
+                    span_kind="approval",
+                    span_status="pending",
+                )
+            )
+        return JSONResponse(
+            status_code=202,
+            content={
+                "approval_required": True,
+                "approval": approval_request_to_dict(approval),
+            },
+        )
 
     @app.get("/api/harnesses")
     async def harnesses() -> dict[str, Any]:
@@ -1789,13 +1877,26 @@ def create_app(
         artifact = build_pr_artifact(run)
         return Response(content=artifact.patch, media_type="text/plain")
 
-    @app.post("/api/runs/{run_id}/apply")
+    @app.post("/api/runs/{run_id}/apply", response_model=None)
     async def apply_run_patch(
         run_id: str,
         payload: dict[str, Any] = Body(default_factory=dict),
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | JSONResponse:
         try:
             run = store.get_run(run_id)
+            approval_response = _approval_gate(
+                PermissionAction.GIT_APPLY,
+                run,
+                reason="Apply an isolated worktree diff to the source checkout.",
+                preview={
+                    "branch_name": _optional_text(payload.get("branch_name")),
+                    "changed_files": run_diff_response(run.metadata).get(
+                        "changed_files", []
+                    ),
+                },
+            )
+            if approval_response is not None:
+                return approval_response
             workspace_execution = apply_run_diff(
                 run.metadata,
                 branch_name=_optional_text(payload.get("branch_name")),
@@ -1831,13 +1932,26 @@ def create_app(
             "diff": run_diff_response(run.metadata),
         }
 
-    @app.post("/api/runs/{run_id}/branch")
+    @app.post("/api/runs/{run_id}/branch", response_model=None)
     async def create_run_branch(
         run_id: str,
         payload: dict[str, Any] = Body(default_factory=dict),
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | JSONResponse:
         try:
             run = store.get_run(run_id)
+            approval_response = _approval_gate(
+                PermissionAction.GIT_BRANCH_CREATE,
+                run,
+                reason="Create a local branch from the isolated run patch.",
+                preview={
+                    "branch_name": _optional_text(payload.get("branch_name")),
+                    "changed_files": run_diff_response(run.metadata).get(
+                        "changed_files", []
+                    ),
+                },
+            )
+            if approval_response is not None:
+                return approval_response
             branch = create_pr_branch(
                 run,
                 branch_name=_optional_text(payload.get("branch_name")),
@@ -2092,6 +2206,7 @@ def create_app(
             ) from exc
         return result_to_dict(result)
 
+    app.include_router(approvals_router)
     app.include_router(runs_router)
     # The shell catch-all must remain last so unknown API and asset paths never
     # become HTML responses.

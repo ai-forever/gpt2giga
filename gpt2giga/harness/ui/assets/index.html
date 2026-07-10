@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=25">
+  <link rel="stylesheet" href="/assets/app.css?v=26">
 </head>
 <body>
   <div class="app">
@@ -23,6 +23,7 @@
         <nav class="primary-nav" aria-label="Primary">
           <a id="work-nav-link" class="primary-nav-link" href="/work">Work</a>
           <a id="runs-nav-link" class="primary-nav-link" href="/runs">Runs</a>
+          <a id="approvals-nav-link" class="primary-nav-link" href="/approvals">Approvals <span id="approval-attention-count" class="nav-count" hidden>0</span></a>
         </nav>
       </div>
       <div class="top-actions">
@@ -165,6 +166,12 @@
                 <option value="temp_copy">temp copy</option>
               </select>
             </label>
+            <label class="advanced-control">Permission profile
+              <select id="permission-profile-select">
+                <option value="interactive">interactive</option>
+                <option value="review_every_action">review every action</option>
+              </select>
+            </label>
             <label class="advanced-control">Capability
               <select id="capability-select"></select>
             </label>
@@ -240,6 +247,21 @@
           <button class="example-prompt" type="button">Write tests for the selected function</button>
           <button class="example-prompt" type="button">Refactor this module for clarity</button>
         </div>
+      </section>
+
+      <section id="approvals-center" class="approvals-center" aria-label="Approval Center" hidden>
+        <header class="runs-center-header">
+          <div>
+            <h2>Approval Center</h2>
+            <p id="approvals-status" class="status-line">Loading policy decisions...</p>
+          </div>
+          <div class="runs-filter-bar" role="group" aria-label="Approval status filters">
+            <button class="secondary active" type="button" data-approval-status="pending">Pending</button>
+            <button class="secondary" type="button" data-approval-status="">All</button>
+            <button id="refresh-approvals-button" class="secondary" type="button">Refresh</button>
+          </div>
+        </header>
+        <div id="approvals-list" class="approvals-list" aria-live="polite"></div>
       </section>
 
       <section id="runs-center" class="runs-center" aria-label="Durable runs" hidden>
@@ -482,6 +504,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=25"></script>
+  <script src="/assets/app.js?v=26"></script>
 </body>
 </html>

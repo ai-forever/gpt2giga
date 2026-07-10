@@ -12,6 +12,7 @@ from typing import Any, Iterator, Mapping
 from uuid import uuid4
 
 from gpt2giga.harness.runtime.models import (
+    ApprovalStatus,
     ClaimedJob,
     JobAttempt,
     JobAttemptStatus,
@@ -29,10 +30,22 @@ from gpt2giga.harness.runtime.models import (
     parse_job_status,
     worker_to_dict,
 )
+from gpt2giga.harness.runtime.policy import (
+    ApprovalDecision,
+    ApprovalGrant,
+    ApprovalRequest,
+    EnforcementLevel,
+    PermissionAction,
+    PolicyContext,
+    PolicyResolution,
+    approval_grant_to_dict,
+    approval_request_to_dict,
+    redacted_policy_preview,
+)
 from gpt2giga.harness.sessions.redaction import redact_for_storage
 
 RUNTIME_DB_NAME = "runtime.sqlite3"
-RUNTIME_SCHEMA_VERSION = 3
+RUNTIME_SCHEMA_VERSION = 4
 SQLITE_TIMEOUT_SECONDS = 10.0
 
 
@@ -176,6 +189,53 @@ _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "CREATE INDEX workers_status_heartbeat_idx ON workers(status, heartbeat_at)",
         ),
     ),
+    (
+        4,
+        "unified policy approvals and scoped grants",
+        (
+            "ALTER TABLE jobs ADD COLUMN approval_request_id TEXT",
+            "CREATE INDEX jobs_approval_idx ON jobs(approval_request_id, status)",
+            """
+            CREATE TABLE approval_requests (
+                id TEXT PRIMARY KEY,
+                action TEXT NOT NULL,
+                status TEXT NOT NULL,
+                enforcement TEXT NOT NULL,
+                policy_source TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                preview_json TEXT NOT NULL DEFAULT '{}',
+                project_id TEXT,
+                session_id TEXT,
+                run_id TEXT,
+                job_id TEXT REFERENCES jobs(id) ON DELETE CASCADE,
+                dedupe_key TEXT NOT NULL,
+                decision TEXT,
+                expires_at TEXT,
+                decided_at TEXT,
+                created_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE UNIQUE INDEX approval_pending_dedupe_idx
+            ON approval_requests(dedupe_key) WHERE status = 'pending'
+            """,
+            "CREATE INDEX approval_inbox_idx ON approval_requests(status, created_at DESC)",
+            "CREATE INDEX approval_job_idx ON approval_requests(job_id, created_at)",
+            """
+            CREATE TABLE approval_grants (
+                id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL REFERENCES approval_requests(id) ON DELETE CASCADE,
+                action TEXT NOT NULL,
+                scope_type TEXT NOT NULL,
+                scope_id TEXT NOT NULL,
+                uses_remaining INTEGER,
+                expires_at TEXT,
+                created_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX approval_grant_match_idx ON approval_grants(action, scope_type, scope_id, expires_at)",
+        ),
+    ),
 )
 
 
@@ -223,8 +283,14 @@ class RuntimeCoordinationStore:
         user_message_id = _required_text(user_message_id, "user_message_id")
         origin = _required_text(origin, "origin")
         submit_status = parse_job_status(initial_status)
-        if submit_status not in {JobStatus.QUEUED, JobStatus.WAITING_INPUT}:
-            raise ValueError("initial job status must be queued or waiting_input")
+        if submit_status not in {
+            JobStatus.QUEUED,
+            JobStatus.WAITING_INPUT,
+            JobStatus.WAITING_APPROVAL,
+        }:
+            raise ValueError(
+                "initial job status must be queued, waiting_input, or waiting_approval"
+            )
         initial_run_id = _required_text(
             initial_run_id or _new_id("run"), "initial_run_id"
         )
@@ -867,6 +933,315 @@ class RuntimeCoordinationStore:
             ).fetchall()
         return tuple(_worker_from_row(row) for row in rows)
 
+    def create_approval_request(
+        self,
+        resolution: PolicyResolution,
+        context: PolicyContext,
+        *,
+        expires_at: str | None = None,
+    ) -> ApprovalRequest:
+        """Create or return one pending request for the same action and scope."""
+        if resolution.decision.value != "ask":
+            raise ValueError("approval requests require an ask policy resolution")
+        now = _utc_now()
+        request_id = _new_id("approval")
+        scope_identity = "\0".join(
+            (
+                resolution.action.value,
+                context.project_id or "",
+                context.session_id or "",
+                context.run_id or "",
+                context.job_id or "",
+            )
+        )
+        dedupe_key = hashlib.sha256(scope_identity.encode("utf-8")).hexdigest()
+        values = (
+            request_id,
+            resolution.action.value,
+            ApprovalStatus.PENDING.value,
+            resolution.enforcement.value,
+            resolution.policy_source,
+            _required_text(context.reason, "approval reason"),
+            json.dumps(
+                redacted_policy_preview(context.preview),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            _optional_text(context.project_id),
+            _optional_text(context.session_id),
+            _optional_text(context.run_id),
+            _optional_text(context.job_id),
+            dedupe_key,
+            expires_at,
+            now,
+        )
+        with self._connect() as connection, _transaction(connection):
+            _expire_approvals(connection, now)
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO approval_requests (
+                        id, action, status, enforcement, policy_source, reason,
+                        preview_json, project_id, session_id, run_id, job_id,
+                        dedupe_key, expires_at, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    values,
+                )
+            except sqlite3.IntegrityError:
+                row = connection.execute(
+                    """
+                    SELECT * FROM approval_requests
+                    WHERE dedupe_key = ? AND status = ?
+                    """,
+                    (dedupe_key, ApprovalStatus.PENDING.value),
+                ).fetchone()
+                if row is None:
+                    raise
+                return _approval_request_from_row(row)
+            if context.job_id:
+                connection.execute(
+                    """
+                    UPDATE jobs SET approval_request_id = ?, updated_at = ?,
+                        version = version + 1 WHERE id = ?
+                    """,
+                    (request_id, now, context.job_id),
+                )
+            row = connection.execute(
+                "SELECT * FROM approval_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+        return _approval_request_from_row(row)
+
+    def get_approval_request(self, request_id: str) -> ApprovalRequest:
+        """Return one approval request after applying expiry."""
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            _expire_approvals(connection, now)
+            row = connection.execute(
+                "SELECT * FROM approval_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(request_id)
+        return _approval_request_from_row(row)
+
+    def list_approval_requests(
+        self,
+        *,
+        status: ApprovalStatus | str | None = None,
+        limit: int = 100,
+    ) -> tuple[ApprovalRequest, ...]:
+        """List newest approval inbox items with bounded output."""
+        parsed_status = ApprovalStatus(status) if status is not None else None
+        page_size = max(1, min(int(limit), 200))
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            _expire_approvals(connection, now)
+            if parsed_status is None:
+                rows = connection.execute(
+                    "SELECT * FROM approval_requests ORDER BY created_at DESC, id DESC LIMIT ?",
+                    (page_size,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM approval_requests WHERE status = ?
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    """,
+                    (parsed_status.value, page_size),
+                ).fetchall()
+        return tuple(_approval_request_from_row(row) for row in rows)
+
+    def decide_approval_request(
+        self,
+        request_id: str,
+        decision: ApprovalDecision | str,
+        *,
+        project_expiry_seconds: float | None = None,
+    ) -> ApprovalRequest:
+        """Persist a decision, optional scoped grant, and pre-spawn job outcome."""
+        parsed_decision = ApprovalDecision(decision)
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            _expire_approvals(connection, now)
+            row = connection.execute(
+                "SELECT * FROM approval_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(request_id)
+            request = _approval_request_from_row(row)
+            if request.status is not ApprovalStatus.PENDING:
+                raise InvalidStateTransitionError(
+                    f"approval {request_id} is {request.status.value}"
+                )
+            grant: tuple[str, str, int | None, str | None] | None = None
+            if parsed_decision is ApprovalDecision.ALLOW_ONCE:
+                scope_type, scope_id = _approval_once_scope(request)
+                grant = (scope_type, scope_id, 1, None)
+            elif parsed_decision is ApprovalDecision.ALLOW_RUN:
+                if not request.run_id:
+                    raise ValueError("run-scoped approval requires a run")
+                grant = ("run", request.run_id, None, None)
+            elif parsed_decision is ApprovalDecision.ALLOW_PROJECT:
+                if not request.project_id:
+                    raise ValueError("project-scoped approval requires a project")
+                if project_expiry_seconds is None or project_expiry_seconds <= 0:
+                    raise ValueError(
+                        "project-scoped approval requires a positive expiry"
+                    )
+                grant = (
+                    "project",
+                    request.project_id,
+                    None,
+                    _future_time(project_expiry_seconds),
+                )
+            status = (
+                ApprovalStatus.DENIED
+                if parsed_decision is ApprovalDecision.DENY
+                else ApprovalStatus.APPROVED
+            )
+            connection.execute(
+                """
+                UPDATE approval_requests
+                SET status = ?, decision = ?, decided_at = ?
+                WHERE id = ? AND status = ?
+                """,
+                (
+                    status.value,
+                    parsed_decision.value,
+                    now,
+                    request_id,
+                    ApprovalStatus.PENDING.value,
+                ),
+            )
+            if connection.execute("SELECT changes()").fetchone()[0] != 1:
+                raise ConcurrentUpdateError(
+                    f"approval {request_id} changed concurrently"
+                )
+            if grant is not None:
+                scope_type, scope_id, uses_remaining, expires_at = grant
+                connection.execute(
+                    """
+                    INSERT INTO approval_grants (
+                        id, request_id, action, scope_type, scope_id,
+                        uses_remaining, expires_at, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        _new_id("grant"),
+                        request_id,
+                        request.action.value,
+                        scope_type,
+                        scope_id,
+                        uses_remaining,
+                        expires_at,
+                        now,
+                    ),
+                )
+            if request.job_id:
+                job_row = connection.execute(
+                    "SELECT * FROM jobs WHERE id = ?", (request.job_id,)
+                ).fetchone()
+                if job_row is not None:
+                    job = _job_from_row(job_row)
+                    if job.status is JobStatus.WAITING_APPROVAL:
+                        target = (
+                            JobStatus.CANCELED
+                            if parsed_decision is ApprovalDecision.DENY
+                            else JobStatus.QUEUED
+                        )
+                        next_version = job.version + 1
+                        connection.execute(
+                            """
+                            UPDATE jobs SET status = ?, available_at = ?,
+                                terminal_at = ?, error_summary = ?, updated_at = ?,
+                                approval_request_id = NULL, version = ?
+                            WHERE id = ? AND version = ?
+                            """,
+                            (
+                                target.value,
+                                now,
+                                now if target is JobStatus.CANCELED else None,
+                                "approval denied"
+                                if target is JobStatus.CANCELED
+                                else None,
+                                now,
+                                next_version,
+                                job.id,
+                                job.version,
+                            ),
+                        )
+                        if target is JobStatus.CANCELED:
+                            self._enqueue_terminal_sync(
+                                connection,
+                                job_id=job.id,
+                                status=target,
+                                version=next_version,
+                                session_id=job.session_id,
+                                attempt=None,
+                            )
+            updated = connection.execute(
+                "SELECT * FROM approval_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+        return _approval_request_from_row(updated)
+
+    def consume_matching_approval_grant(
+        self,
+        *,
+        action: PermissionAction | str,
+        project_id: str | None,
+        run_id: str | None,
+        job_id: str | None,
+    ) -> bool:
+        """Consume a matching allow-once grant or observe a scoped grant."""
+        parsed_action = PermissionAction(action)
+        scopes = [
+            ("job", _optional_text(job_id)),
+            ("run", _optional_text(run_id)),
+            ("project", _optional_text(project_id)),
+        ]
+        scopes = [(kind, value) for kind, value in scopes if value]
+        if not scopes:
+            return False
+        clauses = " OR ".join("(scope_type = ? AND scope_id = ?)" for _ in scopes)
+        params: list[Any] = [parsed_action.value]
+        for kind, value in scopes:
+            params.extend((kind, value))
+        now = _utc_now()
+        params.extend((now,))
+        with self._connect() as connection, _transaction(connection):
+            row = connection.execute(
+                f"""
+                SELECT * FROM approval_grants
+                WHERE action = ? AND ({clauses})
+                  AND (expires_at IS NULL OR expires_at > ?)
+                  AND (uses_remaining IS NULL OR uses_remaining > 0)
+                ORDER BY CASE scope_type WHEN 'job' THEN 0 WHEN 'run' THEN 1 ELSE 2 END,
+                         created_at DESC LIMIT 1
+                """,
+                tuple(params),
+            ).fetchone()
+            if row is None:
+                return False
+            if row["uses_remaining"] is not None:
+                connection.execute(
+                    """
+                    UPDATE approval_grants SET uses_remaining = uses_remaining - 1
+                    WHERE id = ? AND uses_remaining > 0
+                    """,
+                    (row["id"],),
+                )
+                if connection.execute("SELECT changes()").fetchone()[0] != 1:
+                    return False
+        return True
+
+    def list_approval_grants(self) -> tuple[ApprovalGrant, ...]:
+        """List grants for safe runtime inspection and export."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM approval_grants ORDER BY created_at, id"
+            ).fetchall()
+        return tuple(_approval_grant_from_row(row) for row in rows)
+
     def transition_attempt(
         self,
         attempt_id: str,
@@ -1134,6 +1509,8 @@ class RuntimeCoordinationStore:
                     "runtime_outbox",
                     "trace_sequences",
                     "workers",
+                    "approval_requests",
+                    "approval_grants",
                 )
             }
             pending = int(
@@ -1165,6 +1542,13 @@ class RuntimeCoordinationStore:
             "jobs": [job_to_dict(job) for job in self.list_jobs()],
             "attempts": [attempt_to_dict(item) for item in self.list_attempts()],
             "workers": [worker_to_dict(item) for item in self.list_workers()],
+            "approvals": [
+                approval_request_to_dict(item)
+                for item in self.list_approval_requests(limit=200)
+            ],
+            "approval_grants": [
+                approval_grant_to_dict(item) for item in self.list_approval_grants()
+            ],
             "outbox": [
                 outbox_entry_to_dict(_outbox_from_row(row)) for row in outbox_rows
             ],
@@ -1298,6 +1682,7 @@ def _job_from_row(row: sqlite3.Row) -> RuntimeJob:
             if row["timeout_seconds"] is not None
             else None
         ),
+        approval_request_id=_optional_text(row["approval_request_id"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
@@ -1357,6 +1742,66 @@ def _worker_from_row(row: sqlite3.Row) -> RuntimeWorker:
         heartbeat_at=str(row["heartbeat_at"]),
         stopped_at=_optional_text(row["stopped_at"]),
         capability_fingerprint=_json_mapping(row["capability_fingerprint_json"]),
+    )
+
+
+def _approval_request_from_row(row: sqlite3.Row) -> ApprovalRequest:
+    preview = json.loads(str(row["preview_json"]))
+    return ApprovalRequest(
+        id=str(row["id"]),
+        action=PermissionAction(str(row["action"])),
+        status=ApprovalStatus(str(row["status"])),
+        enforcement=EnforcementLevel(str(row["enforcement"])),
+        policy_source=str(row["policy_source"]),
+        reason=str(row["reason"]),
+        preview=dict(preview) if isinstance(preview, Mapping) else {},
+        project_id=_optional_text(row["project_id"]),
+        session_id=_optional_text(row["session_id"]),
+        run_id=_optional_text(row["run_id"]),
+        job_id=_optional_text(row["job_id"]),
+        decision=(
+            ApprovalDecision(str(row["decision"]))
+            if row["decision"] is not None
+            else None
+        ),
+        expires_at=_optional_text(row["expires_at"]),
+        decided_at=_optional_text(row["decided_at"]),
+        created_at=str(row["created_at"]),
+    )
+
+
+def _approval_grant_from_row(row: sqlite3.Row) -> ApprovalGrant:
+    return ApprovalGrant(
+        id=str(row["id"]),
+        request_id=str(row["request_id"]),
+        action=PermissionAction(str(row["action"])),
+        scope_type=str(row["scope_type"]),
+        scope_id=str(row["scope_id"]),
+        uses_remaining=(
+            int(row["uses_remaining"]) if row["uses_remaining"] is not None else None
+        ),
+        expires_at=_optional_text(row["expires_at"]),
+        created_at=str(row["created_at"]),
+    )
+
+
+def _approval_once_scope(request: ApprovalRequest) -> tuple[str, str]:
+    if request.job_id:
+        return "job", request.job_id
+    if request.run_id:
+        return "run", request.run_id
+    if request.project_id:
+        return "project", request.project_id
+    raise ValueError("allow-once approval requires a job, run, or project scope")
+
+
+def _expire_approvals(connection: sqlite3.Connection, now: str) -> None:
+    connection.execute(
+        """
+        UPDATE approval_requests SET status = ?
+        WHERE status = ? AND expires_at IS NOT NULL AND expires_at <= ?
+        """,
+        (ApprovalStatus.EXPIRED.value, ApprovalStatus.PENDING.value, now),
     )
 
 

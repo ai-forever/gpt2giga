@@ -146,6 +146,7 @@ class RuntimeJob:
     required_harness_id: str | None = None
     required_capability_fingerprint: Mapping[str, Any] | None = None
     timeout_seconds: float | None = None
+    approval_request_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -246,6 +247,7 @@ def job_to_dict(job: RuntimeJob) -> dict[str, Any]:
             job.required_capability_fingerprint or {}
         ),
         "timeout_seconds": job.timeout_seconds,
+        "approval_request_id": job.approval_request_id,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }

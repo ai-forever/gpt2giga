@@ -88,6 +88,28 @@ GET  /api/runs/{run_id}/events/{event_id}
 POST /api/runs/{run_id}/retry
 ```
 
+The `Approvals` area is the policy inbox for actions owned by Unified Harness.
+The shared taxonomy covers workspace reads/writes, process and network access,
+MCP server/tool actions, git apply/branch, external writes, and schedule
+operations. Each decision records whether enforcement is owned by the Harness,
+delegated to a CLI sandbox, or advisory/unobservable. The UI never claims that
+it can inspect arbitrary actions inside black-box Codex, Claude, or Gemini
+subprocesses.
+
+Interactive runs use the `interactive` profile by default. Select
+`review every action` in Advanced settings to persist a pre-spawn approval and
+put the durable job in `waiting_approval` without creating an attempt, process,
+or lease. An approval requeues the same logical job; denial cancels it. Apply
+and branch actions always require an approval before mutating the source
+checkout. Allow-once grants are consumed, run grants stay scoped to one run,
+and project grants require an expiry.
+
+```text
+GET  /api/policy/profiles
+GET  /api/approvals?status=pending
+POST /api/approvals/{approval_id}/decision
+```
+
 From a project directory, inspect or initialize the project cockpit config:
 
 ```bash
@@ -816,11 +838,13 @@ POST /api/runs/{run_id}/discard
 POST /api/runs/{run_id}/open-worktree
 ```
 
-`apply` is intentionally guarded: it refuses to patch the source checkout when
+`apply` is intentionally guarded: it first creates a persisted `git.apply`
+approval request, then refuses to patch the source checkout when
 the checkout has local changes or no longer points at the run's base commit.
-The optional branch field creates a new branch before applying when the target
-checkout is clean and still at the base commit. `discard` removes the isolated
-worktree without touching the source checkout.
+The optional branch field and PR branch action use the separate
+`git.branch.create` permission. After allowing either action, retry it from the
+original run. `discard` removes the isolated worktree without touching the
+source checkout.
 
 ## Project Cockpit Attachments
 
@@ -953,7 +977,8 @@ provenance snapshots, replay payloads, status, timestamps, and storage
 metadata.
 
 `runtime.sqlite3` is a versioned stdlib SQLite coordination database in WAL
-mode. It stores only mutable job/attempt/worker state, leases and relationship
+mode. It stores only mutable job/attempt/worker state, approval requests and
+scoped grants, leases and relationship
 indexes, idempotency-key hashes, capability fingerprints, trace sequence
 cursors, and the recovery outbox. Session
 content, raw payloads, events, and artifacts remain authoritative in the
@@ -983,9 +1008,9 @@ Atomic claims create one `JobAttempt` and one `HarnessRun` per attempt. A retry
 does not append the logical user message again. Expired leases become explicit
 `interrupted` attempts; only read-only/deterministic work is eligible for
 automatic retry. Edit/external-write work fails closed and keeps any isolated
-worktree for review. Until policy profiles land, only authenticated manual or
-interactive origins may submit durable jobs, and native terminal processes are
-not scheduled by the worker.
+worktree for review. Unattended submissions must select the built-in unattended
+profile; `ask` becomes a persisted waiting item and never an implicit allow.
+Native terminal processes remain manual and are not scheduled by the worker.
 
 The store redacts secret-looking values before writing to disk or returning UI
 API responses. It must not store API keys, authorization headers, cookies,

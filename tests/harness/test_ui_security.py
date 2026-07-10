@@ -38,6 +38,7 @@ def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
     for fragment in (
         'id="work-nav-link"',
         'id="runs-nav-link"',
+        'id="approvals-nav-link"',
         'id="auth-form"',
         'id="auth-token-input" type="password"',
     ):
@@ -46,6 +47,7 @@ def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
         "function currentRoute()",
         "function syncBrowserRoute",
         "function applyCurrentRoute",
+        "function loadApprovals",
         'window.addEventListener("popstate"',
         "`/work/${encodeURIComponent(session.id)}`",
         "`/runs/${encodeURIComponent(run.id)}`",
@@ -131,7 +133,14 @@ def test_host_and_origin_validation_reject_untrusted_requests():
 def test_shell_deep_links_and_unknown_paths_fail_closed():
     client = _client()
 
-    for path in ("/", "/work", "/work/sess_123", "/runs", "/runs/run_123"):
+    for path in (
+        "/",
+        "/work",
+        "/work/sess_123",
+        "/runs",
+        "/runs/run_123",
+        "/approvals",
+    ):
         response = client.get(path)
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/html")
