@@ -187,6 +187,7 @@ from gpt2giga.harness.tool_profiles import (
 )
 from gpt2giga.harness.ui.routers.runs import router as runs_router
 from gpt2giga.harness.ui.routers.approvals import router as approvals_router
+from gpt2giga.harness.ui.routers.tools import router as tools_router
 from gpt2giga.harness.ui.routers.shell import create_shell_router
 from gpt2giga.harness.ui.security import (
     HarnessUISecurity,
@@ -2207,6 +2208,7 @@ def create_app(
         return result_to_dict(result)
 
     app.include_router(approvals_router)
+    app.include_router(tools_router)
     app.include_router(runs_router)
     # The shell catch-all must remain last so unknown API and asset paths never
     # become HTML responses.

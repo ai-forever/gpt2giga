@@ -14,6 +14,8 @@
       projectMemory: [],
       memoryError: null,
       toolProfiles: [],
+      toolServers: [],
+      toolServerErrors: [],
       toolSyncPreview: null,
       toolError: null,
       evalSpecs: [],
@@ -101,6 +103,7 @@
       if (path === "/work") return { area: "work", id: null };
       if (path === "/runs") return { area: "runs", id: null };
       if (path === "/approvals") return { area: "approvals", id: null };
+      if (path === "/tools") return { area: "tools", id: null };
       const work = path.match(/^\/work\/([^/]+)$/);
       const runs = path.match(/^\/runs\/([^/]+)$/);
       try {
@@ -126,18 +129,120 @@
       const workLink = byId("work-nav-link");
       const runsLink = byId("runs-nav-link");
       const approvalsLink = byId("approvals-nav-link");
+      const toolsLink = byId("tools-nav-link");
       workLink.classList.toggle("active", route.area === "work" || route.area === "legacy");
       runsLink.classList.toggle("active", route.area === "runs");
       approvalsLink.classList.toggle("active", route.area === "approvals");
+      toolsLink.classList.toggle("active", route.area === "tools");
       workLink.href = state.currentSessionId ? `/work/${encodeURIComponent(state.currentSessionId)}` : "/work";
       const run = currentRun();
       runsLink.href = run && run.id ? `/runs/${encodeURIComponent(run.id)}` : "/runs";
       const runsArea = route.area === "runs";
       const approvalsArea = route.area === "approvals";
+      const toolsArea = route.area === "tools";
       document.body.classList.toggle("runs-area", runsArea);
       document.body.classList.toggle("approvals-area", approvalsArea);
+      document.body.classList.toggle("tools-area", toolsArea);
       byId("runs-center").hidden = !runsArea;
       byId("approvals-center").hidden = !approvalsArea;
+      byId("tools-center").hidden = !toolsArea;
+    }
+
+    async function loadToolsCenter() {
+      if (!state.project || !state.project.root) return false;
+      setText("tools-center-status", "Refreshing MCP connections...");
+      const result = await getJson(`/api/tool-servers?workspace=${encodeURIComponent(state.project.root)}`);
+      if (!result.ok) {
+        setText("tools-center-status", result.data.detail || "Tools are unavailable.");
+        return false;
+      }
+      state.toolServers = Array.isArray(result.data.servers) ? result.data.servers : [];
+      state.toolServerErrors = Array.isArray(result.data.errors) ? result.data.errors : [];
+      setText("tools-center-status", `${state.toolServers.length} MCP connections · discovery only · tool execution off`);
+      renderToolsCenter();
+      return true;
+    }
+
+    function renderToolsCenter() {
+      const list = byId("tools-center-list");
+      const errors = byId("tools-center-errors");
+      list.textContent = "";
+      errors.textContent = "";
+      for (const item of state.toolServerErrors) {
+        const row = document.createElement("div");
+        row.className = "warning";
+        row.textContent = `${item.server_id || "profile"}: ${item.error || "invalid descriptor"}`;
+        errors.appendChild(row);
+      }
+      if (!state.toolServers.length) {
+        const empty = document.createElement("div");
+        empty.className = "status-line tool-server-empty";
+        empty.textContent = "No enabled or disabled MCP profiles are configured in .giga/harness.toml.";
+        list.appendChild(empty);
+        return;
+      }
+      for (const item of state.toolServers) {
+        const descriptor = item.descriptor || {};
+        const probe = item.latest_probe || null;
+        const card = document.createElement("article");
+        card.className = "tool-server-card";
+        const endpoint = descriptor.transport === "stdio" ? [descriptor.command, ...(descriptor.args || [])].filter(Boolean).join(" ") : descriptor.url;
+        const compatibility = (item.compatibility || []).map((entry) => `${entry.harness_id}: ${entry.status}`).join(" · ");
+        const toolCount = probe && Array.isArray(probe.tools) ? probe.tools.length : 0;
+        const resourceCount = probe && Array.isArray(probe.resources) ? probe.resources.length : 0;
+        const promptCount = probe && Array.isArray(probe.prompts) ? probe.prompts.length : 0;
+        card.innerHTML = `
+          <div class="tool-server-card-header">
+            <div><strong>${escapeHtml(descriptor.title || descriptor.id)}</strong><p>${escapeHtml(descriptor.description || endpoint || "MCP connection")}</p></div>
+            <span class="badge ${probe && probe.status === "healthy" ? "ok" : probe ? "warn" : "info"}">${escapeHtml(probe ? probe.status : descriptor.enabled ? "not probed" : "disabled")}</span>
+          </div>
+          <div class="runs-center-item-meta">${escapeHtml(descriptor.transport || "mcp")} · ${escapeHtml(descriptor.source || "project")} · ${descriptor.trusted ? "trusted" : "approval required"}</div>
+          <div class="details">${escapeHtml(compatibility || "No harness compatibility targets")}</div>
+          <div class="badge-row"><span class="badge info">${toolCount} tools</span><span class="badge info">${resourceCount} resources</span><span class="badge info">${promptCount} prompts</span></div>
+        `;
+        if (probe && probe.error) {
+          const warning = document.createElement("div");
+          warning.className = "warning";
+          warning.textContent = probe.error;
+          card.appendChild(warning);
+        }
+        if (probe && Array.isArray(probe.tools) && probe.tools.length) {
+          const schemas = document.createElement("details");
+          schemas.innerHTML = `<summary>Discovered schemas and risk labels</summary><pre>${escapeHtml(pretty(probe.tools))}</pre>`;
+          card.appendChild(schemas);
+        }
+        const actions = document.createElement("div");
+        actions.className = "inline-actions";
+        const probeButton = document.createElement("button");
+        probeButton.type = "button";
+        probeButton.className = "secondary";
+        probeButton.textContent = "Probe";
+        probeButton.disabled = !descriptor.enabled;
+        probeButton.addEventListener("click", () => probeToolServer(descriptor.id, probeButton));
+        actions.appendChild(probeButton);
+        card.appendChild(actions);
+        list.appendChild(card);
+      }
+    }
+
+    async function probeToolServer(serverId, button) {
+      button.disabled = true;
+      button.textContent = "Probing...";
+      const result = await getJson(`/api/tool-servers/${encodeURIComponent(serverId)}/probe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root })
+      });
+      if (result.status === 202 && result.data.approval_required) {
+        setText("tools-center-status", "Approval required. Decide in Approval Center, then retry the probe.");
+        await loadApprovals();
+      } else if (!result.ok) {
+        setText("tools-center-status", result.data.detail || `Probe failed with HTTP ${result.status}`);
+      } else {
+        await loadToolsCenter();
+      }
+      button.disabled = false;
+      button.textContent = "Probe";
     }
 
     async function loadApprovals() {
@@ -1969,35 +2074,19 @@
       const list = byId("tool-profile-list");
       if (!list) return;
       list.textContent = "";
-      if (state.toolError) {
-        setText("tools-status", "Tools: unavailable");
-        byId("sync-tools-button").disabled = true;
-        const error = document.createElement("div");
-        error.className = "warning";
-        error.textContent = state.toolError;
-        list.appendChild(error);
-        setText("tool-sync-preview", "No tool sync preview.");
-        return;
-      }
-      const profiles = Array.isArray(state.toolProfiles) ? state.toolProfiles : [];
-      setText("tools-status", profiles.length ? `Tools: ${profiles.length}` : "Tools: none");
-      byId("sync-tools-button").disabled = !profiles.length;
-      if (!profiles.length) {
-        const empty = document.createElement("div");
-        empty.className = "status-line";
-        empty.textContent = "No project tool profiles configured.";
-        list.appendChild(empty);
-        setText("tool-sync-preview", "No tool sync preview.");
-        return;
-      }
-      for (const item of profiles) {
-        list.appendChild(toolProfileCard(item));
-      }
-      if (state.toolSyncPreview) {
-        setText("tool-sync-preview", pretty(state.toolSyncPreview));
-      } else {
-        setText("tool-sync-preview", "Dry-run sync preview has not been generated.");
-      }
+      const run = currentRun();
+      const metadata = run && run.metadata && typeof run.metadata === "object" ? run.metadata : {};
+      const bindings = Array.isArray(metadata.tool_profile_bindings)
+        ? metadata.tool_profile_bindings
+        : Array.isArray(metadata.tool_profiles) ? metadata.tool_profiles : [];
+      setText("tools-status", bindings.length ? `Run tools: ${bindings.length}` : "Run tools: none");
+      const summary = document.createElement("div");
+      summary.className = "status-line";
+      summary.textContent = bindings.length
+        ? `Recorded bindings: ${bindings.join(", ")}`
+        : "No MCP/tool bindings were recorded for this run.";
+      list.appendChild(summary);
+      setText("tool-sync-preview", "Open Tools for connection health, schemas, policies, compatibility, and probe history.");
     }
 
     function toolProfileCard(item) {
@@ -4395,8 +4484,8 @@
       byId("new-chat-button").addEventListener("click", newChat);
       byId("add-memory-button").addEventListener("click", addMemoryFromInput);
       byId("remember-message-button").addEventListener("click", rememberLastMessage);
-      byId("sync-tools-button").addEventListener("click", syncTools);
       byId("refresh-evals-button").addEventListener("click", loadEvals);
+      byId("refresh-tools-center-button").addEventListener("click", loadToolsCenter);
       byId("run-eval-button").addEventListener("click", runSelectedEval);
       byId("harness-select").addEventListener("change", (event) => {
         selectHarness(event.target.value);
@@ -4613,6 +4702,11 @@
       if (route.area === "approvals") {
         closeRunsCenterEventStream();
         await loadApprovals();
+        return true;
+      }
+      if (route.area === "tools") {
+        closeRunsCenterEventStream();
+        await loadToolsCenter();
         return true;
       }
       if (route.area === "work") {

@@ -50,8 +50,8 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.status_code == 200
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
-    assert '<link rel="stylesheet" href="/assets/app.css?v=26">' in index_response.text
-    assert '<script src="/assets/app.js?v=26"></script>' in index_response.text
+    assert '<link rel="stylesheet" href="/assets/app.css?v=28">' in index_response.text
+    assert '<script src="/assets/app.js?v=28"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -778,9 +778,13 @@ def test_ui_index_contains_control_panel_elements():
         "memory-list",
         "tools-panel",
         "tools-status",
-        "sync-tools-button",
         "tool-profile-list",
         "tool-sync-preview",
+        "tools-nav-link",
+        "tools-center",
+        "tools-center-status",
+        "refresh-tools-center-button",
+        "tools-center-list",
         "evals-panel",
         "evals-status",
         "refresh-evals-button",
@@ -838,7 +842,9 @@ def test_ui_index_contains_control_panel_elements():
         "projectMemory",
         "loadMemory",
         "Tools",
-        "Dry-run sync",
+        "discovery only",
+        "/api/tool-servers",
+        "probeToolServer",
         "/api/tools",
         "/api/tools/sync",
         "toolProfiles",

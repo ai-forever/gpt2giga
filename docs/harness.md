@@ -110,6 +110,12 @@ GET  /api/approvals?status=pending
 POST /api/approvals/{approval_id}/decision
 ```
 
+The top-level `Tools` area is the MCP connection center. It shows redacted
+project descriptors, transport and trust state, per-harness compatibility,
+latest health, discovered server instructions, tools/resources/prompts, input
+and output schemas, risk labels, and bounded probe history. It does not execute
+tools or write harness config.
+
 From a project directory, inspect or initialize the project cockpit config:
 
 ```bash
@@ -292,9 +298,7 @@ harnesses = ["codex-cli", "claude-code", "gemini-cli"]
 readonly = true
 ```
 
-Tool profiles are dry-run only in this milestone. The harness parses them,
-reports per-harness status in the UI Tools tab, and generates redacted config
-previews through:
+The legacy profile APIs remain a side-effect-free managed-config preview:
 
 ```text
 GET  /api/tools
@@ -305,6 +309,64 @@ No external tools are installed, authenticated, or written into Codex, Claude,
 or Gemini config files. Profile names are constrained to safe identifier
 characters, secret-looking keys are rejected while loading project config, and
 secret-looking values are redacted in API/UI output.
+
+MCP profiles can additionally describe a stdio or Streamable HTTP connection:
+
+```toml
+[tools.issues]
+enabled = true
+title = "Issue MCP"
+kind = "mcp"
+harnesses = ["codex-cli", "claude-code"]
+transport = "stdio"
+command = "issue-mcp"
+args = ["--readonly"]
+timeout_seconds = 10
+trusted = false
+
+[tools.issues.env.ISSUE_TOKEN.secret_ref]
+kind = "environment"
+name = "ISSUE_MCP_TOKEN"
+
+[tools.search]
+enabled = true
+kind = "mcp"
+transport = "streamable_http"
+url = "https://mcp.example.test/rpc"
+
+[tools.search.headers.Authorization.secret_ref]
+kind = "environment"
+name = "SEARCH_MCP_AUTHORIZATION"
+
+[tools.search.risk_policy]
+low = "allow"
+medium = "ask"
+high = "deny"
+```
+
+Environment and headers accept literal non-secret values or an explicit
+`secret_ref`. Sensitive authentication headers reject literal values. URLs are
+restricted to HTTP(S) without embedded userinfo; probe responses are bounded to
+1 MB and timeouts are capped at 60 seconds. Stdio probes receive a minimal
+environment plus explicitly resolved profile values rather than the complete
+parent environment. Discovery negotiates the MCP `2025-11-25` protocol,
+includes the negotiated version on subsequent HTTP requests, and refuses HTTP
+redirects so authentication headers cannot cross to another origin.
+
+An MCP probe performs only `initialize`, `tools/list`, `resources/list`, and
+`prompts/list`. Starting an untrusted stdio server or connecting to a new HTTP
+origin creates a project-scoped Approval Center request. After approval, retry
+the probe. Results are appended as redacted JSONL under
+`GPT2GIGA_HARNESS_DATA_DIR/tools/probe_history.jsonl`:
+
+```text
+GET  /api/tool-servers?workspace=...
+GET  /api/tool-servers/{server_id}?workspace=...
+POST /api/tool-servers/{server_id}/probe
+```
+
+MCP tool invocation and managed Codex/Claude/Gemini config apply remain
+disabled in this slice.
 
 ### Shared Tool And Secret Contracts
 
@@ -330,8 +392,9 @@ Resolved values render as `<redacted>`, participate in the shared persistence
 redactor, and require an explicit boundary name before their value can be
 revealed. Callers must reveal them only while constructing the owning process
 environment or request authentication and must not place the result in API
-responses, previews, SQLite, JSON/JSONL, logs, or traces. This foundation does
-not start MCP processes, connect to networks, execute tools, or write config.
+responses, previews, SQLite, JSON/JSONL, logs, or traces. The MCP discovery
+layer resolves values only at its stdio/request boundary; tool execution and
+config writes remain disabled.
 
 ### Local Evals
 

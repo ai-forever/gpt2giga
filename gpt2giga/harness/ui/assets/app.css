@@ -2293,10 +2293,22 @@
     .approvals-center[hidden] {
       display: none;
     }
+    .tools-center {
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      background: var(--panel);
+    }
+    .tools-center[hidden] {
+      display: none;
+    }
     body.runs-area .shell {
       grid-template-columns: minmax(0, 1fr);
     }
     body.approvals-area .shell {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    body.tools-area .shell {
       grid-template-columns: minmax(0, 1fr);
     }
     body.runs-area .sidebar,
@@ -2315,6 +2327,66 @@
     body.approvals-area .inspector-backdrop,
     body.approvals-area .sidebar-backdrop {
       display: none;
+    }
+    body.tools-area .sidebar,
+    body.tools-area .center,
+    body.tools-area .runs-center,
+    body.tools-area .approvals-center,
+    body.tools-area .inspector,
+    body.tools-area .details-toggle,
+    body.tools-area .inspector-backdrop,
+    body.tools-area .sidebar-backdrop {
+      display: none;
+    }
+    .tools-center-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 12px;
+      padding: 18px 20px;
+    }
+    .tools-center-errors {
+      display: grid;
+      gap: 8px;
+      padding: 0 20px;
+    }
+    .tool-server-card {
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #151c25;
+      padding: 14px;
+    }
+    .tool-server-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .tool-server-card-header p {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .tool-server-card details pre {
+      max-height: 280px;
+      overflow: auto;
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--mono-bg);
+      padding: 10px;
+      font-size: 11px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .tool-server-empty {
+      grid-column: 1 / -1;
+      padding: 24px;
+      text-align: center;
     }
     .runs-center-header,
     .runs-trace-header {
@@ -2541,6 +2613,10 @@
         margin-left: 24px;
       }
       .approvals-list {
+        grid-template-columns: minmax(0, 1fr);
+        padding: 12px;
+      }
+      .tools-center-list {
         grid-template-columns: minmax(0, 1fr);
         padding: 12px;
       }

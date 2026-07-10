@@ -38,6 +38,7 @@ def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
     for fragment in (
         'id="work-nav-link"',
         'id="runs-nav-link"',
+        'id="tools-nav-link"',
         'id="approvals-nav-link"',
         'id="auth-form"',
         'id="auth-token-input" type="password"',
@@ -140,6 +141,7 @@ def test_shell_deep_links_and_unknown_paths_fail_closed():
         "/runs",
         "/runs/run_123",
         "/approvals",
+        "/tools",
     ):
         response = client.get(path)
         assert response.status_code == 200

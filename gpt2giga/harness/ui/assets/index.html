@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=26">
+  <link rel="stylesheet" href="/assets/app.css?v=28">
 </head>
 <body>
   <div class="app">
@@ -23,6 +23,7 @@
         <nav class="primary-nav" aria-label="Primary">
           <a id="work-nav-link" class="primary-nav-link" href="/work">Work</a>
           <a id="runs-nav-link" class="primary-nav-link" href="/runs">Runs</a>
+          <a id="tools-nav-link" class="primary-nav-link" href="/tools">Tools</a>
           <a id="approvals-nav-link" class="primary-nav-link" href="/approvals">Approvals <span id="approval-attention-count" class="nav-count" hidden>0</span></a>
         </nav>
       </div>
@@ -264,6 +265,18 @@
         <div id="approvals-list" class="approvals-list" aria-live="polite"></div>
       </section>
 
+      <section id="tools-center" class="tools-center" aria-label="MCP connections" hidden>
+        <header class="runs-center-header">
+          <div>
+            <h2>Tools</h2>
+            <p id="tools-center-status" class="status-line">Loading MCP connections...</p>
+          </div>
+          <button id="refresh-tools-center-button" class="secondary" type="button">Refresh</button>
+        </header>
+        <div id="tools-center-errors" class="tools-center-errors"></div>
+        <div id="tools-center-list" class="tools-center-list" aria-live="polite"></div>
+      </section>
+
       <section id="runs-center" class="runs-center" aria-label="Durable runs" hidden>
         <header class="runs-center-header">
           <div>
@@ -339,7 +352,7 @@
               <button class="tab" type="button" data-tab="editor">Editor</button>
               <button class="tab" type="button" data-tab="attachments">Attachments</button>
               <button class="tab" type="button" data-tab="memory">Memory</button>
-              <button class="tab" type="button" data-tab="tools">Tools</button>
+              <button class="tab" type="button" data-tab="tools">Run tools</button>
               <button class="tab" type="button" data-tab="evals">Evals</button>
               <button class="tab" type="button" data-tab="native">Native</button>
               <button class="tab" type="button" data-tab="storage">Storage</button>
@@ -412,11 +425,11 @@
             </div>
             <div id="tools-panel" class="mono-panel tab-panel">
               <div class="inline-actions">
-                <span id="tools-status" class="badge info">Tools: loading</span>
-                <button id="sync-tools-button" class="secondary" type="button">Dry-run sync</button>
+                <span id="tools-status" class="badge info">Run tools: none</span>
+                <a class="secondary link-button" href="/tools">Open Tools</a>
               </div>
-              <div id="tool-profile-list" class="tool-profile-list"></div>
-              <pre id="tool-sync-preview">No tool sync preview.</pre>
+              <div id="tool-profile-list" class="tool-profile-list">Select a run to inspect its tool profile summary.</div>
+              <pre id="tool-sync-preview">MCP inventory, schemas, health, and compatibility live in Tools.</pre>
             </div>
             <div id="evals-panel" class="mono-panel tab-panel">
               <div class="inline-actions">
@@ -504,6 +517,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=26"></script>
+  <script src="/assets/app.js?v=28"></script>
 </body>
 </html>
