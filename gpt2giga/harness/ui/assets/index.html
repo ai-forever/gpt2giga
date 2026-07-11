@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=35.3">
+  <link rel="stylesheet" href="/assets/app.css?v=36.2">
 </head>
 <body>
   <div class="app">
@@ -25,6 +25,7 @@
           <a id="runs-nav-link" class="primary-nav-link" href="/runs">Runs</a>
           <a id="agents-nav-link" class="primary-nav-link" href="/agents">Agents</a>
           <a id="workflows-nav-link" class="primary-nav-link" href="/workflows">Workflows</a>
+          <a id="evaluate-nav-link" class="primary-nav-link" href="/evaluate">Evaluate</a>
           <a id="tools-nav-link" class="primary-nav-link" href="/tools">Tools</a>
           <a id="approvals-nav-link" class="primary-nav-link" href="/approvals">Approvals <span id="approval-attention-count" class="nav-count" hidden>0</span></a>
         </nav>
@@ -341,6 +342,36 @@
         <div id="approvals-list" class="approvals-list" aria-live="polite"></div>
       </section>
 
+      <section id="evaluate-center" class="evaluate-center" aria-label="Eval Lab" hidden>
+        <header class="runs-center-header">
+          <div>
+            <h2>Eval Lab</h2>
+            <p id="evaluate-center-status" class="status-line">Loading compatibility evidence...</p>
+          </div>
+          <div class="inline-actions">
+            <select id="evaluate-spec-select" aria-label="Quality eval"></select>
+            <label class="compact-label">Repeats<input id="evaluate-repetitions" type="number" min="1" max="20" value="1"></label>
+            <button id="run-evaluate-button" type="button" disabled>Run matrix</button>
+            <button id="cancel-evaluate-button" class="danger" type="button" disabled>Cancel</button>
+            <button id="refresh-evaluate-button" class="secondary" type="button">Refresh</button>
+          </div>
+        </header>
+        <div class="evaluate-grid">
+          <section class="evaluate-panel">
+            <div class="agent-editor-header"><div><h3>Protocol conformance</h3><p class="status-line">Client fixtures × /v1 and /v2, filtered by declared capabilities.</p></div></div>
+            <div id="protocol-matrix" class="matrix-table" aria-live="polite"></div>
+          </section>
+          <section class="evaluate-panel">
+            <div class="agent-editor-header"><div><h3>Harness quality</h3><p class="status-line">Durable case runs, repetitions, metrics, flakes, and pinned baselines.</p></div></div>
+            <div id="quality-matrix" class="matrix-table" aria-live="polite"></div>
+          </section>
+          <section class="evaluate-panel evaluate-results-panel">
+            <div class="agent-editor-header"><div><h3>Runs and trends</h3><p class="status-line">Open any cell in Runs for its full trace.</p></div><button id="pin-evaluate-baseline-button" class="secondary" type="button" disabled>Pin baseline</button></div>
+            <div id="evaluate-runs" class="runs-center-list" aria-live="polite"></div>
+          </section>
+        </div>
+      </section>
+
       <section id="tools-center" class="tools-center" aria-label="MCP connections" hidden>
         <header class="runs-center-header">
           <div>
@@ -451,7 +482,7 @@
               <button class="tab" type="button" data-tab="attachments">Attachments</button>
               <button class="tab" type="button" data-tab="memory">Memory</button>
               <button class="tab" type="button" data-tab="tools">Run tools</button>
-              <button class="tab" type="button" data-tab="evals">Evals</button>
+              <button class="tab" type="button" data-tab="evals">Scorecard</button>
               <button class="tab" type="button" data-tab="native">Native</button>
               <button class="tab" type="button" data-tab="storage">Storage</button>
             </div>
@@ -547,17 +578,18 @@
             </div>
             <div id="evals-panel" class="mono-panel tab-panel">
               <div class="inline-actions">
-                <span id="evals-status" class="badge info">Evals: loading</span>
-                <button id="refresh-evals-button" class="secondary" type="button">Refresh evals</button>
-                <button id="run-eval-button" type="button" disabled>Run eval</button>
+                <span id="evals-status" class="badge info">Scorecard: loading</span>
+                <a class="secondary link-button" href="/evaluate">Open Evaluate</a>
+                <button id="refresh-evals-button" class="secondary" type="button" hidden>Refresh evals</button>
+                <button id="run-eval-button" type="button" hidden disabled>Run eval</button>
               </div>
-              <label>Eval spec
+              <label hidden>Eval spec
                 <select id="eval-spec-select"></select>
               </label>
-              <label>Override harnesses
+              <label hidden>Override harnesses
                 <input id="eval-harness-input" placeholder="echo,codex-cli" autocomplete="off">
               </label>
-              <div id="eval-spec-list" class="tool-profile-list"></div>
+              <div id="eval-spec-list" class="tool-profile-list" hidden></div>
               <pre id="eval-scorecard">No eval run selected.</pre>
             </div>
             <div id="native-panel" class="mono-panel tab-panel">
@@ -631,6 +663,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=35.3"></script>
+  <script src="/assets/app.js?v=36.2"></script>
 </body>
 </html>

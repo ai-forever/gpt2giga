@@ -51,9 +51,9 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=35.3">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=36.2">' in index_response.text
     )
-    assert '<script src="/assets/app.js?v=35.3"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=36.2"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -803,6 +803,14 @@ def test_ui_index_contains_control_panel_elements():
         "eval-harness-input",
         "eval-spec-list",
         "eval-scorecard",
+        "evaluate-nav-link",
+        "evaluate-center",
+        "protocol-matrix",
+        "quality-matrix",
+        "evaluate-runs",
+        "run-evaluate-button",
+        "cancel-evaluate-button",
+        "pin-evaluate-baseline-button",
         "native-panel",
         "storage-panel",
         "advanced-settings-button",
@@ -866,6 +874,12 @@ def test_ui_index_contains_control_panel_elements():
         "evalSpecs",
         "runSelectedEval",
         "eval-scorecard",
+        "Eval Lab",
+        "Protocol conformance",
+        "Harness quality",
+        "/api/evaluate",
+        "runEvaluateMatrix",
+        "pinEvaluateBaseline",
         "Editor",
         "/api/editor/open-workspace",
         "/api/editor/open-file",

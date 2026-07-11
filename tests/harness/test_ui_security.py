@@ -41,6 +41,7 @@ def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
         'id="tools-nav-link"',
         'id="agents-nav-link"',
         'id="approvals-nav-link"',
+        'id="evaluate-nav-link"',
         'id="auth-form"',
         'id="auth-token-input" type="password"',
     ):
@@ -146,6 +147,7 @@ def test_shell_deep_links_and_unknown_paths_fail_closed():
         "/agents",
         "/workflows",
         "/workflows/review-team",
+        "/evaluate",
     ):
         response = client.get(path)
         assert response.status_code == 200

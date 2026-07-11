@@ -544,11 +544,18 @@ responses, previews, SQLite, JSON/JSONL, logs, or traces. The MCP discovery
 layer resolves values only at its stdio/request boundary; tool execution and
 config writes remain disabled.
 
-### Local Evals
+### Eval Lab and compatibility matrices
 
 Projects can define repeatable local eval specs under `.giga/evals/*.yaml`.
-The MVP supports deterministic checks and stores scorecards under the project
-state directory:
+The top-level `Evaluate` area keeps protocol conformance separate from harness
+quality. Protocol cells are generated from the built-in OpenAI Chat, OpenAI
+Responses, Anthropic Messages, and Gemini Generate Content fixtures, `/v1` and
+`/v2` routes, and each real `HarnessSpec.capabilities` declaration. Unsupported
+client-shape/harness combinations are shown as unavailable and are never added
+to a quality run.
+
+Quality evals use deterministic project specs and durable jobs. Scorecards are
+stored under the project state directory:
 
 ```text
 projects/<project_id>/eval-runs/<eval_run_id>.json
@@ -564,6 +571,7 @@ mode: read
 cases:
   - id: explain_architecture
     prompt: "Explain the architecture of this project."
+    required_capability: chat_completions
     checks:
       - type: contains
         value: "architecture"
@@ -574,7 +582,7 @@ cases:
         value: "(?i)(api[_-]?key|secret|token)="
 ```
 
-Run evals from the CLI:
+Run simple evals from the CLI:
 
 ```bash
 giga eval list --workspace . --json
@@ -585,9 +593,18 @@ giga eval run smoke --harness codex-cli,claude-code,gemini-cli --dry-run
 Supported check types are `contains`, `not_contains`, `contains_regex`,
 `not_contains_regex`, and `equals`. Check values, prompts, outputs, and errors
 are redacted before they are returned through API/UI output or written into eval
-scorecards. Each case/harness execution is still backed by normal session runs,
-so provenance, raw records, preflight, events, and project memory accounting
-remain inspectable.
+scorecards. The browser Eval Lab can run up to 20 repetitions per compatible
+cell. Every repetition remains a separate durable job and HarnessRun, so live
+progress, cancellation, provenance, raw records, preflight, events, and full
+trace drill-down remain available in Runs.
+
+Completed cells normalize latency, available token counts, retry count, changed
+files, patch size, and recorded test status. Repeated pass/fail disagreement is
+reported as a flake. A completed scorecard can be pinned as the spec baseline;
+the immutable snapshot records the project Git SHA when available and a config
+hash, then later runs show pass-rate and metric deltas. Deterministic checks are
+the default gate. Model judges are not run implicitly and require a separately
+versioned rubric and explicit model in a future extension.
 
 The matching API surface is:
 
@@ -595,10 +612,16 @@ The matching API surface is:
 GET  /api/evals
 POST /api/evals/{eval_name}/runs
 GET  /api/evals/runs/{eval_run_id}
+GET  /api/evaluate
+GET  /api/evaluate/{eval_name}/matrix
+POST /api/evaluate/runs/{eval_run_id}/cancel
+POST /api/evaluate/runs/{eval_run_id}/baseline
 ```
 
-The browser cockpit exposes the same workflow in the `Evals` inspector tab with
-spec discovery, optional harness overrides, and a scorecard for the latest run.
+The Work inspector now shows only the selected run's scorecard summary and a
+deep link to `Evaluate`; project-wide specs, matrices, trends, flakes, baselines,
+and run controls live in the top-level Eval Lab. Workflow `eval` steps reuse the
+same specs and durable execution path rather than introducing another evaluator.
 
 ### PR Artifacts
 

@@ -3,10 +3,13 @@ from pathlib import Path
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.evals import (
     FilesystemHarnessEvalStore,
+    compare_eval_run_to_baseline,
     discover_eval_specs,
+    eval_compatibility_matrix,
     evaluate_checks,
     eval_run_to_dict,
     load_eval_spec,
+    protocol_conformance_matrix,
     run_eval,
 )
 from gpt2giga.harness.project import resolve_project
@@ -63,6 +66,11 @@ cases:
         "failed": 0,
         "errors": 0,
         "score": 1.0,
+        "metrics": {
+            "latency_seconds": payload["summary"]["metrics"]["latency_seconds"]
+        },
+        "flakes": 0,
+        "flaky_targets": [],
     }
     assert [result["case_id"] for result in payload["results"]] == [
         "explain",
@@ -111,6 +119,105 @@ cases:
     assert [spec.name for spec in specs] == ["ok"]
     assert len(errors) == 1
     assert "must define prompt" in errors[0].message
+
+
+def test_eval_matrix_filters_capabilities_and_tracks_repetitions(tmp_path):
+    _write_eval(
+        tmp_path,
+        """
+name: matrix
+harnesses: [echo, codex-cli]
+cases:
+  - id: chat
+    prompt: hello
+    required_capability: chat_completions
+    checks:
+      - {type: contains, value: hello}
+""",
+        filename="matrix.yaml",
+    )
+    data_dir = tmp_path / "data"
+    project = resolve_project(tmp_path, data_dir=data_dir, load_config_name=False)
+    registry = create_default_registry(include_entry_points=False)
+    runner = HarnessSessionRunner(
+        registry=registry,
+        config=HarnessConfig(data_dir=str(data_dir)),
+        store=FilesystemHarnessSessionStore(data_dir),
+    )
+    spec = load_eval_spec(tmp_path, "matrix")
+
+    assert eval_compatibility_matrix(spec, registry) == [
+        {
+            "case_id": "chat",
+            "harness_id": "echo",
+            "required_capability": "chat_completions",
+            "capabilities": ["chat_completions"],
+            "api_mode": "v2",
+            "compatible": True,
+        }
+    ]
+
+    eval_run = run_eval(
+        runner=runner,
+        eval_store=FilesystemHarnessEvalStore(data_dir),
+        project=project,
+        spec=spec,
+        repetitions=2,
+    )
+
+    assert [(item.harness_id, item.repetition) for item in eval_run.results] == [
+        ("echo", 1),
+        ("echo", 2),
+    ]
+    assert eval_run.summary["flakes"] == 0
+    assert eval_run.summary["metrics"]["latency_seconds"] >= 0
+
+
+def test_eval_baseline_records_git_and_config_identity(tmp_path):
+    _write_eval(tmp_path, "name: smoke\ncases:\n  - {id: one, prompt: hello}\n")
+    data_dir = tmp_path / "data"
+    project = resolve_project(tmp_path, data_dir=data_dir, load_config_name=False)
+    registry = create_default_registry(include_entry_points=False)
+    runner = HarnessSessionRunner(
+        registry=registry,
+        config=HarnessConfig(data_dir=str(data_dir)),
+        store=FilesystemHarnessSessionStore(data_dir),
+    )
+    store = FilesystemHarnessEvalStore(data_dir)
+    eval_run = run_eval(
+        runner=runner,
+        eval_store=store,
+        project=project,
+        spec=load_eval_spec(tmp_path, "smoke"),
+    )
+
+    baseline = store.pin_baseline(project, eval_run)
+    comparison = compare_eval_run_to_baseline(eval_run, baseline)
+
+    assert baseline["eval_run_id"] == eval_run.id
+    assert len(baseline["config_hash"]) == 64
+    assert comparison["score_delta"] == 0.0
+    assert store.get_baseline(project, "smoke")["eval_run_id"] == eval_run.id
+
+
+def test_protocol_conformance_matrix_uses_declared_harness_capabilities():
+    cells = protocol_conformance_matrix(
+        create_default_registry(include_entry_points=False)
+    )
+
+    openai_v2 = next(
+        item
+        for item in cells
+        if item["fixture_id"] == "openai-chat" and item["api_mode"] == "v2"
+    )
+    responses_v2 = next(
+        item
+        for item in cells
+        if item["fixture_id"] == "openai-responses" and item["api_mode"] == "v2"
+    )
+    assert openai_v2["runnable"] is True
+    assert "echo" in openai_v2["compatible_harness_ids"]
+    assert responses_v2["runnable"] is False
 
 
 def _write_eval(tmp_path, text: str, *, filename: str = "smoke.yaml") -> Path:

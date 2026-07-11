@@ -188,6 +188,7 @@ from gpt2giga.harness.tool_profiles import (
 from gpt2giga.harness.ui.routers.runs import router as runs_router
 from gpt2giga.harness.ui.routers.agents import router as agents_router
 from gpt2giga.harness.ui.routers.approvals import router as approvals_router
+from gpt2giga.harness.ui.routers.evaluate import router as evaluate_router
 from gpt2giga.harness.ui.routers.tools import router as tools_router
 from gpt2giga.harness.ui.routers.workflows import router as workflows_router
 from gpt2giga.harness.ui.routers.shell import create_shell_router
@@ -825,6 +826,7 @@ def create_app(
                 mode=_optional_text(payload.get("mode")),
                 workspace_policy=_optional_text(payload.get("workspace_policy")),
                 dry_run=bool(payload.get("dry_run")),
+                repetitions=int(payload.get("repetitions") or 1),
                 **(
                     {"dispatcher": durable_dispatcher}
                     if durable_dispatcher is not None
@@ -2211,6 +2213,7 @@ def create_app(
 
     app.include_router(agents_router)
     app.include_router(approvals_router)
+    app.include_router(evaluate_router)
     app.include_router(tools_router)
     app.include_router(workflows_router)
     app.include_router(runs_router)

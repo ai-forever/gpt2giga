@@ -281,6 +281,32 @@ cases:
     assert fetched.json()["eval_run"]["id"] == eval_run["id"]
     assert fetched.json()["eval_run"]["status"] == "passed"
     assert fetched.json()["eval_run"]["summary"]["passed"] == 1
+    assert "latency_seconds" in fetched.json()["eval_run"]["summary"]["metrics"]
+
+    lab = client.get("/api/evaluate", params={"workspace": str(workspace)})
+    assert lab.status_code == 200
+    assert lab.json()["quality_specs"][0]["matrix"][0]["compatible"] is True
+    assert "dimensions" in lab.json()["quality_specs"][0]
+    assert lab.json()["protocol_matrix"][0]["fixture_id"] == "openai-chat"
+    assert lab.json()["runs"][0]["baseline_delta"] is None
+
+    pinned = client.post(
+        f"/api/evaluate/runs/{eval_run['id']}/baseline",
+        json={"workspace": str(workspace)},
+    )
+    assert pinned.status_code == 200
+    assert pinned.json()["baseline"]["eval_run_id"] == eval_run["id"]
+
+    refreshed = client.get("/api/evaluate", params={"workspace": str(workspace)})
+    assert refreshed.json()["runs"][0]["baseline_delta"]["score_delta"] == 0.0
+
+    queued = client.post(
+        "/api/evals/smoke/runs",
+        json={"workspace": str(workspace), "repetitions": 2},
+    ).json()["eval_run"]
+    canceled = client.post(f"/api/evaluate/runs/{queued['id']}/cancel")
+    assert canceled.status_code == 200
+    assert len(canceled.json()["cancel_requested"]) == 2
 
 
 def test_preflight_api_hard_blocks_private_key_prompt_without_echoing_secret():

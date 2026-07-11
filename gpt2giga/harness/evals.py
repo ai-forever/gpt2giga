@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from datetime import datetime
+import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 from typing import Any, Mapping
 
 import yaml
@@ -17,11 +20,19 @@ from gpt2giga.harness.sessions.models import HarnessRun
 from gpt2giga.harness.sessions.redaction import redact_for_storage
 from gpt2giga.harness.sessions.store import new_id, utc_now
 from gpt2giga.harness.session_runner import HarnessSessionRunner
-from gpt2giga.harness.types import GigaChatApiMode, parse_api_mode
+from gpt2giga.harness.types import (
+    GigaChatApiMode,
+    HarnessCapability,
+    parse_api_mode,
+    parse_capability,
+    spec_capability_values,
+)
 
 EVALS_RELATIVE_DIR = Path(".giga") / "evals"
 EVAL_RUNS_DIR = "eval-runs"
+EVAL_BASELINES_DIR = "eval-baselines"
 DEFAULT_EVAL_HARNESSES = ("echo",)
+MAX_EVAL_REPETITIONS = 20
 EVAL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 CHECK_TYPES = {
     "contains",
@@ -58,6 +69,7 @@ class EvalCaseSpec:
     prompt: str
     harnesses: tuple[str, ...] = ()
     checks: tuple[EvalCheckSpec, ...] = ()
+    required_capability: HarnessCapability | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +121,10 @@ class EvalCaseRunResult:
     run_id: str | None = None
     output_text: str | None = None
     error: str | None = None
+    repetition: int = 1
+    target_type: str = "harness"
+    target_id: str | None = None
+    metrics: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -160,17 +176,14 @@ class FilesystemHarnessEvalStore:
             results = [
                 item
                 for item in eval_run.results
-                if (item.case_id, item.harness_id)
-                != (result.case_id, result.harness_id)
+                if _result_identity(item) != _result_identity(result)
             ]
             results.append(result)
             order = {
-                (item.case_id, item.harness_id): index
+                _result_identity(item): index
                 for index, item in enumerate(eval_run.results)
             }
-            results.sort(
-                key=lambda item: order.get((item.case_id, item.harness_id), len(order))
-            )
+            results.sort(key=lambda item: order.get(_result_identity(item), len(order)))
             updated = replace(
                 eval_run,
                 status=_eval_run_status(results, expected_count=len(results)),
@@ -215,6 +228,40 @@ class FilesystemHarnessEvalStore:
                 continue
         runs.sort(key=lambda item: item.updated_at, reverse=True)
         return tuple(runs[: max(limit, 0)])
+
+    def pin_baseline(
+        self, project: HarnessProject, eval_run: HarnessEvalRun
+    ) -> Mapping[str, Any]:
+        """Pin an immutable scorecard snapshot with source/config identities."""
+        directory = Path(project.state_dir).expanduser() / EVAL_BASELINES_DIR
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{_safe_eval_name(eval_run.spec_name)}.json"
+        payload = {
+            "spec_name": eval_run.spec_name,
+            "eval_run_id": eval_run.id,
+            "pinned_at": utc_now(),
+            "git_sha": _git_sha(project.root),
+            "config_hash": _eval_config_hash(eval_run),
+            "summary": dict(eval_run.summary),
+            "results": [eval_case_result_to_dict(item) for item in eval_run.results],
+        }
+        with exclusive_file_lock(path):
+            _write_json_atomic(path, payload)
+        return payload
+
+    def get_baseline(
+        self, project: HarnessProject, spec_name: str
+    ) -> Mapping[str, Any] | None:
+        """Return the pinned baseline for one eval spec, if present."""
+        path = (
+            Path(project.state_dir).expanduser()
+            / EVAL_BASELINES_DIR
+            / f"{_safe_eval_name(spec_name)}.json"
+        )
+        try:
+            return _read_json(path)
+        except FileNotFoundError:
+            return None
 
     def _project_runs_dir(self, project: HarnessProject) -> Path:
         return Path(project.state_dir).expanduser() / EVAL_RUNS_DIR
@@ -268,11 +315,18 @@ def run_eval(
     mode: str | None = None,
     workspace_policy: str | None = None,
     dry_run: bool = False,
+    repetitions: int = 1,
 ) -> HarnessEvalRun:
     """Run a project eval spec against selected harnesses."""
     selected_harnesses = _selected_harnesses(
         harness_ids or spec.harnesses or DEFAULT_EVAL_HARNESSES
     )
+    repetitions = _bounded_repetitions(repetitions)
+    compatible_cells = _compatible_case_harnesses(
+        runner, spec, selected_harnesses, bool(harness_ids)
+    )
+    if not compatible_cells:
+        raise ValueError("Eval matrix has no capability-compatible cells")
     effective_model = model or spec.model
     effective_api_mode = parse_api_mode(api_mode or spec.api_mode)
     effective_mode = mode or spec.mode
@@ -302,35 +356,38 @@ def run_eval(
         harness_ids=selected_harnesses,
         created_at=now,
         updated_at=now,
-        metadata={"dry_run": dry_run},
+        metadata={
+            "dry_run": dry_run,
+            "repetitions": repetitions,
+            "config_hash": _spec_config_hash(spec, selected_harnesses, repetitions),
+        },
     )
     eval_store.save(project, eval_run)
     results: list[EvalCaseRunResult] = []
-    override_harnesses = bool(harness_ids)
-    for case in spec.cases:
-        for harness_id in _case_harnesses(case, selected_harnesses, override_harnesses):
+    for case, harness_id in compatible_cells:
+        for repetition in range(1, repetitions + 1):
+            result = _run_eval_case(
+                runner=runner,
+                eval_run=eval_run,
+                case=case,
+                harness_id=harness_id,
+                model=effective_model,
+                api_mode=effective_api_mode,
+                mode=effective_mode,
+                workspace=project.root,
+                workspace_policy=effective_workspace_policy,
+                dry_run=dry_run,
+            )
             results.append(
-                _run_eval_case(
-                    runner=runner,
-                    eval_run=eval_run,
-                    case=case,
-                    harness_id=harness_id,
-                    model=effective_model,
-                    api_mode=effective_api_mode,
-                    mode=effective_mode,
-                    workspace=project.root,
-                    workspace_policy=effective_workspace_policy,
-                    dry_run=dry_run,
-                )
+                replace(
+                    result,
+                    repetition=repetition,
+                    target_id=harness_id,
+                ),
             )
             eval_run = replace(
                 eval_run,
-                status=_eval_run_status(
-                    results,
-                    expected_count=_expected_count(
-                        spec, selected_harnesses, override_harnesses
-                    ),
-                ),
+                status="running",
                 updated_at=utc_now(),
                 results=tuple(results),
                 summary=_eval_summary(results),
@@ -359,11 +416,18 @@ def queue_eval(
     mode: str | None = None,
     workspace_policy: str | None = None,
     dry_run: bool = False,
+    repetitions: int = 1,
 ) -> HarnessEvalRun:
     """Queue every eval case/harness pair as a durable job."""
     selected_harnesses = _selected_harnesses(
         harness_ids or spec.harnesses or DEFAULT_EVAL_HARNESSES
     )
+    repetitions = _bounded_repetitions(repetitions)
+    compatible_cells = _compatible_case_harnesses(
+        runner, spec, selected_harnesses, bool(harness_ids)
+    )
+    if not compatible_cells:
+        raise ValueError("Eval matrix has no capability-compatible cells")
     effective_model = model or spec.model
     effective_api_mode = parse_api_mode(api_mode or spec.api_mode)
     effective_mode = mode or spec.mode
@@ -393,13 +457,17 @@ def queue_eval(
         harness_ids=selected_harnesses,
         created_at=now,
         updated_at=now,
-        metadata={"dry_run": dry_run, "durable": True},
+        metadata={
+            "dry_run": dry_run,
+            "durable": True,
+            "repetitions": repetitions,
+            "config_hash": _spec_config_hash(spec, selected_harnesses, repetitions),
+        },
     )
     eval_store.save(project, eval_run)
-    override_harnesses = bool(harness_ids)
     queued_results: list[EvalCaseRunResult] = []
-    for case in spec.cases:
-        for harness_id in _case_harnesses(case, selected_harnesses, override_harnesses):
+    for case, harness_id in compatible_cells:
+        for repetition in range(1, repetitions + 1):
             payload = {
                 "harness_id": harness_id,
                 "prompt": case.prompt,
@@ -414,6 +482,9 @@ def queue_eval(
                     "eval_run_id": eval_run.id,
                     "eval_case_id": case.id,
                     "eval_spec": eval_run.spec_name,
+                    "eval_repetition": repetition,
+                    "eval_target_type": "harness",
+                    "eval_target_id": harness_id,
                     "eval_checks": [
                         {
                             "type": check.type,
@@ -428,7 +499,9 @@ def queue_eval(
             submission = dispatcher.submit(
                 session.id,
                 payload,
-                idempotency_key=f"eval:{eval_run.id}:{case.id}:{harness_id}",
+                idempotency_key=(
+                    f"eval:{eval_run.id}:{case.id}:{harness_id}:{repetition}"
+                ),
                 origin="manual",
             )
             queued_results.append(
@@ -440,6 +513,8 @@ def queue_eval(
                     score=0.0,
                     session_id=session.id,
                     run_id=submission.queued.run.id,
+                    repetition=repetition,
+                    target_id=harness_id,
                 )
             )
     eval_run = replace(
@@ -487,6 +562,10 @@ def sync_durable_eval_case(
             run_id=run.id,
             output_text=_redacted_text(result_text),
             error=(None if passed else run.error or "One or more checks failed."),
+            repetition=_positive_int(extra.get("eval_repetition"), 1),
+            target_type=str(extra.get("eval_target_type") or "harness"),
+            target_id=str(extra.get("eval_target_id") or run.harness_id),
+            metrics=_run_metrics(run),
         ),
     )
 
@@ -548,6 +627,11 @@ def eval_spec_to_dict(
                 "id": case.id,
                 "prompt": _redacted_text(case.prompt),
                 "harnesses": list(case.harnesses),
+                "required_capability": (
+                    case.required_capability.value
+                    if case.required_capability is not None
+                    else None
+                ),
                 "checks": [
                     {
                         "name": check.name,
@@ -626,6 +710,10 @@ def eval_case_result_to_dict(result: EvalCaseRunResult) -> dict[str, Any]:
         "run_id": result.run_id,
         "output_text": _redacted_text(result.output_text),
         "error": _redacted_text(result.error),
+        "repetition": result.repetition,
+        "target_type": result.target_type,
+        "target_id": result.target_id or result.harness_id,
+        "metrics": dict(redact_for_storage(dict(result.metrics))),
     }
 
 
@@ -644,6 +732,10 @@ def eval_case_result_from_dict(data: Mapping[str, Any]) -> EvalCaseRunResult:
         run_id=_optional_text(data.get("run_id")),
         output_text=_optional_text(data.get("output_text")),
         error=_optional_text(data.get("error")),
+        repetition=_positive_int(data.get("repetition"), 1),
+        target_type=str(data.get("target_type") or "harness"),
+        target_id=_optional_text(data.get("target_id")) or str(data["harness_id"]),
+        metrics=_mapping(data.get("metrics")),
     )
 
 
@@ -727,6 +819,7 @@ def _run_eval_case(
             score=0.0,
             output_text=_redacted_text(result.result.text),
             error=_redacted_text(result.result.error or "Harness run failed"),
+            metrics=_run_metrics(result.run),
         )
     check_results = evaluate_checks(case.checks, result.result.text)
     passed = all(check.passed for check in check_results)
@@ -748,6 +841,7 @@ def _run_eval_case(
         checks=check_results,
         output_text=_redacted_text(result.result.text),
         error=None if passed else "One or more checks failed.",
+        metrics=_run_metrics(result.run),
     )
 
 
@@ -829,6 +923,11 @@ def _parse_cases(value: Any) -> tuple[EvalCaseSpec, ...]:
                 prompt=prompt,
                 harnesses=_string_tuple(data.get("harnesses")),
                 checks=_parse_checks(data.get("checks")),
+                required_capability=(
+                    parse_capability(data.get("required_capability"))
+                    if data.get("required_capability")
+                    else None
+                ),
             )
         )
     return tuple(cases)
@@ -909,15 +1008,25 @@ def _case_harnesses(
     return _selected_harnesses(case.harnesses)
 
 
-def _expected_count(
+def _compatible_case_harnesses(
+    runner: HarnessSessionRunner,
     spec: HarnessEvalSpec,
     selected_harnesses: tuple[str, ...],
     override_harnesses: bool,
-) -> int:
-    return sum(
-        len(_case_harnesses(case, selected_harnesses, override_harnesses))
-        for case in spec.cases
-    )
+) -> list[tuple[EvalCaseSpec, str]]:
+    cells: list[tuple[EvalCaseSpec, str]] = []
+    for case in spec.cases:
+        for harness_id in _case_harnesses(case, selected_harnesses, override_harnesses):
+            capabilities = spec_capability_values(
+                runner.registry.get(harness_id).spec()
+            )
+            if (
+                case.required_capability is not None
+                and case.required_capability.value not in capabilities
+            ):
+                continue
+            cells.append((case, harness_id))
+    return cells
 
 
 def _eval_run_status(
@@ -940,13 +1049,240 @@ def _eval_summary(results: list[EvalCaseRunResult]) -> dict[str, Any]:
     failed = sum(1 for result in results if result.status == "failed")
     errors = sum(1 for result in results if result.status == "error")
     score = passed / total if total else 0.0
+    completed = [
+        item for item in results if item.status in {"passed", "failed", "error"}
+    ]
+    metric_keys = {
+        key
+        for item in completed
+        for key, value in item.metrics.items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+    metrics = {
+        key: round(
+            sum(float(item.metrics[key]) for item in completed if key in item.metrics)
+            / sum(1 for item in completed if key in item.metrics),
+            4,
+        )
+        for key in sorted(metric_keys)
+    }
+    flaky = _flaky_case_targets(completed)
     return {
         "total": total,
         "passed": passed,
         "failed": failed,
         "errors": errors,
         "score": score,
+        "metrics": metrics,
+        "flakes": len(flaky),
+        "flaky_targets": flaky,
     }
+
+
+def compare_eval_run_to_baseline(
+    eval_run: HarnessEvalRun, baseline: Mapping[str, Any] | None
+) -> Mapping[str, Any] | None:
+    """Return stable pass-rate and normalized metric deltas."""
+    if baseline is None:
+        return None
+    baseline_summary = _mapping(baseline.get("summary"))
+    current_metrics = _mapping(eval_run.summary.get("metrics"))
+    baseline_metrics = _mapping(baseline_summary.get("metrics"))
+    metric_keys = sorted(set(current_metrics) | set(baseline_metrics))
+    return {
+        "baseline_eval_run_id": baseline.get("eval_run_id"),
+        "git_sha": baseline.get("git_sha"),
+        "config_hash": baseline.get("config_hash"),
+        "score_delta": round(
+            float(eval_run.summary.get("score") or 0.0)
+            - float(baseline_summary.get("score") or 0.0),
+            6,
+        ),
+        "metric_deltas": {
+            key: round(
+                float(current_metrics.get(key) or 0.0)
+                - float(baseline_metrics.get(key) or 0.0),
+                6,
+            )
+            for key in metric_keys
+        },
+    }
+
+
+def eval_compatibility_matrix(
+    spec: HarnessEvalSpec, registry: Any
+) -> list[dict[str, Any]]:
+    """Build only capability-valid case/harness cells for the quality matrix."""
+    selected = _selected_harnesses(spec.harnesses or DEFAULT_EVAL_HARNESSES)
+    cells: list[dict[str, Any]] = []
+    for case in spec.cases:
+        for harness_id in _case_harnesses(case, selected, False):
+            harness_spec = registry.get(harness_id).spec()
+            capabilities = spec_capability_values(harness_spec)
+            required = (
+                case.required_capability.value
+                if case.required_capability is not None
+                else None
+            )
+            if required is not None and required not in capabilities:
+                continue
+            cells.append(
+                {
+                    "case_id": case.id,
+                    "harness_id": harness_id,
+                    "required_capability": required,
+                    "capabilities": list(capabilities),
+                    "api_mode": spec.api_mode.value,
+                    "compatible": True,
+                }
+            )
+    return cells
+
+
+PROTOCOL_CONFORMANCE_FIXTURES: tuple[tuple[str, HarnessCapability], ...] = (
+    ("openai-chat", HarnessCapability.CHAT_COMPLETIONS),
+    ("openai-responses", HarnessCapability.RESPONSES),
+    ("anthropic-messages", HarnessCapability.ANTHROPIC_MESSAGES),
+    ("gemini-generate-content", HarnessCapability.GEMINI_GENERATE_CONTENT),
+)
+
+
+def protocol_conformance_matrix(registry: Any) -> list[dict[str, Any]]:
+    """Project protocol fixtures through real harness capabilities and routes."""
+    cells: list[dict[str, Any]] = []
+    for fixture_id, capability in PROTOCOL_CONFORMANCE_FIXTURES:
+        compatible = [
+            harness.spec().id
+            for harness in registry.list()
+            if capability.value in spec_capability_values(harness.spec())
+        ]
+        for api_mode in GigaChatApiMode:
+            cells.append(
+                {
+                    "fixture_id": fixture_id,
+                    "required_capability": capability.value,
+                    "api_mode": api_mode.value,
+                    "compatible_harness_ids": compatible,
+                    "runnable": bool(compatible),
+                }
+            )
+    return cells
+
+
+def _run_metrics(run: HarnessRun) -> dict[str, Any]:
+    metadata = _mapping(run.metadata)
+    usage = _mapping(metadata.get("usage"))
+    execution = _mapping(metadata.get("workspace_execution"))
+    metrics: dict[str, Any] = {}
+    for key in ("input_tokens", "output_tokens", "total_tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            metrics[key] = value
+    started = _timestamp(run.started_at or run.created_at)
+    finished = _timestamp(run.finished_at or run.updated_at)
+    if started is not None and finished is not None:
+        metrics["latency_seconds"] = round(max(finished - started, 0.0), 4)
+    changed_files = execution.get("changed_files")
+    if isinstance(changed_files, list):
+        metrics["changed_files"] = len(changed_files)
+    patch = execution.get("patch")
+    if isinstance(patch, str):
+        metrics["patch_bytes"] = len(patch.encode("utf-8"))
+    metrics["test_passed"] = bool(
+        metadata.get("test_passed") or execution.get("test_passed")
+    )
+    runtime = _mapping(metadata.get("runtime"))
+    attempt_number = runtime.get("attempt_number")
+    if isinstance(attempt_number, int):
+        metrics["retries"] = max(attempt_number - 1, 0)
+    return metrics
+
+
+def _flaky_case_targets(results: list[EvalCaseRunResult]) -> list[str]:
+    outcomes: dict[tuple[str, str, str], set[bool]] = {}
+    for item in results:
+        key = (item.case_id, item.target_type, item.target_id or item.harness_id)
+        outcomes.setdefault(key, set()).add(item.ok)
+    return [
+        ":".join(key) for key, values in sorted(outcomes.items()) if len(values) > 1
+    ]
+
+
+def _result_identity(result: EvalCaseRunResult) -> tuple[str, str, str, int]:
+    return (
+        result.case_id,
+        result.target_type,
+        result.target_id or result.harness_id,
+        result.repetition,
+    )
+
+
+def _timestamp(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _bounded_repetitions(value: Any) -> int:
+    parsed = _positive_int(value, 1)
+    if parsed > MAX_EVAL_REPETITIONS:
+        raise ValueError(f"repetitions must be <= {MAX_EVAL_REPETITIONS}")
+    return parsed
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _spec_config_hash(
+    spec: HarnessEvalSpec, harness_ids: tuple[str, ...], repetitions: int
+) -> str:
+    payload = {
+        "spec": eval_spec_to_dict(spec),
+        "harness_ids": harness_ids,
+        "repetitions": repetitions,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _eval_config_hash(eval_run: HarnessEvalRun) -> str:
+    value = eval_run.metadata.get("config_hash")
+    if isinstance(value, str) and value:
+        return value
+    payload = {
+        "spec": eval_run.spec_name,
+        "model": eval_run.model,
+        "api_mode": eval_run.api_mode.value,
+        "mode": eval_run.mode,
+        "harness_ids": eval_run.harness_ids,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _git_sha(project_root: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", project_root, "rev-parse", "HEAD"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = result.stdout.strip()
+    if result.returncode != 0 or re.fullmatch(r"[0-9a-f]{40}", value) is None:
+        return None
+    return value
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:

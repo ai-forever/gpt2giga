@@ -33,6 +33,10 @@
       evalErrors: [],
       currentEvalRun: null,
       evalError: null,
+      evaluateProtocolMatrix: [],
+      evaluateQualitySpecs: [],
+      evaluateRuns: [],
+      evaluateSelectedRun: null,
       applyingProjectState: false,
       selectedHarness: null,
       arenaSelectionTouched: false,
@@ -114,6 +118,7 @@
       if (path === "/runs") return { area: "runs", id: null };
       if (path === "/agents") return { area: "agents", id: null };
       if (path === "/workflows") return { area: "workflows", id: null };
+      if (path === "/evaluate") return { area: "evaluate", id: null };
       if (path === "/approvals") return { area: "approvals", id: null };
       if (path === "/tools") return { area: "tools", id: null };
       const work = path.match(/^\/work\/([^/]+)$/);
@@ -146,12 +151,21 @@
       const toolsLink = byId("tools-nav-link");
       const agentsLink = byId("agents-nav-link");
       const workflowsLink = byId("workflows-nav-link");
+      const evaluateLink = byId("evaluate-nav-link");
       workLink.classList.toggle("active", route.area === "work" || route.area === "legacy");
       runsLink.classList.toggle("active", route.area === "runs");
       approvalsLink.classList.toggle("active", route.area === "approvals");
       toolsLink.classList.toggle("active", route.area === "tools");
       agentsLink.classList.toggle("active", route.area === "agents");
       workflowsLink.classList.toggle("active", route.area === "workflows");
+      evaluateLink.classList.toggle("active", route.area === "evaluate");
+      const activeNavLink = document.querySelector(".primary-nav-link.active");
+      const primaryNav = activeNavLink && activeNavLink.parentElement;
+      if (activeNavLink && primaryNav && window.innerWidth <= 700) {
+        const navRect = primaryNav.getBoundingClientRect();
+        const activeRect = activeNavLink.getBoundingClientRect();
+        primaryNav.scrollLeft += activeRect.left - navRect.left - (navRect.width - activeRect.width) / 2;
+      }
       workLink.href = state.currentSessionId ? `/work/${encodeURIComponent(state.currentSessionId)}` : "/work";
       const run = currentRun();
       runsLink.href = run && run.id ? `/runs/${encodeURIComponent(run.id)}` : "/runs";
@@ -160,16 +174,143 @@
       const toolsArea = route.area === "tools";
       const agentsArea = route.area === "agents";
       const workflowsArea = route.area === "workflows";
+      const evaluateArea = route.area === "evaluate";
       document.body.classList.toggle("runs-area", runsArea);
       document.body.classList.toggle("approvals-area", approvalsArea);
       document.body.classList.toggle("tools-area", toolsArea);
       document.body.classList.toggle("agents-area", agentsArea);
       document.body.classList.toggle("workflows-area", workflowsArea);
+      document.body.classList.toggle("evaluate-area", evaluateArea);
       byId("runs-center").hidden = !runsArea;
       byId("approvals-center").hidden = !approvalsArea;
       byId("tools-center").hidden = !toolsArea;
       byId("agents-center").hidden = !agentsArea;
       byId("workflows-center").hidden = !workflowsArea;
+      byId("evaluate-center").hidden = !evaluateArea;
+    }
+
+    async function loadEvaluateCenter() {
+      if (!state.project || !state.project.root) return false;
+      setText("evaluate-center-status", "Refreshing compatibility evidence...");
+      const result = await getJson(`/api/evaluate?workspace=${encodeURIComponent(state.project.root)}`);
+      if (!result.ok) {
+        setText("evaluate-center-status", result.data.detail || "Eval Lab is unavailable.");
+        return false;
+      }
+      state.evaluateProtocolMatrix = Array.isArray(result.data.protocol_matrix) ? result.data.protocol_matrix : [];
+      state.evaluateQualitySpecs = Array.isArray(result.data.quality_specs) ? result.data.quality_specs : [];
+      state.evaluateRuns = Array.isArray(result.data.runs) ? result.data.runs : [];
+      if (state.evaluateSelectedRun) {
+        state.evaluateSelectedRun = state.evaluateRuns.find((item) => item.id === state.evaluateSelectedRun.id) || null;
+      }
+      renderEvaluateCenter();
+      setText("evaluate-center-status", `${state.evaluateQualitySpecs.length} quality specs · ${state.evaluateProtocolMatrix.length} protocol cells`);
+      return true;
+    }
+
+    function renderEvaluateCenter() {
+      const select = byId("evaluate-spec-select");
+      const selected = select.value;
+      select.textContent = "";
+      for (const spec of state.evaluateQualitySpecs) {
+        const option = document.createElement("option");
+        option.value = spec.name;
+        option.textContent = `${spec.name} · ${spec.matrix.length} cells`;
+        select.appendChild(option);
+      }
+      if (selected && state.evaluateQualitySpecs.some((item) => item.name === selected)) select.value = selected;
+      byId("run-evaluate-button").disabled = !state.evaluateQualitySpecs.length;
+      byId("cancel-evaluate-button").disabled = !state.evaluateSelectedRun || state.evaluateSelectedRun.status !== "running";
+      byId("pin-evaluate-baseline-button").disabled = !state.evaluateSelectedRun || !["passed", "failed"].includes(state.evaluateSelectedRun.status);
+      renderProtocolMatrix();
+      renderQualityMatrix();
+      renderEvaluateRuns();
+    }
+
+    function renderProtocolMatrix() {
+      const root = byId("protocol-matrix");
+      root.textContent = "";
+      for (const cell of state.evaluateProtocolMatrix) {
+        const row = document.createElement("div");
+        row.className = "matrix-row";
+        const harnesses = Array.isArray(cell.compatible_harness_ids) ? cell.compatible_harness_ids.join(", ") : "";
+        row.innerHTML = `<strong>${escapeHtml(cell.fixture_id)}</strong><span>${escapeHtml(cell.api_mode)}</span><span>${escapeHtml(cell.required_capability)}</span><span class="badge ${cell.runnable ? "ok" : "warn"}">${cell.runnable ? escapeHtml(harnesses) : "unsupported"}</span>`;
+        root.appendChild(row);
+      }
+    }
+
+    function renderQualityMatrix() {
+      const root = byId("quality-matrix");
+      root.textContent = "";
+      for (const spec of state.evaluateQualitySpecs) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "matrix-row matrix-action";
+        const baseline = spec.baseline ? `baseline ${String(spec.baseline.git_sha || "local").slice(0, 8)}` : "no baseline";
+        const dimensions = spec.dimensions || {};
+        const agents = Array.isArray(dimensions.agents) ? dimensions.agents.length : 0;
+        const workflows = Array.isArray(dimensions.workflow_versions) ? dimensions.workflow_versions.length : 0;
+        row.innerHTML = `<strong>${escapeHtml(spec.name)}</strong><span>${spec.case_count} cases</span><span>${spec.matrix.length} cells · ${agents} agents · ${workflows} workflows</span><span class="badge info">${escapeHtml(baseline)}</span>`;
+        row.addEventListener("click", () => { byId("evaluate-spec-select").value = spec.name; });
+        root.appendChild(row);
+      }
+    }
+
+    function renderEvaluateRuns() {
+      const root = byId("evaluate-runs");
+      root.textContent = "";
+      for (const run of state.evaluateRuns) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "runs-center-item";
+        row.classList.toggle("active", state.evaluateSelectedRun && state.evaluateSelectedRun.id === run.id);
+        const summary = run.summary || {};
+        const delta = run.baseline_delta && typeof run.baseline_delta.score_delta === "number" ? ` · Δ ${(run.baseline_delta.score_delta * 100).toFixed(1)}pp` : "";
+        row.innerHTML = `<span class="runs-center-item-row"><strong>${escapeHtml(run.spec_name)}</strong><span class="badge ${run.status === "passed" ? "ok" : run.status === "running" ? "info" : "warn"}">${escapeHtml(run.status)}</span></span><span class="runs-center-item-meta">${summary.passed || 0}/${summary.total || 0} passed · ${(Number(summary.score || 0) * 100).toFixed(0)}%${escapeHtml(delta)} · ${summary.flakes || 0} flakes</span>`;
+        row.addEventListener("click", () => {
+          state.evaluateSelectedRun = run;
+          byId("cancel-evaluate-button").disabled = run.status !== "running";
+          byId("pin-evaluate-baseline-button").disabled = !["passed", "failed"].includes(run.status);
+          renderEvaluateRuns();
+        });
+        row.addEventListener("dblclick", () => {
+          const first = Array.isArray(run.results) ? run.results.find((item) => item.run_id) : null;
+          if (first) window.location.href = `/runs/${encodeURIComponent(first.run_id)}`;
+        });
+        root.appendChild(row);
+      }
+      if (!state.evaluateRuns.length) root.textContent = "No eval runs yet.";
+    }
+
+    async function runEvaluateMatrix() {
+      const spec = byId("evaluate-spec-select").value;
+      if (!spec) return;
+      const repetitions = Math.max(1, Math.min(20, Number(byId("evaluate-repetitions").value) || 1));
+      byId("run-evaluate-button").disabled = true;
+      const result = await getJson(`/api/evals/${encodeURIComponent(spec)}/runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, repetitions })
+      });
+      if (!result.ok) setText("evaluate-center-status", result.data.detail || "Matrix could not start.");
+      await loadEvaluateCenter();
+    }
+
+    async function cancelEvaluateRun() {
+      if (!state.evaluateSelectedRun) return;
+      await getJson(`/api/evaluate/runs/${encodeURIComponent(state.evaluateSelectedRun.id)}/cancel`, { method: "POST" });
+      await loadEvaluateCenter();
+    }
+
+    async function pinEvaluateBaseline() {
+      if (!state.evaluateSelectedRun) return;
+      const result = await getJson(`/api/evaluate/runs/${encodeURIComponent(state.evaluateSelectedRun.id)}/baseline`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root })
+      });
+      if (!result.ok) setText("evaluate-center-status", result.data.detail || "Baseline could not be pinned.");
+      await loadEvaluateCenter();
     }
 
     async function loadWorkflowsCenter(selectedId = null) {
@@ -5077,6 +5218,10 @@
       byId("add-memory-button").addEventListener("click", addMemoryFromInput);
       byId("remember-message-button").addEventListener("click", rememberLastMessage);
       byId("refresh-evals-button").addEventListener("click", loadEvals);
+      byId("refresh-evaluate-button").addEventListener("click", loadEvaluateCenter);
+      byId("run-evaluate-button").addEventListener("click", runEvaluateMatrix);
+      byId("cancel-evaluate-button").addEventListener("click", cancelEvaluateRun);
+      byId("pin-evaluate-baseline-button").addEventListener("click", pinEvaluateBaseline);
       byId("refresh-tools-center-button").addEventListener("click", loadToolsCenter);
       byId("preview-tool-config-button").addEventListener("click", previewManagedToolConfig);
       byId("apply-tool-config-button").addEventListener("click", applyManagedToolConfig);
@@ -5338,6 +5483,11 @@
       if (route.area === "workflows") {
         closeRunsCenterEventStream();
         await loadWorkflowsCenter(route.id);
+        return true;
+      }
+      if (route.area === "evaluate") {
+        closeRunsCenterEventStream();
+        await loadEvaluateCenter();
         return true;
       }
       if (route.area === "work") {
