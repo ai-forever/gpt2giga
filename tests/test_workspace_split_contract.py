@@ -164,6 +164,37 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert ".venv-artifact/bin/gpt2giga-harness --help" in workflow
 
 
+def test_release_workflow_attests_both_artifacts_and_publishes_only_harness():
+    if not HARNESS_MEMBER.exists():
+        return
+
+    workflow = (REPO_ROOT / ".github/workflows/publish-pypi.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "workflow_dispatch:" in workflow
+    assert 'test "${GATEWAY_VERSION}" = "0.2.2a1"' in workflow
+    assert 'test "${HARNESS_VERSION}" = "0.0.1"' in workflow
+    assert 'EXPECTED_TAG="gpt2giga-harness-v${HARNESS_VERSION}"' in workflow
+    assert "uv build --package gpt2giga --wheel --sdist --no-sources" in workflow
+    assert (
+        "uv build --package gpt2giga-harness --wheel --sdist --no-sources" in workflow
+    )
+    assert workflow.count("uses: actions/attest-build-provenance@v3") == 2
+    assert "subject-path: dist/gpt2giga/*" in workflow
+    assert "subject-path: dist/gpt2giga-harness/*" in workflow
+    assert "sha256sum dist/gpt2giga/* dist/gpt2giga-harness/*" in workflow
+
+    publish_commands = [
+        line.strip()
+        for line in workflow.splitlines()
+        if line.strip().startswith("uv publish ")
+    ]
+    assert publish_commands == [
+        'uv publish --token "${PYPI_TOKEN}" dist/gpt2giga-harness/*'
+    ]
+    assert "if: github.event_name == 'release'" in workflow
+
+
 def test_production_docker_build_remains_gateway_only():
     dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
     docker_workflows = "\n".join(

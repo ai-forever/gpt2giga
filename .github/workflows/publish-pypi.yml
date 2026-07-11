@@ -1,14 +1,18 @@
-name: Publish to PyPI
+name: Publish Python packages
+
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 jobs:
-  pypi_release:
-    name: Build with uv and publish to PyPI
+  harness_release:
+    name: Build, attest, and publish Harness
     runs-on: ubuntu-latest
     permissions:
+      attestations: write
       contents: read
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -21,27 +25,67 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Validate release tag matches package version
+      - name: Validate protected gateway and Harness release versions
         shell: bash
         run: |
           set -euo pipefail
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PKG_VERSION="$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("packages/gpt2giga/pyproject.toml").read_text("utf-8"))["project"]["version"])')"
-          echo "Release tag: ${GITHUB_REF_NAME} (version=${TAG_VERSION})"
-          echo "pyproject.toml version: ${PKG_VERSION}"
-          test "${TAG_VERSION}" = "${PKG_VERSION}"
+          GATEWAY_VERSION="$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("packages/gpt2giga/pyproject.toml").read_text("utf-8"))["project"]["version"])')"
+          HARNESS_VERSION="$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("packages/gpt2giga-harness/pyproject.toml").read_text("utf-8"))["project"]["version"])')"
+          echo "Gateway verification version: ${GATEWAY_VERSION}"
+          echo "Harness release version: ${HARNESS_VERSION}"
+          test "${GATEWAY_VERSION}" = "0.2.2a1"
+          test "${HARNESS_VERSION}" = "0.0.1"
+          if [[ "${GITHUB_EVENT_NAME}" = "release" ]]; then
+            EXPECTED_TAG="gpt2giga-harness-v${HARNESS_VERSION}"
+            echo "Release tag: ${GITHUB_REF_NAME} (expected=${EXPECTED_TAG})"
+            test "${GITHUB_REF_NAME}" = "${EXPECTED_TAG}"
+          else
+            echo "Manual run: build and attestation only; no package will be published."
+          fi
 
-      - name: Build sdist and wheel
+      - name: Build gateway verification artifacts
+        run: uv build --package gpt2giga --wheel --sdist --no-sources --out-dir dist/gpt2giga
+
+      - name: Build Harness release artifacts
+        run: uv build --package gpt2giga-harness --wheel --sdist --no-sources --out-dir dist/gpt2giga-harness
+
+      - name: Guard the Harness-only publish surface
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf dist
-          uv build --package gpt2giga
+          test "$(find dist/gpt2giga -maxdepth 1 -type f | wc -l | tr -d ' ')" = "2"
+          test "$(find dist/gpt2giga-harness -maxdepth 1 -type f | wc -l | tr -d ' ')" = "2"
+          find dist/gpt2giga -maxdepth 1 -type f -name 'gpt2giga-0.2.2a1*' | grep -q .
+          find dist/gpt2giga-harness -maxdepth 1 -type f -name 'gpt2giga_harness-0.0.1*' | grep -q .
+          test -z "$(find dist/gpt2giga-harness -maxdepth 1 -type f -name 'gpt2giga-0.2.2a1*' -print -quit)"
+          sha256sum dist/gpt2giga/* dist/gpt2giga-harness/* > dist/SHA256SUMS
+          cat dist/SHA256SUMS
 
-      - name: Publish to PyPI
+      - name: Attest gateway verification artifacts
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/gpt2giga/*
+
+      - name: Attest Harness release artifacts
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/gpt2giga-harness/*
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: workspace-python-artifacts
+          path: |
+            dist/gpt2giga/*
+            dist/gpt2giga-harness/*
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Publish Harness to PyPI
+        if: github.event_name == 'release'
         shell: bash
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_API_KEY }}
         run: |
           set -euo pipefail
-          uv publish --token "${PYPI_TOKEN}" dist/*
+          uv publish --token "${PYPI_TOKEN}" dist/gpt2giga-harness/*

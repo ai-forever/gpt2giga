@@ -23,7 +23,7 @@ CI currently runs Ruff check and pytest coverage; the local Definition of Done i
 | `.github/workflows/ci.yaml` | Ruff + pytest across Python `3.10`–`3.14`, uploads coverage, regenerates badge |
 | `.github/workflows/docker_image.yaml` | Publishes Docker Hub images for Python `3.10`–`3.14` |
 | `.github/workflows/publish-ghcr.yml` | Publishes GHCR images for Python `3.10`–`3.14`; `latest` and unqualified version tags track Python `3.13` |
-| `.github/workflows/publish-pypi.yml` | Builds with `uv` and publishes to PyPI on release |
+| `.github/workflows/publish-pypi.yml` | Builds and attests both workspace members; publishes only the initial Harness release |
 | `.github/workflows/codeflash.yaml` | Runs Codeflash optimization on PRs touching `gpt2giga/**` |
 | `.github/workflows/stale-issues.yaml` | Marks inactive issues as stale and closes them after a grace period |
 | `.github/workflows/dependency-review.yaml` | Reviews dependency changes on pull requests |
@@ -49,7 +49,9 @@ CI currently runs Ruff check and pytest coverage; the local Definition of Done i
 - Preserve the Python compatibility matrix unless the package support policy changes too.
 - Use GitHub secrets only where required; never inline credentials in workflow YAML.
 - Badge generation depends on both `.github/workflows/ci.yaml` and `scripts/generate_badge.py`; change them together.
-- `publish-pypi.yml` validates that the release tag matches `pyproject.toml` version; keep that contract intact.
+- `publish-pypi.yml` accepts `gpt2giga-harness-v<version>` release tags, keeps
+  `gpt2giga==0.2.2a1` verification-only, and publishes only Harness artifacts.
+  Manual dispatch is a build-and-attest dry run with no package upload.
 - `codeflash.yaml` currently uses `pip` and `poetry`, unlike the rest of the repo's `uv`-first tooling. Treat that as intentional unless you are updating the workflow itself.
 - `actions/labeler` expects labels referenced in `.github/labeler.yml` to exist in the repository settings; this repo does not auto-create them.
 - `docker_image.yaml` and `publish-ghcr.yml` both build multi-arch images for Python `3.10`-`3.14`; keep Docker tag semantics aligned when changing either workflow.
