@@ -1,14 +1,14 @@
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.registry import create_default_registry
-from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.sessions.models import HarnessStoredEvent
-from gpt2giga.harness.sessions.store import new_id, utc_now
-from gpt2giga.harness.types import GigaChatApiMode, HarnessCapability
-from gpt2giga.harness.ui.app import create_app
-from gpt2giga.harness.ui.static import INDEX_HTML, load_text_asset
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.sessions.models import HarnessStoredEvent
+from gpt2giga_harness.sessions.store import new_id, utc_now
+from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
+from gpt2giga_harness.ui.app import create_app
+from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 
 
 def test_runs_center_lists_filters_and_resolves_lightweight_summary(tmp_path):

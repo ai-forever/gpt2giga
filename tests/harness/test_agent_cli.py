@@ -5,14 +5,14 @@ import time
 
 import pytest
 
-from gpt2giga.harness.harnesses.agent_cli import (
+from gpt2giga_harness.harnesses.agent_cli import (
     STREAM_QUEUE_MAX_ITEMS,
     message_delta_event,
     run_streaming_command,
     tool_call_event,
     usage_event,
 )
-from gpt2giga.harness.types import HarnessEvent, HarnessRequest
+from gpt2giga_harness.types import HarnessEvent, HarnessRequest
 
 
 def test_streaming_command_emits_jsonl_events_and_normalizes_raw_output():

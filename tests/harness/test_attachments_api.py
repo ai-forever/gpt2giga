@@ -3,19 +3,19 @@ import hashlib
 
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.harnesses.base import BaseHarness
-from gpt2giga.harness.project import project_id_for_root
-from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.types import (
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.project import project_id_for_root
+from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
 )
-from gpt2giga.harness.ui.app import create_app
+from gpt2giga_harness.ui.app import create_app
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 

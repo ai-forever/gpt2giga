@@ -1,10 +1,10 @@
-from gpt2giga.harness.native import (
+from gpt2giga_harness.native import (
     HarnessInvocationMode,
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
 )
-from gpt2giga.harness.types import HarnessCapability, HarnessSpec, spec_to_dict
+from gpt2giga_harness.types import HarnessCapability, HarnessSpec, spec_to_dict
 
 
 def test_harness_spec_defaults_to_headless_without_native_sessions():

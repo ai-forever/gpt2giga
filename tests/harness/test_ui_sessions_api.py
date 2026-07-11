@@ -5,17 +5,17 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.harnesses.base import BaseHarness
-from gpt2giga.harness.project import project_id_for_root
-from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
-from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
-from gpt2giga.harness.runtime.worker import DurableJobWorker
-from gpt2giga.harness.sessions import (
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.project import project_id_for_root
+from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga_harness.runtime.worker import DurableJobWorker
+from gpt2giga_harness.sessions import (
     FilesystemHarnessSessionStore,
     InMemoryHarnessSessionStore,
 )
-from gpt2giga.harness.types import (
+from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
     HarnessContext,
@@ -23,7 +23,7 @@ from gpt2giga.harness.types import (
     HarnessResult,
     HarnessSpec,
 )
-from gpt2giga.harness.ui.app import create_app
+from gpt2giga_harness.ui.app import create_app
 
 
 def test_sessions_api_create_list_get_update_delete():

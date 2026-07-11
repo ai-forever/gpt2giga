@@ -4,16 +4,16 @@ import subprocess
 import pytest
 import yaml
 
-from gpt2giga.harness.agents import render_starter_agent
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.project import init_project_config, resolve_project
-from gpt2giga.harness.registry import create_default_registry
-from gpt2giga.harness.runtime.payloads import DurableJobPayloadStore
-from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
-from gpt2giga.harness.runtime.worker import DurableJobDispatcher, DurableJobWorker
-from gpt2giga.harness.session_runner import HarnessSessionRunner
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.workflows import (
+from gpt2giga_harness.agents import render_starter_agent
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.project import init_project_config, resolve_project
+from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.runtime.payloads import DurableJobPayloadStore
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga_harness.runtime.worker import DurableJobDispatcher, DurableJobWorker
+from gpt2giga_harness.session_runner import HarnessSessionRunner
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.workflows import (
     WorkflowCoordinator,
     WorkflowRepository,
     discover_workflows,
@@ -21,7 +21,7 @@ from gpt2giga.harness.workflows import (
     parse_workflow_definition,
     workflow_plan,
 )
-from gpt2giga.harness.workflow_catalog import (
+from gpt2giga_harness.workflow_catalog import (
     duplicate_workflow,
     merge_workflow_form,
     save_workflow,

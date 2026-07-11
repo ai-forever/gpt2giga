@@ -1,16 +1,16 @@
 import sys
 
-from gpt2giga.harness import proxy
-from gpt2giga.harness.harnesses.agent_cli import (
+from gpt2giga_harness import proxy
+from gpt2giga_harness.harnesses.agent_cli import (
     executable_availability,
     run_command,
     run_streaming_command,
 )
-from gpt2giga.harness.harnesses.gemini_cli import (
+from gpt2giga_harness.harnesses.gemini_cli import (
     GeminiCliHarness,
     _GeminiStreamParser,
 )
-from gpt2giga.harness.types import (
+from gpt2giga_harness.types import (
     Availability,
     AvailabilityStatus,
     GigaChatApiMode,
@@ -198,7 +198,7 @@ def test_agent_cli_executable_availability_reports_broken_binary(monkeypatch):
         raise OSError("bad interpreter")
 
     monkeypatch.setattr(
-        "gpt2giga.harness.harnesses.agent_cli.subprocess.run",
+        "gpt2giga_harness.harnesses.agent_cli.subprocess.run",
         fake_run,
     )
 
@@ -219,7 +219,7 @@ def test_agent_cli_run_command_redacts_known_proxy_keys(monkeypatch):
         stderr = "stderr proxy-key"
 
     monkeypatch.setattr(
-        "gpt2giga.harness.harnesses.agent_cli.subprocess.run",
+        "gpt2giga_harness.harnesses.agent_cli.subprocess.run",
         lambda *args, **kwargs: Completed(),
     )
 
@@ -261,7 +261,7 @@ def test_gemini_cli_autostart_uses_generated_proxy_key(monkeypatch):
         return HarnessResult(ok=True, text="ok", command=command)
 
     monkeypatch.setattr(
-        "gpt2giga.harness.harnesses.gemini_cli.run_command",
+        "gpt2giga_harness.harnesses.gemini_cli.run_command",
         fake_run_command,
     )
 
@@ -289,7 +289,7 @@ def test_gemini_cli_json_output_uses_response_as_text(monkeypatch):
         stderr = ""
 
     monkeypatch.setattr(
-        "gpt2giga.harness.harnesses.agent_cli.subprocess.run",
+        "gpt2giga_harness.harnesses.agent_cli.subprocess.run",
         lambda *args, **kwargs: Completed(),
     )
 
@@ -327,7 +327,7 @@ def test_gemini_cli_stream_run_uses_streaming_runner(monkeypatch):
         return HarnessResult(ok=True, text="streamed", command=kwargs["command"])
 
     monkeypatch.setattr(
-        "gpt2giga.harness.harnesses.gemini_cli.run_streaming_command",
+        "gpt2giga_harness.harnesses.gemini_cli.run_streaming_command",
         fake_streaming_runner,
     )
     request = HarnessRequest(prompt="inspect", stream=True)

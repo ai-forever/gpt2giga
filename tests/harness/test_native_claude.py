@@ -3,11 +3,11 @@ from dataclasses import replace
 
 import pytest
 
-from gpt2giga.harness.native.base import native_command_plan_to_dict
-from gpt2giga.harness.native.claude import ClaudeNativeHistoryConnector
-from gpt2giga.harness.native.models import NativeSessionStatus
-from gpt2giga.harness.project import project_id_for_root
-from gpt2giga.harness.types import (
+from gpt2giga_harness.native.base import native_command_plan_to_dict
+from gpt2giga_harness.native.claude import ClaudeNativeHistoryConnector
+from gpt2giga_harness.native.models import NativeSessionStatus
+from gpt2giga_harness.project import project_id_for_root
+from gpt2giga_harness.types import (
     GigaChatApiMode,
     HarnessCapability,
     HarnessContext,

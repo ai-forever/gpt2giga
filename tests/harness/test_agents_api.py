@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness.agents import render_starter_agent
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.project import init_project_config
-from gpt2giga.harness.ui.app import create_app
+from gpt2giga_harness.agents import render_starter_agent
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.project import init_project_config
+from gpt2giga_harness.ui.app import create_app
 
 
 def _client(tmp_path):

@@ -176,7 +176,8 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 
 | Path | Назначение |
 |---|---|
-| `gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
+| `packages/gpt2giga/src/gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
+| `packages/gpt2giga-harness/src/gpt2giga_harness/` | Harness CLI, local UI, runtime, sessions, and agent adapters |
 | `tests/` | Unit, router, protocol, sink и integration tests |
 | `examples/` | Runnable OpenAI, Anthropic, Gemini, embeddings and agents examples; files/batches examples are prepared but not mounted |
 | `docs/` | Markdown-контент пользовательской документации и architecture notes |

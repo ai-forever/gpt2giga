@@ -1,14 +1,14 @@
 import pytest
 
-from gpt2giga.harness.attachments import FilesystemAttachmentStore
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.harnesses.base import BaseHarness
-from gpt2giga.harness.harnesses.echo import EchoHarness
-from gpt2giga.harness.project import project_id_for_root
-from gpt2giga.harness.registry import HarnessRegistry
-from gpt2giga.harness.session_runner import HarnessSessionRunner
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.types import (
+from gpt2giga_harness.attachments import FilesystemAttachmentStore
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.harnesses.echo import EchoHarness
+from gpt2giga_harness.project import project_id_for_root
+from gpt2giga_harness.registry import HarnessRegistry
+from gpt2giga_harness.session_runner import HarnessSessionRunner
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
     HarnessContext,

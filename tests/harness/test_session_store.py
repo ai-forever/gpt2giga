@@ -1,15 +1,15 @@
 import json
 
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.native import HarnessInvocationMode, NativeSessionStatus
-from gpt2giga.harness.sessions.models import (
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.native import HarnessInvocationMode, NativeSessionStatus
+from gpt2giga_harness.sessions.models import (
     HarnessMessage,
     HarnessNativeLink,
     HarnessStoredEvent,
     bundle_to_dict,
 )
-from gpt2giga.harness.sessions.store import new_id, utc_now
-from gpt2giga.harness.types import GigaChatApiMode, HarnessCapability, REDACTED
+from gpt2giga_harness.sessions.store import new_id, utc_now
+from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability, REDACTED
 
 
 def test_filesystem_store_persists_session_messages_runs_and_events(tmp_path):

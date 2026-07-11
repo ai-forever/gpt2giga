@@ -1,10 +1,10 @@
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.registry import create_default_registry
-from gpt2giga.harness.sessions import InMemoryHarnessSessionStore
-from gpt2giga.harness.types import GigaChatApiMode, HarnessCapability
-from gpt2giga.harness.ui.app import create_app
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
+from gpt2giga_harness.ui.app import create_app
 
 
 def test_editor_open_file_api_builds_dry_run_command(tmp_path):

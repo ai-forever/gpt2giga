@@ -11,6 +11,7 @@ resolution-markers = [
 [manifest]
 members = [
     "gpt2giga",
+    "gpt2giga-harness",
 ]
 
 [manifest.dependency-groups]
@@ -1044,13 +1045,12 @@ wheels = [
 
 [[package]]
 name = "gpt2giga"
-version = "0.3.0a1"
+version = "0.2.2a1"
 source = { editable = "packages/gpt2giga" }
 dependencies = [
     { name = "aiohttp" },
     { name = "aioitertools" },
     { name = "anthropic" },
-    { name = "certifi" },
     { name = "fastapi" },
     { name = "gigachat" },
     { name = "google-genai" },
@@ -1058,9 +1058,7 @@ dependencies = [
     { name = "openai" },
     { name = "pillow" },
     { name = "pydantic-settings" },
-    { name = "python-dateutil" },
     { name = "python-dotenv" },
-    { name = "pyyaml" },
     { name = "sse-starlette" },
     { name = "starlette" },
     { name = "tiktoken" },
@@ -1091,7 +1089,6 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.79.0" },
     { name = "arize-phoenix-otel", marker = "extra == 'phoenix'", specifier = ">=0.1,<1" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.30.0,<1" },
-    { name = "certifi", specifier = ">=2026.6.17" },
     { name = "fastapi", specifier = ">=0.133.0,<1" },
     { name = "gigachat", specifier = ">=0.2.2a1,<0.3.0" },
     { name = "google-genai", specifier = ">=2.8.0,<3" },
@@ -1103,9 +1100,7 @@ requires-dist = [
     { name = "opentelemetry-sdk", marker = "extra == 'phoenix'", specifier = ">=1.28.0,<2" },
     { name = "pillow", specifier = ">=12.2.0,<13" },
     { name = "pydantic-settings", specifier = ">=2.12.0,<3" },
-    { name = "python-dateutil", specifier = ">=2.9.0,<3" },
     { name = "python-dotenv", specifier = ">=1.2.2,<2" },
-    { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'postgres'", specifier = ">=2.0.0,<3" },
     { name = "sse-starlette", specifier = ">=3.0.3,<4" },
     { name = "starlette", specifier = ">=1.1,<2" },
@@ -1113,6 +1108,23 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.41.0,<1" },
 ]
 provides-extras = ["postgres", "opensearch", "phoenix"]
+
+[[package]]
+name = "gpt2giga-harness"
+version = "0.0.1"
+source = { editable = "packages/gpt2giga-harness" }
+dependencies = [
+    { name = "gpt2giga" },
+    { name = "python-dateutil" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gpt2giga", editable = "packages/gpt2giga" },
+    { name = "python-dateutil", specifier = ">=2.9.0,<3" },
+    { name = "pyyaml", specifier = ">=6.0,<7" },
+]
 
 [[package]]
 name = "greenlet"

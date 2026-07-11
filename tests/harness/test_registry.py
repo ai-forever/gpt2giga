@@ -1,13 +1,13 @@
 import pytest
 
-from gpt2giga.harness.harnesses.base import BaseHarness
-from gpt2giga.harness import registry as registry_module
-from gpt2giga.harness.registry import (
+from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness import registry as registry_module
+from gpt2giga_harness.registry import (
     HarnessRegistry,
     UnknownHarnessError,
     create_default_registry,
 )
-from gpt2giga.harness.types import (
+from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
     HarnessRequest,

@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.project import init_project_config
-from gpt2giga.harness.ui.app import create_app
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.project import init_project_config
+from gpt2giga_harness.ui.app import create_app
 
 
 def test_workflow_api_lists_validates_runs_status_and_cancels(tmp_path) -> None:

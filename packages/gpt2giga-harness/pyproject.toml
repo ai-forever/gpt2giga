@@ -1,0 +1,37 @@
+[project]
+name = "gpt2giga-harness"
+version = "0.0.1"
+description = "Local agentic control plane for gpt2giga"
+authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
+requires-python = ">=3.10,<4,<3.15"
+readme = "README.md"
+license = "MIT"
+dependencies = [
+    "gpt2giga==0.2.2a1",
+    "pyyaml>=6.0,<7",
+    "python-dateutil>=2.9.0,<3",
+]
+
+[project.scripts]
+gpt2giga-harness = "gpt2giga_harness.cli:main"
+giga = "gpt2giga_harness.cli:main"
+
+[project.entry-points."gpt2giga.harnesses"]
+direct-chat = "gpt2giga_harness.harnesses.direct_chat:DirectChatHarness"
+codex-cli = "gpt2giga_harness.harnesses.codex_cli:CodexCliHarness"
+claude-code = "gpt2giga_harness.harnesses.claude_code:ClaudeCodeHarness"
+gemini-cli = "gpt2giga_harness.harnesses.gemini_cli:GeminiCliHarness"
+echo = "gpt2giga_harness.harnesses.echo:EchoHarness"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+artifacts = ["src/gpt2giga_harness/ui/assets/**"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gpt2giga_harness"]
+
+[tool.uv.sources]
+gpt2giga = { workspace = true }

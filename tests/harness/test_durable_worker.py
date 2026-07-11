@@ -4,18 +4,18 @@ import time
 
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness import cli
-from gpt2giga.harness.arena import FilesystemHarnessArenaStore, queue_arena
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.harnesses.base import BaseHarness
-from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
-from gpt2giga.harness.runtime.models import JobAttemptStatus, JobStatus
-from gpt2giga.harness.runtime.payloads import DurableJobPayloadStore
-from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
-from gpt2giga.harness.runtime.worker import DurableJobDispatcher, DurableJobWorker
-from gpt2giga.harness.session_runner import HarnessSessionRunner
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.types import (
+from gpt2giga_harness import cli
+from gpt2giga_harness.arena import FilesystemHarnessArenaStore, queue_arena
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
+from gpt2giga_harness.runtime.models import JobAttemptStatus, JobStatus
+from gpt2giga_harness.runtime.payloads import DurableJobPayloadStore
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga_harness.runtime.worker import DurableJobDispatcher, DurableJobWorker
+from gpt2giga_harness.session_runner import HarnessSessionRunner
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
     HarnessContext,
@@ -23,7 +23,7 @@ from gpt2giga.harness.types import (
     HarnessResult,
     HarnessSpec,
 )
-from gpt2giga.harness.ui.app import create_app
+from gpt2giga_harness.ui.app import create_app
 
 
 def test_durable_dispatcher_worker_executes_once_and_preserves_logical_message(
@@ -204,7 +204,7 @@ def test_safe_retry_creates_new_attempt_and_run_without_new_user_message(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(
-        "gpt2giga.harness.runtime.worker.DEFAULT_RETRY_BACKOFF_SECONDS", 0.0
+        "gpt2giga_harness.runtime.worker.DEFAULT_RETRY_BACKOFF_SECONDS", 0.0
     )
     config = HarnessConfig(data_dir=str(tmp_path))
     registry = HarnessRegistry()

@@ -1,19 +1,19 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness import proxy
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.harnesses.base import BaseHarness
-from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
-from gpt2giga.harness.types import (
+from gpt2giga_harness import proxy
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
+from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
 )
-from gpt2giga.harness.ui.app import create_app, validate_ui_bind
-from gpt2giga.harness.ui.static import (
+from gpt2giga_harness.ui.app import create_app, validate_ui_bind
+from gpt2giga_harness.ui.static import (
     INDEX_HTML,
     UIAssetNotFoundError,
     load_asset,

@@ -1,6 +1,6 @@
 import pytest
 
-from gpt2giga.harness.editor import (
+from gpt2giga_harness.editor import (
     EditorOpenError,
     build_open_diff_plan,
     build_open_file_plan,
@@ -8,8 +8,8 @@ from gpt2giga.harness.editor import (
     editor_open_plan_to_dict,
     execute_editor_plan,
 )
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.types import GigaChatApiMode, HarnessCapability
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
 
 
 def test_editor_file_plan_uses_shell_free_goto_command(tmp_path):

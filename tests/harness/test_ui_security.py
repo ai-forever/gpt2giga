@@ -1,11 +1,11 @@
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.registry import create_default_registry
-from gpt2giga.harness.sessions.store import InMemoryHarnessSessionStore
-from gpt2giga.harness.types import GigaChatApiMode, HarnessCapability
-from gpt2giga.harness.ui.app import create_app
-from gpt2giga.harness.ui.static import INDEX_HTML, load_text_asset
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.sessions.store import InMemoryHarnessSessionStore
+from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
+from gpt2giga_harness.ui.app import create_app
+from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 
 
 def test_local_shell_issues_strict_httponly_session_cookie():

@@ -9,13 +9,9 @@ from gpt2giga.protocols.openai.streaming import (
     normalized_stream_event_to_openai_chunk,
     normalized_stream_event_to_openai_sse,
 )
-from gpt2giga.protocols.openai.stream_accumulator import (
-    OpenAIChatCompletionStreamAccumulator,
-)
 
 __all__ = [
     "OpenAIProtocolAdapter",
-    "OpenAIChatCompletionStreamAccumulator",
     "normalized_chat_response_to_openai",
     "normalized_stream_done_sse",
     "normalized_stream_event_to_openai_chunk",

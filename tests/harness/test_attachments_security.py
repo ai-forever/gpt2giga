@@ -4,14 +4,14 @@ import subprocess
 
 import pytest
 
-from gpt2giga.harness.attachments import (
+from gpt2giga_harness.attachments import (
     AttachmentLimits,
     AttachmentSessionNotFoundError,
     AttachmentValidationError,
     FilesystemAttachmentStore,
 )
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.types import REDACTED
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.types import REDACTED
 
 
 def test_upload_denies_secret_filenames(tmp_path):

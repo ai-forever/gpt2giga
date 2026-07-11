@@ -4,14 +4,14 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'packages/gpt2giga/**'
+      - 'packages/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/codeql.yaml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'packages/gpt2giga/**'
+      - 'packages/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/codeql.yaml'

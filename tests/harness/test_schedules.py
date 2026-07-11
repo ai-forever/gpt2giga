@@ -3,17 +3,17 @@ import json
 
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness import cli
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.project import resolve_project
-from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
-from gpt2giga.harness.runtime.worker import DurableJobWorker
-from gpt2giga.harness.schedules import (
+from gpt2giga_harness import cli
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.project import resolve_project
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga_harness.runtime.worker import DurableJobWorker
+from gpt2giga_harness.schedules import (
     ScheduleDefinition,
     build_schedule_definition,
     next_occurrences,
 )
-from gpt2giga.harness.ui.app import create_app
+from gpt2giga_harness.ui.app import create_app
 
 
 def test_rrule_preview_records_nonexistent_time_and_uses_first_ambiguous_instant():

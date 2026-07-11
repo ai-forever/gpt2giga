@@ -1,9 +1,9 @@
 import pytest
 
-from gpt2giga.harness import proxy
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.harnesses.direct_chat import DirectChatHarness
-from gpt2giga.harness.types import (
+from gpt2giga_harness import proxy
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.harnesses.direct_chat import DirectChatHarness
+from gpt2giga_harness.types import (
     GigaChatApiMode,
     HarnessChatMessage,
     HarnessContext,

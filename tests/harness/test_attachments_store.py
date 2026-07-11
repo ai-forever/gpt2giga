@@ -1,7 +1,7 @@
 import hashlib
 import json
 
-from gpt2giga.harness.attachments import (
+from gpt2giga_harness.attachments import (
     AttachmentLimits,
     AttachmentRenderPlan,
     FilesystemAttachmentStore,
@@ -11,11 +11,11 @@ from gpt2giga.harness.attachments import (
     render_plan_from_dict,
     render_plan_to_dict,
 )
-from gpt2giga.harness.attachments.mime import (
+from gpt2giga_harness.attachments.mime import (
     detect_attachment_kind,
     detect_mime_type,
 )
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 

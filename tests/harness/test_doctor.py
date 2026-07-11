@@ -1,6 +1,6 @@
-from gpt2giga.harness import proxy
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.doctor import run_doctor
+from gpt2giga_harness import proxy
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.doctor import run_doctor
 
 
 def test_probe_json_route_treats_validation_error_as_reachable(monkeypatch):

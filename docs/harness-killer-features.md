@@ -44,26 +44,26 @@ These entry points must stay stable while the killer features are added:
 
 | Area | Current code |
 | --- | --- |
-| CLI entrypoint | `gpt2giga/harness/cli.py` |
-| UI FastAPI app | `gpt2giga/harness/ui/app.py` |
-| Packaged no-build UI | `gpt2giga/harness/ui/assets/` |
-| UI asset compatibility loader | `gpt2giga/harness/ui/static.py` |
-| Harness registry | `gpt2giga/harness/registry.py` |
-| Harness contract | `gpt2giga/harness/types.py` |
-| Built-in harnesses | `gpt2giga/harness/harnesses/` |
-| Direct chat harness | `gpt2giga/harness/harnesses/direct_chat.py` |
-| External CLI helpers | `gpt2giga/harness/harnesses/agent_cli.py` |
-| Smart router | `gpt2giga/harness/routing.py` |
-| Project identity/config | `gpt2giga/harness/project.py` |
-| Workspace helpers | `gpt2giga/harness/workspace.py` |
-| Session runner | `gpt2giga/harness/session_runner.py` |
-| Session models/store | `gpt2giga/harness/sessions/` |
-| Attachments | `gpt2giga/harness/attachments/` |
-| Native session connectors | `gpt2giga/harness/native/codex.py`, `claude.py`, `gemini.py` |
-| Native connector registry | `gpt2giga/harness/native/registry.py` |
-| Native metadata index | `gpt2giga/harness/native/store.py` |
-| Native process manager | `gpt2giga/harness/native/process.py` |
-| Proxy discovery/sidecar | `gpt2giga/harness/proxy.py` |
+| CLI entrypoint | `packages/gpt2giga-harness/src/gpt2giga_harness/cli.py` |
+| UI FastAPI app | `packages/gpt2giga-harness/src/gpt2giga_harness/ui/app.py` |
+| Packaged no-build UI | `packages/gpt2giga-harness/src/gpt2giga_harness/ui/assets/` |
+| UI asset compatibility loader | `packages/gpt2giga-harness/src/gpt2giga_harness/ui/static.py` |
+| Harness registry | `packages/gpt2giga-harness/src/gpt2giga_harness/registry.py` |
+| Harness contract | `packages/gpt2giga-harness/src/gpt2giga_harness/types.py` |
+| Built-in harnesses | `packages/gpt2giga-harness/src/gpt2giga_harness/harnesses/` |
+| Direct chat harness | `packages/gpt2giga-harness/src/gpt2giga_harness/harnesses/direct_chat.py` |
+| External CLI helpers | `packages/gpt2giga-harness/src/gpt2giga_harness/harnesses/agent_cli.py` |
+| Smart router | `packages/gpt2giga-harness/src/gpt2giga_harness/routing.py` |
+| Project identity/config | `packages/gpt2giga-harness/src/gpt2giga_harness/project.py` |
+| Workspace helpers | `packages/gpt2giga-harness/src/gpt2giga_harness/workspace.py` |
+| Session runner | `packages/gpt2giga-harness/src/gpt2giga_harness/session_runner.py` |
+| Session models/store | `packages/gpt2giga-harness/src/gpt2giga_harness/sessions/` |
+| Attachments | `packages/gpt2giga-harness/src/gpt2giga_harness/attachments/` |
+| Native session connectors | `packages/gpt2giga-harness/src/gpt2giga_harness/native/codex.py`, `claude.py`, `gemini.py` |
+| Native connector registry | `packages/gpt2giga-harness/src/gpt2giga_harness/native/registry.py` |
+| Native metadata index | `packages/gpt2giga-harness/src/gpt2giga_harness/native/store.py` |
+| Native process manager | `packages/gpt2giga-harness/src/gpt2giga_harness/native/process.py` |
+| Proxy discovery/sidecar | `packages/gpt2giga-harness/src/gpt2giga_harness/proxy.py` |
 | Harness docs | `docs/harness.md` |
 
 ## Already Implemented
@@ -177,7 +177,7 @@ roadmap.
 - Project config can define generic non-secret `[tools.<name>]` profiles with
   enabled state, title, kind, description, target harnesses, and safe config
   metadata.
-- `gpt2giga/harness/tool_profiles.py` builds side-effect-free dry-run sync
+- `packages/gpt2giga-harness/src/gpt2giga_harness/tool_profiles.py` builds side-effect-free dry-run sync
   status for Codex CLI, Claude Code, and Gemini CLI managed config targets.
 - `/api/tools` reports profile and per-harness status for the current project;
   `/api/tools/sync` returns redacted dry-run config previews without installing,
@@ -191,7 +191,7 @@ roadmap.
 
 - Explicit project memory is stored as transparent JSONL in
   `projects/<project_id>/memory.jsonl`.
-- `gpt2giga/harness/project_memory.py` provides CRUD, enabled-only prompt
+- `packages/gpt2giga-harness/src/gpt2giga_harness/project_memory.py` provides CRUD, enabled-only prompt
   selection, prompt rendering, and redacted serialization.
 - `/api/project/memory` plus item `PATCH`/`DELETE` expose project memory to the
   cockpit.
@@ -221,7 +221,7 @@ this status to choose the next vertical slice.
 | Slice 08: per-harness attachment rendering | Implemented. |
 | Slice 09: worktree-safe edit/apply flow | Implemented as an MVP for headless external agent edit runs: `auto` policy creates an isolated git worktree, captures changed/untracked files and patch metadata, exposes diff/apply/discard/open-worktree endpoints, and wires Apply/Discard/Open controls into the Diff inspector. `temp_copy` remains a future fallback policy. |
 | Slice 10: multi-harness arena | Implemented as an MVP: `/api/arena/runs` creates a JSON parent record under `arenas/{arena_id}.json`, runs selected headless harnesses sequentially with isolated request history, links child `HarnessRun` ids, aggregates child events through `/api/arena/runs/{arena_id}/events/stream`, and renders side-by-side UI result cards. Parallel execution and arena cancellation remain future work. |
-| Slice 11: smart router | Implemented as an MVP: `gpt2giga/harness/routing.py` scores available harnesses deterministically from prompt text, attachments, workspace/selected files, requested mode, and harness capabilities; `/api/route/recommendation` exposes the result; the UI shows a Recommended badge with reasons/warnings and one-click apply. Edit-looking prompts remain non-edit unless `edit` was already selected explicitly. |
+| Slice 11: smart router | Implemented as an MVP: `packages/gpt2giga-harness/src/gpt2giga_harness/routing.py` scores available harnesses deterministically from prompt text, attachments, workspace/selected files, requested mode, and harness capabilities; `/api/route/recommendation` exposes the result; the UI shows a Recommended badge with reasons/warnings and one-click apply. Edit-looking prompts remain non-edit unless `edit` was already selected explicitly. |
 | Slice 12: presets and runbooks | Implemented as an MVP: presets support prompt templates, safe variables, workspace policy, API/CLI listing and rendering, CLI dry-run execution, and UI preset chips that prefill run controls. Multi-step runbook orchestration remains future work. |
 | Slice 13: tools/MCP profiles | Implemented as an MVP: `.giga/harness.toml` supports non-secret `[tools.NAME]` profiles; `/api/tools` and `/api/tools/sync` expose per-harness status plus redacted dry-run config previews; the UI has a Tools inspector tab. Actual external tool install/auth/config writes remain future work. |
 | Slice 14: issue/PR mode | Implemented as an MVP: every completed run stores `run.metadata.pr_artifact` with deterministic PR title/body/patch/changed-file data, `/api/runs/{run_id}/pr`, `/api/runs/{run_id}/patch`, and `/api/runs/{run_id}/branch` expose local artifact workflows, `giga run pr-summary|patch RUN_ID` exports them from the CLI, and the UI has a PR inspector tab with copy actions plus guarded local branch creation. Hosted GitHub/GitLab writes remain future work. |

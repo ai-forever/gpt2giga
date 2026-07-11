@@ -5,32 +5,32 @@ import threading
 
 import pytest
 
-from gpt2giga.harness import cli
-from gpt2giga.harness.harnesses.codex_cli import CodexCliHarness
-from gpt2giga.harness.harnesses.echo import EchoHarness
-from gpt2giga.harness.runtime.capabilities import negotiate_execution_capabilities
-from gpt2giga.harness.runtime.models import (
+from gpt2giga_harness import cli
+from gpt2giga_harness.harnesses.codex_cli import CodexCliHarness
+from gpt2giga_harness.harnesses.echo import EchoHarness
+from gpt2giga_harness.runtime.capabilities import negotiate_execution_capabilities
+from gpt2giga_harness.runtime.models import (
     JobAttemptStatus,
     JobStatus,
     RunStatus,
 )
-from gpt2giga.harness.runtime.reconcile import RuntimeReconciler
-from gpt2giga.harness.runtime.store import (
+from gpt2giga_harness.runtime.reconcile import RuntimeReconciler
+from gpt2giga_harness.runtime.store import (
     RUNTIME_SCHEMA_VERSION,
     ConcurrentUpdateError,
     IdempotencyConflictError,
     RuntimeCoordinationStore,
     _MIGRATIONS,
 )
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.sessions.models import (
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.sessions.models import (
     HarnessStoredEvent,
     event_from_dict,
     event_to_dict,
     run_from_dict,
     run_to_dict,
 )
-from gpt2giga.harness.types import GigaChatApiMode, HarnessCapability
+from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
 
 
 def test_runtime_store_uses_wal_hashed_idempotency_and_safe_json_export(tmp_path):

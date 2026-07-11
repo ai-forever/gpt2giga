@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-import gpt2giga.harness.worktrees as worktrees
-from gpt2giga.harness.worktrees import (
+import gpt2giga_harness.worktrees as worktrees
+from gpt2giga_harness.worktrees import (
     WorktreeConflictError,
     WorktreeError,
     WorkspacePolicy,

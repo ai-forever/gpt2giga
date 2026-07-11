@@ -1,12 +1,12 @@
 import sys
 
-from gpt2giga.harness import proxy
-from gpt2giga.harness.harnesses.agent_cli import run_streaming_command
-from gpt2giga.harness.harnesses.codex_cli import (
+from gpt2giga_harness import proxy
+from gpt2giga_harness.harnesses.agent_cli import run_streaming_command
+from gpt2giga_harness.harnesses.codex_cli import (
     CodexCliHarness,
     _CodexStreamParser,
 )
-from gpt2giga.harness.types import (
+from gpt2giga_harness.types import (
     Availability,
     GigaChatApiMode,
     HarnessContext,
@@ -252,7 +252,7 @@ def test_codex_cli_autostart_uses_generated_proxy_key(monkeypatch):
         lambda self: Availability.available("codex available"),
     )
     monkeypatch.setattr(
-        "gpt2giga.harness.harnesses.codex_cli.run_command",
+        "gpt2giga_harness.harnesses.codex_cli.run_command",
         fake_run_command,
     )
 
@@ -289,7 +289,7 @@ def test_codex_cli_stream_run_uses_streaming_runner(monkeypatch):
         return HarnessResult(ok=True, text="streamed", command=kwargs["command"])
 
     monkeypatch.setattr(
-        "gpt2giga.harness.harnesses.codex_cli.run_streaming_command",
+        "gpt2giga_harness.harnesses.codex_cli.run_streaming_command",
         fake_streaming_runner,
     )
     request = HarnessRequest(prompt="inspect", stream=True)

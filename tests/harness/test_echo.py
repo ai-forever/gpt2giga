@@ -1,5 +1,5 @@
-from gpt2giga.harness.harnesses.echo import EchoHarness
-from gpt2giga.harness.types import HarnessContext, HarnessRequest
+from gpt2giga_harness.harnesses.echo import EchoHarness
+from gpt2giga_harness.types import HarnessContext, HarnessRequest
 
 
 def test_echo_harness_returns_prompt():

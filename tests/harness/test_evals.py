@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.evals import (
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.evals import (
     FilesystemHarnessEvalStore,
     compare_eval_run_to_baseline,
     discover_eval_specs,
@@ -12,11 +12,11 @@ from gpt2giga.harness.evals import (
     protocol_conformance_matrix,
     run_eval,
 )
-from gpt2giga.harness.project import resolve_project
-from gpt2giga.harness.registry import create_default_registry
-from gpt2giga.harness.session_runner import HarnessSessionRunner
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.evals import EvalCheckSpec
+from gpt2giga_harness.project import resolve_project
+from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.session_runner import HarnessSessionRunner
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.evals import EvalCheckSpec
 
 
 def test_eval_spec_parse_and_run_echo(tmp_path):

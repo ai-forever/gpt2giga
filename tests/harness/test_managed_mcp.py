@@ -3,8 +3,8 @@ import json
 from fastapi.testclient import TestClient
 import pytest
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.managed_mcp import (
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.managed_mcp import (
     MANAGED_MARKER,
     ManagedConfigConflictError,
     ManagedConfigOwnershipError,
@@ -12,9 +12,9 @@ from gpt2giga.harness.managed_mcp import (
     compose_managed_config,
     compose_startup_config,
 )
-from gpt2giga.harness.mcp import descriptor_from_profile
-from gpt2giga.harness.project import ProjectToolProfile
-from gpt2giga.harness.ui.app import create_app
+from gpt2giga_harness.mcp import descriptor_from_profile
+from gpt2giga_harness.project import ProjectToolProfile
+from gpt2giga_harness.ui.app import create_app
 
 
 def _stdio_descriptor(*, trusted=True, harnesses=()):

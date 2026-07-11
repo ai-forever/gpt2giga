@@ -4,22 +4,22 @@ import time
 
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.native.base import NativeCommandPlan
-from gpt2giga.harness.native.models import (
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.native.base import NativeCommandPlan
+from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
 )
-from gpt2giga.harness.native.process import NativeProcessManager
-from gpt2giga.harness.native.registry import NativeHistoryConnectorRegistry
-from gpt2giga.harness.native.store import FilesystemNativeSessionIndexStore
-from gpt2giga.harness.registry import create_default_registry
-from gpt2giga.harness.sessions import (
+from gpt2giga_harness.native.process import NativeProcessManager
+from gpt2giga_harness.native.registry import NativeHistoryConnectorRegistry
+from gpt2giga_harness.native.store import FilesystemNativeSessionIndexStore
+from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.sessions import (
     FilesystemHarnessSessionStore,
     InMemoryHarnessSessionStore,
 )
-from gpt2giga.harness.types import HarnessContext, HarnessRequest, REDACTED
-from gpt2giga.harness.ui.app import create_app
+from gpt2giga_harness.types import HarnessContext, HarnessRequest, REDACTED
+from gpt2giga_harness.ui.app import create_app
 
 
 def test_native_process_api_start_poll_input_and_stop(tmp_path):

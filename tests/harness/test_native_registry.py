@@ -1,20 +1,20 @@
 import pytest
 
-from gpt2giga.harness.native.base import (
+from gpt2giga_harness.native.base import (
     NativeCommandPlan,
     discovery_result_to_dict,
     native_command_plan_to_dict,
 )
-from gpt2giga.harness.native.models import (
+from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
 )
-from gpt2giga.harness.native.registry import (
+from gpt2giga_harness.native.registry import (
     NativeHistoryConnectorRegistry,
     UnknownNativeHistoryConnectorError,
 )
-from gpt2giga.harness.types import (
+from gpt2giga_harness.types import (
     GigaChatApiMode,
     HarnessCapability,
     HarnessContext,

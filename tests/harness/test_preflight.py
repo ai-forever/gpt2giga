@@ -1,13 +1,13 @@
 from pathlib import Path
 
-from gpt2giga.harness.attachments.models import HarnessAttachment
-from gpt2giga.harness.preflight import (
+from gpt2giga_harness.attachments.models import HarnessAttachment
+from gpt2giga_harness.preflight import (
     ACTION_CONTINUE,
     ACTION_EXCLUDE_ATTACHMENT,
     build_preflight_report,
     preflight_report_to_dict,
 )
-from gpt2giga.harness.sessions.models import HarnessMessage
+from gpt2giga_harness.sessions.models import HarnessMessage
 
 
 def test_preflight_blocks_private_key_prompt_without_echoing_secret():

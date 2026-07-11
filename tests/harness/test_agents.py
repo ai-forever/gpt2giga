@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from gpt2giga.harness.agents import (
+from gpt2giga_harness.agents import (
     agent_profile_to_dict,
     agent_run_payload,
     discover_agent_profiles,
@@ -11,8 +11,8 @@ from gpt2giga.harness.agents import (
     parse_agent_profile,
     render_starter_agent,
 )
-from gpt2giga.harness.authoring import AuthoringConflictError, ProjectAuthoringService
-from gpt2giga.harness.project import init_project_config
+from gpt2giga_harness.authoring import AuthoringConflictError, ProjectAuthoringService
+from gpt2giga_harness.project import init_project_config
 
 
 def test_init_creates_six_valid_starter_agents(tmp_path):

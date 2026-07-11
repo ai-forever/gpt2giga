@@ -2,14 +2,14 @@ import os
 import sys
 import time
 
-from gpt2giga.harness.native.base import NativeCommandPlan
-from gpt2giga.harness.native.process import (
+from gpt2giga_harness.native.base import NativeCommandPlan
+from gpt2giga_harness.native.process import (
     NativeProcessManager,
     NativeProcessStatus,
     native_output_chunk_to_dict,
 )
-from gpt2giga.harness.sessions import InMemoryHarnessSessionStore
-from gpt2giga.harness.types import REDACTED
+from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga_harness.types import REDACTED
 
 
 def test_native_process_manager_starts_reads_writes_and_stops_fake_cli(tmp_path):

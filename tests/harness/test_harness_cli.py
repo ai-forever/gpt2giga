@@ -2,20 +2,20 @@ import json
 
 import pytest
 
-from gpt2giga.harness import cli
-from gpt2giga.harness.harnesses.base import BaseHarness
-from gpt2giga.harness.harnesses.claude_code import ClaudeCodeHarness
-from gpt2giga.harness.harnesses.codex_cli import CodexCliHarness
-from gpt2giga.harness.harnesses.direct_chat import DirectChatHarness
-from gpt2giga.harness.harnesses.gemini_cli import GeminiCliHarness
-from gpt2giga.harness.native.models import (
+from gpt2giga_harness import cli
+from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.harnesses.claude_code import ClaudeCodeHarness
+from gpt2giga_harness.harnesses.codex_cli import CodexCliHarness
+from gpt2giga_harness.harnesses.direct_chat import DirectChatHarness
+from gpt2giga_harness.harnesses.gemini_cli import GeminiCliHarness
+from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
 )
-from gpt2giga.harness.native.registry import NativeHistoryConnectorRegistry
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.types import (
+from gpt2giga_harness.native.registry import NativeHistoryConnectorRegistry
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.types import (
     Availability,
     GigaChatApiMode,
     HarnessCapability,

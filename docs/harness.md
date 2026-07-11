@@ -573,7 +573,7 @@ enforcement boundary as configuration provenance.
 
 ### Shared Tool And Secret Contracts
 
-The execution-neutral `gpt2giga.tools` package defines the common vocabulary
+The execution-neutral `gpt2giga_harness.tools` package defines the common vocabulary
 used by future Harness MCP connections and the proxy Tool Gateway:
 
 - `ToolProvider` and `ToolDescriptor` describe provider-owned tools without
@@ -1215,7 +1215,7 @@ The composer supports:
 
 Uploaded and pasted files are copied into `GPT2GIGA_HARNESS_DATA_DIR`.
 Workspace files are stored as path references by default; the harness receives a
-rendered reference such as `@gpt2giga/harness/workspace.py`, not a copied
+rendered reference such as `@packages/gpt2giga-harness/src/gpt2giga_harness/workspace.py`, not a copied
 repository file.
 
 The selected harness determines the render plan:
@@ -1237,7 +1237,7 @@ giga harness run codex-cli \
   --mode plan \
   --api-mode v2 \
   --model GigaChat-2-Max \
-  --prompt "Inspect @gpt2giga/harness/workspace.py" \
+  --prompt "Inspect @packages/gpt2giga-harness/src/gpt2giga_harness/workspace.py" \
   --dry-run \
   --json
 ```
@@ -1530,7 +1530,7 @@ If discovery fails, the UI still accepts manual model input.
 
 ## Add a New Harness
 
-1. Create `gpt2giga/harness/harnesses/my_harness.py`.
+1. Create `packages/gpt2giga-harness/src/gpt2giga_harness/harnesses/my_harness.py`.
 2. Subclass `BaseHarness`.
 3. Implement `spec()`, `availability()`, and `run()`.
 4. Register the class in `BUILTIN_HARNESSES` or expose a package entry point:

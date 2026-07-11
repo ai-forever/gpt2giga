@@ -1,6 +1,6 @@
-from gpt2giga.harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
-from gpt2giga.harness.sessions.models import HarnessRun
-from gpt2giga.harness.types import GigaChatApiMode, HarnessCapability
+from gpt2giga_harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
+from gpt2giga_harness.sessions.models import HarnessRun
+from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
 
 
 def test_pr_artifact_uses_diff_result_and_test_output():

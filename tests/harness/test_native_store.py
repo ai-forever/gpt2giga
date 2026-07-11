@@ -1,11 +1,11 @@
 import json
 
-from gpt2giga.harness.native import NativeSessionRef, NativeSessionStatus
-from gpt2giga.harness.native.store import (
+from gpt2giga_harness.native import NativeSessionRef, NativeSessionStatus
+from gpt2giga_harness.native.store import (
     FilesystemNativeSessionIndexStore,
     native_session_ref_to_dict,
 )
-from gpt2giga.harness.types import REDACTED
+from gpt2giga_harness.types import REDACTED
 
 
 def test_native_session_index_store_upserts_and_filters(tmp_path):

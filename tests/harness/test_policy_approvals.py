@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.registry import create_default_registry
-from gpt2giga.harness.runtime.models import ApprovalStatus, JobStatus
-from gpt2giga.harness.runtime.policy import (
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.runtime.models import ApprovalStatus, JobStatus
+from gpt2giga_harness.runtime.policy import (
     ApprovalDecision,
     EnforcementLevel,
     PermissionAction,
@@ -14,10 +14,10 @@ from gpt2giga.harness.runtime.policy import (
     approval_request_to_dict,
     permission_profile,
 )
-from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
-from gpt2giga.harness.runtime.worker import DurableJobWorker
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.ui.app import create_app
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga_harness.runtime.worker import DurableJobWorker
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.ui.app import create_app
 
 
 def test_policy_profiles_are_named_and_record_enforcement_boundary():

@@ -3,8 +3,8 @@ import sys
 
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.mcp import (
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.mcp import (
     MCPProbeHistoryStore,
     MCPProbeStatus,
     build_mcp_inventory,
@@ -13,13 +13,13 @@ from gpt2giga.harness.mcp import (
     mcp_probe_to_dict,
     probe_mcp_server,
 )
-from gpt2giga.harness.project import ProjectToolProfile
-from gpt2giga.harness.registry import create_default_registry
-from gpt2giga.harness.runtime.policy import ApprovalDecision
-from gpt2giga.harness.runtime.store import RuntimeCoordinationStore
-from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.ui.app import create_app
-from gpt2giga.tools import CompositeSecretResolver, EnvironmentSecretResolver
+from gpt2giga_harness.project import ProjectToolProfile
+from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.runtime.policy import ApprovalDecision
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.ui.app import create_app
+from gpt2giga_harness.tools import CompositeSecretResolver, EnvironmentSecretResolver
 
 
 _FAKE_STDIO = r"""
@@ -155,7 +155,7 @@ def test_streamable_http_discovery_accepts_json_and_session_header(monkeypatch):
             session_id="session-1" if payload["id"] == 1 else None,
         )
 
-    monkeypatch.setattr("gpt2giga.harness.mcp._open_http", fake_urlopen)
+    monkeypatch.setattr("gpt2giga_harness.mcp._open_http", fake_urlopen)
     descriptor = descriptor_from_profile(
         "remote",
         ProjectToolProfile(

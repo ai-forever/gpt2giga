@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from gpt2giga.harness.config import HarnessConfig
-from gpt2giga.harness.registry import create_default_registry
-from gpt2giga.harness.sessions import InMemoryHarnessSessionStore
-from gpt2giga.harness.ui.app import create_app
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga_harness.ui.app import create_app
 
 
 def test_project_api_returns_workspace_project_defaults(tmp_path):
@@ -96,14 +96,17 @@ prompt_file = ".giga/prompts/plan.md"
         json={
             "workspace": str(tmp_path),
             "user_prompt": "ship slice",
-            "selected_files": ["gpt2giga/harness/project.py"],
+            "selected_files": [
+                "packages/gpt2giga-harness/src/gpt2giga_harness/project.py"
+            ],
         },
     )
 
     assert render_response.status_code == 200
     rendered = render_response.json()["preset"]
     assert rendered["prompt"] == (
-        "Plan api-demo for ship slice with gpt2giga/harness/project.py"
+        "Plan api-demo for ship slice with "
+        "packages/gpt2giga-harness/src/gpt2giga_harness/project.py"
     )
     assert rendered["run"]["harness_id"] == "codex-cli"
 

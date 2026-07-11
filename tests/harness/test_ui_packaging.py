@@ -23,19 +23,39 @@ def test_packaged_ui_assets_survive_wheel_install(tmp_path):
         capture_output=True,
         text=True,
     )
+    subprocess.run(
+        [
+            "uv",
+            "build",
+            "--package",
+            "gpt2giga-harness",
+            "--wheel",
+            "--out-dir",
+            str(dist_dir),
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     wheel_path = next(dist_dir.glob("gpt2giga-*.whl"))
+    harness_wheel_path = next(dist_dir.glob("gpt2giga_harness-*.whl"))
     installed_root = tmp_path / "installed"
     with zipfile.ZipFile(wheel_path) as wheel:
+        wheel.extractall(installed_root)
+    with zipfile.ZipFile(harness_wheel_path) as wheel:
         wheel.extractall(installed_root)
 
     smoke = """
 from pathlib import Path
 
 import gpt2giga
-from gpt2giga.harness.ui.static import INDEX_HTML, load_text_asset
+import gpt2giga_harness
+from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 
 installed_root = Path(__import__("sys").argv[1]).resolve()
 assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
+assert Path(gpt2giga_harness.__file__).resolve().is_relative_to(installed_root)
 assert '<link rel="stylesheet" href="/assets/app.css?v=38.3">' in INDEX_HTML
 assert "function boot()" in load_text_asset("app.js")
 assert ".app {" in load_text_asset("app.css")

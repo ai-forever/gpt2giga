@@ -1,11 +1,11 @@
 import pytest
 
-from gpt2giga.harness.harnesses.claude_code import ClaudeCodeHarness
-from gpt2giga.harness.harnesses.codex_cli import CodexCliHarness
-from gpt2giga.harness.harnesses.direct_chat import DirectChatHarness
-from gpt2giga.harness.harnesses.echo import EchoHarness
-from gpt2giga.harness.harnesses.gemini_cli import GeminiCliHarness
-from gpt2giga.harness.types import (
+from gpt2giga_harness.harnesses.claude_code import ClaudeCodeHarness
+from gpt2giga_harness.harnesses.codex_cli import CodexCliHarness
+from gpt2giga_harness.harnesses.direct_chat import DirectChatHarness
+from gpt2giga_harness.harnesses.echo import EchoHarness
+from gpt2giga_harness.harnesses.gemini_cli import GeminiCliHarness
+from gpt2giga_harness.types import (
     HarnessChatMessage,
     HarnessContext,
     HarnessRequest,

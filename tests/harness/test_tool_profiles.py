@@ -1,6 +1,6 @@
-from gpt2giga.harness.project import ProjectToolProfile
-from gpt2giga.harness.registry import create_default_registry
-from gpt2giga.harness.tool_profiles import (
+from gpt2giga_harness.project import ProjectToolProfile
+from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.tool_profiles import (
     build_tool_profile_statuses,
     tool_profile_status_to_dict,
 )

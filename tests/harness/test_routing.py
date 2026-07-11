@@ -1,11 +1,11 @@
-from gpt2giga.harness.harnesses.base import BaseHarness
-from gpt2giga.harness.native.models import HarnessInvocationMode
-from gpt2giga.harness.registry import HarnessRegistry
-from gpt2giga.harness.routing import (
+from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.native.models import HarnessInvocationMode
+from gpt2giga_harness.registry import HarnessRegistry
+from gpt2giga_harness.routing import (
     recommend_harness_route,
     route_recommendation_to_dict,
 )
-from gpt2giga.harness.types import (
+from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
     HarnessContext,

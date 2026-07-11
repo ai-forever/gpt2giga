@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from gpt2giga.harness.project import (
+from gpt2giga_harness.project import (
     DEFAULT_ATTACHMENT_IGNORE,
     DEFAULT_ENABLED_HARNESSES,
     init_project_config,
@@ -238,7 +238,7 @@ selected_files = ["tests/test_project.py"]
         config,
         "fix_tests",
         user_prompt="repair failing tests",
-        selected_files=("gpt2giga/harness/project.py",),
+        selected_files=("packages/gpt2giga-harness/src/gpt2giga_harness/project.py",),
         last_run_diff="diff --git a/x b/x",
     )
     payload = rendered_project_preset_to_dict(rendered)
@@ -246,7 +246,7 @@ selected_files = ["tests/test_project.py"]
     assert rendered.workspace_policy == "worktree"
     assert rendered.selected_files == (
         "tests/test_project.py",
-        "gpt2giga/harness/project.py",
+        "packages/gpt2giga-harness/src/gpt2giga_harness/project.py",
     )
     assert "Project render-demo" in rendered.prompt
     assert "repair failing tests" in rendered.prompt
@@ -254,7 +254,7 @@ selected_files = ["tests/test_project.py"]
     assert payload["run"]["workspace_policy"] == "worktree"
     assert payload["variables"]["selected_files"] == [
         "tests/test_project.py",
-        "gpt2giga/harness/project.py",
+        "packages/gpt2giga-harness/src/gpt2giga_harness/project.py",
     ]
 
 

@@ -1,13 +1,13 @@
 import json
 import sys
 
-from gpt2giga.harness import proxy
-from gpt2giga.harness.harnesses.agent_cli import run_command, run_streaming_command
-from gpt2giga.harness.harnesses.claude_code import (
+from gpt2giga_harness import proxy
+from gpt2giga_harness.harnesses.agent_cli import run_command, run_streaming_command
+from gpt2giga_harness.harnesses.claude_code import (
     ClaudeCodeHarness,
     _ClaudeStreamParser,
 )
-from gpt2giga.harness.types import (
+from gpt2giga_harness.types import (
     Availability,
     GigaChatApiMode,
     HarnessContext,
@@ -282,7 +282,7 @@ def test_claude_code_proxy_preflight_failure_prevents_cli_run(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "gpt2giga.harness.harnesses.claude_code.run_command",
+        "gpt2giga_harness.harnesses.claude_code.run_command",
         fail_run_command,
     )
 
@@ -305,7 +305,7 @@ def test_claude_code_json_output_uses_result_as_text(monkeypatch):
         stderr = ""
 
     monkeypatch.setattr(
-        "gpt2giga.harness.harnesses.agent_cli.subprocess.run",
+        "gpt2giga_harness.harnesses.agent_cli.subprocess.run",
         lambda *args, **kwargs: Completed(),
     )
 
@@ -347,7 +347,7 @@ def test_claude_code_stream_run_uses_streaming_runner(monkeypatch):
         return HarnessResult(ok=True, text="streamed", command=kwargs["command"])
 
     monkeypatch.setattr(
-        "gpt2giga.harness.harnesses.claude_code.run_streaming_command",
+        "gpt2giga_harness.harnesses.claude_code.run_streaming_command",
         fake_streaming_runner,
     )
     request = HarnessRequest(prompt="inspect", stream=True)

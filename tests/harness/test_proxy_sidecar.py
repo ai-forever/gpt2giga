@@ -1,8 +1,8 @@
 import threading
 import time
 
-from gpt2giga.harness import proxy
-from gpt2giga.harness.types import GigaChatApiMode, HarnessContext
+from gpt2giga_harness import proxy
+from gpt2giga_harness.types import GigaChatApiMode, HarnessContext
 
 
 def test_stream_sse_json_decodes_events_and_stops_at_done(monkeypatch):
