@@ -663,6 +663,33 @@ POST /api/runs/{run_id}/replay
 POST /api/runs/{run_id}/fork
 ```
 
+### Promote A Run Into Project Configuration
+
+The `Provenance` inspector can turn a useful run into a reviewed reusable
+artifact with `Save as agent`, `Save as workflow`, or `Add trace to eval`.
+Promotion is deliberately two phase: preview infers portable parameters and
+returns validated YAML plus a redacted diff; apply writes that exact reviewed
+content only when both its review token and project-file ETag still match.
+
+Generated candidates record source run/trace provenance. Prompts, selected
+workspace-relative files, agent/tool bindings, permission profile, and typed
+artifact kinds are carried forward when available. Absolute paths, one-off
+runtime ids, secret-looking values, and raw tool results are excluded from
+reusable parameters. Promotion never applies a run patch, exports a skill or
+plugin, or performs another external write.
+
+The authenticated API surface is:
+
+```text
+POST /api/runs/{run_id}/promotions/preview
+POST /api/runs/{run_id}/promotions/apply
+```
+
+Preview accepts `kind` (`agent`, `workflow`, or `eval`) and a safe `target_id`.
+Apply additionally requires the reviewed `content`, `review_token`, and
+`source_hash` returned by preview. Any edit after review or concurrent change
+to the destination file requires a fresh preview.
+
 ### Editor Bridge
 
 Projects can define a non-secret editor command in `.giga/harness.toml`:

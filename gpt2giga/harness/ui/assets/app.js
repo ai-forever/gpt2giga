@@ -24,6 +24,7 @@
       workflows: [],
       workflowErrors: [],
       workflowTemplates: [],
+      promotionDraft: null,
       selectedWorkflow: null,
       toolSyncPreview: null,
       toolError: null,
@@ -4232,6 +4233,9 @@
       byId("refresh-provenance-button").disabled = !hasRun;
       byId("replay-run-button").disabled = !hasRun;
       byId("fork-run-button").disabled = !hasRun;
+      byId("promote-agent-button").disabled = !hasRun;
+      byId("promote-workflow-button").disabled = !hasRun;
+      byId("promote-eval-button").disabled = !hasRun;
       if (!hasRun) {
         setText("provenance-text", "No provenance selected.");
         return;
@@ -4538,6 +4542,72 @@
       await loadSessions();
       setText("model-status", "Replayed run.");
       showTab("run");
+    }
+
+    async function previewRunPromotion(kind) {
+      const run = currentRun();
+      if (!run) return;
+      const suggested = `${kind}-${String(run.harness_id || "run").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase()}-${String(run.id).slice(-8).toLowerCase()}`;
+      state.promotionDraft = { runId: run.id, kind };
+      byId("promotion-target-id").value = suggested;
+      byId("promotion-review-content").value = "";
+      byId("promotion-review-content").hidden = true;
+      byId("apply-promotion-button").disabled = true;
+      setText("promotion-review-meta", `Choose the project ${kind} id, then generate and review YAML before applying.`);
+      byId("promotion-review").hidden = false;
+      showTab("provenance");
+    }
+
+    async function generateRunPromotion() {
+      const pending = state.promotionDraft;
+      if (!pending) return;
+      const targetId = byId("promotion-target-id").value.trim();
+      if (!targetId) return setText("promotion-review-meta", "Project artifact id is required.");
+      const result = await getJson(`/api/runs/${encodeURIComponent(pending.runId)}/promotions/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: pending.kind, target_id: targetId })
+      });
+      if (!result.ok) {
+        setText("provenance-text", result.data.detail || `Promotion preview failed with HTTP ${result.status}`);
+        showTab("provenance");
+        return;
+      }
+      state.promotionDraft = { runId: pending.runId, ...result.data.promotion };
+      byId("promotion-review-content").value = state.promotionDraft.content || "";
+      byId("promotion-review-content").hidden = false;
+      byId("apply-promotion-button").disabled = false;
+      setText("promotion-review-meta", `${state.promotionDraft.relative_path} · review required · ${(state.promotionDraft.warnings || []).join(" ")}`);
+      byId("promotion-review").hidden = false;
+      setText("provenance-text", state.promotionDraft.redacted_diff || "New project file has no diff.");
+      showTab("provenance");
+    }
+
+    async function applyRunPromotion() {
+      const draft = state.promotionDraft;
+      if (!draft) return;
+      byId("apply-promotion-button").disabled = true;
+      const result = await getJson(`/api/runs/${encodeURIComponent(draft.runId)}/promotions/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: draft.kind,
+          target_id: draft.target_id,
+          content: draft.content,
+          source_hash: draft.source_hash,
+          review_token: draft.review_token
+        })
+      });
+      byId("apply-promotion-button").disabled = false;
+      if (!result.ok) return setText("provenance-text", result.data.detail || `Promotion apply failed with HTTP ${result.status}`);
+      setText("provenance-text", `Saved ${result.data.relative_path}\nSource: ${String(result.data.source_hash || "").slice(0, 12)}\nPlugin/skill export was not performed.`);
+      byId("promotion-review").hidden = true;
+      state.promotionDraft = null;
+    }
+
+    function cancelRunPromotion() {
+      state.promotionDraft = null;
+      byId("promotion-review").hidden = true;
     }
 
     async function forkCurrentRun() {
@@ -5120,6 +5190,12 @@
       byId("refresh-provenance-button").addEventListener("click", refreshRunProvenance);
       byId("replay-run-button").addEventListener("click", replayCurrentRun);
       byId("fork-run-button").addEventListener("click", forkCurrentRun);
+      byId("promote-agent-button").addEventListener("click", () => previewRunPromotion("agent"));
+      byId("promote-workflow-button").addEventListener("click", () => previewRunPromotion("workflow"));
+      byId("promote-eval-button").addEventListener("click", () => previewRunPromotion("eval"));
+      byId("preview-promotion-button").addEventListener("click", generateRunPromotion);
+      byId("apply-promotion-button").addEventListener("click", applyRunPromotion);
+      byId("cancel-promotion-button").addEventListener("click", cancelRunPromotion);
       byId("open-editor-workspace-button").addEventListener("click", () => openEditorWorkspace(false));
       byId("open-editor-run-button").addEventListener("click", () => openEditorWorkspace(true));
       byId("open-editor-diff-button").addEventListener("click", openEditorDiff);

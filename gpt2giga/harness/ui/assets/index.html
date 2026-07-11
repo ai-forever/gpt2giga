@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=34.2">
+  <link rel="stylesheet" href="/assets/app.css?v=35.3">
 </head>
 <body>
   <div class="app">
@@ -487,7 +487,22 @@
                 <button id="refresh-provenance-button" class="secondary" type="button" disabled>Refresh provenance</button>
                 <button id="replay-run-button" type="button" disabled>Replay</button>
                 <button id="fork-run-button" class="secondary" type="button" disabled>Fork chat</button>
+                <button id="promote-agent-button" class="secondary" type="button" disabled>Save as agent</button>
+                <button id="promote-workflow-button" class="secondary" type="button" disabled>Save as workflow</button>
+                <button id="promote-eval-button" class="secondary" type="button" disabled>Add trace to eval</button>
               </div>
+              <section id="promotion-review" hidden>
+                <p id="promotion-review-meta">Review generated YAML before applying.</p>
+                <div class="inline-actions">
+                  <input id="promotion-target-id" placeholder="project artifact id" autocomplete="off">
+                  <button id="preview-promotion-button" class="secondary" type="button">Generate preview</button>
+                </div>
+                <textarea id="promotion-review-content" rows="18" readonly hidden></textarea>
+                <div class="inline-actions">
+                  <button id="apply-promotion-button" type="button" disabled>Apply reviewed YAML</button>
+                  <button id="cancel-promotion-button" class="secondary" type="button">Cancel</button>
+                </div>
+              </section>
               <pre id="provenance-text">No provenance selected.</pre>
             </div>
             <div id="editor-panel" class="mono-panel tab-panel">
@@ -616,6 +631,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=34.2"></script>
+  <script src="/assets/app.js?v=35.3"></script>
 </body>
 </html>

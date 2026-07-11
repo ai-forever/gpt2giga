@@ -73,6 +73,7 @@ class HarnessEvalSpec:
     mode: str = "plan"
     workspace_policy: str = "current"
     cases: tuple[EvalCaseSpec, ...] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -511,6 +512,7 @@ def eval_spec_from_mapping(
         mode=_optional_text(data.get("mode")) or "plan",
         workspace_policy=_optional_text(data.get("workspace_policy")) or "current",
         cases=cases,
+        metadata=_mapping(data.get("metadata")),
     )
 
 
@@ -538,6 +540,7 @@ def eval_spec_to_dict(
         "mode": spec.mode,
         "workspace_policy": spec.workspace_policy,
         "case_count": len(spec.cases),
+        "metadata": dict(redact_for_storage(dict(spec.metadata))),
     }
     if include_cases:
         payload["cases"] = [

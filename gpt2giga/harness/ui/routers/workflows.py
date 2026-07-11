@@ -10,6 +10,13 @@ from starlette.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from gpt2giga.harness.project import project_to_dict, resolve_project
+from gpt2giga.harness.promotions import (
+    apply_run_promotion,
+    preview_run_promotion,
+    promotion_to_dict,
+)
+from gpt2giga.harness.authoring import AuthoringConflictError
+from gpt2giga.harness.sessions.store import RunNotFoundError
 from gpt2giga.harness.runtime.models import ApprovalStatus
 from gpt2giga.harness.runtime.policy import (
     EnforcementLevel,
@@ -106,6 +113,78 @@ class WorkflowMergeApplyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     approval_id: str | None = None
+
+
+class RunPromotionPreviewRequest(BaseModel):
+    """Requested run-derived project YAML candidate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    target_id: str = Field(min_length=2, max_length=64)
+
+
+class RunPromotionApplyRequest(RunPromotionPreviewRequest):
+    """Reviewed promotion content plus optimistic-lock values."""
+
+    content: str = Field(min_length=1)
+    source_hash: str
+    review_token: str
+
+
+@router.post("/api/runs/{run_id}/promotions/preview")
+async def run_promotion_preview(
+    run_id: str,
+    request: Request,
+    payload: RunPromotionPreviewRequest = Body(...),
+) -> dict[str, Any]:
+    """Infer and validate a portable candidate without writing project YAML."""
+    try:
+        draft = await run_in_threadpool(
+            preview_run_promotion,
+            request.app.state.harness_session_store,
+            run_id,
+            kind=payload.kind,
+            target_id=payload.target_id,
+        )
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"review_required": True, "promotion": promotion_to_dict(draft)}
+
+
+@router.post("/api/runs/{run_id}/promotions/apply")
+async def run_promotion_apply(
+    run_id: str,
+    request: Request,
+    payload: RunPromotionApplyRequest = Body(...),
+) -> dict[str, Any]:
+    """Write an explicitly reviewed candidate after token and ETag checks."""
+    try:
+        new_hash, draft = await run_in_threadpool(
+            apply_run_promotion,
+            request.app.state.harness_session_store,
+            run_id,
+            kind=payload.kind,
+            target_id=payload.target_id,
+            content=payload.content,
+            source_hash=payload.source_hash,
+            review_token=payload.review_token,
+        )
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Run not found") from exc
+    except AuthoringConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "applied": True,
+        "kind": payload.kind,
+        "target_id": payload.target_id,
+        "relative_path": draft.relative_path,
+        "source_hash": new_hash,
+    }
 
 
 @router.get("/api/workflows")

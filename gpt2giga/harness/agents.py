@@ -56,6 +56,7 @@ class AgentProfile:
     tool_ids: tuple[str, ...] = ()
     budgets: AgentBudgets = field(default_factory=AgentBudgets)
     expected_artifact: str | None = None
+    provenance: Mapping[str, Any] = field(default_factory=dict)
     source_path: str | None = None
     source_hash: str | None = None
 
@@ -135,6 +136,7 @@ def parse_agent_profile(
         "tool_ids",
         "budgets",
         "expected_artifact",
+        "provenance",
     }
     unknown = sorted(set(data) - allowed)
     if unknown:
@@ -194,6 +196,7 @@ def parse_agent_profile(
         tool_ids=_text_tuple(data.get("tool_ids"), "tool_ids"),
         budgets=budgets,
         expected_artifact=_optional_text(data.get("expected_artifact")),
+        provenance=dict(_profile_mapping(data.get("provenance"))),
         source_path=source_path,
         source_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
     )
@@ -384,6 +387,14 @@ def _required_text(value: Any, field_name: str) -> str:
 def _optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _profile_mapping(value: Any) -> Mapping[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError("Agent provenance must be a mapping")
+    return value
 
 
 def _positive_int(value: Any, field_name: str) -> int:

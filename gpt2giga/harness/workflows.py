@@ -123,6 +123,7 @@ class WorkflowDefinition:
     steps: tuple[WorkflowStep, ...]
     budgets: WorkflowBudgets
     inputs: Mapping[str, Any] = field(default_factory=dict)
+    provenance: Mapping[str, Any] = field(default_factory=dict)
     source_path: str | None = None
     source_hash: str | None = None
 
@@ -196,6 +197,7 @@ def parse_workflow_definition(
         "schema_version",
         "version",
         "inputs",
+        "provenance",
         "budgets",
         "steps",
     }
@@ -228,6 +230,7 @@ def parse_workflow_definition(
     if len(steps) > budgets.max_steps:
         raise ValueError("Workflow step count exceeds its max_steps budget")
     safe_inputs = redact_for_storage(_mapping(data.get("inputs")))
+    safe_provenance = redact_for_storage(_mapping(data.get("provenance")))
     return WorkflowDefinition(
         id=workflow_id,
         title=_required_text(data.get("title"), "workflow title"),
@@ -239,6 +242,9 @@ def parse_workflow_definition(
         steps=steps,
         budgets=budgets,
         inputs=dict(safe_inputs) if isinstance(safe_inputs, Mapping) else {},
+        provenance=(
+            dict(safe_provenance) if isinstance(safe_provenance, Mapping) else {}
+        ),
         source_path=source_path,
         source_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
     )
