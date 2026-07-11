@@ -48,6 +48,9 @@ jobs:
       - name: Lint with Ruff
         run: uv run ruff check .
 
+      - name: Check formatting with Ruff
+        run: uv run ruff format --check .
+
       - name: Run tests with coverage
         run: |
           uv run pytest tests/ --cov=. --cov-report=json:coverage.json --cov-fail-under=80
@@ -58,6 +61,101 @@ jobs:
         with:
           name: coverage-${{ matrix.python-version }}
           path: coverage.json
+
+  build-artifacts:
+    name: Build workspace artifacts
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Build gateway wheel and sdist without workspace sources
+        run: uv build --package gpt2giga --wheel --sdist --no-sources --out-dir dist/gpt2giga
+
+      - name: Build Harness wheel and sdist without workspace sources
+        run: uv build --package gpt2giga-harness --wheel --sdist --no-sources --out-dir dist/gpt2giga-harness
+
+      - name: Upload gateway artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: gpt2giga-0.2.2a1
+          path: dist/gpt2giga/*
+          if-no-files-found: error
+
+      - name: Upload Harness artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: gpt2giga-harness-0.0.1
+          path: dist/gpt2giga-harness/*
+          if-no-files-found: error
+
+  artifact-smoke:
+    name: ${{ matrix.package }} artifact smoke on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [gateway, harness]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Build gateway wheel without workspace sources
+        run: uv build --package gpt2giga --wheel --no-sources --out-dir dist/smoke
+
+      - name: Build Harness wheel without workspace sources
+        if: matrix.package == 'harness'
+        run: uv build --package gpt2giga-harness --wheel --no-sources --out-dir dist/smoke
+
+      - name: Create clean artifact environment
+        run: uv venv --python ${{ matrix.python-version }} .venv-artifact
+
+      - name: Install gateway artifact
+        if: matrix.package == 'gateway'
+        run: uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl
+
+      - name: Install Harness and gateway artifacts
+        if: matrix.package == 'harness'
+        run: uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl dist/smoke/gpt2giga_harness-*.whl
+
+      - name: Smoke gateway-only imports and command
+        if: matrix.package == 'gateway'
+        run: |
+          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.util, gpt2giga; assert m.version('gpt2giga') == '0.2.2a1'; assert importlib.util.find_spec('gpt2giga_harness') is None"
+          .venv-artifact/bin/gpt2giga --help
+          test ! -e .venv-artifact/bin/giga
+          test ! -e .venv-artifact/bin/gpt2giga-harness
+
+      - name: Smoke combined imports, UI assets, and commands
+        if: matrix.package == 'harness'
+        run: |
+          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, gpt2giga, gpt2giga_harness; assert m.version('gpt2giga') == '0.2.2a1'; assert m.version('gpt2giga-harness') == '0.0.1'; assert r.files('gpt2giga_harness.ui').joinpath('assets/index.html').is_file()"
+          .venv-artifact/bin/gpt2giga --help
+          .venv-artifact/bin/giga --help
+          .venv-artifact/bin/gpt2giga-harness --help
 
 
   coverage-badge:

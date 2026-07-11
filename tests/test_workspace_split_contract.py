@@ -142,3 +142,40 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
     assert (harness_source / "tools").is_dir()
     assert (harness_source / "protocols/openai/stream_accumulator.py").is_file()
     assert (harness_source / "ui/assets/index.html").is_file()
+
+
+def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
+    if not HARNESS_MEMBER.exists():
+        return
+
+    workflow = (REPO_ROOT / ".github/workflows/ci.yaml").read_text(encoding="utf-8")
+    assert "build-artifacts:" in workflow
+    assert "artifact-smoke:" in workflow
+    assert "package: [gateway, harness]" in workflow
+    assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in workflow
+    assert "uv build --package gpt2giga --wheel --sdist --no-sources" in workflow
+    assert (
+        "uv build --package gpt2giga-harness --wheel --sdist --no-sources" in workflow
+    )
+    assert "gpt2giga-0.2.2a1" in workflow
+    assert "gpt2giga-harness-0.0.1" in workflow
+    assert ".venv-artifact/bin/gpt2giga --help" in workflow
+    assert ".venv-artifact/bin/giga --help" in workflow
+    assert ".venv-artifact/bin/gpt2giga-harness --help" in workflow
+
+
+def test_production_docker_build_remains_gateway_only():
+    dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    docker_workflows = "\n".join(
+        (REPO_ROOT / path).read_text(encoding="utf-8")
+        for path in (
+            ".github/workflows/docker-smoke.yaml",
+            ".github/workflows/docker_image.yaml",
+            ".github/workflows/publish-ghcr.yml",
+        )
+    )
+
+    assert "uv build --package gpt2giga --wheel" in dockerfile
+    assert "packages/gpt2giga-harness" not in dockerfile
+    assert "gpt2giga_harness" not in dockerfile
+    assert "packages/gpt2giga-harness" not in docker_workflows
