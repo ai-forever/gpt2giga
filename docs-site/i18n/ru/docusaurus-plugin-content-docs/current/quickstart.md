@@ -54,19 +54,35 @@ docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
 curl http://localhost:8090/health
 ```
 
-## Локальный запуск
+## Выбор пакета
 
-Установить как инструмент:
+Если нужен только HTTP API, совместимый с OpenAI, Anthropic и Gemini,
+установите gateway:
 
 ```sh
-uv tool install gpt2giga
+uv tool install "gpt2giga==0.2.2a1"
 gpt2giga
 ```
 
-Или запустить из репозитория:
+Для Harness CLI, worker и локального browser UI установите отдельный control
+plane. Он установит точную совместимую зависимость gateway:
 
 ```sh
-uv sync --all-extras --dev
+uv tool install "gpt2giga-harness==0.0.1"
+giga doctor
+giga ui
+```
+
+Дистрибутив Harness использует Python namespace `gpt2giga_harness` и добавляет
+команды `giga` и `gpt2giga-harness`. Дистрибутив gateway добавляет только
+команду `gpt2giga`.
+
+## Запуск из репозитория
+
+Установите оба editable workspace member и зависимости разработки:
+
+```sh
+uv sync --all-packages --all-extras --dev
 uv run gpt2giga
 ```
 

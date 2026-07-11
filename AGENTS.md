@@ -2,8 +2,8 @@
 
 ## Project Snapshot
 
-- **Repo type:** Single Python package with examples, docs, CI workflows, and deployment assets
-- **What:** FastAPI compatibility gateway that translates OpenAI-, Anthropic-, and Gemini-shaped requests into GigaChat calls
+- **Repo type:** Two-member `uv` workspace with examples, docs, CI workflows, and deployment assets
+- **What:** FastAPI compatibility gateway plus a separately packaged local agentic control plane
 - **Stack:** Python 3.10-3.14, FastAPI/Starlette, GigaChat SDK, Pydantic Settings, SSE, Docker, optional Postgres/OpenSearch/Phoenix backends
 - **Tooling:** `uv`, Ruff, pytest, Docusaurus/Node.js, Docker, GitHub Actions
 - **Hierarchy:** Subfolders with their own `AGENTS.md` override this file
@@ -12,13 +12,14 @@
 
 ```bash
 # Install runtime + dev dependencies
-uv sync --all-extras --dev
+uv sync --all-packages --all-extras --dev
 
 # Run the proxy locally
 uv run gpt2giga
 
 # Build wheel + sdist
-uv build
+uv build --package gpt2giga
+uv build --package gpt2giga-harness
 
 # Run full quality gate
 uv run ruff check .
@@ -35,7 +36,8 @@ uv run pre-commit install
 - **Commit style:** Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`.
 - **Python compat:** Code must remain compatible with Python `3.10` through `3.14`.
 - **Async-first:** Endpoint handlers and upstream GigaChat interactions are async.
-- **Imports:** stdlib → third-party → local (`gpt2giga.*`), using absolute imports.
+- **Imports:** stdlib → third-party → local (`gpt2giga.*` or `gpt2giga_harness.*`), using absolute imports.
+- **Package boundary:** Harness may depend on the gateway; gateway code must never import `gpt2giga_harness`.
 - **Docstrings:** Google style, imperative mood, concise.
 - **Architecture fit:** Keep route aggregation, protocol translation, upstream providers, and sink/storage concerns in their existing layers.
 - **PR checklist:** Follow `.github/PULL_REQUEST_TEMPLATE.md`.
@@ -53,7 +55,10 @@ uv run pre-commit install
 
 | Path | Purpose | Notes |
 |---|---|---|
-| `gpt2giga/` | Main application package | App factory, API aggregation, routers, protocols, providers, sinks |
+| `packages/gpt2giga/` | Distribution: `gpt2giga==0.2.2a1` | Gateway-only source, metadata, and README |
+| `packages/gpt2giga/src/gpt2giga/` | Gateway Python namespace | App factory, API aggregation, routers, protocols, providers, sinks |
+| `packages/gpt2giga-harness/` | Distribution: `gpt2giga-harness==0.0.1` | Harness metadata and README |
+| `packages/gpt2giga-harness/src/gpt2giga_harness/` | Harness Python namespace | CLI, UI, workers, sessions, tools, workflows, and harness adapters |
 | `tests/` | Test suite | Mirrors app, router, protocol, sink, and compatibility behavior |
 | `examples/` | Runnable SDK examples | OpenAI chat/responses/embeddings/models, Anthropic, Gemini, agents; files/batches examples are prepared but not mounted |
 | `docs/` | User documentation content | Markdown guides and architecture notes rendered by Docusaurus |
@@ -69,18 +74,17 @@ uv run pre-commit install
 
 ## Current Architecture Notes
 
-- `gpt2giga/app/factory.py` is the FastAPI composition root: middleware, auth dependencies, metrics, public routers, and admin/debug routers are mounted there.
-- OpenAI, Anthropic, and Gemini public API aggregators live in `gpt2giga/api/openai/`, `gpt2giga/api/anthropic/`, and `gpt2giga/api/gemini/`; concrete route handlers live under the matching `gpt2giga/routers/*/` package.
-- LiteLLM-compatible model-info endpoints live in `gpt2giga/routers/litellm/`.
-- System health routes live in `gpt2giga/routers/system_router.py`; Prometheus metrics are mounted from `gpt2giga/api/system/metrics.py` when enabled.
-- Runtime `/logs*` routes live in `gpt2giga/routers/logs_router.py` and are disabled in `PROD`.
-- Admin traffic-log and debug translation routes live in `gpt2giga/api/admin/` and are opt-in.
-- Legacy request/response translation lives in `gpt2giga/protocol/`; experimental normalized adapters and diagnostics live in `gpt2giga/protocols/`.
-- Shared HTTP, schema, streaming, auth, and utility helpers live in `gpt2giga/common/`.
-- GigaChat upstream integration lives in `gpt2giga/providers/gigachat/`.
-- Traffic logs, metrics, and observability sinks live in `gpt2giga/sinks/`; Postgres/OpenSearch storage helpers live in `gpt2giga/storage/`.
+- `packages/gpt2giga/src/gpt2giga/app/factory.py` is the gateway FastAPI composition root: middleware, auth dependencies, metrics, public routers, and admin/debug routers are mounted there.
+- OpenAI, Anthropic, and Gemini public API aggregators live below `packages/gpt2giga/src/gpt2giga/api/`; concrete route handlers live below the matching `routers/*/` package.
+- LiteLLM-compatible model-info endpoints live in the gateway `routers/litellm/` package.
+- System health routes live in the gateway `routers/system_router.py`; Prometheus metrics are mounted from `api/system/metrics.py` when enabled.
+- Runtime `/logs*` routes live in the gateway `routers/logs_router.py` and are disabled in `PROD`.
+- Admin traffic-log and debug translation routes live in the gateway `api/admin/` package and are opt-in.
+- Legacy and normalized gateway translation lives in `packages/gpt2giga/src/gpt2giga/protocol/` and `protocols/`.
+- Harness runtime, UI, sessions, worker coordination, tools, and built-in adapters live below `packages/gpt2giga-harness/src/gpt2giga_harness/`.
+- Harness retains only the reviewed gateway imports from `gpt2giga.protocols.normalized` and `from gpt2giga import run` for optional sidecar startup.
 - Files and batch router code exists, but OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are intentionally not mounted until the upstream SDK/backend can execute them end-to-end.
-- OpenAPI schema builders live in `gpt2giga/openapi_specs/`.
+- OpenAPI schema builders live in the gateway `openapi_specs/` package.
 
 ## Quick Find Commands
 
@@ -89,16 +93,16 @@ uv run pre-commit install
 find . -name AGENTS.md -not -path './.git/*' -print | sort
 
 # Find route handlers
-rg -n "@router\.(get|post|delete|put|patch)" gpt2giga/api gpt2giga/routers
+rg -n "@router\.(get|post|delete|put|patch)" packages/gpt2giga/src/gpt2giga/api packages/gpt2giga/src/gpt2giga/routers
 
 # Find config/env settings
-rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/models/config.py
+rg -n "GPT2GIGA_|GIGACHAT_" .env.example packages/*/src
 
 # Find middleware classes
-rg -n "class .*Middleware" gpt2giga/middlewares
+rg -n "class .*Middleware" packages/gpt2giga/src/gpt2giga/middlewares
 
 # Find admin, traffic log, metrics, and observability wiring
-rg -n "admin|traffic_log|metrics|observability|debug_translate" gpt2giga docs .env.example
+rg -n "admin|traffic_log|metrics|observability|debug_translate" packages/gpt2giga/src/gpt2giga docs .env.example
 
 # Find tests for a feature
 rg -n "batch|file|anthropic|gemini|responses|traffic|metrics|normalized" tests

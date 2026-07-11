@@ -195,6 +195,36 @@ def test_release_workflow_attests_both_artifacts_and_publishes_only_harness():
     assert "if: github.event_name == 'release'" in workflow
 
 
+def test_split_install_and_namespace_migration_are_documented():
+    if not HARNESS_MEMBER.exists():
+        return
+
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    quickstart = (REPO_ROOT / "docs/quickstart.md").read_text(encoding="utf-8")
+    harness_guide = (REPO_ROOT / "docs/harness.md").read_text(encoding="utf-8")
+    root_instructions = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    harness_instructions = (HARNESS_MEMBER / "AGENTS.md").read_text(encoding="utf-8")
+
+    for guide in (readme, quickstart):
+        assert "gpt2giga==0.2.2a1" in guide
+        assert "gpt2giga-harness==0.0.1" in guide
+        assert "gpt2giga_harness" in guide
+
+    assert "Migration from the Combined Prerelease" in harness_guide
+    assert "from gpt2giga.harness.harnesses.base import BaseHarness" in harness_guide
+    assert "from gpt2giga_harness.harnesses.base import BaseHarness" in harness_guide
+    assert "python -m pip uninstall -y gpt2giga gpt2giga-harness" in harness_guide
+    assert "`gpt2giga.harnesses`" in harness_guide
+    assert "`~/.gpt2giga/harness`" in harness_guide
+    assert "`.giga/`" in harness_guide
+
+    for instructions in (root_instructions, harness_instructions):
+        assert "uv sync --all-packages --all-extras --dev" in instructions
+    assert "uv build --package gpt2giga" in root_instructions
+    assert "uv build --package gpt2giga-harness" in root_instructions
+    assert "gateway code must never import `gpt2giga_harness`" in root_instructions
+
+
 def test_production_docker_build_remains_gateway_only():
     dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
     docker_workflows = "\n".join(

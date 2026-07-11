@@ -13,6 +13,20 @@ GigaChat credentials are already present in the environment.
 
 ## Quickstart
 
+Install the Harness distribution. It installs its exact
+`gpt2giga==0.2.2a1` dependency and provides both Harness commands:
+
+```bash
+uv tool install "gpt2giga-harness==0.0.1"
+giga doctor
+```
+
+For development from this repository, install both editable workspace members:
+
+```bash
+uv sync --all-packages --all-extras --dev
+```
+
 Start the proxy:
 
 ```bash
@@ -1531,7 +1545,12 @@ If discovery fails, the UI still accepts manual model input.
 ## Add a New Harness
 
 1. Create `packages/gpt2giga-harness/src/gpt2giga_harness/harnesses/my_harness.py`.
-2. Subclass `BaseHarness`.
+2. Import and subclass the Harness-owned base class:
+
+   ```python
+   from gpt2giga_harness.harnesses.base import BaseHarness
+   ```
+
 3. Implement `spec()`, `availability()`, and `run()`.
 4. Register the class in `BUILTIN_HARNESSES` or expose a package entry point:
 
@@ -1554,6 +1573,44 @@ For a starting template:
 ```bash
 giga harness scaffold my-harness
 ```
+
+## Migration from the Combined Prerelease
+
+The previous branch-only combined prerelease exposed Harness modules below
+`gpt2giga.harness`. The split release intentionally does not provide an import
+shim. Update Python imports directly:
+
+```python
+# Before
+from gpt2giga.harness.harnesses.base import BaseHarness
+
+# After
+from gpt2giga_harness.harnesses.base import BaseHarness
+```
+
+The plugin entry-point group remains `gpt2giga.harnesses`; only entry-point
+targets and Python imports move to `gpt2giga_harness.*`.
+
+Remove the old combined wheel before installing the split packages so stale
+`gpt2giga/harness` files cannot mask a migration error:
+
+```bash
+python -m pip uninstall -y gpt2giga gpt2giga-harness
+python -m pip install "gpt2giga-harness==0.0.1"
+```
+
+For `uv` tool installations, recreate both tool environments:
+
+```bash
+uv tool uninstall gpt2giga
+uv tool uninstall gpt2giga-harness
+uv tool install "gpt2giga==0.2.2a1"
+uv tool install "gpt2giga-harness==0.0.1"
+```
+
+This package migration does not move or rewrite Harness state. Existing
+`~/.gpt2giga/harness` data and project-local `.giga/` directories remain in
+place. Do not delete them as part of uninstall/reinstall.
 
 ## Troubleshooting
 

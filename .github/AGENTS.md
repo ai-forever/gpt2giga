@@ -8,7 +8,7 @@
 ## Local Validation
 
 ```bash
-uv sync --all-extras --dev
+uv sync --all-packages --all-extras --dev
 uv run ruff check .
 uv run ruff format --check .
 uv run pytest tests/ --cov=. --cov-fail-under=80
@@ -24,7 +24,7 @@ CI currently runs Ruff check and pytest coverage; the local Definition of Done i
 | `.github/workflows/docker_image.yaml` | Publishes Docker Hub images for Python `3.10`–`3.14` |
 | `.github/workflows/publish-ghcr.yml` | Publishes GHCR images for Python `3.10`–`3.14`; `latest` and unqualified version tags track Python `3.13` |
 | `.github/workflows/publish-pypi.yml` | Builds and attests both workspace members; publishes only the initial Harness release |
-| `.github/workflows/codeflash.yaml` | Runs Codeflash optimization on PRs touching `gpt2giga/**` |
+| `.github/workflows/codeflash.yaml` | Runs Codeflash optimization for gateway source changes |
 | `.github/workflows/stale-issues.yaml` | Marks inactive issues as stale and closes them after a grace period |
 | `.github/workflows/dependency-review.yaml` | Reviews dependency changes on pull requests |
 | `.github/workflows/actionlint.yaml` | Lints GitHub Actions workflow files |

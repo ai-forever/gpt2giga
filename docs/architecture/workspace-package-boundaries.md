@@ -1,8 +1,9 @@
 # Workspace package boundaries
 
-This document freezes the package ownership contract at the pre-split baseline
-`e267531cf2b3a4382b5aa303f95f8bd33dc5ef9e`. It is an implementation inventory
-for the `uv` workspace migration, not a change to the current source layout.
+This document records the package ownership contract frozen at the pre-split
+baseline `e267531cf2b3a4382b5aa303f95f8bd33dc5ef9e`. The migration is now
+implemented; baseline paths below are historical inventory, while target paths
+describe the current `uv` workspace layout.
 
 ## Distribution contract
 
@@ -65,7 +66,8 @@ The mechanical migration must cover all of the following surfaces:
   and package data in `pyproject.toml`, plus the single root `uv.lock`;
 - UI resource loading and the installed-wheel smoke in
   `tests/harness/test_ui_packaging.py`;
-- distribution lookup in `gpt2giga/harness/runtime/fingerprint.py`;
+- distribution lookup moved from the historical
+  `gpt2giga/harness/runtime/fingerprint.py` path;
 - all imports and monkeypatch strings under `tests/harness/**`;
 - path-bearing project-selection assertions in `tests/harness/test_project.py`
   and `tests/harness/test_project_api.py`;

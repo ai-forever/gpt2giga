@@ -47,7 +47,8 @@ OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are pr
 3. Run `docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d`.
 4. Check `curl http://localhost:8090/health`.
 5. Point the SDK at `http://localhost:8090/v1` or `http://localhost:8090/v2` for an explicit backend contract, or at `http://localhost:8090` if the root should follow `GPT2GIGA_GIGACHAT_API_MODE`.
-6. For a local smoke-test UI, run `giga ui` and open `http://127.0.0.1:8091/`.
+6. For the local control plane, install `gpt2giga-harness==0.0.1`, run
+   `giga ui`, and open `http://127.0.0.1:8091/`.
 
 ## For developers
 

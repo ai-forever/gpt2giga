@@ -45,12 +45,16 @@ cp .env.example .env
 docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
 ```
 
-Или локальный запуск:
+Или локальный запуск gateway:
 
 ```sh
-uv tool install gpt2giga
+uv tool install "gpt2giga==0.2.2a1"
 gpt2giga
 ```
+
+Локальный control plane поставляется отдельно как
+`gpt2giga-harness==0.0.1`; установка gateway не добавляет команды `giga` или
+`gpt2giga-harness` и Python namespace `gpt2giga_harness`.
 
 Минимальный OpenAI SDK вызов:
 
@@ -176,7 +180,7 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 
 | Path | Назначение |
 |---|---|
-| `gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
+| `packages/gpt2giga/src/gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
 | `tests/` | Unit, router, protocol, sink и integration tests |
 | `examples/` | Runnable OpenAI, Anthropic, Gemini, embeddings and agents examples; files/batches examples are prepared but not mounted |
 | `docs/` | Markdown-контент пользовательской документации и architecture notes |
@@ -191,7 +195,7 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 Установить зависимости:
 
 ```sh
-uv sync --all-extras --dev
+uv sync --all-packages --all-extras --dev
 ```
 
 Запустить сервис:

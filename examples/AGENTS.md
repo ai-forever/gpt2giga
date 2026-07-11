@@ -61,7 +61,7 @@
 
 ```bash
 # Install repo dependencies
-uv sync --all-extras --dev
+uv sync --all-packages --all-extras --dev
 
 # For the OpenAI Agents example
 uv sync --group integrations

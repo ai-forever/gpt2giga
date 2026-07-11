@@ -1,4 +1,4 @@
-# AGENTS.md — gpt2giga/
+# AGENTS.md — packages/gpt2giga/src/gpt2giga/
 
 ## Package Identity
 
@@ -9,10 +9,10 @@
 ## Setup & Run
 
 ```bash
-uv sync --all-extras --dev
+uv sync --all-packages --all-extras --dev
 uv run gpt2giga
-uv run ruff check gpt2giga
-uv run ruff format --check gpt2giga
+uv run ruff check packages/gpt2giga/src/gpt2giga
+uv run ruff format --check packages/gpt2giga/src/gpt2giga
 ```
 
 ## Architecture Overview
@@ -167,25 +167,25 @@ Remember that Starlette executes middleware in reverse registration order on req
 
 ```bash
 # Find route handlers
-rg -n "@router\.(get|post|delete|put|patch)" gpt2giga/api gpt2giga/routers
+rg -n "@router\.(get|post|delete|put|patch)" packages/gpt2giga/src/gpt2giga/api packages/gpt2giga/src/gpt2giga/routers
 
 # Find middleware classes
-rg -n "class .*Middleware" gpt2giga/middlewares
+rg -n "class .*Middleware" packages/gpt2giga/src/gpt2giga/middlewares
 
 # Find request/response transformation methods
-rg -n "def (prepare_|process_|transform_|_build_)" gpt2giga/protocol gpt2giga/protocols
+rg -n "def (prepare_|process_|transform_|_build_)" packages/gpt2giga/src/gpt2giga/protocol packages/gpt2giga/src/gpt2giga/protocols
 
 # Find disabled Files/Batches wiring
-rg -n "files_router|batches_router|messages/batches|batchGenerateContent|/files|/batches" gpt2giga/api gpt2giga/routers gpt2giga/protocol
+rg -n "files_router|batches_router|messages/batches|batchGenerateContent|/files|/batches" packages/gpt2giga/src/gpt2giga/api packages/gpt2giga/src/gpt2giga/routers packages/gpt2giga/src/gpt2giga/protocol
 
 # Find OpenAPI schema helpers
-rg -n "openapi_extra|_openapi_extra" gpt2giga/openapi_specs gpt2giga/routers
+rg -n "openapi_extra|_openapi_extra" packages/gpt2giga/src/gpt2giga/openapi_specs packages/gpt2giga/src/gpt2giga/routers
 
 # Find Gemini protocol wiring
-rg -n "gemini|v1beta|generateContent" gpt2giga/app gpt2giga/api gpt2giga/routers gpt2giga/protocols tests
+rg -n "gemini|v1beta|generateContent" packages/gpt2giga/src/gpt2giga/app packages/gpt2giga/src/gpt2giga/api packages/gpt2giga/src/gpt2giga/routers packages/gpt2giga/src/gpt2giga/protocols tests
 
 # Find traffic logs, metrics, and observability wiring
-rg -n "traffic_log|metrics|observability|admin_api|debug_translate|replay" gpt2giga
+rg -n "traffic_log|metrics|observability|admin_api|debug_translate|replay" packages/gpt2giga/src/gpt2giga
 ```
 
 ## Common Gotchas

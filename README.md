@@ -45,12 +45,26 @@ cp .env.example .env
 docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
 ```
 
-Или локальный запуск:
+Или локальный запуск только gateway с зафиксированной первой split-версией:
 
 ```sh
-uv tool install gpt2giga
+uv tool install "gpt2giga==0.2.2a1"
 gpt2giga
 ```
+
+Для локального Harness/control plane установите отдельный пакет. Он подтянет
+совместимый `gpt2giga==0.2.2a1` и добавит команды `giga` и
+`gpt2giga-harness`:
+
+```sh
+uv tool install "gpt2giga-harness==0.0.1"
+giga doctor
+giga ui
+```
+
+Python namespace Harness — `gpt2giga_harness`; прежний
+`gpt2giga.harness` больше не поставляется. Подробности обновления со старого
+combined prerelease wheel — в [Unified Harness](./docs/harness.md#migration-from-the-combined-prerelease).
 
 Минимальный OpenAI SDK вызов:
 
@@ -192,13 +206,21 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 Установить зависимости:
 
 ```sh
-uv sync --all-extras --dev
+uv sync --all-packages --all-extras --dev
 ```
 
 Запустить сервис:
 
 ```sh
 uv run gpt2giga
+uv run giga doctor
+```
+
+Сборка двух дистрибутивов выполняется явно:
+
+```sh
+uv build --package gpt2giga
+uv build --package gpt2giga-harness
 ```
 
 Проверки перед PR:
