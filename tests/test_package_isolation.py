@@ -138,7 +138,11 @@ import importlib.metadata
 import importlib.util
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 import gpt2giga
+from gpt2giga.app.factory import create_app
+from gpt2giga.models.config import ProxyConfig
 
 assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
 assert importlib.util.find_spec("gpt2giga_harness") is None
@@ -150,6 +154,15 @@ scripts = {
     if entry.group == "console_scripts"
 }
 assert scripts == {"gpt2giga": "gpt2giga:run"}
+
+client = TestClient(create_app(ProxyConfig()))
+assert client.get("/health").status_code == 200
+openapi = client.get("/openapi.json")
+assert openapi.status_code == 200
+paths = openapi.json()["paths"]
+assert "/v1/chat/completions" in paths
+assert "/v1/messages" in paths
+assert "/v1beta/models/{model}:generateContent" in paths
 """
 
 
@@ -157,8 +170,12 @@ HARNESS_SMOKE = """
 import importlib.metadata
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 import gpt2giga
 import gpt2giga_harness
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.ui.app import create_app
 from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 
 assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
@@ -179,6 +196,22 @@ assert scripts == {
 assert '<link rel="stylesheet" href="/assets/app.css?v=38.3">' in INDEX_HTML
 assert "function boot()" in load_text_asset("app.js")
 assert ".app {" in load_text_asset("app.css")
+
+data_dir = installed_root.parent / "runtime-smoke-state"
+client = TestClient(
+    create_app(HarnessConfig(data_dir=str(data_dir))),
+    base_url="http://127.0.0.1",
+    client=("127.0.0.1", 50000),
+)
+assert client.get("/healthz").status_code == 200
+shell = client.get("/")
+assert shell.status_code == 200
+assert "gpt2giga Harness" in shell.text
+assert client.get("/assets/app.css").status_code == 200
+harnesses = client.get("/api/harnesses")
+assert harnesses.status_code == 200
+ids = {item["spec"]["id"] for item in harnesses.json()["harnesses"]}
+assert {"direct-chat", "echo"} <= ids
 """
 
 
