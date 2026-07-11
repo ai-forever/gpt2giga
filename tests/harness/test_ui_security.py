@@ -144,6 +144,8 @@ def test_shell_deep_links_and_unknown_paths_fail_closed():
         "/approvals",
         "/tools",
         "/agents",
+        "/workflows",
+        "/workflows/review-team",
     ):
         response = client.get(path)
         assert response.status_code == 200
@@ -151,7 +153,7 @@ def test_shell_deep_links_and_unknown_paths_fail_closed():
 
     unknown_api = client.get("/api/not-a-route")
     unknown_asset = client.get("/assets/nested/app.js")
-    unknown_page = client.get("/workflows")
+    unknown_page = client.get("/unknown-product-area")
     assert unknown_api.status_code == 404
     assert not unknown_api.headers["content-type"].startswith("text/html")
     assert unknown_asset.status_code == 404

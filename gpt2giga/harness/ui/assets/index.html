@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=33.1">
+  <link rel="stylesheet" href="/assets/app.css?v=34.2">
 </head>
 <body>
   <div class="app">
@@ -24,6 +24,7 @@
           <a id="work-nav-link" class="primary-nav-link" href="/work">Work</a>
           <a id="runs-nav-link" class="primary-nav-link" href="/runs">Runs</a>
           <a id="agents-nav-link" class="primary-nav-link" href="/agents">Agents</a>
+          <a id="workflows-nav-link" class="primary-nav-link" href="/workflows">Workflows</a>
           <a id="tools-nav-link" class="primary-nav-link" href="/tools">Tools</a>
           <a id="approvals-nav-link" class="primary-nav-link" href="/approvals">Approvals <span id="approval-attention-count" class="nav-count" hidden>0</span></a>
         </nav>
@@ -277,6 +278,50 @@
               <button id="run-agent-button" type="button" disabled>Run as Agent</button>
             </div>
             <pre id="agent-diff-panel" class="runs-payload-panel" hidden></pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflows-center" class="workflows-center" aria-label="Workflow Catalog" hidden>
+        <header class="runs-center-header">
+          <div>
+            <h2>Workflow Catalog</h2>
+            <p id="workflows-center-status" class="status-line">Loading versioned workflows...</p>
+          </div>
+          <div class="inline-actions">
+            <select id="workflow-template-select" aria-label="Workflow template"></select>
+            <button id="create-workflow-template-button" class="secondary" type="button">Use template</button>
+            <button id="import-workflow-button" class="secondary" type="button">Import YAML</button>
+            <button id="refresh-workflows-button" class="secondary" type="button">Refresh</button>
+          </div>
+        </header>
+        <div class="workflow-catalog-grid">
+          <div>
+            <div id="workflows-center-errors"></div>
+            <div id="workflows-center-list" class="agents-center-list" aria-live="polite"></div>
+          </div>
+          <div class="agent-editor workflow-editor">
+            <div class="agent-editor-header">
+              <div><h3 id="workflow-editor-title">Select a workflow</h3><p id="workflow-editor-meta" class="status-line">Definitions live in .giga/workflows/*.yaml.</p></div>
+              <div class="inline-actions">
+                <button id="duplicate-workflow-button" class="secondary" type="button" disabled>Duplicate</button>
+                <a id="export-workflow-link" class="secondary link-button" href="#" aria-disabled="true">Export</a>
+              </div>
+            </div>
+            <div class="workflow-form-grid">
+              <label>Title<input id="workflow-title-input" disabled></label>
+              <label>Version<input id="workflow-version-input" disabled></label>
+              <label class="span-2">Description<input id="workflow-description-input" disabled></label>
+            </div>
+            <div class="inline-actions"><h3>Steps</h3><button id="add-workflow-step-button" class="secondary" type="button" disabled>Add step</button></div>
+            <div id="workflow-step-builder" class="workflow-step-builder"></div>
+            <details><summary>YAML source and forward-compatible fields</summary><textarea id="workflow-source-input" class="agent-source-input" spellcheck="false" disabled></textarea></details>
+            <div class="inline-actions">
+              <button id="validate-workflow-button" class="secondary" type="button" disabled>Validate</button>
+              <button id="save-workflow-button" type="button" disabled>Save revision</button>
+            </div>
+            <div class="workflow-dag-panel"><h3>DAG preview</h3><div id="workflow-dag" class="workflow-dag"></div></div>
+            <details><summary>Revision history</summary><div id="workflow-history" class="tool-profile-list"></div></details>
           </div>
         </div>
       </section>
@@ -571,6 +616,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=33.1"></script>
+  <script src="/assets/app.js?v=34.2"></script>
 </body>
 </html>

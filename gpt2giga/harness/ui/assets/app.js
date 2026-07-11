@@ -21,6 +21,10 @@
       agentErrors: [],
       selectedAgent: null,
       agentDraft: null,
+      workflows: [],
+      workflowErrors: [],
+      workflowTemplates: [],
+      selectedWorkflow: null,
       toolSyncPreview: null,
       toolError: null,
       evalSpecs: [],
@@ -108,13 +112,16 @@
       if (path === "/work") return { area: "work", id: null };
       if (path === "/runs") return { area: "runs", id: null };
       if (path === "/agents") return { area: "agents", id: null };
+      if (path === "/workflows") return { area: "workflows", id: null };
       if (path === "/approvals") return { area: "approvals", id: null };
       if (path === "/tools") return { area: "tools", id: null };
       const work = path.match(/^\/work\/([^/]+)$/);
       const runs = path.match(/^\/runs\/([^/]+)$/);
+      const workflows = path.match(/^\/workflows\/([^/]+)$/);
       try {
         if (work) return { area: "work", id: decodeURIComponent(work[1]) };
         if (runs) return { area: "runs", id: decodeURIComponent(runs[1]) };
+        if (workflows) return { area: "workflows", id: decodeURIComponent(workflows[1]) };
       } catch (error) {
         return { area: "invalid", id: null };
       }
@@ -137,11 +144,13 @@
       const approvalsLink = byId("approvals-nav-link");
       const toolsLink = byId("tools-nav-link");
       const agentsLink = byId("agents-nav-link");
+      const workflowsLink = byId("workflows-nav-link");
       workLink.classList.toggle("active", route.area === "work" || route.area === "legacy");
       runsLink.classList.toggle("active", route.area === "runs");
       approvalsLink.classList.toggle("active", route.area === "approvals");
       toolsLink.classList.toggle("active", route.area === "tools");
       agentsLink.classList.toggle("active", route.area === "agents");
+      workflowsLink.classList.toggle("active", route.area === "workflows");
       workLink.href = state.currentSessionId ? `/work/${encodeURIComponent(state.currentSessionId)}` : "/work";
       const run = currentRun();
       runsLink.href = run && run.id ? `/runs/${encodeURIComponent(run.id)}` : "/runs";
@@ -149,14 +158,194 @@
       const approvalsArea = route.area === "approvals";
       const toolsArea = route.area === "tools";
       const agentsArea = route.area === "agents";
+      const workflowsArea = route.area === "workflows";
       document.body.classList.toggle("runs-area", runsArea);
       document.body.classList.toggle("approvals-area", approvalsArea);
       document.body.classList.toggle("tools-area", toolsArea);
       document.body.classList.toggle("agents-area", agentsArea);
+      document.body.classList.toggle("workflows-area", workflowsArea);
       byId("runs-center").hidden = !runsArea;
       byId("approvals-center").hidden = !approvalsArea;
       byId("tools-center").hidden = !toolsArea;
       byId("agents-center").hidden = !agentsArea;
+      byId("workflows-center").hidden = !workflowsArea;
+    }
+
+    async function loadWorkflowsCenter(selectedId = null) {
+      if (!state.project || !state.project.root) return false;
+      setText("workflows-center-status", "Refreshing versioned workflows...");
+      const result = await getJson(`/api/workflows?workspace=${encodeURIComponent(state.project.root)}`);
+      if (!result.ok) {
+        setText("workflows-center-status", result.data.detail || "Workflow Catalog is unavailable.");
+        return false;
+      }
+      state.workflows = Array.isArray(result.data.workflows) ? result.data.workflows : [];
+      state.workflowErrors = Array.isArray(result.data.errors) ? result.data.errors : [];
+      state.workflowTemplates = Array.isArray(result.data.templates) ? result.data.templates : [];
+      renderWorkflowTemplates();
+      renderWorkflowCatalog();
+      setText("workflows-center-status", `${state.workflows.length} workflows · YAML history retained locally`);
+      if (selectedId) await selectWorkflow(selectedId, false);
+      return true;
+    }
+
+    function renderWorkflowTemplates() {
+      const select = byId("workflow-template-select");
+      select.textContent = "";
+      for (const template of state.workflowTemplates) {
+        const option = document.createElement("option");
+        option.value = template.id;
+        option.textContent = template.title;
+        select.appendChild(option);
+      }
+    }
+
+    function renderWorkflowCatalog() {
+      const list = byId("workflows-center-list");
+      const errors = byId("workflows-center-errors");
+      list.textContent = "";
+      errors.textContent = "";
+      for (const error of state.workflowErrors) {
+        const row = document.createElement("div");
+        row.className = "warning";
+        row.textContent = `${error.path}: ${error.error}`;
+        errors.appendChild(row);
+      }
+      for (const workflow of state.workflows) {
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "agent-card";
+        card.classList.toggle("active", state.selectedWorkflow && state.selectedWorkflow.workflow.id === workflow.id);
+        card.innerHTML = `<span><strong>${escapeHtml(workflow.title)}</strong><small>${escapeHtml(workflow.description || "Versioned workflow")}</small></span><span class="badge info">v${escapeHtml(workflow.version)}</span><span class="runs-center-item-meta">${workflow.steps.length} steps · ${escapeHtml(String(workflow.source_hash || "").slice(0, 12))}</span>`;
+        card.addEventListener("click", () => selectWorkflow(workflow.id));
+        list.appendChild(card);
+      }
+      if (!state.workflows.length) {
+        const empty = document.createElement("div");
+        empty.className = "status-line";
+        empty.textContent = "No workflows found. Choose a template or import YAML.";
+        list.appendChild(empty);
+      }
+    }
+
+    async function selectWorkflow(workflowId, syncRoute = true) {
+      const result = await getJson(`/api/workflows/${encodeURIComponent(workflowId)}?workspace=${encodeURIComponent(state.project.root)}`);
+      if (!result.ok) {
+        setText("workflows-center-status", result.data.detail || "Workflow could not be loaded.");
+        return;
+      }
+      state.selectedWorkflow = result.data;
+      const workflow = result.data.workflow;
+      byId("workflow-title-input").value = workflow.title || "";
+      byId("workflow-version-input").value = workflow.version || "";
+      byId("workflow-description-input").value = workflow.description || "";
+      byId("workflow-source-input").value = result.data.source || "";
+      for (const id of ["workflow-title-input", "workflow-version-input", "workflow-description-input", "workflow-source-input", "validate-workflow-button", "save-workflow-button", "duplicate-workflow-button", "add-workflow-step-button"]) byId(id).disabled = false;
+      byId("export-workflow-link").href = `/api/workflows/${encodeURIComponent(workflow.id)}/export?workspace=${encodeURIComponent(state.project.root)}`;
+      byId("export-workflow-link").setAttribute("aria-disabled", "false");
+      setText("workflow-editor-title", workflow.title);
+      setText("workflow-editor-meta", `${workflow.id} · ${workflow.source_path} · ${String(workflow.source_hash || "").slice(0, 12)}`);
+      renderWorkflowSteps(workflow.steps || []);
+      renderWorkflowDag(result.data.plan || {});
+      renderWorkflowHistory(result.data.history || []);
+      renderWorkflowCatalog();
+      if (syncRoute) syncBrowserRoute("workflows", workflow.id);
+    }
+
+    function renderWorkflowSteps(steps) {
+      const builder = byId("workflow-step-builder");
+      builder.textContent = "";
+      for (const step of steps) addWorkflowStepRow(step);
+    }
+
+    function addWorkflowStepRow(step = {}) {
+      const row = document.createElement("div");
+      row.className = "workflow-step-row";
+      const kinds = ["agent", "arena", "eval", "approval", "transform", "join"];
+      row.innerHTML = `<label>Id<input data-step-field="id" value="${escapeHtml(step.id || "step")}"></label><label>Kind<select data-step-field="kind">${kinds.map((kind) => `<option value="${kind}"${kind === step.kind ? " selected" : ""}>${kind}</option>`).join("")}</select></label><label>Depends on<input data-step-field="depends_on" value="${escapeHtml((step.depends_on || []).join(", "))}" placeholder="step ids"></label><label>Agent / target<input data-step-field="target" value="${escapeHtml(step.agent_id || step.eval_id || step.transform || step.action || "")}"></label><button class="danger" type="button" data-remove-step>Remove</button>`;
+      row.querySelector("[data-remove-step]").addEventListener("click", () => row.remove());
+      byId("workflow-step-builder").appendChild(row);
+    }
+
+    function workflowFormPayload() {
+      const original = state.selectedWorkflow.workflow;
+      const originalById = new Map((original.steps || []).map((step) => [step.id, step]));
+      const steps = [...byId("workflow-step-builder").querySelectorAll(".workflow-step-row")].map((row) => {
+        const id = row.querySelector('[data-step-field="id"]').value.trim();
+        const kind = row.querySelector('[data-step-field="kind"]').value;
+        const target = row.querySelector('[data-step-field="target"]').value.trim();
+        const step = { ...(originalById.get(id) || {}), id, kind };
+        const depends = row.querySelector('[data-step-field="depends_on"]').value.split(",").map((item) => item.trim()).filter(Boolean);
+        if (depends.length) step.depends_on = depends; else delete step.depends_on;
+        for (const key of ["agent_id", "eval_id", "transform", "action"]) delete step[key];
+        if (target) {
+          if (kind === "agent") step.agent_id = target;
+          else if (kind === "eval") step.eval_id = target;
+          else if (kind === "transform") step.transform = target;
+          else if (kind === "approval") step.action = target;
+        }
+        return step;
+      });
+      return { title: byId("workflow-title-input").value.trim(), version: byId("workflow-version-input").value.trim(), description: byId("workflow-description-input").value.trim(), steps };
+    }
+
+    function renderWorkflowDag(plan) {
+      const dag = byId("workflow-dag");
+      dag.textContent = "";
+      for (const level of plan.levels || []) {
+        const group = document.createElement("div");
+        group.className = "workflow-dag-level";
+        for (const id of level) {
+          const node = document.createElement("span");
+          node.className = "workflow-dag-node";
+          node.textContent = id;
+          group.appendChild(node);
+        }
+        dag.appendChild(group);
+      }
+    }
+
+    function renderWorkflowHistory(history) {
+      const node = byId("workflow-history");
+      node.textContent = "";
+      for (const revision of history) {
+        const row = document.createElement("div");
+        row.className = "status-line";
+        row.textContent = `${revision.created_at} · ${String(revision.source_hash).slice(0, 12)} · ${revision.path}`;
+        node.appendChild(row);
+      }
+      if (!history.length) node.textContent = "No previous revisions.";
+    }
+
+    async function validateWorkflowSource() {
+      const result = await getJson("/api/workflows/validate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: byId("workflow-source-input").value }) });
+      if (!result.ok) return setText("workflows-center-status", result.data.detail || "Workflow validation failed.");
+      renderWorkflowDag(result.data.plan);
+      setText("workflows-center-status", "YAML source is valid. Save revision applies the typed form fields.");
+    }
+
+    async function saveSelectedWorkflow() {
+      if (!state.selectedWorkflow) return;
+      const workflow = state.selectedWorkflow.workflow;
+      const result = await getJson(`/api/workflows/${encodeURIComponent(workflow.id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workspace: state.project.root, content: byId("workflow-source-input").value, expected_hash: workflow.source_hash, form: workflowFormPayload() }) });
+      if (!result.ok) return setText("workflows-center-status", result.data.detail || "Workflow save failed.");
+      await loadWorkflowsCenter(workflow.id);
+      setText("workflows-center-status", "Workflow revision saved atomically; previous YAML retained in history.");
+    }
+
+    async function duplicateSelectedWorkflow() {
+      if (!state.selectedWorkflow) return;
+      const newId = window.prompt("New workflow id", `${state.selectedWorkflow.workflow.id}-copy`);
+      if (!newId) return;
+      const result = await getJson(`/api/workflows/${encodeURIComponent(state.selectedWorkflow.workflow.id)}/duplicate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workspace: state.project.root, new_id: newId }) });
+      if (!result.ok) return setText("workflows-center-status", result.data.detail || "Workflow duplicate failed.");
+      await loadWorkflowsCenter(result.data.workflow.id);
+    }
+
+    async function importWorkflow(content = null, templateId = null) {
+      const result = await getJson("/api/workflows/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workspace: state.project.root, content, template_id: templateId }) });
+      if (!result.ok) return setText("workflows-center-status", result.data.detail || "Workflow import failed.");
+      await loadWorkflowsCenter(result.data.workflow.id);
     }
 
     async function loadAgentsCenter() {
@@ -4832,6 +5021,16 @@
       byId("apply-agent-button").addEventListener("click", applyAgent);
       byId("duplicate-agent-button").addEventListener("click", duplicateAgent);
       byId("run-agent-button").addEventListener("click", runSelectedAgent);
+      byId("refresh-workflows-button").addEventListener("click", () => loadWorkflowsCenter(state.selectedWorkflow && state.selectedWorkflow.workflow.id));
+      byId("create-workflow-template-button").addEventListener("click", () => importWorkflow(null, byId("workflow-template-select").value));
+      byId("import-workflow-button").addEventListener("click", () => {
+        const content = window.prompt("Paste workflow YAML");
+        if (content) importWorkflow(content, null);
+      });
+      byId("validate-workflow-button").addEventListener("click", validateWorkflowSource);
+      byId("save-workflow-button").addEventListener("click", saveSelectedWorkflow);
+      byId("duplicate-workflow-button").addEventListener("click", duplicateSelectedWorkflow);
+      byId("add-workflow-step-button").addEventListener("click", () => addWorkflowStepRow());
       byId("run-eval-button").addEventListener("click", runSelectedEval);
       byId("harness-select").addEventListener("change", (event) => {
         selectHarness(event.target.value);
@@ -5058,6 +5257,11 @@
       if (route.area === "agents") {
         closeRunsCenterEventStream();
         await loadAgentsCenter();
+        return true;
+      }
+      if (route.area === "workflows") {
+        closeRunsCenterEventStream();
+        await loadWorkflowsCenter(route.id);
         return true;
       }
       if (route.area === "work") {

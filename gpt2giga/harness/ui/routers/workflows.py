@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from gpt2giga.harness.project import project_to_dict, resolve_project
@@ -20,6 +20,14 @@ from gpt2giga.harness.runtime.policy import (
     approval_request_to_dict,
 )
 from gpt2giga.harness.worktrees import WorktreeConflictError, WorktreeError
+from gpt2giga.harness.workflow_catalog import (
+    duplicate_workflow,
+    save_workflow,
+    template_source,
+    workflow_catalog_detail,
+    workflow_source,
+    workflow_templates,
+)
 from gpt2giga.harness.workflows import (
     WorkflowCoordinator,
     WorkflowHandoffManager,
@@ -54,6 +62,36 @@ class WorkflowRunRequest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkflowSaveRequest(BaseModel):
+    """Validated workflow source or typed builder update."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace: str | None = None
+    content: str = Field(min_length=1)
+    expected_hash: str | None = None
+    form: dict[str, Any] | None = None
+
+
+class WorkflowDuplicateRequest(BaseModel):
+    """Create an independent catalog entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace: str | None = None
+    new_id: str = Field(min_length=2, max_length=64)
+
+
+class WorkflowImportRequest(BaseModel):
+    """Import YAML or instantiate a built-in template."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace: str | None = None
+    content: str | None = None
+    template_id: str | None = None
+
+
 class WorkflowHandoffChoiceRequest(BaseModel):
     """Explicit patch selection state."""
 
@@ -86,7 +124,30 @@ async def workflow_list(
             workflow_run_to_dict(item)
             for item in repository.list_runs(project_id=project.id)
         ],
+        "templates": list(workflow_templates()),
     }
+
+
+@router.post("/api/workflows/import", status_code=201)
+async def workflow_import(
+    request: Request, payload: WorkflowImportRequest = Body(...)
+) -> dict[str, Any]:
+    """Import validated YAML or instantiate a built-in template."""
+    project = _project(request, payload.workspace)
+    if bool(payload.content) == bool(payload.template_id):
+        raise HTTPException(
+            status_code=400, detail="Provide exactly one of content or template_id"
+        )
+    try:
+        content = payload.content or template_source(payload.template_id or "")
+        definition = await run_in_threadpool(save_workflow, project.root, content)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail="Workflow template not found"
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return workflow_catalog_detail(project.root, definition.id)
 
 
 @router.post("/api/workflows/validate")
@@ -95,7 +156,7 @@ async def workflow_validate(
 ) -> dict[str, Any]:
     """Validate workflow YAML and return the canonical dry-run plan."""
     try:
-        definition = parse_workflow_definition(payload.content)
+        definition = parse_workflow_definition(payload.content, allow_unknown=True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -118,9 +179,80 @@ async def workflow_detail(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow not found") from exc
     return {
-        "workflow": workflow_definition_to_dict(definition),
-        "plan": workflow_plan(definition),
+        **workflow_catalog_detail(project.root, definition.id),
+        "runs": [
+            workflow_run_to_dict(item)
+            for item in WorkflowRepository(_runtime_store(request)).list_runs(
+                workflow_id=definition.id, project_id=project.id
+            )
+        ],
     }
+
+
+@router.put("/api/workflows/{workflow_id}")
+async def workflow_save(
+    workflow_id: str,
+    request: Request,
+    payload: WorkflowSaveRequest = Body(...),
+) -> dict[str, Any]:
+    """Atomically save a validated YAML or typed builder revision."""
+    project = _project(request, payload.workspace)
+    try:
+        workflow_source(project.root, workflow_id)
+        definition = await run_in_threadpool(
+            save_workflow,
+            project.root,
+            payload.content,
+            expected_hash=payload.expected_hash,
+            expected_id=workflow_id,
+            form=payload.form,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Workflow not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return workflow_catalog_detail(project.root, definition.id)
+
+
+@router.post("/api/workflows/{workflow_id}/duplicate", status_code=201)
+async def workflow_duplicate(
+    workflow_id: str,
+    request: Request,
+    payload: WorkflowDuplicateRequest = Body(...),
+) -> dict[str, Any]:
+    """Duplicate one definition into an independent editable entry."""
+    project = _project(request, payload.workspace)
+    try:
+        definition = await run_in_threadpool(
+            duplicate_workflow, project.root, workflow_id, payload.new_id
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Workflow not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return workflow_catalog_detail(project.root, definition.id)
+
+
+@router.get("/api/workflows/{workflow_id}/export")
+async def workflow_export(
+    workflow_id: str,
+    request: Request,
+    workspace: str | None = Query(default=None),
+) -> Response:
+    """Export the exact project YAML as a portable attachment."""
+    project = _project(request, workspace)
+    try:
+        content = workflow_source(project.root, workflow_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Workflow not found") from exc
+    return Response(
+        content=content,
+        media_type="application/yaml",
+        headers={
+            "Content-Disposition": f'attachment; filename="{workflow_id}.yaml"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.post("/api/workflows/{workflow_id}/run")

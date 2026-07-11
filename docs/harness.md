@@ -325,9 +325,25 @@ Authenticated APIs:
 - `POST /api/workflow-runs/{run_id}/merge-queue` and approval-gated
   `/merge-queue/apply`.
 
-The visual Workflow Catalog and builder are intentionally deferred; this slice
-ships one canonical execution model rather than a second UI-only workflow
-format.
+The top-level **Workflows** area is a catalog and form/step builder over this
+same execution IR. It shows a dependency-level DAG preview and per-definition
+run history, supports atomic optimistic-lock saves, and archives the previous
+YAML under `.giga/workflows/.history/<workflow_id>/`. Typed form edits merge
+into the exact YAML source, preserving unknown top-level and per-step fields so
+a newer definition is not silently damaged by an older UI.
+
+Catalog actions include duplicate, YAML import/export, and three starter
+templates: Plan-Implement-Test-Review, Diagnose-Fix-Regression, and
+Issue-Patch-PR Draft. Free-form drag-and-drop graph editing remains deferred;
+step ordering and dependencies stay explicit and validated.
+
+Additional catalog APIs:
+
+- `POST /api/workflows/import`;
+- `PUT /api/workflows/{workflow_id}` with `expected_hash` and an optional typed
+  form merge;
+- `POST /api/workflows/{workflow_id}/duplicate`;
+- `GET /api/workflows/{workflow_id}/export`.
 
 ### Project Memory
 

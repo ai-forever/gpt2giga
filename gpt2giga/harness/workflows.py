@@ -180,7 +180,7 @@ class StepAttempt:
 
 
 def parse_workflow_definition(
-    content: str, *, source_path: str | None = None
+    content: str, *, source_path: str | None = None, allow_unknown: bool = False
 ) -> WorkflowDefinition:
     """Parse one strict, bounded workflow YAML document."""
     try:
@@ -200,7 +200,7 @@ def parse_workflow_definition(
         "steps",
     }
     unknown = sorted(set(data) - allowed)
-    if unknown:
+    if unknown and not allow_unknown:
         raise ValueError(f"Unknown workflow fields: {', '.join(unknown)}")
     workflow_id = _safe_id(data.get("id"), "workflow id")
     raw_steps = data.get("steps")
@@ -208,7 +208,7 @@ def parse_workflow_definition(
         raise ValueError("Workflow steps must be a non-empty list")
     if len(raw_steps) > MAX_WORKFLOW_STEPS:
         raise ValueError(f"Workflow exceeds {MAX_WORKFLOW_STEPS} steps")
-    steps = tuple(_parse_step(item) for item in raw_steps)
+    steps = tuple(_parse_step(item, allow_unknown=allow_unknown) for item in raw_steps)
     _validate_graph(steps)
     budget_data = _mapping(data.get("budgets"))
     budgets = WorkflowBudgets(
@@ -256,7 +256,9 @@ def discover_workflows(
         relative = path.relative_to(root).as_posix()
         try:
             definition = parse_workflow_definition(
-                path.read_text(encoding="utf-8"), source_path=relative
+                path.read_text(encoding="utf-8"),
+                source_path=relative,
+                allow_unknown=True,
             )
             if path.stem != definition.id:
                 raise ValueError("Workflow filename must match its id")
@@ -275,6 +277,7 @@ def load_workflow(project_root: str | Path, workflow_id: str) -> WorkflowDefinit
         definition = parse_workflow_definition(
             path.read_text(encoding="utf-8"),
             source_path=path.relative_to(root).as_posix(),
+            allow_unknown=True,
         )
     except FileNotFoundError as exc:
         raise KeyError(safe_id) from exc
@@ -1268,7 +1271,7 @@ def render_review_team_workflow() -> str:
     return yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
 
 
-def _parse_step(value: Any) -> WorkflowStep:
+def _parse_step(value: Any, *, allow_unknown: bool = False) -> WorkflowStep:
     data = _mapping(value)
     allowed = {
         "id",
@@ -1291,7 +1294,7 @@ def _parse_step(value: Any) -> WorkflowStep:
         "output",
     }
     unknown = sorted(set(data) - allowed)
-    if unknown:
+    if unknown and not allow_unknown:
         raise ValueError(f"Unknown workflow step fields: {', '.join(unknown)}")
     step_id = _safe_id(data.get("id"), "step id")
     try:

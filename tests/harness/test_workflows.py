@@ -2,6 +2,7 @@ from pathlib import Path
 import subprocess
 
 import pytest
+import yaml
 
 from gpt2giga.harness.agents import render_starter_agent
 from gpt2giga.harness.config import HarnessConfig
@@ -19,6 +20,14 @@ from gpt2giga.harness.workflows import (
     load_workflow,
     parse_workflow_definition,
     workflow_plan,
+)
+from gpt2giga.harness.workflow_catalog import (
+    duplicate_workflow,
+    merge_workflow_form,
+    save_workflow,
+    workflow_history,
+    workflow_source,
+    workflow_templates,
 )
 
 
@@ -119,6 +128,72 @@ def test_project_init_installs_valid_review_team(tmp_path: Path) -> None:
     assert definition.budgets.max_concurrency == 3
     assert [item.id for item in definitions] == ["review-team"]
     assert errors == ()
+
+
+def test_workflow_catalog_saves_history_and_preserves_unknown_builder_fields(
+    tmp_path: Path,
+) -> None:
+    init_project_config(tmp_path)
+    original = workflow_source(tmp_path, "review-team")
+    original_hash = load_workflow(tmp_path, "review-team").source_hash
+    source_with_future_fields = original + "future_ui:\n  color: blue\n"
+
+    saved = save_workflow(
+        tmp_path,
+        source_with_future_fields,
+        expected_hash=original_hash,
+        form={
+            "title": "Review Team 2",
+            "steps": [
+                {**step, "title": f"Step {step['id']}"}
+                for step in yaml.safe_load(original)["steps"]
+            ],
+        },
+    )
+
+    assert saved.title == "Review Team 2"
+    assert "future_ui:" in workflow_source(tmp_path, "review-team")
+    assert workflow_history(tmp_path, "review-team")[0].source_hash == original_hash
+
+
+def test_workflow_catalog_duplicate_and_templates_are_valid(tmp_path: Path) -> None:
+    init_project_config(tmp_path)
+
+    copied = duplicate_workflow(tmp_path, "review-team", "review-team-copy")
+    templates = workflow_templates()
+
+    assert copied.id == "review-team-copy"
+    assert copied.version == "1.0.0"
+    assert [item["id"] for item in templates] == [
+        "plan-implement-test-review",
+        "diagnose-fix-regression",
+        "issue-patch-pr-draft",
+    ]
+    assert all(item["plan"]["step_count"] >= 3 for item in templates)
+
+
+def test_merge_workflow_form_keeps_unknown_step_fields() -> None:
+    merged = merge_workflow_form(
+        """
+id: future-flow
+title: Future
+version: '1'
+future_ui: {color: blue}
+steps:
+  - id: value
+    kind: transform
+    transform: identity
+    future_hint: compact
+""",
+        {
+            "title": "Edited",
+            "steps": [{"id": "value", "kind": "transform", "transform": "identity"}],
+        },
+    )
+
+    assert "future_ui:" in merged
+    assert "future_hint: compact" in merged
+    assert "title: Edited" in merged
 
 
 def test_safe_transform_and_join_workflow_completes_without_child_jobs(
