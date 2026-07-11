@@ -1114,16 +1114,26 @@ name = "gpt2giga-harness"
 version = "0.0.1"
 source = { editable = "packages/gpt2giga-harness" }
 dependencies = [
+    { name = "fastapi" },
     { name = "gpt2giga" },
+    { name = "pydantic" },
     { name = "python-dateutil" },
     { name = "pyyaml" },
+    { name = "starlette" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.133.0,<1" },
     { name = "gpt2giga", editable = "packages/gpt2giga" },
+    { name = "pydantic", specifier = ">=2.12.0,<3" },
     { name = "python-dateutil", specifier = ">=2.9.0,<3" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
+    { name = "starlette", specifier = ">=1.1,<2" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0,<3" },
+    { name = "uvicorn", specifier = ">=0.41.0,<1" },
 ]
 
 [[package]]
