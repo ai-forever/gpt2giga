@@ -251,6 +251,73 @@ def test_schedule_ids_are_scoped_per_project(tmp_path):
     )
 
 
+def test_automation_center_combines_attention_and_preserves_archive_snapshot(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_echo_project(workspace)
+    config = HarnessConfig(data_dir=str(tmp_path / "data"), auto_start_proxy=False)
+    app = create_app(config)
+    project = resolve_project(workspace, data_dir=config.data_dir)
+    service = app.state.harness_schedule_service
+    payload = {**_payload(workspace), "notifications": {"desktop": True}}
+    created = service.upsert(project, payload)
+    source_hash = created["definition"]["source_hash"]
+    service._mark_attention(  # noqa: SLF001 - exercises derived UI projection
+        created["state"]["schedule_key"], "nightly regression"
+    )
+    runtime = app.state.harness_runtime_store
+    job = runtime.submit_job(
+        session_id="session_failed",
+        user_message_id="message_failed",
+        idempotency_key="automation-failed",
+        project_id=project.id,
+        initial_run_id="run_failed",
+    ).job
+    runtime.transition_job(job.id, "failed", error_summary="tests failed")
+
+    with TestClient(app) as client:
+        approval = client.post("/api/schedules", json=payload)
+        assert approval.status_code == 202
+        overview = client.get("/api/automation", params={"workspace": str(workspace)})
+        assert overview.status_code == 200
+        attention = overview.json()["attention"]
+        assert attention["unread"] == 3
+        assert {item["kind"] for item in attention["items"]} == {
+            "approval",
+            "failed_job",
+            "schedule",
+        }
+        assert (
+            next(item for item in attention["items"] if item["kind"] == "schedule")[
+                "desktop_notification"
+            ]
+            is True
+        )
+
+        ids = [item["id"] for item in attention["items"]]
+        marked = client.post(
+            "/api/attention/read", json={"item_ids": ids, "read": True}
+        )
+        assert marked.status_code == 200
+        assert (
+            client.get("/api/attention", params={"workspace": str(workspace)}).json()[
+                "unread"
+            ]
+            == 0
+        )
+
+        archived = client.delete(
+            "/api/schedules/daily-echo", params={"workspace": str(workspace)}
+        )
+        assert archived.status_code == 200
+        archived_item = client.get(
+            "/api/automation", params={"workspace": str(workspace)}
+        ).json()["schedules"][0]
+        assert archived_item["state"]["status"] == "archived"
+        assert archived_item["definition"]["source_hash"] == source_hash
+        assert archived_item["definition"]["target"]["id"] == "echo"
+
+
 def _definition(
     *, start_at: str, rrule_text: str, timezone_name: str
 ) -> ScheduleDefinition:

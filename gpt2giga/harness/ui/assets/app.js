@@ -72,6 +72,14 @@
       runsEventSourceRunId: null,
       approvals: [],
       approvalsStatus: "pending",
+      schedules: [],
+      scheduleHistory: [],
+      scheduleWorker: {},
+      attentionItems: [],
+      scheduledView: "list",
+      selectedScheduleId: null,
+      notifiedAttentionIds: new Set(),
+      desktopNotificationsEnabled: false,
       liveRuns: new Map(),
       renderedSessionId: null,
       routeRecommendation: null,
@@ -119,15 +127,18 @@
       if (path === "/agents") return { area: "agents", id: null };
       if (path === "/workflows") return { area: "workflows", id: null };
       if (path === "/evaluate") return { area: "evaluate", id: null };
+      if (path === "/scheduled") return { area: "scheduled", id: null };
       if (path === "/approvals") return { area: "approvals", id: null };
       if (path === "/tools") return { area: "tools", id: null };
       const work = path.match(/^\/work\/([^/]+)$/);
       const runs = path.match(/^\/runs\/([^/]+)$/);
       const workflows = path.match(/^\/workflows\/([^/]+)$/);
+      const scheduled = path.match(/^\/scheduled\/([^/]+)$/);
       try {
         if (work) return { area: "work", id: decodeURIComponent(work[1]) };
         if (runs) return { area: "runs", id: decodeURIComponent(runs[1]) };
         if (workflows) return { area: "workflows", id: decodeURIComponent(workflows[1]) };
+        if (scheduled) return { area: "scheduled", id: decodeURIComponent(scheduled[1]) };
       } catch (error) {
         return { area: "invalid", id: null };
       }
@@ -152,6 +163,7 @@
       const agentsLink = byId("agents-nav-link");
       const workflowsLink = byId("workflows-nav-link");
       const evaluateLink = byId("evaluate-nav-link");
+      const scheduledLink = byId("scheduled-nav-link");
       workLink.classList.toggle("active", route.area === "work" || route.area === "legacy");
       runsLink.classList.toggle("active", route.area === "runs");
       approvalsLink.classList.toggle("active", route.area === "approvals");
@@ -159,6 +171,7 @@
       agentsLink.classList.toggle("active", route.area === "agents");
       workflowsLink.classList.toggle("active", route.area === "workflows");
       evaluateLink.classList.toggle("active", route.area === "evaluate");
+      scheduledLink.classList.toggle("active", route.area === "scheduled");
       const activeNavLink = document.querySelector(".primary-nav-link.active");
       const primaryNav = activeNavLink && activeNavLink.parentElement;
       if (activeNavLink && primaryNav && window.innerWidth <= 700) {
@@ -175,18 +188,21 @@
       const agentsArea = route.area === "agents";
       const workflowsArea = route.area === "workflows";
       const evaluateArea = route.area === "evaluate";
+      const scheduledArea = route.area === "scheduled";
       document.body.classList.toggle("runs-area", runsArea);
       document.body.classList.toggle("approvals-area", approvalsArea);
       document.body.classList.toggle("tools-area", toolsArea);
       document.body.classList.toggle("agents-area", agentsArea);
       document.body.classList.toggle("workflows-area", workflowsArea);
       document.body.classList.toggle("evaluate-area", evaluateArea);
+      document.body.classList.toggle("scheduled-area", scheduledArea);
       byId("runs-center").hidden = !runsArea;
       byId("approvals-center").hidden = !approvalsArea;
       byId("tools-center").hidden = !toolsArea;
       byId("agents-center").hidden = !agentsArea;
       byId("workflows-center").hidden = !workflowsArea;
       byId("evaluate-center").hidden = !evaluateArea;
+      byId("scheduled-center").hidden = !scheduledArea;
     }
 
     async function loadEvaluateCenter() {
@@ -5162,6 +5178,277 @@
         .replace(/"/g, "&quot;");
     }
 
+    async function loadScheduledCenter(scheduleId = null) {
+      if (!state.project || !state.project.root) return false;
+      setText("scheduled-status", "Refreshing schedules and attention...");
+      const result = await getJson(`/api/automation?workspace=${encodeURIComponent(state.project.root)}`);
+      if (!result.ok) {
+        setText("scheduled-status", result.data.detail || "Scheduled Automation is unavailable.");
+        return false;
+      }
+      state.schedules = Array.isArray(result.data.schedules) ? result.data.schedules : [];
+      state.scheduleHistory = Array.isArray(result.data.history) ? result.data.history : [];
+      state.scheduleWorker = result.data.worker || {};
+      state.attentionItems = result.data.attention && Array.isArray(result.data.attention.items) ? result.data.attention.items : [];
+      state.selectedScheduleId = scheduleId || state.selectedScheduleId;
+      const unread = Number(result.data.attention && result.data.attention.unread || 0);
+      const badge = byId("attention-count");
+      badge.hidden = unread < 1;
+      badge.textContent = String(unread);
+      byId("scheduled-worker").className = `badge ${state.scheduleWorker.online ? "ok" : "warn"}`;
+      setText("scheduled-worker", `Worker: ${state.scheduleWorker.online ? `${state.scheduleWorker.count} online` : "offline"}`);
+      setText("scheduled-status", `${state.schedules.length} schedules · ${unread} unread · immutable history retained`);
+      setText("attention-status", `${unread} unread · approvals, failed jobs, and schedule findings`);
+      renderScheduledCenter();
+      notifyAttentionItems();
+      return true;
+    }
+
+    async function loadAttentionBadge() {
+      if (!state.project || !state.project.root) return false;
+      const result = await getJson(`/api/attention?workspace=${encodeURIComponent(state.project.root)}`);
+      if (!result.ok) return false;
+      state.attentionItems = Array.isArray(result.data.items) ? result.data.items : [];
+      const badge = byId("attention-count");
+      badge.hidden = Number(result.data.unread || 0) < 1;
+      badge.textContent = String(result.data.unread || 0);
+      notifyAttentionItems();
+      return true;
+    }
+
+    function renderScheduledCenter() {
+      renderScheduleList();
+      renderScheduleCalendar();
+      renderScheduleHistory();
+      renderAttentionInbox();
+      for (const button of document.querySelectorAll("[data-scheduled-view]")) {
+        button.classList.toggle("active", button.dataset.scheduledView === state.scheduledView);
+      }
+      byId("schedule-list").hidden = state.scheduledView !== "list";
+      byId("schedule-calendar").hidden = state.scheduledView !== "calendar";
+      byId("schedule-history").hidden = state.scheduledView !== "history";
+    }
+
+    function renderScheduleList() {
+      const list = byId("schedule-list");
+      list.textContent = "";
+      for (const item of state.schedules) {
+        const definition = item.definition || {};
+        const scheduleState = item.state || {};
+        const scheduleId = definition.id || scheduleState.schedule_id;
+        const status = scheduleState.status || "paused";
+        const target = definition.target || {};
+        const cadence = definition.cadence || {};
+        const tested = scheduleState.tested_hash && scheduleState.tested_hash === definition.source_hash;
+        const archived = status === "archived";
+        const card = document.createElement("article");
+        card.className = "schedule-card";
+        if (scheduleId === state.selectedScheduleId) card.classList.add("active");
+        card.innerHTML = `<div class="schedule-card-header"><div><strong>${escapeHtml(definition.title || scheduleId)}</strong><div class="schedule-card-meta">${escapeHtml(scheduleId)} · ${escapeHtml(target.kind || "target")}:${escapeHtml(target.id || "unknown")}</div></div><span class="runs-status ${status === "active" ? "completed" : status === "needs_attention" ? "failed" : "blocked"}">${escapeHtml(status)}</span></div><div class="schedule-card-meta"><span>Next: ${escapeHtml(scheduleState.next_run_at || "not scheduled")}</span><span>Last: ${escapeHtml(scheduleState.last_status || "never")} ${scheduleState.last_error ? `· ${escapeHtml(scheduleState.last_error)}` : ""}</span><span>Version: ${escapeHtml(String(definition.source_hash || scheduleState.definition_hash || "").slice(0, 12))} · ${escapeHtml(cadence.kind || "unknown")} · ${escapeHtml(cadence.timezone || scheduleState.timezone || "UTC")}</span><span>Workspace: dedicated worktree · Policy: ${definition.workspace_policy === "worktree" ? "isolated" : "blocked"} · Test gate: ${tested ? "passed" : "required"}</span></div>`;
+        if (!archived) {
+          const actions = document.createElement("div");
+          actions.className = "schedule-card-actions";
+          for (const [label, action, className, disabled] of [
+            ["Edit", "edit", "secondary", false],
+            ["Test now", "test-now", "secondary", false],
+            [status === "active" ? "Pause" : "Enable", status === "active" ? "pause" : "enable", "", status !== "active" && (!tested || !state.scheduleWorker.online)],
+            ["Run now", "run-now", "secondary", !tested],
+            ["Archive", "archive", "danger", false]
+          ]) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = className;
+            button.textContent = label;
+            button.disabled = Boolean(disabled);
+            if (disabled && action === "enable") button.title = tested ? "Start the local worker first" : "Run Test now successfully for this exact version first";
+            button.addEventListener("click", () => action === "edit" ? openScheduleWizard(item) : scheduleAction(scheduleId, action));
+            actions.appendChild(button);
+          }
+          card.appendChild(actions);
+        }
+        card.addEventListener("click", (event) => {
+          if (event.target.closest("button")) return;
+          state.selectedScheduleId = scheduleId;
+          syncBrowserRoute("scheduled", scheduleId);
+          renderScheduleList();
+        });
+        list.appendChild(card);
+      }
+      if (!state.schedules.length) list.innerHTML = '<div class="status-line">No schedules yet. Create one to make repeatable work visible here.</div>';
+    }
+
+    function renderScheduleCalendar() {
+      const calendar = byId("schedule-calendar");
+      calendar.textContent = "";
+      const entries = [];
+      for (const item of state.schedules) {
+        for (const occurrence of item.preview || []) {
+          if (occurrence.utc) entries.push({ ...occurrence, schedule: item.definition.title || item.definition.id });
+        }
+      }
+      entries.sort((left, right) => String(left.utc).localeCompare(String(right.utc)));
+      for (const entry of entries.slice(0, 60)) {
+        const row = document.createElement("article");
+        row.className = "calendar-item";
+        row.innerHTML = `<strong>${escapeHtml(entry.schedule)}</strong><div class="schedule-card-meta"><span>${escapeHtml(entry.utc)}</span><span>${escapeHtml(entry.local)} · ${escapeHtml(entry.status)}</span></div>`;
+        calendar.appendChild(row);
+      }
+      if (!entries.length) calendar.innerHTML = '<div class="status-line">No upcoming occurrences.</div>';
+    }
+
+    function renderScheduleHistory() {
+      const history = byId("schedule-history");
+      history.textContent = "";
+      for (const occurrence of state.scheduleHistory) {
+        const row = document.createElement("article");
+        row.className = "history-item";
+        row.innerHTML = `<div class="attention-item-header"><strong>${escapeHtml(occurrence.schedule_id)}</strong><span class="runs-status ${occurrence.status === "succeeded" ? "completed" : occurrence.status}">${escapeHtml(occurrence.status)}</span></div><div class="schedule-card-meta"><span>${escapeHtml(occurrence.trigger)} · ${escapeHtml(occurrence.scheduled_for)}</span><span>${escapeHtml(occurrence.error_summary || occurrence.run_id || occurrence.job_id || "Audit record")}</span></div>`;
+        history.appendChild(row);
+      }
+      if (!state.scheduleHistory.length) history.innerHTML = '<div class="status-line">No occurrence history yet.</div>';
+    }
+
+    function renderAttentionInbox() {
+      const list = byId("attention-list");
+      list.textContent = "";
+      for (const item of state.attentionItems) {
+        const card = document.createElement("article");
+        card.className = `attention-item ${item.severity || "warning"}${item.read ? " read" : ""}`;
+        card.innerHTML = `<div class="attention-item-header"><strong>${escapeHtml(item.title)}</strong><span class="badge ${item.read ? "" : "warn"}">${item.read ? "read" : "unread"}</span></div><div class="attention-item-meta"><span>${escapeHtml(item.summary)}</span><span>${escapeHtml(item.created_at)}</span></div>`;
+        const actions = document.createElement("div");
+        actions.className = "schedule-card-actions";
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "secondary";
+        open.textContent = "Review";
+        open.addEventListener("click", async () => {
+          await markAttentionRead([item.id], true);
+          window.location.assign(item.href);
+        });
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "secondary";
+        toggle.textContent = item.read ? "Mark unread" : "Mark read";
+        toggle.addEventListener("click", () => markAttentionRead([item.id], !item.read));
+        actions.append(open, toggle);
+        card.appendChild(actions);
+        list.appendChild(card);
+      }
+      if (!state.attentionItems.length) list.innerHTML = '<div class="status-line">Nothing needs attention.</div>';
+      byId("mark-attention-read-button").disabled = !state.attentionItems.some((item) => !item.read);
+    }
+
+    async function markAttentionRead(itemIds, read) {
+      if (!itemIds.length) return;
+      const result = await getJson("/api/attention/read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item_ids: itemIds, read }) });
+      if (!result.ok) return setText("attention-status", result.data.detail || "Could not update inbox.");
+      await loadScheduledCenter(state.selectedScheduleId);
+    }
+
+    async function scheduleAction(scheduleId, action) {
+      if (action === "archive") {
+        const result = await getJson(`/api/schedules/${encodeURIComponent(scheduleId)}?workspace=${encodeURIComponent(state.project.root)}`, { method: "DELETE" });
+        if (!result.ok) return setText("scheduled-status", result.data.detail || "Archive failed.");
+      } else {
+        const result = await getJson(`/api/schedules/${encodeURIComponent(scheduleId)}/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workspace: state.project.root }) });
+        if (!result.ok) return setText("scheduled-status", result.data.detail || `${action} failed.`);
+        if (result.data.approval_required) {
+          setText("scheduled-status", `${action} is waiting in Approval Center.`);
+          return syncBrowserRoute("approvals", null);
+        }
+      }
+      await loadScheduledCenter(scheduleId);
+    }
+
+    function openScheduleWizard(item = null) {
+      const definition = item && item.definition || {};
+      const target = definition.target || {};
+      const cadence = definition.cadence || {};
+      byId("schedule-wizard-title").textContent = definition.id ? "Edit schedule" : "New schedule";
+      byId("schedule-id-input").value = definition.id || "";
+      byId("schedule-id-input").disabled = Boolean(definition.id);
+      byId("schedule-title-input").value = definition.title || "";
+      byId("schedule-target-kind").value = target.kind || "agent";
+      byId("schedule-target-id").value = target.id || "";
+      byId("schedule-cadence-kind").value = cadence.kind || "once";
+      byId("schedule-start-at").value = String(cadence.start_at || new Date(Date.now() + 3600000).toISOString()).slice(0, 16);
+      byId("schedule-timezone").value = cadence.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      byId("schedule-interval").value = cadence.interval_seconds || 86400;
+      byId("schedule-rrule").value = cadence.rrule || "FREQ=DAILY";
+      byId("schedule-destination").value = definition.destination || "new_task";
+      byId("schedule-session-id").value = definition.session_id || "";
+      byId("schedule-concurrency").value = definition.max_concurrency || 1;
+      byId("schedule-overlap").value = definition.overlap_policy || "skip";
+      byId("schedule-misfire").value = definition.misfire_policy || "skip";
+      byId("schedule-attempts").value = definition.max_attempts || 1;
+      byId("schedule-timeout").value = definition.timeout_seconds || 3600;
+      byId("schedule-notifications").checked = Boolean(definition.notifications && definition.notifications.desktop);
+      setText("schedule-form-status", "Saving pauses the definition and invalidates its previous Test now grant.");
+      byId("schedule-preview").textContent = "Preview upcoming occurrences before saving.";
+      byId("schedule-wizard").showModal();
+    }
+
+    function scheduleFormPayload() {
+      return {
+        workspace: state.project.root,
+        id: byId("schedule-id-input").value.trim(),
+        title: byId("schedule-title-input").value.trim(),
+        target: { kind: byId("schedule-target-kind").value, id: byId("schedule-target-id").value.trim() },
+        cadence: { kind: byId("schedule-cadence-kind").value, timezone: byId("schedule-timezone").value.trim(), start_at: byId("schedule-start-at").value, interval_seconds: Number(byId("schedule-interval").value), rrule: byId("schedule-rrule").value.trim() },
+        destination: byId("schedule-destination").value,
+        session_id: byId("schedule-session-id").value.trim() || null,
+        workspace_policy: "worktree",
+        max_concurrency: Number(byId("schedule-concurrency").value),
+        overlap_policy: byId("schedule-overlap").value,
+        misfire_policy: byId("schedule-misfire").value,
+        max_attempts: Number(byId("schedule-attempts").value),
+        timeout_seconds: Number(byId("schedule-timeout").value),
+        notifications: { desktop: byId("schedule-notifications").checked }
+      };
+    }
+
+    async function previewSchedule() {
+      const result = await getJson("/api/schedules/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(scheduleFormPayload()) });
+      if (!result.ok) return setText("schedule-form-status", result.data.detail || "Preview failed.");
+      byId("schedule-preview").textContent = pretty(result.data.occurrences);
+      setText("schedule-form-status", `Valid exact hash ${String(result.data.definition.source_hash).slice(0, 12)} · no files changed`);
+    }
+
+    async function saveSchedule() {
+      const payload = scheduleFormPayload();
+      const editing = byId("schedule-id-input").disabled;
+      const url = editing ? `/api/schedules/${encodeURIComponent(payload.id)}` : "/api/schedules";
+      const result = await getJson(url, { method: editing ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (!result.ok) return setText("schedule-form-status", result.data.detail || "Save failed.");
+      if (result.data.approval_required) {
+        byId("schedule-wizard").close();
+        return syncBrowserRoute("approvals", null);
+      }
+      byId("schedule-wizard").close();
+      state.selectedScheduleId = payload.id;
+      syncBrowserRoute("scheduled", payload.id);
+      await loadScheduledCenter(payload.id);
+    }
+
+    async function configureDesktopNotifications() {
+      if (!("Notification" in window)) return setText("scheduled-status", "Desktop notifications are not supported by this browser.");
+      const permission = await Notification.requestPermission();
+      state.desktopNotificationsEnabled = permission === "granted";
+      byId("notification-button").textContent = `Desktop alerts: ${permission === "granted" ? "on" : "off"}`;
+    }
+
+    function notifyAttentionItems() {
+      const enabled = state.desktopNotificationsEnabled;
+      byId("notification-button").textContent = `Desktop alerts: ${enabled ? "on" : "off"}`;
+      if (!enabled || !("Notification" in window) || Notification.permission !== "granted") return;
+      for (const item of state.attentionItems) {
+        if (item.read || !item.desktop_notification || state.notifiedAttentionIds.has(item.id)) continue;
+        const notification = new Notification(item.title, { body: item.summary, tag: item.id });
+        notification.onclick = () => window.location.assign(item.href);
+        state.notifiedAttentionIds.add(item.id);
+      }
+    }
+
     function bindEvents() {
       if (state.eventsBound) return;
       state.eventsBound = true;
@@ -5184,6 +5471,19 @@
       byId("refresh-models-button").addEventListener("click", loadModels);
       byId("refresh-runs-center-button").addEventListener("click", () => loadRunsCenter());
       byId("refresh-approvals-button").addEventListener("click", () => loadApprovals());
+      byId("refresh-scheduled-button").addEventListener("click", () => loadScheduledCenter(state.selectedScheduleId));
+      byId("new-schedule-button").addEventListener("click", () => openScheduleWizard());
+      byId("notification-button").addEventListener("click", configureDesktopNotifications);
+      byId("mark-attention-read-button").addEventListener("click", () => markAttentionRead(state.attentionItems.filter((item) => !item.read).map((item) => item.id), true));
+      byId("preview-schedule-button").addEventListener("click", previewSchedule);
+      byId("save-schedule-button").addEventListener("click", saveSchedule);
+      byId("close-schedule-wizard").addEventListener("click", () => byId("schedule-wizard").close());
+      for (const button of document.querySelectorAll("[data-scheduled-view]")) {
+        button.addEventListener("click", () => {
+          state.scheduledView = button.dataset.scheduledView || "list";
+          renderScheduledCenter();
+        });
+      }
       byId("load-more-runs-button").addEventListener("click", () => loadRunsCenter({ append: true }));
       byId("load-older-trace-button").addEventListener("click", () => loadRunsTrace(true));
       byId("runs-open-task-button").addEventListener("click", () => runCenterAction("open_task"));
@@ -5272,6 +5572,7 @@
       byId("continue-preflight-button").addEventListener("click", () => closePreflightModal(true));
       byId("auth-form").addEventListener("submit", authenticateBrowser);
       window.addEventListener("popstate", () => applyCurrentRoute());
+      window.addEventListener("resize", syncNavigation);
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && state.nativeModalOpen) closeNativeHistory();
         if (event.key === "Escape" && state.preflightModalOpen) closePreflightModal(false);
@@ -5490,6 +5791,11 @@
         await loadEvaluateCenter();
         return true;
       }
+      if (route.area === "scheduled") {
+        closeRunsCenterEventStream();
+        await loadScheduledCenter(route.id);
+        return true;
+      }
       if (route.area === "work") {
         clearRouteSelection();
         syncNavigation();
@@ -5512,7 +5818,7 @@
       }
       byId("auth-modal").hidden = true;
       await loadProject();
-      await Promise.all([loadHarnesses(), refreshHealth(), loadModels(), loadApprovals()]);
+      await Promise.all([loadHarnesses(), refreshHealth(), loadModels(), loadApprovals(), loadAttentionBadge()]);
       await loadSessions();
       const routed = await applyCurrentRoute();
       if (!routed && !state.currentSessionId && state.projectState && state.projectState.last_selected_session) {

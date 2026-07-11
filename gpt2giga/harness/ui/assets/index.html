@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=36.2">
+  <link rel="stylesheet" href="/assets/app.css?v=38.3">
 </head>
 <body>
   <div class="app">
@@ -27,6 +27,7 @@
           <a id="workflows-nav-link" class="primary-nav-link" href="/workflows">Workflows</a>
           <a id="evaluate-nav-link" class="primary-nav-link" href="/evaluate">Evaluate</a>
           <a id="tools-nav-link" class="primary-nav-link" href="/tools">Tools</a>
+          <a id="scheduled-nav-link" class="primary-nav-link" href="/scheduled">Scheduled <span id="attention-count" class="nav-count" hidden>0</span></a>
           <a id="approvals-nav-link" class="primary-nav-link" href="/approvals">Approvals <span id="approval-attention-count" class="nav-count" hidden>0</span></a>
         </nav>
       </div>
@@ -325,6 +326,68 @@
             <details><summary>Revision history</summary><div id="workflow-history" class="tool-profile-list"></div></details>
           </div>
         </div>
+      </section>
+
+      <section id="scheduled-center" class="scheduled-center" aria-label="Scheduled Automation Center" hidden>
+        <header class="runs-center-header">
+          <div>
+            <h2>Scheduled Automation</h2>
+            <p id="scheduled-status" class="status-line">Loading background work...</p>
+          </div>
+          <div class="inline-actions">
+            <span id="scheduled-worker" class="badge warn">Worker: checking</span>
+            <button id="notification-button" class="secondary" type="button">Desktop alerts: off</button>
+            <button id="new-schedule-button" type="button">New schedule</button>
+            <button id="refresh-scheduled-button" class="secondary" type="button">Refresh</button>
+          </div>
+        </header>
+        <div class="scheduled-layout">
+          <section class="scheduled-main">
+            <div class="runs-filter-bar" role="group" aria-label="Scheduled views">
+              <button class="secondary active" type="button" data-scheduled-view="list">List</button>
+              <button class="secondary" type="button" data-scheduled-view="calendar">Calendar</button>
+              <button class="secondary" type="button" data-scheduled-view="history">History</button>
+            </div>
+            <div id="schedule-list" class="schedule-list" aria-live="polite"></div>
+            <div id="schedule-calendar" class="schedule-calendar" aria-live="polite" hidden></div>
+            <div id="schedule-history" class="schedule-history" aria-live="polite" hidden></div>
+          </section>
+          <aside class="attention-panel" aria-label="Attention Inbox">
+            <div class="agent-editor-header">
+              <div><h3>Attention Inbox</h3><p id="attention-status" class="status-line">Unread findings, failures, and approvals.</p></div>
+              <button id="mark-attention-read-button" class="secondary" type="button">Mark all read</button>
+            </div>
+            <div id="attention-list" class="attention-list" aria-live="polite"></div>
+          </aside>
+        </div>
+        <dialog id="schedule-wizard">
+          <form id="schedule-form" method="dialog">
+            <div class="dialog-header"><div><h2 id="schedule-wizard-title">New schedule</h2><p class="status-line">Test the exact saved version before enabling it.</p></div><button id="close-schedule-wizard" class="secondary icon-button" value="cancel" aria-label="Close">×</button></div>
+            <div class="schedule-form-grid">
+              <label>Schedule id<input id="schedule-id-input" required pattern="[A-Za-z0-9._-]+" placeholder="nightly-compat"></label>
+              <label>Title<input id="schedule-title-input" required placeholder="Nightly compatibility"></label>
+              <label>Target kind<select id="schedule-target-kind"><option value="agent">Agent</option><option value="preset">Preset</option><option value="workflow">Workflow</option><option value="eval">Eval</option></select></label>
+              <label>Target id<input id="schedule-target-id" required placeholder="compatibility"></label>
+              <label>Cadence<select id="schedule-cadence-kind"><option value="once">Once</option><option value="interval">Interval</option><option value="rrule">RRULE</option></select></label>
+              <label>Start (local)<input id="schedule-start-at" type="datetime-local" required></label>
+              <label>Timezone<input id="schedule-timezone" required value="UTC" placeholder="Europe/Moscow"></label>
+              <label>Interval seconds<input id="schedule-interval" type="number" min="1" value="86400"></label>
+              <label class="span-2">RRULE<input id="schedule-rrule" value="FREQ=DAILY" placeholder="FREQ=DAILY;BYHOUR=3"></label>
+              <label>Destination<select id="schedule-destination"><option value="new_task">New task</option><option value="resume">Resume session</option></select></label>
+              <label>Session id<input id="schedule-session-id" placeholder="required for resume"></label>
+              <label>Isolation<input value="Dedicated worktree" disabled></label>
+              <label>Max concurrency<input id="schedule-concurrency" type="number" min="1" max="20" value="1"></label>
+              <label>Overlap<select id="schedule-overlap"><option value="skip">Skip</option><option value="allow">Allow</option></select></label>
+              <label>Misfire<select id="schedule-misfire"><option value="skip">No catch-up</option><option value="run_once">Run once</option></select></label>
+              <label>Attempts<input id="schedule-attempts" type="number" min="1" max="20" value="1"></label>
+              <label>Timeout seconds<input id="schedule-timeout" type="number" min="1" value="3600"></label>
+              <label class="choice"><input id="schedule-notifications" type="checkbox"> Desktop alert on attention</label>
+            </div>
+            <pre id="schedule-preview" class="runs-payload-panel">Preview upcoming occurrences before saving.</pre>
+            <p id="schedule-form-status" class="status-line"></p>
+            <div class="dialog-actions"><button id="preview-schedule-button" class="secondary" type="button">Preview</button><button id="save-schedule-button" type="button">Save paused</button></div>
+          </form>
+        </dialog>
       </section>
 
       <section id="approvals-center" class="approvals-center" aria-label="Approval Center" hidden>
@@ -663,6 +726,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=36.2"></script>
+  <script src="/assets/app.js?v=38.3"></script>
 </body>
 </html>

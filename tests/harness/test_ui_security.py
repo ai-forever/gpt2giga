@@ -42,6 +42,7 @@ def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
         'id="agents-nav-link"',
         'id="approvals-nav-link"',
         'id="evaluate-nav-link"',
+        'id="scheduled-nav-link"',
         'id="auth-form"',
         'id="auth-token-input" type="password"',
     ):
@@ -51,6 +52,8 @@ def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
         "function syncBrowserRoute",
         "function applyCurrentRoute",
         "function loadApprovals",
+        "function loadScheduledCenter",
+        "function notifyAttentionItems",
         'window.addEventListener("popstate"',
         "`/work/${encodeURIComponent(session.id)}`",
         "`/runs/${encodeURIComponent(run.id)}`",
@@ -148,6 +151,8 @@ def test_shell_deep_links_and_unknown_paths_fail_closed():
         "/workflows",
         "/workflows/review-team",
         "/evaluate",
+        "/scheduled",
+        "/scheduled/daily-echo",
     ):
         response = client.get(path)
         assert response.status_code == 200

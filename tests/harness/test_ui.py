@@ -51,9 +51,9 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=36.2">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.3">' in index_response.text
     )
-    assert '<script src="/assets/app.js?v=36.2"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.3"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -716,6 +716,14 @@ def test_ui_index_contains_control_panel_elements():
         "clear-native-terminal-button",
         "run-button",
         "approvals-nav-link",
+        "scheduled-nav-link",
+        "attention-count",
+        "scheduled-center",
+        "schedule-list",
+        "schedule-calendar",
+        "schedule-history",
+        "attention-list",
+        "schedule-wizard",
         "approval-attention-count",
         "approvals-center",
         "approvals-list",

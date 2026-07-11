@@ -72,6 +72,7 @@ class ScheduleDefinition:
     max_concurrency: int = 1
     misfire_policy: str = "skip"
     misfire_grace_seconds: float = 60.0
+    notifications: Mapping[str, Any] | None = None
     source_hash: str = ""
 
 
@@ -159,13 +160,17 @@ def build_schedule_definition(
         max_concurrency=max(int(payload.get("max_concurrency") or 1), 1),
         misfire_policy=str(payload.get("misfire_policy") or "skip"),
         misfire_grace_seconds=_positive(payload.get("misfire_grace_seconds"), 60.0),
+        notifications={
+            "desktop": bool(_mapping(payload.get("notifications")).get("desktop"))
+        },
     )
     if definition.overlap_policy not in {"skip", "allow"}:
         raise ScheduleError("overlap_policy must be skip or allow")
     if definition.misfire_policy not in {"skip", "run_once"}:
         raise ScheduleError("misfire_policy must be skip or run_once")
     return replace(
-        definition, source_hash=_hash(schedule_definition_to_dict(definition))
+        definition,
+        source_hash=_hash(schedule_definition_to_dict(definition, include_hash=False)),
     )
 
 
@@ -306,11 +311,12 @@ class ScheduleService:
                 """
                 INSERT INTO schedule_states (
                     schedule_key, schedule_id, project_id, project_root, definition_hash,
-                    status, enabled, timezone, next_run_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'paused', 0, ?, ?, ?, ?)
+                    definition_json, status, enabled, timezone, next_run_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'paused', 0, ?, ?, ?, ?)
                 ON CONFLICT(schedule_key) DO UPDATE SET
                     project_id=excluded.project_id, project_root=excluded.project_root,
-                    definition_hash=excluded.definition_hash, timezone=excluded.timezone,
+                    definition_hash=excluded.definition_hash,
+                    definition_json=excluded.definition_json, timezone=excluded.timezone,
                     next_run_at=excluded.next_run_at, status='paused', enabled=0,
                     tested_hash=NULL, tested_at=NULL, updated_at=excluded.updated_at
                 """,
@@ -320,6 +326,11 @@ class ScheduleService:
                     project.id,
                     project.root,
                     definition.source_hash,
+                    json.dumps(
+                        schedule_definition_to_dict(definition),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
                     definition.timezone,
                     next_run,
                     now,
@@ -354,6 +365,60 @@ class ScheduleService:
         return tuple(
             self.detail(project, item.id) for item in discover_schedules(project.root)
         )
+
+    def automation_overview(self, project: HarnessProject) -> dict[str, Any]:
+        """Return live definitions plus archived audit rows for the UI center."""
+        live = {item["definition"]["id"]: item for item in self.list(project)}
+        with self.runtime_store._connect() as connection:  # noqa: SLF001
+            states = connection.execute(
+                "SELECT * FROM schedule_states WHERE project_id = ? ORDER BY updated_at DESC, schedule_id",
+                (project.id,),
+            ).fetchall()
+            occurrence_rows = connection.execute(
+                """
+                SELECT schedule_occurrences.* FROM schedule_occurrences
+                JOIN schedule_states USING (schedule_key)
+                WHERE schedule_states.project_id = ?
+                ORDER BY schedule_occurrences.created_at DESC LIMIT 200
+                """,
+                (project.id,),
+            ).fetchall()
+        schedules: list[dict[str, Any]] = list(live.values())
+        for state in states:
+            schedule_id = str(state["schedule_id"])
+            if schedule_id in live:
+                continue
+            try:
+                definition = json.loads(str(state["definition_json"] or "{}"))
+            except json.JSONDecodeError:
+                definition = {}
+            schedules.append(
+                {
+                    "definition": definition
+                    or {
+                        "id": schedule_id,
+                        "title": schedule_id,
+                        "source_hash": str(state["definition_hash"]),
+                    },
+                    "state": dict(state),
+                    "occurrences": [],
+                    "preview": [],
+                    "worker": self.worker_health(),
+                }
+            )
+        schedules.sort(
+            key=lambda item: (
+                str((item.get("state") or {}).get("status") == "archived"),
+                str(item["definition"].get("title") or item["definition"].get("id")),
+            )
+        )
+        return {
+            "schedules": schedules,
+            "history": [
+                occurrence_to_dict(_occurrence_from_row(row)) for row in occurrence_rows
+            ],
+            "worker": self.worker_health(),
+        }
 
     def test_now(self, project: HarnessProject, schedule_id: str) -> dict[str, Any]:
         definition = load_schedule(project.root, schedule_id)
@@ -398,14 +463,25 @@ class ScheduleService:
 
     def archive(self, project: HarnessProject, schedule_id: str) -> dict[str, Any]:
         """Remove the shareable definition while retaining immutable audit rows."""
+        definition = load_schedule(project.root, schedule_id)
         self.pause(project, schedule_id)
         path = Path(project.root) / SCHEDULE_DIRECTORY / f"{schedule_id}.yaml"
         if not path.is_file():
             raise KeyError(schedule_id)
         path.unlink()
-        self._mark_attention(
-            _schedule_key(project.id, schedule_id), "definition archived"
-        )
+        with self.runtime_store._connect() as connection:  # noqa: SLF001
+            connection.execute(
+                "UPDATE schedule_states SET status = 'archived', enabled = 0, definition_json = ?, updated_at = ? WHERE schedule_key = ?",
+                (
+                    json.dumps(
+                        schedule_definition_to_dict(definition),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    _utc_now(),
+                    _schedule_key(project.id, schedule_id),
+                ),
+            )
         return {"archived": True, "schedule_id": schedule_id}
 
     def run_now(self, project: HarnessProject, schedule_id: str) -> dict[str, Any]:
@@ -885,6 +961,7 @@ def schedule_definition_to_dict(
         "max_concurrency": definition.max_concurrency,
         "misfire_policy": definition.misfire_policy,
         "misfire_grace_seconds": definition.misfire_grace_seconds,
+        "notifications": dict(definition.notifications or {"desktop": False}),
     }
     if include_hash:
         payload["source_hash"] = definition.source_hash
@@ -920,6 +997,9 @@ def _definition_from_saved(data: Mapping[str, Any]) -> ScheduleDefinition:
         max_concurrency=max(int(data.get("max_concurrency") or 1), 1),
         misfire_policy=str(data.get("misfire_policy") or "skip"),
         misfire_grace_seconds=_positive(data.get("misfire_grace_seconds"), 60),
+        notifications={
+            "desktop": bool(_mapping(data.get("notifications")).get("desktop"))
+        },
     )
     source_hash = _hash(schedule_definition_to_dict(definition, include_hash=False))
     if _hash(definition.target_snapshot) != definition.target_hash:

@@ -146,8 +146,24 @@ The authenticated API exposes matching CRUD, preview, test, enable/pause,
 resume, and run-now operations under `/api/schedules`. Create/update, enable,
 and run-now use the shared Approval Center policy actions. Deleting a schedule
 archives its SQLite audit state instead of erasing occurrence history. The
-Scheduled UI and combined Attention Inbox are introduced by the next roadmap
-slice; this slice intentionally ships the backend, worker, CLI, and API first.
+top-level `Scheduled` area adds list, upcoming-calendar, and immutable-history
+views plus a typed wizard for target, cadence, destination, worktree isolation,
+concurrency, retry/misfire policy, and notifications. It explains the exact-hash
+`Test now` gate and worker-online requirement before enable.
+
+The same area contains the project Attention Inbox. Pending approvals, failed
+durable jobs, and schedules in `needs_attention` are derived from their source
+audit records rather than copied into a second queue. Marking an item read only
+stores acknowledgement state in `runtime.sqlite3`; it never deletes the job,
+approval, schedule snapshot, or occurrence history. Desktop notifications are
+optional, browser-session-only, and link back to the relevant approval, run, or
+schedule. A schedule must opt in to schedule-finding notifications explicitly.
+
+```text
+GET  /api/automation?workspace=/path/to/project
+GET  /api/attention?workspace=/path/to/project
+POST /api/attention/read
+```
 
 The top-level `Tools` area is the MCP connection center. It shows redacted
 project descriptors, transport and trust state, per-harness compatibility,

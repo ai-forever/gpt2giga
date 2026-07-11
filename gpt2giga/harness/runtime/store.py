@@ -45,7 +45,7 @@ from gpt2giga.harness.runtime.policy import (
 from gpt2giga.harness.sessions.redaction import redact_for_storage
 
 RUNTIME_DB_NAME = "runtime.sqlite3"
-RUNTIME_SCHEMA_VERSION = 6
+RUNTIME_SCHEMA_VERSION = 7
 SQLITE_TIMEOUT_SECONDS = 10.0
 
 
@@ -336,6 +336,19 @@ _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             """,
             "CREATE INDEX schedule_occurrences_schedule_idx ON schedule_occurrences(schedule_key, created_at DESC)",
             "CREATE INDEX schedule_occurrences_active_idx ON schedule_occurrences(status, destination_session_id)",
+        ),
+    ),
+    (
+        7,
+        "scheduled automation archive snapshots and attention read state",
+        (
+            "ALTER TABLE schedule_states ADD COLUMN definition_json TEXT NOT NULL DEFAULT '{}'",
+            """
+            CREATE TABLE attention_reads (
+                item_id TEXT PRIMARY KEY,
+                read_at TEXT NOT NULL
+            )
+            """,
         ),
     ),
 )
@@ -1176,6 +1189,40 @@ class RuntimeCoordinationStore:
                 ).fetchall()
         return tuple(_approval_request_from_row(row) for row in rows)
 
+    def attention_read_ids(self, item_ids: tuple[str, ...]) -> frozenset[str]:
+        """Return the subset of derived attention item ids marked as read."""
+        if not item_ids:
+            return frozenset()
+        safe_ids = tuple(_required_text(item_id, "item_id") for item_id in item_ids)
+        placeholders = ", ".join("?" for _ in safe_ids)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT item_id FROM attention_reads WHERE item_id IN ({placeholders})",
+                safe_ids,
+            ).fetchall()
+        return frozenset(str(row[0]) for row in rows)
+
+    def mark_attention_read(
+        self, item_ids: tuple[str, ...], *, read: bool = True
+    ) -> None:
+        """Persist or clear acknowledgement without mutating source audit rows."""
+        safe_ids = tuple(_required_text(item_id, "item_id") for item_id in item_ids)
+        if not safe_ids:
+            return
+        with self._connect() as connection, _transaction(connection):
+            if read:
+                now = _utc_now()
+                connection.executemany(
+                    "INSERT OR REPLACE INTO attention_reads (item_id, read_at) VALUES (?, ?)",
+                    ((item_id, now) for item_id in safe_ids),
+                )
+            else:
+                placeholders = ", ".join("?" for _ in safe_ids)
+                connection.execute(
+                    f"DELETE FROM attention_reads WHERE item_id IN ({placeholders})",
+                    safe_ids,
+                )
+
     def decide_approval_request(
         self,
         request_id: str,
@@ -1640,6 +1687,7 @@ class RuntimeCoordinationStore:
                     "workflow_step_attempts",
                     "schedule_states",
                     "schedule_occurrences",
+                    "attention_reads",
                 )
             }
             pending = int(
@@ -1677,6 +1725,9 @@ class RuntimeCoordinationStore:
             occurrence_rows = connection.execute(
                 "SELECT * FROM schedule_occurrences ORDER BY created_at, id"
             ).fetchall()
+            attention_rows = connection.execute(
+                "SELECT * FROM attention_reads ORDER BY read_at, item_id"
+            ).fetchall()
         return {
             "schema_version": self.schema_version,
             "exported_at": _utc_now(),
@@ -1690,6 +1741,7 @@ class RuntimeCoordinationStore:
             "approval_grants": [
                 approval_grant_to_dict(item) for item in self.list_approval_grants()
             ],
+            "attention_reads": [dict(row) for row in attention_rows],
             "outbox": [
                 outbox_entry_to_dict(_outbox_from_row(row)) for row in outbox_rows
             ],
