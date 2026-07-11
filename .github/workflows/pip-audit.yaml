@@ -27,7 +27,7 @@ jobs:
         run: uv python install 3.13
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --all-packages --all-extras --dev
 
       - name: Audit dependencies
         uses: pypa/gh-action-pip-audit@v1.1.0

@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'gpt2giga/**'
+      - 'packages/gpt2giga/**'
       - 'tests/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -13,7 +13,7 @@ on:
     branches: [ main ]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'gpt2giga/**'
+      - 'packages/gpt2giga/**'
       - 'tests/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -43,7 +43,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --all-packages --all-extras --dev
 
       - name: Lint with Ruff
         run: uv run ruff check .

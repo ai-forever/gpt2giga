@@ -5,7 +5,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'Dockerfile'
-      - 'gpt2giga/**'
+      - 'packages/gpt2giga/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/docker_image.yaml'
@@ -32,7 +32,9 @@ jobs:
         import tomllib
         from pathlib import Path
 
-        pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+        pyproject = tomllib.loads(
+            Path("packages/gpt2giga/pyproject.toml").read_text(encoding="utf-8")
+        )
         print(pyproject["project"]["version"])
         PY
         )"

@@ -7,7 +7,7 @@ on:
       - 'Dockerfile'
       - '.dockerignore'
       - 'deploy/**'
-      - 'gpt2giga/**'
+      - 'packages/gpt2giga/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/docker-smoke.yaml'

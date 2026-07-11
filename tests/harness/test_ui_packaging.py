@@ -9,7 +9,15 @@ def test_packaged_ui_assets_survive_wheel_install(tmp_path):
     repo_root = Path(__file__).resolve().parents[2]
     dist_dir = tmp_path / "dist"
     subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(dist_dir)],
+        [
+            "uv",
+            "build",
+            "--package",
+            "gpt2giga",
+            "--wheel",
+            "--out-dir",
+            str(dist_dir),
+        ],
         cwd=repo_root,
         check=True,
         capture_output=True,
