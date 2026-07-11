@@ -458,8 +458,13 @@ def new_id(prefix: str) -> str:
 def title_from_prompt(prompt: str) -> str:
     """Generate a session title from a first prompt."""
     title = " ".join(str(prompt).split())
-    if len(title) > 60:
-        title = title[:57].rstrip() + "..."
+    title = title.lstrip("#>*- `")
+    if len(title) > 40:
+        candidate = title[:37].rstrip()
+        word_boundary = candidate.rfind(" ")
+        if word_boundary >= 24:
+            candidate = candidate[:word_boundary]
+        title = candidate.rstrip(".,:;!?") + "..."
     return title or "Untitled session"
 
 

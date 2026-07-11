@@ -1134,21 +1134,53 @@
     }
     .session-row {
       position: relative;
-      padding-right: 26px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 4px;
     }
-    .session-row::after {
-      position: absolute;
-      top: 50%;
-      right: 12px;
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: #59667a;
-      content: "";
-      transform: translateY(-50%);
+    .session-row-content {
+      min-width: 0;
     }
-    .session-row.active::after {
-      background: var(--accent-strong);
+    .session-row-actions {
+      display: flex;
+      gap: 2px;
+      opacity: 0;
+      transition: opacity 120ms ease;
+    }
+    .session-row:hover .session-row-actions,
+    .session-row:focus-within .session-row-actions,
+    .session-row.active .session-row-actions {
+      opacity: 1;
+    }
+    .session-row-action {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      place-items: center;
+      border-color: transparent;
+      background: transparent;
+      color: var(--muted);
+    }
+    .session-row-action:hover {
+      border-color: var(--border);
+      background: #1b2735;
+      color: var(--text);
+    }
+    .session-row-action.delete:hover {
+      border-color: #743d48;
+      background: #321d25;
+      color: #ffadb8;
+    }
+    .session-row-action svg {
+      width: 15px;
+      height: 15px;
+      fill: none;
+      stroke: currentcolor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
     .session-row.active {
       border-color: #2d6e74;
@@ -1164,6 +1196,11 @@
     }
     .session-meta span:nth-child(n + 3) {
       display: none;
+    }
+    @media (hover: none) {
+      .session-row-actions {
+        opacity: 1;
+      }
     }
     .center {
       display: flex;

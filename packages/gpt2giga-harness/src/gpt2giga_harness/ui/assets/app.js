@@ -1774,18 +1774,86 @@
         for (const session of sessions) {
           const row = document.createElement("div");
           row.className = `session-row${session.id === state.currentSessionId ? " active" : ""}`;
+          const displayTitle = compactSessionTitle(session.title || "Untitled session");
           row.innerHTML = `
-            <div class="session-title">${escapeHtml(session.title || "Untitled session")}</div>
-            <div class="session-meta">
-              <span>${escapeHtml(session.default_harness_id || "")}</span>
-              <span>${escapeHtml(session.default_api_mode || "")}</span>
-              <span>${escapeHtml(session.last_run_status || "new")}</span>
+            <div class="session-row-content">
+              <div class="session-title" title="${escapeHtml(session.title || "Untitled session")}">${escapeHtml(displayTitle)}</div>
+              <div class="session-meta">
+                <span>${escapeHtml(session.default_harness_id || "")}</span>
+                <span>${escapeHtml(session.default_api_mode || "")}</span>
+                <span>${escapeHtml(session.last_run_status || "new")}</span>
+              </div>
             </div>
+            <div class="session-row-actions"></div>
           `;
           row.addEventListener("click", () => loadSession(session.id));
+          const actions = row.querySelector(".session-row-actions");
+          actions.appendChild(sessionRowActionButton(
+            session.archived ? "Unarchive" : "Archive",
+            session.archived ? "unarchive" : "archive",
+            () => archiveSessionFromList(session)
+          ));
+          actions.appendChild(sessionRowActionButton(
+            "Delete",
+            "delete",
+            () => deleteSessionFromList(session)
+          ));
           list.appendChild(row);
         }
       }
+    }
+
+    function compactSessionTitle(value) {
+      const title = String(value || "Untitled session").replace(/^\s*[#>*-]+\s*/, "").replace(/\s+/g, " ").trim();
+      if (title.length <= 40) return title || "Untitled session";
+      let candidate = title.slice(0, 37).trimEnd();
+      const wordBoundary = candidate.lastIndexOf(" ");
+      if (wordBoundary >= 24) candidate = candidate.slice(0, wordBoundary);
+      return `${candidate.replace(/[.,:;!?]+$/, "")}...`;
+    }
+
+    function sessionRowActionButton(label, action, handler) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `session-row-action ${action}`;
+      button.setAttribute("aria-label", `${label} session`);
+      button.title = label;
+      button.innerHTML = action === "delete"
+        ? '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-9 0 1 14h10l1-14M10 11v6m4-6v6"/></svg>'
+        : '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16v13H4zM3 4h18v3H3zm6 8h6"/></svg>';
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        handler();
+      });
+      return button;
+    }
+
+    async function archiveSessionFromList(session) {
+      const result = await getJson(`/api/sessions/${encodeURIComponent(session.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: !session.archived })
+      });
+      if (!result.ok) {
+        setText("model-status", result.data.detail || "Session archive failed.");
+        return;
+      }
+      if (state.currentBundle && state.currentSessionId === session.id) {
+        state.currentBundle.session = result.data.session;
+        renderAll();
+      }
+      await loadSessions();
+    }
+
+    async function deleteSessionFromList(session) {
+      if (!window.confirm(`Delete \"${compactSessionTitle(session.title)}\" permanently?`)) return;
+      const result = await getJson(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      if (!result.ok) {
+        setText("model-status", result.data.detail || "Session delete failed.");
+        return;
+      }
+      if (state.currentSessionId === session.id) clearCurrentSession();
+      await loadSessions();
     }
 
     function renderNativeSessions(error) {
@@ -4982,18 +5050,25 @@
 
     async function deleteCurrentSession() {
       if (!state.currentSessionId) return;
+      const title = state.currentBundle && state.currentBundle.session ? state.currentBundle.session.title : "this session";
+      if (!window.confirm(`Delete \"${compactSessionTitle(title)}\" permanently?`)) return;
       const sessionId = state.currentSessionId;
       const result = await getJson(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
       if (result.ok) {
-        state.currentSessionId = null;
-        state.currentBundle = null;
-        state.currentArena = null;
-        state.attachments = [];
-        renderAttachments();
-        renderAll();
+        clearCurrentSession();
         await loadSessions();
-        persistProjectState({ last_selected_session: null });
       }
+    }
+
+    function clearCurrentSession() {
+      state.currentSessionId = null;
+      state.currentBundle = null;
+      state.currentArena = null;
+      state.attachments = [];
+      renderAttachments();
+      renderAll();
+      persistProjectState({ last_selected_session: null });
+      syncBrowserRoute("work", null);
     }
 
     function renameCurrentSession() {

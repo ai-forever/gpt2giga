@@ -8,7 +8,7 @@ from gpt2giga_harness.sessions.models import (
     HarnessStoredEvent,
     bundle_to_dict,
 )
-from gpt2giga_harness.sessions.store import new_id, utc_now
+from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
 from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability, REDACTED
 
 
@@ -63,6 +63,13 @@ def test_filesystem_store_persists_session_messages_runs_and_events(tmp_path):
     assert bundle.runs[0].id == run.id
     assert bundle.events == (event,)
     assert bundle.native_links == ()
+
+
+def test_title_from_prompt_creates_compact_plain_session_name():
+    assert title_from_prompt("# Streaming QA - **bold item** and a long suffix") == (
+        "Streaming QA - **bold item** and a..."
+    )
+    assert title_from_prompt("  Какой курс доллара?  ") == "Какой курс доллара?"
 
 
 def test_filesystem_store_persists_invocation_mode_on_runs(tmp_path):
