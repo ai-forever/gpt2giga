@@ -1,55 +1,70 @@
-# AGENTS.md — packages/gpt2giga-harness/
+# AGENTS.md — Harness package
 
-## Package Identity
+## Scope and boundary
 
-- **Distribution:** `gpt2giga-harness==0.0.1`
-- **Python namespace:** `gpt2giga_harness`
-- **Commands:** `giga`, `gpt2giga-harness`
-- **Dependency direction:** Harness may import reviewed gateway contracts;
-  gateway code must not import Harness.
+These rules apply to `packages/gpt2giga-harness/**` in addition to the root
+contract.
 
-## Setup and Checks
+- Keep Harness-owned imports under `gpt2giga_harness.*`. Do not restore the
+  old `gpt2giga.harness.*` namespace or add a broad compatibility shim.
+- Keep the plugin entry-point group `gpt2giga.harnesses`; entry-point targets
+  belong in `gpt2giga_harness.*`.
+- Keep the gateway dependency exact unless an explicit release change includes
+  installed-artifact compatibility evidence.
+- Reviewed gateway boundaries are normalized protocol models used by Direct
+  Chat and `from gpt2giga import run` in optional sidecar startup. Do not add a
+  new gateway import without proving the standalone package contract.
 
-Run workspace commands from the repository root:
+## Runtime invariants
+
+- Preserve backward-compatible user state under `~/.gpt2giga/harness` and
+  project `.giga/`: SQLite migrations, JSON/JSONL records, session metadata,
+  worktrees, managed homes, approvals, and provenance.
+- Redact before persistence and before API/UI serialization. Secret resolution
+  may cross an explicit execution boundary but secret values must not appear in
+  previews, records, logs, traces, diffs, or errors.
+- Mutating actions must remain approval-gated where policy requires it.
+  Worktree-mutating edit/apply flows must fail closed when isolation, approval,
+  lease, or policy checks fail.
+- Preserve idempotency, atomic writes, file locks, lease/cancellation semantics,
+  and crash reconciliation when changing durable runtime flows.
+- External commands must use explicit argv, controlled cwd/env, bounded output,
+  and redacted records. Do not introduce `shell=True` or mutate a user's
+  native Codex, Claude, or Gemini home.
+- Keep `src/gpt2giga_harness/ui/assets/**` in the packaged no-build
+  HTML/CSS/JavaScript stack. Do not introduce a frontend build toolchain unless
+  explicitly requested.
+
+## Ownership guide
+
+| Path under `src/gpt2giga_harness/` | Responsibility |
+|---|---|
+| `cli.py`, `doctor.py`, `config.py` | CLI, diagnostics, Harness configuration |
+| `harnesses/`, `native/` | Built-in adapters and native session connectors |
+| `runtime/`, `sessions/` | Durable jobs, policy, leases, attempts, stored events |
+| `ui/` | FastAPI control plane, routers, security, packaged static UI |
+| `tools/`, `mcp.py`, `managed_mcp.py` | Tool contracts, policy, managed secrets/config |
+| `project*.py`, `workspace.py`, `worktrees.py` | Project state, bounded filesystem access, edit isolation |
+| `workflows.py`, `schedules.py`, `evals.py`, `agents.py` | Higher-level orchestration and authoring |
+
+Keep `ui/app.py` as composition; add cohesive API families to `ui/routers/`
+instead of expanding the composition module. Use temporary data dirs and repos
+in tests; never exercise real user state.
+
+## Validation
+
+Run from the repository root:
 
 ```bash
 uv sync --all-packages --all-extras --dev
-uv run giga doctor
-uv run pytest tests/harness -q
 uv run ruff check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness
 uv run ruff format --check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness
+uv run pytest tests/harness -q
 uv build --package gpt2giga-harness --no-sources
 ```
 
-## Boundaries and Compatibility
-
-- Keep all Harness imports under `gpt2giga_harness.*`; do not restore the old
-  `gpt2giga.harness.*` namespace or add a broad compatibility shim.
-- Keep the plugin entry-point group named `gpt2giga.harnesses`, with targets in
-  `gpt2giga_harness.*`.
-- The initial package depends on exactly `gpt2giga==0.2.2a1`. Do not widen the
-  range without installed-artifact compatibility evidence.
-- Reviewed gateway imports are `gpt2giga.protocols.normalized` and
-  `from gpt2giga import run` for optional local sidecar startup.
-- Preserve `~/.gpt2giga/harness`, project `.giga/` state, SQLite migrations,
-  JSON/JSONL records, worktrees, managed homes, and approval semantics.
-- Keep `ui/assets/**` in the no-build HTML/CSS/JavaScript stack and verify that
-  those files remain packaged.
-
-## Package Map
-
-| Path | Purpose |
-|---|---|
-| `src/gpt2giga_harness/cli.py` | `giga` and `gpt2giga-harness` CLI |
-| `src/gpt2giga_harness/harnesses/` | Built-in direct and external CLI adapters |
-| `src/gpt2giga_harness/runtime/` | Durable jobs, workers, leases, policy, approvals |
-| `src/gpt2giga_harness/sessions/` | Session and event persistence |
-| `src/gpt2giga_harness/ui/` | FastAPI control plane and packaged no-build UI |
-| `src/gpt2giga_harness/tools/` | Harness-owned tool and managed-secret contracts |
-| `tests/harness/` | Harness and cross-package integration tests |
-
-## Definition of Done
-
-For a Harness-only change, run the focused Harness gate above. Before release
-or after package-boundary changes, also run the root coverage gate, both member
-builds, package-isolation tests, and the Docusaurus build.
+`uv run giga doctor` is an environment smoke check, not a hermetic quality
+gate. For UI changes, also verify the packaged asset test and perform browser QA
+at relevant desktop and mobile widths. For metadata, imports, package data, or
+release changes, run the root coverage gate, both member builds, and workspace
+package-isolation tests.
