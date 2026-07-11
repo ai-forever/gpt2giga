@@ -149,6 +149,7 @@ from gpt2giga.harness.runtime.policy import (
 from gpt2giga.harness.runtime.reconcile import RuntimeReconciler
 from gpt2giga.harness.runtime.store import JobNotFoundError, RuntimeCoordinationStore
 from gpt2giga.harness.runtime.worker import DurableJobDispatcher
+from gpt2giga.harness.schedules import ScheduleService
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
@@ -186,6 +187,7 @@ from gpt2giga.harness.tool_profiles import (
     tool_profile_status_to_dict,
 )
 from gpt2giga.harness.ui.routers.runs import router as runs_router
+from gpt2giga.harness.ui.routers.schedules import router as schedules_router
 from gpt2giga.harness.ui.routers.agents import router as agents_router
 from gpt2giga.harness.ui.routers.approvals import router as approvals_router
 from gpt2giga.harness.ui.routers.evaluate import router as evaluate_router
@@ -284,6 +286,16 @@ def create_app(
     app.state.harness_attachment_store = attachment_store
     app.state.harness_arena_store = arena_store
     app.state.harness_eval_store = eval_store
+    app.state.harness_schedule_service = (
+        ScheduleService(
+            runtime_store=runtime_store,
+            runner=runner,
+            dispatcher=durable_dispatcher,
+            eval_store=eval_store,
+        )
+        if runtime_store is not None and durable_dispatcher is not None
+        else None
+    )
     app.state.harness_project_memory_store = memory_store
     app.state.harness_native_registry = native_registry
     app.state.harness_native_index_store = native_index_store
@@ -2217,6 +2229,7 @@ def create_app(
     app.include_router(tools_router)
     app.include_router(workflows_router)
     app.include_router(runs_router)
+    app.include_router(schedules_router)
     # The shell catch-all must remain last so unknown API and asset paths never
     # become HTML responses.
     app.include_router(create_shell_router(ui_security))

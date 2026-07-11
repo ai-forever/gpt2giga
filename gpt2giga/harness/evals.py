@@ -417,6 +417,8 @@ def queue_eval(
     workspace_policy: str | None = None,
     dry_run: bool = False,
     repetitions: int = 1,
+    origin: str = "manual",
+    schedule_id: str | None = None,
 ) -> HarnessEvalRun:
     """Queue every eval case/harness pair as a durable job."""
     selected_harnesses = _selected_harnesses(
@@ -432,6 +434,8 @@ def queue_eval(
     effective_api_mode = parse_api_mode(api_mode or spec.api_mode)
     effective_mode = mode or spec.mode
     effective_workspace_policy = workspace_policy or spec.workspace_policy
+    if origin == "scheduled":
+        effective_workspace_policy = "worktree"
     session = runner.create_session(
         title=f"Eval: {spec.name}",
         workspace=project.root,
@@ -477,6 +481,8 @@ def queue_eval(
                 "workspace": project.root,
                 "workspace_policy": effective_workspace_policy,
                 "dry_run": dry_run,
+                "permission_profile": "unattended" if origin == "scheduled" else None,
+                "schedule_id": schedule_id,
                 "extra": {
                     "isolated_history": True,
                     "eval_run_id": eval_run.id,
@@ -502,7 +508,7 @@ def queue_eval(
                 idempotency_key=(
                     f"eval:{eval_run.id}:{case.id}:{harness_id}:{repetition}"
                 ),
-                origin="manual",
+                origin=origin,
             )
             queued_results.append(
                 EvalCaseRunResult(

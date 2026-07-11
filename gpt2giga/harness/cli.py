@@ -9,6 +9,7 @@ import sys
 from typing import Any, Mapping
 
 import uvicorn
+import yaml
 
 from gpt2giga.harness.agents import (
     agent_profile_to_dict,
@@ -93,6 +94,12 @@ from gpt2giga.harness.runtime.worker import (
     DurableJobDispatcher,
     DurableJobWorker,
     worker_status,
+)
+from gpt2giga.harness.schedules import (
+    ScheduleService,
+    build_schedule_definition,
+    next_occurrences,
+    schedule_definition_to_dict,
 )
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
@@ -275,6 +282,30 @@ def build_parser() -> argparse.ArgumentParser:
     worker_idle.add_argument("--lease-seconds", type=float, default=15.0)
     worker_idle.add_argument("--heartbeat-seconds", type=float, default=2.0)
     worker_idle.set_defaults(handler=_handle_worker_stop_on_idle)
+
+    schedule = subparsers.add_parser("schedule")
+    schedule_subparsers = schedule.add_subparsers(dest="schedule_command")
+    schedule_list = schedule_subparsers.add_parser("list")
+    schedule_list.add_argument("--workspace", default=None)
+    schedule_list.add_argument("--json", action="store_true")
+    schedule_list.set_defaults(handler=_handle_schedule_list)
+    schedule_show = schedule_subparsers.add_parser("show")
+    schedule_show.add_argument("schedule_id")
+    schedule_show.add_argument("--workspace", default=None)
+    schedule_show.add_argument("--json", action="store_true")
+    schedule_show.set_defaults(handler=_handle_schedule_show)
+    for action in ("preview", "create", "update"):
+        command = schedule_subparsers.add_parser(action)
+        command.add_argument("definition")
+        command.add_argument("--workspace", default=None)
+        command.add_argument("--json", action="store_true")
+        command.set_defaults(handler=_handle_schedule_write, schedule_action=action)
+    for action in ("test-now", "enable", "pause", "resume", "run-now", "delete"):
+        command = schedule_subparsers.add_parser(action)
+        command.add_argument("schedule_id")
+        command.add_argument("--workspace", default=None)
+        command.add_argument("--json", action="store_true")
+        command.set_defaults(handler=_handle_schedule_action, schedule_action=action)
 
     native = subparsers.add_parser("native")
     native_subparsers = native.add_subparsers(dest="native_command")
@@ -918,6 +949,91 @@ def _handle_worker_stop_on_idle(args: argparse.Namespace, config: HarnessConfig)
     )
     print(f"Worker {worker.worker_id} stopped after idle timeout.")
     return 0
+
+
+def _handle_schedule_list(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = _schedule_project(args.workspace, config)
+    rows = list(_schedule_service(config).list(project))
+    if args.json:
+        _print_json({"schedules": rows})
+    else:
+        for row in rows:
+            state = row.get("state") or {}
+            definition = row["definition"]
+            print(
+                f"{definition['id']}  {state.get('status', 'paused')}  "
+                f"next={state.get('next_run_at') or '-'}  "
+                f"target={definition['target']['kind']}:{definition['target']['id']}"
+            )
+    return 0
+
+
+def _handle_schedule_show(args: argparse.Namespace, config: HarnessConfig) -> int:
+    payload = _schedule_service(config).detail(
+        _schedule_project(args.workspace, config), args.schedule_id
+    )
+    _print_json(payload)
+    return 0
+
+
+def _handle_schedule_write(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = _schedule_project(args.workspace, config)
+    source = Path(args.definition).expanduser().read_text(encoding="utf-8")
+    payload = yaml.safe_load(source)
+    if not isinstance(payload, Mapping):
+        raise ValueError("Schedule definition must be a YAML/JSON mapping")
+    payload = {**payload, "workspace": project.root}
+    if args.schedule_action == "preview":
+        definition = build_schedule_definition(project, payload)
+        result = {
+            "definition": schedule_definition_to_dict(definition),
+            "occurrences": list(next_occurrences(definition)),
+            "dry_run": True,
+        }
+    else:
+        result = _schedule_service(config).upsert(project, payload)
+    _print_json(result)
+    return 0
+
+
+def _handle_schedule_action(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = _schedule_project(args.workspace, config)
+    service = _schedule_service(config)
+    method = args.schedule_action.replace("-", "_")
+    if method == "delete":
+        result = service.archive(project, args.schedule_id)
+    elif method == "resume":
+        result = service.enable(project, args.schedule_id)
+    else:
+        result = getattr(service, method)(project, args.schedule_id)
+    _print_json(result)
+    return 0
+
+
+def _schedule_project(workspace: str | None, config: HarnessConfig):
+    return resolve_project(
+        workspace,
+        data_dir=config.data_dir,
+        load_config_name=False,
+    )
+
+
+def _schedule_service(config: HarnessConfig) -> ScheduleService:
+    registry = create_default_registry()
+    store = FilesystemHarnessSessionStore(config.data_dir)
+    runner = HarnessSessionRunner(registry=registry, config=config, store=store)
+    runtime_store = RuntimeCoordinationStore(config.data_dir)
+    dispatcher = DurableJobDispatcher(
+        runtime_store=runtime_store,
+        payload_store=DurableJobPayloadStore(config.data_dir),
+        runner=runner,
+    )
+    return ScheduleService(
+        runtime_store=runtime_store,
+        runner=runner,
+        dispatcher=dispatcher,
+        eval_store=FilesystemHarnessEvalStore(config.data_dir),
+    )
 
 
 def _handle_native_sync(args: argparse.Namespace, config: HarnessConfig) -> int:

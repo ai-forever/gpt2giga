@@ -45,7 +45,7 @@ from gpt2giga.harness.runtime.policy import (
 from gpt2giga.harness.sessions.redaction import redact_for_storage
 
 RUNTIME_DB_NAME = "runtime.sqlite3"
-RUNTIME_SCHEMA_VERSION = 5
+RUNTIME_SCHEMA_VERSION = 6
 SQLITE_TIMEOUT_SECONDS = 10.0
 
 
@@ -285,6 +285,57 @@ _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             """,
             "CREATE INDEX workflow_steps_run_status_idx ON workflow_step_attempts(workflow_run_id, status, step_id)",
             "CREATE INDEX workflow_steps_job_idx ON workflow_step_attempts(job_id)",
+        ),
+    ),
+    (
+        6,
+        "scheduled job definitions and occurrence state",
+        (
+            """
+            CREATE TABLE schedule_states (
+                schedule_key TEXT PRIMARY KEY,
+                schedule_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                project_root TEXT NOT NULL,
+                definition_hash TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'paused',
+                enabled INTEGER NOT NULL DEFAULT 0,
+                timezone TEXT NOT NULL,
+                next_run_at TEXT,
+                tested_hash TEXT,
+                tested_at TEXT,
+                last_run_at TEXT,
+                last_status TEXT,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (project_id, schedule_id)
+            )
+            """,
+            "CREATE INDEX schedule_states_due_idx ON schedule_states(enabled, status, next_run_at)",
+            "CREATE INDEX schedule_states_project_idx ON schedule_states(project_id, updated_at)",
+            """
+            CREATE TABLE schedule_occurrences (
+                id TEXT PRIMARY KEY,
+                schedule_key TEXT NOT NULL REFERENCES schedule_states(schedule_key) ON DELETE CASCADE,
+                schedule_id TEXT NOT NULL,
+                definition_hash TEXT NOT NULL,
+                scheduled_for TEXT NOT NULL,
+                trigger TEXT NOT NULL,
+                status TEXT NOT NULL,
+                destination_session_id TEXT,
+                history_cutoff TEXT,
+                job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+                run_id TEXT,
+                error_summary TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                UNIQUE (schedule_id, scheduled_for, trigger)
+            )
+            """,
+            "CREATE INDEX schedule_occurrences_schedule_idx ON schedule_occurrences(schedule_key, created_at DESC)",
+            "CREATE INDEX schedule_occurrences_active_idx ON schedule_occurrences(status, destination_session_id)",
         ),
     ),
 )
@@ -1587,6 +1638,8 @@ class RuntimeCoordinationStore:
                     "approval_grants",
                     "workflow_runs",
                     "workflow_step_attempts",
+                    "schedule_states",
+                    "schedule_occurrences",
                 )
             }
             pending = int(
@@ -1618,6 +1671,12 @@ class RuntimeCoordinationStore:
             workflow_step_rows = connection.execute(
                 "SELECT * FROM workflow_step_attempts ORDER BY workflow_run_id, created_at, id"
             ).fetchall()
+            schedule_rows = connection.execute(
+                "SELECT * FROM schedule_states ORDER BY project_id, schedule_id"
+            ).fetchall()
+            occurrence_rows = connection.execute(
+                "SELECT * FROM schedule_occurrences ORDER BY created_at, id"
+            ).fetchall()
         return {
             "schema_version": self.schema_version,
             "exported_at": _utc_now(),
@@ -1641,6 +1700,10 @@ class RuntimeCoordinationStore:
             "workflow_runs": [_safe_workflow_export_row(row) for row in workflow_rows],
             "workflow_step_attempts": [
                 _safe_workflow_export_row(row) for row in workflow_step_rows
+            ],
+            "schedules": [_safe_workflow_export_row(row) for row in schedule_rows],
+            "schedule_occurrences": [
+                _safe_workflow_export_row(row) for row in occurrence_rows
             ],
         }
 

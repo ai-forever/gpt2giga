@@ -563,11 +563,15 @@ class WorkflowCoordinator:
         runtime_store: RuntimeCoordinationStore,
         runner: HarnessSessionRunner,
         dispatcher: DurableJobDispatcher,
+        origin: str = "manual",
+        schedule_id: str | None = None,
     ) -> None:
         self.project = project
         self.runtime_store = runtime_store
         self.runner = runner
         self.dispatcher = dispatcher
+        self.origin = origin
+        self.schedule_id = schedule_id
         self.repository = WorkflowRepository(runtime_store)
 
     def start(
@@ -846,11 +850,19 @@ class WorkflowCoordinator:
                     or payload.get("timeout_seconds"),
                 }
             )
+            if self.origin == "scheduled":
+                payload.update(
+                    {
+                        "permission_profile": "unattended",
+                        "schedule_id": self.schedule_id,
+                        "workspace_policy": "worktree",
+                    }
+                )
             submission = self.dispatcher.submit(
                 run.session_id,
                 payload,
                 idempotency_key=f"workflow:{run.id}:{step.id}:1",
-                origin="manual",
+                origin=self.origin,
             )
             return self.repository.update_step(
                 attempt.id,

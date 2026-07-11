@@ -110,6 +110,45 @@ GET  /api/approvals?status=pending
 POST /api/approvals/{approval_id}/decision
 ```
 
+### Scheduled jobs
+
+Project schedules are shareable YAML definitions under
+`.giga/schedules/<schedule_id>.yaml`; mutable enablement, next-run state, and
+occurrence history stay in `runtime.sqlite3`. A schedule captures an immutable,
+redacted content hash and snapshot of its agent, preset, workflow, or eval
+target. Editing any material field pauses the schedule and invalidates its
+previous `Test now` grant.
+
+One-shot, fixed interval, and RRULE cadence are supported with an explicit IANA
+timezone. Occurrences are stored as UTC instants. Nonexistent spring-forward
+times are recorded as misfires, and ambiguous fall-back times run once at the
+first instant. The default overlap and misfire policies both skip rather than
+silently catch up or run concurrent copies.
+
+The local worker evaluates due schedules before claiming ordinary jobs, so an
+open browser is not required. Enable is blocked until the exact schedule hash
+passes backend `Test now` and a live worker is registered. Scheduled edits use
+the unattended policy profile and fail closed unless an isolated Git worktree
+can be created; `schedule.unattended_edit` remains approval-gated. Resume mode
+serializes work per session and stores its explicit history cutoff.
+
+```bash
+giga schedule preview schedule.yaml --workspace /path/to/project --json
+giga schedule create schedule.yaml --workspace /path/to/project --json
+giga schedule list --workspace /path/to/project --json
+giga schedule test-now daily-review --workspace /path/to/project --json
+giga schedule enable daily-review --workspace /path/to/project --json
+giga schedule run-now daily-review --workspace /path/to/project --json
+giga schedule pause daily-review --workspace /path/to/project --json
+```
+
+The authenticated API exposes matching CRUD, preview, test, enable/pause,
+resume, and run-now operations under `/api/schedules`. Create/update, enable,
+and run-now use the shared Approval Center policy actions. Deleting a schedule
+archives its SQLite audit state instead of erasing occurrence history. The
+Scheduled UI and combined Attention Inbox are introduced by the next roadmap
+slice; this slice intentionally ships the backend, worker, CLI, and API first.
+
 The top-level `Tools` area is the MCP connection center. It shows redacted
 project descriptors, transport and trust state, per-harness compatibility,
 latest health, discovered server instructions, tools/resources/prompts, input
@@ -1252,6 +1291,7 @@ projects/<project_id>/memory.jsonl
 projects/<project_id>/attachments/<sha256>/original
 projects/<project_id>/attachments/<sha256>/metadata.json
 worktrees/<session_id>/<run_id>/
+.giga/schedules/<schedule_id>.yaml  # inside the project checkout
 runtime.sqlite3
 runtime/job_payloads/<job_id>.json
 runtime/attempt_logs/<attempt_id>.jsonl
@@ -1266,9 +1306,9 @@ metadata.
 
 `runtime.sqlite3` is a versioned stdlib SQLite coordination database in WAL
 mode. It stores only mutable job/attempt/worker state, workflow runs and step
-attempts, approval requests and scoped grants, leases and relationship indexes,
-idempotency-key hashes, capability fingerprints, trace sequence cursors, and
-the recovery outbox. Session
+attempts, schedule state and occurrence history, approval requests and scoped
+grants, leases and relationship indexes, idempotency-key hashes, capability
+fingerprints, trace sequence cursors, and the recovery outbox. Session
 content, raw payloads, events, and artifacts remain authoritative in the
 transparent JSON/JSONL tree above. Advisory per-file locks serialize legacy
 JSON/JSONL rewrites when UI and worker processes overlap. Immutable redacted job

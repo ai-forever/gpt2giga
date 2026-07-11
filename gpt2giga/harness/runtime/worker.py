@@ -138,6 +138,7 @@ class DurableJobDispatcher:
             project_id=str(queued.session.metadata.get("project_id") or "") or None,
             workflow_id=str(payload.get("workflow_id") or "") or None,
             workflow_version=str(payload.get("workflow_version") or "") or None,
+            schedule_id=str(payload.get("schedule_id") or "") or None,
             agent_id=str(payload.get("agent_id") or "") or None,
             max_attempts=max_attempts,
             required_harness_id=harness_id,
@@ -151,12 +152,21 @@ class DurableJobDispatcher:
         selected_profile = permission_profile(
             payload.get("permission_profile"), origin=origin
         )
+        action = (
+            PermissionAction.SCHEDULE_UNATTENDED_EDIT
+            if origin == "scheduled" and str(payload.get("mode") or "plan") == "edit"
+            else PermissionAction.PROCESS_SPAWN
+        )
         context = PolicyContext(
             project_id=str(queued.session.metadata.get("project_id") or "") or None,
             session_id=session_id,
             run_id=queued.run.id,
             job_id=submission.job.id,
-            reason="Start a durable harness process.",
+            reason=(
+                "Start an unattended scheduled edit in an isolated worktree."
+                if action is PermissionAction.SCHEDULE_UNATTENDED_EDIT
+                else "Start a durable harness process."
+            ),
             preview={
                 "harness_id": harness_id,
                 "mode": payload.get("mode") or "plan",
@@ -165,7 +175,7 @@ class DurableJobDispatcher:
             },
         )
         resolution = self.policy_engine.resolve(
-            PermissionAction.PROCESS_SPAWN,
+            action,
             profile=selected_profile,
             context=context,
             enforcement=EnforcementLevel.ENFORCED_BY_HARNESS,
@@ -224,7 +234,7 @@ class DurableJobDispatcher:
                 message=event_message,
                 payload={
                     "job_id": ready_job.id,
-                    "action": PermissionAction.PROCESS_SPAWN.value,
+                    "action": action.value,
                     "policy_source": resolution.policy_source,
                     "enforcement": resolution.enforcement.value,
                     "approval_id": approval.id if approval is not None else None,
@@ -282,6 +292,7 @@ class DurableJobWorker:
         """Claim and execute at most one job; return whether work was claimed."""
         self._register()
         self.runtime_store.heartbeat_worker(self.worker_id)
+        self._trigger_schedules()
         self.runtime_store.recover_expired_attempts()
         self.runtime_store.requeue_due_jobs()
         RuntimeReconciler(self.runtime_store, self.session_store).reconcile()
@@ -390,6 +401,23 @@ class DurableJobWorker:
         RuntimeReconciler(self.runtime_store, self.session_store).reconcile()
         self._advance_parent_workflow(updated_job)
         return True
+
+    def _trigger_schedules(self) -> None:
+        """Materialize due schedule occurrences before claiming normal work."""
+        from gpt2giga.harness.evals import FilesystemHarnessEvalStore
+        from gpt2giga.harness.schedules import ScheduleService
+
+        dispatcher = DurableJobDispatcher(
+            runtime_store=self.runtime_store,
+            payload_store=self.payload_store,
+            runner=self.runner,
+        )
+        ScheduleService(
+            runtime_store=self.runtime_store,
+            runner=self.runner,
+            dispatcher=dispatcher,
+            eval_store=FilesystemHarnessEvalStore(self.config.data_dir),
+        ).tick()
 
     def run_forever(
         self,
