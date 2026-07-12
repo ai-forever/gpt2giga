@@ -316,6 +316,7 @@ def _is_codex_tool_item(item_type: str) -> bool:
         "command_execution",
         "file_change",
         "mcp_tool_call",
+        "todo_list",
         "web_search",
         "dynamic_tool_call",
     } or item_type.endswith("_tool_call")
@@ -328,14 +329,7 @@ def _codex_tool_event(
 ) -> HarnessEvent | None:
     item_type = str(item.get("type") or "tool")
     name = _codex_tool_name(item_type, item)
-    arguments = _first_present(
-        item,
-        "arguments",
-        "input",
-        "command",
-        "query",
-        "changes",
-    )
+    arguments = _codex_tool_arguments(item_type, item)
     status = item.get("status")
     if event_type == "item.started":
         return tool_call_event(
@@ -346,6 +340,15 @@ def _codex_tool_event(
             status=status or "running",
         )
     if event_type == "item.updated":
+        if item_type == "todo_list":
+            return tool_call_event(
+                "tool_call_delta",
+                tool_call_id=item_id,
+                name=name,
+                arguments=arguments,
+                status=status or "running",
+                arguments_are_complete=True,
+            )
         arguments_delta = _first_present(item, "arguments_delta", "input_delta")
         result_delta = _first_present(item, "output_delta", "delta")
         if arguments_delta is None and result_delta is None and status is None:
@@ -400,7 +403,48 @@ def _codex_tool_name(item_type: str, item: Mapping[str, Any]) -> str:
         return str(explicit)
     if item_type == "command_execution":
         return "shell"
+    if item_type == "todo_list":
+        return "update_plan"
     return item_type or "tool"
+
+
+def _codex_tool_arguments(item_type: str, item: Mapping[str, Any]) -> Any:
+    if item_type == "todo_list":
+        todo_items = item.get("items")
+        if not isinstance(todo_items, list):
+            return {"plan": []}
+        first_incomplete = next(
+            (
+                index
+                for index, todo in enumerate(todo_items)
+                if isinstance(todo, Mapping) and not bool(todo.get("completed"))
+            ),
+            None,
+        )
+        plan = []
+        for index, todo in enumerate(todo_items):
+            if not isinstance(todo, Mapping):
+                continue
+            text = todo.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            status = (
+                "completed"
+                if bool(todo.get("completed"))
+                else "in_progress"
+                if index == first_incomplete
+                else "pending"
+            )
+            plan.append({"step": text.strip(), "status": status})
+        return {"plan": plan}
+    return _first_present(
+        item,
+        "arguments",
+        "input",
+        "command",
+        "query",
+        "changes",
+    )
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:

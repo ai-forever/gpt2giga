@@ -1429,6 +1429,71 @@
       flex: 1 1 auto;
       min-height: 0;
       padding: 10px 0;
+      position: relative;
+    }
+    .chat-plan-layer {
+      position: sticky;
+      z-index: 8;
+      top: 12px;
+      height: 0;
+      pointer-events: none;
+    }
+    .current-plan {
+      width: min(320px, calc(100% - 32px));
+      margin-right: 16px;
+      margin-left: auto;
+      border: 1px solid #31566a;
+      border-radius: 12px;
+      background: rgb(10 18 27 / 0.96);
+      box-shadow: 0 18px 48px rgb(0 0 0 / 0.34);
+      pointer-events: auto;
+      backdrop-filter: blur(12px);
+    }
+    .current-plan[hidden] {
+      display: none;
+    }
+    .current-plan-details > summary {
+      display: flex;
+      min-height: 44px;
+      align-items: center;
+      gap: 10px;
+      list-style: none;
+      padding: 10px 12px;
+      cursor: pointer;
+    }
+    .current-plan-details > summary::-webkit-details-marker {
+      display: none;
+    }
+    .current-plan-title {
+      flex: 1 1 auto;
+      color: #dce9f5;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .current-plan-title::before {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin-right: 8px;
+      border-radius: 50%;
+      background: #5eead4;
+      box-shadow: 0 0 0 4px rgb(94 234 212 / 0.1);
+      content: "";
+      vertical-align: 1px;
+    }
+    .current-plan-count {
+      color: #8295aa;
+      font-size: 10px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+    .current-plan-details > .plan-body {
+      max-height: min(52vh, 440px);
+      overflow: auto;
+      border-top: 1px solid #243142;
+      padding: 11px;
     }
     .message-list {
       width: min(960px, calc(100% - 48px));
@@ -1955,6 +2020,15 @@
       padding: 8px 9px;
       font-size: 11px;
       white-space: pre-wrap;
+    }
+    @media (max-width: 1100px) {
+      .current-plan {
+        width: min(960px, calc(100% - 28px));
+        margin: 0 auto;
+      }
+      .current-plan-details > .plan-body {
+        max-height: 320px;
+      }
     }
     @media (max-width: 520px) {
       .plan-item {

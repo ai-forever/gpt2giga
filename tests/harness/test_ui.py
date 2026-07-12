@@ -51,9 +51,9 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.11">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.13">' in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.11"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.13"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -191,6 +191,8 @@ def test_ui_static_includes_live_execution_renderer():
         "function planPayloadFromTool",
         "function appendPlanBody",
         "function planProgressText",
+        "function latestPlanFromTools",
+        "function renderCurrentPlan",
         "function renderRunSummary",
         "function mergeUsage",
         "usage = mergeUsage(usage, event.payload || {})",
@@ -228,6 +230,9 @@ def test_ui_static_includes_live_execution_renderer():
         ".plan-progress-row",
         ".plan-item.in_progress",
         ".plan-item.completed",
+        'id="current-plan" class="current-plan"',
+        ".chat-plan-layer",
+        ".current-plan-details",
     ):
         assert fragment in UI_SOURCE
 

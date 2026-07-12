@@ -247,6 +247,58 @@ def test_codex_stream_parser_preserves_update_plan_payload():
     }
 
 
+def test_codex_stream_parser_maps_todo_list_to_update_plan():
+    parser = _CodexStreamParser()
+    payloads = (
+        {
+            "type": "item.started",
+            "item": {
+                "id": "todo-1",
+                "type": "todo_list",
+                "items": [
+                    {"text": "Inspect the repository", "completed": True},
+                    {"text": "Fix plan rendering", "completed": False},
+                    {"text": "Verify the UI", "completed": False},
+                ],
+            },
+        },
+        {
+            "type": "item.updated",
+            "item": {
+                "id": "todo-1",
+                "type": "todo_list",
+                "items": [
+                    {"text": "Inspect the repository", "completed": True},
+                    {"text": "Fix plan rendering", "completed": True},
+                    {"text": "Verify the UI", "completed": False},
+                ],
+            },
+        },
+    )
+
+    events = [event for payload in payloads for event in parser(payload)]
+
+    assert [event.type for event in events] == [
+        "tool_call_started",
+        "tool_call_delta",
+    ]
+    assert all(event.payload["name"] == "update_plan" for event in events)
+    assert events[0].payload["arguments"] == {
+        "plan": [
+            {"step": "Inspect the repository", "status": "completed"},
+            {"step": "Fix plan rendering", "status": "in_progress"},
+            {"step": "Verify the UI", "status": "pending"},
+        ]
+    }
+    assert events[1].payload["arguments"] == {
+        "plan": [
+            {"step": "Inspect the repository", "status": "completed"},
+            {"step": "Fix plan rendering", "status": "completed"},
+            {"step": "Verify the UI", "status": "in_progress"},
+        ]
+    }
+
+
 def test_codex_stream_exit_zero_with_failed_turn_is_failure():
     script = """
 import json

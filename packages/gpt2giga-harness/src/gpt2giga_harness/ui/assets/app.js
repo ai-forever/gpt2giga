@@ -4058,8 +4058,8 @@
       if (name) current.name = String(name);
       const completeArguments = payload.arguments != null ? payload.arguments : payload.input != null ? payload.input : functionPayload.arguments;
       const argumentDelta = payload.arguments_delta != null ? payload.arguments_delta : payload.input_delta;
-      if (event.type === "tool_call_delta" && (argumentDelta != null || completeArguments != null)) {
-        current.arguments += toolValueText(argumentDelta != null ? argumentDelta : completeArguments);
+      if (event.type === "tool_call_delta" && argumentDelta != null) {
+        current.arguments += toolValueText(argumentDelta);
       } else if (completeArguments != null) {
         current.arguments = toolValueText(completeArguments);
       }
@@ -4112,6 +4112,15 @@
     function planProgressText(plan) {
       const completed = plan.items.filter((item) => item.status === "completed").length;
       return `${completed}/${plan.items.length} complete`;
+    }
+
+    function latestPlanFromTools(tools) {
+      let latest = null;
+      for (const tool of tools ? tools.values() : []) {
+        const plan = planPayloadFromTool(tool);
+        if (plan) latest = { plan, tool };
+      }
+      return latest;
     }
 
     function appendPlanBody(details, plan, tool) {
@@ -4200,6 +4209,41 @@
         details.appendChild(body);
       }
       return details;
+    }
+
+    function currentSessionPlan() {
+      const liveDrafts = [...state.liveRuns.values()].filter((draft) => draft.sessionId === state.currentSessionId);
+      const live = liveDrafts.length ? latestPlanFromTools(liveDrafts[liveDrafts.length - 1].tools) : null;
+      if (live) return live;
+      const runs = state.currentBundle && Array.isArray(state.currentBundle.runs) ? state.currentBundle.runs : [];
+      const run = runs.length ? runs[runs.length - 1] : null;
+      return run ? latestPlanFromTools(toolsFromEvents(eventsForRun(run.id))) : null;
+    }
+
+    function renderCurrentPlan() {
+      const panel = byId("current-plan");
+      if (!panel) return;
+      const current = currentSessionPlan();
+      panel.replaceChildren();
+      panel.hidden = !current;
+      if (!current) return;
+      const details = document.createElement("details");
+      details.className = "current-plan-details";
+      details.open = panel.dataset.collapsed !== "true";
+      details.addEventListener("toggle", () => {
+        panel.dataset.collapsed = details.open ? "false" : "true";
+      });
+      const summary = document.createElement("summary");
+      const title = document.createElement("span");
+      title.className = "current-plan-title";
+      title.textContent = "Current plan";
+      const progress = document.createElement("span");
+      progress.className = "current-plan-count";
+      progress.textContent = planProgressText(current.plan);
+      summary.append(title, progress);
+      details.appendChild(summary);
+      appendPlanBody(details, current.plan, current.tool);
+      panel.appendChild(details);
     }
 
     function appendToolCards(parent, tools) {
@@ -4422,6 +4466,7 @@
       const replacement = liveMessageNode(draft);
       if (existing) existing.replaceWith(replacement);
       else byId("message-list").appendChild(replacement);
+      renderCurrentPlan();
       document.body.classList.remove("new-session");
       if (shouldStick) scrollChatToBottom();
     }
@@ -4469,6 +4514,7 @@
         list.appendChild(empty);
       }
       state.renderedSessionId = session && session.id;
+      renderCurrentPlan();
       if (shouldStick) scrollChatToBottom();
     }
 

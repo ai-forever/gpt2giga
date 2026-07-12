@@ -507,6 +507,7 @@ def tool_call_event(
     arguments: Any = None,
     result: Any = None,
     status: Any = None,
+    arguments_are_complete: bool = False,
 ) -> HarnessEvent:
     """Build a normalized tool-call lifecycle event."""
     payload = {
@@ -515,7 +516,9 @@ def tool_call_event(
         "status": str(status) if status is not None else None,
     }
     if event_type == "tool_call_delta":
-        payload["arguments_delta"] = arguments
+        payload["arguments" if arguments_are_complete else "arguments_delta"] = (
+            arguments
+        )
         payload["output_delta"] = result
     else:
         payload["arguments"] = arguments

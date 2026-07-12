@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=38.11">
+  <link rel="stylesheet" href="/assets/app.css?v=38.13">
 </head>
 <body>
   <div class="app">
@@ -224,6 +224,9 @@
           </div>
         </div>
         <div id="output-panel" class="chat-scroll">
+          <div class="chat-plan-layer">
+            <aside id="current-plan" class="current-plan" aria-label="Current execution plan" hidden></aside>
+          </div>
           <div id="message-list" class="message-list" aria-live="polite" aria-relevant="additions text"></div>
         </div>
         <div id="composer" class="composer">
@@ -737,6 +740,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=38.11"></script>
+  <script src="/assets/app.js?v=38.13"></script>
 </body>
 </html>
