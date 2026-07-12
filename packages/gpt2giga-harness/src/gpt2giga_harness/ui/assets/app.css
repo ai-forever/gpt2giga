@@ -2021,6 +2021,37 @@
       font-size: 11px;
       white-space: pre-wrap;
     }
+    .generated-file-stack {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .generated-file-card {
+      width: min(680px, 100%);
+      margin: 0;
+      overflow: hidden;
+      border: 1px solid #2b4053;
+      border-radius: 14px;
+      background: #0b151f;
+    }
+    .generated-file-card a {
+      display: block;
+      background: #071019;
+    }
+    .generated-file-card img {
+      display: block;
+      width: 100%;
+      max-height: 620px;
+      object-fit: contain;
+    }
+    .generated-file-card figcaption {
+      overflow: hidden;
+      padding: 9px 12px;
+      color: #8295aa;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     @media (max-width: 1100px) {
       .current-plan {
         width: min(960px, calc(100% - 28px));

@@ -23,6 +23,7 @@ HARNESS_SOURCE = HARNESS_MEMBER / "src/gpt2giga_harness"
 IMPORT_DISTRIBUTIONS = {
     "dateutil": "python-dateutil",
     "fastapi": "fastapi",
+    "gigachat": "gigachat",
     "gpt2giga": "gpt2giga",
     "pydantic": "pydantic",
     "starlette": "starlette",
@@ -193,7 +194,7 @@ assert scripts == {
     "giga": "gpt2giga_harness.cli:main",
     "gpt2giga-harness": "gpt2giga_harness.cli:main",
 }
-assert '<link rel="stylesheet" href="/assets/app.css?v=38.10">' in INDEX_HTML
+assert '<link rel="stylesheet" href="/assets/app.css?v=38.14">' in INDEX_HTML
 assert "function boot()" in load_text_asset("app.js")
 assert ".app {" in load_text_asset("app.css")
 

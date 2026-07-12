@@ -1115,6 +1115,7 @@ version = "0.0.1"
 source = { editable = "packages/gpt2giga-harness" }
 dependencies = [
     { name = "fastapi" },
+    { name = "gigachat" },
     { name = "gpt2giga" },
     { name = "pydantic" },
     { name = "python-dateutil" },
@@ -1127,6 +1128,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.133.0,<1" },
+    { name = "gigachat", specifier = ">=0.2.2a1,<0.3.0" },
     { name = "gpt2giga", editable = "packages/gpt2giga" },
     { name = "pydantic", specifier = ">=2.12.0,<3" },
     { name = "python-dateutil", specifier = ">=2.9.0,<3" },

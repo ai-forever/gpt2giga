@@ -122,6 +122,7 @@ class HarnessConfig:
             timeout_seconds=self.timeout_seconds,
             auto_start_proxy=self.auto_start_proxy,
             proxy_start_timeout_seconds=self.proxy_start_timeout_seconds,
+            data_dir=self.data_dir,
         )
 
 

@@ -61,6 +61,7 @@ class HarnessEventType(str, Enum):
     TOOL_CALL_STARTED = "tool_call_started"
     TOOL_CALL_DELTA = "tool_call_delta"
     TOOL_CALL_FINISHED = "tool_call_finished"
+    GENERATED_FILE = "generated_file"
     USAGE = "usage"
     FILE_CHANGED = "file_changed"
     RAW_REQUEST = "raw_request"
@@ -206,6 +207,7 @@ class HarnessContext:
     timeout_seconds: float = 3600.0
     auto_start_proxy: bool = False
     proxy_start_timeout_seconds: float = 15.0
+    data_dir: str | None = None
     extra_env: Mapping[str, str] = field(default_factory=dict)
 
     def api_base_url(self, api_mode: GigaChatApiMode) -> str:

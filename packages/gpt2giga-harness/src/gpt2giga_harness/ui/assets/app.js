@@ -3897,6 +3897,38 @@
       return /^#{1,6}\s+/.test(line) || /^```/.test(line) || /^>\s?/.test(line) || Boolean(markdownListMatch(line, false)) || Boolean(markdownListMatch(line, true));
     }
 
+    function normalizeMarkdownFenceLines(value) {
+      const lines = String(value == null ? "" : value).replace(/\r\n?/g, "\n").split("\n");
+      const normalized = [];
+      let inFence = false;
+      for (const line of lines) {
+        if (!inFence) {
+          const prefixedFence = line.match(/^(.*\S)[ \t]+```([A-Za-z0-9_-]+)(?:[ \t]+(.*))?$/);
+          const compactFence = line.match(/^```([A-Za-z0-9_-]+)[ \t]+(.+)$/);
+          if (prefixedFence && line.indexOf("```") === line.lastIndexOf("```")) {
+            normalized.push(prefixedFence[1], `\`\`\`${prefixedFence[2]}`);
+            if (prefixedFence[3]) normalized.push(prefixedFence[3]);
+            inFence = true;
+            continue;
+          }
+          if (compactFence && line.indexOf("```") === line.lastIndexOf("```")) {
+            normalized.push(`\`\`\`${compactFence[1]}`, compactFence[2]);
+            inFence = true;
+            continue;
+          }
+          normalized.push(line);
+          if (/^```[A-Za-z0-9_-]*\s*$/.test(line)) inFence = true;
+          continue;
+        }
+
+        const suffixedFence = line.match(/^(.*\S)[ \t]+```\s*$/);
+        if (suffixedFence) normalized.push(suffixedFence[1], "```");
+        else normalized.push(line);
+        if (/^```\s*$/.test(line) || suffixedFence) inFence = false;
+      }
+      return normalized;
+    }
+
     function appendMarkdownBlocks(parent, lines) {
       let index = 0;
       while (index < lines.length) {
@@ -4005,7 +4037,7 @@
 
     function renderMarkdownInto(node, value) {
       const fragment = document.createDocumentFragment();
-      const lines = String(value == null ? "" : value).replace(/\r\n?/g, "\n").split("\n");
+      const lines = normalizeMarkdownFenceLines(value);
       appendMarkdownBlocks(fragment, lines);
       node.replaceChildren(fragment);
     }
@@ -4051,7 +4083,8 @@
         status: "running",
         arguments: "",
         output: "",
-        duration_ms: null
+        duration_ms: null,
+        seconds_left: null
       };
       const functionPayload = payload.function && typeof payload.function === "object" ? payload.function : {};
       const name = payload.name || functionPayload.name;
@@ -4072,8 +4105,10 @@
       if (event.type === "tool_call_finished") {
         current.status = normalizedToolStatus(payload.status, payload.error ? "failed" : "completed");
         current.duration_ms = finiteToken(payload.duration_ms);
+        current.seconds_left = null;
       } else {
         current.status = normalizedToolStatus(payload.status, current.status || "running");
+        if (payload.seconds_left != null) current.seconds_left = finiteToken(payload.seconds_left);
       }
       tools.set(id, current);
     }
@@ -4082,6 +4117,27 @@
       const tools = new Map();
       for (const event of events || []) applyToolEvent(tools, event);
       return tools;
+    }
+
+    function applyGeneratedFileEvent(files, event) {
+      if (!event || event.type !== "generated_file") return;
+      const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+      const previewUrl = typeof payload.preview_url === "string" ? payload.preview_url : "";
+      if (!previewUrl.startsWith("/api/files/generated/")) return;
+      const id = String(payload.file_id || payload.id || previewUrl);
+      files.set(id, {
+        id,
+        filename: String(payload.filename || "Generated image"),
+        mime_type: String(payload.mime_type || "image/jpeg"),
+        preview_url: previewUrl,
+        size_bytes: finiteToken(payload.size_bytes)
+      });
+    }
+
+    function generatedFilesFromEvents(events) {
+      const files = new Map();
+      for (const event of events || []) applyGeneratedFileEvent(files, event);
+      return files;
     }
 
     function planPayloadFromTool(tool) {
@@ -4184,7 +4240,13 @@
       name.textContent = plan ? "Plan" : tool.name || "tool";
       const status = document.createElement("span");
       status.className = "tool-call-status";
-      status.textContent = plan ? planProgressText(plan) : tool.duration_ms != null ? `${tool.status} · ${tool.duration_ms} ms` : tool.status || "running";
+      status.textContent = plan
+        ? planProgressText(plan)
+        : tool.seconds_left != null && tool.status === "running"
+          ? `${tool.status} · ${tool.seconds_left}s left`
+          : tool.duration_ms != null
+            ? `${tool.status} · ${tool.duration_ms} ms`
+            : tool.status || "running";
       summary.append(dot, name, status);
       details.appendChild(summary);
       if (plan) {
@@ -4255,6 +4317,33 @@
       label.textContent = `Tool calls · ${tools.size}`;
       stack.appendChild(label);
       for (const tool of tools.values()) stack.appendChild(toolCard(tool));
+      parent.appendChild(stack);
+    }
+
+    function appendGeneratedFiles(parent, files) {
+      if (!files || !files.size) return;
+      const stack = document.createElement("div");
+      stack.className = "generated-file-stack";
+      for (const file of files.values()) {
+        const figure = document.createElement("figure");
+        figure.className = "generated-file-card";
+        const link = document.createElement("a");
+        link.href = file.preview_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.title = `Open ${file.filename}`;
+        const image = document.createElement("img");
+        image.src = file.preview_url;
+        image.alt = file.filename || "Generated image";
+        image.loading = "lazy";
+        link.appendChild(image);
+        const caption = document.createElement("figcaption");
+        caption.textContent = file.size_bytes != null
+          ? `${file.filename} · ${formatBytes(file.size_bytes)}`
+          : file.filename;
+        figure.append(link, caption);
+        stack.appendChild(figure);
+      }
       parent.appendChild(stack);
     }
 
@@ -4340,6 +4429,7 @@
       }
       item.appendChild(content);
       appendToolCards(item, options.tools || new Map());
+      appendGeneratedFiles(item, options.generatedFiles || new Map());
       appendExecutionOutput(item, options.draft || null);
       appendUsageChips(item, options.usage || null);
       const attachments = message.metadata && Array.isArray(message.metadata.attachments) ? message.metadata.attachments : [];
@@ -4361,6 +4451,7 @@
           stdout: "",
           stderr: "",
           tools: new Map(),
+          generatedFiles: new Map(),
           usage: null,
           status: seed.status || "running",
           hasMessageDelta: false,
@@ -4402,6 +4493,8 @@
         draft.stderr += liveDelta(event);
       } else if (["tool_call_started", "tool_call_delta", "tool_call_finished"].includes(event.type)) {
         applyToolEvent(draft.tools, event);
+      } else if (event.type === "generated_file") {
+        applyGeneratedFileEvent(draft.generatedFiles, event);
       } else if (event.type === "usage") {
         draft.usage = mergeUsage(draft.usage, payload);
       } else if (event.type === "message_completed" && !draft.text) {
@@ -4443,6 +4536,7 @@
           live: true,
           liveStatus: draft.status,
           tools: draft.tools,
+          generatedFiles: draft.generatedFiles,
           usage: draft.usage,
           draft
         }
@@ -4486,6 +4580,7 @@
         const events = message.run_id ? eventsForRun(message.run_id) : [];
         const executionMessage = ["assistant", "error"].includes(message.role);
         const tools = message.run_id && executionMessage ? toolsFromEvents(events) : new Map();
+        const generatedFiles = message.run_id && executionMessage ? generatedFilesFromEvents(events) : new Map();
         const usage = executionMessage ? usageForMessage(message, run, events) : null;
         if (message.run_id && executionMessage) {
           persistedRunIds.add(message.run_id);
@@ -4495,7 +4590,7 @@
             renderedPartialDrafts.add(message.run_id);
           }
         }
-        list.appendChild(buildMessageNode(message, { tools, usage }));
+        list.appendChild(buildMessageNode(message, { tools, generatedFiles, usage }));
       }
       for (const [runId, draft] of [...state.liveRuns.entries()]) {
         if (renderedPartialDrafts.has(runId)) continue;

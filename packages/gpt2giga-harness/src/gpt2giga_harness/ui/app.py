@@ -2258,7 +2258,7 @@ def create_app(
     app.include_router(workflows_router)
     app.include_router(runs_router)
     app.include_router(schedules_router)
-    app.include_router(create_file_preview_router())
+    app.include_router(create_file_preview_router(config.data_dir))
     # The shell catch-all must remain last so unknown API and asset paths never
     # become HTML responses.
     app.include_router(create_shell_router(ui_security))

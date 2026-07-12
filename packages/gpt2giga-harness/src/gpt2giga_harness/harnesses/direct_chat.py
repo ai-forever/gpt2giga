@@ -6,7 +6,13 @@ import json
 import time
 from typing import Any, Mapping
 
+from gigachat import GigaChat
 from gpt2giga_harness import proxy
+from gpt2giga_harness.generated_files import (
+    GeneratedFileError,
+    generated_image_metadata,
+    persist_generated_image,
+)
 from gpt2giga_harness.harnesses.attachment_plan import (
     attachment_raw_metadata,
     attachment_warning_events,
@@ -172,6 +178,10 @@ class DirectChatHarness(BaseHarness):
                 error=str(exc),
             )
         events = list(events)
+        for event in _builtin_tool_execution_events(data, final=True):
+            _emit_or_collect(request, events, event)
+        for event in _generated_file_events(data, request=request, context=context):
+            _emit_or_collect(request, events, event)
         usage_event = _usage_event(data.get("usage"))
         if usage_event is not None:
             _emit_or_collect(request, events, usage_event)
@@ -204,6 +214,8 @@ class DirectChatHarness(BaseHarness):
         for event in events:
             _emit_or_collect(request, pending_events, event)
         accumulator = OpenAIChatCompletionStreamAccumulator()
+        builtin_tools_seen: set[str] = set()
+        generated_files_seen: set[str] = set()
         message_deltas = _MessageDeltaCoalescer(request, pending_events)
         chunk_count = 0
         last_payload: Mapping[str, Any] = {}
@@ -219,6 +231,20 @@ class DirectChatHarness(BaseHarness):
             ):
                 chunk_count += 1
                 last_payload = stream_payload
+                for event in _builtin_tool_execution_events(
+                    stream_payload,
+                    seen=builtin_tools_seen,
+                ):
+                    message_deltas.flush()
+                    _emit_or_collect(request, pending_events, event)
+                for event in _generated_file_events(
+                    stream_payload,
+                    request=request,
+                    context=context,
+                    seen=generated_files_seen,
+                ):
+                    message_deltas.flush()
+                    _emit_or_collect(request, pending_events, event)
                 for normalized_event in accumulator.observe_payload(stream_payload):
                     if normalized_event.type == "content_delta":
                         message_deltas.push(normalized_event)
@@ -498,6 +524,158 @@ def _usage_event(value: Any) -> HarnessEvent | None:
         message="Token usage updated.",
         payload=_usage_payload(usage),
     )
+
+
+def _builtin_tool_execution_events(
+    payload: Mapping[str, Any],
+    *,
+    seen: set[str] | None = None,
+    final: bool = False,
+) -> tuple[HarnessEvent, ...]:
+    """Normalize GigaChat built-in tool metadata into Harness tool events."""
+    seen = seen if seen is not None else set()
+    events = []
+    for choice in payload.get("choices") or ():
+        if not isinstance(choice, Mapping):
+            continue
+        for message_key in ("delta", "message"):
+            message = choice.get(message_key)
+            if not isinstance(message, Mapping):
+                continue
+            for execution in message.get("tool_executions") or ():
+                if not isinstance(execution, Mapping):
+                    continue
+                name = str(execution.get("name") or "").strip()
+                if not name:
+                    continue
+                tool_call_id = f"builtin:{name}"
+                status = _builtin_tool_status(execution.get("status"), final=final)
+                if status in {"completed", "failed"}:
+                    event_type = HarnessEventType.TOOL_CALL_FINISHED.value
+                elif tool_call_id in seen:
+                    event_type = HarnessEventType.TOOL_CALL_DELTA.value
+                else:
+                    event_type = HarnessEventType.TOOL_CALL_STARTED.value
+                seen.add(tool_call_id)
+                event_payload = {
+                    "tool_call_id": tool_call_id,
+                    "name": name,
+                    "type": "builtin",
+                    "status": status,
+                    "source": "direct-chat",
+                }
+                if execution.get("seconds_left") is not None:
+                    event_payload["seconds_left"] = execution["seconds_left"]
+                events.append(
+                    HarnessEvent(
+                        type=event_type,
+                        message=f"Built-in tool {name} {status}.",
+                        payload=event_payload,
+                    )
+                )
+    return tuple(events)
+
+
+def _builtin_tool_status(value: Any, *, final: bool) -> str:
+    status = str(value or "").lower()
+    if status in {"success", "completed"}:
+        return "completed"
+    if status in {"failed", "error"}:
+        return "failed"
+    return "completed" if final else "running"
+
+
+def _generated_file_events(
+    payload: Mapping[str, Any],
+    *,
+    request: HarnessRequest,
+    context: HarnessContext,
+    seen: set[str] | None = None,
+) -> tuple[HarnessEvent, ...]:
+    """Fetch GigaChat-generated images and expose safe Harness preview events."""
+    seen = seen if seen is not None else set()
+    events = []
+    for choice in payload.get("choices") or ():
+        if not isinstance(choice, Mapping):
+            continue
+        for message_key in ("delta", "message"):
+            message = choice.get(message_key)
+            if not isinstance(message, Mapping):
+                continue
+            for file_data in message.get("files") or ():
+                if not isinstance(file_data, Mapping):
+                    continue
+                metadata = generated_image_metadata(file_data)
+                if metadata is None:
+                    continue
+                file_id, mime_type = metadata
+                if file_id in seen:
+                    continue
+                seen.add(file_id)
+                try:
+                    generated = _fetch_generated_image_file(
+                        file_data,
+                        request=request,
+                        context=context,
+                        file_id=file_id,
+                        mime_type=mime_type,
+                    )
+                except Exception as exc:
+                    events.append(
+                        HarnessEvent(
+                            type=HarnessEventType.WARNING.value,
+                            message="Generated image could not be fetched.",
+                            payload={
+                                "file_id": file_id,
+                                "error_type": type(exc).__name__,
+                                "source": "direct-chat",
+                            },
+                        )
+                    )
+                    continue
+                events.append(
+                    HarnessEvent(
+                        type=HarnessEventType.GENERATED_FILE.value,
+                        message="Generated image is ready.",
+                        payload={**generated, "source": "direct-chat"},
+                    )
+                )
+    return tuple(events)
+
+
+def _fetch_generated_image_file(
+    file_data: Mapping[str, Any],
+    *,
+    request: HarnessRequest,
+    context: HarnessContext,
+    file_id: str,
+    mime_type: str,
+) -> dict[str, Any]:
+    if not context.data_dir or not request.run_id:
+        raise GeneratedFileError("generated files require a managed Harness run")
+    content = file_data.get("content")
+    if not isinstance(content, str) or not content:
+        content = _download_gigachat_image(file_id)
+    return persist_generated_image(
+        context.data_dir,
+        run_id=request.run_id,
+        file_id=file_id,
+        mime_type=mime_type,
+        content_base64=content,
+    )
+
+
+def _download_gigachat_image(file_id: str) -> str:
+    """Download a generated image through the SDK's GigaChat Files API helper."""
+    client = GigaChat()
+    try:
+        image = client.get_image(file_id)
+        content = getattr(image, "content", None)
+        if not isinstance(content, str) or not content:
+            raise GeneratedFileError("GigaChat returned empty generated image content")
+        return content
+    finally:
+        client.close()
 
 
 def _usage_payload(usage: Any) -> dict[str, Any]:

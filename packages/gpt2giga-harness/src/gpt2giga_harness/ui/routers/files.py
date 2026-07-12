@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from gpt2giga_harness.attachments.limits import AttachmentLimits, is_denied_path
+from gpt2giga_harness.generated_files import GeneratedFileError, generated_file_path
 
 _MAX_PREVIEW_BYTES = 25 * 1024 * 1024
 _SAFE_IMAGE_TYPES = frozenset(
@@ -49,9 +50,37 @@ _SAFE_TEXT_SUFFIXES = frozenset(
 )
 
 
-def create_file_preview_router() -> APIRouter:
+def create_file_preview_router(data_dir: str | None = None) -> APIRouter:
     """Create the bounded local-file preview router."""
     router = APIRouter()
+
+    @router.get(
+        "/api/files/generated/{run_key}/{filename}", response_class=FileResponse
+    )
+    async def generated_file(run_key: str, filename: str) -> FileResponse:
+        if data_dir is None:
+            raise HTTPException(status_code=404, detail="Generated file not found")
+        try:
+            resolved = generated_file_path(data_dir, run_key, filename)
+        except GeneratedFileError as exc:
+            raise HTTPException(
+                status_code=404, detail="Generated file not found"
+            ) from exc
+        if not resolved.exists() or not resolved.is_file():
+            raise HTTPException(status_code=404, detail="Generated file not found")
+        media_type = _preview_media_type(resolved)
+        if media_type not in _SAFE_IMAGE_TYPES:
+            raise HTTPException(status_code=415, detail="Generated file type is unsafe")
+        if resolved.stat().st_size > _MAX_PREVIEW_BYTES:
+            raise HTTPException(status_code=413, detail="Generated file is too large")
+        return FileResponse(
+            resolved,
+            media_type=media_type,
+            headers={
+                "Cache-Control": "private, max-age=3600",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @router.get("/api/files/preview", response_class=FileResponse)
     async def preview_file(

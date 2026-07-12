@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.generated_files import persist_generated_image
 from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.ui.app import create_app
 
@@ -60,6 +61,27 @@ def test_file_preview_rejects_unsafe_or_unsupported_files(tmp_path):
     assert outside.status_code == 403
     assert denied.status_code == 403
     assert unsupported.status_code == 415
+
+
+def test_generated_file_preview_serves_only_hashed_harness_files(tmp_path):
+    data_dir = tmp_path / "data"
+    generated = persist_generated_image(
+        data_dir,
+        run_id="run-1",
+        file_id="image-file-1",
+        mime_type="image/jpeg",
+        content_base64="Z2VuZXJhdGVkLWpwZWc=",
+    )
+    client = _client(tmp_path)
+
+    response = client.get(generated["preview_url"])
+    escaped = client.get("/api/files/generated/not-a-hash/../../etc/passwd")
+
+    assert response.status_code == 200
+    assert response.content == b"generated-jpeg"
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert escaped.status_code == 404
 
 
 def _client(tmp_path: Path) -> TestClient:

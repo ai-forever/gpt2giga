@@ -51,9 +51,9 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.13">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.14">' in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.13"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.14"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -145,6 +145,7 @@ def test_ui_static_includes_safe_dom_markdown_renderer():
         "function renderMarkdownInto",
         "function appendMarkdownBlocks",
         "function appendInlineMarkdown",
+        "function normalizeMarkdownFenceLines",
         "function isSafeMarkdownHref",
         "function parseLocalFilePath",
         "function appendSourcesBlock",
@@ -163,6 +164,9 @@ def test_ui_static_includes_safe_dom_markdown_renderer():
         'link.setAttribute("rel", "noopener noreferrer")',
         'section.className = "markdown-sources"',
         "domain.textContent = new URL(source.href, window.location.href).hostname",
+        "line.match(/^(.*\\S)[ \\t]+```([A-Za-z0-9_-]+)",
+        "normalized.push(prefixedFence[1], `\\`\\`\\`${prefixedFence[2]}`)",
+        "const lines = normalizeMarkdownFenceLines(value)",
     ):
         assert fragment in UI_SOURCE
 
@@ -188,6 +192,8 @@ def test_ui_static_includes_live_execution_renderer():
         "function renderLiveDraft",
         "function persistedMessageForRun",
         "function toolsFromEvents",
+        "function generatedFilesFromEvents",
+        "function appendGeneratedFiles",
         "function planPayloadFromTool",
         "function appendPlanBody",
         "function planProgressText",
@@ -202,12 +208,14 @@ def test_ui_static_includes_live_execution_renderer():
         'event.type === "stderr_delta"',
         '"tool_call_started", "tool_call_delta", "tool_call_finished"',
         'event.type === "usage"',
+        'event.type === "generated_file"',
         "state.liveRuns.delete(runId)",
         "isChatNearBottom()",
         'class="message-list" aria-live="polite"',
         'id="run-panel" class="run-summary tab-panel active"',
         ".execution-rail-label",
         ".tool-call-card",
+        ".generated-file-card",
         ".live-cursor",
         ".token-chip",
         'tokenChip("Input", normalized.input_tokens)',

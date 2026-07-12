@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 
 from gpt2giga_harness import proxy
@@ -93,6 +95,39 @@ def test_direct_chat_maps_selected_v2_builtin_tools(monkeypatch):
         {"type": "web_search"},
         {"type": "code_interpreter"},
     ]
+
+
+def test_direct_chat_records_nonstream_builtin_tools(monkeypatch):
+    monkeypatch.setattr(
+        proxy,
+        "request_json",
+        lambda *args, **kwargs: {
+            "choices": [
+                {
+                    "message": {
+                        "content": "answer",
+                        "tool_executions": [
+                            {"name": "url_content_extraction", "status": "success"}
+                        ],
+                    }
+                }
+            ]
+        },
+    )
+
+    result = DirectChatHarness().run(
+        HarnessRequest(prompt="read this URL"),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert [event.type for event in result.events] == ["tool_call_finished"]
+    assert result.events[0].payload == {
+        "tool_call_id": "builtin:url_content_extraction",
+        "name": "url_content_extraction",
+        "type": "builtin",
+        "status": "completed",
+        "source": "direct-chat",
+    }
 
 
 def test_direct_chat_sends_provided_history(monkeypatch):
@@ -254,6 +289,102 @@ def test_direct_chat_streams_coalesced_message_tool_and_usage_events(monkeypatch
         "cached_input_tokens": 2,
     }
     assert emitted[4].payload["arguments"] == '{"city":"Moscow"}'
+
+
+def test_direct_chat_streams_gigachat_builtin_tool_events(monkeypatch, tmp_path):
+    emitted = []
+
+    def fake_stream_sse_json(*args, **kwargs):
+        yield {
+            "choices": [
+                {"delta": {"tool_executions": [{"name": "url_content_extraction"}]}}
+            ]
+        }
+        yield {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_executions": [
+                            {
+                                "name": "url_content_extraction",
+                                "seconds_left": 3,
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        yield {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_executions": [
+                            {
+                                "name": "url_content_extraction",
+                                "status": "success",
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        yield {
+            "choices": [
+                {
+                    "delta": {
+                        "files": [
+                            {
+                                "id": "image-file-1",
+                                "mime": "image/jpeg",
+                                "target": "image",
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        yield {"choices": [{"delta": {"content": "answer"}, "finish_reason": "stop"}]}
+
+    monkeypatch.setattr(proxy, "stream_sse_json", fake_stream_sse_json)
+    monkeypatch.setattr(
+        "gpt2giga_harness.harnesses.direct_chat._download_gigachat_image",
+        lambda file_id: base64.b64encode(b"generated-jpeg").decode("ascii"),
+    )
+
+    result = DirectChatHarness().run(
+        HarnessRequest(
+            prompt="read this URL",
+            stream=True,
+            run_id="run-image-1",
+            event_sink=emitted.append,
+        ),
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            data_dir=str(tmp_path),
+        ),
+    )
+
+    tool_events = [event for event in emitted if event.type.startswith("tool_call_")]
+    assert [event.type for event in tool_events] == [
+        "tool_call_started",
+        "tool_call_delta",
+        "tool_call_finished",
+    ]
+    assert {event.payload["tool_call_id"] for event in tool_events} == {
+        "builtin:url_content_extraction"
+    }
+    assert tool_events[0].payload["status"] == "running"
+    assert tool_events[1].payload["seconds_left"] == 3
+    assert tool_events[2].payload["status"] == "completed"
+    generated = [event for event in emitted if event.type == "generated_file"]
+    assert len(generated) == 1
+    assert generated[0].payload["file_id"] == "image-file-1"
+    assert generated[0].payload["mime_type"] == "image/jpeg"
+    assert generated[0].payload["preview_url"].startswith("/api/files/generated/")
+    stored_files = list((tmp_path / "generated-files").rglob("*.jpg"))
+    assert len(stored_files) == 1
+    assert stored_files[0].read_bytes() == b"generated-jpeg"
+    assert result.text == "answer"
 
 
 def test_direct_chat_flushes_pending_text_during_upstream_pause(monkeypatch):
