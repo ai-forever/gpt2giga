@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml README.md ./
 COPY packages/gpt2giga/pyproject.toml packages/gpt2giga/pyproject.toml
+COPY packages/gpt2giga/README.md packages/gpt2giga/README.md
 COPY packages/gpt2giga/src/ packages/gpt2giga/src/
 
 RUN uv build --package gpt2giga --wheel

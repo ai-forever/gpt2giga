@@ -237,6 +237,7 @@ def test_production_docker_build_remains_gateway_only():
     )
 
     assert "uv build --package gpt2giga --wheel" in dockerfile
+    assert "COPY packages/gpt2giga/README.md packages/gpt2giga/README.md" in dockerfile
     assert "packages/gpt2giga-harness" not in dockerfile
     assert "gpt2giga_harness" not in dockerfile
     assert "packages/gpt2giga-harness" not in docker_workflows
