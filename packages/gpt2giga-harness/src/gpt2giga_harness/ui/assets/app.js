@@ -3695,6 +3695,23 @@
       };
     }
 
+    function parseLocalFilePath(source, start) {
+      if (source[start] !== "/") return null;
+      const previous = start > 0 ? source[start - 1] : " ";
+      if (!/[\s(\[{]/.test(previous)) return null;
+      const match = source.slice(start).match(/^\/[^\s<>\[\]{}"'`]+/);
+      if (!match) return null;
+      const path = match[0].replace(/[.,;:!?]+$/, "");
+      if (!/^\/(?:[^/\s]+\/)+[^/\s]+\.[A-Za-z0-9]{1,12}$/.test(path)) return null;
+      const params = new URLSearchParams({ path });
+      if (state.project && state.project.root) params.set("workspace", state.project.root);
+      return {
+        end: start + path.length,
+        path,
+        href: `/api/files/preview?${params.toString()}`
+      };
+    }
+
     function sourceLinkFromLine(line) {
       const match = markdownListMatch(line, false);
       if (!match) return null;
@@ -3790,6 +3807,20 @@
           appendInlineMarkdown(link, parsedLink.label);
           parent.appendChild(link);
           index = parsedLink.end;
+          continue;
+        }
+        const localFile = parseLocalFilePath(source, index);
+        if (localFile) {
+          flush();
+          const link = document.createElement("a");
+          link.className = "markdown-file-link";
+          link.setAttribute("href", localFile.href);
+          link.setAttribute("target", "_blank");
+          link.setAttribute("rel", "noopener noreferrer");
+          link.setAttribute("title", `Preview ${localFile.path}`);
+          link.textContent = localFile.path;
+          parent.appendChild(link);
+          index = localFile.end;
           continue;
         }
         const strongMarker = source.startsWith("**", index) ? "**" : source.startsWith("__", index) ? "__" : null;

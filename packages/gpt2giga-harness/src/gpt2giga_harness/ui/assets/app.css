@@ -1664,6 +1664,12 @@
     .markdown-body a:hover {
       text-decoration-color: currentColor;
     }
+    .markdown-file-link::after {
+      content: " ↗";
+      color: #7f91a5;
+      font-size: 0.82em;
+      text-decoration: none;
+    }
     .markdown-sources {
       display: grid;
       gap: 8px;

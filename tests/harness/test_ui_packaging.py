@@ -56,7 +56,7 @@ from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 installed_root = Path(__import__("sys").argv[1]).resolve()
 assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
 assert Path(gpt2giga_harness.__file__).resolve().is_relative_to(installed_root)
-assert '<link rel="stylesheet" href="/assets/app.css?v=38.9">' in INDEX_HTML
+assert '<link rel="stylesheet" href="/assets/app.css?v=38.10">' in INDEX_HTML
 assert "function boot()" in load_text_asset("app.js")
 assert ".app {" in load_text_asset("app.css")
 """

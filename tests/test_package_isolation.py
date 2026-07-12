@@ -193,7 +193,7 @@ assert scripts == {
     "giga": "gpt2giga_harness.cli:main",
     "gpt2giga-harness": "gpt2giga_harness.cli:main",
 }
-assert '<link rel="stylesheet" href="/assets/app.css?v=38.9">' in INDEX_HTML
+assert '<link rel="stylesheet" href="/assets/app.css?v=38.10">' in INDEX_HTML
 assert "function boot()" in load_text_asset("app.js")
 assert ".app {" in load_text_asset("app.css")
 

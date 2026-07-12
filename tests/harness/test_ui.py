@@ -51,9 +51,9 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.9">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.10">' in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.9"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.10"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -146,6 +146,7 @@ def test_ui_static_includes_safe_dom_markdown_renderer():
         "function appendMarkdownBlocks",
         "function appendInlineMarkdown",
         "function isSafeMarkdownHref",
+        "function parseLocalFilePath",
         "function appendSourcesBlock",
         "function sourceLinkFromLine",
         "document.createElement(`h${heading[1].length}`)",
@@ -217,6 +218,9 @@ def test_ui_static_includes_live_execution_renderer():
         ".run-summary-grid",
         ".markdown-body",
         ".markdown-sources",
+        ".markdown-file-link",
+        'link.className = "markdown-file-link"',
+        "href: `/api/files/preview?${params.toString()}`",
         'tool.status === "failed" ? "Failure reason" : "Output"',
         "No failure details were reported by the harness.",
         'name.textContent = plan ? "Plan" : tool.name || "tool"',
