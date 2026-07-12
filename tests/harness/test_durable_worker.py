@@ -63,6 +63,36 @@ def test_durable_dispatcher_worker_executes_once_and_preserves_logical_message(
     assert bundle.runs[0].metadata["runtime"]["worker_id"] == "worker_test"
 
 
+def test_worker_fails_orphaned_job_without_stopping(tmp_path):
+    config = HarnessConfig(data_dir=str(tmp_path))
+    registry = create_default_registry(include_entry_points=False)
+    runtime = RuntimeCoordinationStore(tmp_path)
+    payloads = DurableJobPayloadStore(tmp_path)
+    submitted = runtime.submit_job(
+        session_id="sess_missing",
+        user_message_id="msg_missing",
+        initial_run_id="run_missing",
+        idempotency_key="orphaned-session",
+        max_attempts=2,
+        required_harness_id="echo",
+    )
+    payloads.save(
+        submitted.job.id,
+        {"harness_id": "echo", "prompt": "orphaned", "mode": "read"},
+    )
+    worker = DurableJobWorker(config, registry=registry, worker_id="worker_orphan")
+
+    assert worker.run_once() is True
+    assert worker.run_once() is False
+
+    job = runtime.get_job(submitted.job.id)
+    attempts = runtime.list_attempts(job.id)
+    assert job.status is JobStatus.FAILED
+    assert [attempt.status for attempt in attempts] == [JobAttemptStatus.FAILED]
+    assert job.error_summary == "'sess_missing'"
+    assert runtime.pending_outbox() == ()
+
+
 def test_atomic_claim_allows_only_one_matching_worker(tmp_path):
     store = RuntimeCoordinationStore(tmp_path)
     job = store.submit_job(

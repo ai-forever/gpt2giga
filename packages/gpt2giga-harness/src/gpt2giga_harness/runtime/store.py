@@ -1509,6 +1509,7 @@ class RuntimeCoordinationStore:
         *,
         error_summary: str | None = None,
         retry_delay_seconds: float | None = None,
+        sync_terminal_run: bool = True,
     ) -> tuple[JobAttempt, RuntimeJob]:
         """Finish an attempt and atomically retry or terminate its logical job."""
         target = parse_attempt_status(status)
@@ -1575,7 +1576,7 @@ class RuntimeCoordinationStore:
             updated_job_row = connection.execute(
                 "SELECT * FROM jobs WHERE id = ?", (job.id,)
             ).fetchone()
-            if job_status in TERMINAL_JOB_STATUSES:
+            if job_status in TERMINAL_JOB_STATUSES and sync_terminal_run:
                 self._enqueue_terminal_sync(
                     connection,
                     job_id=job.id,

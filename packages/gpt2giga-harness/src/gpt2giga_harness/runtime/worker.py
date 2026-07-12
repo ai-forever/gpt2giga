@@ -353,7 +353,7 @@ class DurableJobWorker:
             )
         except Exception as exc:
             error = str(exc)
-            self._ensure_failed_run(job, attempt.run_id, payload, error)
+            final_run = self._ensure_failed_run(job, attempt.run_id, payload, error)
             terminal = JobAttemptStatus.FAILED
             result_text = ""
         else:
@@ -372,14 +372,16 @@ class DurableJobWorker:
             else:
                 terminal = JobAttemptStatus.FAILED
             result_text = result.result.text
+            final_run = self.session_store.get_run(attempt.run_id)
         finally:
             finished.set()
             monitor.join(timeout=self.heartbeat_seconds * 2)
-        final_run = self.session_store.get_run(attempt.run_id)
-        self._sync_parent_records(execution_payload, final_run, result_text)
+        if final_run is not None:
+            self._sync_parent_records(execution_payload, final_run, result_text)
         retry_delay = (
             DEFAULT_RETRY_BACKOFF_SECONDS * (2 ** (attempt.attempt_number - 1))
-            if terminal in {JobAttemptStatus.FAILED, JobAttemptStatus.INTERRUPTED}
+            if final_run is not None
+            and terminal in {JobAttemptStatus.FAILED, JobAttemptStatus.INTERRUPTED}
             else None
         )
         _, updated_job = self.runtime_store.finish_attempt(
@@ -387,6 +389,7 @@ class DurableJobWorker:
             terminal,
             error_summary=error,
             retry_delay_seconds=retry_delay,
+            sync_terminal_run=final_run is not None,
         )
         self.payload_store.append_attempt_log(
             attempt.id,
@@ -518,11 +521,14 @@ class DurableJobWorker:
         run_id: str,
         payload: Mapping[str, Any],
         error: str,
-    ) -> None:
+    ) -> Any | None:
         try:
             run = self.session_store.get_run(run_id)
         except KeyError:
-            session = self.session_store.get_session(job.session_id)
+            try:
+                session = self.session_store.get_session(job.session_id)
+            except KeyError:
+                return None
             run = self.session_store.create_run(
                 run_id=run_id,
                 session_id=job.session_id,
@@ -555,6 +561,7 @@ class DurableJobWorker:
                 job_id=job.id,
             )
         )
+        return run
 
     def _sync_parent_records(
         self, payload: Mapping[str, Any], run: Any, result_text: str
