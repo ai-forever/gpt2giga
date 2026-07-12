@@ -1,9 +1,11 @@
 import base64
+from types import SimpleNamespace
 
 import pytest
 
 from gpt2giga_harness import proxy
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.harnesses import direct_chat as direct_chat_module
 from gpt2giga_harness.harnesses.direct_chat import DirectChatHarness
 from gpt2giga_harness.types import (
     GigaChatBuiltinTool,
@@ -385,6 +387,49 @@ def test_direct_chat_streams_gigachat_builtin_tool_events(monkeypatch, tmp_path)
     assert len(stored_files) == 1
     assert stored_files[0].read_bytes() == b"generated-jpeg"
     assert result.text == "answer"
+
+
+def test_generated_image_download_uses_local_proxy_gigachat_config(monkeypatch):
+    captured = {}
+
+    class FakeSettings:
+        def model_dump(self):
+            return {
+                "user": "configured-user",
+                "password": "configured-password",
+                "verify_ssl_certs": False,
+            }
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured["settings"] = kwargs
+
+        def get_image(self, file_id):
+            captured["file_id"] = file_id
+            return SimpleNamespace(content="encoded-image")
+
+        def close(self):
+            captured["closed"] = True
+
+    monkeypatch.setattr(
+        direct_chat_module,
+        "load_config",
+        lambda: SimpleNamespace(gigachat_settings=FakeSettings()),
+    )
+    monkeypatch.setattr(direct_chat_module, "GigaChat", FakeClient)
+
+    assert direct_chat_module._download_gigachat_image("image-file-1") == (
+        "encoded-image"
+    )
+    assert captured == {
+        "settings": {
+            "user": "configured-user",
+            "password": "configured-password",
+            "verify_ssl_certs": False,
+        },
+        "file_id": "image-file-1",
+        "closed": True,
+    }
 
 
 def test_direct_chat_flushes_pending_text_during_upstream_pause(monkeypatch):

@@ -7,6 +7,7 @@ import time
 from typing import Any, Mapping
 
 from gigachat import GigaChat
+from gpt2giga.cli import load_config
 from gpt2giga_harness import proxy
 from gpt2giga_harness.generated_files import (
     GeneratedFileError,
@@ -666,8 +667,9 @@ def _fetch_generated_image_file(
 
 
 def _download_gigachat_image(file_id: str) -> str:
-    """Download a generated image through the SDK's GigaChat Files API helper."""
-    client = GigaChat()
+    """Download a generated image with the same config as the local proxy."""
+    settings = load_config().gigachat_settings
+    client = GigaChat(**settings.model_dump())
     try:
         image = client.get_image(file_id)
         content = getattr(image, "content", None)
