@@ -51,15 +51,23 @@ def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
         "function currentRoute()",
         "function syncBrowserRoute",
         "function applyCurrentRoute",
+        "function loadCurrentRoute",
+        "function bindPrimaryNavigation",
         "function loadApprovals",
         "function loadScheduledCenter",
         "function notifyAttentionItems",
         'window.addEventListener("popstate"',
+        'document.querySelectorAll(".primary-nav-link")',
+        "event.preventDefault()",
         "`/work/${encodeURIComponent(session.id)}`",
         "`/runs/${encodeURIComponent(run.id)}`",
         "headers: { Authorization: `Bearer ${token}` }",
     ):
         assert fragment in script
+    assert "const secondaryLoads = Promise.all([" in script
+    assert "loadMemory(),\n        loadTools(),\n        loadEvals()," in script
+    assert "state.routeLoadKey === routeKey && state.routeLoadPromise" in script
+    assert "state.routeLoadedKey === routeKey" in script
     assert "localStorage" not in script
 
 

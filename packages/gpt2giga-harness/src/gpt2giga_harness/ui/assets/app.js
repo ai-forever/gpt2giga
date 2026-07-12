@@ -84,6 +84,9 @@
       renderedSessionId: null,
       routeRecommendation: null,
       routeRecommendationTimer: null,
+      routeLoadKey: null,
+      routeLoadPromise: null,
+      routeLoadedKey: null,
       lastPayload: null,
       eventsBound: false
     };
@@ -1327,9 +1330,6 @@
       state.currentEvalRun = null;
       state.evalError = null;
       applyProject();
-      await loadMemory();
-      await loadTools();
-      await loadEvals();
     }
 
     function applyProject() {
@@ -5528,6 +5528,7 @@
       if (state.eventsBound) return;
       state.eventsBound = true;
       bindTabEvents();
+      bindPrimaryNavigation();
       const composer = byId("composer");
       byId("details-toggle-button").addEventListener("click", () => setInspectorOpen(true));
       byId("close-inspector-button").addEventListener("click", () => setInspectorOpen(false));
@@ -5783,6 +5784,20 @@
       });
     }
 
+    function bindPrimaryNavigation() {
+      for (const link of document.querySelectorAll(".primary-nav-link")) {
+        link.addEventListener("click", (event) => {
+          if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          const target = new URL(link.href, window.location.href);
+          if (target.origin !== window.location.origin) return;
+          event.preventDefault();
+          window.history.pushState({}, "", `${target.pathname}${target.search}${target.hash}`);
+          syncNavigation();
+          void applyCurrentRoute();
+        });
+      }
+    }
+
     async function authenticateBrowser(event) {
       event.preventDefault();
       const input = byId("auth-token-input");
@@ -5818,6 +5833,25 @@
     }
 
     async function applyCurrentRoute() {
+      const routeKey = `${window.location.pathname}${window.location.search}`;
+      if (state.routeLoadedKey === routeKey) return true;
+      if (state.routeLoadKey === routeKey && state.routeLoadPromise) return state.routeLoadPromise;
+      const promise = loadCurrentRoute();
+      state.routeLoadKey = routeKey;
+      state.routeLoadPromise = promise;
+      try {
+        const loaded = await promise;
+        if (loaded) state.routeLoadedKey = routeKey;
+        return loaded;
+      } finally {
+        if (state.routeLoadPromise === promise) {
+          state.routeLoadKey = null;
+          state.routeLoadPromise = null;
+        }
+      }
+    }
+
+    async function loadCurrentRoute() {
       const route = currentRoute();
       syncNavigation();
       if (route.area === "work" && route.id) {
@@ -5893,14 +5927,24 @@
       }
       byId("auth-modal").hidden = true;
       await loadProject();
-      await Promise.all([loadHarnesses(), refreshHealth(), loadModels(), loadApprovals(), loadAttentionBadge()]);
-      await loadSessions();
+      const secondaryLoads = Promise.all([
+        loadMemory(),
+        loadTools(),
+        loadEvals(),
+        loadHarnesses(),
+        refreshHealth(),
+        loadModels(),
+        loadApprovals(),
+        loadAttentionBadge()
+      ]);
+      const route = currentRoute();
+      if ((route.area === "work" && !route.id) || route.area === "legacy") await loadSessions();
       const routed = await applyCurrentRoute();
       if (!routed && !state.currentSessionId && state.projectState && state.projectState.last_selected_session) {
         await loadSession(state.projectState.last_selected_session);
       }
-      await loadNativeSessions(false);
       renderAll();
+      await secondaryLoads;
     }
 
     boot();
