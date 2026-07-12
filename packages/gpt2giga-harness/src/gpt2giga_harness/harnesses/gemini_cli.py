@@ -6,6 +6,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import quote
 
 from gpt2giga_harness.harnesses.agent_cli import (
     StreamTerminalOutcome,
@@ -45,6 +46,8 @@ MODE_TO_APPROVAL = {
     "plan": "--approval-mode=plan",
     "read": "--approval-mode=plan",
 }
+HARNESS_MODEL_HEADER = "X-GPT2GIGA-Harness-Model"
+PASS_MODEL_HEADER = "X-GPT2GIGA-Pass-Model"
 
 
 class GeminiCliHarness(BaseHarness):
@@ -117,6 +120,12 @@ class GeminiCliHarness(BaseHarness):
     ) -> dict[str, str]:
         """Build a sanitized environment for Gemini CLI."""
         model = request.model or context.default_model or "GigaChat"
+        harness_headers = (
+            f"{HARNESS_MODEL_HEADER}:{quote(model, safe='')},{PASS_MODEL_HEADER}:false"
+        )
+        existing_headers = context.extra_env.get("GEMINI_CLI_CUSTOM_HEADERS")
+        if existing_headers:
+            harness_headers = f"{existing_headers},{harness_headers}"
         return build_safe_env(
             context,
             home=home,
@@ -124,6 +133,7 @@ class GeminiCliHarness(BaseHarness):
                 "GOOGLE_GEMINI_BASE_URL": context.api_base_url(request.api_mode),
                 "GEMINI_API_KEY": context.api_key or "0",
                 "GEMINI_MODEL": model,
+                "GEMINI_CLI_CUSTOM_HEADERS": harness_headers,
                 "GEMINI_CLI_TRUST_WORKSPACE": "true",
                 "GPT2GIGA_HARNESS_PROXY_URL": context.proxy_url,
                 "GPT2GIGA_HARNESS_API_MODE": request.api_mode.value,

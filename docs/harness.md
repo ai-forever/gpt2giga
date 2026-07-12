@@ -952,6 +952,14 @@ giga harness run gemini-cli \
 `.gemini/settings.json` pinned to `gemini-api-key` auth, avoiding cached Google
 auth when the local proxy API key should be used.
 
+Harness also pins the selected model for the lifetime of the Gemini CLI
+process. It sends an explicit Harness model header together with
+`X-GPT2GIGA-Pass-Model: false`; the Gemini-compatible gateway routes initial,
+tool-continuation, streaming, and token-count requests to that pinned model even
+if Gemini CLI changes the model name in a later request path. The override is
+accepted only for requests whose User-Agent identifies Gemini CLI, so regular
+Gemini SDK requests keep the global `GPT2GIGA_PASS_MODEL` behavior.
+
 Backward-friendly alias:
 
 ```bash

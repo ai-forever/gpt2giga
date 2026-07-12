@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.protocol.request.transformer import RequestTransformer
 from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.routers.gemini import router as gemini_router
 from gpt2giga.routers.gemini.batches import router as gemini_batches_router
@@ -310,6 +311,63 @@ def test_gemini_generate_content_roundtrips_through_gigachat_provider():
     assert payload["messages"][0] == {"role": "system", "content": "Be concise."}
     assert payload["messages"][1] == {"role": "user", "content": "Hello"}
     assert payload["max_tokens"] == 64
+
+
+def test_gemini_cli_harness_model_stays_pinned_across_requests():
+    app = make_app(mode="v2", pass_model=False)
+    app.state.request_transformer = RequestTransformer(app.state.config, logger)
+    client = TestClient(app)
+    headers = {
+        "user-agent": "GeminiCLI/0.46.0/GigaChat-Selected (darwin; arm64; headless)",
+        "x-gpt2giga-harness-model": "GigaChat-Selected",
+        "x-gpt2giga-pass-model": "false",
+    }
+    payload = {"contents": [{"parts": [{"text": "Hello"}]}]}
+
+    first = client.post(
+        "/models/GigaChat-Selected:generateContent",
+        json=payload,
+        headers=headers,
+    )
+    continuation = client.post(
+        "/models/gemini-2.5-flash:generateContent",
+        json=payload,
+        headers=headers,
+    )
+    token_count = client.post(
+        "/models/gemini-2.5-flash:countTokens",
+        json=payload,
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert continuation.status_code == 200
+    assert token_count.status_code == 200
+    assert [call.model for call in app.state.gigachat_client.achat.create_calls] == [
+        "GigaChat-Selected",
+        "GigaChat-Selected",
+    ]
+    assert app.state.gigachat_client.token_count_calls[-1]["model"] == (
+        "GigaChat-Selected"
+    )
+
+
+def test_non_gemini_cli_cannot_activate_harness_model_pin():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:generateContent",
+        json={"contents": [{"parts": [{"text": "Hello"}]}]},
+        headers={
+            "user-agent": "google-genai-sdk/1.30.0",
+            "x-gpt2giga-harness-model": "GigaChat-Selected",
+            "x-gpt2giga-pass-model": "false",
+        },
+    )
+
+    assert response.status_code == 200
+    assert app.state.gigachat_client.achat.calls[0]["model"] == "gemini-pro"
 
 
 def test_gemini_generate_content_maps_response_json_schema_alias():

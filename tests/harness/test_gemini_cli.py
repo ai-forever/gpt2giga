@@ -41,7 +41,26 @@ def test_gemini_cli_sanitizes_env(monkeypatch):
     assert env["GOOGLE_GEMINI_BASE_URL"] == "http://127.0.0.1:8090/v2"
     assert env["GEMINI_API_KEY"] == "proxy-key"
     assert env["GEMINI_MODEL"] == "GigaChat-2-Max"
+    assert env["GEMINI_CLI_CUSTOM_HEADERS"] == (
+        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max,X-GPT2GIGA-Pass-Model:false"
+    )
     assert env["GEMINI_CLI_TRUST_WORKSPACE"] == "true"
+
+
+def test_gemini_cli_preserves_custom_headers_and_encodes_pinned_model():
+    env = GeminiCliHarness().build_env(
+        HarnessRequest(prompt="inspect", model="team/model,preview"),
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            extra_env={"GEMINI_CLI_CUSTOM_HEADERS": "X-Existing:value"},
+        ),
+    )
+
+    assert env["GEMINI_CLI_CUSTOM_HEADERS"] == (
+        "X-Existing:value,"
+        "X-GPT2GIGA-Harness-Model:team%2Fmodel%2Cpreview,"
+        "X-GPT2GIGA-Pass-Model:false"
+    )
 
 
 def test_gemini_cli_dry_run_redacts_proxy_key(monkeypatch):

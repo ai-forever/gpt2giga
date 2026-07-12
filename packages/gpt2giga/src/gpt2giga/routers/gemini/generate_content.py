@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -48,6 +49,9 @@ from gpt2giga.sinks.observability.llm import (
 router = APIRouter(tags=[OPENAPI_TAG_GEMINI_GENERATE_CONTENT])
 
 GEMINI_SPAN_NAME = "Gemini-Content"
+HARNESS_MODEL_HEADER = "x-gpt2giga-harness-model"
+PASS_MODEL_HEADER = "x-gpt2giga-pass-model"
+MAX_MODEL_LENGTH = 256
 
 
 @router.post(
@@ -59,6 +63,8 @@ async def generate_content(model: str, request: Request):
     """Create a Gemini-compatible content response."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
+    pinned_model = _gemini_cli_harness_model(request)
+    effective_model = pinned_model or requested_model
     update_request_context(
         model_requested=requested_model,
         metadata={"protocol": "gemini", "api_format": "generate_content"},
@@ -67,7 +73,7 @@ async def generate_content(model: str, request: Request):
     protocol_adapter = _gemini_adapter(request)
     normalized_request = protocol_adapter.generate_content_to_normalized(
         data,
-        model=requested_model,
+        model=effective_model,
         context=context,
         stream=False,
         builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
@@ -78,7 +84,11 @@ async def generate_content(model: str, request: Request):
         normalized_request,
     )
     request_options = extract_gigachat_request_options(request, data)
-    provider_adapter = _provider_adapter(request, request_options=request_options)
+    provider_adapter = _provider_adapter(
+        request,
+        request_options=request_options,
+        forced_model=pinned_model,
+    )
     normalized_response = await provider_adapter.chat(
         normalized_request,
         context=context,
@@ -111,6 +121,8 @@ async def stream_generate_content(model: str, request: Request):
     """Create a Gemini-compatible content stream."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
+    pinned_model = _gemini_cli_harness_model(request)
+    effective_model = pinned_model or requested_model
     update_request_context(
         model_requested=requested_model,
         metadata={"protocol": "gemini", "api_format": "stream_generate_content"},
@@ -119,7 +131,7 @@ async def stream_generate_content(model: str, request: Request):
     protocol_adapter = _gemini_adapter(request)
     normalized_request = protocol_adapter.generate_content_to_normalized(
         data,
-        model=requested_model,
+        model=effective_model,
         context=context,
         stream=True,
         builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
@@ -134,6 +146,7 @@ async def stream_generate_content(model: str, request: Request):
         request,
         request_options=request_options,
         require_streaming=True,
+        forced_model=pinned_model,
     )
     response_id = context.request_id if context is not None else "gemini-stream"
     observer = _GeminiStreamObserver(response_id=response_id, model=requested_model)
@@ -306,6 +319,7 @@ async def count_tokens(model: str, request: Request):
     """Count prompt tokens for a Gemini-compatible request."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
+    effective_model = _gemini_cli_harness_model(request) or requested_model
     update_request_context(
         model_requested=requested_model,
         metadata={"protocol": "gemini", "api_format": "count_tokens"},
@@ -319,11 +333,11 @@ async def count_tokens(model: str, request: Request):
     model_limiter = get_model_concurrency_limiter(request)
     from gpt2giga.common.gigachat_options import gigachat_request_options
 
-    async with model_limiter.limit(requested_model, provider="gemini"):
+    async with model_limiter.limit(effective_model, provider="gemini"):
         async with gigachat_request_options(giga_client, request_options):
             token_counts = await giga_client.atokens_count(
                 texts,
-                model=requested_model,
+                model=effective_model,
             )
     total_tokens = sum(int(getattr(item, "tokens", 0)) for item in token_counts)
     return {"totalTokens": total_tokens}
@@ -334,6 +348,7 @@ def _provider_adapter(
     *,
     request_options: Any,
     require_streaming: bool = False,
+    forced_model: str | None = None,
 ) -> GigaChatProviderAdapter:
     state = request.app.state
     return GigaChatProviderAdapter(
@@ -345,7 +360,26 @@ def _provider_adapter(
         response_processor=state.response_processor if require_streaming else None,
         api_mode=resolve_gigachat_api_mode(request),
         provider_label="gemini",
+        forced_model=forced_model,
     )
+
+
+def _gemini_cli_harness_model(request: Request) -> str | None:
+    """Return the Harness-pinned model for an explicit Gemini CLI request."""
+    user_agent = request.headers.get("user-agent", "").strip().lower()
+    if not user_agent.startswith("geminicli"):
+        return None
+    if request.headers.get(PASS_MODEL_HEADER, "").strip().lower() != "false":
+        return None
+    encoded_model = request.headers.get(HARNESS_MODEL_HEADER)
+    if not encoded_model:
+        return None
+    model = _normalize_model_name(unquote(encoded_model).strip())
+    if not model or len(model) > MAX_MODEL_LENGTH:
+        return None
+    if any(ord(character) < 32 or ord(character) == 127 for character in model):
+        return None
+    return model
 
 
 def _gemini_adapter(request: Request) -> GeminiProtocolAdapter:
