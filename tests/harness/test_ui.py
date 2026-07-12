@@ -51,9 +51,9 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.7">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.8">' in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.7"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.8"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -146,6 +146,8 @@ def test_ui_static_includes_safe_dom_markdown_renderer():
         "function appendMarkdownBlocks",
         "function appendInlineMarkdown",
         "function isSafeMarkdownHref",
+        "function appendSourcesBlock",
+        "function sourceLinkFromLine",
         "document.createElement(`h${heading[1].length}`)",
         'document.createElement("blockquote")',
         'document.createElement(isOrdered ? "ol" : "ul")',
@@ -158,6 +160,8 @@ def test_ui_static_includes_safe_dom_markdown_renderer():
         '["http:", "https:", "mailto:"]',
         "resolved.origin === window.location.origin",
         'link.setAttribute("rel", "noopener noreferrer")',
+        'section.className = "markdown-sources"',
+        "domain.textContent = new URL(source.href, window.location.href).hostname",
     ):
         assert fragment in UI_SOURCE
 
@@ -209,6 +213,9 @@ def test_ui_static_includes_live_execution_renderer():
         ".code-block-copy",
         ".run-summary-grid",
         ".markdown-body",
+        ".markdown-sources",
+        'tool.status === "failed" ? "Failure reason" : "Output"',
+        "No failure details were reported by the harness.",
     ):
         assert fragment in UI_SOURCE
 

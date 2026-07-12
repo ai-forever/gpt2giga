@@ -38,6 +38,7 @@ _GIGACHAT_BUILTIN_TOOL_TYPE_PREFIX_ALIASES = (
 )
 _CAMEL_TO_SNAKE_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
 _NAMESPACE_TOOL_SEPARATOR = "__"
+_IMAGEGEN_TOOL_NAMES = frozenset({"imagegen", "image_gen", "image_generate"})
 
 
 def map_tool_name_to_gigachat(name: str) -> str:
@@ -91,6 +92,59 @@ def split_gigachat_tool_name(
         return tool_name, namespace
 
     return visible_name, None
+
+
+def find_imagegen_tool(tools: Any) -> tuple[str, str | None] | None:
+    """Find the client-side Codex ImageGen tool advertised in a request.
+
+    Codex can expose the ImageGen skill either as a flat function or inside an
+    ``image_gen`` namespace.  Preserve the advertised transport name so a
+    provider-side ``image_generate`` hand-off is routed back to the exact tool
+    the client knows how to execute.
+    """
+    if not isinstance(tools, list):
+        return None
+
+    for tool in tools:
+        if not isinstance(tool, Mapping):
+            continue
+        if tool.get("type") == "namespace":
+            namespace = tool.get("name")
+            nested_tools = tool.get("tools")
+            if not isinstance(namespace, str) or not isinstance(nested_tools, list):
+                continue
+            for nested_tool in nested_tools:
+                if not isinstance(nested_tool, Mapping):
+                    continue
+                name = _function_tool_name(nested_tool)
+                if _is_imagegen_tool_name(name, namespace=namespace):
+                    return name, namespace
+            continue
+
+        name = _function_tool_name(tool)
+        if _is_imagegen_tool_name(name):
+            return name, None
+    return None
+
+
+def _function_tool_name(tool: Mapping[str, Any]) -> str:
+    function = tool.get("function")
+    source = function if isinstance(function, Mapping) else tool
+    name = source.get("name")
+    return name if isinstance(name, str) else ""
+
+
+def _is_imagegen_tool_name(name: str, *, namespace: str | None = None) -> bool:
+    normalized = name.strip().lower().replace("-", "_")
+    if normalized in _IMAGEGEN_TOOL_NAMES:
+        return True
+    if normalized.endswith("__imagegen"):
+        return True
+    return (
+        namespace is not None
+        and namespace.strip().lower().replace("-", "_") in {"image_gen", "imagegen"}
+        and normalized == "imagegen"
+    )
 
 
 def normalize_gigachat_builtin_tool_type(tool_type: Any) -> str | None:

@@ -24,7 +24,11 @@ from gpt2giga.common.sources import (
     has_source_marker_start,
     render_text_with_sources,
 )
-from gpt2giga.common.tools import map_tool_name_from_gigachat, split_gigachat_tool_name
+from gpt2giga.common.tools import (
+    find_imagegen_tool,
+    map_tool_name_from_gigachat,
+    split_gigachat_tool_name,
+)
 from gpt2giga.protocol.response.gigachat_chat_completion_adapter import (
     GIGACHAT_PROVIDER_METADATA_KEY,
 )
@@ -425,7 +429,27 @@ class ResponseProcessor:
             if ResponseProcessor._is_image_file(file_data)
         ]
         if image_files or "image_generate" in tool_names:
-            if image_files:
+            imagegen_tool = find_imagegen_tool(
+                request_data.get("tools") if isinstance(request_data, Mapping) else None
+            )
+            if imagegen_tool is not None:
+                tool_name, namespace = imagegen_tool
+                arguments = json.dumps(
+                    {"prompt": ResponseProcessor._request_input_text(request_data)},
+                    ensure_ascii=False,
+                )
+                item = {
+                    "id": f"fc_{response_id}_imagegen",
+                    "type": "function_call",
+                    "status": "completed",
+                    "call_id": f"call_{response_id}_imagegen",
+                    "name": tool_name,
+                    "arguments": arguments,
+                }
+                if namespace:
+                    item["namespace"] = namespace
+                items.append(item)
+            elif image_files:
                 for index, file_data in enumerate(image_files):
                     item = {
                         "id": f"ig_{response_id}_{index}",

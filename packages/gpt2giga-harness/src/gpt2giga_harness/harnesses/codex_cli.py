@@ -359,13 +359,7 @@ def _codex_tool_event(
             status=status,
         )
     if event_type in {"item.completed", "item.failed"}:
-        result = _first_present(
-            item,
-            "aggregated_output",
-            "output",
-            "result",
-            "error",
-        )
+        result = _codex_tool_result(item, failed=event_type == "item.failed")
         return tool_call_event(
             "tool_call_finished",
             tool_call_id=item_id,
@@ -375,6 +369,29 @@ def _codex_tool_event(
             status=status or ("failed" if event_type == "item.failed" else "completed"),
         )
     return None
+
+
+def _codex_tool_result(item: Mapping[str, Any], *, failed: bool) -> Any:
+    result = _first_present(
+        item,
+        "aggregated_output",
+        "output",
+        "result",
+        "error",
+        "stderr",
+        "message",
+    )
+    if result not in (None, "", (), [], {}):
+        return result
+    if not failed and str(item.get("status") or "").lower() not in {
+        "failed",
+        "error",
+    }:
+        return result
+    exit_code = item.get("exit_code")
+    if exit_code is not None:
+        return f"Command exited with code {exit_code} and produced no output."
+    return "Codex marked this tool call as failed without an error message."
 
 
 def _codex_tool_name(item_type: str, item: Mapping[str, Any]) -> str:

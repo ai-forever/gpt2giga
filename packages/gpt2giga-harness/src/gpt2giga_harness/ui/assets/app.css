@@ -1664,6 +1664,77 @@
     .markdown-body a:hover {
       text-decoration-color: currentColor;
     }
+    .markdown-sources {
+      display: grid;
+      gap: 8px;
+      margin-top: 16px;
+      white-space: normal;
+    }
+    .markdown-sources-header {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: #8ea0b8;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .markdown-sources-header span {
+      display: inline-grid;
+      min-width: 18px;
+      height: 18px;
+      place-items: center;
+      border: 1px solid #30465b;
+      border-radius: 999px;
+      color: #9fb3c9;
+      font-size: 9px;
+    }
+    .markdown-sources ul {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .markdown-sources li {
+      margin: 0;
+    }
+    .markdown-sources a {
+      position: relative;
+      display: grid;
+      gap: 3px;
+      border: 1px solid #293c4e;
+      border-radius: 9px;
+      background: #0c151f;
+      padding: 9px 34px 9px 11px;
+      color: #d8e6f2;
+      text-decoration: none;
+    }
+    .markdown-sources a:hover {
+      border-color: #357b7b;
+      background: #0f2028;
+    }
+    .markdown-sources a > span:first-child {
+      overflow: hidden;
+      font-size: 12px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .markdown-sources small {
+      overflow: hidden;
+      color: #75889d;
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .markdown-source-arrow {
+      position: absolute;
+      top: 50%;
+      right: 12px;
+      color: #67e8df;
+      transform: translateY(-50%);
+    }
     .tool-call-stack,
     .execution-output-stack {
       display: grid;

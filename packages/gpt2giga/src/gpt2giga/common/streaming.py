@@ -31,7 +31,7 @@ from gpt2giga.common.sources import (
     has_source_marker_start,
     merge_inline_data,
 )
-from gpt2giga.common.tools import split_gigachat_tool_name
+from gpt2giga.common.tools import find_imagegen_tool, split_gigachat_tool_name
 from gpt2giga.logger import rquid_context
 from gpt2giga.protocol.response import (
     GIGACHAT_PROVIDER_METADATA_KEY,
@@ -494,6 +494,7 @@ def _image_generation_stream_item(
     response_id: str,
     status: str,
     metadata: dict[str, Any],
+    request_data: Optional[dict] = None,
 ) -> dict[str, Any]:
     image_files = [
         file_data
@@ -501,6 +502,25 @@ def _image_generation_stream_item(
         if ResponseProcessor._is_image_file(file_data)
     ]
     file_data = image_files[0] if image_files else {}
+    imagegen_tool = find_imagegen_tool(
+        request_data.get("tools") if isinstance(request_data, dict) else None
+    )
+    if imagegen_tool is not None:
+        tool_name, namespace = imagegen_tool
+        item = {
+            "id": f"fc_{response_id}_imagegen",
+            "type": "function_call",
+            "status": status,
+            "call_id": f"call_{response_id}_imagegen",
+            "name": tool_name,
+            "arguments": json.dumps(
+                {"prompt": ResponseProcessor._request_input_text(request_data)},
+                ensure_ascii=False,
+            ),
+        }
+        if namespace:
+            item["namespace"] = namespace
+        return item
     item = {
         "id": _builtin_tool_stream_item_id("image_generate", response_id),
         "type": "image_generation_call",
@@ -544,7 +564,12 @@ def _builtin_tool_stream_item(
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
     if tool_name == "image_generate":
-        return _image_generation_stream_item(response_id, status, metadata)
+        return _image_generation_stream_item(
+            response_id,
+            status,
+            metadata,
+            request_data,
+        )
     return _web_search_stream_item(response_id, status, request_data, metadata)
 
 
@@ -737,6 +762,7 @@ async def stream_responses_generator(
                 "last_status": "in_progress",
                 "completed_event_emitted": False,
                 "item_done": False,
+                "client_function_call": item.get("type") == "function_call",
             }
             return [
                 emit_sequenced_event(
@@ -770,6 +796,9 @@ async def stream_responses_generator(
                 )
                 state["last_status"] = status
 
+                if state["client_function_call"]:
+                    continue
+
                 if status == "failed":
                     continue
                 if status == "completed" and state["completed_event_emitted"]:
@@ -796,6 +825,8 @@ async def stream_responses_generator(
             events = []
             for tool_name in builtin_tool_stream_order:
                 state = builtin_tool_streams[tool_name]
+                if state["client_function_call"]:
+                    continue
                 if state["item_done"] or not _builtin_tool_has_stream_result(
                     tool_name,
                     builtin_message_metadata,
@@ -845,7 +876,8 @@ async def stream_responses_generator(
                     (
                         item
                         for item in final_items
-                        if item.get("type") == "image_generation_call"
+                        if item.get("type")
+                        in {"image_generation_call", "function_call"}
                     ),
                     None,
                 ),
@@ -878,18 +910,30 @@ async def stream_responses_generator(
                     )
 
                 if status == "completed" and not state["completed_event_emitted"]:
-                    events.append(
-                        emit_sequenced_event(
-                            _builtin_tool_stream_event_type(
-                                tool_name,
-                                "completed",
-                            ),
-                            {
-                                "item_id": state["item_id"],
-                                "output_index": state["output_index"],
-                            },
+                    if state["client_function_call"]:
+                        events.append(
+                            emit_sequenced_event(
+                                "response.function_call_arguments.done",
+                                {
+                                    "item_id": state["item_id"],
+                                    "output_index": state["output_index"],
+                                    "arguments": item.get("arguments", "{}"),
+                                },
+                            )
                         )
-                    )
+                    else:
+                        events.append(
+                            emit_sequenced_event(
+                                _builtin_tool_stream_event_type(
+                                    tool_name,
+                                    "completed",
+                                ),
+                                {
+                                    "item_id": state["item_id"],
+                                    "output_index": state["output_index"],
+                                },
+                            )
+                        )
                     state["completed_event_emitted"] = True
 
                 events.append(

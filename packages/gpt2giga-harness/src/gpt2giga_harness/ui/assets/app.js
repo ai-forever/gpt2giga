@@ -3632,7 +3632,7 @@
 
     function isSafeMarkdownHref(value) {
       const href = String(value || "").trim();
-      if (!href || /[\\u0000-\\u001f\\u007f]/.test(href) || href.startsWith("//") || href.includes("\\\\")) return false;
+      if (!href || /[\u0000-\u001f\u007f]/.test(href) || href.startsWith("//") || href.includes("\\")) return false;
       const explicitScheme = href.match(/^([A-Za-z][A-Za-z0-9+.-]*):/);
       if (explicitScheme) {
         return ["http:", "https:", "mailto:"].includes(`${explicitScheme[1].toLowerCase()}:`);
@@ -3647,13 +3647,43 @@
 
     function parseMarkdownLink(source, start) {
       if (source[start] !== "[" || (start > 0 && source[start - 1] === "!")) return null;
-      const labelEnd = source.indexOf("](", start + 1);
+      let labelEnd = -1;
+      for (let cursor = start + 1; cursor < source.length - 1; cursor += 1) {
+        if (source[cursor] === "\\") {
+          cursor += 1;
+          continue;
+        }
+        if (source[cursor] === "]" && source[cursor + 1] === "(") {
+          labelEnd = cursor;
+          break;
+        }
+      }
       if (labelEnd < 0) return null;
-      const targetEnd = source.indexOf(")", labelEnd + 2);
+      let targetEnd = -1;
+      let depth = 0;
+      let inAngleTarget = false;
+      for (let cursor = labelEnd + 2; cursor < source.length; cursor += 1) {
+        const character = source[cursor];
+        if (character === "\\") {
+          cursor += 1;
+          continue;
+        }
+        if (cursor === labelEnd + 2 && character === "<") inAngleTarget = true;
+        if (inAngleTarget) {
+          if (character === ">") inAngleTarget = false;
+          continue;
+        }
+        if (character === "(") depth += 1;
+        if (character === ")" && depth > 0) depth -= 1;
+        else if (character === ")") {
+          targetEnd = cursor;
+          break;
+        }
+      }
       if (targetEnd < 0) return null;
       const label = source.slice(start + 1, labelEnd);
       const rawTarget = source.slice(labelEnd + 2, targetEnd).trim();
-      const targetMatch = rawTarget.match(/^(<[^>]+>|\\S+?)(?:\\s+["']([^"']*)["'])?$/);
+      const targetMatch = rawTarget.match(/^(<[^>]+>|\S+?)(?:\s+["']([^"']*)["'])?$/);
       if (!targetMatch) return null;
       const href = targetMatch[1].startsWith("<") ? targetMatch[1].slice(1, -1) : targetMatch[1];
       if (!isSafeMarkdownHref(href)) return null;
@@ -3663,6 +3693,61 @@
         href,
         title: targetMatch[2] || ""
       };
+    }
+
+    function sourceLinkFromLine(line) {
+      const match = markdownListMatch(line, false);
+      if (!match) return null;
+      const link = parseMarkdownLink(match[1].trim(), 0);
+      if (!link || link.end !== match[1].trim().length) return null;
+      return link;
+    }
+
+    function appendSourcesBlock(parent, lines, start) {
+      const links = [];
+      let index = start + 1;
+      while (index < lines.length) {
+        const link = sourceLinkFromLine(lines[index]);
+        if (!link) break;
+        links.push(link);
+        index += 1;
+      }
+      if (!links.length) return null;
+
+      const section = document.createElement("section");
+      section.className = "markdown-sources";
+      const header = document.createElement("div");
+      header.className = "markdown-sources-header";
+      const title = document.createElement("strong");
+      title.textContent = "Sources";
+      const count = document.createElement("span");
+      count.textContent = String(links.length);
+      header.append(title, count);
+      const list = document.createElement("ul");
+      for (const source of links) {
+        const item = document.createElement("li");
+        const link = document.createElement("a");
+        link.setAttribute("href", source.href);
+        link.setAttribute("target", "_blank");
+        link.setAttribute("rel", "noopener noreferrer");
+        const label = document.createElement("span");
+        appendInlineMarkdown(label, source.label);
+        const domain = document.createElement("small");
+        try {
+          domain.textContent = new URL(source.href, window.location.href).hostname;
+        } catch (error) {
+          domain.textContent = source.href;
+        }
+        const arrow = document.createElement("span");
+        arrow.className = "markdown-source-arrow";
+        arrow.textContent = "↗";
+        link.append(label, domain, arrow);
+        item.appendChild(link);
+        list.appendChild(item);
+      }
+      section.append(header, list);
+      parent.appendChild(section);
+      return index;
     }
 
     function appendInlineMarkdown(parent, value) {
@@ -3675,7 +3760,7 @@
         buffer = "";
       };
       while (index < source.length) {
-        if (source[index] === "\\\\" && index + 1 < source.length) {
+        if (source[index] === "\\" && index + 1 < source.length) {
           buffer += source[index + 1];
           index += 2;
           continue;
@@ -3741,11 +3826,11 @@
     }
 
     function markdownListMatch(line, ordered) {
-      return ordered ? line.match(/^\\s*\\d+[.)]\\s+(.+)$/) : line.match(/^\\s*[-+*]\\s+(.+)$/);
+      return ordered ? line.match(/^\s*\d+[.)]\s+(.+)$/) : line.match(/^\s*[-+*]\s+(.+)$/);
     }
 
     function isMarkdownBlockStart(line) {
-      return /^#{1,6}\\s+/.test(line) || /^```/.test(line) || /^>\\s?/.test(line) || Boolean(markdownListMatch(line, false)) || Boolean(markdownListMatch(line, true));
+      return /^#{1,6}\s+/.test(line) || /^```/.test(line) || /^>\s?/.test(line) || Boolean(markdownListMatch(line, false)) || Boolean(markdownListMatch(line, true));
     }
 
     function appendMarkdownBlocks(parent, lines) {
@@ -3756,11 +3841,18 @@
           index += 1;
           continue;
         }
-        const fence = line.match(/^```([A-Za-z0-9_-]*)\\s*$/);
+        if (/^sources:\s*$/i.test(line.trim())) {
+          const nextIndex = appendSourcesBlock(parent, lines, index);
+          if (nextIndex != null) {
+            index = nextIndex;
+            continue;
+          }
+        }
+        const fence = line.match(/^```([A-Za-z0-9_-]*)\s*$/);
         if (fence) {
           const codeLines = [];
           index += 1;
-          while (index < lines.length && !/^```\\s*$/.test(lines[index])) {
+          while (index < lines.length && !/^```\s*$/.test(lines[index])) {
             codeLines.push(lines[index]);
             index += 1;
           }
@@ -3780,7 +3872,7 @@
           const pre = document.createElement("pre");
           const code = document.createElement("code");
           if (fence[1]) code.className = `language-${fence[1]}`;
-          code.textContent = codeLines.join("\\n");
+          code.textContent = codeLines.join("\n");
           pre.appendChild(code);
           copy.addEventListener("click", async () => {
             try {
@@ -3795,7 +3887,7 @@
           parent.appendChild(wrapper);
           continue;
         }
-        const heading = line.match(/^(#{1,6})\\s+(.+)$/);
+        const heading = line.match(/^(#{1,6})\s+(.+)$/);
         if (heading) {
           const node = document.createElement(`h${heading[1].length}`);
           appendInlineMarkdown(node, heading[2]);
@@ -3803,10 +3895,10 @@
           index += 1;
           continue;
         }
-        if (/^>\\s?/.test(line)) {
+        if (/^>\s?/.test(line)) {
           const quoteLines = [];
-          while (index < lines.length && /^>\\s?/.test(lines[index])) {
-            quoteLines.push(lines[index].replace(/^>\\s?/, ""));
+          while (index < lines.length && /^>\s?/.test(lines[index])) {
+            quoteLines.push(lines[index].replace(/^>\s?/, ""));
             index += 1;
           }
           const quote = document.createElement("blockquote");
@@ -3824,7 +3916,7 @@
             if (!itemMatch) break;
             const parts = [itemMatch[1]];
             index += 1;
-            while (index < lines.length && /^\\s{2,}\\S/.test(lines[index]) && !markdownListMatch(lines[index], isOrdered)) {
+            while (index < lines.length && /^\s{2,}\S/.test(lines[index]) && !markdownListMatch(lines[index], isOrdered)) {
               parts.push(lines[index].trim());
               index += 1;
             }
@@ -3849,7 +3941,7 @@
 
     function renderMarkdownInto(node, value) {
       const fragment = document.createDocumentFragment();
-      const lines = String(value == null ? "" : value).replace(/\\r\\n?/g, "\\n").split("\\n");
+      const lines = String(value == null ? "" : value).replace(/\r\n?/g, "\n").split("\n");
       appendMarkdownBlocks(fragment, lines);
       node.replaceChildren(fragment);
     }
@@ -3943,10 +4035,13 @@
       status.textContent = tool.duration_ms != null ? `${tool.status} · ${tool.duration_ms} ms` : tool.status || "running";
       summary.append(dot, name, status);
       details.appendChild(summary);
-      if (tool.arguments || tool.output) {
+      if (tool.arguments || tool.output || tool.status === "failed") {
         const body = document.createElement("div");
         body.className = "tool-call-body";
-        for (const [label, text] of [["Input", tool.arguments], ["Output", tool.output]]) {
+        const failureOutput = tool.status === "failed" && !tool.output
+          ? "No failure details were reported by the harness."
+          : tool.output;
+        for (const [label, text] of [["Input", tool.arguments], [tool.status === "failed" ? "Failure reason" : "Output", failureOutput]]) {
           if (!text) continue;
           const section = document.createElement("div");
           section.className = "tool-call-section";

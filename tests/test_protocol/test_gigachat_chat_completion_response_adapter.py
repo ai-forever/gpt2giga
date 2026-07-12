@@ -463,6 +463,55 @@ async def test_adapted_chat_completion_builtin_tool_outputs_flow_through_respons
     )
 
 
+def test_image_generate_handoff_maps_to_advertised_codex_imagegen_tool():
+    response = ChatCompletionResponse.model_validate(
+        {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [{"tool_execution": {"name": "image_generate"}}],
+                }
+            ],
+            "finish_reason": "stop",
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        }
+    )
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
+
+    processed = ResponseProcessor(logger=logger).process_response_api(
+        {
+            "model": "gpt-x",
+            "input": "Draw a friendly robot",
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "image_gen",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "imagegen",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"prompt": {"type": "string"}},
+                                "required": ["prompt"],
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+        SimpleNamespace(model_dump=lambda: adapted),
+        gpt_model="gpt-x",
+        response_id="v2",
+    )
+
+    call = processed["output"][0]
+    assert call["type"] == "function_call"
+    assert call["name"] == "imagegen"
+    assert call["namespace"] == "image_gen"
+    assert json.loads(call["arguments"]) == {"prompt": "Draw a friendly robot"}
+
+
 def test_chat_completion_response_renders_sources_section():
     response = ChatCompletionResponse.model_validate(
         {

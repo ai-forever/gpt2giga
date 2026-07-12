@@ -11,6 +11,7 @@ DEFAULT_PROXY_URL = "http://127.0.0.1:8090"
 DEFAULT_UI_HOST = "127.0.0.1"
 DEFAULT_UI_PORT = 8091
 DEFAULT_PROXY_START_TIMEOUT_SECONDS = 15.0
+DEFAULT_HARNESS_TIMEOUT_SECONDS = 3600.0
 DEFAULT_HARNESS_DATA_DIR = "~/.gpt2giga/harness"
 DEFAULT_MODEL_HINTS = (
     "GigaChat-2-Max",
@@ -32,7 +33,7 @@ class HarnessConfig:
     ui_port: int = DEFAULT_UI_PORT
     ui_bootstrap_token: str | None = field(default=None, repr=False)
     ui_allowed_hosts: tuple[str, ...] = ()
-    timeout_seconds: float = 60.0
+    timeout_seconds: float = DEFAULT_HARNESS_TIMEOUT_SECONDS
     auto_start_proxy: bool = True
     proxy_start_timeout_seconds: float = DEFAULT_PROXY_START_TIMEOUT_SECONDS
     data_dir: str = DEFAULT_HARNESS_DATA_DIR
@@ -58,7 +59,7 @@ class HarnessConfig:
         ui_allowed_hosts = _parse_csv(_env_first("GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS"))
         timeout = _parse_float(
             _env_first("GPT2GIGA_HARNESS_TIMEOUT_SECONDS"),
-            60.0,
+            DEFAULT_HARNESS_TIMEOUT_SECONDS,
         )
         auto_start_proxy = _parse_bool(
             _env_first("GPT2GIGA_HARNESS_AUTO_START_PROXY"),

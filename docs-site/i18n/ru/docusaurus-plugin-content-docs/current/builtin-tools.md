@@ -67,6 +67,12 @@ function tools, задайте `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`. Т�
 | `function` | обёртка `functions` | Пользовательская функция, не встроенный инструмент |
 | `namespace` | обёртка `functions` | Инструменты пространства имён Responses разворачиваются в плоские имена функций GigaChat |
 
+Если Responses-клиент объявляет Codex ImageGen как плоскую функцию `imagegen` /
+`image_gen__imagegen` или как `image_gen.imagegen` внутри namespace, upstream
+`image_generate` возвращается вызовом именно этого клиентского инструмента.
+Запросы с нативным built-in `image_generation` по-прежнему получают обычный
+`image_generation_call`.
+
 Конфигурация читается из канонического поля, поля-псевдонима и неструктурированных
 ключей верхнего уровня. Например:
 

@@ -96,8 +96,8 @@ class ToolServerDescriptor:
                 )
         if any(_is_sensitive_arg(item) for item in self.args):
             raise ValueError("sensitive MCP args must use an env/header secret_ref")
-        if self.timeout_seconds <= 0 or self.timeout_seconds > 60:
-            raise ValueError("MCP timeout_seconds must be between 0 and 60")
+        if self.timeout_seconds <= 0:
+            raise ValueError("MCP timeout_seconds must be positive")
 
     def list_tools(self) -> tuple[ToolDescriptor, ...]:
         """Return the most recently discovered tools."""

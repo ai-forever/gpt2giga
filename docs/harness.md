@@ -227,6 +227,7 @@ GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN=<strong-random-secret-for-remote-ui>
 GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS=harness.example.internal
 GPT2GIGA_HARNESS_AUTO_START_PROXY=True
 GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS=15
+GPT2GIGA_HARNESS_TIMEOUT_SECONDS=3600
 GPT2GIGA_HARNESS_DATA_DIR=~/.gpt2giga/harness
 ```
 
@@ -564,7 +565,7 @@ high = "deny"
 Environment and headers accept literal non-secret values or an explicit
 `secret_ref`. Sensitive authentication headers reject literal values. URLs are
 restricted to HTTP(S) without embedded userinfo; probe responses are bounded to
-1 MB and timeouts are capped at 60 seconds. Stdio probes receive a minimal
+1 MB and timeouts must be positive. Stdio probes receive a minimal
 environment plus explicitly resolved profile values rather than the complete
 parent environment. Discovery negotiates the MCP `2025-11-25` protocol,
 includes the negotiated version on subsequent HTTP requests, and refuses HTTP

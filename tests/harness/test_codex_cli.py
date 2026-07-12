@@ -191,6 +191,30 @@ def test_codex_stream_parser_marks_structured_failures_terminal():
         assert events[-1].type == "stderr_delta"
 
 
+def test_codex_stream_parser_explains_failed_tool_without_output():
+    parser = _CodexStreamParser()
+
+    events = parser(
+        {
+            "type": "item.failed",
+            "item": {
+                "id": "command-1",
+                "type": "command_execution",
+                "command": "rg missing",
+                "status": "failed",
+                "exit_code": 1,
+                "aggregated_output": "",
+            },
+        }
+    )
+
+    tool_event = next(event for event in events if event.type == "tool_call_finished")
+    assert tool_event.payload["status"] == "failed"
+    assert tool_event.payload["result"] == (
+        "Command exited with code 1 and produced no output."
+    )
+
+
 def test_codex_stream_exit_zero_with_failed_turn_is_failure():
     script = """
 import json

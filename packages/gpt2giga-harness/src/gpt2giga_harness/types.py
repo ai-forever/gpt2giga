@@ -186,7 +186,7 @@ class HarnessContext:
     proxy_url: str
     api_key: str | None = None
     default_model: str | None = None
-    timeout_seconds: float = 60.0
+    timeout_seconds: float = 3600.0
     auto_start_proxy: bool = False
     proxy_start_timeout_seconds: float = 15.0
     extra_env: Mapping[str, str] = field(default_factory=dict)

@@ -41,6 +41,21 @@ for line in sys.stdin:
 """
 
 
+def test_descriptor_accepts_timeout_longer_than_60_seconds():
+    profile = ProjectToolProfile(
+        enabled=True,
+        config={
+            "transport": "stdio",
+            "command": "server",
+            "timeout_seconds": 300,
+        },
+    )
+
+    descriptor = descriptor_from_profile("long-running", profile)
+
+    assert descriptor.timeout_seconds == 300
+
+
 def test_stdio_descriptor_discovers_without_invoking_tools(tmp_path):
     profile = ProjectToolProfile(
         enabled=True,
