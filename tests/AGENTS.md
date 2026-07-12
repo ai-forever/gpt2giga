@@ -50,7 +50,7 @@ uv run pytest tests/harness -q
 Full pytest/coverage gate:
 
 ```bash
-uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
+uv run pytest tests/ -n 4 --cov=. --cov-report=term --cov-fail-under=80
 ```
 
 Run the full gate after shared fixtures/config, app composition, public protocol,

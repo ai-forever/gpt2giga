@@ -53,7 +53,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          uv run pytest tests/ --cov=. --cov-report=json:coverage.json --cov-fail-under=80
+          uv run pytest tests/ -n 4 --cov=. --cov-report=json:coverage.json --cov-fail-under=80
         continue-on-error: false
 
       - name: Upload coverage artifact

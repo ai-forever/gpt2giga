@@ -273,13 +273,15 @@ _SECRET_TEXT_KEY = (
     r"database[_-]?url|db[_-]?url|password|passwd|private[_-]?key|secret|token)"
     r"[A-Za-z0-9_.-]*"
 )
+# Only attempt a key match at a token boundary. Without this guard, a long
+# non-secret token makes the leading and trailing wildcards backtrack quadratically.
 _SECRET_JSON_VALUE_PATTERN = re.compile(
-    rf"(?P<prefix>[\"']?{_SECRET_TEXT_KEY}[\"']?\s*:\s*)"
+    rf"(?P<prefix>(?<![A-Za-z0-9_.-])[\"']?{_SECRET_TEXT_KEY}[\"']?\s*:\s*)"
     rf"(?P<quote>[\"'])(?P<value>[^\r\n]*?)(?P=quote)",
     re.IGNORECASE,
 )
 _SECRET_ASSIGNMENT_PATTERN = re.compile(
-    rf"(?P<prefix>\b{_SECRET_TEXT_KEY}\s*(?:=|:\s+)\s*)"
+    rf"(?P<prefix>(?<![A-Za-z0-9_.-]){_SECRET_TEXT_KEY}\s*(?:=|:\s+)\s*)"
     rf"(?:(?P<quote>[\"'])(?P<quoted>[^\r\n]*?)(?P=quote)|"
     rf"(?P<bare>[^\s&,;\r\n]+))",
     re.IGNORECASE,

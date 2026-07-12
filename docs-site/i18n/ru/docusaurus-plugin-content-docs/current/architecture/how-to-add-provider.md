@@ -235,7 +235,7 @@
 ```sh
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
+uv run pytest tests/ -n 4 --cov=. --cov-report=term --cov-fail-under=80
 ```
 
 Если менялись зависимости, обновите `uv.lock`. Если менялись контракты deploy/окружения,

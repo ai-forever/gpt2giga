@@ -209,7 +209,7 @@ uv run gpt2giga
 ```sh
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
+uv run pytest tests/ -n 4 --cov=. --cov-report=term --cov-fail-under=80
 ```
 
 Live-тесты с реальными вызовами GigaChat запускаются отдельно и требуют
