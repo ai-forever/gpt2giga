@@ -4,6 +4,7 @@ from gpt2giga_harness import proxy
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.harnesses.direct_chat import DirectChatHarness
 from gpt2giga_harness.types import (
+    GigaChatBuiltinTool,
     GigaChatApiMode,
     HarnessChatMessage,
     HarnessContext,
@@ -66,6 +67,32 @@ def test_direct_chat_parses_choices_message_content(monkeypatch):
     )
 
     assert result.text == "answer"
+
+
+def test_direct_chat_maps_selected_v2_builtin_tools(monkeypatch):
+    captured = {}
+
+    def fake_request_json(method, url, *, payload, api_key, timeout):
+        captured["payload"] = payload
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(proxy, "request_json", fake_request_json)
+
+    DirectChatHarness().run(
+        HarnessRequest(
+            prompt="search and calculate",
+            builtin_tools=(
+                GigaChatBuiltinTool.WEB_SEARCH,
+                GigaChatBuiltinTool.CODE_INTERPRETER,
+            ),
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert captured["payload"]["tools"] == [
+        {"type": "web_search"},
+        {"type": "code_interpreter"},
+    ]
 
 
 def test_direct_chat_sends_provided_history(monkeypatch):

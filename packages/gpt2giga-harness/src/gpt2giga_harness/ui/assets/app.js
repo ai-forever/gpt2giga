@@ -1673,6 +1673,35 @@
       }
     }
 
+    function supportedBuiltinTools() {
+      const spec = state.selectedHarness && state.selectedHarness.spec ? state.selectedHarness.spec : {};
+      return Array.isArray(spec.supported_builtin_tools) ? spec.supported_builtin_tools : [];
+    }
+
+    function selectedBuiltinTools() {
+      if (currentApiMode() !== "v2" || byId("builtin-tools-control").hidden) return [];
+      return Array.from(document.querySelectorAll('input[name="builtin-tool"]:checked'))
+        .map((input) => input.value)
+        .filter((value) => supportedBuiltinTools().includes(value));
+    }
+
+    function applyBuiltinTools(values) {
+      const selected = new Set(Array.isArray(values) ? values : []);
+      for (const input of document.querySelectorAll('input[name="builtin-tool"]')) {
+        input.checked = selected.has(input.value);
+      }
+    }
+
+    function updateBuiltinToolControls() {
+      const supported = supportedBuiltinTools();
+      const available = currentApiMode() === "v2" && supported.length > 0 && currentInvocationMode() === "headless";
+      const control = byId("builtin-tools-control");
+      control.hidden = !available;
+      for (const input of control.querySelectorAll('input[name="builtin-tool"]')) {
+        input.disabled = !available || !supported.includes(input.value);
+      }
+    }
+
     function updateHarnessDrivenControls() {
       const spec = state.selectedHarness && state.selectedHarness.spec ? state.selectedHarness.spec : {};
       const invocation = byId("invocation-select");
@@ -1691,6 +1720,7 @@
       byId("workspace-input").disabled = spec.supports_workspace === false;
       byId("stream-checkbox").disabled = spec.supports_streaming !== true || currentInvocationMode() === "native";
       byId("copy-curl-button").disabled = spec.id !== "direct-chat";
+      updateBuiltinToolControls();
       const availability = state.selectedHarness && state.selectedHarness.availability ? state.selectedHarness.availability : {};
       const warning = availability.status === "missing" || availability.status === "error" ? availability.reason || availability.status : "";
       setText("harness-warning", warning);
@@ -2388,6 +2418,7 @@
       byId(`api-mode-${mode}`).checked = true;
       byId("mode-select").value = payload.mode || "plan";
       byId("workspace-input").value = payload.workspace || "";
+      applyBuiltinTools(payload.builtin_tools || []);
       updateRouteNote();
     }
 
@@ -2427,6 +2458,8 @@
         stream: byId("stream-checkbox").checked,
         dry_run: byId("dry-run-checkbox").checked
       };
+      const builtinTools = selectedBuiltinTools();
+      if (builtinTools.length) payload.builtin_tools = builtinTools;
       const attachmentIds = state.attachments.map((attachment) => attachment.id).filter(Boolean);
       if (attachmentIds.length) payload.attachment_ids = attachmentIds;
       return payload;
@@ -5303,6 +5336,7 @@
 
     function updateRouteNote() {
       setText("route-note", `Current route: /${currentApiMode()}/chat/completions`);
+      updateBuiltinToolControls();
       updateHeaderBadges();
     }
 
@@ -5353,6 +5387,9 @@
         messages: [{ role: "user", content: payload.prompt || "" }],
         stream: Boolean(payload.stream)
       };
+      if (Array.isArray(payload.builtin_tools) && payload.builtin_tools.length) {
+        body.tools = payload.builtin_tools.map((type) => ({ type }));
+      }
       const url = `${state.defaults.proxy_url || "http://127.0.0.1:8090"}/${payload.api_mode || "v2"}/chat/completions`;
       const args = [
         payload.stream ? "curl -sS -N" : "curl -sS",

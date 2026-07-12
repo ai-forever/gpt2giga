@@ -1317,6 +1317,21 @@
     .quick-config.advanced-open > .span-4 {
       grid-column: 1 / -1;
     }
+    .quick-config.advanced-open > .builtin-tools-control[hidden] {
+      display: none;
+    }
+    .builtin-tools-control {
+      gap: 7px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .builtin-tools-control legend {
+      padding: 0 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
     .advanced-settings-button {
       order: 5;
       min-height: 42px;

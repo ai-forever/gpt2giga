@@ -51,9 +51,9 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.10">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.11">' in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.10"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.11"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -547,6 +547,63 @@ def test_ui_run_passes_explicit_extra_mapping():
     assert harness.last_request.extra == {"temperature": 0, "dry_run": False}
 
 
+def test_ui_run_maps_v2_builtin_tools_into_direct_chat_payload():
+    app = create_app(
+        HarnessConfig(),
+        registry=create_default_registry(include_entry_points=False),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/run",
+        json={
+            "harness_id": "direct-chat",
+            "prompt": "search and calculate",
+            "api_mode": "v2",
+            "builtin_tools": ["web_search", "code_interpreter"],
+            "dry_run": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["raw"]["payload"]["tools"] == [
+        {"type": "web_search"},
+        {"type": "code_interpreter"},
+    ]
+
+
+def test_ui_run_rejects_builtin_tools_outside_supported_v2_harness():
+    app = create_app(
+        HarnessConfig(),
+        registry=create_default_registry(include_entry_points=False),
+    )
+    client = TestClient(app)
+
+    v1_response = client.post(
+        "/api/run",
+        json={
+            "harness_id": "direct-chat",
+            "prompt": "search",
+            "api_mode": "v1",
+            "builtin_tools": ["web_search"],
+        },
+    )
+    unsupported_response = client.post(
+        "/api/run",
+        json={
+            "harness_id": "echo",
+            "prompt": "search",
+            "api_mode": "v2",
+            "builtin_tools": ["web_search"],
+        },
+    )
+
+    assert v1_response.status_code == 400
+    assert "/v2/chat/completions" in v1_response.json()["detail"]
+    assert unsupported_response.status_code == 400
+    assert "does not support built-in tools" in unsupported_response.json()["detail"]
+
+
 def test_ui_run_rejects_invalid_api_mode_with_400():
     app = create_app(
         HarnessConfig(),
@@ -806,6 +863,7 @@ def test_ui_index_contains_control_panel_elements():
         "remember-message-button",
         "memory-list",
         "tools-panel",
+        "builtin-tools-control",
         "tools-status",
         "tool-profile-list",
         "tool-sync-preview",

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=38.10">
+  <link rel="stylesheet" href="/assets/app.css?v=38.11">
 </head>
 <body>
   <div class="app">
@@ -193,6 +193,17 @@
                 stream
               </label>
             </div>
+            <fieldset id="builtin-tools-control" class="builtin-tools-control span-4 advanced-control" hidden>
+              <legend>GigaChat v2 built-in tools</legend>
+              <div class="check-row">
+                <label class="choice"><input name="builtin-tool" type="checkbox" value="web_search">web search</label>
+                <label class="choice"><input name="builtin-tool" type="checkbox" value="url_content_extraction">URL content</label>
+                <label class="choice"><input name="builtin-tool" type="checkbox" value="code_interpreter">code interpreter</label>
+                <label class="choice"><input name="builtin-tool" type="checkbox" value="image_generate">image generation</label>
+                <label class="choice"><input name="builtin-tool" type="checkbox" value="model_3d_generate">3D generation</label>
+              </div>
+              <div class="hint">Selected tools are mapped into the /v2/chat/completions request.</div>
+            </fieldset>
             <div id="harness-warning" class="warning span-4 advanced-control"></div>
             <div id="harness-details" class="details span-4 advanced-control"></div>
             <div id="route-recommendation" class="route-recommendation span-4 advanced-control">
@@ -726,6 +737,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=38.10"></script>
+  <script src="/assets/app.js?v=38.11"></script>
 </body>
 </html>

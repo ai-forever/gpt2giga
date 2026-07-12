@@ -1,6 +1,7 @@
 import pytest
 
 from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.harnesses.direct_chat import DirectChatHarness
 from gpt2giga_harness import registry as registry_module
 from gpt2giga_harness.registry import (
     HarnessRegistry,
@@ -99,6 +100,18 @@ def test_spec_to_dict_ignores_unknown_capabilities_and_redacts_metadata():
         payload["plugin_metadata"]["config_schema"]["properties"]["endpoint"]["default"]
         == "<redacted>"
     )
+
+
+def test_direct_chat_spec_serializes_canonical_builtin_tool_names():
+    payload = spec_to_dict(DirectChatHarness.spec())
+
+    assert payload["supported_builtin_tools"] == [
+        "web_search",
+        "url_content_extraction",
+        "code_interpreter",
+        "image_generate",
+        "model_3d_generate",
+    ]
 
 
 def test_redact_secrets_preserves_only_numeric_usage_token_fields():

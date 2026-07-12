@@ -30,6 +30,19 @@ class GigaChatApiMode(str, Enum):
     V2 = "v2"
 
 
+class GigaChatBuiltinTool(str, Enum):
+    """GigaChat v2 tools that execute inside the upstream model service."""
+
+    WEB_SEARCH = "web_search"
+    URL_CONTENT_EXTRACTION = "url_content_extraction"
+    CODE_INTERPRETER = "code_interpreter"
+    IMAGE_GENERATE = "image_generate"
+    MODEL_3D_GENERATE = "model_3d_generate"
+
+
+GIGACHAT_BUILTIN_TOOLS = tuple(GigaChatBuiltinTool)
+
+
 class AvailabilityStatus(str, Enum):
     """Availability state reported by harnesses."""
 
@@ -106,6 +119,9 @@ class HarnessSpec:
     attachment_transport: tuple[str, ...] = field(default_factory=tuple)
     supports_native_sessions: bool = False
     supports_external_history: bool = False
+    supported_builtin_tools: tuple[GigaChatBuiltinTool, ...] = field(
+        default_factory=tuple
+    )
     default_invocation_mode: HarnessInvocationMode = HarnessInvocationMode.HEADLESS
     default_api_mode: GigaChatApiMode = GigaChatApiMode.V2
     tags: tuple[str, ...] = field(default_factory=tuple)
@@ -136,6 +152,7 @@ class HarnessRequest:
     messages: tuple[HarnessChatMessage, ...] = ()
     attachments: tuple[Mapping[str, Any], ...] = ()
     attachment_render_plan: Mapping[str, Any] | None = None
+    builtin_tools: tuple[GigaChatBuiltinTool, ...] = ()
     session_id: str | None = None
     run_id: str | None = None
     native_session_id: str | None = None
@@ -280,6 +297,27 @@ def parse_api_mode(value: str | GigaChatApiMode | None) -> GigaChatApiMode:
     return GigaChatApiMode(str(value).strip().lower())
 
 
+def parse_builtin_tools(value: Any) -> tuple[GigaChatBuiltinTool, ...]:
+    """Parse a unique list of supported GigaChat built-in tool names."""
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("builtin_tools must be a list")
+    tools: list[GigaChatBuiltinTool] = []
+    for item in value:
+        try:
+            tool = (
+                item
+                if isinstance(item, GigaChatBuiltinTool)
+                else GigaChatBuiltinTool(str(item).strip().lower())
+            )
+        except ValueError as exc:
+            raise ValueError(f"Unsupported built-in tool: {item}") from exc
+        if tool not in tools:
+            tools.append(tool)
+    return tuple(tools)
+
+
 def parse_capability(
     value: str | HarnessCapability | None,
 ) -> HarnessCapability:
@@ -345,6 +383,10 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         getattr(spec, "accepted_attachment_kinds", ())
     )
     attachment_transport = _string_values(getattr(spec, "attachment_transport", ()))
+    supported_builtin_tools = [
+        tool.value if isinstance(tool, GigaChatBuiltinTool) else str(tool)
+        for tool in getattr(spec, "supported_builtin_tools", ())
+    ]
     default_invocation_mode = _enum_text(
         getattr(spec, "default_invocation_mode", None),
         HarnessInvocationMode.HEADLESS.value,
@@ -372,6 +414,7 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         "attachment_transport": attachment_transport,
         "supports_native_sessions": spec.supports_native_sessions,
         "supports_external_history": spec.supports_external_history,
+        "supported_builtin_tools": supported_builtin_tools,
         "default_invocation_mode": default_invocation_mode,
         "default_api_mode": default_api_mode,
         "tags": tags,
@@ -393,6 +436,7 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
                 "attachments": spec.supports_attachments,
                 "native_sessions": spec.supports_native_sessions,
                 "external_history": spec.supports_external_history,
+                "builtin_tools": bool(supported_builtin_tools),
                 "headless": True,
                 "native": spec.supports_native_sessions,
             },
@@ -401,6 +445,7 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
                 "accepted_kinds": accepted_attachment_kinds,
                 "transport": attachment_transport,
             },
+            "builtin_tools": supported_builtin_tools,
             "config_schema": config_schema,
             "metadata": metadata,
         },

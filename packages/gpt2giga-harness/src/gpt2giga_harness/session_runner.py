@@ -59,6 +59,7 @@ from gpt2giga_harness.types import (
     HarnessResult,
     event_to_dict,
     parse_api_mode,
+    parse_builtin_tools,
     parse_capability,
     result_to_dict,
 )
@@ -347,6 +348,10 @@ class HarnessSessionRunner:
             "preflight": preflight_payload,
             **_agent_metadata(options),
         }
+        if options["builtin_tools"]:
+            run_metadata["builtin_tools"] = [
+                tool.value for tool in options["builtin_tools"]
+            ]
         if runtime_metadata:
             run_metadata["runtime"] = dict(runtime_metadata)
         if project_memory_payload:
@@ -438,6 +443,7 @@ class HarnessSessionRunner:
                 "workspace_policy": workspace_execution.policy.value,
                 "requested_workspace_policy": workspace_execution.requested_policy.value,
                 "attachment_count": len(attachment_payloads),
+                "builtin_tools": [tool.value for tool in options["builtin_tools"]],
             },
         )
         if workspace_execution.fallback_reason:
@@ -492,6 +498,7 @@ class HarnessSessionRunner:
             messages=request_messages,
             attachments=attachment_payloads,
             attachment_render_plan=attachment_render_plan_payload,
+            builtin_tools=options["builtin_tools"],
             session_id=session.id,
             run_id=run.id,
             native_session_id=options["native_session_id"],
@@ -517,6 +524,7 @@ class HarnessSessionRunner:
                 {"role": message.role, "content": message.content}
                 for message in request_messages
             ],
+            "builtin_tools": [tool.value for tool in options["builtin_tools"]],
             "extra": options["extra"],
         }
         if effective_prompt != options["prompt"]:
@@ -775,6 +783,18 @@ class HarnessSessionRunner:
             payload.get("api_mode")
             or (session.default_api_mode if session else self.config.default_api_mode)
         )
+        builtin_tools = parse_builtin_tools(payload.get("builtin_tools"))
+        if builtin_tools and api_mode is not GigaChatApiMode.V2:
+            raise ValueError("built-in tools require /v2/chat/completions")
+        supported_builtin_tools = set(getattr(spec, "supported_builtin_tools", ()))
+        unsupported_builtin_tools = [
+            tool.value for tool in builtin_tools if tool not in supported_builtin_tools
+        ]
+        if unsupported_builtin_tools:
+            raise ValueError(
+                f"{harness_id} does not support built-in tools: "
+                + ", ".join(unsupported_builtin_tools)
+            )
         capability = parse_capability(
             payload.get("capability")
             or (spec.capabilities[0].value if spec.capabilities else None)
@@ -801,6 +821,7 @@ class HarnessSessionRunner:
             "harness_kind": spec.kind,
             "model": model,
             "api_mode": api_mode,
+            "builtin_tools": builtin_tools,
             "capability": capability,
             "mode": mode,
             "invocation_mode": invocation_mode,

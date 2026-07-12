@@ -14,6 +14,7 @@ from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
 from gpt2giga_harness.types import (
     Availability,
+    GigaChatBuiltinTool,
     HarnessCapability,
     HarnessContext,
     HarnessEvent,
@@ -67,6 +68,39 @@ def test_session_runner_blocks_private_key_before_harness_invocation():
 
     assert harness.last_request is None
     assert "private_key_material" in str(exc_info.value)
+
+
+def test_session_runner_passes_and_records_selected_builtin_tools():
+    harness = _CaptureHarness()
+    runner = _runner(harness)
+
+    result = runner.create_and_run(
+        {
+            "harness_id": "capture",
+            "prompt": "search",
+            "api_mode": "v2",
+            "builtin_tools": ["web_search"],
+        }
+    )
+
+    assert harness.last_request is not None
+    assert harness.last_request.builtin_tools == (GigaChatBuiltinTool.WEB_SEARCH,)
+    assert result.bundle.raw_requests[0].payload["builtin_tools"] == ["web_search"]
+    assert result.run.metadata["builtin_tools"] == ["web_search"]
+
+
+def test_session_runner_rejects_builtin_tools_for_v1():
+    runner = _runner(_CaptureHarness())
+
+    with pytest.raises(ValueError, match="/v2/chat/completions"):
+        runner.create_and_run(
+            {
+                "harness_id": "capture",
+                "prompt": "search",
+                "api_mode": "v1",
+                "builtin_tools": ["web_search"],
+            }
+        )
 
 
 def test_session_runner_failed_harness_stores_error_message():
@@ -304,6 +338,7 @@ class _CaptureHarness(BaseHarness):
             kind="test",
             description="Capture request",
             capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
+            supported_builtin_tools=(GigaChatBuiltinTool.WEB_SEARCH,),
         )
 
     def availability(self) -> Availability:

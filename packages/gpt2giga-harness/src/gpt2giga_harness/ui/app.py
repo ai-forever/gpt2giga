@@ -173,11 +173,13 @@ from gpt2giga_harness.sessions.models import (
 )
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
 from gpt2giga_harness.types import (
+    GigaChatApiMode,
     HarnessCapability,
     HarnessEventType,
     HarnessRequest,
     availability_to_dict,
     parse_api_mode,
+    parse_builtin_tools,
     parse_capability,
     result_to_dict,
     spec_to_dict,
@@ -2196,6 +2198,28 @@ def create_app(
                 status_code=400,
                 detail="Invalid capability",
             ) from exc
+        try:
+            builtin_tools = parse_builtin_tools(payload.get("builtin_tools"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if builtin_tools and api_mode is not GigaChatApiMode.V2:
+            raise HTTPException(
+                status_code=400,
+                detail="built-in tools require /v2/chat/completions",
+            )
+        unsupported_builtin_tools = [
+            tool.value
+            for tool in builtin_tools
+            if tool not in set(getattr(harness.spec(), "supported_builtin_tools", ()))
+        ]
+        if unsupported_builtin_tools:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{harness_id} does not support built-in tools: "
+                    + ", ".join(unsupported_builtin_tools)
+                ),
+            )
         request = HarnessRequest(
             prompt=str(payload.get("prompt") or ""),
             model=_optional_text(payload.get("model")),
@@ -2204,6 +2228,7 @@ def create_app(
             mode=str(payload.get("mode") or "plan"),
             stream=bool(payload.get("stream")),
             workspace=resolve_workspace(_optional_text(payload.get("workspace"))),
+            builtin_tools=builtin_tools,
             extra=extra,
         )
         preflight = build_preflight_report(

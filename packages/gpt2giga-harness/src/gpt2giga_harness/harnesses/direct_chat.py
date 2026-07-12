@@ -15,6 +15,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.types import (
     Availability,
+    GIGACHAT_BUILTIN_TOOLS,
     HarnessChatMessage,
     HarnessCapability,
     HarnessContext,
@@ -57,6 +58,7 @@ class DirectChatHarness(BaseHarness):
             supports_attachments=True,
             accepted_attachment_kinds=("image", "text", "workspace_file"),
             attachment_transport=("openai_content_parts", "inline_text"),
+            supported_builtin_tools=GIGACHAT_BUILTIN_TOOLS,
             tags=("chat", "proxy"),
         )
 
@@ -75,6 +77,8 @@ class DirectChatHarness(BaseHarness):
             "messages": _payload_messages(request),
             "stream": bool(request.stream),
         }
+        if request.builtin_tools:
+            payload["tools"] = [{"type": tool.value} for tool in request.builtin_tools]
         api_key = context.api_key or proxy.cached_sidecar_api_key(context.proxy_url)
         cli_command = (
             "giga",
