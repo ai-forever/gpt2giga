@@ -207,17 +207,20 @@ def test_codex_native_start_command_applies_attachment_plan(tmp_path):
         ),
         attachment_render_plan={
             "prompt_prefix": "Attachments:\n- @src/app.py",
+            "cli_args": ["--image", "/tmp/screenshot.png"],
             "warnings": ["image attachments use path references only."],
-            "metadata": {"transport": "prompt_path_reference"},
+            "metadata": {"transport": "cli_image_flag_and_prompt_path_reference"},
         },
     )
     context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
 
     plan = connector.build_start_command(request, context)
 
+    image_index = plan.command.index("--image")
+    assert plan.command[image_index + 1] == "/tmp/screenshot.png"
     assert plan.command[-1] == "Attachments:\n- @src/app.py\n\nInspect this project"
     assert plan.metadata["attachment_render_plan"]["metadata"]["transport"] == (
-        "prompt_path_reference"
+        "cli_image_flag_and_prompt_path_reference"
     )
     assert plan.metadata["attachment_warnings"] == [
         "image attachments use path references only."

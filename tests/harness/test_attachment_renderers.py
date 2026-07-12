@@ -86,8 +86,13 @@ def test_agent_renderers_use_workspace_and_uploaded_path_references(tmp_path):
     gemini_plan = render_for_gemini_cli((workspace_attachment, image), store)
 
     assert "@src/app.py" in codex_plan.prompt_prefix
-    assert "screenshot.png" in codex_plan.prompt_prefix
-    assert "path reference" in codex_plan.warnings[0]
+    assert "screenshot.png" not in codex_plan.prompt_prefix
+    assert codex_plan.cli_args == ("--image", image.storage_path)
+    assert codex_plan.warnings == ()
+    assert codex_plan.metadata["transport"] == (
+        "cli_image_flag_and_prompt_path_reference"
+    )
+    assert codex_plan.metadata["image_count"] == 1
     assert "@src/app.py" in gemini_plan.prompt_prefix
     assert gemini_plan.warnings == (
         "Gemini CLI will receive this image as a path reference only.",

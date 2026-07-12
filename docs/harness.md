@@ -1240,7 +1240,7 @@ The selected harness determines the render plan:
 |---|---|
 | `echo` | Reports attachment metadata and events without credentials. |
 | `direct-chat` | Uses OpenAI-style image content parts for stored images and inlines small text files with truncation warnings. Workspace files are referenced by path. |
-| `codex-cli` | Adds safe path or `@file` references to the prompt. Image CLI flags are not enabled unless support is verified. |
+| `codex-cli` | Passes images separately with the Codex `--image` flag. Non-image files remain safe path or `@file` prompt references. |
 | `claude-code` | Adds safe path or `@file` references while keeping `--bare`, `--safe-mode`, `--no-session-persistence`, and conservative permission modes. |
 | `gemini-cli` | Adds `@file` or path references and warns when images are path-only. |
 
@@ -1282,7 +1282,7 @@ Direct-chat screenshot:
 
 Codex dry-run with image:
   paste or attach an image, switch to codex-cli, enable dry run, inspect Command
-  and Attachments for path-reference behavior.
+  for a separate --image argument and an image-free prompt.
 
 Claude Code with workspace file:
   type @src/foo.py, select the file, switch to claude-code, inspect Attachments

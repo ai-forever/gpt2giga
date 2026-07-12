@@ -129,3 +129,24 @@ def test_agent_cli_dry_runs_apply_attachment_prompt_prefix(
         "image attachments use path references only."
     ]
     assert result.events[0].type == "attachment_warning"
+
+
+def test_codex_cli_dry_run_passes_image_separately_from_prompt():
+    request = HarnessRequest(
+        prompt="Describe this",
+        attachment_render_plan={
+            "cli_args": ["--image", "/tmp/screenshot.png"],
+            "metadata": {"transport": "cli_image_flag"},
+        },
+        extra={"dry_run": True},
+    )
+
+    result = CodexCliHarness().run(
+        request,
+        HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key"),
+    )
+
+    image_index = result.command.index("--image")
+    assert result.command[image_index + 1] == "/tmp/screenshot.png"
+    assert result.command[-1] == "Describe this"
+    assert "/tmp/screenshot.png" not in result.command[-1]

@@ -138,21 +138,48 @@ def render_for_codex_cli(
     prompt: str = "",
     inline_text_limit: int = DEFAULT_INLINE_TEXT_LIMIT,
 ) -> AttachmentRenderPlan:
-    """Render prompt path references for Codex CLI dry-run inspection."""
+    """Render images as CLI attachments and files as prompt path references."""
     del store, prompt, inline_text_limit
     attachment_list = tuple(attachments)
-    prefix, warnings = _agent_reference_prefix(
-        attachment_list,
+    referenced_files: list[HarnessAttachment] = []
+    image_paths: list[str] = []
+    warnings: list[str] = []
+    for attachment in attachment_list:
+        if _effective_kind(attachment) != AttachmentKind.IMAGE.value:
+            referenced_files.append(attachment)
+            continue
+        image_path = _attachment_path(attachment)
+        if image_path:
+            image_paths.append(image_path)
+            continue
+        referenced_files.append(attachment)
+        warnings.append(
+            f"{attachment.filename} has no readable path for the Codex CLI image flag."
+        )
+    prefix, reference_warnings = _agent_reference_prefix(
+        tuple(referenced_files),
         workspace_prefix="@",
         uploaded_label="Local attachment path",
-        image_warning="Codex CLI image flag support is not verified; using a path reference.",
+        image_warning="Codex CLI will receive this image as a path reference only.",
     )
+    warnings.extend(reference_warnings)
+    cli_args = tuple(
+        item for image_path in image_paths for item in ("--image", image_path)
+    )
+    if image_paths and referenced_files:
+        transport = "cli_image_flag_and_prompt_path_reference"
+    elif image_paths:
+        transport = "cli_image_flag"
+    else:
+        transport = "prompt_path_reference"
     return _plan(
         prompt_prefix=prefix,
+        cli_args=cli_args,
         warnings=tuple(warnings),
         metadata={
-            "transport": "prompt_path_reference",
+            "transport": transport,
             "attachments": [_summary(attachment) for attachment in attachment_list],
+            "image_count": len(image_paths),
         },
     )
 
@@ -292,6 +319,14 @@ def _local_path(attachment: HarnessAttachment) -> str:
     if attachment.workspace_path:
         return f"@{attachment.workspace_path}"
     return attachment.filename
+
+
+def _attachment_path(attachment: HarnessAttachment) -> str:
+    if attachment.storage_path:
+        return str(Path(attachment.storage_path).expanduser().resolve())
+    if attachment.workspace_path and attachment.metadata.get("workspace_root"):
+        return str(_workspace_path(attachment))
+    return ""
 
 
 def _effective_kind(attachment: HarnessAttachment) -> str:
