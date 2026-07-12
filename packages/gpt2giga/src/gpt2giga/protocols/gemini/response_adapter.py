@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from gpt2giga.common.sources import render_text_with_sources
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.normalized import (
     NormalizedChoice,
@@ -64,7 +65,14 @@ def _choice_to_gemini(choice: NormalizedChoice) -> dict[str, Any]:
 def _message_to_gemini_content(message: NormalizedMessage | None) -> dict[str, Any]:
     if message is None:
         return {"role": "model", "parts": [{"text": ""}]}
-    parts = _content_to_gemini_parts(message.content)
+    content = message.content
+    if isinstance(content, str):
+        inline_data = message.raw_extensions.get("inline_data")
+        content = render_text_with_sources(
+            content,
+            inline_data if isinstance(inline_data, dict) else {},
+        )
+    parts = _content_to_gemini_parts(content)
     parts.extend(_tool_calls_to_gemini_parts(message.tool_calls))
     if not parts:
         parts = [{"text": ""}]
