@@ -218,6 +218,7 @@ def test_codex_native_start_command_applies_attachment_plan(tmp_path):
 
     image_index = plan.command.index("--image")
     assert plan.command[image_index + 1] == "/tmp/screenshot.png"
+    assert plan.command[-2] == "--"
     assert plan.command[-1] == "Attachments:\n- @src/app.py\n\nInspect this project"
     assert plan.metadata["attachment_render_plan"]["metadata"]["transport"] == (
         "cli_image_flag_and_prompt_path_reference"

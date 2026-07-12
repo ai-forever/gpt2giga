@@ -121,9 +121,12 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
         if model:
             command.extend(["-m", model])
         command.extend(["--sandbox", sandbox])
-        command.extend(cli_args_from_attachments(request))
+        attachment_args = cli_args_from_attachments(request)
+        command.extend(attachment_args)
         prompt = prompt_with_attachments(request).strip()
         if prompt:
+            if attachment_args:
+                command.append("--")
             command.append(prompt)
         env = _codex_env(
             context,

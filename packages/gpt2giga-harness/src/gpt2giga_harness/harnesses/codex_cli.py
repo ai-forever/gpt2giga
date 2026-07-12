@@ -92,6 +92,8 @@ class CodexCliHarness(BaseHarness):
         sandbox = MODE_TO_SANDBOX.get(request.mode, MODE_TO_SANDBOX["plan"])
         model = request.model or context.default_model or "GigaChat"
         prompt = prompt_with_attachments(request)
+        attachment_args = cli_args_from_attachments(request)
+        prompt_separator = ("--",) if attachment_args and prompt else ()
         stream_args = ("--json",) if request.stream else ()
         return (
             executable,
@@ -104,7 +106,8 @@ class CodexCliHarness(BaseHarness):
             *stream_args,
             "-m",
             model,
-            *cli_args_from_attachments(request),
+            *attachment_args,
+            *prompt_separator,
             prompt,
         )
 

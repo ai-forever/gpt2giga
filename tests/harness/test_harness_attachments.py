@@ -148,5 +148,6 @@ def test_codex_cli_dry_run_passes_image_separately_from_prompt():
 
     image_index = result.command.index("--image")
     assert result.command[image_index + 1] == "/tmp/screenshot.png"
+    assert result.command[-2] == "--"
     assert result.command[-1] == "Describe this"
     assert "/tmp/screenshot.png" not in result.command[-1]
