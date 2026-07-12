@@ -13,6 +13,9 @@ giga doctor
 giga ui
 ```
 
+`giga ui` starts a local durable worker automatically when needed. Pass
+`--no-start-worker` to keep worker lifecycle under separate supervision.
+
 `gpt2giga-harness==0.0.1` depends on exactly `gpt2giga==0.2.2a1`. The gateway
 can be started separately with `gpt2giga`; Harness can also start a temporary
 local sidecar for supported direct runs.

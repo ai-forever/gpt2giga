@@ -1,4 +1,5 @@
 import json
+import signal
 
 import pytest
 
@@ -23,6 +24,102 @@ from gpt2giga_harness.types import (
     HarnessResult,
     HarnessSpec,
 )
+
+
+class _FakeWorkerProcess:
+    pid = 4242
+
+    def __init__(self):
+        self.return_code = None
+        self.signals = []
+        self.terminated = False
+        self.killed = False
+
+    def poll(self):
+        return self.return_code
+
+    def send_signal(self, value):
+        self.signals.append(value)
+        self.return_code = 130
+
+    def terminate(self):
+        self.terminated = True
+        self.return_code = 143
+
+    def kill(self):
+        self.killed = True
+        self.return_code = 137
+
+    def wait(self, timeout):
+        return self.return_code
+
+
+def test_cli_ui_starts_and_stops_worker_when_none_is_online(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path))
+    process = _FakeWorkerProcess()
+    popen_calls = []
+    status_calls = 0
+
+    def fake_worker_status(_store):
+        nonlocal status_calls
+        status_calls += 1
+        return {"workers": [], "online": int(status_calls > 1)}
+
+    monkeypatch.setattr(cli, "worker_status", fake_worker_status)
+    monkeypatch.setattr(
+        cli.subprocess,
+        "Popen",
+        lambda command, **kwargs: popen_calls.append((command, kwargs)) or process,
+    )
+    monkeypatch.setattr(cli, "create_app", lambda _config: "app")
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *args, **kwargs: None)
+
+    assert cli.main(["ui"]) == 0
+
+    command, options = popen_calls[0]
+    assert command[1:] == [
+        "-m",
+        "gpt2giga_harness.cli",
+        "worker",
+        "start",
+    ]
+    assert options["env"]["GPT2GIGA_HARNESS_DATA_DIR"] == str(tmp_path)
+    assert options["env"]["GPT2GIGA_HARNESS_AUTO_START_PROXY"] == "false"
+    assert process.signals == [signal.SIGINT]
+    assert process.terminated is False
+    assert "Started durable Harness worker pid=4242." in capsys.readouterr().out
+
+
+def test_cli_ui_reuses_online_worker_or_allows_autostart_opt_out(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        cli,
+        "worker_status",
+        lambda _store: {"workers": [{"status": "online"}], "online": 1},
+    )
+    monkeypatch.setattr(
+        cli.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("must not start another worker"),
+    )
+    monkeypatch.setattr(cli, "create_app", lambda _config: "app")
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *args, **kwargs: None)
+
+    assert cli.main(["ui"]) == 0
+
+    monkeypatch.setattr(
+        cli,
+        "worker_status",
+        lambda _store: pytest.fail("opt-out must skip worker discovery"),
+    )
+    assert cli.main(["ui", "--no-start-worker"]) == 0
 
 
 def test_cli_harness_list_outputs_direct_chat(capsys):

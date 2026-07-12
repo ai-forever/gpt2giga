@@ -1,4 +1,5 @@
 import concurrent.futures
+import hashlib
 import json
 import sqlite3
 import threading
@@ -184,6 +185,138 @@ def test_runtime_store_migrates_existing_v1_database(tmp_path):
         }
     assert "workflow_version" in columns
     assert versions == set(range(1, RUNTIME_SCHEMA_VERSION + 1))
+
+
+def test_runtime_store_migrates_legacy_schedule_tables_to_project_keys(tmp_path):
+    path = tmp_path / "runtime.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    for version, name, statements in _MIGRATIONS[:5]:
+        for statement in statements:
+            connection.execute(statement)
+        connection.execute(
+            "INSERT INTO schema_migrations VALUES (?, ?, '2026-07-10T00:00:00+00:00')",
+            (version, name),
+        )
+    connection.execute(
+        """
+        CREATE TABLE schedule_states (
+            schedule_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            project_root TEXT NOT NULL,
+            definition_hash TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'paused',
+            enabled INTEGER NOT NULL DEFAULT 0,
+            timezone TEXT NOT NULL,
+            next_run_at TEXT,
+            tested_hash TEXT,
+            tested_at TEXT,
+            last_run_at TEXT,
+            last_status TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX schedule_states_due_idx ON schedule_states(enabled, status, next_run_at)"
+    )
+    connection.execute(
+        "CREATE INDEX schedule_states_project_idx ON schedule_states(project_id, updated_at)"
+    )
+    connection.execute(
+        """
+        CREATE TABLE schedule_occurrences (
+            id TEXT PRIMARY KEY,
+            schedule_id TEXT NOT NULL REFERENCES schedule_states(schedule_id) ON DELETE CASCADE,
+            definition_hash TEXT NOT NULL,
+            scheduled_for TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            status TEXT NOT NULL,
+            destination_session_id TEXT,
+            history_cutoff TEXT,
+            job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+            run_id TEXT,
+            error_summary TEXT,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            UNIQUE (schedule_id, scheduled_for, trigger)
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX schedule_occurrences_schedule_idx ON schedule_occurrences(schedule_id, created_at DESC)"
+    )
+    connection.execute(
+        "CREATE INDEX schedule_occurrences_active_idx ON schedule_occurrences(status, destination_session_id)"
+    )
+    connection.execute(
+        "INSERT INTO schema_migrations VALUES (6, ?, '2026-07-11T00:00:00+00:00')",
+        (_MIGRATIONS[5][1],),
+    )
+    version, name, statements = _MIGRATIONS[6]
+    for statement in statements:
+        connection.execute(statement)
+    connection.execute(
+        "INSERT INTO schema_migrations VALUES (?, ?, '2026-07-11T01:00:00+00:00')",
+        (version, name),
+    )
+    connection.execute(
+        """
+        INSERT INTO schedule_states (
+            schedule_id, project_id, project_root, definition_hash, status,
+            enabled, timezone, created_at, updated_at, definition_json
+        ) VALUES ('nightly', 'project-1', '/tmp/project-1', 'hash-1', 'active',
+                  1, 'UTC', '2026-07-11T00:00:00+00:00',
+                  '2026-07-11T00:00:00+00:00', '{"id":"nightly"}')
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO schedule_occurrences (
+            id, schedule_id, definition_hash, scheduled_for, trigger, status,
+            created_at
+        ) VALUES ('occ-1', 'nightly', 'hash-1', '2026-07-12T00:00:00+00:00',
+                  'schedule', 'queued', '2026-07-11T00:00:00+00:00')
+        """
+    )
+    connection.execute("PRAGMA user_version = 7")
+    connection.commit()
+    connection.close()
+
+    store = RuntimeCoordinationStore(tmp_path)
+
+    expected_key = hashlib.sha256(b"project-1\0nightly").hexdigest()
+    assert store.schema_version == RUNTIME_SCHEMA_VERSION
+    with sqlite3.connect(path) as reopened:
+        state = reopened.execute(
+            "SELECT schedule_key, definition_json FROM schedule_states"
+        ).fetchone()
+        occurrence = reopened.execute(
+            """
+            SELECT schedule_occurrences.schedule_key
+            FROM schedule_occurrences
+            JOIN schedule_states USING (schedule_key)
+            """
+        ).fetchone()
+        versions = {
+            row[0] for row in reopened.execute("SELECT version FROM schema_migrations")
+        }
+        foreign_key_errors = reopened.execute("PRAGMA foreign_key_check").fetchall()
+    assert state == (expected_key, '{"id":"nightly"}')
+    assert occurrence == (expected_key,)
+    assert versions == set(range(1, RUNTIME_SCHEMA_VERSION + 1))
+    assert foreign_key_errors == []
 
 
 def test_reconciler_repairs_terminal_job_to_run_and_is_idempotent(tmp_path):

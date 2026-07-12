@@ -67,10 +67,12 @@ giga harness run direct-chat \
 Open the local UI:
 
 ```bash
-giga worker start
-# In another terminal:
 giga ui
 ```
+
+`giga ui` starts a local durable worker automatically when no online worker is
+registered. Use `giga ui --no-start-worker` when a separately supervised worker
+already exists or when the UI should only inspect durable state.
 
 The standalone worker owns headless UI runs, leases, heartbeats, timeouts,
 retries, and cancellation, so a run survives a browser or UI-server restart.

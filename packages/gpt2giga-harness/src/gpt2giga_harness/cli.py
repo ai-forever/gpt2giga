@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
+import signal
+import subprocess
 import sys
+import time
 from typing import Any, Mapping
 
 import uvicorn
@@ -152,6 +156,9 @@ AGENT_ALIASES = {
     "gemini": "gemini-cli",
 }
 
+UI_WORKER_START_TIMEOUT_SECONDS = 5.0
+UI_WORKER_STOP_TIMEOUT_SECONDS = 3.0
+
 
 def main(argv: list[str] | None = None) -> int:
     """Run the Unified Harness CLI."""
@@ -222,6 +229,12 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--host", default=None)
     ui.add_argument("--port", type=int, default=None)
     ui.add_argument("--allow-remote", action="store_true")
+    ui.add_argument(
+        "--start-worker",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Start a local durable worker when no online worker is available",
+    )
     ui.set_defaults(handler=_handle_ui)
 
     run = subparsers.add_parser("run", parents=[common])
@@ -1659,9 +1672,77 @@ def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     print(
         f"Starting gpt2giga Unified Harness UI at http://{config.ui_host}:{config.ui_port}/"
     )
-    app = create_app(config)
-    uvicorn.run(app, host=config.ui_host, port=config.ui_port, log_level="info")
+    worker_process = _start_ui_worker(config) if args.start_worker else None
+    try:
+        app = create_app(config)
+        uvicorn.run(app, host=config.ui_host, port=config.ui_port, log_level="info")
+    finally:
+        if worker_process is not None:
+            _stop_ui_worker(worker_process)
     return 0
+
+
+def _start_ui_worker(config: HarnessConfig) -> subprocess.Popen[bytes] | None:
+    runtime_store = RuntimeCoordinationStore(config.data_dir)
+    if worker_status(runtime_store)["online"]:
+        print("Using an existing online durable Harness worker.")
+        return None
+
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "GPT2GIGA_HARNESS_DATA_DIR": config.data_dir,
+            "GPT2GIGA_HARNESS_PROXY_URL": config.proxy_url,
+            "GPT2GIGA_HARNESS_DEFAULT_API_MODE": config.default_api_mode.value,
+            "GPT2GIGA_HARNESS_TIMEOUT_SECONDS": str(config.timeout_seconds),
+            "GPT2GIGA_HARNESS_AUTO_START_PROXY": "false",
+        }
+    )
+    if config.api_key:
+        environment["GPT2GIGA_HARNESS_API_KEY"] = config.api_key
+    if config.default_model:
+        environment["GPT2GIGA_HARNESS_DEFAULT_MODEL"] = config.default_model
+
+    try:
+        process = subprocess.Popen(
+            [sys.executable, "-m", "gpt2giga_harness.cli", "worker", "start"],
+            env=environment,
+        )
+    except OSError as exc:
+        raise ValueError(f"Failed to start durable Harness worker: {exc}") from exc
+
+    deadline = time.monotonic() + UI_WORKER_START_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        return_code = process.poll()
+        if return_code is not None:
+            raise ValueError(
+                f"Durable Harness worker exited during startup with code {return_code}."
+            )
+        if worker_status(runtime_store)["online"]:
+            print(f"Started durable Harness worker pid={process.pid}.")
+            return process
+        time.sleep(0.05)
+
+    _stop_ui_worker(process)
+    raise ValueError("Timed out waiting for the durable Harness worker to start.")
+
+
+def _stop_ui_worker(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        if os.name == "posix":
+            process.send_signal(signal.SIGINT)
+        else:
+            process.terminate()
+        process.wait(timeout=UI_WORKER_STOP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=UI_WORKER_STOP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=UI_WORKER_STOP_TIMEOUT_SECONDS)
 
 
 def _handle_harness_scaffold(args: argparse.Namespace, config: HarnessConfig) -> int:
