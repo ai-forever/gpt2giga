@@ -51,9 +51,9 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.8">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.9">' in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.8"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.9"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -187,6 +187,9 @@ def test_ui_static_includes_live_execution_renderer():
         "function renderLiveDraft",
         "function persistedMessageForRun",
         "function toolsFromEvents",
+        "function planPayloadFromTool",
+        "function appendPlanBody",
+        "function planProgressText",
         "function renderRunSummary",
         "function mergeUsage",
         "usage = mergeUsage(usage, event.payload || {})",
@@ -216,6 +219,11 @@ def test_ui_static_includes_live_execution_renderer():
         ".markdown-sources",
         'tool.status === "failed" ? "Failure reason" : "Output"',
         "No failure details were reported by the harness.",
+        'name.textContent = plan ? "Plan" : tool.name || "tool"',
+        "row.className = `plan-item ${item.status}`",
+        ".plan-progress-row",
+        ".plan-item.in_progress",
+        ".plan-item.completed",
     ):
         assert fragment in UI_SOURCE
 

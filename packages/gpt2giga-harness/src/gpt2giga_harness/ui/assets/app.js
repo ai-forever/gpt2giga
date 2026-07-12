@@ -4020,22 +4020,103 @@
       return tools;
     }
 
+    function planPayloadFromTool(tool) {
+      const name = String(tool && tool.name || "").toLowerCase();
+      if (!(name === "update_plan" || name.endsWith("__update_plan") || name.endsWith(".update_plan"))) return null;
+      let payload = tool.arguments;
+      if (typeof payload === "string") {
+        try {
+          payload = JSON.parse(payload);
+        } catch (error) {
+          return null;
+        }
+      }
+      if (!payload || typeof payload !== "object" || !Array.isArray(payload.plan)) return null;
+      const items = payload.plan.flatMap((item) => {
+        if (!item || typeof item !== "object" || typeof item.step !== "string" || !item.step.trim()) return [];
+        const rawStatus = String(item.status || "pending").toLowerCase();
+        const status = ["pending", "in_progress", "completed"].includes(rawStatus) ? rawStatus : "pending";
+        return [{ step: item.step.trim(), status }];
+      });
+      if (!items.length) return null;
+      return {
+        explanation: typeof payload.explanation === "string" ? payload.explanation.trim() : "",
+        items
+      };
+    }
+
+    function planProgressText(plan) {
+      const completed = plan.items.filter((item) => item.status === "completed").length;
+      return `${completed}/${plan.items.length} complete`;
+    }
+
+    function appendPlanBody(details, plan, tool) {
+      const body = document.createElement("div");
+      body.className = "tool-call-body plan-body";
+      const progressRow = document.createElement("div");
+      progressRow.className = "plan-progress-row";
+      const progress = document.createElement("progress");
+      const completed = plan.items.filter((item) => item.status === "completed").length;
+      progress.max = plan.items.length;
+      progress.value = completed;
+      progress.setAttribute("aria-label", planProgressText(plan));
+      const progressText = document.createElement("span");
+      progressText.textContent = planProgressText(plan);
+      progressRow.append(progress, progressText);
+      body.appendChild(progressRow);
+      if (plan.explanation) {
+        const explanation = document.createElement("p");
+        explanation.className = "plan-explanation";
+        explanation.textContent = plan.explanation;
+        body.appendChild(explanation);
+      }
+      const list = document.createElement("ol");
+      list.className = "plan-list";
+      for (const item of plan.items) {
+        const row = document.createElement("li");
+        row.className = `plan-item ${item.status}`;
+        const marker = document.createElement("span");
+        marker.className = "plan-item-marker";
+        marker.textContent = item.status === "completed" ? "✓" : item.status === "in_progress" ? "●" : "○";
+        marker.setAttribute("aria-hidden", "true");
+        const step = document.createElement("span");
+        step.className = "plan-item-step";
+        step.textContent = item.step;
+        const status = document.createElement("span");
+        status.className = "plan-item-status";
+        status.textContent = item.status.replace("_", " ");
+        row.append(marker, step, status);
+        list.appendChild(row);
+      }
+      body.appendChild(list);
+      if (tool.status === "failed") {
+        const failure = document.createElement("div");
+        failure.className = "plan-failure";
+        failure.textContent = tool.output || "No failure details were reported by the harness.";
+        body.appendChild(failure);
+      }
+      details.appendChild(body);
+    }
+
     function toolCard(tool) {
+      const plan = planPayloadFromTool(tool);
       const details = document.createElement("details");
-      details.className = "tool-call-card";
-      details.open = tool.status === "running" || tool.status === "failed" || tool.status === "requested";
+      details.className = `tool-call-card${plan ? " plan-card" : ""}`;
+      details.open = Boolean(plan) || tool.status === "running" || tool.status === "failed" || tool.status === "requested";
       const summary = document.createElement("summary");
       const dot = document.createElement("span");
       dot.className = `tool-status-dot ${tool.status || "running"}`;
       const name = document.createElement("span");
       name.className = "tool-call-name";
-      name.textContent = tool.name || "tool";
+      name.textContent = plan ? "Plan" : tool.name || "tool";
       const status = document.createElement("span");
       status.className = "tool-call-status";
-      status.textContent = tool.duration_ms != null ? `${tool.status} · ${tool.duration_ms} ms` : tool.status || "running";
+      status.textContent = plan ? planProgressText(plan) : tool.duration_ms != null ? `${tool.status} · ${tool.duration_ms} ms` : tool.status || "running";
       summary.append(dot, name, status);
       details.appendChild(summary);
-      if (tool.arguments || tool.output || tool.status === "failed") {
+      if (plan) {
+        appendPlanBody(details, plan, tool);
+      } else if (tool.arguments || tool.output || tool.status === "failed") {
         const body = document.createElement("div");
         body.className = "tool-call-body";
         const failureOutput = tool.status === "failed" && !tool.output

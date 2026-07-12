@@ -215,6 +215,38 @@ def test_codex_stream_parser_explains_failed_tool_without_output():
     )
 
 
+def test_codex_stream_parser_preserves_update_plan_payload():
+    parser = _CodexStreamParser()
+    plan = [
+        {
+            "status": "in_progress",
+            "step": "Render update_plan as a structured plan card.",
+        }
+    ]
+
+    events = parser(
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "plan-1",
+                "type": "dynamic_tool_call",
+                "name": "update_plan",
+                "arguments": {"explanation": "Rendering the plan.", "plan": plan},
+                "output": "Plan updated",
+                "status": "completed",
+            },
+        }
+    )
+
+    assert len(events) == 1
+    assert events[0].type == "tool_call_finished"
+    assert events[0].payload["name"] == "update_plan"
+    assert events[0].payload["arguments"] == {
+        "explanation": "Rendering the plan.",
+        "plan": plan,
+    }
+
+
 def test_codex_stream_exit_zero_with_failed_turn_is_failure():
     script = """
 import json
