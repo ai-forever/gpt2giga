@@ -310,6 +310,23 @@ proxy без `GPT2GIGA_HARNESS_API_KEY` и запрещённый remote auto-st
 sidecar key передаётся напрямую в startup context CLI, а не восстанавливается из
 временного key cache UI-процесса.
 
+Spawn native-процесса также проходит через общее действие Approval Center
+`process.spawn` до создания worktree, запуска proxy или spawn CLI. Профиль
+`review_every_action` возвращает approval, после которого исходный запрос можно
+повторить; deny не запускает процесс и не создаёт worktree. Для безопасной
+политики `auto` и явной `worktree` native-режим `edit` создаёт отдельный detached
+Git worktree и передаёт CLI только его effective path. Ошибка изоляции блокирует
+запуск без fallback в source checkout. Run, native link и безопасный plan
+сохраняют source/effective workspace и результат Harness policy.
+
+После spawn permission enforcement остаётся делегированным конкретному CLI:
+Codex отображает `plan|read` в `--sandbox read-only`, а `edit` в
+`workspace-write`; Claude Code использует `--permission-mode plan` для
+`plan|read` и `default` для `edit`; Gemini использует `--approval-mode plan` и
+`default` соответственно. Интерактивные approval prompts внутри CLI явно
+помечаются delegated: Approval Center не заявляет, что видит или подтверждает
+их.
+
 Перед новым Gemini native-запуском Harness проверяет поддержку
 `--prompt-interactive` установленной версией CLI. Если flag доступен, составной
 prompt вместе с отрендеренными ссылками на attachments передаётся ровно в одном

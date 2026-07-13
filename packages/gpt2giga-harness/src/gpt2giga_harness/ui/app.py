@@ -154,6 +154,7 @@ from gpt2giga_harness.runtime.policy import (
     PolicyDecision,
     PolicyEngine,
     approval_request_to_dict,
+    permission_profile,
 )
 from gpt2giga_harness.runtime.reconcile import RuntimeReconciler
 from gpt2giga_harness.runtime.store import JobNotFoundError, RuntimeCoordinationStore
@@ -218,6 +219,7 @@ from gpt2giga_harness.worktrees import (
     apply_run_diff,
     discard_run_worktree,
     open_worktree_response,
+    prepare_workspace_execution,
     run_diff_response,
 )
 from gpt2giga_harness.workspace import (
@@ -1233,19 +1235,62 @@ def create_app(
             "native_link": native_link_to_dict(link),
         }
 
-    @app.post("/api/native/processes/start")
+    @app.post("/api/native/processes/start", response_model=None)
     async def native_process_start(
         payload: dict[str, Any] = Body(default_factory=dict),
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | JSONResponse:
         run = None
         process_ref = None
         options = None
+        workspace_execution = None
         try:
             session = store.get_session(
                 _required_text(payload.get("session_id"), "session_id is required")
             )
-            options = _native_process_start_options(
+            action = str(payload.get("action") or "start").strip().lower()
+            if action not in {"start", "resume"}:
+                raise ValueError("action must be start or resume")
+            if action == "start":
+                _native_permission_mode(payload.get("mode") or session.default_mode)
+            policy_result = _native_process_policy_gate(
                 payload=payload,
+                session=session,
+                policy_engine=policy_engine,
+                runtime_store=runtime_store,
+            )
+            if isinstance(policy_result, JSONResponse):
+                return policy_result
+            run_id, policy_metadata = policy_result
+            effective_payload = dict(payload)
+            if action == "start":
+                mode = _native_permission_mode(
+                    payload.get("mode") or session.default_mode
+                )
+                source_workspace = resolve_workspace(
+                    _optional_text(payload.get("workspace")) or session.workspace
+                )
+                if mode == "edit" and source_workspace is None:
+                    raise WorktreeError(
+                        "Native edit isolation requires an explicit workspace; "
+                        "refusing to inherit the UI server checkout."
+                    )
+                workspace_execution = prepare_workspace_execution(
+                    requested_policy=payload.get("workspace_policy"),
+                    harness_kind="agent-cli",
+                    mode=mode,
+                    workspace=source_workspace,
+                    data_dir=config.data_dir,
+                    session_id=session.id,
+                    run_id=run_id,
+                )
+                effective_payload["mode"] = mode
+                effective_payload["workspace"] = workspace_execution.request_workspace
+                extra = _metadata_mapping(payload.get("extra"))
+                extra["native_source_workspace"] = source_workspace
+                extra["workspace_execution"] = workspace_execution.to_metadata()
+                effective_payload["extra"] = extra
+            options = _native_process_start_options(
+                payload=effective_payload,
                 session=session,
                 config=config,
                 native_registry=native_registry,
@@ -1253,7 +1298,38 @@ def create_app(
                 store=store,
                 attachment_store=attachment_store,
             )
+            if workspace_execution is None:
+                workspace_metadata = _native_resume_workspace_execution(options)
+            else:
+                workspace_metadata = workspace_execution.to_metadata()
+            requested_workspace_policy = (
+                str(payload.get("workspace_policy") or "auto").strip().lower()
+            )
+            if (
+                action == "resume"
+                and options["mode"] == "edit"
+                and requested_workspace_policy in {"auto", "worktree"}
+                and workspace_metadata.get("policy") != "worktree"
+            ):
+                raise NativeProcessStartError(
+                    "Native edit resume has no isolated worktree evidence; "
+                    "refusing to resume in the source checkout."
+                )
+            options["source_workspace"] = (
+                workspace_metadata.get("source_workspace") or options["workspace"]
+            )
+            options["workspace_execution"] = workspace_metadata
+            options["policy"] = policy_metadata
+            options["plan"] = replace(
+                options["plan"],
+                metadata={
+                    **dict(options["plan"].metadata),
+                    "workspace_execution": workspace_metadata,
+                    "policy": policy_metadata,
+                },
+            )
             run = store.create_run(
+                run_id=run_id,
                 session_id=session.id,
                 harness_id=options["harness_id"],
                 status="running",
@@ -1286,7 +1362,7 @@ def create_app(
                 "default_model": options["model"],
                 "default_api_mode": options["api_mode"],
                 "default_mode": options["mode"],
-                "workspace": options["workspace"],
+                "workspace": options["source_workspace"],
             }
             if (
                 session.title == "Untitled session"
@@ -1295,6 +1371,20 @@ def create_app(
             ):
                 session_patch["title"] = title_from_prompt(options["prompt"])
             store.update_session(session.id, **session_patch)
+            store.append_event(
+                HarnessStoredEvent(
+                    id=new_id("evt"),
+                    session_id=session.id,
+                    run_id=run.id,
+                    type="policy_allowed",
+                    message="Harness policy allowed native process spawn.",
+                    payload=policy_metadata,
+                    created_at=utc_now(),
+                    trace_id=run.id,
+                    span_kind="policy",
+                    span_status="allowed",
+                )
+            )
             process_ref = native_process_manager.start(
                 options["plan"],
                 session_id=session.id,
@@ -1364,6 +1454,13 @@ def create_app(
                         ),
                     ),
                 )
+            elif workspace_execution is not None and workspace_execution.worktree_path:
+                try:
+                    discard_run_worktree(
+                        {"workspace_execution": workspace_execution.to_metadata()}
+                    )
+                except WorktreeError:
+                    pass
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
             "process": native_process_ref_to_dict(process_ref),
@@ -2707,6 +2804,143 @@ def _native_connector_or_404(
         ) from exc
 
 
+def _native_process_policy_gate(
+    *,
+    payload: Mapping[str, Any],
+    session: HarnessSession,
+    policy_engine: PolicyEngine,
+    runtime_store: RuntimeCoordinationStore | None,
+) -> tuple[str, dict[str, Any]] | JSONResponse:
+    """Resolve the Harness-owned spawn action before sidecars or CLIs start."""
+    profile = permission_profile(payload.get("permission_profile"), origin="manual")
+    run_id = _native_policy_run_id(payload, session.id)
+    context = PolicyContext(
+        project_id=_session_project_id(session),
+        session_id=session.id,
+        run_id=run_id,
+        reason="Start or resume a managed native CLI process.",
+        preview={
+            "harness_id": payload.get("harness_id") or session.default_harness_id,
+            "action": payload.get("action") or "start",
+            "mode": payload.get("mode") or session.default_mode,
+            "workspace": payload.get("workspace") or session.workspace,
+            "workspace_policy": payload.get("workspace_policy") or "auto",
+        },
+    )
+    resolution = policy_engine.resolve(
+        PermissionAction.PROCESS_SPAWN,
+        profile=profile,
+        context=context,
+        enforcement=EnforcementLevel.ENFORCED_BY_HARNESS,
+    )
+    policy_metadata = {
+        "action": resolution.action.value,
+        "decision": resolution.decision.value,
+        "enforcement": resolution.enforcement.value,
+        "policy_source": resolution.policy_source,
+        "permission_profile": profile.id,
+    }
+    if resolution.decision is PolicyDecision.DENY:
+        raise HTTPException(
+            status_code=403, detail="Native process spawn denied by policy"
+        )
+    if resolution.decision is PolicyDecision.ALLOW:
+        return run_id, policy_metadata
+    if runtime_store is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Durable runtime is required for native process approval",
+        )
+    approval = runtime_store.create_approval_request(resolution, context)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "approval_required": True,
+            "approval": approval_request_to_dict(approval),
+            "retry": {
+                "action": "retry_native_process_start",
+                "idempotency_key": payload.get("idempotency_key"),
+            },
+        },
+    )
+
+
+def _native_policy_run_id(payload: Mapping[str, Any], session_id: str) -> str:
+    """Return a stable approval scope without persisting prompt contents."""
+    idempotency_key = _optional_text(payload.get("idempotency_key"))
+    identity = {
+        "session_id": session_id,
+        "idempotency_key": idempotency_key,
+        "action": payload.get("action") or "start",
+        "harness_id": payload.get("harness_id"),
+        "native_ref_id": payload.get("native_ref_id"),
+        "prompt_sha256": hashlib.sha256(
+            str(payload.get("prompt") or "").encode("utf-8")
+        ).hexdigest(),
+        "workspace": payload.get("workspace"),
+        "mode": payload.get("mode"),
+        "model": payload.get("model"),
+        "api_mode": payload.get("api_mode"),
+        "capability": payload.get("capability"),
+        "workspace_policy": payload.get("workspace_policy"),
+        "attachment_ids": payload.get("attachment_ids"),
+    }
+    digest = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    return f"run_native_{digest[:20]}"
+
+
+def _native_permission_mode(value: Any) -> str:
+    mode = str(value or "plan").strip().lower()
+    if mode not in {"plan", "read", "edit"}:
+        raise ValueError("native mode must be plan, read, or edit")
+    return mode
+
+
+def _native_resume_workspace_execution(options: Mapping[str, Any]) -> dict[str, Any]:
+    ref = options.get("native_ref")
+    if isinstance(ref, NativeSessionRef):
+        plan_metadata = _metadata_mapping(ref.metadata.get("plan_metadata"))
+        stored = _metadata_mapping(plan_metadata.get("workspace_execution"))
+        if stored:
+            return stored
+        snapshot = ref.execution_snapshot
+        if snapshot is not None and (
+            snapshot.source_workspace is not None
+            or snapshot.effective_workspace is not None
+            or snapshot.workspace_policy is not None
+        ):
+            effective_workspace = snapshot.effective_workspace or snapshot.workspace
+            return {
+                "requested_policy": snapshot.workspace_policy or "current",
+                "policy": snapshot.workspace_policy or "current",
+                "source_workspace": snapshot.source_workspace or snapshot.workspace,
+                "source_git_root": snapshot.source_workspace,
+                "effective_workspace": effective_workspace,
+                "worktree_path": (
+                    effective_workspace
+                    if snapshot.workspace_policy == "worktree"
+                    else None
+                ),
+                "base_branch": None,
+                "base_commit": None,
+                "fallback_reason": None,
+            }
+    workspace = _optional_text(options.get("workspace"))
+    return {
+        "requested_policy": "current",
+        "policy": "current",
+        "source_workspace": workspace,
+        "source_git_root": None,
+        "effective_workspace": workspace,
+        "worktree_path": None,
+        "base_branch": None,
+        "base_commit": None,
+        "fallback_reason": "legacy native resume has no stored workspace isolation",
+    }
+
+
 def _native_process_start_options(
     *,
     payload: Mapping[str, Any],
@@ -2762,7 +2996,7 @@ def _native_process_new_options(
     )
     prompt = str(payload.get("prompt") or "")
     model = _optional_text(payload.get("model")) or session.default_model
-    mode = str(payload.get("mode") or session.default_mode)
+    mode = _native_permission_mode(payload.get("mode") or session.default_mode)
     attachment_ids = _attachment_ids(payload.get("attachment_ids"))
     attachments = _load_native_attachments(
         attachment_store,
@@ -2916,7 +3150,7 @@ def _native_process_resume_options(
         payload.get("capability") or HarnessCapability.AGENT_CLI.value
     )
     workspace = resolve_workspace(
-        snapshot.workspace
+        snapshot.effective_workspace or snapshot.workspace
         if snapshot is not None
         else _optional_text(payload.get("workspace"))
         or ref.workspace
@@ -3047,6 +3281,12 @@ def _native_process_run_metadata(
         metadata["proxy_preflight"] = proxy.proxy_route_preflight_to_dict(
             route_preflight
         )
+    workspace_execution = options.get("workspace_execution")
+    if isinstance(workspace_execution, Mapping):
+        metadata["workspace_execution"] = dict(workspace_execution)
+    policy = options.get("policy")
+    if isinstance(policy, Mapping):
+        metadata["policy"] = dict(policy)
     return metadata
 
 
@@ -3076,6 +3316,12 @@ def _append_native_process_link(
         "command": list(process_ref.display_command),
         "process_status": process_ref.status.value,
     }
+    workspace_execution = options.get("workspace_execution")
+    if isinstance(workspace_execution, Mapping):
+        metadata["workspace_execution"] = dict(workspace_execution)
+    policy = options.get("policy")
+    if isinstance(policy, Mapping):
+        metadata["policy"] = dict(policy)
     if process_ref.native_home is not None:
         metadata["native_home"] = process_ref.native_home
     if isinstance(ref, NativeSessionRef):
@@ -3111,7 +3357,9 @@ def _append_native_process_link(
             native_session_id=native_session_id,
             native_ref_id=ref.id if isinstance(ref, NativeSessionRef) else None,
             source=f"native_process_{options['action']}",
-            workspace=_optional_text(options.get("workspace")) or session.workspace,
+            workspace=(
+                _optional_text(options.get("source_workspace")) or session.workspace
+            ),
             metadata=metadata,
         ),
     )

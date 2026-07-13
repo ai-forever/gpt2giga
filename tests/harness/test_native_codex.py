@@ -275,7 +275,16 @@ def test_codex_native_resume_command_requires_managed_ref(tmp_path):
         can_resume=False,
     )
 
-    assert plan.command == ("codex", "resume", "managed-session")
+    assert plan.command == (
+        "codex",
+        "--ask-for-approval",
+        "on-request",
+        "--sandbox",
+        "workspace-write",
+        "resume",
+        "managed-session",
+    )
+    assert plan.metadata["permission_enforcement"]["requested_mode"] == "edit"
     assert "exec" not in plan.command
     assert "--ephemeral" not in plan.command
     assert plan.env["CODEX_HOME"] == managed.metadata["native_home"]

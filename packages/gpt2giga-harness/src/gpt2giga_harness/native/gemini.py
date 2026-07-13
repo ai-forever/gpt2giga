@@ -22,6 +22,9 @@ from gpt2giga_harness.native.base import (
     NativeCommandPlan,
     NativeHistoryConnector,
     NativePromptDelivery,
+    native_permission_metadata,
+    native_source_workspace,
+    native_workspace_policy,
 )
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
@@ -41,6 +44,11 @@ GEMINI_HARNESS_ID = "gemini-cli"
 LIST_SESSIONS_TIMEOUT_SECONDS = 5.0
 CAPABILITY_PROBE_TIMEOUT_SECONDS = 5.0
 _SESSION_ID_RE = re.compile(r"(?P<id>[A-Za-z0-9][A-Za-z0-9_.:-]{3,})")
+MODE_TO_APPROVAL = {
+    "plan": "plan",
+    "read": "plan",
+    "edit": "default",
+}
 
 
 class GeminiNativeHistoryConnector(NativeHistoryConnector):
@@ -145,7 +153,8 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         context: HarnessContext,
     ) -> NativeCommandPlan:
         """Plan a native interactive `gemini` command."""
-        project_id = _project_id(request.workspace)
+        source_workspace = native_source_workspace(request)
+        project_id = _project_id(source_workspace)
         native_home = self.managed_home(project_id)
         known_sources = tuple(
             str(path) for path in _checkpoint_files(native_home, request.workspace)
@@ -154,7 +163,17 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         tool_config_hash = _write_gemini_settings(native_home)
         model = request.model or context.default_model
         executable = self._executable()
-        command = [executable]
+        approval_mode = MODE_TO_APPROVAL.get(
+            request.mode,
+            MODE_TO_APPROVAL["plan"],
+        )
+        permission = native_permission_metadata(
+            requested_mode=request.mode,
+            cli_control="--approval-mode",
+            cli_value=approval_mode,
+            read_only=approval_mode == "plan",
+        )
+        command = [executable, "--approval-mode", approval_mode]
         if model:
             command.extend(["-m", model])
         prompt = prompt_with_attachments(request)
@@ -164,6 +183,9 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
             "api_mode": request.api_mode.value,
             "managed": True,
             "chat_commands": ("/chat save <tag>", "/chat resume <tag>"),
+            "source_workspace": source_workspace,
+            "effective_workspace": request.workspace,
+            "permission_enforcement": permission,
             **attachment_raw_metadata(request),
         }
         env = _gemini_env(
@@ -202,10 +224,13 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
             api_mode=request.api_mode.value,
             model=model,
             native_home=str(native_home),
-            workspace=request.workspace,
+            workspace=source_workspace,
             project_id=project_id,
             permission_mode=request.mode,
             tool_config_hash=tool_config_hash,
+            source_workspace=source_workspace,
+            effective_workspace=request.workspace,
+            workspace_policy=native_workspace_policy(request),
         )
         return NativeCommandPlan(
             command=tuple(command),
@@ -242,10 +267,26 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
             native_home=native_home,
             model=snapshot.model or context.default_model,
         )
+        approval_mode = MODE_TO_APPROVAL.get(
+            snapshot.permission_mode,
+            MODE_TO_APPROVAL["plan"],
+        )
+        permission = native_permission_metadata(
+            requested_mode=snapshot.permission_mode,
+            cli_control="--approval-mode",
+            cli_value=approval_mode,
+            read_only=approval_mode == "plan",
+        )
         return NativeCommandPlan(
-            command=(self._executable(), "--resume", ref.native_session_id),
+            command=(
+                self._executable(),
+                "--approval-mode",
+                approval_mode,
+                "--resume",
+                ref.native_session_id,
+            ),
             env=env,
-            cwd=ref.workspace,
+            cwd=snapshot.effective_workspace or ref.workspace,
             native_home=str(native_home),
             metadata={
                 "harness_id": self.harness_id,
@@ -254,6 +295,9 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
                 "managed": True,
                 "route_unknown": not snapshot.route_known,
                 "resume_warnings": list(snapshot.warnings),
+                "source_workspace": ref.metadata.get("source_workspace"),
+                "effective_workspace": snapshot.effective_workspace or ref.workspace,
+                "permission_enforcement": permission,
             },
             execution_snapshot=snapshot,
         )

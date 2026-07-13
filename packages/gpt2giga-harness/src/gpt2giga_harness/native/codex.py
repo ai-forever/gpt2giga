@@ -16,7 +16,13 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     cli_args_from_attachments,
     prompt_with_attachments,
 )
-from gpt2giga_harness.native.base import NativeCommandPlan, NativeHistoryConnector
+from gpt2giga_harness.native.base import (
+    NativeCommandPlan,
+    NativeHistoryConnector,
+    native_permission_metadata,
+    native_source_workspace,
+    native_workspace_policy,
+)
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
@@ -123,7 +129,8 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
         context: HarnessContext,
     ) -> NativeCommandPlan:
         """Plan a native `codex` command without using headless exec mode."""
-        project_id = _project_id(request.workspace)
+        source_workspace = native_source_workspace(request)
+        project_id = _project_id(source_workspace)
         native_home = self.managed_home(project_id)
         known_sources = tuple(
             str(path) for path in _session_files(native_home / "sessions")
@@ -131,6 +138,12 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
         native_home.mkdir(parents=True, exist_ok=True)
         tool_config_hash = _write_codex_config(native_home, request, context)
         sandbox = MODE_TO_SANDBOX.get(request.mode, MODE_TO_SANDBOX["plan"])
+        permission = native_permission_metadata(
+            requested_mode=request.mode,
+            cli_control="--sandbox",
+            cli_value=sandbox,
+            read_only=sandbox == "read-only",
+        )
         model = request.model or context.default_model
         command = [self._executable(), "--ask-for-approval", "on-request"]
         if model:
@@ -153,10 +166,13 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
             api_mode=request.api_mode.value,
             model=model,
             native_home=str(native_home),
-            workspace=request.workspace,
+            workspace=source_workspace,
             project_id=project_id,
             permission_mode=request.mode,
             tool_config_hash=tool_config_hash,
+            source_workspace=source_workspace,
+            effective_workspace=request.workspace,
+            workspace_policy=native_workspace_policy(request),
         )
         return NativeCommandPlan(
             command=tuple(command),
@@ -168,6 +184,9 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
                 "project_id": project_id,
                 "api_mode": request.api_mode.value,
                 "managed": True,
+                "source_workspace": source_workspace,
+                "effective_workspace": request.workspace,
+                "permission_enforcement": permission,
                 **attachment_raw_metadata(request),
             },
             execution_snapshot=snapshot,
@@ -196,10 +215,28 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
             base_url=context.api_base_url(api_mode),
         )
         env = _codex_env(context, api_mode=api_mode, native_home=native_home)
+        sandbox = MODE_TO_SANDBOX.get(
+            snapshot.permission_mode,
+            MODE_TO_SANDBOX["plan"],
+        )
+        permission = native_permission_metadata(
+            requested_mode=snapshot.permission_mode,
+            cli_control="--sandbox",
+            cli_value=sandbox,
+            read_only=sandbox == "read-only",
+        )
         return NativeCommandPlan(
-            command=(self._executable(), "resume", ref.native_session_id),
+            command=(
+                self._executable(),
+                "--ask-for-approval",
+                "on-request",
+                "--sandbox",
+                sandbox,
+                "resume",
+                ref.native_session_id,
+            ),
             env=env,
-            cwd=ref.workspace,
+            cwd=snapshot.effective_workspace or ref.workspace,
             native_home=str(native_home),
             metadata={
                 "harness_id": self.harness_id,
@@ -208,6 +245,9 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
                 "managed": True,
                 "route_unknown": not snapshot.route_known,
                 "resume_warnings": list(snapshot.warnings),
+                "source_workspace": ref.metadata.get("source_workspace"),
+                "effective_workspace": snapshot.effective_workspace or ref.workspace,
+                "permission_enforcement": permission,
             },
             execution_snapshot=snapshot,
         )

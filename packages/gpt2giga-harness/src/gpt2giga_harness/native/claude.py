@@ -17,7 +17,13 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     cli_args_from_attachments,
     prompt_with_attachments,
 )
-from gpt2giga_harness.native.base import NativeCommandPlan, NativeHistoryConnector
+from gpt2giga_harness.native.base import (
+    NativeCommandPlan,
+    NativeHistoryConnector,
+    native_permission_metadata,
+    native_source_workspace,
+    native_workspace_policy,
+)
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
@@ -34,6 +40,11 @@ from gpt2giga_harness.types import GigaChatApiMode, HarnessContext, HarnessReque
 
 CLAUDE_HARNESS_ID = "claude-code"
 MANAGED_SESSION_PREFIX = "gpt2giga"
+MODE_TO_PERMISSION = {
+    "plan": "plan",
+    "read": "plan",
+    "edit": "default",
+}
 
 
 class ClaudeNativeHistoryConnector(NativeHistoryConnector):
@@ -119,13 +130,30 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         context: HarnessContext,
     ) -> NativeCommandPlan:
         """Plan a native interactive `claude -n <name>` command."""
-        project_id = _project_id(request.workspace)
+        source_workspace = native_source_workspace(request)
+        project_id = _project_id(source_workspace)
         native_home = self.managed_home(project_id)
         known_sources = tuple(str(path) for path in _session_files(native_home))
         native_home.mkdir(parents=True, exist_ok=True)
         tool_config_hash = _write_claude_settings(native_home)
         session_name = _managed_session_name(request, project_id)
-        command = [self._executable(), "-n", session_name]
+        permission_mode = MODE_TO_PERMISSION.get(
+            request.mode,
+            MODE_TO_PERMISSION["plan"],
+        )
+        permission = native_permission_metadata(
+            requested_mode=request.mode,
+            cli_control="--permission-mode",
+            cli_value=permission_mode,
+            read_only=permission_mode == "plan",
+        )
+        command = [
+            self._executable(),
+            "--permission-mode",
+            permission_mode,
+            "-n",
+            session_name,
+        ]
         model = request.model or context.default_model
         if model:
             command.extend(["--model", model])
@@ -139,10 +167,13 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
             api_mode=request.api_mode.value,
             model=model,
             native_home=str(native_home),
-            workspace=request.workspace,
+            workspace=source_workspace,
             project_id=project_id,
             permission_mode=request.mode,
             tool_config_hash=tool_config_hash,
+            source_workspace=source_workspace,
+            effective_workspace=request.workspace,
+            workspace_policy=native_workspace_policy(request),
         )
         return NativeCommandPlan(
             command=tuple(command),
@@ -155,6 +186,9 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
                 "api_mode": request.api_mode.value,
                 "managed": True,
                 "session_name": session_name,
+                "source_workspace": source_workspace,
+                "effective_workspace": request.workspace,
+                "permission_enforcement": permission,
                 **attachment_raw_metadata(request),
             },
             execution_snapshot=snapshot,
@@ -179,10 +213,26 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         native_home.mkdir(parents=True, exist_ok=True)
         _write_claude_settings(native_home)
         env = _claude_env(context, api_mode=api_mode, native_home=native_home)
+        permission_mode = MODE_TO_PERMISSION.get(
+            snapshot.permission_mode,
+            MODE_TO_PERMISSION["plan"],
+        )
+        permission = native_permission_metadata(
+            requested_mode=snapshot.permission_mode,
+            cli_control="--permission-mode",
+            cli_value=permission_mode,
+            read_only=permission_mode == "plan",
+        )
         return NativeCommandPlan(
-            command=(self._executable(), "--resume", ref.native_session_id),
+            command=(
+                self._executable(),
+                "--permission-mode",
+                permission_mode,
+                "--resume",
+                ref.native_session_id,
+            ),
             env=env,
-            cwd=ref.workspace,
+            cwd=snapshot.effective_workspace or ref.workspace,
             native_home=str(native_home),
             metadata={
                 "harness_id": self.harness_id,
@@ -191,6 +241,9 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
                 "managed": True,
                 "route_unknown": not snapshot.route_known,
                 "resume_warnings": list(snapshot.warnings),
+                "source_workspace": ref.metadata.get("source_workspace"),
+                "effective_workspace": snapshot.effective_workspace or ref.workspace,
+                "permission_enforcement": permission,
             },
             execution_snapshot=snapshot,
         )

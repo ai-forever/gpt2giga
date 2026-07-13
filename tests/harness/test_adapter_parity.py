@@ -10,6 +10,7 @@ from gpt2giga_harness.native.codex import CodexNativeHistoryConnector
 from gpt2giga_harness.native.gemini import GeminiNativeHistoryConnector
 from gpt2giga_harness.native.models import NativeSessionRef, NativeSessionStatus
 from gpt2giga_harness.native.store import native_session_ref_to_dict
+from gpt2giga_harness.project import project_id_for_root
 from gpt2giga_harness.types import (
     AdapterSupportLevel,
     GigaChatApiMode,
@@ -33,7 +34,7 @@ EXPECTED_SUPPORT = {
         "headless_continuity": "partial",
         "native_initial_prompt": "supported",
         "native_permission_mode": "supported",
-        "native_workspace": "partial",
+        "native_workspace": "supported",
         "native_resume": "partial",
         "native_route_snapshot": "supported",
         "native_durable_lifecycle": "unsupported",
@@ -49,8 +50,8 @@ EXPECTED_SUPPORT = {
         "headless_structured_events": "supported",
         "headless_continuity": "unsupported",
         "native_initial_prompt": "supported",
-        "native_permission_mode": "unsupported",
-        "native_workspace": "partial",
+        "native_permission_mode": "supported",
+        "native_workspace": "supported",
         "native_resume": "supported",
         "native_route_snapshot": "supported",
         "native_durable_lifecycle": "unsupported",
@@ -66,8 +67,8 @@ EXPECTED_SUPPORT = {
         "headless_structured_events": "supported",
         "headless_continuity": "unsupported",
         "native_initial_prompt": "supported",
-        "native_permission_mode": "unsupported",
-        "native_workspace": "partial",
+        "native_permission_mode": "supported",
+        "native_workspace": "supported",
         "native_resume": "partial",
         "native_route_snapshot": "supported",
         "native_durable_lifecycle": "unsupported",
@@ -162,8 +163,8 @@ def test_headless_request_field_consumption_is_explicit(
     ("harness_id", "connector_cls", "prompt_delivered", "permission_value"),
     (
         ("codex-cli", CodexNativeHistoryConnector, True, "read-only"),
-        ("claude-code", ClaudeNativeHistoryConnector, True, None),
-        ("gemini-cli", GeminiNativeHistoryConnector, True, None),
+        ("claude-code", ClaudeNativeHistoryConnector, True, "plan"),
+        ("gemini-cli", GeminiNativeHistoryConnector, True, "plan"),
     ),
 )
 def test_native_request_field_consumption_and_policy_gap_are_explicit(
@@ -209,13 +210,11 @@ def test_native_request_field_consumption_and_policy_gap_are_explicit(
     assert plan.metadata["api_mode"] == "v1"
     assert "GigaChat-2-Max" in plan.command
     assert ("inspect the project" in plan.command) is prompt_delivered
-    if permission_value is None:
-        assert not any(
-            value in plan.command
-            for value in ("read-only", "--permission-mode", "--approval-mode=plan")
-        )
-    else:
-        assert permission_value in plan.command
+    assert permission_value in plan.command
+    permission = plan.metadata["permission_enforcement"]
+    assert permission["requested_mode"] == "plan"
+    assert permission["read_only"] is True
+    assert permission["interactive_approvals"] == "delegated_to_cli_sandbox"
     if harness_id == "gemini-cli":
         assert plan.command[-2:] == (
             "--prompt-interactive",
@@ -226,7 +225,7 @@ def test_native_request_field_consumption_and_policy_gap_are_explicit(
 
     spec = BUILTIN_ADAPTERS[harness_id].spec()
     assert spec.adapter_capabilities["native_workspace"].status is (
-        AdapterSupportLevel.PARTIAL
+        AdapterSupportLevel.SUPPORTED
     )
     expected_prompt_status = (
         AdapterSupportLevel.SUPPORTED
@@ -236,6 +235,123 @@ def test_native_request_field_consumption_and_policy_gap_are_explicit(
     assert spec.adapter_capabilities["native_initial_prompt"].status is (
         expected_prompt_status
     )
+
+
+@pytest.mark.parametrize(
+    ("harness_id", "connector_cls", "control", "plan_value", "edit_value"),
+    (
+        (
+            "codex-cli",
+            CodexNativeHistoryConnector,
+            "--sandbox",
+            "read-only",
+            "workspace-write",
+        ),
+        (
+            "claude-code",
+            ClaudeNativeHistoryConnector,
+            "--permission-mode",
+            "plan",
+            "default",
+        ),
+        (
+            "gemini-cli",
+            GeminiNativeHistoryConnector,
+            "--approval-mode",
+            "plan",
+            "default",
+        ),
+    ),
+)
+@pytest.mark.parametrize("mode", ("plan", "read", "edit"))
+def test_native_permission_modes_use_explicit_cli_controls(
+    harness_id,
+    connector_cls,
+    control,
+    plan_value,
+    edit_value,
+    mode,
+    tmp_path,
+):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    connector = connector_cls(
+        data_dir=tmp_path / "data",
+        executable=harness_id,
+    )
+
+    plan = connector.build_start_command(
+        HarnessRequest(
+            prompt="",
+            api_mode=GigaChatApiMode.V1,
+            mode=mode,
+            workspace=str(workspace),
+            session_id="session-permissions",
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    expected = edit_value if mode == "edit" else plan_value
+    control_index = plan.command.index(control)
+    assert plan.command[control_index + 1] == expected
+    permission = plan.metadata["permission_enforcement"]
+    assert permission["requested_mode"] == mode
+    assert permission["cli_control"] == control
+    assert permission["cli_value"] == expected
+    assert permission["read_only"] is (mode != "edit")
+    assert permission["harness_process_spawn"] == "enforced_by_harness"
+
+
+@pytest.mark.parametrize(
+    ("harness_id", "connector_cls"),
+    (
+        ("codex-cli", CodexNativeHistoryConnector),
+        ("claude-code", ClaudeNativeHistoryConnector),
+        ("gemini-cli", GeminiNativeHistoryConnector),
+    ),
+)
+def test_native_edit_snapshot_preserves_source_and_effective_worktree(
+    harness_id,
+    connector_cls,
+    tmp_path,
+):
+    source_workspace = tmp_path / "repo"
+    effective_workspace = tmp_path / "data" / "worktrees" / "sess" / "run"
+    source_workspace.mkdir()
+    effective_workspace.mkdir(parents=True)
+    connector = connector_cls(
+        data_dir=tmp_path / "data",
+        executable=harness_id,
+    )
+
+    plan = connector.build_start_command(
+        HarnessRequest(
+            prompt="",
+            api_mode=GigaChatApiMode.V1,
+            mode="edit",
+            workspace=str(effective_workspace),
+            session_id="session-worktree-snapshot",
+            extra={
+                "native_source_workspace": str(source_workspace),
+                "workspace_execution": {
+                    "requested_policy": "auto",
+                    "policy": "worktree",
+                    "source_workspace": str(source_workspace),
+                    "effective_workspace": str(effective_workspace),
+                },
+            },
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    snapshot = plan.execution_snapshot
+    assert snapshot is not None
+    assert snapshot.workspace == str(source_workspace)
+    assert snapshot.source_workspace == str(source_workspace)
+    assert snapshot.effective_workspace == str(effective_workspace)
+    assert snapshot.workspace_policy == "worktree"
+    assert plan.cwd == str(effective_workspace)
+    assert plan.metadata["project_id"] == project_id_for_root(source_workspace)
 
 
 @pytest.mark.parametrize(

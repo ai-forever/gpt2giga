@@ -1734,6 +1734,23 @@ marked external and is never stopped. The generated sidecar key is passed
 directly to the CLI startup context and is not recovered from the UI process's
 temporary key cache.
 
+Native process spawn also passes through the shared `process.spawn` Approval
+Center action before worktree creation, proxy startup, or CLI spawn. The
+`review_every_action` profile returns a retryable approval request; a denial
+starts no process and creates no worktree. Under the safe `auto` or explicit
+`worktree` policy, native `edit` creates a detached Git worktree and passes only
+that effective path to the CLI. Isolation failure stops the start instead of
+falling back to the source checkout. Runs, links, and public plan metadata keep
+both source and effective workspace evidence plus the Harness policy result.
+
+Permission controls remain CLI-owned after spawn: Codex maps `plan|read` to
+`--sandbox read-only` and `edit` to `workspace-write`; Claude Code maps
+`plan|read` to `--permission-mode plan` and `edit` to `default`; Gemini maps
+`plan|read` to `--approval-mode plan` and `edit` to `default`. Harness records
+these controls as delegated to the CLI sandbox and keeps interactive in-CLI
+approval prompts explicitly delegated rather than claiming that Approval
+Center can observe or answer them.
+
 Gemini native starts capability-probe the installed CLI for
 `--prompt-interactive`. When supported, the composed prompt and rendered
 attachment references are passed in that one interactive invocation, without

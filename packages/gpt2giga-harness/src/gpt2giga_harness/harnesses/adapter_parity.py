@@ -24,9 +24,9 @@ def _common_contract() -> dict[str, AdapterCapabilitySupport]:
             "Consumes the CLI JSON or JSONL surface and emits normalized Harness events.",
         ),
         "native_workspace": _claim(
-            AdapterSupportLevel.PARTIAL,
-            "Uses the requested workspace as cwd, but native start does not yet pass "
-            "through shared policy approval or worktree isolation.",
+            AdapterSupportLevel.SUPPORTED,
+            "Native process spawn passes through shared policy and edit mode uses an "
+            "isolated Git worktree under the safe auto or worktree policy.",
         ),
         "native_route_snapshot": _claim(
             AdapterSupportLevel.SUPPORTED,
@@ -85,7 +85,8 @@ def codex_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
             ),
             "native_permission_mode": _claim(
                 AdapterSupportLevel.SUPPORTED,
-                "Maps plan and read to read-only and edit to workspace-write sandbox argv.",
+                "Maps plan and read to read-only and edit to workspace-write sandbox "
+                "argv; interactive approvals remain delegated to Codex.",
             ),
             "native_resume": _claim(
                 AdapterSupportLevel.PARTIAL,
@@ -112,8 +113,9 @@ def claude_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
                 "Delivers the composed prompt and attachment references in native argv.",
             ),
             "native_permission_mode": _claim(
-                AdapterSupportLevel.UNSUPPORTED,
-                "Native start does not consume the requested plan, read, or edit mode.",
+                AdapterSupportLevel.SUPPORTED,
+                "Maps plan and read to Claude plan mode and edit to default permission "
+                "mode; interactive approvals remain delegated to Claude Code.",
             ),
             "native_resume": _claim(
                 AdapterSupportLevel.SUPPORTED,
@@ -141,8 +143,9 @@ def gemini_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
                 "composed prompt once and records a redaction-safe outcome.",
             ),
             "native_permission_mode": _claim(
-                AdapterSupportLevel.UNSUPPORTED,
-                "Native start does not consume the requested plan, read, or edit mode.",
+                AdapterSupportLevel.SUPPORTED,
+                "Maps plan and read to Gemini plan approval mode and edit to default "
+                "approval mode; interactive approvals remain delegated to Gemini CLI.",
             ),
             "native_resume": _claim(
                 AdapterSupportLevel.PARTIAL,

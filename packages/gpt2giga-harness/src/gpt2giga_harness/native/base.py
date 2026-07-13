@@ -12,7 +12,11 @@ from gpt2giga_harness.native.models import (
     NativeTranscriptMessage,
     execution_snapshot_to_dict,
 )
+from gpt2giga_harness.runtime.policy import EnforcementLevel
 from gpt2giga_harness.types import HarnessContext, HarnessRequest, redact_secrets
+
+
+NATIVE_PERMISSION_MODES = frozenset({"plan", "read", "edit"})
 
 
 class NativePromptDeliveryStatus(str, Enum):
@@ -112,6 +116,45 @@ class NativeHistoryConnector(Protocol):
 
     def record_start_snapshot(self, plan: NativeCommandPlan) -> None:
         """Persist a successfully spawned native start snapshot for discovery."""
+
+
+def native_permission_metadata(
+    *,
+    requested_mode: str,
+    cli_control: str,
+    cli_value: str,
+    read_only: bool,
+) -> dict[str, Any]:
+    """Describe the proven CLI permission boundary without claiming ownership."""
+    if requested_mode not in NATIVE_PERMISSION_MODES:
+        raise ValueError(f"unsupported native permission mode: {requested_mode}")
+    return {
+        "requested_mode": requested_mode,
+        "cli_control": cli_control,
+        "cli_value": cli_value,
+        "read_only": read_only,
+        "cli_permission_enforcement": EnforcementLevel.DELEGATED_TO_CLI_SANDBOX.value,
+        "interactive_approvals": EnforcementLevel.DELEGATED_TO_CLI_SANDBOX.value,
+        "harness_process_spawn": EnforcementLevel.ENFORCED_BY_HARNESS.value,
+    }
+
+
+def native_source_workspace(request: HarnessRequest) -> str | None:
+    """Return the source checkout identity when execution uses a worktree."""
+    value = request.extra.get("native_source_workspace")
+    if value is None or not str(value).strip():
+        return request.workspace
+    return str(value).strip()
+
+
+def native_workspace_policy(request: HarnessRequest) -> str:
+    """Return the effective persisted workspace policy for a native plan."""
+    execution = request.extra.get("workspace_execution")
+    if isinstance(execution, Mapping):
+        value = execution.get("policy")
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return "current"
 
 
 def native_command_plan_to_dict(plan: NativeCommandPlan) -> dict[str, Any]:

@@ -1,5 +1,7 @@
 import os
 import json
+from pathlib import Path
+import subprocess
 import sys
 import time
 from dataclasses import replace
@@ -88,6 +90,192 @@ def test_native_process_api_start_poll_input_and_stop(tmp_path):
         "terminal_output",
         "terminal_stop",
     }
+
+
+def test_native_process_api_approval_blocks_before_worktree_and_spawn(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    data_dir = tmp_path / "data"
+    script = _write_workspace_cli(tmp_path)
+    store = FilesystemHarnessSessionStore(data_dir)
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(start_script=script),
+        config=HarnessConfig(data_dir=str(data_dir)),
+        store=store,
+    )
+    session = store.create_session(
+        title="Native approval",
+        workspace=str(repo),
+        default_harness_id="fake-cli",
+        metadata={"project_id": "project_native_policy"},
+    )
+    payload = {
+        "session_id": session.id,
+        "harness_id": "fake-cli",
+        "action": "start",
+        "prompt": "edit safely",
+        "mode": "edit",
+        "workspace": str(repo),
+        "workspace_policy": "auto",
+        "permission_profile": "review_every_action",
+        "idempotency_key": "native-approval-deny",
+    }
+
+    waiting = client.post("/api/native/processes/start", json=payload)
+
+    assert waiting.status_code == 202, waiting.text
+    approval = waiting.json()["approval"]
+    assert approval["action"] == "process.spawn"
+    assert approval["enforcement"] == "enforced_by_harness"
+    assert "edit safely" not in str(approval)
+    assert store.list_runs(session.id) == ()
+    assert not (data_dir / "worktrees").exists()
+    assert not (repo / "native-cwd.txt").exists()
+
+    denied = client.post(
+        f"/api/approvals/{approval['id']}/decision",
+        json={"decision": "deny"},
+    )
+
+    assert denied.status_code == 200, denied.text
+    assert denied.json()["approval"]["status"] == "denied"
+    assert store.list_runs(session.id) == ()
+    assert not (repo / "native-cwd.txt").exists()
+
+
+def test_native_process_api_edit_fails_closed_when_worktree_is_unavailable(tmp_path):
+    workspace = tmp_path / "plain-workspace"
+    workspace.mkdir()
+    script = _write_workspace_cli(tmp_path)
+    client, store = _client(tmp_path, FakeProcessConnector(start_script=script))
+    session = store.create_session(
+        title="Native isolation failure",
+        workspace=str(workspace),
+        default_harness_id="fake-cli",
+    )
+
+    response = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "action": "start",
+            "prompt": "edit safely",
+            "mode": "edit",
+            "workspace": str(workspace),
+            "workspace_policy": "auto",
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert "requires a Git repository" in response.json()["detail"]
+    assert store.list_runs(session.id) == ()
+    assert not (workspace / "native-cwd.txt").exists()
+
+
+def test_native_process_api_edit_uses_approved_isolated_worktree(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    data_dir = tmp_path / "data"
+    script = _write_workspace_cli(tmp_path)
+    store = FilesystemHarnessSessionStore(data_dir)
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(start_script=script),
+        config=HarnessConfig(data_dir=str(data_dir)),
+        store=store,
+    )
+    session = store.create_session(
+        title="Native worktree",
+        workspace=str(repo),
+        default_harness_id="fake-cli",
+        metadata={"project_id": "project_native_worktree"},
+    )
+    payload = {
+        "session_id": session.id,
+        "harness_id": "fake-cli",
+        "action": "start",
+        "prompt": "edit safely",
+        "mode": "edit",
+        "workspace": str(repo),
+        "workspace_policy": "auto",
+        "permission_profile": "review_every_action",
+        "idempotency_key": "native-approval-allow",
+    }
+    waiting = client.post("/api/native/processes/start", json=payload)
+    approval_id = waiting.json()["approval"]["id"]
+    approved = client.post(
+        f"/api/approvals/{approval_id}/decision",
+        json={"decision": "allow_once"},
+    )
+    assert approved.status_code == 200, approved.text
+
+    started = client.post("/api/native/processes/start", json=payload)
+
+    assert started.status_code == 200, started.text
+    run = started.json()["run"]
+    execution = run["metadata"]["workspace_execution"]
+    assert execution["requested_policy"] == "auto"
+    assert execution["policy"] == "worktree"
+    assert execution["source_workspace"] == str(repo)
+    assert execution["effective_workspace"] != str(repo)
+    assert run["workspace"] == execution["effective_workspace"]
+    assert run["metadata"]["policy"] == {
+        "action": "process.spawn",
+        "decision": "allow",
+        "enforcement": "enforced_by_harness",
+        "policy_source": "approval_grant",
+        "permission_profile": "review_every_action",
+    }
+    worktree = Path(execution["worktree_path"])
+    _wait_for_process_status(client, started.json()["process"]["id"], {"succeeded"})
+    assert (worktree / "native-cwd.txt").read_text(encoding="utf-8") == str(worktree)
+    assert not (repo / "native-cwd.txt").exists()
+
+
+def test_native_process_api_edit_resume_requires_isolation_evidence(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    script = _write_workspace_cli(tmp_path)
+    snapshot = create_execution_snapshot(
+        harness_id="fake-cli",
+        api_mode="v2",
+        model="ConfiguredModel",
+        native_home=str(tmp_path / "managed-home"),
+        workspace=str(repo),
+        project_id="proj_native",
+        permission_mode="edit",
+        tool_config_hash="config-hash",
+    )
+    ref = replace(
+        _native_ref(workspace=str(repo)),
+        execution_snapshot=snapshot,
+    )
+    native_index = FilesystemNativeSessionIndexStore(tmp_path / "data")
+    native_index.upsert_ref(ref, project_id="proj_native")
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(start_script=script),
+        native_index_store=native_index,
+    )
+    session = store.create_session(
+        title="Unsafe legacy edit resume",
+        workspace=str(repo),
+        default_harness_id="fake-cli",
+    )
+
+    response = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "action": "resume",
+            "native_ref_id": ref.id,
+            "workspace_policy": "auto",
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert "no isolated worktree evidence" in response.json()["detail"]
+    assert store.list_runs(session.id) == ()
+    assert not (repo / "native-cwd.txt").exists()
 
 
 def test_native_process_api_start_creates_managed_native_link(tmp_path):
@@ -966,6 +1154,16 @@ def _write_once_cli(tmp_path):
     return script
 
 
+def _write_workspace_cli(tmp_path):
+    script = tmp_path / "workspace_cli.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        "Path('native-cwd.txt').write_text(str(Path.cwd()), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    return script
+
+
 def _write_gemini_argv_cli(tmp_path, capture_path):
     script = tmp_path / "fake_gemini"
     script.write_text(
@@ -1091,3 +1289,24 @@ def _wait_for_process_status(
             return body
         time.sleep(0.02)
     raise AssertionError(f"Timed out waiting for {run_statuses}; last body was {body}")
+
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir()
+    subprocess.run(("git", "init", str(path)), check=True, capture_output=True)
+    subprocess.run(
+        ("git", "-C", str(path), "config", "user.email", "test@example.com"),
+        check=True,
+    )
+    subprocess.run(
+        ("git", "-C", str(path), "config", "user.name", "Test User"),
+        check=True,
+    )
+    (path / "base.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(("git", "-C", str(path), "add", "base.txt"), check=True)
+    subprocess.run(
+        ("git", "-C", str(path), "commit", "-m", "initial"),
+        check=True,
+        capture_output=True,
+    )
+    return path

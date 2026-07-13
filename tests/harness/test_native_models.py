@@ -89,6 +89,9 @@ def test_native_execution_snapshot_round_trips_public_identity():
         permission_mode="edit",
         tool_config_hash="sha256-config",
         created_at="2026-07-13T10:00:00+00:00",
+        source_workspace="/repo",
+        effective_workspace="/data/worktrees/sess/run",
+        workspace_policy="worktree",
     )
 
     payload = execution_snapshot_to_dict(snapshot)
@@ -96,3 +99,6 @@ def test_native_execution_snapshot_round_trips_public_identity():
     assert execution_snapshot_from_dict(payload) == snapshot
     assert payload["route_known"] is True
     assert payload["warnings"] == []
+    assert payload["source_workspace"] == "/repo"
+    assert payload["effective_workspace"] == "/data/worktrees/sess/run"
+    assert payload["workspace_policy"] == "worktree"

@@ -357,7 +357,14 @@ def test_gemini_native_resume_command_requires_managed_ref(tmp_path):
         can_resume=False,
     )
 
-    assert plan.command == ("gemini", "--resume", "managed-gemini-session")
+    assert plan.command == (
+        "gemini",
+        "--approval-mode",
+        "plan",
+        "--resume",
+        "managed-gemini-session",
+    )
+    assert plan.metadata["permission_enforcement"]["read_only"] is True
     assert "-p" not in plan.command
     assert "--skip-trust" not in plan.command
     assert plan.env["HOME"] == managed.metadata["native_home"]

@@ -2746,6 +2746,7 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         max-height: calc(100vh - 96px);
         overflow: auto;
+        backdrop-filter: none;
       }
       .quick-config > label,
       .quick-config > fieldset,
@@ -2772,6 +2773,17 @@
         grid-template-columns: 1fr;
         max-height: none;
         align-content: start;
+        padding-top: 58px;
+      }
+      .quick-config.advanced-open .advanced-settings-button {
+        position: fixed;
+        z-index: 81;
+        top: 72px;
+        right: 16px;
+        min-height: 36px;
+        border: 1px solid var(--border) !important;
+        border-radius: 8px;
+        background: #172533;
       }
       .advanced-panel .span-2,
       .advanced-panel .span-4,

@@ -55,6 +55,7 @@
       selectedNativeRefId: null,
       nativePreview: null,
       activeNativeProcess: null,
+      pendingNativeApproval: null,
       nativeOutputCursor: 0,
       nativeTerminalText: "",
       nativePollTimer: null,
@@ -3628,9 +3629,15 @@
       setNativeSummary("Starting native process...");
       byId("run-button").disabled = true;
       byId("run-button").textContent = "Starting...";
-      const promptIdempotencyKey = window.crypto && typeof window.crypto.randomUUID === "function"
-        ? `native_prompt_${window.crypto.randomUUID()}`
-        : `native_prompt_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      const pendingApproval = state.pendingNativeApproval;
+      const reusePendingApproval = pendingApproval
+        && pendingApproval.prompt === payload.prompt
+        && pendingApproval.harnessId === payload.harness_id;
+      const promptIdempotencyKey = reusePendingApproval
+        ? pendingApproval.idempotencyKey
+        : window.crypto && typeof window.crypto.randomUUID === "function"
+          ? `native_prompt_${window.crypto.randomUUID()}`
+          : `native_prompt_${Date.now()}_${Math.random().toString(16).slice(2)}`;
       try {
         const result = await getJson("/api/native/processes/start", {
           method: "POST",
@@ -3644,6 +3651,8 @@
             model: payload.model,
             api_mode: payload.api_mode,
             mode: payload.mode,
+            workspace_policy: payload.workspace_policy || "auto",
+            permission_profile: payload.permission_profile || "interactive",
             workspace: payload.workspace,
             attachment_ids: payload.attachment_ids || []
           })
@@ -3652,6 +3661,18 @@
           setNativeSummary(result.data.detail || `Native start failed with HTTP ${result.status}`);
           return;
         }
+        if (result.data.approval_required) {
+          const approval = result.data.approval || {};
+          state.pendingNativeApproval = {
+            idempotencyKey: promptIdempotencyKey,
+            prompt: payload.prompt,
+            harnessId: payload.harness_id
+          };
+          setNativeSummary(`Native start is waiting for Approval Center (${approval.id || "pending"}). Approve it, then submit the same prompt again.`);
+          await loadApprovals();
+          return;
+        }
+        state.pendingNativeApproval = null;
         setActiveNativeProcess(result.data.process || null, result.data);
         state.attachments = [];
         byId("prompt-input").value = "";

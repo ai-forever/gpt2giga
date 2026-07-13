@@ -55,6 +55,9 @@ class NativeExecutionSnapshot:
     created_at: str
     route_known: bool = True
     warnings: tuple[str, ...] = ()
+    source_workspace: str | None = None
+    effective_workspace: str | None = None
+    workspace_policy: str | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +102,9 @@ def create_execution_snapshot(
     project_id: str,
     permission_mode: str,
     tool_config_hash: str | None,
+    source_workspace: str | None = None,
+    effective_workspace: str | None = None,
+    workspace_policy: str | None = None,
     route_known: bool = True,
     warnings: tuple[str, ...] = (),
 ) -> NativeExecutionSnapshot:
@@ -114,6 +120,9 @@ def create_execution_snapshot(
             "project_id": project_id,
             "permission_mode": permission_mode,
             "tool_config_hash": tool_config_hash,
+            "source_workspace": source_workspace,
+            "effective_workspace": effective_workspace,
+            "workspace_policy": workspace_policy,
             "created_at": created_at,
             "nonce": uuid.uuid4().hex,
         },
@@ -134,6 +143,9 @@ def create_execution_snapshot(
         created_at=created_at,
         route_known=route_known,
         warnings=warnings,
+        source_workspace=source_workspace,
+        effective_workspace=effective_workspace,
+        workspace_policy=workspace_policy,
     )
 
 
@@ -154,6 +166,9 @@ def execution_snapshot_to_dict(
         "created_at": snapshot.created_at,
         "route_known": snapshot.route_known,
         "warnings": list(snapshot.warnings),
+        "source_workspace": snapshot.source_workspace,
+        "effective_workspace": snapshot.effective_workspace,
+        "workspace_policy": snapshot.workspace_policy,
     }
 
 
@@ -179,6 +194,9 @@ def execution_snapshot_from_dict(
         created_at=str(data.get("created_at") or ""),
         route_known=bool(data.get("route_known", True)),
         warnings=tuple(str(item) for item in data.get("warnings", ())),
+        source_workspace=_optional_text(data.get("source_workspace")),
+        effective_workspace=_optional_text(data.get("effective_workspace")),
+        workspace_policy=_optional_text(data.get("workspace_policy")),
     )
 
 

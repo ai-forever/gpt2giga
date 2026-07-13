@@ -163,7 +163,13 @@ def test_claude_native_start_command_uses_managed_home_and_redacts_key(
     plan = connector.build_start_command(request, context)
     payload = native_command_plan_to_dict(plan)
 
-    assert plan.command[:3] == ("claude", "-n", plan.metadata["session_name"])
+    assert plan.command[:5] == (
+        "claude",
+        "--permission-mode",
+        "default",
+        "-n",
+        plan.metadata["session_name"],
+    )
     assert str(plan.metadata["session_name"]).startswith("gpt2giga-sess-abcdef")
     assert "--model" in plan.command
     assert "GigaChat-2-Max" in plan.command
@@ -273,7 +279,14 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
         can_resume=False,
     )
 
-    assert plan.command == ("claude", "--resume", session_name)
+    assert plan.command == (
+        "claude",
+        "--permission-mode",
+        "plan",
+        "--resume",
+        session_name,
+    )
+    assert plan.metadata["permission_enforcement"]["read_only"] is True
     assert "-p" not in plan.command
     assert "--no-session-persistence" not in plan.command
     assert plan.env["HOME"] == managed.metadata["native_home"]
