@@ -1,37 +1,163 @@
 # Unified Harness
 
-Unified Harness is a local control surface on top of `gpt2giga`. It lets you
-choose a harness, choose a GigaChat model, choose the explicit GigaChat Chat
-Completions backend mode (`/v1` or `/v2`), and run quick smoke tests from either
-the CLI or a small browser UI.
+:::warning[Alpha preview — under active development]
 
-It does not replace the existing `gpt2giga` proxy entry point. You can still
-start the proxy yourself as before, then use `giga` or `gpt2giga-harness` as the
-local harness client. For local `127.0.0.1` proxy URLs, the direct-chat harness
-can also start a temporary `gpt2giga` sidecar when the proxy is down and real
-GigaChat credentials are already present in the environment.
+The `gpt2giga-harness` 0.0.x line is an early preview for testing and feedback.
+The UI, CLI, project YAML, runtime schema, and upgrade behavior can change while
+the product is being developed. Use it for local evaluation and supervised
+workflows, not as a production-critical or unattended multi-user service.
+
+:::
+
+Unified Harness is a local project cockpit on top of `gpt2giga`. It gives you
+one place to run a task through direct GigaChat, Codex CLI, Claude Code, Gemini
+CLI, or a plugin harness; compare the results; inspect what happened; and decide
+which changes are allowed back into your project.
+
+The Harness is not another model and it does not replace the compatibility
+gateway or the agent CLIs. It coordinates them and keeps a normalized local
+record of runs, approvals, artifacts, and reusable project automation.
+
+## Why use it
+
+Working with several agent CLIs usually means different commands, histories,
+permission models, and output formats. Unified Harness adds a common layer for:
+
+- **one project cockpit** — start from the current repository with `giga ui`;
+- **repeatable runs** — save agents, prompts, evals, workflows, and schedules
+  under `.giga/` instead of rebuilding the setup for every task;
+- **comparison** — send the same task to several available harnesses in Arena
+  and inspect the results side by side;
+- **review before mutation** — keep edit runs in isolated Git worktrees and put
+  apply/branch actions behind explicit approvals;
+- **traceability** — inspect durable run status, attempts, redacted events,
+  artifacts, diffs, and provenance after the browser or UI server restarts;
+- **local control** — keep project configuration and runtime history on your
+  machine rather than introducing a hosted control plane.
+
+### Mental model
+
+| Layer | Responsibility |
+| --- | --- |
+| `gpt2giga` gateway | Exposes OpenAI-, Anthropic-, and Gemini-shaped HTTP APIs backed by GigaChat. |
+| Unified Harness | Selects a harness and model, coordinates runs, stores local history, and exposes the CLI/UI. |
+| Direct Chat or agent CLI | Performs the actual model or agent work. External CLIs remain responsible for behavior inside their own process. |
+
+This separation matters: an approval shown by Unified Harness covers actions it
+owns, such as spawning a run or applying a captured patch. It cannot claim to
+observe every internal action performed by a black-box external CLI.
+
+## Is the alpha preview for you?
+
+Try it now if you want to evaluate a local agent cockpit, compare harnesses,
+prototype reviewable workflows, or give feedback while the interfaces are
+still being shaped. Start with `echo`, dry-runs, `plan`/`read` modes, and a test
+repository before allowing edits.
+
+Wait for a later release if you need a stable automation API, guaranteed
+backward compatibility, high availability, central multi-user administration,
+or a security boundary around arbitrary behavior inside third-party CLIs.
+
+During the alpha:
+
+- read release notes before upgrading and back up `~/.gpt2giga/harness` plus
+  important project `.giga/` definitions;
+- expect optional features to depend on the exact Codex, Claude, or Gemini CLI
+  installed on the workstation;
+- keep the UI on its default loopback address unless you deliberately configure
+  remote authentication and TLS;
+- review generated `.giga/` files before committing them, and never put secrets
+  in project configuration;
+- report bugs with `giga doctor`, the Harness version, reproduction steps, and
+  redacted diagnostics in [GitHub Issues](https://github.com/ai-forever/gpt2giga/issues).
 
 ## Quickstart
 
-Install the Harness distribution. It installs the exact compatible gateway
-dependency declared in its package metadata and provides both Harness commands:
+### 1. Get the preview and check the workstation
+
+The source checkout is the current, always-available alpha path:
+
+```bash
+git clone --branch feature/unified_harness \
+  https://github.com/ai-forever/gpt2giga.git
+cd gpt2giga
+uv sync --all-packages --all-extras --dev
+source .venv/bin/activate
+giga doctor
+giga harness list
+```
+
+Keep the checkout virtual environment activated in every terminal used for the
+preview. You can then `cd` to the project you want to inspect while `giga` and
+`gpt2giga` continue to resolve from the checkout. On Windows, activate
+`.venv\Scripts\Activate.ps1` instead.
+
+After the standalone preview appears in your package index, the shorter install
+path is:
 
 ```bash
 uv tool install gpt2giga-harness
 giga doctor
 ```
 
-For development from this repository, install both editable workspace members:
+The distribution installs the exact compatible gateway dependency declared in
+its package metadata and provides the `giga` and `gpt2giga-harness` commands.
+
+Requirements are Python 3.10–3.14 and `uv`. Direct GigaChat runs also need the
+gateway credentials described in the [gpt2giga quickstart](quickstart.md).
+Codex, Claude Code, and Gemini integrations require the matching external CLI
+executable on `PATH` (or an explicit executable override) plus a configured
+local gateway. They do not require a separate vendor login for the documented
+Harness route. Unavailable CLIs stay disabled rather than breaking the cockpit.
+
+### 2. Initialize a disposable or test project
+
+Run the first tour in a repository where generated project files and test edits
+are safe to inspect:
 
 ```bash
-uv sync --all-packages --all-extras --dev
+cd /path/to/project
+giga doctor
+giga init
 ```
 
-Start the proxy:
+`giga init` creates non-secret starter configuration, agent profiles, prompts,
+an eval, and a review workflow under `.giga/`. Existing files are not replaced
+unless you pass `--overwrite`.
+
+Before connecting a real model, verify the local execution path with the
+credential-free `echo` harness:
 
 ```bash
-uv run gpt2giga
+giga harness run echo \
+  --workspace . \
+  --prompt "Summarize the selected task"
 ```
+
+Preview an external agent command without launching it:
+
+```bash
+giga run \
+  --agent codex \
+  --mode read \
+  --workspace . \
+  --dry-run \
+  "Summarize this repository"
+```
+
+### 3. Connect GigaChat
+
+For browser and durable-worker runs, keep the gateway running in a separate
+terminal. Activate the same source-checkout environment in that terminal, then
+run:
+
+```bash
+source /path/to/gpt2giga/.venv/bin/activate
+gpt2giga
+```
+
+With tool installations, install/expose the gateway command separately as
+described in the [gpt2giga quickstart](quickstart.md), then run `gpt2giga`.
 
 In another terminal, inspect the harness environment:
 
@@ -64,11 +190,22 @@ giga harness run direct-chat \
   --prompt "Hello from the harness"
 ```
 
+### 4. Open the project cockpit
+
 Open the local UI:
 
 ```bash
 giga ui
 ```
+
+Then open `http://127.0.0.1:8091/`. A useful first tour is:
+
+1. Confirm the current repository and branch in **Work**.
+2. Select `echo` and submit a harmless prompt.
+3. Open **Runs** and inspect the attempt, trace, and stored redacted payloads.
+4. Use **Arena** to compare two available harnesses with the same task.
+5. Inspect **Approvals**, **Agents**, **Workflows**, **Evaluate**, **Tools**, and
+   **Scheduled** before enabling edits or unattended execution.
 
 `giga ui` starts a local durable worker automatically when no online worker is
 registered. Use `giga ui --no-start-worker` when a separately supervised worker

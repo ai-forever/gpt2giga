@@ -16,7 +16,7 @@ http://localhost:8090
 | Поддерживаемые маршруты OpenAI, Anthropic, Gemini и LiteLLM | [Совместимость API](api-compatibility.md) |
 | Поведение `extra_headers`, `extra_query`, `extra_body` и необязательных полей | [Параметры клиентов](client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и их сопоставление с OpenAI/Anthropic/Gemini | [Встроенные инструменты](builtin-tools.md) |
-| Локальные Harness CLI/UI для smoke-тестов и agent CLI adapters | [Unified Harness](harness.md) |
+| Альфа-превью локального cockpit для запусков, сравнений, approvals и workflows | [Unified Harness](harness.md) |
 | Переменные окружения, аутентификация, лимиты, метрики, наблюдаемость | [Конфигурация](configuration.md) |
 | Профили Compose, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развёртывание](deployment.md) |
 | Журналы выполнения, журналы трафика, admin API, отладочная трансляция | [Операции](operations.md) |
@@ -47,8 +47,9 @@ OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подг
 3. Запустите `docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d`.
 4. Проверьте `curl http://localhost:8090/health`.
 5. Подключите SDK к `http://localhost:8090/v1` или `http://localhost:8090/v2` для явного контракта бэкенда, либо к `http://localhost:8090`, если корень должен следовать `GPT2GIGA_GIGACHAT_API_MODE`.
-6. Для локального control plane установите `gpt2giga-harness==0.0.1`,
-   запустите `giga ui` и откройте `http://127.0.0.1:8091/`.
+6. Чтобы попробовать локальный project cockpit в статусе альфа-превью,
+   следуйте [руководству Unified Harness](harness.md), запустите `giga doctor`
+   и `giga ui`, затем откройте `http://127.0.0.1:8091/`.
 
 ## Для разработчиков
 

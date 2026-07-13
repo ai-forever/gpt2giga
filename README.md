@@ -52,9 +52,10 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Для локального Harness/control plane установите отдельный пакет. Он подтянет
-совместимую gateway-версию из package metadata и добавит команды `giga` и
-`gpt2giga-harness`:
+Unified Harness пока доступен как активно разрабатываемое альфа-превью. Текущий
+способ запуска — [из source checkout](./docs/harness.md#quickstart). После
+появления отдельного пакета в вашем package index он подтянет совместимую
+gateway-версию и добавит команды `giga` и `gpt2giga-harness`:
 
 ```sh
 uv tool install gpt2giga-harness

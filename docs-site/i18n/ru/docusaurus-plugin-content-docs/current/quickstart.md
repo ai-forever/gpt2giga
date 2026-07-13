@@ -60,15 +60,16 @@ curl http://localhost:8090/health
 установите gateway:
 
 ```sh
-uv tool install "gpt2giga==0.2.2a1"
+uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Для Harness CLI, worker и локального browser UI установите отдельный control
-plane. Он установит точную совместимую зависимость gateway:
+Текущее альфа-превью Unified Harness запускается из source checkout по
+[руководству Unified Harness](harness.md). После появления отдельного пакета в
+вашем package index установите control plane так:
 
 ```sh
-uv tool install "gpt2giga-harness==0.0.1"
+uv tool install gpt2giga-harness
 giga doctor
 giga ui
 ```
@@ -76,6 +77,14 @@ giga ui
 Дистрибутив Harness использует Python namespace `gpt2giga_harness` и добавляет
 команды `giga` и `gpt2giga-harness`. Дистрибутив gateway добавляет только
 команду `gpt2giga`.
+
+:::warning[Альфа-превью]
+
+Unified Harness активно разрабатывается. Начните с локальных запусков под
+наблюдением и прочитайте [руководство по альфа-превью](harness.md), прежде чем
+включать режим редактирования, удалённый доступ или расписания.
+
+:::
 
 ## Запуск из репозитория
 
