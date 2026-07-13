@@ -113,7 +113,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         path = _path_from_ref(ref)
         if path is None:
             return ()
-        return tuple(_iter_messages(path, max_messages=max_messages))
+        return tuple(_iter_session_messages(path, max_messages=max_messages))
 
     def import_ref(
         self,
@@ -123,7 +123,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         path = _path_from_ref(ref)
         if path is None:
             return ()
-        return tuple(_iter_messages(path, max_messages=None))
+        return tuple(_iter_session_messages(path, max_messages=None))
 
     def build_start_command(
         self,
@@ -396,7 +396,11 @@ def _session_files(source_root: Path) -> tuple[Path, ...]:
             if root == source_root:
                 paths.update(path for path in root.glob("*.jsonl") if path.is_file())
                 continue
-            paths.update(path for path in root.rglob("*.jsonl") if path.is_file())
+            paths.update(
+                path
+                for path in root.rglob("*.jsonl")
+                if path.is_file() and "subagents" not in path.parts
+            )
     except OSError:
         return ()
     return tuple(sorted(paths))
@@ -433,6 +437,100 @@ def _iter_messages(
         count += 1
         if max_messages is not None and count >= max_messages:
             return
+
+
+def _iter_session_messages(
+    path: Path,
+    *,
+    max_messages: int | None,
+) -> Iterable[NativeTranscriptMessage]:
+    indexed_messages: list[tuple[NativeTranscriptMessage, int]] = []
+    for message in _iter_messages(path, max_messages=None):
+        indexed_messages.append((message, len(indexed_messages)))
+    for subagent_path in _subagent_session_files(path):
+        context = _subagent_context(subagent_path)
+        if context is None:
+            continue
+        for message in _iter_messages(subagent_path, max_messages=None):
+            nested_message = _subagent_tool_message(message, context=context)
+            if nested_message is not None:
+                indexed_messages.append((nested_message, len(indexed_messages)))
+    indexed_messages.sort(
+        key=lambda item: (
+            item[0].created_at is None,
+            item[0].created_at or "",
+            item[1],
+        )
+    )
+    for index, (message, _) in enumerate(indexed_messages):
+        if max_messages is not None and index >= max_messages:
+            return
+        yield message
+
+
+def _subagent_session_files(path: Path) -> tuple[Path, ...]:
+    subagents_dir = path.parent / path.stem / "subagents"
+    try:
+        if not subagents_dir.is_dir():
+            return ()
+        return tuple(sorted(subagents_dir.glob("*.jsonl")))
+    except OSError:
+        return ()
+
+
+def _subagent_context(path: Path) -> Mapping[str, Any] | None:
+    metadata_path = path.with_suffix(".meta.json")
+    try:
+        decoded = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(decoded, Mapping):
+        return None
+    parent_tool_call_id = decoded.get("toolUseId")
+    if parent_tool_call_id is None or not str(parent_tool_call_id).strip():
+        return None
+    return {
+        "parent_tool_call_id": str(parent_tool_call_id).strip(),
+        "subagent_id": path.stem,
+        "subagent_type": str(decoded.get("agentType") or "subagent").strip(),
+        "subagent_description": str(decoded.get("description") or "").strip(),
+        "subagent_depth": decoded.get("spawnDepth"),
+    }
+
+
+def _subagent_tool_message(
+    message: NativeTranscriptMessage,
+    *,
+    context: Mapping[str, Any],
+) -> NativeTranscriptMessage | None:
+    tool_calls = message.metadata.get("tool_calls")
+    tool_results = message.metadata.get("tool_results")
+    if not tool_calls and not tool_results:
+        return None
+    metadata = dict(message.metadata)
+    native_message_id = metadata.get("native_message_id")
+    if native_message_id is not None:
+        metadata["native_message_id"] = f"{context['subagent_id']}:{native_message_id}"
+    for key in (
+        "parent_tool_call_id",
+        "subagent_id",
+        "subagent_type",
+        "subagent_description",
+        "subagent_depth",
+    ):
+        metadata[key] = context.get(key)
+    if tool_calls:
+        metadata["tool_calls"] = [{**tool_call, **context} for tool_call in tool_calls]
+    if tool_results:
+        metadata["tool_results"] = [
+            {**tool_result, **context} for tool_result in tool_results
+        ]
+    return NativeTranscriptMessage(
+        role=message.role,
+        content="",
+        created_at=message.created_at,
+        metadata=metadata,
+    )
 
 
 def _message_from_event(event: Mapping[str, Any]) -> NativeTranscriptMessage | None:

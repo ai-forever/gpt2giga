@@ -4509,11 +4509,21 @@
         arguments: "",
         output: "",
         duration_ms: null,
-        seconds_left: null
+        seconds_left: null,
+        parentToolCallId: "",
+        subagentId: "",
+        subagentType: "",
+        subagentDescription: "",
+        subagentDepth: null
       };
       const functionPayload = payload.function && typeof payload.function === "object" ? payload.function : {};
       const name = payload.name || functionPayload.name;
       if (name) current.name = String(name);
+      if (payload.parent_tool_call_id != null) current.parentToolCallId = String(payload.parent_tool_call_id);
+      if (payload.subagent_id != null) current.subagentId = String(payload.subagent_id);
+      if (payload.subagent_type != null) current.subagentType = String(payload.subagent_type);
+      if (payload.subagent_description != null) current.subagentDescription = String(payload.subagent_description);
+      if (payload.subagent_depth != null) current.subagentDepth = finiteToken(payload.subagent_depth);
       const completeArguments = payload.arguments != null ? payload.arguments : payload.input != null ? payload.input : functionPayload.arguments;
       const argumentDelta = payload.arguments_delta != null ? payload.arguments_delta : payload.input_delta;
       if (event.type === "tool_call_delta" && argumentDelta != null) {
@@ -4655,7 +4665,7 @@
     function toolCard(tool, messageKey) {
       const plan = planPayloadFromTool(tool);
       const details = document.createElement("details");
-      details.className = `tool-call-card${plan ? " plan-card" : ""}`;
+      details.className = `tool-call-card${plan ? " plan-card" : ""}${tool.subagentId ? " subagent-tool" : ""}`;
       const expansionKey = `${messageKey || "run"}:${tool.id}`;
       const rememberedOpen = state.toolCallExpansion.get(expansionKey);
       details.open = rememberedOpen == null
@@ -4667,9 +4677,19 @@
       const summary = document.createElement("summary");
       const dot = document.createElement("span");
       dot.className = `tool-status-dot ${tool.status || "running"}`;
+      const title = document.createElement("span");
+      title.className = "tool-call-title";
       const name = document.createElement("span");
       name.className = "tool-call-name";
       name.textContent = plan ? "Plan" : tool.name || "tool";
+      title.appendChild(name);
+      if (tool.subagentType) {
+        const origin = document.createElement("span");
+        origin.className = "tool-call-origin";
+        origin.textContent = `${tool.subagentType} subagent`;
+        if (tool.subagentDescription) origin.title = tool.subagentDescription;
+        title.appendChild(origin);
+      }
       const status = document.createElement("span");
       status.className = "tool-call-status";
       status.textContent = plan
@@ -4679,7 +4699,7 @@
           : tool.duration_ms != null
             ? `${tool.status} · ${tool.duration_ms} ms`
             : tool.status || "running";
-      summary.append(dot, name, status);
+      summary.append(dot, title, status);
       details.appendChild(summary);
       if (plan) {
         appendPlanBody(details, plan, tool);

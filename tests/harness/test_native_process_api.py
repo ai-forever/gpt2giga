@@ -345,6 +345,11 @@ def test_native_process_syncs_claude_tool_events_while_running(tmp_path):
                                 "name": "Read",
                                 "arguments": {"file_path": "/repo/README.md"},
                                 "status": "running",
+                                "parent_tool_call_id": "toolu_agent",
+                                "subagent_id": "agent-explore",
+                                "subagent_type": "Explore",
+                                "subagent_description": "Inspect repository",
+                                "subagent_depth": 1,
                             }
                         ],
                     },
@@ -360,6 +365,11 @@ def test_native_process_syncs_claude_tool_events_while_running(tmp_path):
                                 "tool_call_id": "toolu_read",
                                 "result": "README contents",
                                 "status": "completed",
+                                "parent_tool_call_id": "toolu_agent",
+                                "subagent_id": "agent-explore",
+                                "subagent_type": "Explore",
+                                "subagent_description": "Inspect repository",
+                                "subagent_depth": 1,
                             }
                         ],
                     },
@@ -407,7 +417,10 @@ def test_native_process_syncs_claude_tool_events_while_running(tmp_path):
     ]
     assert tool_events[0]["payload"]["name"] == "Read"
     assert tool_events[0]["payload"]["arguments"] == {"file_path": "/repo/README.md"}
+    assert tool_events[0]["payload"]["parent_tool_call_id"] == "toolu_agent"
+    assert tool_events[0]["payload"]["subagent_type"] == "Explore"
     assert tool_events[1]["payload"]["result"] == "README contents"
+    assert tool_events[1]["payload"]["subagent_id"] == "agent-explore"
     assert len(second_poll["events"]) == len(first_poll["events"])
     stored_tool_events = [
         event

@@ -53,13 +53,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.33">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.34">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.34"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.35"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -483,6 +483,9 @@ def test_ui_native_tools_render_once_stream_live_and_keep_expansion_state():
         "state.toolCallExpansion.set(expansionKey, details.open)",
         "toolCard(tool, messageKey)",
         "message.id || message.run_id",
+        "subagentType",
+        "tool-call-origin",
+        "`${tool.subagentType} subagent`",
     ):
         source = (
             APP_JS

@@ -248,6 +248,142 @@ def test_claude_native_import_normalizes_tool_calls_and_results(tmp_path):
     ]
 
 
+def test_claude_native_import_includes_subagent_tool_activity(tmp_path):
+    workspace = tmp_path / "repo"
+    data_dir = tmp_path / "data"
+    external_home = tmp_path / ".claude"
+    workspace.mkdir()
+    session_file = external_home / "projects" / "repo" / "external.jsonl"
+    _write_jsonl(
+        session_file,
+        (
+            {
+                "uuid": "root-agent-call",
+                "sessionId": "external-session",
+                "timestamp": "2026-07-13T19:28:18Z",
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_agent",
+                            "name": "Agent",
+                            "input": {"subagent_type": "Explore"},
+                        }
+                    ],
+                },
+            },
+            {
+                "uuid": "root-agent-result",
+                "timestamp": "2026-07-13T19:28:22Z",
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_agent",
+                            "content": "exploration complete",
+                        }
+                    ],
+                },
+            },
+        ),
+    )
+    subagent_file = (
+        session_file.parent / session_file.stem / "subagents" / "agent-explore.jsonl"
+    )
+    _write_jsonl(
+        subagent_file,
+        (
+            {
+                "uuid": "nested-read-call",
+                "timestamp": "2026-07-13T19:28:19Z",
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_read",
+                            "name": "Read",
+                            "input": {"file_path": "/repo/README.md"},
+                        }
+                    ],
+                },
+            },
+            {
+                "uuid": "nested-read-result",
+                "timestamp": "2026-07-13T19:28:20Z",
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_read",
+                            "content": "README contents",
+                        }
+                    ],
+                },
+            },
+            {
+                "uuid": "nested-answer",
+                "timestamp": "2026-07-13T19:28:21Z",
+                "type": "assistant",
+                "message": {"role": "assistant", "content": "private summary"},
+            },
+        ),
+    )
+    subagent_file.with_suffix(".meta.json").write_text(
+        json.dumps(
+            {
+                "toolUseId": "toolu_agent",
+                "agentType": "Explore",
+                "description": "Inspect repository structure",
+                "spawnDepth": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    connector = ClaudeNativeHistoryConnector(
+        data_dir=data_dir,
+        external_claude_home=external_home,
+    )
+
+    refs = connector.discover(workspace=str(workspace), include_external=True)
+    imported = connector.import_ref(refs[0])
+
+    assert len(refs) == 1
+    assert [message.created_at for message in imported] == [
+        "2026-07-13T19:28:18Z",
+        "2026-07-13T19:28:19Z",
+        "2026-07-13T19:28:20Z",
+        "2026-07-13T19:28:22Z",
+    ]
+    nested_call = imported[1].metadata["tool_calls"][0]
+    nested_result = imported[2].metadata["tool_results"][0]
+    assert nested_call == {
+        "tool_call_id": "toolu_read",
+        "name": "Read",
+        "arguments": {"file_path": "/repo/README.md"},
+        "status": "running",
+        "parent_tool_call_id": "toolu_agent",
+        "subagent_id": "agent-explore",
+        "subagent_type": "Explore",
+        "subagent_description": "Inspect repository structure",
+        "subagent_depth": 1,
+    }
+    assert nested_result["parent_tool_call_id"] == "toolu_agent"
+    assert nested_result["subagent_type"] == "Explore"
+    assert imported[1].metadata["native_message_id"] == (
+        "agent-explore:nested-read-call"
+    )
+    assert all(message.content != "private summary" for message in imported)
+    assert connector.preview(refs[0], max_messages=2) == imported[:2]
+
+
 def test_claude_native_start_command_uses_managed_home_and_redacts_key(
     tmp_path,
     monkeypatch,
