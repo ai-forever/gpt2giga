@@ -172,7 +172,7 @@ jobs:
         run: |
           set -euo pipefail
           uv venv --python 3.13 .venv-release-check
-          uv pip install --python .venv-release-check/bin/python "gpt2giga==${GATEWAY_VERSION}"
+          uv pip install --prerelease allow --python .venv-release-check/bin/python "gpt2giga==${GATEWAY_VERSION}"
 
       - name: Attest Harness artifacts
         uses: actions/attest-build-provenance@v3

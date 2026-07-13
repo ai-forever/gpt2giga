@@ -189,3 +189,4 @@ cython_debug/
 node_modules/
 docs/internal/
 scripts/internal/
+.python-version
