@@ -65,6 +65,12 @@ OpenAI Chat Completions and Responses tools are normalized by `type`.
 | `function` | `functions` wrapper | A user function, not a built-in tool |
 | `namespace` | `functions` wrapper | Responses namespace tools are flattened into GigaChat function names |
 
+When a Responses client advertises the Codex ImageGen tool as a flat
+`imagegen` / `image_gen__imagegen` function or as `image_gen.imagegen` inside a
+namespace, a provider-side `image_generate` hand-off is returned as a function
+call to that exact client tool. Requests that advertise the native
+`image_generation` built-in keep the normal `image_generation_call` response.
+
 The configuration is read from the canonical field, the alias field, and
 non-structured top-level keys. For example:
 

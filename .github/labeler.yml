@@ -1,22 +1,22 @@
 openai:
   - changed-files:
       - any-glob-to-any-file:
-          - 'gpt2giga/routers/openai/**'
-          - 'gpt2giga/openapi_specs/openai.py'
+          - 'packages/gpt2giga/src/gpt2giga/routers/openai/**'
+          - 'packages/gpt2giga/src/gpt2giga/openapi_specs/openai.py'
           - 'examples/openai/**'
           - 'examples/weather_agent.py'
 
 anthropic:
   - changed-files:
       - any-glob-to-any-file:
-          - 'gpt2giga/routers/anthropic/**'
-          - 'gpt2giga/openapi_specs/anthropic.py'
+          - 'packages/gpt2giga/src/gpt2giga/routers/anthropic/**'
+          - 'packages/gpt2giga/src/gpt2giga/openapi_specs/anthropic.py'
           - 'examples/anthropic/**'
 
 protocol:
   - changed-files:
       - any-glob-to-any-file:
-          - 'gpt2giga/protocol/**'
+          - 'packages/gpt2giga/src/gpt2giga/protocols/**'
 
 docker:
   - changed-files:
@@ -55,4 +55,5 @@ dependencies:
   - changed-files:
       - any-glob-to-any-file:
           - 'pyproject.toml'
+          - 'packages/*/pyproject.toml'
           - 'uv.lock'

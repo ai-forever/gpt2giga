@@ -4,7 +4,8 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'gpt2giga/**'
+      - 'packages/**'
+      - '!packages/**/*.md'
       - 'tests/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -13,7 +14,8 @@ on:
     branches: [ main ]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'gpt2giga/**'
+      - 'packages/**'
+      - '!packages/**/*.md'
       - 'tests/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -27,7 +29,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # Exercise the supported boundaries plus the release/build runtime.
+        python-version: ["3.10", "3.13", "3.14"]
 
     steps:
       - name: Checkout repository
@@ -43,21 +46,144 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --all-packages --all-extras --dev
 
       - name: Lint with Ruff
+        if: matrix.python-version == '3.13'
         run: uv run ruff check .
+
+      - name: Check formatting with Ruff
+        if: matrix.python-version == '3.13'
+        run: uv run ruff format --check .
 
       - name: Run tests with coverage
         run: |
-          uv run pytest tests/ --cov=. --cov-report=json:coverage.json --cov-fail-under=80
+          uv run pytest tests/ -n 4 --cov=. --cov-report=json:coverage.json --cov-fail-under=80
         continue-on-error: false
 
       - name: Upload coverage artifact
+        if: matrix.python-version == '3.13'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.python-version }}
           path: coverage.json
+
+  build-artifacts:
+    name: Build workspace artifacts
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Resolve package versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "gateway=$(uv version --package gpt2giga --short --frozen)" >> "$GITHUB_OUTPUT"
+          echo "harness=$(uv version --package gpt2giga-harness --short --frozen)" >> "$GITHUB_OUTPUT"
+
+      - name: Build gateway wheel and sdist without workspace sources
+        run: uv build --package gpt2giga --wheel --sdist --no-sources --out-dir dist/gpt2giga
+
+      - name: Build Harness wheel and sdist without workspace sources
+        run: uv build --package gpt2giga-harness --wheel --sdist --no-sources --out-dir dist/gpt2giga-harness
+
+      - name: Upload gateway artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: gpt2giga-${{ steps.versions.outputs.gateway }}
+          path: dist/gpt2giga/*
+          if-no-files-found: error
+
+      - name: Upload Harness artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: gpt2giga-harness-${{ steps.versions.outputs.harness }}
+          path: dist/gpt2giga-harness/*
+          if-no-files-found: error
+
+  artifact-smoke:
+    name: ${{ matrix.package }} artifact smoke on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [gateway, harness]
+        # Clean installs only need the declared Python range boundaries.
+        python-version: ["3.10", "3.14"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Resolve package versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "gateway=$(uv version --package gpt2giga --short --frozen)" >> "$GITHUB_OUTPUT"
+          echo "harness=$(uv version --package gpt2giga-harness --short --frozen)" >> "$GITHUB_OUTPUT"
+
+      - name: Build gateway wheel without workspace sources
+        run: uv build --package gpt2giga --wheel --no-sources --out-dir dist/smoke
+
+      - name: Build Harness wheel without workspace sources
+        if: matrix.package == 'harness'
+        run: uv build --package gpt2giga-harness --wheel --no-sources --out-dir dist/smoke
+
+      - name: Create clean artifact environment
+        run: uv venv --python ${{ matrix.python-version }} .venv-artifact
+
+      - name: Install gateway artifact
+        if: matrix.package == 'gateway'
+        run: uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl
+
+      - name: Install Harness and gateway artifacts
+        if: matrix.package == 'harness'
+        run: uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl dist/smoke/gpt2giga_harness-*.whl
+
+      - name: Smoke gateway-only imports and command
+        if: matrix.package == 'gateway'
+        env:
+          GATEWAY_VERSION: ${{ steps.versions.outputs.gateway }}
+        run: |
+          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.util, os, gpt2giga; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert importlib.util.find_spec('gpt2giga_harness') is None"
+          .venv-artifact/bin/gpt2giga --help
+          test ! -e .venv-artifact/bin/giga
+          test ! -e .venv-artifact/bin/gpt2giga-harness
+
+      - name: Smoke combined imports, UI assets, and commands
+        if: matrix.package == 'harness'
+        env:
+          GATEWAY_VERSION: ${{ steps.versions.outputs.gateway }}
+          HARNESS_VERSION: ${{ steps.versions.outputs.harness }}
+        run: |
+          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, os, gpt2giga, gpt2giga_harness; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert m.version('gpt2giga-harness') == os.environ['HARNESS_VERSION']; assert r.files('gpt2giga_harness.ui').joinpath('assets/index.html').is_file()"
+          .venv-artifact/bin/gpt2giga --help
+          .venv-artifact/bin/giga --help
+          .venv-artifact/bin/gpt2giga-harness --help
 
 
   coverage-badge:
@@ -79,14 +205,14 @@ jobs:
       - name: Download coverage artifact from one Python version
         uses: actions/download-artifact@v7
         with:
-          name: coverage-3.12
+          name: coverage-3.13
           path: .
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install 3.13
 
       - name: Generate badge
         run: |
@@ -100,10 +226,10 @@ jobs:
           name: coverage-badge
           path: badges/coverage.svg
 
-      - name: Commit coverage badge to branch (if internal)
-        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+      - name: Commit coverage badge on main
+        if: github.event_name == 'push'
         env:
-          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+          BRANCH_NAME: ${{ github.ref_name }}
         run: |
           echo "Pushing coverage badge to branch: $BRANCH_NAME"
 

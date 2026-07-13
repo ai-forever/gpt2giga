@@ -10,9 +10,11 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml README.md ./
-COPY gpt2giga/ gpt2giga/
+COPY packages/gpt2giga/pyproject.toml packages/gpt2giga/pyproject.toml
+COPY packages/gpt2giga/README.md packages/gpt2giga/README.md
+COPY packages/gpt2giga/src/ packages/gpt2giga/src/
 
-RUN uv build --wheel
+RUN uv build --package gpt2giga --wheel
 
 
 FROM python:${PYTHON_VERSION}-slim AS runtime

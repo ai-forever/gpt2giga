@@ -1,0 +1,1090 @@
+"""Session orchestration for the Unified Harness chat cockpit."""
+
+from __future__ import annotations
+
+from collections import Counter
+from dataclasses import dataclass
+import json
+from typing import Any, Mapping
+
+from gpt2giga_harness.attachments import (
+    AttachmentNotFoundError,
+    FilesystemAttachmentStore,
+    HarnessAttachment,
+    attachment_to_dict,
+    render_attachments_for_harness,
+    render_plan_to_dict,
+)
+from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.native.models import parse_invocation_mode
+from gpt2giga_harness.project import resolve_project
+from gpt2giga_harness.project_memory import (
+    FilesystemProjectMemoryStore,
+    ProjectMemoryEntry,
+    memory_entries_to_context,
+    memory_entries_to_prompt,
+)
+from gpt2giga_harness.preflight import (
+    PreflightBlockedError,
+    build_preflight_report,
+    preflight_report_to_dict,
+)
+from gpt2giga_harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
+from gpt2giga_harness.provenance import (
+    build_run_provenance,
+    run_provenance_to_dict,
+)
+from gpt2giga_harness.registry import HarnessRegistry
+from gpt2giga_harness.sessions.models import (
+    HarnessMessage,
+    HarnessRun,
+    HarnessSession,
+    HarnessSessionBundle,
+    HarnessStoredEvent,
+    bundle_to_dict,
+    run_to_dict,
+)
+from gpt2giga_harness.sessions.store import (
+    HarnessSessionStore,
+    new_id,
+    title_from_prompt,
+    utc_now,
+)
+from gpt2giga_harness.types import (
+    GigaChatApiMode,
+    HarnessChatMessage,
+    HarnessEvent,
+    HarnessEventType,
+    HarnessRequest,
+    HarnessResult,
+    event_to_dict,
+    parse_api_mode,
+    parse_builtin_tools,
+    parse_capability,
+    result_to_dict,
+)
+from gpt2giga_harness.worktrees import (
+    capture_workspace_diff,
+    parse_workspace_policy,
+    prepare_workspace_execution,
+)
+from gpt2giga_harness.workspace import resolve_workspace
+
+MAX_HISTORY_MESSAGES = 20
+
+
+@dataclass(frozen=True)
+class HarnessSessionRunResult:
+    """Result of running one harness inside one session."""
+
+    session: HarnessSession
+    run: HarnessRun
+    result: HarnessResult
+    bundle: HarnessSessionBundle
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the run result for API responses."""
+        payload = bundle_to_dict(self.bundle)
+        payload.update(
+            {
+                "session": payload["session"],
+                "run": run_to_dict(self.run),
+                "result": result_to_dict(self.result),
+            }
+        )
+        attachments = self.run.metadata.get("attachments")
+        if attachments:
+            payload["attachments"] = attachments
+        attachment_render_plan = self.run.metadata.get("attachment_render_plan")
+        if attachment_render_plan:
+            payload["attachment_render_plan"] = attachment_render_plan
+        return payload
+
+
+@dataclass(frozen=True)
+class QueuedHarnessRun:
+    """Prepared durable run and its single logical user message."""
+
+    session: HarnessSession
+    run: HarnessRun
+    user_message: HarnessMessage
+
+
+class HarnessSessionRunner:
+    """Create and run normalized harness sessions."""
+
+    def __init__(
+        self,
+        *,
+        registry: HarnessRegistry,
+        config: HarnessConfig,
+        store: HarnessSessionStore,
+        attachment_store: FilesystemAttachmentStore | None = None,
+        memory_store: FilesystemProjectMemoryStore | None = None,
+    ) -> None:
+        self.registry = registry
+        self.config = config
+        self.store = store
+        self.attachment_store = attachment_store or FilesystemAttachmentStore(
+            config.data_dir
+        )
+        self.memory_store = memory_store or FilesystemProjectMemoryStore()
+
+    def preflight(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        session_id: str | None = None,
+    ):
+        """Build a pre-run safety report without invoking a harness."""
+        session = self.store.get_session(session_id) if session_id is not None else None
+        options = self._run_options(payload, session=session)
+        previous_messages = (
+            ()
+            if session is None
+            or bool(_mapping(options["extra"]).get("isolated_history"))
+            else self.store.list_messages(session.id)
+        )
+        if options["attachment_ids"] and session is None:
+            raise ValueError("session_id is required for attachment preflight")
+        attachments = (
+            self._load_attachments(session.id, options["attachment_ids"])
+            if session is not None
+            else ()
+        )
+        project_memory = self._load_project_memory(options["workspace"])
+        return build_preflight_report(
+            prompt=options["prompt"],
+            workspace=options["workspace"],
+            previous_messages=previous_messages,
+            attachments=attachments,
+            project_memory=project_memory,
+            data_dir=self.config.data_dir,
+            max_history_messages=MAX_HISTORY_MESSAGES,
+        )
+
+    def create_session(
+        self,
+        *,
+        title: str | None = None,
+        workspace: str | None = None,
+        default_harness_id: str = "echo",
+        default_model: str | None = None,
+        default_api_mode: GigaChatApiMode | str | None = None,
+        default_mode: str = "plan",
+    ) -> HarnessSession:
+        """Create a new empty session."""
+        resolved_workspace = resolve_workspace(workspace)
+        return self.store.create_session(
+            title=title,
+            workspace=resolved_workspace,
+            default_harness_id=default_harness_id,
+            default_model=default_model,
+            default_api_mode=parse_api_mode(default_api_mode),
+            default_mode=default_mode,
+            metadata=_project_metadata(
+                resolved_workspace,
+                data_dir=self.config.data_dir,
+            ),
+        )
+
+    def create_and_run(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        cancel_event: Any | None = None,
+    ) -> HarnessSessionRunResult:
+        """Create a session from a prompt and immediately run it."""
+        options = self._run_options(payload, session=None)
+        title = _optional_text(payload.get("title")) or title_from_prompt(
+            options["prompt"]
+        )
+        session = self.create_session(
+            title=title,
+            workspace=options["workspace"],
+            default_harness_id=options["harness_id"],
+            default_model=options["model"],
+            default_api_mode=options["api_mode"],
+            default_mode=options["mode"],
+        )
+        return self.run_in_session(session.id, payload, cancel_event=cancel_event)
+
+    def enqueue_in_session(
+        self,
+        session_id: str,
+        payload: Mapping[str, Any],
+        *,
+        run_id: str,
+    ) -> QueuedHarnessRun:
+        """Prepare one durable headless run without executing its harness."""
+        session = self.store.get_session(session_id)
+        options = self._run_options(payload, session=session)
+        if options["invocation_mode"].value != "headless":
+            raise ValueError("durable jobs currently support headless runs only")
+        report = self.preflight(payload, session_id=session_id)
+        if report.hard_block:
+            raise PreflightBlockedError(report)
+        message_id = new_id("msg")
+        run = self.store.create_run(
+            run_id=run_id,
+            session_id=session.id,
+            harness_id=options["harness_id"],
+            status="queued",
+            prompt=options["prompt"],
+            model=options["model"],
+            api_mode=options["api_mode"],
+            capability=options["capability"],
+            mode=options["mode"],
+            workspace=options["workspace"],
+            invocation_mode=options["invocation_mode"],
+            metadata={
+                "invocation_mode": options["invocation_mode"].value,
+                "preflight": preflight_report_to_dict(report),
+                "durable": True,
+                **_agent_metadata(options),
+            },
+        )
+        user_message = self.store.append_message(
+            HarnessMessage(
+                id=message_id,
+                session_id=session.id,
+                run_id=run.id,
+                role="user",
+                content=options["prompt"],
+                created_at=utc_now(),
+                harness_id=options["harness_id"],
+                model=options["model"],
+                api_mode=options["api_mode"],
+            )
+        )
+        updated_session = self.store.update_session(
+            session.id,
+            default_harness_id=options["harness_id"],
+            default_model=options["model"],
+            default_api_mode=options["api_mode"],
+            default_mode=options["mode"],
+            workspace=options["workspace"],
+            title=(
+                title_from_prompt(options["prompt"])
+                if session.title == "Untitled session"
+                else session.title
+            ),
+        )
+        return QueuedHarnessRun(
+            session=updated_session, run=run, user_message=user_message
+        )
+
+    def run_in_session(
+        self,
+        session_id: str,
+        payload: Mapping[str, Any],
+        *,
+        cancel_event: Any | None = None,
+        existing_run_id: str | None = None,
+        user_message_id: str | None = None,
+        excluded_history_run_ids: tuple[str, ...] = (),
+        runtime_metadata: Mapping[str, Any] | None = None,
+        process_sink: Any | None = None,
+    ) -> HarnessSessionRunResult:
+        """Run one prompt inside an existing session."""
+        session = self.store.get_session(session_id)
+        options = self._run_options(payload, session=session)
+        harness = self.registry.get(options["harness_id"])
+        previous_messages = (
+            ()
+            if bool(_mapping(options["extra"]).get("isolated_history"))
+            else tuple(
+                message
+                for message in self.store.list_messages(session.id)
+                if message.id != user_message_id
+                and message.run_id not in excluded_history_run_ids
+            )
+        )
+        attachments = self._load_attachments(
+            session.id,
+            options["attachment_ids"],
+        )
+        attachment_payloads = tuple(
+            _run_attachment_metadata(attachment) for attachment in attachments
+        )
+        attachment_render_plan = (
+            render_attachments_for_harness(
+                options["harness_id"],
+                attachments,
+                self.attachment_store,
+                prompt=options["prompt"],
+            )
+            if attachment_payloads
+            else None
+        )
+        attachment_render_plan_payload = (
+            render_plan_to_dict(attachment_render_plan)
+            if attachment_render_plan is not None
+            else None
+        )
+        project_memory = self._load_project_memory(options["workspace"])
+        project_memory_payload = (
+            memory_entries_to_context(project_memory) if project_memory else None
+        )
+        preflight = build_preflight_report(
+            prompt=options["prompt"],
+            workspace=options["workspace"],
+            previous_messages=previous_messages,
+            attachments=attachments,
+            project_memory=project_memory,
+            data_dir=self.config.data_dir,
+            max_history_messages=MAX_HISTORY_MESSAGES,
+        )
+        if preflight.hard_block:
+            raise PreflightBlockedError(preflight)
+        preflight_payload = preflight_report_to_dict(preflight)
+        effective_prompt = _prompt_with_project_memory(
+            options["prompt"],
+            project_memory,
+        )
+        run_metadata: dict[str, Any] = {
+            "invocation_mode": options["invocation_mode"].value,
+            "native_resume": _native_resume_metadata(options["harness_id"]),
+            "preflight": preflight_payload,
+            **_agent_metadata(options),
+        }
+        if options["builtin_tools"]:
+            run_metadata["builtin_tools"] = [
+                tool.value for tool in options["builtin_tools"]
+            ]
+        if runtime_metadata:
+            run_metadata["runtime"] = dict(runtime_metadata)
+        if project_memory_payload:
+            run_metadata["project_memory"] = project_memory_payload
+        if attachment_payloads:
+            run_metadata["attachment_ids"] = list(options["attachment_ids"])
+            run_metadata["attachments"] = list(attachment_payloads)
+        if attachment_render_plan_payload:
+            run_metadata["attachment_render_plan"] = attachment_render_plan_payload
+        if existing_run_id is not None:
+            try:
+                run = self.store.get_run(existing_run_id)
+            except KeyError:
+                run = self.store.create_run(
+                    run_id=existing_run_id,
+                    session_id=session.id,
+                    harness_id=options["harness_id"],
+                    status="running",
+                    prompt=options["prompt"],
+                    model=options["model"],
+                    api_mode=options["api_mode"],
+                    capability=options["capability"],
+                    mode=options["mode"],
+                    workspace=options["workspace"],
+                    invocation_mode=options["invocation_mode"],
+                    started_at=utc_now(),
+                    metadata=run_metadata,
+                )
+            else:
+                run = self.store.update_run(
+                    run.id,
+                    status="running",
+                    started_at=run.started_at or utc_now(),
+                    metadata={**dict(run.metadata), **run_metadata},
+                )
+        else:
+            run = self.store.create_run(
+                session_id=session.id,
+                harness_id=options["harness_id"],
+                status="running",
+                prompt=options["prompt"],
+                model=options["model"],
+                api_mode=options["api_mode"],
+                capability=options["capability"],
+                mode=options["mode"],
+                workspace=options["workspace"],
+                invocation_mode=options["invocation_mode"],
+                started_at=utc_now(),
+                metadata=run_metadata,
+            )
+        workspace_execution = prepare_workspace_execution(
+            requested_policy=options["workspace_policy"],
+            harness_kind=options["harness_kind"],
+            mode=options["mode"],
+            workspace=options["workspace"],
+            data_dir=self.config.data_dir,
+            session_id=session.id,
+            run_id=run.id,
+            dry_run=bool(options["extra"].get("dry_run")),
+        )
+        run_metadata["workspace_execution"] = workspace_execution.to_metadata()
+        run = self.store.update_run(run.id, metadata=run_metadata)
+        if user_message_id is None:
+            self.store.append_message(
+                HarnessMessage(
+                    id=new_id("msg"),
+                    session_id=session.id,
+                    run_id=run.id,
+                    role="user",
+                    content=options["prompt"],
+                    created_at=utc_now(),
+                    harness_id=options["harness_id"],
+                    model=options["model"],
+                    api_mode=options["api_mode"],
+                    metadata=_message_attachment_metadata(attachment_payloads),
+                )
+            )
+        self._append_event(
+            session.id,
+            run.id,
+            HarnessEventType.RUN_STARTED.value,
+            "Harness run started.",
+            {
+                "harness_id": options["harness_id"],
+                "model": options["model"],
+                "api_mode": options["api_mode"].value,
+                "mode": options["mode"],
+                "invocation_mode": options["invocation_mode"].value,
+                "workspace_policy": workspace_execution.policy.value,
+                "requested_workspace_policy": workspace_execution.requested_policy.value,
+                "attachment_count": len(attachment_payloads),
+                "builtin_tools": [tool.value for tool in options["builtin_tools"]],
+            },
+        )
+        if workspace_execution.fallback_reason:
+            self._append_event(
+                session.id,
+                run.id,
+                HarnessEventType.WARNING.value,
+                "Workspace execution policy fell back to current workspace.",
+                {
+                    "requested_policy": workspace_execution.requested_policy.value,
+                    "fallback_reason": workspace_execution.fallback_reason,
+                },
+            )
+        request_messages = self._build_request_messages(
+            previous_messages,
+            prompt=effective_prompt,
+        )
+        request_extra = _request_extra(
+            options["extra"],
+            attachment_payloads,
+            attachment_render_plan_payload,
+        )
+        request_extra["workspace_execution"] = workspace_execution.to_metadata()
+        if project_memory_payload:
+            request_extra["project_memory"] = project_memory_payload
+        request_extra["preflight"] = preflight_payload
+        emitted_event_counts: Counter[str] = Counter()
+        latest_usage: dict[str, Any] = {}
+
+        def event_sink(event: HarnessEvent) -> None:
+            self._append_event(
+                session.id,
+                run.id,
+                event.type,
+                event.message,
+                event_to_dict(event)["payload"],
+            )
+            emitted_event_counts[_event_fingerprint(event)] += 1
+            usage = _usage_from_event(event)
+            if usage is not None:
+                _merge_usage(latest_usage, usage)
+
+        request = HarnessRequest(
+            prompt=effective_prompt,
+            model=options["model"],
+            api_mode=options["api_mode"],
+            capability=options["capability"],
+            mode=options["mode"],
+            invocation_mode=options["invocation_mode"],
+            stream=options["stream"],
+            workspace=workspace_execution.request_workspace,
+            messages=request_messages,
+            attachments=attachment_payloads,
+            attachment_render_plan=attachment_render_plan_payload,
+            builtin_tools=options["builtin_tools"],
+            session_id=session.id,
+            run_id=run.id,
+            native_session_id=options["native_session_id"],
+            cancel_event=cancel_event,
+            event_sink=event_sink,
+            process_sink=process_sink,
+            extra=request_extra,
+        )
+        raw_request = {
+            "harness_id": options["harness_id"],
+            "prompt": effective_prompt,
+            "model": options["model"],
+            "api_mode": options["api_mode"].value,
+            "capability": options["capability"].value,
+            "mode": options["mode"],
+            "invocation_mode": options["invocation_mode"].value,
+            "stream": options["stream"],
+            "workspace": options["workspace"],
+            "effective_workspace": workspace_execution.request_workspace,
+            "workspace_policy": workspace_execution.policy.value,
+            "requested_workspace_policy": workspace_execution.requested_policy.value,
+            "messages": [
+                {"role": message.role, "content": message.content}
+                for message in request_messages
+            ],
+            "builtin_tools": [tool.value for tool in options["builtin_tools"]],
+            "extra": options["extra"],
+        }
+        if effective_prompt != options["prompt"]:
+            raw_request["original_prompt"] = options["prompt"]
+        if project_memory_payload:
+            raw_request["project_memory"] = project_memory_payload
+        if attachment_payloads:
+            raw_request["attachment_ids"] = list(options["attachment_ids"])
+            raw_request["attachments"] = list(attachment_payloads)
+        if attachment_render_plan_payload:
+            raw_request["attachment_render_plan"] = attachment_render_plan_payload
+        raw_request["preflight"] = preflight_payload
+        raw_request_record = self.store.append_raw_request(
+            session_id=session.id,
+            run_id=run.id,
+            payload=raw_request,
+        )
+        self._append_event(
+            session.id,
+            run.id,
+            HarnessEventType.RAW_REQUEST.value,
+            "Stored redacted harness request.",
+            {
+                "message_count": len(request_messages),
+                "attachment_count": len(attachment_payloads),
+                "memory_count": len(project_memory),
+                "preflight_finding_count": len(preflight.findings),
+            },
+        )
+        if preflight.findings:
+            self._append_event(
+                session.id,
+                run.id,
+                HarnessEventType.WARNING.value,
+                "Preflight completed with warnings.",
+                {
+                    "max_severity": preflight.max_severity,
+                    "finding_count": len(preflight.findings),
+                    "codes": sorted({finding.code for finding in preflight.findings}),
+                },
+            )
+        try:
+            result = (
+                HarnessResult(ok=False, text="", error="Harness run canceled.")
+                if _cancel_requested(cancel_event)
+                else harness.run(request, self.config.to_context())
+            )
+        except Exception as exc:
+            result = HarnessResult(ok=False, text="", error=str(exc))
+        if _cancel_requested(cancel_event):
+            result = HarnessResult(
+                ok=False,
+                text="",
+                raw=result.raw,
+                events=result.events,
+                command=result.command,
+                error="Harness run canceled.",
+            )
+
+        raw_response_record = self.store.append_raw_response(
+            session_id=session.id,
+            run_id=run.id,
+            payload=result_to_dict(result),
+        )
+        self._append_event(
+            session.id,
+            run.id,
+            HarnessEventType.RAW_RESPONSE.value,
+            "Stored redacted harness response.",
+            {"ok": result.ok},
+        )
+        for event in result.events:
+            fingerprint = _event_fingerprint(event)
+            if emitted_event_counts[fingerprint] > 0:
+                emitted_event_counts[fingerprint] -= 1
+                continue
+            self._append_event(
+                session.id,
+                run.id,
+                event.type,
+                event.message,
+                event_to_dict(event)["payload"],
+            )
+            usage = _usage_from_event(event)
+            if usage is not None:
+                _merge_usage(latest_usage, usage)
+
+        if _cancel_requested(cancel_event):
+            status = "canceled"
+            role = "error"
+            content = "Harness run canceled."
+            event_type = HarnessEventType.RUN_CANCELED.value
+            event_message = "Harness run canceled."
+            error = content
+        elif result.ok:
+            status = "succeeded"
+            role = "assistant"
+            content = result.text
+            event_type = HarnessEventType.MESSAGE_COMPLETED.value
+            event_message = "Assistant message completed."
+            error = None
+        else:
+            status = "failed"
+            role = "error"
+            content = result.error or result.text or "Harness run failed"
+            event_type = HarnessEventType.ERROR.value
+            event_message = "Harness run failed."
+            error = content
+        self.store.append_message(
+            HarnessMessage(
+                id=new_id("msg"),
+                session_id=session.id,
+                run_id=run.id,
+                role=role,
+                content=content,
+                created_at=utc_now(),
+                harness_id=options["harness_id"],
+                model=options["model"],
+                api_mode=options["api_mode"],
+                metadata={"usage": dict(latest_usage)}
+                if role == "assistant" and latest_usage
+                else {},
+            )
+        )
+        self._append_event(
+            session.id,
+            run.id,
+            event_type,
+            event_message,
+            {"role": role},
+        )
+        metadata = dict(run_metadata)
+        if latest_usage:
+            metadata["usage"] = dict(latest_usage)
+        if options["mode"] == "edit":
+            workspace_diff = capture_workspace_diff(workspace_execution)
+            if workspace_diff is not None:
+                workspace_metadata = {
+                    **dict(metadata.get("workspace_execution", {})),
+                    **workspace_diff.to_metadata(),
+                }
+                metadata["workspace_execution"] = workspace_metadata
+                metadata["diff"] = workspace_diff.patch
+                metadata["diff_captured"] = workspace_diff.captured
+                if workspace_diff.captured:
+                    self._append_event(
+                        session.id,
+                        run.id,
+                        HarnessEventType.FILE_CHANGED.value,
+                        "Captured workspace diff.",
+                        {
+                            "changed_files": list(workspace_diff.changed_files),
+                            "untracked_files": list(workspace_diff.untracked_files),
+                            "workspace_policy": workspace_execution.policy.value,
+                        },
+                    )
+        pr_artifact_run = HarnessRun(
+            id=run.id,
+            session_id=session.id,
+            harness_id=options["harness_id"],
+            status=status,
+            prompt=options["prompt"],
+            model=options["model"],
+            api_mode=options["api_mode"],
+            capability=options["capability"],
+            mode=options["mode"],
+            workspace=options["workspace"],
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+            invocation_mode=options["invocation_mode"],
+            started_at=run.started_at,
+            finished_at=utc_now(),
+            error=error,
+            command=result.command,
+            native_session_id=run.native_session_id,
+            metadata=metadata,
+        )
+        metadata["pr_artifact"] = pr_artifact_to_dict(
+            build_pr_artifact(
+                pr_artifact_run,
+                result_text=content if role == "assistant" else None,
+                result_raw=result.raw,
+            )
+        )
+        updated_run = self.store.update_run(
+            run.id,
+            status=status,
+            finished_at=utc_now(),
+            error=error,
+            command=result.command,
+            metadata=metadata,
+        )
+        session_patch: dict[str, Any] = {
+            "default_harness_id": options["harness_id"],
+            "default_model": options["model"],
+            "default_api_mode": options["api_mode"],
+            "default_mode": options["mode"],
+            "workspace": options["workspace"],
+        }
+        project_metadata = _project_metadata(
+            options["workspace"],
+            data_dir=self.config.data_dir,
+        )
+        if project_metadata:
+            session_patch["metadata"] = {**session.metadata, **project_metadata}
+        if session.title == "Untitled session":
+            session_patch["title"] = title_from_prompt(options["prompt"])
+        updated_session = self.store.update_session(session.id, **session_patch)
+        self._append_event(
+            session.id,
+            run.id,
+            HarnessEventType.RUN_FINISHED.value,
+            "Harness run finished.",
+            {"status": status},
+        )
+        provenance = build_run_provenance(
+            updated_run,
+            session=updated_session,
+            spec=harness.spec(),
+            raw_requests=(raw_request_record,),
+            raw_responses=(raw_response_record,),
+            events=self.store.list_events(session.id, run_id=run.id),
+            data_dir=self.config.data_dir,
+        )
+        metadata = {
+            **dict(updated_run.metadata),
+            "provenance": run_provenance_to_dict(provenance),
+        }
+        updated_run = self.store.update_run(run.id, metadata=metadata)
+        bundle = self.store.get_session_bundle(session.id)
+        return HarnessSessionRunResult(
+            session=updated_session,
+            run=updated_run,
+            result=result,
+            bundle=bundle,
+        )
+
+    def _run_options(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        session: HarnessSession | None,
+    ) -> dict[str, Any]:
+        prompt = str(payload.get("prompt") or "")
+        harness_id = str(
+            payload.get("harness_id")
+            or (session.default_harness_id if session else "echo")
+        )
+        spec = self.registry.get(harness_id).spec()
+        model = _optional_text(payload.get("model"))
+        if model is None and session is not None:
+            model = session.default_model
+        if model is None:
+            model = self.config.default_model
+        api_mode = parse_api_mode(
+            payload.get("api_mode")
+            or (session.default_api_mode if session else self.config.default_api_mode)
+        )
+        builtin_tools = parse_builtin_tools(payload.get("builtin_tools"))
+        if builtin_tools and api_mode is not GigaChatApiMode.V2:
+            raise ValueError("built-in tools require /v2/chat/completions")
+        supported_builtin_tools = set(getattr(spec, "supported_builtin_tools", ()))
+        unsupported_builtin_tools = [
+            tool.value for tool in builtin_tools if tool not in supported_builtin_tools
+        ]
+        if unsupported_builtin_tools:
+            raise ValueError(
+                f"{harness_id} does not support built-in tools: "
+                + ", ".join(unsupported_builtin_tools)
+            )
+        capability = parse_capability(
+            payload.get("capability")
+            or (spec.capabilities[0].value if spec.capabilities else None)
+        )
+        mode = str(payload.get("mode") or (session.default_mode if session else "plan"))
+        invocation_mode = parse_invocation_mode(payload.get("invocation_mode"))
+        workspace = _optional_text(payload.get("workspace"))
+        if workspace is None and session is not None:
+            workspace = session.workspace
+        workspace = resolve_workspace(workspace)
+        extra = payload.get("extra") if isinstance(payload.get("extra"), dict) else {}
+        extra = dict(extra)
+        if bool(payload.get("dry_run")):
+            extra["dry_run"] = True
+        if "continue_native" in payload:
+            extra["continue_native"] = bool(payload.get("continue_native"))
+        attachment_ids = _attachment_ids(payload.get("attachment_ids"))
+        workspace_policy = parse_workspace_policy(
+            payload.get("workspace_policy") or extra.get("workspace_policy")
+        )
+        return {
+            "prompt": prompt,
+            "harness_id": harness_id,
+            "harness_kind": spec.kind,
+            "model": model,
+            "api_mode": api_mode,
+            "builtin_tools": builtin_tools,
+            "capability": capability,
+            "mode": mode,
+            "invocation_mode": invocation_mode,
+            "workspace": workspace,
+            "stream": bool(payload.get("stream")),
+            "extra": extra,
+            "native_session_id": _optional_text(payload.get("native_session_id")),
+            "attachment_ids": attachment_ids,
+            "workspace_policy": workspace_policy,
+            "agent_id": _optional_text(payload.get("agent_id")),
+            "agent_profile_snapshot": (
+                dict(payload["agent_profile_snapshot"])
+                if isinstance(payload.get("agent_profile_snapshot"), Mapping)
+                else None
+            ),
+        }
+
+    def _build_request_messages(
+        self,
+        previous_messages: tuple[HarnessMessage, ...],
+        *,
+        prompt: str,
+    ) -> tuple[HarnessChatMessage, ...]:
+        history = [
+            HarnessChatMessage(role=message.role, content=message.content)
+            for message in previous_messages
+            if message.role in {"user", "assistant"} and message.content
+        ]
+        history.append(HarnessChatMessage(role="user", content=prompt))
+        return tuple(history[-MAX_HISTORY_MESSAGES:])
+
+    def _load_attachments(
+        self,
+        session_id: str,
+        attachment_ids: tuple[str, ...],
+    ) -> tuple[HarnessAttachment, ...]:
+        attachments: list[HarnessAttachment] = []
+        for attachment_id in attachment_ids:
+            try:
+                attachment = self.attachment_store.get_attachment(attachment_id)
+            except AttachmentNotFoundError as exc:
+                raise ValueError(f"Unknown attachment id: {attachment_id}") from exc
+            if attachment.session_id != session_id:
+                raise ValueError(
+                    f"Attachment does not belong to session: {attachment_id}"
+                )
+            attachments.append(attachment)
+        return tuple(attachments)
+
+    def _load_project_memory(
+        self,
+        workspace: str | None,
+    ) -> tuple[ProjectMemoryEntry, ...]:
+        if workspace is None:
+            return ()
+        try:
+            project = resolve_project(
+                workspace,
+                data_dir=self.config.data_dir,
+                load_config_name=False,
+            )
+        except ValueError:
+            return ()
+        return self.memory_store.enabled_for_prompt(project)
+
+    def _append_event(
+        self,
+        session_id: str,
+        run_id: str,
+        event_type: str,
+        message: str,
+        payload: Mapping[str, Any],
+    ) -> HarnessStoredEvent:
+        return self.store.append_event(
+            HarnessStoredEvent(
+                id=new_id("evt"),
+                session_id=session_id,
+                run_id=run_id,
+                type=event_type,
+                message=message,
+                payload=payload,
+                created_at=utc_now(),
+            )
+        )
+
+
+def _native_resume_metadata(harness_id: str) -> dict[str, Any]:
+    if harness_id in {"codex-cli", "claude-code", "gemini-cli"}:
+        return {
+            "supported": False,
+            "reason": "normalized gpt2giga history is enabled; native resume is not implemented yet",
+        }
+    return {
+        "supported": False,
+        "reason": "native sessions do not apply to this harness",
+    }
+
+
+def _project_metadata(workspace: str | None, *, data_dir: str) -> dict[str, str]:
+    if workspace is None:
+        return {}
+    project = resolve_project(workspace, data_dir=data_dir)
+    return {
+        "project_id": project.id,
+        "project_root": project.root,
+        "project_name": project.name,
+    }
+
+
+def _prompt_with_project_memory(
+    prompt: str,
+    entries: tuple[ProjectMemoryEntry, ...],
+) -> str:
+    if not entries:
+        return prompt
+    memory_text = memory_entries_to_prompt(entries)
+    return (
+        f"Project memory to honor for this run:\n{memory_text}\n\nUser task:\n{prompt}"
+    )
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _attachment_ids(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("attachment_ids must be a list")
+    ids: list[str] = []
+    for item in value:
+        attachment_id = _optional_text(item)
+        if attachment_id is None:
+            raise ValueError("attachment_ids must contain non-empty strings")
+        ids.append(attachment_id)
+    return tuple(ids)
+
+
+def _run_attachment_metadata(
+    attachment: HarnessAttachment,
+) -> dict[str, Any]:
+    payload = attachment_to_dict(attachment)
+    payload.pop("storage_path", None)
+    return payload
+
+
+def _message_attachment_metadata(
+    attachments: tuple[Mapping[str, Any], ...],
+) -> dict[str, Any]:
+    if not attachments:
+        return {}
+    return {
+        "attachment_ids": [str(attachment["id"]) for attachment in attachments],
+        "attachments": [dict(attachment) for attachment in attachments],
+    }
+
+
+def _agent_metadata(options: Mapping[str, Any]) -> dict[str, Any]:
+    """Return immutable, redacted AgentProfile identity for run history."""
+    agent_id = _optional_text(options.get("agent_id"))
+    snapshot = options.get("agent_profile_snapshot")
+    if agent_id is None or not isinstance(snapshot, Mapping):
+        return {}
+    return {
+        "agent_id": agent_id,
+        "agent_profile_snapshot": dict(snapshot),
+    }
+
+
+def _request_extra(
+    extra: Mapping[str, Any],
+    attachments: tuple[Mapping[str, Any], ...],
+    attachment_render_plan: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = dict(extra)
+    if attachments:
+        payload["attachment_ids"] = [
+            str(attachment["id"]) for attachment in attachments
+        ]
+        payload["attachments"] = [dict(attachment) for attachment in attachments]
+    if attachment_render_plan:
+        payload["attachment_render_plan"] = dict(attachment_render_plan)
+    return payload
+
+
+def _cancel_requested(cancel_event: Any | None) -> bool:
+    if cancel_event is None:
+        return False
+    is_set = getattr(cancel_event, "is_set", None)
+    return bool(is_set()) if callable(is_set) else False
+
+
+def _event_fingerprint(event: HarnessEvent) -> str:
+    """Return a stable fingerprint used to suppress already-streamed events."""
+    return json.dumps(
+        event_to_dict(event),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _usage_from_event(event: HarnessEvent) -> dict[str, Any] | None:
+    """Extract safe token counters from one normalized usage event."""
+    if event.type != HarnessEventType.USAGE.value:
+        return None
+    payload = event_to_dict(event)["payload"]
+    aliases = {
+        "input_tokens": ("input_tokens", "prompt_tokens"),
+        "output_tokens": ("output_tokens", "completion_tokens"),
+        "total_tokens": ("total_tokens",),
+        "cached_input_tokens": ("cached_input_tokens", "cached_tokens"),
+        "reasoning_output_tokens": (
+            "reasoning_output_tokens",
+            "reasoning_tokens",
+            "thoughts_tokens",
+        ),
+    }
+    usage: dict[str, Any] = {}
+    for target, keys in aliases.items():
+        value = next(
+            (payload[key] for key in keys if _is_nonnegative_integer(payload.get(key))),
+            None,
+        )
+        if value is not None:
+            usage[target] = value
+    if (
+        "total_tokens" not in usage
+        and {
+            "input_tokens",
+            "output_tokens",
+        }
+        <= usage.keys()
+    ):
+        usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
+    source = payload.get("source")
+    if isinstance(source, str) and source:
+        usage["source"] = source
+    return usage or None
+
+
+def _is_nonnegative_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _merge_usage(target: dict[str, Any], update: Mapping[str, Any]) -> None:
+    """Merge partial usage snapshots and keep the aggregate total consistent."""
+    explicit_total = "total_tokens" in update
+    target.update(update)
+    if (
+        not explicit_total
+        and _is_nonnegative_integer(target.get("input_tokens"))
+        and _is_nonnegative_integer(target.get("output_tokens"))
+    ):
+        target["total_tokens"] = target["input_tokens"] + target["output_tokens"]

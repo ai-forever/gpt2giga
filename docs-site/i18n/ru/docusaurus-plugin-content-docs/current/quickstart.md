@@ -54,19 +54,44 @@ docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
 curl http://localhost:8090/health
 ```
 
-## Локальный запуск
+## Выбор пакета
 
-Установить как инструмент:
+Если нужен только HTTP API, совместимый с OpenAI, Anthropic и Gemini,
+установите gateway:
 
 ```sh
-uv tool install gpt2giga
+uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Или запустить из репозитория:
+Текущее альфа-превью Unified Harness запускается из source checkout по
+[руководству Unified Harness](harness.md). После появления отдельного пакета в
+вашем package index установите control plane так:
 
 ```sh
-uv sync --all-extras --dev
+uv tool install gpt2giga-harness
+giga doctor
+giga ui
+```
+
+Дистрибутив Harness использует Python namespace `gpt2giga_harness` и добавляет
+команды `giga` и `gpt2giga-harness`. Дистрибутив gateway добавляет только
+команду `gpt2giga`.
+
+:::warning[Альфа-превью]
+
+Unified Harness активно разрабатывается. Начните с локальных запусков под
+наблюдением и прочитайте [руководство по альфа-превью](harness.md), прежде чем
+включать режим редактирования, удалённый доступ или расписания.
+
+:::
+
+## Запуск из репозитория
+
+Установите оба editable workspace member и зависимости разработки:
+
+```sh
+uv sync --all-packages --all-extras --dev
 uv run gpt2giga
 ```
 

@@ -139,6 +139,7 @@ def test_adapted_chat_completion_response_preserves_provider_state_ids_in_respon
 
     parsed = Response.model_validate(processed)
     assert parsed.metadata["gigachat_thread_id"] == "thread_1"
+    assert parsed.usage.input_tokens_details.cache_write_tokens == 0
 
 
 def test_adapted_chat_completion_text_response_preserves_called_tools_from_responses_input():
@@ -454,6 +455,7 @@ async def test_adapted_chat_completion_builtin_tool_outputs_flow_through_respons
     ]
 
     parsed = Response.model_validate(processed)
+    assert parsed.usage.input_tokens_details.cache_write_tokens == 0
     assert parsed.output[0].type == "web_search_call"
     assert parsed.output[1].type == "image_generation_call"
     assert parsed.output[1].result == "aW1n"
@@ -461,6 +463,55 @@ async def test_adapted_chat_completion_builtin_tool_outputs_flow_through_respons
     assert parsed.output[2].content[0].inline_data["sources"]["1"]["title"] == (
         "Example Source"
     )
+
+
+def test_image_generate_handoff_maps_to_advertised_codex_imagegen_tool():
+    response = ChatCompletionResponse.model_validate(
+        {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [{"tool_execution": {"name": "image_generate"}}],
+                }
+            ],
+            "finish_reason": "stop",
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        }
+    )
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
+
+    processed = ResponseProcessor(logger=logger).process_response_api(
+        {
+            "model": "gpt-x",
+            "input": "Draw a friendly robot",
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "image_gen",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "imagegen",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"prompt": {"type": "string"}},
+                                "required": ["prompt"],
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+        SimpleNamespace(model_dump=lambda: adapted),
+        gpt_model="gpt-x",
+        response_id="v2",
+    )
+
+    call = processed["output"][0]
+    assert call["type"] == "function_call"
+    assert call["name"] == "imagegen"
+    assert call["namespace"] == "image_gen"
+    assert json.loads(call["arguments"]) == {"prompt": "Draw a friendly robot"}
 
 
 def test_chat_completion_response_renders_sources_section():

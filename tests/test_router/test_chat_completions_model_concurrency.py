@@ -215,7 +215,7 @@ async def test_chat_completions_non_stream_timeout_returns_429() -> None:
     assert limited.status_code == 429
     assert limited.json() == {
         "error": {
-            "message": "Concurrency limit reached for model GigaChat: 1",
+            "message": "Concurrency limit reached for the requested model",
             "type": "rate_limit_error",
             "param": "model",
             "code": "model_concurrency_limit",
@@ -331,7 +331,7 @@ async def test_chat_completions_stream_timeout_returns_http_429() -> None:
     assert response.status_code == 429
     assert response.json() == {
         "error": {
-            "message": "Concurrency limit reached for model GigaChat: 1",
+            "message": "Concurrency limit reached for the requested model",
             "type": "rate_limit_error",
             "param": "model",
             "code": "model_concurrency_limit",

@@ -20,6 +20,22 @@ async def test_exceptions_handler_success():
     assert await ok() == "ok"
 
 
+async def test_exceptions_handler_redacts_unhandled_exception_details():
+    @exceptions_handler
+    async def boom():
+        raise DummyError("secret=/srv/private/config.toml")
+
+    response = await boom()
+
+    assert response.status_code == 500
+    assert response.body == (
+        b'{"error":{"message":"Internal server error","type":"server_error",'
+        b'"param":null,"code":null}}'
+    )
+    assert b"secret" not in response.body
+    assert b"/srv/private/config.toml" not in response.body
+
+
 async def test_exceptions_handler_converts_gigachat_response_error(monkeypatch):
     import gigachat
 

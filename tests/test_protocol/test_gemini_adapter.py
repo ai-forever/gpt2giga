@@ -952,6 +952,40 @@ def test_gemini_response_adapter_maps_normalized_response():
     assert candidate["finishReason"] == "STOP"
 
 
+def test_gemini_response_adapter_renders_gigachat_sources():
+    response = NormalizedResponse(
+        choices=[
+            NormalizedChoice(
+                message=NormalizedMessage(
+                    role="assistant",
+                    content="Answer. [sources=[3]]",
+                    raw_extensions={
+                        "inline_data": {
+                            "sources": {
+                                "3": {
+                                    "url": "https://example.test/source",
+                                    "title": "Example Source",
+                                }
+                            }
+                        }
+                    },
+                )
+            )
+        ]
+    )
+
+    payload = normalized_chat_response_to_gemini(
+        response,
+        requested_model="gemini-pro",
+    )
+
+    text = payload["candidates"][0]["content"]["parts"][0]["text"]
+    assert text == (
+        "Answer.\n\nSources:\n- [Example Source](https://example.test/source)"
+    )
+    assert "[sources=" not in text
+
+
 def test_gemini_stream_message_end_includes_usage_metadata():
     payload = normalized_stream_event_to_gemini_chunk(
         NormalizedStreamEvent(

@@ -16,7 +16,7 @@ async def test_exceptions_handler_renders_openai_model_concurrency_timeout() -> 
     assert response.status_code == 429
     assert json.loads(response.body) == {
         "error": {
-            "message": "Concurrency limit reached for model GigaChat-Max: 5",
+            "message": "Concurrency limit reached for the requested model",
             "type": "rate_limit_error",
             "param": "model",
             "code": "model_concurrency_limit",
@@ -45,7 +45,7 @@ async def test_exceptions_handler_renders_anthropic_model_concurrency_timeout() 
         "type": "error",
         "error": {
             "type": "rate_limit_error",
-            "message": "Concurrency limit reached for model GigaChat-Pro: 1",
+            "message": "Concurrency limit reached for the requested model",
             "code": "model_concurrency_limit",
         },
         "request_id": "rq-model-limit",

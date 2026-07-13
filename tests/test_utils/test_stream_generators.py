@@ -243,6 +243,8 @@ async def test_stream_chat_generator_gigachat_exception():
     assert len(lines) == 2
     # Проверяем, что ошибка содержит тип и код
     assert "GigaChatException" in lines[0]
+    assert "Upstream service error" in lines[0]
+    assert "GigaChat API error occurred" not in lines[0]
     assert "stream_error" in lines[0]
     assert lines[1].strip() == "data: [DONE]"
 
@@ -515,6 +517,8 @@ async def test_stream_chat_completion_generator_gigachat_exception():
 
     assert len(lines) == 2
     assert "GigaChatException" in lines[0]
+    assert "Upstream service error" in lines[0]
+    assert "GigaChat API error occurred" not in lines[0]
     assert "stream_error" in lines[0]
     assert lines[1].strip() == "data: [DONE]"
 
@@ -541,7 +545,8 @@ async def test_stream_responses_generator_gigachat_exception():
     assert len(lines) == 3
     assert "event: response.created" in lines[0]
     assert "event: response.in_progress" in lines[1]
-    assert "GigaChat" in lines[2]
+    assert "Upstream service error" in lines[2]
+    assert "GigaChat API error occurred" not in lines[2]
     assert "stream_error" in lines[2]
     assert "event: error" in lines[2]
 
@@ -674,6 +679,65 @@ async def test_stream_responses_chat_completion_generator_builtin_tool_outputs()
     assert content["inline_data"]["sources"]["1"]["title"] == "Example Source"
     assert content["annotations"][0]["type"] == "url_citation"
     assert content["annotations"][0]["url"] == "https://example.test/source"
+
+
+async def test_stream_maps_image_generate_to_codex_imagegen_function_call():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"tool_execution": {"name": "image_generate"}}],
+                    }
+                ]
+            }
+        )
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_responses_chat_completion_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={
+            "model": "gpt-x",
+            "input": "Draw a friendly robot",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "image_gen__imagegen",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"prompt": {"type": "string"}},
+                        "required": ["prompt"],
+                    },
+                }
+            ],
+        },
+    ):
+        lines.append(line)
+
+    events = [
+        (
+            line.strip().split("\n")[0].replace("event: ", ""),
+            json.loads(line.strip().split("\n")[1].replace("data: ", "")),
+        )
+        for line in lines
+    ]
+    added = next(data for kind, data in events if kind == "response.output_item.added")
+    arguments_done = next(
+        data for kind, data in events if kind == "response.function_call_arguments.done"
+    )
+    completed = [data for kind, data in events if kind == "response.completed"][-1]
+
+    assert added["item"]["type"] == "function_call"
+    assert added["item"]["name"] == "image_gen__imagegen"
+    assert json.loads(arguments_done["arguments"]) == {
+        "prompt": "Draw a friendly robot"
+    }
+    assert completed["response"]["output"][0]["type"] == "function_call"
 
 
 async def test_stream_responses_chat_completion_generator_emits_source_annotation_event():
@@ -1031,6 +1095,8 @@ async def test_stream_responses_chat_completion_generator_gigachat_exception():
     assert len(lines) == 3
     assert "event: response.created" in lines[0]
     assert "event: response.in_progress" in lines[1]
+    assert "Upstream service error" in lines[2]
+    assert "GigaChat API error occurred" not in lines[2]
     assert "stream_error" in lines[2]
     assert "event: error" in lines[2]
 
