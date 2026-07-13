@@ -844,7 +844,7 @@ def test_native_spawn_failure_stops_new_owned_sidecar(tmp_path, monkeypatch):
     ("harness_id", "api_mode", "proxy_env", "base_url_env"),
     [
         ("codex-cli", "v1", "GPT2GIGA_API_KEY", None),
-        ("claude-code", "v2", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"),
+        ("claude-code", "v2", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"),
         ("gemini-cli", "v1", "GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"),
     ],
 )

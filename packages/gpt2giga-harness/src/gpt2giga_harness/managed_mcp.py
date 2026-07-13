@@ -243,7 +243,28 @@ def compose_startup_config(
     existing = dict(parsed) if isinstance(parsed, Mapping) else {}
     if not isinstance(base, Mapping):
         raise TypeError("JSON CLI startup settings must be a mapping")
-    existing.update(base)
+    for key, value in base.items():
+        if (
+            harness_id == "claude-code"
+            and key == "projects"
+            and isinstance(existing.get(key), Mapping)
+            and isinstance(value, Mapping)
+        ):
+            projects = dict(existing[key])
+            for project_path, project_settings in value.items():
+                current_settings = projects.get(project_path)
+                if isinstance(current_settings, Mapping) and isinstance(
+                    project_settings, Mapping
+                ):
+                    projects[project_path] = {
+                        **dict(current_settings),
+                        **dict(project_settings),
+                    }
+                else:
+                    projects[project_path] = project_settings
+            existing[key] = projects
+        else:
+            existing[key] = value
     return json.dumps(existing, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 

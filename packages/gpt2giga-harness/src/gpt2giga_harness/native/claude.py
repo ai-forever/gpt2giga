@@ -135,7 +135,10 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         native_home = self.managed_home(project_id)
         known_sources = tuple(str(path) for path in _session_files(native_home))
         native_home.mkdir(parents=True, exist_ok=True)
-        tool_config_hash = _write_claude_settings(native_home)
+        tool_config_hash = _write_claude_settings(
+            native_home,
+            workspace=request.workspace,
+        )
         session_name = _managed_session_name(request, project_id)
         permission_mode = MODE_TO_PERMISSION.get(
             request.mode,
@@ -211,7 +214,10 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         native_home = Path(snapshot.native_home).expanduser()
         api_mode = GigaChatApiMode(snapshot.api_mode)
         native_home.mkdir(parents=True, exist_ok=True)
-        _write_claude_settings(native_home)
+        _write_claude_settings(
+            native_home,
+            workspace=snapshot.effective_workspace or ref.workspace,
+        )
         env = _claude_env(context, api_mode=api_mode, native_home=native_home)
         permission_mode = MODE_TO_PERMISSION.get(
             snapshot.permission_mode,
@@ -299,8 +305,12 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         return resolution.executable or resolution.configured or "claude"
 
 
-def _write_claude_settings(home: Path) -> str:
-    return write_startup_config("claude-code", home, {})
+def _write_claude_settings(home: Path, *, workspace: str | None) -> str:
+    startup: dict[str, Any] = {"hasCompletedOnboarding": True}
+    if workspace:
+        trusted_workspace = str(Path(workspace).expanduser().resolve())
+        startup["projects"] = {trusted_workspace: {"hasTrustDialogAccepted": True}}
+    return write_startup_config("claude-code", home, startup)
 
 
 def _ref_from_file(
@@ -618,7 +628,7 @@ def _claude_env(
         home=str(native_home),
         extra={
             "ANTHROPIC_BASE_URL": context.api_base_url(api_mode),
-            "ANTHROPIC_API_KEY": context.api_key or "0",
+            "ANTHROPIC_AUTH_TOKEN": context.api_key or "0",
             "GPT2GIGA_HARNESS_PROXY_URL": context.proxy_url,
             "GPT2GIGA_HARNESS_API_MODE": api_mode.value,
         },

@@ -51,6 +51,25 @@ def test_composer_preserves_startup_settings_and_never_copies_secret_refs():
     )
     restarted = compose_startup_config("codex-cli", codex, 'model = "GigaChat-2-Max"\n')
     claude, _ = compose_managed_config("claude-code", "{}", (descriptor,))
+    claude = compose_startup_config(
+        "claude-code",
+        json.dumps(
+            {
+                **json.loads(claude),
+                "projects": {
+                    "/repo": {
+                        "allowedTools": ["Read"],
+                        "hasTrustDialogAccepted": False,
+                    },
+                    "/other": {"hasTrustDialogAccepted": True},
+                },
+            }
+        ),
+        {
+            "hasCompletedOnboarding": True,
+            "projects": {"/repo": {"hasTrustDialogAccepted": True}},
+        },
+    )
     gemini = compose_startup_config(
         "gemini-cli",
         json.dumps({"mcpServers": {"issues": {"command": "issue-mcp"}}}),
@@ -65,6 +84,14 @@ def test_composer_preserves_startup_settings_and_never_copies_secret_refs():
         "issues: secret reference TOKEN was not copied; use an explicit secret flow",
     )
     assert json.loads(claude)["mcpServers"]["issues"]["env"] == {"MODE": "read"}
+    assert json.loads(claude)["hasCompletedOnboarding"] is True
+    assert json.loads(claude)["projects"] == {
+        "/other": {"hasTrustDialogAccepted": True},
+        "/repo": {
+            "allowedTools": ["Read"],
+            "hasTrustDialogAccepted": True,
+        },
+    }
     assert json.loads(gemini)["mcpServers"]["issues"]["command"] == "issue-mcp"
 
 

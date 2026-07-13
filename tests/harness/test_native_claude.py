@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -178,10 +179,16 @@ def test_claude_native_start_command_uses_managed_home_and_redacts_key(
     assert "--no-session-persistence" not in plan.command
     assert "GIGACHAT_CREDENTIALS" not in plan.env
     assert plan.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v1"
-    assert plan.env["ANTHROPIC_API_KEY"] == secret
+    assert plan.env["ANTHROPIC_AUTH_TOKEN"] == secret
+    assert "ANTHROPIC_API_KEY" not in plan.env
     assert plan.env["HOME"] == plan.native_home
     assert secret not in str(payload)
     assert REDACTED in str(payload)
+    startup = json.loads((Path(plan.native_home) / ".claude.json").read_text())
+    assert startup["hasCompletedOnboarding"] is True
+    assert (
+        startup["projects"][str(workspace.resolve())]["hasTrustDialogAccepted"] is True
+    )
 
 
 def test_claude_native_start_command_applies_attachment_plan(tmp_path):
@@ -293,6 +300,7 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
     assert managed.execution_snapshot == start_plan.execution_snapshot
     assert plan.execution_snapshot == start_plan.execution_snapshot
     assert plan.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v1"
+    assert plan.env["ANTHROPIC_AUTH_TOKEN"] == "proxy-key"
     with pytest.raises(ValueError, match="Only managed"):
         connector.build_resume_command(external, context)
 

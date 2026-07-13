@@ -27,6 +27,7 @@ from gpt2giga_harness.types import (
 SAFE_ENV_KEYS = ("PATH", "HOME", "TMPDIR", "TEMP", "TMP", "SHELL", "LANG", "LC_ALL")
 SECRET_ENV_KEYS = (
     "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
     "GEMINI_API_KEY",
     "GPT2GIGA_API_KEY",
     "OPENAI_API_KEY",
