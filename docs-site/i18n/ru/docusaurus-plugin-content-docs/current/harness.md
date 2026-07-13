@@ -327,6 +327,16 @@ Codex отображает `plan|read` в `--sandbox read-only`, а `edit` в
 помечаются delegated: Approval Center не заявляет, что видит или подтверждает
 их.
 
+Для каждого управляемого native-процесса Harness теперь сохраняет в
+`runtime.sqlite3` публичную запись ownership: owner и process id, lease,
+heartbeat, timeout/cancel state, terminal cursor и ограниченные redacted-ссылки
+на output. Сырые PTY и process handles остаются только у процесса-владельца.
+Другой UI/API-клиент может читать durable state и запросить cooperative cancel,
+но не может писать в неподтверждённый PTY или «усыновить» его. После истечения
+lease reconciliation явно фиксирует `interrupted`, `exited` или `unknown`,
+оставляет managed home и изолированный worktree для review, а живой orphan
+помечает `process_alive_not_adopted` без ложного reconnect.
+
 Перед новым Gemini native-запуском Harness проверяет поддержку
 `--prompt-interactive` установленной версией CLI. Если flag доступен, составной
 prompt вместе с отрендеренными ссылками на attachments передаётся ровно в одном

@@ -35,14 +35,14 @@ def _common_contract() -> dict[str, AdapterCapabilitySupport]:
             "an explicit reviewed route override.",
         ),
         "native_durable_lifecycle": _claim(
-            AdapterSupportLevel.UNSUPPORTED,
-            "Native process ownership is in memory and cannot be truthfully recovered "
-            "after owner restart.",
+            AdapterSupportLevel.SUPPORTED,
+            "Persists owner leases, heartbeats, cancellation, timeouts, bounded terminal "
+            "cursors, and explicit non-adopting recovery after owner restart.",
         ),
         "native_terminal_transport": _claim(
             AdapterSupportLevel.PARTIAL,
-            "Provides PTY or pipes, stdin, polling output, and stop without durable "
-            "cursor reconnect or resize.",
+            "Provides PTY or pipes, stdin, bounded durable cursor polling, and stop, but "
+            "does not yet provide streaming transport or resize.",
         ),
         "managed_mcp_native": _claim(
             AdapterSupportLevel.SUPPORTED,

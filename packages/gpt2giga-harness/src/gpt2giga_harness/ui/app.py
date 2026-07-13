@@ -267,7 +267,8 @@ def create_app(
         config.data_dir
     )
     native_process_manager = native_process_manager or NativeProcessManager(
-        session_store=store
+        session_store=store,
+        runtime_store=runtime_store,
     )
     attachment_store = FilesystemAttachmentStore(config.data_dir)
     arena_store = FilesystemHarnessArenaStore(config.data_dir)
@@ -1395,6 +1396,7 @@ def create_app(
                 session_id=session.id,
                 workspace=options["workspace"],
                 run_id=run.id,
+                timeout_seconds=_native_timeout_seconds(payload.get("timeout_seconds")),
             )
             if options["action"] == "start":
                 recorder = getattr(options["connector"], "record_start_snapshot", None)
@@ -1570,7 +1572,10 @@ def create_app(
     @app.delete("/api/native/processes/{process_id}")
     async def native_process_stop(process_id: str) -> dict[str, Any]:
         try:
-            process_ref = native_process_manager.stop(process_id)
+            process_ref = await run_in_threadpool(
+                native_process_manager.stop,
+                process_id,
+            )
             run = _sync_native_process_run(
                 store,
                 process_ref,
@@ -1581,7 +1586,8 @@ def create_app(
                 status_code=404, detail="Native process not found"
             ) from exc
         return {
-            "stopped": True,
+            "stopped": process_ref.status is not NativeProcessStatus.RUNNING,
+            "cancel_requested": process_ref.cancel_requested_at is not None,
             "process": native_process_ref_to_dict(process_ref),
             "run": run_to_dict(run) if run is not None else None,
         }
@@ -3655,9 +3661,19 @@ def _sync_native_process_run(
             "native_process": {
                 "id": process_ref.id,
                 "pid": process_ref.pid,
+                "process_group_id": process_ref.process_group_id,
                 "transport": process_ref.transport,
                 "status": process_ref.status.value,
                 "exit_code": process_ref.exit_code,
+                "owner_id": process_ref.owner_id,
+                "owner_process_id": process_ref.owner_process_id,
+                "heartbeat_at": process_ref.heartbeat_at,
+                "leased_until": process_ref.leased_until,
+                "timeout_at": process_ref.timeout_at,
+                "cancel_requested_at": process_ref.cancel_requested_at,
+                "terminal_cursor": process_ref.terminal_cursor,
+                "recovery_outcome": process_ref.recovery_outcome,
+                "reconnectable": process_ref.reconnectable,
             },
         }
     )
@@ -3669,11 +3685,16 @@ def _sync_native_process_run(
     if process_ref.status is not NativeProcessStatus.RUNNING:
         patch["finished_at"] = process_ref.updated_at
     if status is RunStatus.FAILED:
-        patch["error"] = (
-            f"Native process exited with code {process_ref.exit_code}"
-            if process_ref.exit_code is not None
-            else "Native process failed"
-        )
+        if process_ref.recovery_outcome is not None:
+            patch["error"] = (
+                f"Native process could not be recovered: {process_ref.recovery_outcome}"
+            )
+        else:
+            patch["error"] = (
+                f"Native process exited with code {process_ref.exit_code}"
+                if process_ref.exit_code is not None
+                else "Native process failed"
+            )
     try:
         run = store.update_run(process_ref.run_id, **patch)
     except RunNotFoundError:
@@ -4039,9 +4060,27 @@ def _run_status_from_process(process_ref: NativeProcessRef) -> RunStatus:
         return RunStatus.CANCELED
     if process_ref.status is NativeProcessStatus.FAILED:
         return RunStatus.FAILED
+    if process_ref.status in {
+        NativeProcessStatus.TIMED_OUT,
+        NativeProcessStatus.INTERRUPTED,
+        NativeProcessStatus.UNKNOWN,
+    }:
+        return RunStatus.FAILED
     if process_ref.exit_code == 0:
         return RunStatus.SUCCEEDED
     return RunStatus.FAILED
+
+
+def _native_timeout_seconds(value: Any) -> float | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("timeout_seconds must be a positive number") from exc
+    if timeout <= 0:
+        raise ValueError("timeout_seconds must be a positive number")
+    return timeout
 
 
 def _native_transcript_message_to_dict(

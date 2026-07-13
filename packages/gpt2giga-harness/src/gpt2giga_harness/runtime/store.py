@@ -18,6 +18,8 @@ from gpt2giga_harness.runtime.models import (
     JobAttemptStatus,
     JobStatus,
     JobSubmission,
+    NativeProcessOutputRecord,
+    NativeProcessRecord,
     RuntimeJob,
     RuntimeOutboxEntry,
     RuntimeWorker,
@@ -25,6 +27,7 @@ from gpt2giga_harness.runtime.models import (
     TERMINAL_JOB_STATUSES,
     attempt_to_dict,
     job_to_dict,
+    native_process_record_to_dict,
     outbox_entry_to_dict,
     parse_attempt_status,
     parse_job_status,
@@ -45,7 +48,7 @@ from gpt2giga_harness.runtime.policy import (
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 
 RUNTIME_DB_NAME = "runtime.sqlite3"
-RUNTIME_SCHEMA_VERSION = 8
+RUNTIME_SCHEMA_VERSION = 9
 SQLITE_TIMEOUT_SECONDS = 10.0
 
 
@@ -59,6 +62,10 @@ class JobNotFoundError(RuntimeStoreError):
 
 class AttemptNotFoundError(RuntimeStoreError):
     """Raised when a job attempt does not exist."""
+
+
+class NativeProcessRecordNotFoundError(RuntimeStoreError):
+    """Raised when a durable native process record does not exist."""
 
 
 class IdempotencyConflictError(RuntimeStoreError):
@@ -355,6 +362,51 @@ _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         8,
         "project-scoped schedule keys",
         (),
+    ),
+    (
+        9,
+        "durable native process ownership and terminal cursors",
+        (
+            """
+            CREATE TABLE native_processes (
+                id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                owner_process_id INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                harness_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                process_id INTEGER,
+                process_group_id INTEGER,
+                transport TEXT NOT NULL,
+                ref_json TEXT NOT NULL DEFAULT '{}',
+                started_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                heartbeat_at TEXT NOT NULL,
+                leased_until TEXT NOT NULL,
+                timeout_at TEXT,
+                cancel_requested_at TEXT,
+                finished_at TEXT,
+                terminal_cursor INTEGER NOT NULL DEFAULT 0,
+                recovery_outcome TEXT,
+                version INTEGER NOT NULL DEFAULT 0
+            )
+            """,
+            "CREATE INDEX native_processes_status_lease_idx ON native_processes(status, leased_until)",
+            "CREATE INDEX native_processes_run_idx ON native_processes(run_id, updated_at)",
+            "CREATE INDEX native_processes_owner_idx ON native_processes(owner_id, status)",
+            """
+            CREATE TABLE native_process_outputs (
+                process_id TEXT NOT NULL REFERENCES native_processes(id) ON DELETE CASCADE,
+                cursor INTEGER NOT NULL CHECK (cursor > 0),
+                stream TEXT NOT NULL,
+                text TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (process_id, cursor)
+            )
+            """,
+            "CREATE INDEX native_process_outputs_created_idx ON native_process_outputs(process_id, created_at)",
+        ),
     ),
 )
 
@@ -1106,6 +1158,268 @@ class RuntimeCoordinationStore:
             ).fetchall()
         return tuple(_worker_from_row(row) for row in rows)
 
+    def create_native_process(self, record: NativeProcessRecord) -> NativeProcessRecord:
+        """Persist one native process before it is exposed to API clients."""
+        with self._connect() as connection, _transaction(connection):
+            connection.execute(
+                """
+                INSERT INTO native_processes (
+                    id, owner_id, owner_process_id, session_id, run_id,
+                    harness_id, status, process_id, process_group_id, transport,
+                    ref_json, started_at, updated_at, heartbeat_at, leased_until,
+                    timeout_at, cancel_requested_at, finished_at, terminal_cursor,
+                    recovery_outcome, version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.owner_id,
+                    record.owner_process_id,
+                    record.session_id,
+                    record.run_id,
+                    record.harness_id,
+                    record.status,
+                    record.process_id,
+                    record.process_group_id,
+                    record.transport,
+                    _safe_json(record.ref),
+                    record.started_at,
+                    record.updated_at,
+                    record.heartbeat_at,
+                    record.leased_until,
+                    record.timeout_at,
+                    record.cancel_requested_at,
+                    record.finished_at,
+                    record.terminal_cursor,
+                    record.recovery_outcome,
+                    record.version,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM native_processes WHERE id = ?", (record.id,)
+            ).fetchone()
+        return _native_process_from_row(row)
+
+    def get_native_process(self, process_id: str) -> NativeProcessRecord:
+        """Return one durable native process record."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM native_processes WHERE id = ?", (process_id,)
+            ).fetchone()
+        if row is None:
+            raise NativeProcessRecordNotFoundError(process_id)
+        return _native_process_from_row(row)
+
+    def list_native_processes(self) -> tuple[NativeProcessRecord, ...]:
+        """List durable native process records in creation order."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM native_processes ORDER BY started_at, id"
+            ).fetchall()
+        return tuple(_native_process_from_row(row) for row in rows)
+
+    def heartbeat_native_process(
+        self,
+        process_id: str,
+        *,
+        owner_id: str,
+        lease_seconds: float,
+        ref: Mapping[str, Any],
+        terminal_cursor: int,
+    ) -> NativeProcessRecord:
+        """Renew a native owner lease while refreshing its public snapshot."""
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            connection.execute(
+                """
+                UPDATE native_processes
+                SET heartbeat_at = ?, leased_until = ?, updated_at = ?,
+                    ref_json = ?, terminal_cursor = MAX(terminal_cursor, ?),
+                    version = version + 1
+                WHERE id = ? AND owner_id = ? AND status = 'running'
+                """,
+                (
+                    now,
+                    _future_time(max(lease_seconds, 0.1)),
+                    now,
+                    _safe_json(ref),
+                    max(terminal_cursor, 0),
+                    process_id,
+                    owner_id,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM native_processes WHERE id = ?", (process_id,)
+            ).fetchone()
+        if row is None:
+            raise NativeProcessRecordNotFoundError(process_id)
+        return _native_process_from_row(row)
+
+    def append_native_process_output(
+        self,
+        output: NativeProcessOutputRecord,
+        *,
+        owner_id: str,
+        max_chunks: int,
+    ) -> None:
+        """Persist one redacted terminal chunk and prune older references."""
+        with self._connect() as connection, _transaction(connection):
+            owner = connection.execute(
+                "SELECT owner_id FROM native_processes WHERE id = ?",
+                (output.process_id,),
+            ).fetchone()
+            if owner is None:
+                raise NativeProcessRecordNotFoundError(output.process_id)
+            if str(owner["owner_id"]) != owner_id:
+                return
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO native_process_outputs (
+                    process_id, cursor, stream, text, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    output.process_id,
+                    output.cursor,
+                    output.stream,
+                    str(redact_for_storage(output.text)),
+                    output.created_at,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE native_processes
+                SET terminal_cursor = MAX(terminal_cursor, ?), updated_at = ?,
+                    version = version + 1
+                WHERE id = ? AND owner_id = ?
+                """,
+                (output.cursor, _utc_now(), output.process_id, owner_id),
+            )
+            keep = max(int(max_chunks), 1)
+            connection.execute(
+                """
+                DELETE FROM native_process_outputs
+                WHERE process_id = ? AND cursor <= ?
+                """,
+                (output.process_id, max(output.cursor - keep, 0)),
+            )
+
+    def read_native_process_outputs(
+        self, process_id: str, *, after_cursor: int = 0
+    ) -> tuple[NativeProcessOutputRecord, ...]:
+        """Read persisted terminal chunks after one caller cursor."""
+        self.get_native_process(process_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM native_process_outputs
+                WHERE process_id = ? AND cursor > ? ORDER BY cursor
+                """,
+                (process_id, max(after_cursor, 0)),
+            ).fetchall()
+        return tuple(_native_process_output_from_row(row) for row in rows)
+
+    def request_native_process_cancel(self, process_id: str) -> NativeProcessRecord:
+        """Persist a cooperative cancellation request for the owning supervisor."""
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            connection.execute(
+                """
+                UPDATE native_processes
+                SET cancel_requested_at = COALESCE(cancel_requested_at, ?),
+                    updated_at = ?, version = version + 1
+                WHERE id = ? AND status = 'running'
+                """,
+                (now, now, process_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM native_processes WHERE id = ?", (process_id,)
+            ).fetchone()
+        if row is None:
+            raise NativeProcessRecordNotFoundError(process_id)
+        return _native_process_from_row(row)
+
+    def finish_native_process(
+        self,
+        process_id: str,
+        *,
+        owner_id: str,
+        status: str,
+        ref: Mapping[str, Any],
+        terminal_cursor: int,
+        recovery_outcome: str | None = None,
+    ) -> NativeProcessRecord:
+        """Finish a native process only from its proven owner."""
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            connection.execute(
+                """
+                UPDATE native_processes
+                SET status = ?, ref_json = ?, terminal_cursor = MAX(terminal_cursor, ?),
+                    recovery_outcome = ?, finished_at = COALESCE(finished_at, ?),
+                    heartbeat_at = ?, updated_at = ?, version = version + 1
+                WHERE id = ? AND owner_id = ? AND status = 'running'
+                """,
+                (
+                    status,
+                    _safe_json(ref),
+                    max(terminal_cursor, 0),
+                    _optional_text(recovery_outcome),
+                    now,
+                    now,
+                    now,
+                    process_id,
+                    owner_id,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM native_processes WHERE id = ?", (process_id,)
+            ).fetchone()
+        if row is None:
+            raise NativeProcessRecordNotFoundError(process_id)
+        return _native_process_from_row(row)
+
+    def list_expired_native_processes(self) -> tuple[NativeProcessRecord, ...]:
+        """List running native processes whose owner lease expired."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM native_processes
+                WHERE status = 'running' AND leased_until < ?
+                ORDER BY leased_until, id
+                """,
+                (_utc_now(),),
+            ).fetchall()
+        return tuple(_native_process_from_row(row) for row in rows)
+
+    def recover_native_process(
+        self,
+        process_id: str,
+        *,
+        status: str,
+        ref: Mapping[str, Any],
+        recovery_outcome: str,
+    ) -> NativeProcessRecord:
+        """Record an expired owner outcome without attempting process adoption."""
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            connection.execute(
+                """
+                UPDATE native_processes
+                SET status = ?, ref_json = ?, recovery_outcome = ?,
+                    finished_at = COALESCE(finished_at, ?), updated_at = ?,
+                    version = version + 1
+                WHERE id = ? AND status = 'running' AND leased_until < ?
+                """,
+                (status, _safe_json(ref), recovery_outcome, now, now, process_id, now),
+            )
+            row = connection.execute(
+                "SELECT * FROM native_processes WHERE id = ?", (process_id,)
+            ).fetchone()
+        if row is None:
+            raise NativeProcessRecordNotFoundError(process_id)
+        return _native_process_from_row(row)
+
     def create_approval_request(
         self,
         resolution: PolicyResolution,
@@ -1724,6 +2038,8 @@ class RuntimeCoordinationStore:
                     "schedule_states",
                     "schedule_occurrences",
                     "attention_reads",
+                    "native_processes",
+                    "native_process_outputs",
                 )
             }
             pending = int(
@@ -1764,12 +2080,32 @@ class RuntimeCoordinationStore:
             attention_rows = connection.execute(
                 "SELECT * FROM attention_reads ORDER BY read_at, item_id"
             ).fetchall()
+            native_output_rows = connection.execute(
+                """
+                SELECT process_id, cursor, stream, text, created_at
+                FROM native_process_outputs ORDER BY process_id, cursor
+                """
+            ).fetchall()
         return {
             "schema_version": self.schema_version,
             "exported_at": _utc_now(),
             "jobs": [job_to_dict(job) for job in self.list_jobs()],
             "attempts": [attempt_to_dict(item) for item in self.list_attempts()],
             "workers": [worker_to_dict(item) for item in self.list_workers()],
+            "native_processes": [
+                native_process_record_to_dict(item)
+                for item in self.list_native_processes()
+            ],
+            "native_process_outputs": [
+                {
+                    "process_id": str(row["process_id"]),
+                    "cursor": int(row["cursor"]),
+                    "stream": str(row["stream"]),
+                    "text": str(redact_for_storage(row["text"])),
+                    "created_at": str(row["created_at"]),
+                }
+                for row in native_output_rows
+            ],
             "approvals": [
                 approval_request_to_dict(item)
                 for item in self.list_approval_requests(limit=200)
@@ -2129,6 +2465,48 @@ def _worker_from_row(row: sqlite3.Row) -> RuntimeWorker:
         heartbeat_at=str(row["heartbeat_at"]),
         stopped_at=_optional_text(row["stopped_at"]),
         capability_fingerprint=_json_mapping(row["capability_fingerprint_json"]),
+    )
+
+
+def _native_process_from_row(row: sqlite3.Row) -> NativeProcessRecord:
+    return NativeProcessRecord(
+        id=str(row["id"]),
+        owner_id=str(row["owner_id"]),
+        owner_process_id=int(row["owner_process_id"]),
+        session_id=str(row["session_id"]),
+        run_id=str(row["run_id"]),
+        harness_id=str(row["harness_id"]),
+        status=str(row["status"]),
+        process_id=(int(row["process_id"]) if row["process_id"] is not None else None),
+        process_group_id=(
+            int(row["process_group_id"])
+            if row["process_group_id"] is not None
+            else None
+        ),
+        transport=str(row["transport"]),
+        ref=_json_mapping(row["ref_json"]),
+        started_at=str(row["started_at"]),
+        updated_at=str(row["updated_at"]),
+        heartbeat_at=str(row["heartbeat_at"]),
+        leased_until=str(row["leased_until"]),
+        timeout_at=_optional_text(row["timeout_at"]),
+        cancel_requested_at=_optional_text(row["cancel_requested_at"]),
+        finished_at=_optional_text(row["finished_at"]),
+        terminal_cursor=int(row["terminal_cursor"]),
+        recovery_outcome=_optional_text(row["recovery_outcome"]),
+        version=int(row["version"]),
+    )
+
+
+def _native_process_output_from_row(
+    row: sqlite3.Row,
+) -> NativeProcessOutputRecord:
+    return NativeProcessOutputRecord(
+        process_id=str(row["process_id"]),
+        cursor=int(row["cursor"]),
+        stream=str(row["stream"]),
+        text=str(redact_for_storage(row["text"])),
+        created_at=str(row["created_at"]),
     )
 
 

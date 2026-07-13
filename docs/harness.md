@@ -1529,6 +1529,11 @@ JSON/JSONL rewrites when UI and worker processes overlap. Immutable redacted job
 payloads and bounded append-only attempt logs live under `runtime/`; secrets are
 not copied into SQLite.
 
+Native terminals also have a public coordination record in `runtime.sqlite3`:
+owner and process ids, lease and heartbeat timestamps, timeout/cancel state,
+terminal cursor, bounded redacted output chunks, and an explicit recovery
+outcome. The raw PTY and process handles remain owner-local and are never stored.
+
 Inspect the schema/counts or export all coordination rows as safe JSON:
 
 ```bash
@@ -1552,7 +1557,9 @@ does not append the logical user message again. Expired leases become explicit
 automatic retry. Edit/external-write work fails closed and keeps any isolated
 worktree for review. Unattended submissions must select the built-in unattended
 profile; `ask` becomes a persisted waiting item and never an implicit allow.
-Native terminal processes remain manual and are not scheduled by the worker.
+Native terminal processes remain manual and are not scheduled by the worker,
+but their lifecycle is durable and supervised by the UI process that spawned
+them.
 
 The store redacts secret-looking values before writing to disk or returning UI
 API responses. It must not store API keys, authorization headers, cookies,
@@ -1750,6 +1757,15 @@ Permission controls remain CLI-owned after spawn: Codex maps `plan|read` to
 these controls as delegated to the CLI sandbox and keeps interactive in-CLI
 approval prompts explicitly delegated rather than claiming that Approval
 Center can observe or answer them.
+
+Every managed native process now persists an owner lease, heartbeat, process and
+process-group diagnostics, timeout/cancel state, terminal cursor, and bounded
+redacted output references. Another UI/API client can read that public state and
+request cooperative cancellation, but it cannot write to or adopt an unproven
+PTY. If the owner lease expires, restart reconciliation records the process as
+`interrupted`, `exited`, or `unknown` and keeps its managed home and isolated
+worktree for review. A still-running orphan is explicitly marked
+`process_alive_not_adopted`; reconnect never pretends that a new UI owns it.
 
 Gemini native starts capability-probe the installed CLI for
 `--prompt-interactive`. When supported, the composed prompt and rendered
