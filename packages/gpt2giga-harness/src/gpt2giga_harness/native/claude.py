@@ -22,6 +22,11 @@ from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
+    create_execution_snapshot,
+)
+from gpt2giga_harness.native.snapshots import (
+    NativeExecutionSnapshotStore,
+    validate_resume_snapshot,
 )
 from gpt2giga_harness.managed_mcp import write_startup_config
 from gpt2giga_harness.project import project_id_for_root
@@ -52,6 +57,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         )
         self.executable = executable
         self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
+        self.snapshot_store = NativeExecutionSnapshotStore(self.data_dir)
 
     def discover(
         self,
@@ -61,13 +67,16 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
     ) -> tuple[NativeSessionRef, ...]:
         """Discover managed Claude refs first, then external refs when requested."""
         project_id = _project_id(workspace)
-        managed = self._discover_source(
-            source_root=self.managed_home(project_id),
-            workspace=workspace,
-            project_id=project_id,
-            status=NativeSessionStatus.MANAGED_NATIVE,
-            source_kind="managed",
-            can_resume=True,
+        managed = self.snapshot_store.reconcile(
+            self._discover_source(
+                source_root=self.managed_home(project_id),
+                workspace=workspace,
+                project_id=project_id,
+                status=NativeSessionStatus.MANAGED_NATIVE,
+                source_kind="managed",
+                can_resume=True,
+            ),
+            harness_id=self.harness_id,
         )
         external: tuple[NativeSessionRef, ...] = ()
         if include_external:
@@ -111,8 +120,9 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         """Plan a native interactive `claude -n <name>` command."""
         project_id = _project_id(request.workspace)
         native_home = self.managed_home(project_id)
+        known_sources = tuple(str(path) for path in _session_files(native_home))
         native_home.mkdir(parents=True, exist_ok=True)
-        _write_claude_settings(native_home)
+        tool_config_hash = _write_claude_settings(native_home)
         session_name = _managed_session_name(request, project_id)
         command = [self._executable(), "-n", session_name]
         model = request.model or context.default_model
@@ -123,6 +133,16 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         if prompt:
             command.append(prompt)
         env = _claude_env(context, api_mode=request.api_mode, native_home=native_home)
+        snapshot = create_execution_snapshot(
+            harness_id=self.harness_id,
+            api_mode=request.api_mode.value,
+            model=model,
+            native_home=str(native_home),
+            workspace=request.workspace,
+            project_id=project_id,
+            permission_mode=request.mode,
+            tool_config_hash=tool_config_hash,
+        )
         return NativeCommandPlan(
             command=tuple(command),
             env=env,
@@ -136,6 +156,8 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
                 "session_name": session_name,
                 **attachment_raw_metadata(request),
             },
+            execution_snapshot=snapshot,
+            snapshot_known_sources=known_sources,
         )
 
     def build_resume_command(
@@ -148,10 +170,11 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
             raise ValueError("Only managed Claude native sessions can be resumed")
         if not ref.native_session_id:
             raise ValueError("Claude native session name is required for resume")
-        native_home = _native_home_from_ref(ref)
-        if native_home is None:
-            native_home = self.managed_home(_project_id(ref.workspace))
-        api_mode = _api_mode_from_ref(ref)
+        snapshot = validate_resume_snapshot(ref, harness_id=self.harness_id)
+        if not snapshot.native_home:
+            raise ValueError("Native resume snapshot is missing its managed home")
+        native_home = Path(snapshot.native_home).expanduser()
+        api_mode = GigaChatApiMode(snapshot.api_mode)
         native_home.mkdir(parents=True, exist_ok=True)
         _write_claude_settings(native_home)
         env = _claude_env(context, api_mode=api_mode, native_home=native_home)
@@ -165,7 +188,18 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
                 "native_ref_id": ref.id,
                 "api_mode": api_mode.value,
                 "managed": True,
+                "route_unknown": not snapshot.route_known,
+                "resume_warnings": list(snapshot.warnings),
             },
+            execution_snapshot=snapshot,
+        )
+
+    def record_start_snapshot(self, plan: NativeCommandPlan) -> None:
+        """Persist a successful Claude native start for later discovery."""
+        native_session_id = str(plan.metadata.get("session_name") or "").strip() or None
+        self.snapshot_store.record_start(
+            plan,
+            native_session_id=native_session_id,
         )
 
     def managed_home(self, project_id: str) -> Path:
@@ -211,8 +245,8 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         return resolution.executable or resolution.configured or "claude"
 
 
-def _write_claude_settings(home: Path) -> None:
-    write_startup_config("claude-code", home, {})
+def _write_claude_settings(home: Path) -> str:
+    return write_startup_config("claude-code", home, {})
 
 
 def _ref_from_file(
@@ -513,23 +547,6 @@ def _path_from_ref(ref: NativeSessionRef) -> Path | None:
         return None
     path = Path(str(path_value)).expanduser()
     return path if path.exists() and path.is_file() else None
-
-
-def _native_home_from_ref(ref: NativeSessionRef) -> Path | None:
-    value = ref.metadata.get("native_home")
-    if value is None:
-        return None
-    return Path(str(value)).expanduser()
-
-
-def _api_mode_from_ref(ref: NativeSessionRef) -> GigaChatApiMode:
-    value = ref.metadata.get("api_mode")
-    if isinstance(value, GigaChatApiMode):
-        return value
-    try:
-        return GigaChatApiMode(str(value))
-    except ValueError:
-        return GigaChatApiMode.V2
 
 
 def _project_id(workspace: str | None) -> str:

@@ -7,6 +7,7 @@ import base64
 import binascii
 from dataclasses import dataclass, replace
 import json
+from pathlib import Path
 import threading
 from typing import Any, Mapping
 
@@ -69,9 +70,13 @@ from gpt2giga_harness.native.base import (
 )
 from gpt2giga_harness.native.models import (
     HarnessInvocationMode,
+    NativeExecutionSnapshot,
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
+    create_execution_snapshot,
+    execution_snapshot_from_dict,
+    execution_snapshot_to_dict,
 )
 from gpt2giga_harness.native.process import (
     NativeProcessManager,
@@ -1095,8 +1100,16 @@ def create_app(
             title=str(redact_for_storage(ref.title)),
             workspace=ref.workspace,
             default_harness_id=ref.harness_id,
-            default_model=_optional_text(ref.metadata.get("model")),
-            default_api_mode=config.default_api_mode,
+            default_model=(
+                ref.execution_snapshot.model
+                if ref.execution_snapshot is not None
+                else _optional_text(ref.metadata.get("model"))
+            ),
+            default_api_mode=parse_api_mode(
+                ref.execution_snapshot.api_mode
+                if ref.execution_snapshot is not None
+                else config.default_api_mode
+            ),
             default_mode="plan",
             native={
                 "source": "native_import",
@@ -1166,6 +1179,7 @@ def create_app(
                     "imported_message_count": len(messages),
                     "skipped_item_count": skipped_count,
                     "project_id": ref.metadata.get("project_id"),
+                    **_native_snapshot_link_metadata(ref),
                 },
             ),
         )
@@ -1206,6 +1220,7 @@ def create_app(
                     "project_id": ref.metadata.get("project_id"),
                     "can_resume": ref.can_resume,
                     "resume_reason": ref.resume_reason,
+                    **_native_snapshot_link_metadata(ref),
                 },
             ),
         )
@@ -1280,6 +1295,16 @@ def create_app(
                 workspace=options["workspace"],
                 run_id=run.id,
             )
+            if options["action"] == "start":
+                recorder = getattr(options["connector"], "record_start_snapshot", None)
+                if recorder is not None:
+                    try:
+                        recorder(options["plan"])
+                    except (OSError, ValueError) as exc:
+                        native_process_manager.stop(process_ref.id)
+                        raise NativeProcessStartError(
+                            "Could not persist native execution snapshot"
+                        ) from exc
             run = store.update_run(
                 run.id,
                 command=process_ref.display_command,
@@ -2780,6 +2805,7 @@ def _native_process_new_options(
         "workspace": workspace,
         "native_ref": None,
         "native_session_id": native_session_id,
+        "connector": connector,
         "attachment_ids": attachment_ids,
         "attachments": attachment_payloads,
         "attachment_render_plan": attachment_render_plan_payload,
@@ -2811,13 +2837,29 @@ def _native_process_resume_options(
             detail=ref.resume_reason or "Native session cannot be resumed",
         )
     connector = _native_connector_or_404(native_registry, ref.harness_id)
+    ref = _native_ref_with_reviewed_resume_snapshot(
+        ref=ref,
+        payload=payload,
+        session=session,
+        data_dir=config.data_dir,
+    )
+    snapshot = ref.execution_snapshot
+    _reject_resume_snapshot_overrides(payload, snapshot)
     plan = connector.build_resume_command(ref, config.to_context())
-    api_mode = parse_api_mode(payload.get("api_mode") or session.default_api_mode)
+    api_mode = parse_api_mode(
+        snapshot.api_mode
+        if snapshot is not None
+        else payload.get("api_mode") or session.default_api_mode
+    )
     capability = parse_capability(
         payload.get("capability") or HarnessCapability.AGENT_CLI.value
     )
     workspace = resolve_workspace(
-        _optional_text(payload.get("workspace")) or ref.workspace or session.workspace
+        snapshot.workspace
+        if snapshot is not None
+        else _optional_text(payload.get("workspace"))
+        or ref.workspace
+        or session.workspace
     )
     prompt = (
         _optional_text(payload.get("prompt")) or f"Resume native session: {ref.title}"
@@ -2827,18 +2869,27 @@ def _native_process_resume_options(
         "plan": plan,
         "harness_id": ref.harness_id,
         "prompt": prompt,
-        "model": _optional_text(payload.get("model"))
-        or _optional_text(ref.metadata.get("model"))
-        or session.default_model,
+        "model": (
+            snapshot.model
+            if snapshot is not None
+            else _optional_text(payload.get("model"))
+            or _optional_text(ref.metadata.get("model"))
+            or session.default_model
+        ),
         "api_mode": api_mode,
         "capability": capability,
-        "mode": str(payload.get("mode") or session.default_mode),
+        "mode": (
+            snapshot.permission_mode
+            if snapshot is not None
+            else str(payload.get("mode") or session.default_mode)
+        ),
         "workspace": workspace,
         "native_ref": ref,
         "native_session_id": ref.native_session_id,
         "attachment_ids": (),
         "attachments": (),
         "attachment_render_plan": None,
+        "connector": connector,
     }
 
 
@@ -2865,6 +2916,10 @@ def _native_process_run_metadata(
         )
     elif isinstance(plan, NativeCommandPlan) and plan.native_home is not None:
         metadata["native_home"] = plan.native_home
+    if isinstance(plan, NativeCommandPlan) and plan.execution_snapshot is not None:
+        metadata["execution_snapshot"] = execution_snapshot_to_dict(
+            plan.execution_snapshot
+        )
     if process_ref is not None:
         metadata["native_process"] = {
             "id": process_ref.id,
@@ -2923,6 +2978,10 @@ def _append_native_process_link(
         )
     if isinstance(options.get("plan"), NativeCommandPlan):
         metadata["plan_metadata"] = dict(options["plan"].metadata)
+        if options["plan"].execution_snapshot is not None:
+            snapshot = options["plan"].execution_snapshot
+            metadata["execution_snapshot"] = execution_snapshot_to_dict(snapshot)
+            metadata["limitations"] = [] if snapshot.route_known else ["route_unknown"]
     return store.append_native_link(
         session.id,
         HarnessNativeLink(
@@ -2972,7 +3031,110 @@ def _native_ref_from_session_link(
         can_resume=can_resume,
         resume_reason=resume_reason,
         metadata=link.metadata,
+        execution_snapshot=execution_snapshot_from_dict(
+            _metadata_mapping(link.metadata.get("execution_snapshot"))
+        ),
     )
+
+
+def _native_ref_with_reviewed_resume_snapshot(
+    *,
+    ref: NativeSessionRef,
+    payload: Mapping[str, Any],
+    session: HarnessSession,
+    data_dir: str,
+) -> NativeSessionRef:
+    if ref.execution_snapshot is not None:
+        return ref
+    if ref.harness_id not in {"codex-cli", "claude-code", "gemini-cli"}:
+        return ref
+    explicit_api_mode = _optional_text(payload.get("api_mode"))
+    if explicit_api_mode is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "route_unknown: legacy native ref requires an explicit reviewed "
+                "api_mode before resume"
+            ),
+        )
+    api_mode = parse_api_mode(explicit_api_mode)
+    workspace = resolve_workspace(
+        _optional_text(payload.get("workspace")) or ref.workspace or session.workspace
+    )
+    project_id = _optional_text(ref.metadata.get("project_id"))
+    if project_id is None:
+        if workspace is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Legacy native ref is missing project identity",
+            )
+        project_id = resolve_project(workspace, data_dir=data_dir).id
+    native_home = _optional_text(ref.metadata.get("native_home"))
+    if native_home is None:
+        family = {
+            "codex-cli": "codex",
+            "claude-code": "claude",
+            "gemini-cli": "gemini",
+        }[ref.harness_id]
+        native_home = str(
+            Path(data_dir).expanduser() / "native" / family / "homes" / project_id
+        )
+    snapshot = create_execution_snapshot(
+        harness_id=ref.harness_id,
+        api_mode=api_mode.value,
+        model=_optional_text(payload.get("model"))
+        or _optional_text(ref.metadata.get("model"))
+        or session.default_model,
+        native_home=native_home,
+        workspace=workspace,
+        project_id=project_id,
+        permission_mode=str(payload.get("mode") or session.default_mode),
+        tool_config_hash=_optional_text(ref.metadata.get("tool_config_hash")),
+        route_known=False,
+        warnings=(
+            "Legacy native ref had no route snapshot; this explicit route override "
+            "applies only to the reviewed resume.",
+        ),
+    )
+    return replace(ref, execution_snapshot=snapshot)
+
+
+def _reject_resume_snapshot_overrides(
+    payload: Mapping[str, Any],
+    snapshot: NativeExecutionSnapshot | None,
+) -> None:
+    if snapshot is None:
+        return
+    checks = {
+        "api_mode": snapshot.api_mode,
+        "model": snapshot.model,
+        "mode": snapshot.permission_mode,
+        "workspace": snapshot.workspace,
+    }
+    for key, expected in checks.items():
+        if key not in payload or payload.get(key) is None:
+            continue
+        actual = str(payload[key]).strip()
+        if key == "api_mode":
+            actual = parse_api_mode(actual).value
+        elif key == "workspace":
+            actual = resolve_workspace(actual) or ""
+        if actual != (expected or ""):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Native resume {key} contradicts the execution snapshot",
+            )
+
+
+def _native_snapshot_link_metadata(ref: NativeSessionRef) -> dict[str, Any]:
+    if ref.execution_snapshot is None:
+        return {"limitations": ["route_unknown"]} if ref.can_resume else {}
+    return {
+        "execution_snapshot": execution_snapshot_to_dict(ref.execution_snapshot),
+        "limitations": (
+            [] if ref.execution_snapshot.route_known else ["route_unknown"]
+        ),
+    }
 
 
 def _native_session_id_from_plan(plan: NativeCommandPlan) -> str | None:
@@ -3136,6 +3298,7 @@ def _native_import_session_metadata(ref: NativeSessionRef) -> dict[str, Any]:
         metadata["project_id"] = project_id
     if ref.workspace is not None:
         metadata["project_root"] = ref.workspace
+    metadata.update(_native_snapshot_link_metadata(ref))
     return metadata
 
 

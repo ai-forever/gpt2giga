@@ -255,6 +255,19 @@ def test_gemini_native_resume_command_requires_managed_ref(tmp_path):
     workspace.mkdir()
     project_id = project_id_for_root(workspace)
     project_hash = project_hash_for_workspace(workspace)
+    connector = GeminiNativeHistoryConnector(data_dir=data_dir, executable="gemini")
+    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+    start_plan = connector.build_start_command(
+        HarnessRequest(
+            prompt="start",
+            model="GigaChat-2-Max",
+            api_mode=GigaChatApiMode.V1,
+            mode="plan",
+            workspace=str(workspace),
+        ),
+        context,
+    )
+    connector.record_start_snapshot(start_plan)
     session_file = (
         data_dir
         / "native"
@@ -278,8 +291,6 @@ def test_gemini_native_resume_command_requires_managed_ref(tmp_path):
             },
         ),
     )
-    connector = GeminiNativeHistoryConnector(data_dir=data_dir, executable="gemini")
-    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
     (managed,) = connector.discover(workspace=str(workspace), include_external=False)
 
     plan = connector.build_resume_command(managed, context)
@@ -293,7 +304,9 @@ def test_gemini_native_resume_command_requires_managed_ref(tmp_path):
     assert "-p" not in plan.command
     assert "--skip-trust" not in plan.command
     assert plan.env["HOME"] == managed.metadata["native_home"]
-    assert plan.env["GOOGLE_GEMINI_BASE_URL"] == "http://127.0.0.1:8090/v2"
+    assert managed.execution_snapshot == start_plan.execution_snapshot
+    assert plan.execution_snapshot == start_plan.execution_snapshot
+    assert plan.env["GOOGLE_GEMINI_BASE_URL"] == "http://127.0.0.1:8090/v1"
     assert plan.env["GEMINI_MODEL"] == "GigaChat-2-Max"
     with pytest.raises(ValueError, match="Only managed"):
         connector.build_resume_command(external, context)

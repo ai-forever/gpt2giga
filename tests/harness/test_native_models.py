@@ -1,8 +1,13 @@
 from gpt2giga_harness.native import (
     HarnessInvocationMode,
+    NativeExecutionSnapshot,
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
+)
+from gpt2giga_harness.native.models import (
+    execution_snapshot_from_dict,
+    execution_snapshot_to_dict,
 )
 from gpt2giga_harness.types import HarnessCapability, HarnessSpec, spec_to_dict
 
@@ -70,3 +75,24 @@ def test_native_transcript_message_defaults_metadata():
 
     assert message.created_at is None
     assert message.metadata == {}
+
+
+def test_native_execution_snapshot_round_trips_public_identity():
+    snapshot = NativeExecutionSnapshot(
+        id="nexec_123",
+        harness_id="codex-cli",
+        api_mode="v1",
+        model="GigaChat-2-Max",
+        native_home="/managed/codex",
+        workspace="/repo",
+        project_id="proj_repo",
+        permission_mode="edit",
+        tool_config_hash="sha256-config",
+        created_at="2026-07-13T10:00:00+00:00",
+    )
+
+    payload = execution_snapshot_to_dict(snapshot)
+
+    assert execution_snapshot_from_dict(payload) == snapshot
+    assert payload["route_known"] is True
+    assert payload["warnings"] == []

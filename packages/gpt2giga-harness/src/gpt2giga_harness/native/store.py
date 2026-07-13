@@ -8,7 +8,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol
 
-from gpt2giga_harness.native.models import NativeSessionRef, NativeSessionStatus
+from gpt2giga_harness.native.models import (
+    NativeSessionRef,
+    NativeSessionStatus,
+    execution_snapshot_from_dict,
+    execution_snapshot_to_dict,
+)
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import new_id
 
@@ -170,6 +175,12 @@ def native_session_ref_to_dict(ref: NativeSessionRef) -> dict[str, Any]:
         "can_resume": ref.can_resume,
         "resume_reason": ref.resume_reason,
         "metadata": _metadata_only(ref.metadata),
+        "execution_snapshot": (
+            execution_snapshot_to_dict(ref.execution_snapshot)
+            if ref.execution_snapshot is not None
+            else None
+        ),
+        "limitations": _ref_limitations(ref),
     }
 
 
@@ -191,7 +202,17 @@ def native_session_ref_from_dict(data: Mapping[str, Any]) -> NativeSessionRef:
         can_resume=bool(data.get("can_resume")),
         resume_reason=_optional_text(data.get("resume_reason")),
         metadata=_metadata_only(_mapping(data.get("metadata"))),
+        execution_snapshot=execution_snapshot_from_dict(
+            _mapping(data.get("execution_snapshot"))
+        ),
     )
+
+
+def _ref_limitations(ref: NativeSessionRef) -> list[str]:
+    snapshot = ref.execution_snapshot
+    if ref.can_resume and (snapshot is None or not snapshot.route_known):
+        return ["route_unknown"]
+    return []
 
 
 def _redacted_ref(ref: NativeSessionRef) -> NativeSessionRef:

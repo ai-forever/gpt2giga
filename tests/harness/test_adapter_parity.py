@@ -9,6 +9,7 @@ from gpt2giga_harness.native.claude import ClaudeNativeHistoryConnector
 from gpt2giga_harness.native.codex import CodexNativeHistoryConnector
 from gpt2giga_harness.native.gemini import GeminiNativeHistoryConnector
 from gpt2giga_harness.native.models import NativeSessionRef, NativeSessionStatus
+from gpt2giga_harness.native.store import native_session_ref_to_dict
 from gpt2giga_harness.types import (
     AdapterSupportLevel,
     GigaChatApiMode,
@@ -34,7 +35,7 @@ EXPECTED_SUPPORT = {
         "native_permission_mode": "supported",
         "native_workspace": "partial",
         "native_resume": "partial",
-        "native_route_snapshot": "partial",
+        "native_route_snapshot": "supported",
         "native_durable_lifecycle": "unsupported",
         "native_terminal_transport": "partial",
         "managed_mcp_native": "supported",
@@ -51,7 +52,7 @@ EXPECTED_SUPPORT = {
         "native_permission_mode": "unsupported",
         "native_workspace": "partial",
         "native_resume": "supported",
-        "native_route_snapshot": "partial",
+        "native_route_snapshot": "supported",
         "native_durable_lifecycle": "unsupported",
         "native_terminal_transport": "partial",
         "managed_mcp_native": "supported",
@@ -68,7 +69,7 @@ EXPECTED_SUPPORT = {
         "native_permission_mode": "unsupported",
         "native_workspace": "partial",
         "native_resume": "partial",
-        "native_route_snapshot": "partial",
+        "native_route_snapshot": "supported",
         "native_durable_lifecycle": "unsupported",
         "native_terminal_transport": "partial",
         "managed_mcp_native": "supported",
@@ -189,6 +190,14 @@ def test_native_request_field_consumption_and_policy_gap_are_explicit(
         HarnessContext(proxy_url="http://127.0.0.1:8090"),
     )
 
+    assert plan.execution_snapshot is not None
+    assert plan.execution_snapshot.harness_id == harness_id
+    assert plan.execution_snapshot.api_mode == "v1"
+    assert plan.execution_snapshot.model == "GigaChat-2-Max"
+    assert plan.execution_snapshot.native_home == plan.native_home
+    assert plan.execution_snapshot.workspace == str(workspace)
+    assert plan.execution_snapshot.permission_mode == "plan"
+    assert plan.execution_snapshot.tool_config_hash
     assert plan.cwd == str(workspace)
     assert plan.metadata["api_mode"] == "v1"
     assert "GigaChat-2-Max" in plan.command
@@ -225,7 +234,7 @@ def test_native_request_field_consumption_and_policy_gap_are_explicit(
         ("gemini-cli", GeminiNativeHistoryConnector),
     ),
 )
-def test_legacy_native_resume_route_fallback_is_reported_as_partial(
+def test_legacy_native_resume_route_is_limited_instead_of_guessed(
     harness_id,
     connector_cls,
     tmp_path,
@@ -250,16 +259,18 @@ def test_legacy_native_resume_route_fallback_is_reported_as_partial(
         metadata={},
     )
 
-    plan = connector.build_resume_command(
-        ref,
-        HarnessContext(proxy_url="http://127.0.0.1:8090"),
-    )
+    payload = native_session_ref_to_dict(ref)
 
-    assert plan.metadata["api_mode"] == "v2"
+    assert payload["limitations"] == ["route_unknown"]
+    with pytest.raises(ValueError, match="route_unknown"):
+        connector.build_resume_command(
+            ref,
+            HarnessContext(proxy_url="http://127.0.0.1:8090"),
+        )
     assert (
         BUILTIN_ADAPTERS[harness_id]
         .spec()
         .adapter_capabilities["native_route_snapshot"]
         .status
-        is AdapterSupportLevel.PARTIAL
+        is AdapterSupportLevel.SUPPORTED
     )

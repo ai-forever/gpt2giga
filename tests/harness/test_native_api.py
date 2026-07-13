@@ -10,6 +10,7 @@ from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
+    create_execution_snapshot,
 )
 from gpt2giga_harness.native.registry import NativeHistoryConnectorRegistry
 from gpt2giga_harness.native.store import FilesystemNativeSessionIndexStore
@@ -325,14 +326,27 @@ def test_imported_native_session_can_continue_with_another_harness(tmp_path):
 def test_native_session_link_adds_link_to_existing_session(tmp_path):
     workspace = tmp_path / "repo"
     workspace.mkdir()
-    ref = _ref(workspace=str(workspace), status=NativeSessionStatus.MANAGED_NATIVE)
+    snapshot = create_execution_snapshot(
+        harness_id="codex-cli",
+        api_mode="v1",
+        model="PinnedModel",
+        native_home=str(tmp_path / "managed-home"),
+        workspace=str(workspace),
+        project_id="proj_fake",
+        permission_mode="read",
+        tool_config_hash="config-hash",
+    )
+    ref = replace(
+        _ref(workspace=str(workspace), status=NativeSessionStatus.MANAGED_NATIVE),
+        execution_snapshot=snapshot,
+    )
     connector = FakeConnector("codex-cli", refs=(ref,))
     registry = NativeHistoryConnectorRegistry()
     registry.register(connector)
     store = InMemoryHarnessSessionStore()
     session = store.create_session(title="Existing chat", default_harness_id="echo")
     client = _client(tmp_path, registry, store=store)
-    client.post(
+    synced = client.post(
         "/api/native/sessions/sync",
         json={"harness_id": "codex-cli", "workspace": str(workspace)},
     )
@@ -343,8 +357,14 @@ def test_native_session_link_adds_link_to_existing_session(tmp_path):
     )
 
     assert linked.status_code == 200
+    assert synced.json()["sessions"][0]["execution_snapshot"]["api_mode"] == "v1"
     assert linked.json()["native_link"]["status"] == "linked"
     assert linked.json()["native_link"]["native_ref_id"] == ref.id
+    assert (
+        linked.json()["native_link"]["metadata"]["execution_snapshot"]
+        == (synced.json()["sessions"][0]["execution_snapshot"])
+    )
+    assert linked.json()["native_link"]["metadata"]["limitations"] == []
     bundle = client.get(f"/api/sessions/{session.id}").json()
     assert bundle["native_links"][0]["status"] == "linked"
 

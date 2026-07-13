@@ -29,9 +29,10 @@ def _common_contract() -> dict[str, AdapterCapabilitySupport]:
             "through shared policy approval or worktree isolation.",
         ),
         "native_route_snapshot": _claim(
-            AdapterSupportLevel.PARTIAL,
-            "Start consumes the selected route, while discovered or legacy resume refs "
-            "can lose route, model, home, or project identity and fall back.",
+            AdapterSupportLevel.SUPPORTED,
+            "Managed starts persist route, model, home, workspace, permission, and tool "
+            "configuration identity through discovery and resume; legacy refs require "
+            "an explicit reviewed route override.",
         ),
         "native_durable_lifecycle": _claim(
             AdapterSupportLevel.UNSUPPORTED,
@@ -89,7 +90,7 @@ def codex_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
             "native_resume": _claim(
                 AdapterSupportLevel.PARTIAL,
                 "Managed resume works after history discovery reconciles a native session "
-                "id; execution snapshot continuity is incomplete.",
+                "id; the execution snapshot is preserved once that id is reconciled.",
             ),
         }
     )
@@ -116,7 +117,8 @@ def claude_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
             ),
             "native_resume": _claim(
                 AdapterSupportLevel.SUPPORTED,
-                "Uses a deterministic managed session name for immediate native resume.",
+                "Uses a deterministic managed session name and preserves its immutable "
+                "execution snapshot for immediate native resume.",
             ),
         }
     )
@@ -145,7 +147,7 @@ def gemini_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
             "native_resume": _claim(
                 AdapterSupportLevel.PARTIAL,
                 "Managed resume works after history discovery reconciles a native session "
-                "id; execution snapshot continuity is incomplete.",
+                "id; the execution snapshot is preserved once that id is reconciled.",
             ),
         }
     )

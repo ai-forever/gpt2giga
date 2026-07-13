@@ -226,6 +226,21 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
     data_dir = tmp_path / "data"
     workspace.mkdir()
     project_id = project_id_for_root(workspace)
+    connector = ClaudeNativeHistoryConnector(data_dir=data_dir, executable="claude")
+    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+    start_plan = connector.build_start_command(
+        HarnessRequest(
+            prompt="start",
+            model="GigaChat-2-Max",
+            api_mode=GigaChatApiMode.V1,
+            mode="read",
+            workspace=str(workspace),
+            session_id="sess_resume_contract",
+        ),
+        context,
+    )
+    session_name = str(start_plan.metadata["session_name"])
+    connector.record_start_snapshot(start_plan)
     session_file = (
         data_dir
         / "native"
@@ -235,22 +250,20 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
         / ".claude"
         / "projects"
         / "repo"
-        / "gpt2giga-sess-fix.jsonl"
+        / f"{session_name}.jsonl"
     )
     _write_jsonl(
         session_file,
         (
             {
                 "sessionId": "managed-claude-id",
-                "session_name": "gpt2giga-sess-fix",
+                "session_name": session_name,
                 "timestamp": "2026-07-09T10:00:00Z",
                 "type": "user",
                 "message": {"content": "resume me"},
             },
         ),
     )
-    connector = ClaudeNativeHistoryConnector(data_dir=data_dir, executable="claude")
-    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
     (managed,) = connector.discover(workspace=str(workspace), include_external=False)
 
     plan = connector.build_resume_command(managed, context)
@@ -260,11 +273,13 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
         can_resume=False,
     )
 
-    assert plan.command == ("claude", "--resume", "gpt2giga-sess-fix")
+    assert plan.command == ("claude", "--resume", session_name)
     assert "-p" not in plan.command
     assert "--no-session-persistence" not in plan.command
     assert plan.env["HOME"] == managed.metadata["native_home"]
-    assert plan.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v2"
+    assert managed.execution_snapshot == start_plan.execution_snapshot
+    assert plan.execution_snapshot == start_plan.execution_snapshot
+    assert plan.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v1"
     with pytest.raises(ValueError, match="Only managed"):
         connector.build_resume_command(external, context)
 

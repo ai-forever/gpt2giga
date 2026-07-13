@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from dataclasses import replace
 
 from fastapi.testclient import TestClient
 
@@ -9,6 +10,7 @@ from gpt2giga_harness.native.base import NativeCommandPlan
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
+    create_execution_snapshot,
 )
 from gpt2giga_harness.native.process import NativeProcessManager
 from gpt2giga_harness.native.registry import NativeHistoryConnectorRegistry
@@ -318,6 +320,106 @@ def test_native_process_api_resume_reports_missing_native_id_from_link(tmp_path)
     assert "Native session id was not detected" in resumed.json()["detail"]
 
 
+def test_native_process_api_legacy_builtin_resume_requires_reviewed_route(tmp_path):
+    script = _write_once_cli(tmp_path)
+    ref = replace(
+        _native_ref(workspace=str(tmp_path)),
+        harness_id="codex-cli",
+        metadata={
+            "project_id": "proj_native",
+            "native_home": str(tmp_path / "managed-home"),
+        },
+    )
+    native_index = FilesystemNativeSessionIndexStore(tmp_path / "data")
+    native_index.upsert_ref(ref, project_id="proj_native")
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(start_script=script, harness_id="codex-cli"),
+        native_index_store=native_index,
+    )
+    session = store.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+    )
+
+    rejected = client.post(
+        "/api/native/processes/start",
+        json={"session_id": session.id, "action": "resume", "native_ref_id": ref.id},
+    )
+    resumed = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "action": "resume",
+            "native_ref_id": ref.id,
+            "api_mode": "v1",
+        },
+    )
+
+    assert rejected.status_code == 400
+    assert "route_unknown" in rejected.json()["detail"]
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["run"]["api_mode"] == "v1"
+    snapshot = resumed.json()["native_link"]["metadata"]["execution_snapshot"]
+    assert snapshot["route_known"] is False
+    assert resumed.json()["native_link"]["metadata"]["limitations"] == ["route_unknown"]
+
+
+def test_native_process_api_rejects_snapshot_override(tmp_path):
+    script = _write_once_cli(tmp_path)
+    snapshot = create_execution_snapshot(
+        harness_id="codex-cli",
+        api_mode="v1",
+        model="PinnedModel",
+        native_home=str(tmp_path / "managed-home"),
+        workspace=str(tmp_path),
+        project_id="proj_native",
+        permission_mode="read",
+        tool_config_hash="config-hash",
+    )
+    ref = replace(
+        _native_ref(workspace=str(tmp_path)),
+        harness_id="codex-cli",
+        metadata={
+            "project_id": "proj_native",
+            "native_home": str(tmp_path / "managed-home"),
+        },
+        execution_snapshot=snapshot,
+    )
+    native_index = FilesystemNativeSessionIndexStore(tmp_path / "data")
+    native_index.upsert_ref(ref, project_id="proj_native")
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(start_script=script, harness_id="codex-cli"),
+        native_index_store=native_index,
+    )
+    session = store.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+    )
+
+    rejected = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "action": "resume",
+            "native_ref_id": ref.id,
+            "api_mode": "v2",
+        },
+    )
+    resumed = client.post(
+        "/api/native/processes/start",
+        json={"session_id": session.id, "action": "resume", "native_ref_id": ref.id},
+    )
+
+    assert rejected.status_code == 400
+    assert "contradicts" in rejected.json()["detail"]
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["run"]["api_mode"] == "v1"
+    assert resumed.json()["run"]["model"] == "PinnedModel"
+    assert resumed.json()["run"]["mode"] == "read"
+
+
 def test_native_process_api_redacts_start_output_and_events(tmp_path):
     secret = "native-process-api-secret-value"
     script = tmp_path / "print_secret.py"
@@ -425,6 +527,7 @@ class FakeProcessConnector:
                 "harness_id": self.harness_id,
                 "native_ref_id": ref.id,
             },
+            execution_snapshot=ref.execution_snapshot,
         )
 
 

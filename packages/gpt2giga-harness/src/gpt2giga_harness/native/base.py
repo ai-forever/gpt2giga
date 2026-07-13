@@ -6,8 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
 from gpt2giga_harness.native.models import (
+    NativeExecutionSnapshot,
     NativeSessionRef,
     NativeTranscriptMessage,
+    execution_snapshot_to_dict,
 )
 from gpt2giga_harness.types import HarnessContext, HarnessRequest, redact_secrets
 
@@ -22,6 +24,8 @@ class NativeCommandPlan:
     native_home: str | None = None
     display_command: tuple[str, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    execution_snapshot: NativeExecutionSnapshot | None = None
+    snapshot_known_sources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -83,6 +87,9 @@ class NativeHistoryConnector(Protocol):
     ) -> NativeCommandPlan:
         """Build a command plan for resuming a known native session."""
 
+    def record_start_snapshot(self, plan: NativeCommandPlan) -> None:
+        """Persist a successfully spawned native start snapshot for discovery."""
+
 
 def native_command_plan_to_dict(plan: NativeCommandPlan) -> dict[str, Any]:
     """Serialize a native command plan with secret-looking values redacted."""
@@ -94,6 +101,11 @@ def native_command_plan_to_dict(plan: NativeCommandPlan) -> dict[str, Any]:
         "cwd": redact_secrets(plan.cwd),
         "native_home": redact_secrets(plan.native_home),
         "metadata": redact_secrets(dict(plan.metadata)),
+        "execution_snapshot": (
+            redact_secrets(execution_snapshot_to_dict(plan.execution_snapshot))
+            if plan.execution_snapshot is not None
+            else None
+        ),
     }
 
 

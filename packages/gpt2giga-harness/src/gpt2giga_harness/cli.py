@@ -58,6 +58,7 @@ from gpt2giga_harness.native.base import (
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
+    execution_snapshot_to_dict,
 )
 from gpt2giga_harness.native.registry import (
     UnknownNativeHistoryConnectorError,
@@ -1165,12 +1166,19 @@ def _handle_native_import(args: argparse.Namespace, config: HarnessConfig) -> in
     )
     imported = connector.import_ref(ref)
     session_store = FilesystemHarnessSessionStore(config.data_dir)
+    snapshot = ref.execution_snapshot
     session = session_store.create_session(
         title=f"Imported: {ref.title}",
         workspace=ref.workspace,
         default_harness_id=ref.harness_id,
-        default_model=_optional_text(ref.metadata.get("model")),
-        default_api_mode=parse_api_mode(ref.metadata.get("api_mode")),
+        default_model=(
+            snapshot.model
+            if snapshot is not None
+            else _optional_text(ref.metadata.get("model"))
+        ),
+        default_api_mode=parse_api_mode(
+            snapshot.api_mode if snapshot is not None else ref.metadata.get("api_mode")
+        ),
         native={
             "source": "native_import",
             "native_ref_id": ref.id,
@@ -1239,6 +1247,7 @@ def _handle_native_import(args: argparse.Namespace, config: HarnessConfig) -> in
                 "imported_message_count": len(messages),
                 "skipped_item_count": skipped_count,
                 "project_id": ref.metadata.get("project_id"),
+                **_native_snapshot_metadata(ref),
             },
         ),
     )
@@ -2171,7 +2180,19 @@ def _native_import_session_metadata(ref: NativeSessionRef) -> dict[str, Any]:
         metadata["project_id"] = project_id
     if ref.workspace is not None:
         metadata["project_root"] = ref.workspace
+    metadata.update(_native_snapshot_metadata(ref))
     return metadata
+
+
+def _native_snapshot_metadata(ref: NativeSessionRef) -> dict[str, Any]:
+    if ref.execution_snapshot is None:
+        return {"limitations": ["route_unknown"]} if ref.can_resume else {}
+    return {
+        "execution_snapshot": execution_snapshot_to_dict(ref.execution_snapshot),
+        "limitations": (
+            [] if ref.execution_snapshot.route_known else ["route_unknown"]
+        ),
+    }
 
 
 def _native_import_message_role(role: str) -> str | None:

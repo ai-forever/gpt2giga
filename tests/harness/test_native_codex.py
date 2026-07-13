@@ -233,6 +233,19 @@ def test_codex_native_resume_command_requires_managed_ref(tmp_path):
     data_dir = tmp_path / "data"
     workspace.mkdir()
     project_id = project_id_for_root(workspace)
+    connector = CodexNativeHistoryConnector(data_dir=data_dir, executable="codex")
+    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+    start_plan = connector.build_start_command(
+        HarnessRequest(
+            prompt="start",
+            model="GigaChat-2-Max",
+            api_mode=GigaChatApiMode.V1,
+            mode="edit",
+            workspace=str(workspace),
+        ),
+        context,
+    )
+    connector.record_start_snapshot(start_plan)
     session_file = (
         data_dir
         / "native"
@@ -253,8 +266,6 @@ def test_codex_native_resume_command_requires_managed_ref(tmp_path):
             },
         ),
     )
-    connector = CodexNativeHistoryConnector(data_dir=data_dir, executable="codex")
-    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
     (managed,) = connector.discover(workspace=str(workspace), include_external=False)
 
     plan = connector.build_resume_command(managed, context)
@@ -268,7 +279,10 @@ def test_codex_native_resume_command_requires_managed_ref(tmp_path):
     assert "exec" not in plan.command
     assert "--ephemeral" not in plan.command
     assert plan.env["CODEX_HOME"] == managed.metadata["native_home"]
-    assert 'base_url = "http://127.0.0.1:8090/v2"' in (
+    assert managed.execution_snapshot == start_plan.execution_snapshot
+    assert plan.execution_snapshot == start_plan.execution_snapshot
+    assert plan.metadata["api_mode"] == "v1"
+    assert 'base_url = "http://127.0.0.1:8090/v1"' in (
         session_file.parents[1] / "config.toml"
     ).read_text(encoding="utf-8")
     with pytest.raises(ValueError, match="Only managed"):

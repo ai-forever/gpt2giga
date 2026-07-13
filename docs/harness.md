@@ -1707,11 +1707,20 @@ automation. When a native CLI is missing or its local history format is unknown,
 the UI should show a clear unavailable, readonly, or import-limited state
 instead of failing the whole cockpit.
 
-Managed native resume is best-effort. Claude Code uses a deterministic managed
-session name, while Codex and Gemini resume support depends on discovering a
-real native session id/name after the CLI has written its history. Until that id
-is known, the normalized session stores a managed native link with
-`can_resume=false` and an explicit reason.
+Every new managed native start persists an immutable, redaction-safe execution
+snapshot containing the selected API mode, model, managed home, workspace,
+project id, permission mode, and managed tool-config hash. Discovery, sync,
+import, link, and resume carry that snapshot forward. Claude Code uses a
+deterministic managed session name immediately; Codex and Gemini become
+resumable after discovery can bind one newly written native session id to the
+start without ambiguity. Until then, the normalized link keeps
+`can_resume=false` with an explicit reason.
+
+Legacy managed refs without an execution snapshot remain readable but expose a
+`route_unknown` limitation. Resume requires an explicit reviewed `api_mode`;
+the Harness does not silently replace an unknown original route with `/v2`.
+Any route, model, home, workspace, project, or harness identity that contradicts
+a known snapshot is rejected before the native CLI starts.
 
 ## Model Selection Notes
 

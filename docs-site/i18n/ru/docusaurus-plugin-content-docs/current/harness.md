@@ -291,6 +291,14 @@ giga harness inspect codex-cli --json
 `/api/harnesses` явно показывают ограничения continuity, native policy, доставки
 первого prompt и managed tools.
 
+Для новых управляемых native-запусков Harness сохраняет неизменяемый безопасный
+execution snapshot: route `v1|v2`, model, managed home, workspace, project id,
+permission mode и hash управляемой tool-конфигурации. Этот snapshot переносится
+через sync, import, link и resume. Старые refs без snapshot помечаются
+`route_unknown`: перед resume нужно явно подтвердить `api_mode`, и неизвестный
+исходный route больше не подменяется молча на `/v2`. Противоречащие snapshot
+route, model, home, workspace, project или harness блокируются до запуска CLI.
+
 Проверьте:
 
 - доступен ли proxy по `GPT2GIGA_HARNESS_PROXY_URL`;

@@ -21,6 +21,11 @@ from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
+    create_execution_snapshot,
+)
+from gpt2giga_harness.native.snapshots import (
+    NativeExecutionSnapshotStore,
+    validate_resume_snapshot,
 )
 from gpt2giga_harness.managed_mcp import write_startup_config
 from gpt2giga_harness.project import project_id_for_root
@@ -56,6 +61,7 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
         )
         self.executable = executable
         self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
+        self.snapshot_store = NativeExecutionSnapshotStore(self.data_dir)
 
     def discover(
         self,
@@ -65,13 +71,16 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
     ) -> tuple[NativeSessionRef, ...]:
         """Discover managed Codex refs first, then external refs when requested."""
         project_id = _project_id(workspace)
-        managed = self._discover_source(
-            sessions_dir=self.managed_home(project_id) / "sessions",
-            workspace=workspace,
-            project_id=project_id,
-            status=NativeSessionStatus.MANAGED_NATIVE,
-            source_kind="managed",
-            can_resume=True,
+        managed = self.snapshot_store.reconcile(
+            self._discover_source(
+                sessions_dir=self.managed_home(project_id) / "sessions",
+                workspace=workspace,
+                project_id=project_id,
+                status=NativeSessionStatus.MANAGED_NATIVE,
+                source_kind="managed",
+                can_resume=True,
+            ),
+            harness_id=self.harness_id,
         )
         external: tuple[NativeSessionRef, ...] = ()
         if include_external:
@@ -115,8 +124,11 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
         """Plan a native `codex` command without using headless exec mode."""
         project_id = _project_id(request.workspace)
         native_home = self.managed_home(project_id)
+        known_sources = tuple(
+            str(path) for path in _session_files(native_home / "sessions")
+        )
         native_home.mkdir(parents=True, exist_ok=True)
-        _write_codex_config(native_home, request, context)
+        tool_config_hash = _write_codex_config(native_home, request, context)
         sandbox = MODE_TO_SANDBOX.get(request.mode, MODE_TO_SANDBOX["plan"])
         model = request.model or context.default_model
         command = [self._executable(), "--ask-for-approval", "on-request"]
@@ -135,6 +147,16 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
             api_mode=request.api_mode,
             native_home=native_home,
         )
+        snapshot = create_execution_snapshot(
+            harness_id=self.harness_id,
+            api_mode=request.api_mode.value,
+            model=model,
+            native_home=str(native_home),
+            workspace=request.workspace,
+            project_id=project_id,
+            permission_mode=request.mode,
+            tool_config_hash=tool_config_hash,
+        )
         return NativeCommandPlan(
             command=tuple(command),
             env=env,
@@ -147,6 +169,8 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
                 "managed": True,
                 **attachment_raw_metadata(request),
             },
+            execution_snapshot=snapshot,
+            snapshot_known_sources=known_sources,
         )
 
     def build_resume_command(
@@ -159,14 +183,15 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
             raise ValueError("Only managed Codex native sessions can be resumed")
         if not ref.native_session_id:
             raise ValueError("Codex native session id is required for resume")
-        native_home = _native_home_from_ref(ref)
-        if native_home is None:
-            native_home = self.managed_home(_project_id(ref.workspace))
-        api_mode = _api_mode_from_ref(ref)
+        snapshot = validate_resume_snapshot(ref, harness_id=self.harness_id)
+        native_home = Path(snapshot.native_home or "").expanduser()
+        if not snapshot.native_home:
+            raise ValueError("Native resume snapshot is missing its managed home")
+        api_mode = GigaChatApiMode(snapshot.api_mode)
         native_home.mkdir(parents=True, exist_ok=True)
         _write_codex_config_values(
             native_home,
-            model=_model_from_ref(ref) or context.default_model or "GigaChat",
+            model=snapshot.model or context.default_model or "GigaChat",
             base_url=context.api_base_url(api_mode),
         )
         env = _codex_env(context, api_mode=api_mode, native_home=native_home)
@@ -180,8 +205,15 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
                 "native_ref_id": ref.id,
                 "api_mode": api_mode.value,
                 "managed": True,
+                "route_unknown": not snapshot.route_known,
+                "resume_warnings": list(snapshot.warnings),
             },
+            execution_snapshot=snapshot,
         )
+
+    def record_start_snapshot(self, plan: NativeCommandPlan) -> None:
+        """Persist a successful Codex native start for later discovery."""
+        self.snapshot_store.record_start(plan)
 
     def managed_home(self, project_id: str) -> Path:
         """Return the managed CODEX_HOME for one project id."""
@@ -462,30 +494,6 @@ def _path_from_ref(ref: NativeSessionRef) -> Path | None:
     return path if path.exists() and path.is_file() else None
 
 
-def _native_home_from_ref(ref: NativeSessionRef) -> Path | None:
-    value = ref.metadata.get("native_home")
-    if value is None:
-        return None
-    return Path(str(value)).expanduser()
-
-
-def _api_mode_from_ref(ref: NativeSessionRef) -> GigaChatApiMode:
-    value = ref.metadata.get("api_mode")
-    if isinstance(value, GigaChatApiMode):
-        return value
-    try:
-        return GigaChatApiMode(str(value))
-    except ValueError:
-        return GigaChatApiMode.V2
-
-
-def _model_from_ref(ref: NativeSessionRef) -> str | None:
-    value = ref.metadata.get("model")
-    if value is None or not str(value).strip():
-        return None
-    return str(value).strip()
-
-
 def _project_id(workspace: str | None) -> str:
     return project_id_for_root(workspace or Path.cwd())
 
@@ -511,10 +519,10 @@ def _write_codex_config(
     codex_home: Path,
     request: HarnessRequest,
     context: HarnessContext,
-) -> None:
+) -> str:
     model = request.model or context.default_model or "GigaChat"
     base_url = context.api_base_url(request.api_mode)
-    _write_codex_config_values(codex_home, model=model, base_url=base_url)
+    return _write_codex_config_values(codex_home, model=model, base_url=base_url)
 
 
 def _write_codex_config_values(
@@ -522,7 +530,7 @@ def _write_codex_config_values(
     *,
     model: str,
     base_url: str,
-) -> None:
+) -> str:
     config = (
         f'model = "{_toml_escape(model)}"\n'
         f'model_provider = "{CODEX_PROVIDER_NAME}"\n'
@@ -534,7 +542,7 @@ def _write_codex_config_values(
         'wire_api = "responses"\n'
         "supports_websockets = false\n"
     )
-    write_startup_config("codex-cli", codex_home, config)
+    return write_startup_config("codex-cli", codex_home, config)
 
 
 def _toml_escape(value: str) -> str:
