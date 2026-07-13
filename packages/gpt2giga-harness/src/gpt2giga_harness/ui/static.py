@@ -7,7 +7,7 @@ from importlib import resources
 
 
 ASSET_PACKAGE = "gpt2giga_harness.ui.assets"
-ASSET_NAMES = frozenset({"app.css", "app.js", "index.html"})
+ASSET_NAMES = frozenset({"app.css", "app.js", "favicon.ico", "index.html"})
 
 
 class UIAssetNotFoundError(FileNotFoundError):

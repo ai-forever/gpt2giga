@@ -28,6 +28,7 @@ UI_SOURCE = "\n".join((INDEX_HTML, APP_CSS, APP_JS))
 
 def test_ui_assets_load_from_package_resources():
     assert load_asset("index.html").startswith(b"<!doctype html>")
+    assert load_asset("favicon.ico").startswith(b"\x00\x00\x01\x00")
     assert "function boot()" in APP_JS
     assert ".app {" in APP_CSS
     with pytest.raises(UIAssetNotFoundError):
@@ -44,6 +45,7 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     index_response = client.get("/")
     css_response = client.get("/assets/app.css")
     js_response = client.get("/assets/app.js")
+    favicon_response = client.get("/assets/favicon.ico")
     missing_response = client.get("/assets/missing.js")
     traversal_response = client.get("/assets/nested/app.js")
 
@@ -52,6 +54,10 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
         '<link rel="stylesheet" href="/assets/app.css?v=38.21">' in index_response.text
+    )
+    assert (
+        '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
+        in index_response.text
     )
     assert '<script src="/assets/app.js?v=38.21"></script>' in index_response.text
     assert "<style>" not in index_response.text
@@ -64,6 +70,10 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert js_response.headers["content-type"] == "text/javascript; charset=utf-8"
     assert js_response.headers["cache-control"] == "public, max-age=3600"
     assert js_response.text == APP_JS
+    assert favicon_response.status_code == 200
+    assert favicon_response.headers["content-type"] == "image/vnd.microsoft.icon"
+    assert favicon_response.headers["cache-control"] == "public, max-age=3600"
+    assert favicon_response.content == load_asset("favicon.ico")
     assert missing_response.status_code == 404
     assert traversal_response.status_code == 404
 
