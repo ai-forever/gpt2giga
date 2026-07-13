@@ -138,6 +138,116 @@ def test_claude_native_preview_and_import_tolerate_unknown_jsonl(tmp_path):
     assert imported[1].metadata["native_message_id"] == "assistant-message-id"
 
 
+def test_claude_native_import_normalizes_tool_calls_and_results(tmp_path):
+    workspace = tmp_path / "repo"
+    data_dir = tmp_path / "data"
+    external_home = tmp_path / ".claude"
+    workspace.mkdir()
+    session_file = external_home / "projects" / "repo" / "external.jsonl"
+    _write_jsonl(
+        session_file,
+        (
+            {
+                "uuid": "tool-call-message",
+                "timestamp": "2026-07-13T19:28:18Z",
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_read",
+                            "name": "Read",
+                            "input": {"file_path": "/repo/README.md"},
+                        }
+                    ],
+                },
+            },
+            {
+                "uuid": "tool-result-message",
+                "timestamp": "2026-07-13T19:28:19Z",
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_read",
+                            "content": "README contents",
+                        }
+                    ],
+                },
+            },
+            {
+                "timestamp": "2026-07-13T19:28:20Z",
+                "role": "assistant",
+                "tools_state_id": "toolu_glob",
+                "content": [
+                    {
+                        "function_call": {
+                            "name": "Glob",
+                            "arguments": {"pattern": "**/*.py"},
+                        }
+                    }
+                ],
+            },
+            {
+                "timestamp": "2026-07-13T19:28:21Z",
+                "role": "tool",
+                "tools_state_id": "toolu_glob",
+                "content": [
+                    {
+                        "function_result": {
+                            "name": "Glob",
+                            "result": {"result": "a.py\nb.py"},
+                        }
+                    }
+                ],
+            },
+        ),
+    )
+    connector = ClaudeNativeHistoryConnector(
+        data_dir=data_dir,
+        external_claude_home=external_home,
+    )
+    (ref,) = connector.discover(workspace=str(workspace), include_external=True)
+
+    imported = connector.import_ref(ref)
+
+    assert [message.role for message in imported] == [
+        "assistant",
+        "tool",
+        "assistant",
+        "tool",
+    ]
+    assert [message.content for message in imported] == ["", "", "", ""]
+    assert imported[0].metadata["tool_calls"] == [
+        {
+            "tool_call_id": "toolu_read",
+            "name": "Read",
+            "arguments": {"file_path": "/repo/README.md"},
+            "status": "running",
+        }
+    ]
+    assert imported[1].metadata["tool_results"] == [
+        {
+            "tool_call_id": "toolu_read",
+            "result": "README contents",
+            "status": "completed",
+        }
+    ]
+    assert imported[2].metadata["tool_calls"][0]["tool_call_id"] == "toolu_glob"
+    assert imported[2].metadata["tool_calls"][0]["name"] == "Glob"
+    assert imported[3].metadata["tool_results"] == [
+        {
+            "tool_call_id": "toolu_glob",
+            "name": "Glob",
+            "result": {"result": "a.py\nb.py"},
+            "status": "completed",
+        }
+    ]
+
+
 def test_claude_native_start_command_uses_managed_home_and_redacts_key(
     tmp_path,
     monkeypatch,

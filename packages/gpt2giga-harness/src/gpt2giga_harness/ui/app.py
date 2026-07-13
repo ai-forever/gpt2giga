@@ -1542,6 +1542,11 @@ def create_app(
             if run is not None
             else []
         )
+        payload["events"] = (
+            [event_to_dict(event) for event in _native_run_events(store, run)]
+            if run is not None
+            else []
+        )
         return payload
 
     @app.get("/api/native/processes/{process_id}")
@@ -3724,14 +3729,76 @@ def _sync_native_process_transcript(
         for message in existing_messages
         if message.run_id == run.id and message.metadata.get("native_message_key")
     }
-    appended_count = 0
+    known_event_keys = {
+        str(event.payload["native_event_key"])
+        for event in store.list_events(run.session_id, run_id=run.id)
+        if event.payload.get("native_event_key")
+    }
+    appended_message_count = 0
+    appended_event_count = 0
     for message in transcript:
-        if _native_import_message_role(message.role) != "assistant":
-            continue
         if not _native_message_belongs_to_run(message, run):
             continue
         message_key = _native_message_key(ref, message)
-        if message_key in known_keys:
+        for tool_call in _native_tool_records(message.metadata.get("tool_calls")):
+            event_key = _native_tool_event_key(
+                message_key,
+                HarnessEventType.TOOL_CALL_STARTED.value,
+                tool_call,
+            )
+            if event_key in known_event_keys:
+                continue
+            store.append_event(
+                HarnessStoredEvent(
+                    id=new_id("evt"),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    type=HarnessEventType.TOOL_CALL_STARTED.value,
+                    message="Native tool call started.",
+                    payload={
+                        **tool_call,
+                        "native_event_key": event_key,
+                        "native_message_key": message_key,
+                        "native_ref_id": ref.id,
+                        "native_session_id": ref.native_session_id,
+                    },
+                    created_at=message.created_at or utc_now(),
+                )
+            )
+            known_event_keys.add(event_key)
+            appended_event_count += 1
+        for tool_result in _native_tool_records(message.metadata.get("tool_results")):
+            event_key = _native_tool_event_key(
+                message_key,
+                HarnessEventType.TOOL_CALL_FINISHED.value,
+                tool_result,
+            )
+            if event_key in known_event_keys:
+                continue
+            store.append_event(
+                HarnessStoredEvent(
+                    id=new_id("evt"),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    type=HarnessEventType.TOOL_CALL_FINISHED.value,
+                    message="Native tool call finished.",
+                    payload={
+                        **tool_result,
+                        "native_event_key": event_key,
+                        "native_message_key": message_key,
+                        "native_ref_id": ref.id,
+                        "native_session_id": ref.native_session_id,
+                    },
+                    created_at=message.created_at or utc_now(),
+                )
+            )
+            known_event_keys.add(event_key)
+            appended_event_count += 1
+        if (
+            _native_import_message_role(message.role) != "assistant"
+            or not message.content.strip()
+            or message_key in known_keys
+        ):
             continue
         store.append_message(
             HarnessMessage(
@@ -3771,8 +3838,12 @@ def _sync_native_process_transcript(
             )
         )
         known_keys.add(message_key)
-        appended_count += 1
-    if not appended_count and run.native_session_id == ref.native_session_id:
+        appended_message_count += 1
+    if (
+        not appended_message_count
+        and not appended_event_count
+        and run.native_session_id == ref.native_session_id
+    ):
         return run
     metadata = {
         **dict(run.metadata),
@@ -3780,6 +3851,7 @@ def _sync_native_process_transcript(
             "native_ref_id": ref.id,
             "native_session_id": ref.native_session_id,
             "synced_message_count": len(known_keys),
+            "synced_tool_event_count": len(known_event_keys),
             "updated_at": utc_now(),
         },
     }
@@ -3824,9 +3896,16 @@ def _native_message_key(
         return f"{ref.id}:id:{native_message_id}"
     digest = hashlib.sha256(
         json.dumps(
-            [message.role, message.created_at, message.content],
+            [
+                message.role,
+                message.created_at,
+                message.content,
+                message.metadata.get("tool_calls"),
+                message.metadata.get("tool_results"),
+            ],
             ensure_ascii=False,
             separators=(",", ":"),
+            default=str,
         ).encode("utf-8")
     ).hexdigest()
     return f"{ref.id}:sha256:{digest}"
@@ -3841,6 +3920,28 @@ def _native_run_messages(
         for message in store.list_messages(run.session_id)
         if message.run_id == run.id and message.role in {"assistant", "error"}
     )
+
+
+def _native_run_events(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+) -> tuple[HarnessStoredEvent, ...]:
+    return store.list_events(run.session_id, run_id=run.id)
+
+
+def _native_tool_records(value: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(dict(item) for item in value if isinstance(item, Mapping))
+
+
+def _native_tool_event_key(
+    message_key: str,
+    event_type: str,
+    payload: Mapping[str, Any],
+) -> str:
+    tool_call_id = _optional_text(payload.get("tool_call_id")) or "tool-call"
+    return f"{message_key}:{event_type}:{tool_call_id}"
 
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)?)")

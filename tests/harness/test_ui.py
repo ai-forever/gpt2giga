@@ -53,13 +53,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.29">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.30">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.27"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.31"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -401,9 +401,12 @@ def test_ui_static_refreshes_native_run_after_process_exit():
         "function syncNativeRunInBundle(run)",
         "syncNativeRunInBundle(body.run);",
         "function syncNativeMessagesInBundle(messages)",
+        "function syncNativeEventsInBundle(events)",
         "const nativeMessages = Array.isArray(body.messages) ? body.messages : [];",
-        "syncNativeMessagesInBundle(nativeMessages);",
-        "if (nativeMessages.length)",
+        "const nativeEvents = Array.isArray(body.events) ? body.events : [];",
+        "const messagesChanged = syncNativeMessagesInBundle(nativeMessages);",
+        "const eventsChanged = syncNativeEventsInBundle(nativeEvents);",
+        "if (messagesChanged || eventsChanged)",
         "renderMessages();",
         "renderInspector();",
         'status !== "running"',
@@ -439,6 +442,89 @@ def test_ui_native_continuation_requests_a_separate_submit_key():
     assert "sendNativeProcessInput(prompt, prompt, true)" in continuation_source
     assert "if (submit) body.submit = true;" in input_source
     assert "body: JSON.stringify(body)" in input_source
+
+
+def test_ui_native_tools_render_once_stream_live_and_keep_expansion_state():
+    render_source = APP_JS[
+        APP_JS.index("function renderMessages") : APP_JS.index(
+            "function runStatusBadgeClass"
+        )
+    ]
+    tool_source = APP_JS[
+        APP_JS.index("function toolCard") : APP_JS.index(
+            "function appendGeneratedFiles"
+        )
+    ]
+    poll_source = APP_JS[
+        APP_JS.index("async function pollNativeOutput") : APP_JS.index(
+            "function maybeShowNativeTrustPrompt"
+        )
+    ]
+    native_stream_source = APP_JS[
+        APP_JS.index("function setActiveNativeProcess") : APP_JS.index(
+            "async function pollNativeOutput"
+        )
+    ]
+
+    for fragment in (
+        "const latestMessageIdsByRun = new Map();",
+        "latestMessageIdsByRun.set(message.run_id, message.id);",
+        "const events = eventsForMessage(message, messages);",
+        "const tools = executionMessage ? toolsFromEvents(events) : new Map();",
+        "if (latestExecutionMessage && preserveTerminalPartialDraft(draft))",
+    ):
+        assert fragment in render_source
+    for fragment in (
+        "toolCallExpansion: new Map()",
+        "state.toolCallExpansion.get(expansionKey)",
+        "state.toolCallExpansion.set(expansionKey, details.open)",
+        "toolCard(tool, messageKey)",
+        "message.id || message.run_id",
+    ):
+        source = (
+            APP_JS
+            if fragment
+            in {"toolCallExpansion: new Map()", "message.id || message.run_id"}
+            else tool_source
+        )
+        assert fragment in source
+    for fragment in (
+        "let nativeStreamChanged = false;",
+        "nativeStreamChanged = appendNativeTerminal",
+        "const messagesChanged = syncNativeMessagesInBundle(nativeMessages);",
+        "const eventsChanged = syncNativeEventsInBundle(nativeEvents);",
+        "if (hasNewAssistantMessage)",
+        "if (messagesChanged || eventsChanged)",
+        "else if (nativeStreamChanged)",
+    ):
+        assert fragment in poll_source
+    assert (
+        native_stream_source.count(
+            '["claude-code", "gemini-cli"].includes(process.harness_id)'
+        )
+        == 3
+    )
+    assert "consumeLiveEvent(event)" not in poll_source
+
+
+def test_ui_native_gemini_streaming_handles_terminal_screen_redraws():
+    parser_source = APP_JS[
+        APP_JS.index("function geminiStreamingTextFromTerminal") : APP_JS.index(
+            "function maybeShowNativeTrustPrompt"
+        )
+    ]
+
+    for fragment in (
+        "if (/^\\s*>\\s+\\S/.test(lines[index])) promptIndex = index;",
+        "if (/^\\s*✦(?:\\s|$)/.test(lines[index])) {",
+    ):
+        assert fragment in parser_source
+    for fragment in (
+        'raw.includes("\\x1B[2J")',
+        'raw.includes("\\x1B[3J")',
+        "return updateNativeStreamingFromTerminal();",
+    ):
+        assert fragment in APP_JS
 
 
 def test_ui_static_routes_codex_work_through_structured_chat():

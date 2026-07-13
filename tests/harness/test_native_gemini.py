@@ -210,6 +210,116 @@ def test_gemini_native_reads_current_projects_mapping_and_message_schema(tmp_pat
     }
 
 
+def test_gemini_native_imports_function_calls_and_responses(tmp_path):
+    workspace = tmp_path / "repo"
+    data_dir = tmp_path / "data"
+    workspace.mkdir()
+    project_id = project_id_for_root(workspace)
+    gemini_home = data_dir / "native" / "gemini" / "homes" / project_id
+    projects_path = gemini_home / ".gemini" / "projects.json"
+    projects_path.parent.mkdir(parents=True)
+    projects_path.write_text(
+        json.dumps({"projects": {str(workspace.resolve()): "repo-storage"}}),
+        encoding="utf-8",
+    )
+    session_file = (
+        gemini_home
+        / ".gemini"
+        / "tmp"
+        / "repo-storage"
+        / "chats"
+        / "session-tools.jsonl"
+    )
+    _write_jsonl(
+        session_file,
+        (
+            {
+                "kind": "main",
+                "sessionId": "gemini-tools-session",
+                "startTime": "2026-07-13T19:25:54Z",
+            },
+            {
+                "id": "user-message-1",
+                "type": "user",
+                "content": [{"text": "Inspect the repository"}],
+                "timestamp": "2026-07-13T19:25:54.652Z",
+            },
+            {
+                "id": "assistant-tool-1",
+                "type": "gemini",
+                "content": [
+                    {
+                        "functionCall": {
+                            "id": "read_file__call-1",
+                            "name": "read_file",
+                            "args": {"file_path": str(workspace / "README.md")},
+                        }
+                    }
+                ],
+                "timestamp": "2026-07-13T19:25:57.464Z",
+            },
+            {
+                "id": "tool-result-1",
+                "type": "user",
+                "content": [
+                    {
+                        "functionResponse": {
+                            "id": "read_file__call-1",
+                            "name": "read_file",
+                            "response": {"output": "# Repository"},
+                        }
+                    }
+                ],
+                "timestamp": "2026-07-13T19:25:57.476Z",
+            },
+            {
+                "id": "assistant-message-2",
+                "type": "gemini",
+                "content": "The repository is ready.",
+                "timestamp": "2026-07-13T19:26:00.524Z",
+            },
+        ),
+    )
+    connector = GeminiNativeHistoryConnector(data_dir=data_dir)
+
+    (ref,) = connector.discover(workspace=str(workspace), include_external=False)
+    imported = connector.import_ref(ref)
+
+    assert [message.role for message in imported] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+    assert imported[1].content == ""
+    assert imported[1].metadata == {
+        "source": "gemini",
+        "native_message_id": "assistant-tool-1",
+        "tool_calls": [
+            {
+                "tool_call_id": "read_file__call-1",
+                "name": "read_file",
+                "arguments": {"file_path": str(workspace / "README.md")},
+                "status": "running",
+            }
+        ],
+    }
+    assert imported[2].content == ""
+    assert imported[2].metadata == {
+        "source": "gemini",
+        "native_message_id": "tool-result-1",
+        "tool_results": [
+            {
+                "tool_call_id": "read_file__call-1",
+                "name": "read_file",
+                "result": {"output": "# Repository"},
+                "status": "completed",
+            }
+        ],
+    }
+    assert imported[3].content == "The repository is ready."
+
+
 def test_gemini_native_reconciles_sequential_managed_checkpoints(tmp_path):
     workspace = tmp_path / "repo"
     data_dir = tmp_path / "data"

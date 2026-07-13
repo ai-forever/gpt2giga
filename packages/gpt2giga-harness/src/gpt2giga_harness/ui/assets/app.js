@@ -58,6 +58,8 @@
       pendingNativeApproval: null,
       nativeOutputCursor: 0,
       nativeTerminalText: "",
+      nativeStreamingActive: false,
+      nativeStreamingText: "",
       nativePollTimer: null,
       nativePollBurstUntil: 0,
       nativeTrustPromptProcessId: null,
@@ -91,6 +93,7 @@
       notifiedAttentionIds: new Set(),
       desktopNotificationsEnabled: false,
       liveRuns: new Map(),
+      toolCallExpansion: new Map(),
       renderedSessionId: null,
       routeRecommendation: null,
       routeRecommendationTimer: null,
@@ -3730,6 +3733,7 @@
           return;
         }
         if (result.data.process) state.activeNativeProcess = result.data.process;
+        beginNativeResponseStream();
         if (result.data.message && state.currentBundle) {
           const messages = Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
           if (!messages.some((message) => message.id === result.data.message.id)) {
@@ -3798,6 +3802,43 @@
     function eventsForRun(runId) {
       const events = state.currentBundle && Array.isArray(state.currentBundle.events) ? state.currentBundle.events : [];
       return events.filter((event) => event.run_id === runId || (!event.run_id && state.activeHeadlessRun && state.activeHeadlessRun.id === runId));
+    }
+
+    function eventTimestamp(value) {
+      const timestamp = Date.parse(value || "");
+      return Number.isFinite(timestamp) ? timestamp : null;
+    }
+
+    function executionMessagesForRun(runId, messages) {
+      return messages
+        .filter((message) => message.run_id === runId && ["assistant", "error"].includes(message.role))
+        .sort((left, right) => (eventTimestamp(left.created_at) || 0) - (eventTimestamp(right.created_at) || 0));
+    }
+
+    function eventsForMessage(message, messages) {
+      const events = message.run_id ? eventsForRun(message.run_id) : [];
+      if (!message.run_id || !["assistant", "error"].includes(message.role)) return [];
+      const executionMessages = executionMessagesForRun(message.run_id, messages);
+      if (executionMessages.length <= 1) return events;
+      const index = executionMessages.findIndex((item) => item.id === message.id);
+      if (index === -1) return [];
+      const upperBound = eventTimestamp(message.created_at);
+      const lowerBound = index > 0 ? eventTimestamp(executionMessages[index - 1].created_at) : null;
+      return events.filter((event) => {
+        const timestamp = eventTimestamp(event.created_at);
+        if (timestamp == null || upperBound == null) return index === executionMessages.length - 1;
+        return timestamp <= upperBound && (lowerBound == null || timestamp > lowerBound);
+      });
+    }
+
+    function eventsAfterLatestMessage(runId, messages) {
+      const executionMessages = executionMessagesForRun(runId, messages);
+      const latest = executionMessages.length ? executionMessages[executionMessages.length - 1] : null;
+      const lowerBound = latest ? eventTimestamp(latest.created_at) : null;
+      return eventsForRun(runId).filter((event) => {
+        const timestamp = eventTimestamp(event.created_at);
+        return lowerBound == null || timestamp == null || timestamp > lowerBound;
+      });
     }
 
     function activeHeadlessRunFromBundle(bundle = state.currentBundle) {
@@ -4500,11 +4541,18 @@
       details.appendChild(body);
     }
 
-    function toolCard(tool) {
+    function toolCard(tool, messageKey) {
       const plan = planPayloadFromTool(tool);
       const details = document.createElement("details");
       details.className = `tool-call-card${plan ? " plan-card" : ""}`;
-      details.open = Boolean(plan) || tool.status === "running" || tool.status === "failed" || tool.status === "requested";
+      const expansionKey = `${messageKey || "run"}:${tool.id}`;
+      const rememberedOpen = state.toolCallExpansion.get(expansionKey);
+      details.open = rememberedOpen == null
+        ? Boolean(plan) || tool.status === "running" || tool.status === "failed" || tool.status === "requested"
+        : rememberedOpen;
+      details.addEventListener("toggle", () => {
+        state.toolCallExpansion.set(expansionKey, details.open);
+      });
       const summary = document.createElement("summary");
       const dot = document.createElement("span");
       dot.className = `tool-status-dot ${tool.status || "running"}`;
@@ -4581,7 +4629,7 @@
       panel.appendChild(details);
     }
 
-    function appendToolCards(parent, tools) {
+    function appendToolCards(parent, tools, messageKey) {
       if (!tools || !tools.size) return;
       const stack = document.createElement("div");
       stack.className = "tool-call-stack";
@@ -4589,7 +4637,7 @@
       label.className = "execution-rail-label";
       label.textContent = `Tool calls · ${tools.size}`;
       stack.appendChild(label);
-      for (const tool of tools.values()) stack.appendChild(toolCard(tool));
+      for (const tool of tools.values()) stack.appendChild(toolCard(tool, messageKey));
       parent.appendChild(stack);
     }
 
@@ -4701,7 +4749,7 @@
         else content.appendChild(cursor);
       }
       item.appendChild(content);
-      appendToolCards(item, options.tools || new Map());
+      appendToolCards(item, options.tools || new Map(), message.id || message.run_id);
       appendGeneratedFiles(item, options.generatedFiles || new Map());
       appendExecutionOutput(item, options.draft || null);
       appendUsageChips(item, options.usage || null);
@@ -4846,19 +4894,26 @@
       const shouldStick = sessionChanged || panel.scrollHeight === 0 || isChatNearBottom();
       list.replaceChildren();
       const messages = state.currentBundle && Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
+      const latestMessageIdsByRun = new Map();
+      for (const message of messages) {
+        if (message.run_id && ["assistant", "error"].includes(message.role)) {
+          latestMessageIdsByRun.set(message.run_id, message.id);
+        }
+      }
       const persistedRunIds = new Set();
       const renderedPartialDrafts = new Set();
       for (const message of messages) {
         const run = message.run_id ? runForId(message.run_id) : null;
-        const events = message.run_id ? eventsForRun(message.run_id) : [];
+        const events = eventsForMessage(message, messages);
         const executionMessage = ["assistant", "error"].includes(message.role);
-        const tools = message.run_id && executionMessage ? toolsFromEvents(events) : new Map();
-        const generatedFiles = message.run_id && executionMessage ? generatedFilesFromEvents(events) : new Map();
+        const latestExecutionMessage = executionMessage && latestMessageIdsByRun.get(message.run_id) === message.id;
+        const tools = executionMessage ? toolsFromEvents(events) : new Map();
+        const generatedFiles = executionMessage ? generatedFilesFromEvents(events) : new Map();
         const usage = executionMessage ? usageForMessage(message, run, events) : null;
         if (message.run_id && executionMessage) {
           persistedRunIds.add(message.run_id);
           const draft = state.liveRuns.get(message.run_id);
-          if (preserveTerminalPartialDraft(draft)) {
+          if (latestExecutionMessage && preserveTerminalPartialDraft(draft)) {
             list.appendChild(liveMessageNode(draft));
             renderedPartialDrafts.add(message.run_id);
           }
@@ -4873,6 +4928,7 @@
         }
         if (draft.sessionId === (session && session.id)) list.appendChild(liveMessageNode(draft));
       }
+      appendNativeStreamingMessage(list, messages);
       const hasVisibleMessages = list.childElementCount > 0;
       document.body.classList.toggle("new-session", !hasVisibleMessages);
       if (!hasVisibleMessages) {
@@ -5585,6 +5641,7 @@
         state.activeNativeProcess = null;
         state.nativeOutputCursor = 0;
         state.nativeTerminalText = "";
+        finishNativeResponseStream();
         resetNativeTrustPrompt();
         renderNativeTerminalStatus("idle");
         setNativeSummary(nativeInspectorText(state.currentBundle));
@@ -5610,10 +5667,17 @@
       state.activeNativeProcess = process;
       state.nativeOutputCursor = 0;
       state.nativeTerminalText = "";
+      state.nativeStreamingActive = Boolean(
+        process
+        && ["claude-code", "gemini-cli"].includes(process.harness_id)
+        && !(payload && payload.reconnected)
+      );
+      state.nativeStreamingText = "";
       state.nativePollBurstUntil = Date.now() + NATIVE_POLL_BURST_MS;
       setNativeSummary(pretty(payload || process || {}));
       setText("native-terminal-output", "Terminal output will appear here.");
       renderNativeTerminalStatus();
+      renderNativeStreamingDraft();
       if (process && process.id) {
         pollNativeOutput();
       }
@@ -5657,6 +5721,115 @@
       return true;
     }
 
+    function syncNativeEventsInBundle(events) {
+      if (!state.currentBundle || !Array.isArray(events) || !events.length) return false;
+      const current = Array.isArray(state.currentBundle.events) ? state.currentBundle.events : [];
+      const byEventId = new Map(current.map((event) => [event.id, event]));
+      let changed = false;
+      for (const event of events) {
+        if (!event || !event.id) continue;
+        const previous = byEventId.get(event.id);
+        if (!previous || JSON.stringify(previous) !== JSON.stringify(event)) changed = true;
+        byEventId.set(event.id, event);
+      }
+      if (!changed) return false;
+      state.currentBundle.events = [...byEventId.values()];
+      return true;
+    }
+
+    function nativeStreamingMessageNode(messages) {
+      const process = state.activeNativeProcess || {};
+      if (
+        !state.nativeStreamingActive
+        || !["claude-code", "gemini-cli"].includes(process.harness_id)
+        || !process.run_id
+      ) return null;
+      const events = eventsAfterLatestMessage(process.run_id, messages);
+      const node = buildMessageNode(
+        {
+          id: `native-stream:${process.id}`,
+          role: "assistant",
+          run_id: process.run_id,
+          content: state.nativeStreamingText,
+          harness_id: process.harness_id,
+          api_mode: process.api_mode || currentApiMode(),
+          metadata: {}
+        },
+        {
+          live: true,
+          liveStatus: "running",
+          tools: toolsFromEvents(events)
+        }
+      );
+      node.dataset.nativeStreamingProcessId = process.id;
+      return node;
+    }
+
+    function appendNativeStreamingMessage(list, messages) {
+      const node = nativeStreamingMessageNode(messages);
+      if (node) list.appendChild(node);
+    }
+
+    function renderNativeStreamingDraft() {
+      const list = byId("message-list");
+      if (!list) return;
+      const existing = list.querySelector("[data-native-streaming-process-id]");
+      const messages = state.currentBundle && Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
+      const replacement = nativeStreamingMessageNode(messages);
+      if (existing && replacement) existing.replaceWith(replacement);
+      else if (existing) existing.remove();
+      else if (replacement) list.appendChild(replacement);
+      if (replacement && isChatNearBottom()) scrollChatToBottom();
+    }
+
+    function beginNativeResponseStream() {
+      const process = state.activeNativeProcess || {};
+      if (!["claude-code", "gemini-cli"].includes(process.harness_id)) return;
+      state.nativeTerminalText = "";
+      state.nativeStreamingActive = true;
+      state.nativeStreamingText = "";
+      renderNativeStreamingDraft();
+    }
+
+    function finishNativeResponseStream() {
+      state.nativeStreamingActive = false;
+      state.nativeStreamingText = "";
+    }
+
+    function geminiStreamingTextFromTerminal(value) {
+      const lines = String(value || "").replace(/\r/g, "").split("\n");
+      let promptIndex = -1;
+      for (let index = 0; index < lines.length; index += 1) {
+        if (/^\s*>\s+\S/.test(lines[index])) promptIndex = index;
+      }
+      if (promptIndex === -1) return "";
+      let responseIndex = -1;
+      for (let index = promptIndex + 1; index < lines.length; index += 1) {
+        if (/^\s*✦(?:\s|$)/.test(lines[index])) {
+          responseIndex = index;
+          break;
+        }
+      }
+      if (responseIndex === -1) return "";
+      const response = [];
+      for (let index = responseIndex; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (index > responseIndex && /^\s*>\s*$/.test(line)) break;
+        response.push(index === responseIndex ? line.replace(/^\s*✦\s?/, "") : line.replace(/^ {2}/, ""));
+      }
+      return response.join("\n").trim();
+    }
+
+    function updateNativeStreamingFromTerminal() {
+      const process = state.activeNativeProcess || {};
+      if (!state.nativeStreamingActive || process.harness_id !== "gemini-cli") return false;
+      const candidate = geminiStreamingTextFromTerminal(state.nativeTerminalText);
+      if (!candidate || candidate === state.nativeStreamingText) return false;
+      if (state.nativeStreamingText && candidate.length < state.nativeStreamingText.length) return false;
+      state.nativeStreamingText = candidate;
+      return true;
+    }
+
     async function pollNativeOutput() {
       const process = state.activeNativeProcess || {};
       if (!process.id) {
@@ -5673,8 +5846,9 @@
       const body = result.data || {};
       state.nativeOutputCursor = body.cursor || state.nativeOutputCursor;
       const outputs = Array.isArray(body.outputs) ? body.outputs : [];
+      let nativeStreamChanged = false;
       for (const output of outputs) {
-        appendNativeTerminal(output.text || "");
+        nativeStreamChanged = appendNativeTerminal(output.text || "") || nativeStreamChanged;
       }
       if (outputs.length) state.nativePollBurstUntil = Date.now() + NATIVE_POLL_BURST_MS;
       const status = body.status || (body.run && body.run.status) || "running";
@@ -5684,12 +5858,30 @@
         renderInspector();
       }
       const nativeMessages = Array.isArray(body.messages) ? body.messages : [];
-      if (nativeMessages.length) {
-        syncNativeMessagesInBundle(nativeMessages);
+      const nativeEvents = Array.isArray(body.events) ? body.events : [];
+      const currentMessageIds = new Set(
+        state.currentBundle && Array.isArray(state.currentBundle.messages)
+          ? state.currentBundle.messages.map((message) => message.id)
+          : []
+      );
+      const hasNewAssistantMessage = nativeMessages.some(
+        (message) => message && ["assistant", "error"].includes(message.role) && !currentMessageIds.has(message.id)
+      );
+      const messagesChanged = syncNativeMessagesInBundle(nativeMessages);
+      const eventsChanged = syncNativeEventsInBundle(nativeEvents);
+      if (hasNewAssistantMessage) {
+        finishNativeResponseStream();
+      }
+      if (messagesChanged || eventsChanged) {
         renderMessages();
+      } else if (nativeStreamChanged) {
+        renderNativeStreamingDraft();
       }
       renderNativeTerminalStatus(status);
       if (status !== "running") {
+        const hadNativeStream = state.nativeStreamingActive;
+        finishNativeResponseStream();
+        if (hadNativeStream && !messagesChanged && !eventsChanged) renderNativeStreamingDraft();
         stopNativePolling();
         resetNativeTrustPrompt();
       } else {
@@ -5798,17 +5990,24 @@
 
     function clearNativeTerminal() {
       state.nativeTerminalText = "";
+      finishNativeResponseStream();
+      renderNativeStreamingDraft();
       setText("native-terminal-output", "Terminal output will appear here.");
       resetNativeTrustPrompt();
     }
 
     function appendNativeTerminal(text) {
-      const clean = stripAnsi(text);
+      const raw = String(text || "");
+      if (raw.includes("\x1B[2J") || raw.includes("\x1B[3J")) {
+        state.nativeTerminalText = "";
+      }
+      const clean = stripAnsi(raw);
       state.nativeTerminalText += clean;
       if (state.nativeTerminalText.length > NATIVE_TERMINAL_CHAR_LIMIT) {
         state.nativeTerminalText = state.nativeTerminalText.slice(-NATIVE_TERMINAL_CHAR_LIMIT);
       }
       setText("native-terminal-output", state.nativeTerminalText || "Terminal output will appear here.");
+      return updateNativeStreamingFromTerminal();
     }
 
     function appendNativeTerminalLine(text) {

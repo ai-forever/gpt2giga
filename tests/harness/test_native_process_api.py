@@ -287,6 +287,136 @@ def test_native_process_syncs_assistant_message_while_running(
     assert run.native_session_id == native_session_id
 
 
+def test_native_process_syncs_claude_tool_events_while_running(tmp_path):
+    script = _write_echo_cli(tmp_path)
+
+    class ToolTranscriptConnector(FakeProcessConnector):
+        def __init__(self):
+            super().__init__(start_script=script, harness_id="claude-code")
+            self.snapshot = None
+
+        def build_start_command(self, request, context):
+            plan = super().build_start_command(request, context)
+            self.snapshot = create_execution_snapshot(
+                harness_id=self.harness_id,
+                api_mode=request.api_mode.value,
+                model=request.model,
+                native_home=request.workspace,
+                workspace=request.workspace,
+                project_id="proj_native_tools",
+                permission_mode=request.mode,
+                tool_config_hash=None,
+            )
+            return replace(plan, execution_snapshot=self.snapshot)
+
+        def discover(self, *, workspace, include_external):
+            del include_external
+            return (
+                NativeSessionRef(
+                    id="native_claude_tools",
+                    harness_id=self.harness_id,
+                    native_session_id="claude-tools-session",
+                    title="Native tools",
+                    workspace=workspace,
+                    source="managed-tools.jsonl",
+                    status=NativeSessionStatus.MANAGED_NATIVE,
+                    created_at="2099-01-01T00:00:00Z",
+                    updated_at="2099-01-01T00:00:03Z",
+                    message_count=3,
+                    can_preview=True,
+                    can_import=True,
+                    can_resume=True,
+                    execution_snapshot=self.snapshot,
+                ),
+            )
+
+        def import_ref(self, ref):
+            del ref
+            return (
+                NativeTranscriptMessage(
+                    role="assistant",
+                    content="",
+                    created_at="2099-01-01T00:00:01Z",
+                    metadata={
+                        "native_message_id": "tool-start-message",
+                        "tool_calls": [
+                            {
+                                "tool_call_id": "toolu_read",
+                                "name": "Read",
+                                "arguments": {"file_path": "/repo/README.md"},
+                                "status": "running",
+                            }
+                        ],
+                    },
+                ),
+                NativeTranscriptMessage(
+                    role="tool",
+                    content="",
+                    created_at="2099-01-01T00:00:02Z",
+                    metadata={
+                        "native_message_id": "tool-result-message",
+                        "tool_results": [
+                            {
+                                "tool_call_id": "toolu_read",
+                                "result": "README contents",
+                                "status": "completed",
+                            }
+                        ],
+                    },
+                ),
+                NativeTranscriptMessage(
+                    role="assistant",
+                    content="Done.",
+                    created_at="2099-01-01T00:00:03Z",
+                    metadata={"native_message_id": "assistant-final-message"},
+                ),
+            )
+
+    connector = ToolTranscriptConnector()
+    client, store = _client(tmp_path, connector)
+    session = store.create_session(
+        title="Native tools",
+        workspace=str(tmp_path),
+        default_harness_id="claude-code",
+    )
+    started = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "claude-code",
+            "action": "start",
+            "prompt": "Read the repository",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    process_id = started.json()["process"]["id"]
+    _wait_for_output(client, process_id, 0, "ready")
+    first_poll = client.get(f"/api/native/processes/{process_id}/output").json()
+    second_poll = client.get(f"/api/native/processes/{process_id}/output").json()
+
+    assert [message["content"] for message in first_poll["messages"]] == ["Done."]
+    tool_events = [
+        event
+        for event in first_poll["events"]
+        if event["type"].startswith("tool_call_")
+    ]
+    assert [event["type"] for event in tool_events] == [
+        "tool_call_started",
+        "tool_call_finished",
+    ]
+    assert tool_events[0]["payload"]["name"] == "Read"
+    assert tool_events[0]["payload"]["arguments"] == {"file_path": "/repo/README.md"}
+    assert tool_events[1]["payload"]["result"] == "README contents"
+    assert len(second_poll["events"]) == len(first_poll["events"])
+    stored_tool_events = [
+        event
+        for event in store.list_events(session.id)
+        if event.type.startswith("tool_call_")
+    ]
+    assert len(stored_tool_events) == 2
+
+
 def test_native_process_api_approval_blocks_before_worktree_and_spawn(tmp_path):
     repo = _git_repo(tmp_path / "repo")
     data_dir = tmp_path / "data"

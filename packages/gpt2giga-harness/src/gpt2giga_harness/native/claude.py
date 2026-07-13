@@ -426,13 +426,20 @@ def _iter_messages(
 
 def _message_from_event(event: Mapping[str, Any]) -> NativeTranscriptMessage | None:
     role = _role_from_event(event)
-    content = _content_from_event(event)
-    if role is None or content is None:
+    content = _content_from_event(event) or ""
+    tool_calls, tool_results = _tool_records_from_event(event)
+    if role is None or (not content and not tool_calls and not tool_results):
         return None
     metadata = {"source": "claude"}
     native_message_id = event.get("uuid")
     if native_message_id is not None and str(native_message_id).strip():
         metadata["native_message_id"] = str(native_message_id).strip()
+    if tool_calls:
+        metadata["tool_calls"] = tool_calls
+    if tool_results:
+        metadata["tool_results"] = tool_results
+        if role == "user" and not content:
+            role = "tool"
     return NativeTranscriptMessage(
         role=role,
         content=content,
@@ -457,12 +464,7 @@ def _role_from_event(event: Mapping[str, Any]) -> str | None:
 
 
 def _content_from_event(event: Mapping[str, Any]) -> str | None:
-    candidates = (
-        _nested(event, "message", "content"),
-        _nested(event, "message", "text"),
-        event.get("content"),
-        event.get("text"),
-    )
+    candidates = _content_candidates(event)
     for candidate in candidates:
         text = _content_text(candidate)
         if text:
@@ -475,6 +477,10 @@ def _content_text(value: Any) -> str | None:
         text = value.strip()
         return text or None
     if isinstance(value, Mapping):
+        if _tool_call_from_block(value, fallback_id=None) is not None:
+            return None
+        if _tool_result_from_block(value, fallback_id=None) is not None:
+            return None
         for key in ("text", "content", "value"):
             text = _content_text(value.get(key))
             if text:
@@ -485,6 +491,102 @@ def _content_text(value: Any) -> str | None:
         text = "\n".join(part for part in parts if part)
         return text or None
     return None
+
+
+def _content_candidates(event: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (
+        _nested(event, "message", "content"),
+        _nested(event, "message", "text"),
+        event.get("content"),
+        event.get("text"),
+    )
+
+
+def _tool_records_from_event(
+    event: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    content = next(
+        (
+            candidate
+            for candidate in _content_candidates(event)
+            if candidate is not None
+        ),
+        None,
+    )
+    blocks = content if isinstance(content, list) else [content]
+    fallback_id = _optional_tool_id(event.get("tools_state_id"))
+    calls: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+    for index, block in enumerate(blocks):
+        if not isinstance(block, Mapping):
+            continue
+        block_fallback_id = fallback_id
+        if fallback_id is not None and len(blocks) > 1:
+            block_fallback_id = f"{fallback_id}:{index}"
+        call = _tool_call_from_block(block, fallback_id=block_fallback_id)
+        if call is not None:
+            calls.append(call)
+        result = _tool_result_from_block(block, fallback_id=block_fallback_id)
+        if result is not None:
+            results.append(result)
+    return calls, results
+
+
+def _tool_call_from_block(
+    block: Mapping[str, Any],
+    *,
+    fallback_id: str | None,
+) -> dict[str, Any] | None:
+    if block.get("type") == "tool_use":
+        tool_call_id = _optional_tool_id(block.get("id")) or fallback_id or "tool-call"
+        return {
+            "tool_call_id": tool_call_id,
+            "name": str(block.get("name") or "tool"),
+            "arguments": block.get("input"),
+            "status": "running",
+        }
+    function_call = block.get("function_call")
+    if not isinstance(function_call, Mapping):
+        return None
+    tool_call_id = _optional_tool_id(block.get("id")) or fallback_id or "tool-call"
+    return {
+        "tool_call_id": tool_call_id,
+        "name": str(function_call.get("name") or "tool"),
+        "arguments": function_call.get("arguments"),
+        "status": "running",
+    }
+
+
+def _tool_result_from_block(
+    block: Mapping[str, Any],
+    *,
+    fallback_id: str | None,
+) -> dict[str, Any] | None:
+    if block.get("type") == "tool_result":
+        tool_call_id = (
+            _optional_tool_id(block.get("tool_use_id")) or fallback_id or "tool-call"
+        )
+        return {
+            "tool_call_id": tool_call_id,
+            "result": block.get("content"),
+            "status": "failed" if block.get("is_error") else "completed",
+        }
+    function_result = block.get("function_result")
+    if not isinstance(function_result, Mapping):
+        return None
+    tool_call_id = _optional_tool_id(block.get("id")) or fallback_id or "tool-call"
+    return {
+        "tool_call_id": tool_call_id,
+        "name": str(function_result.get("name") or "tool"),
+        "result": function_result.get("result"),
+        "status": "completed",
+    }
+
+
+def _optional_tool_id(value: Any) -> str | None:
+    if value is None or not str(value).strip():
+        return None
+    return str(value).strip()
 
 
 def _timestamp_from_event(event: Mapping[str, Any]) -> str | None:
