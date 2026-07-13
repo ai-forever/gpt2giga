@@ -53,13 +53,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.21">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.22">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.21"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.22"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -390,6 +390,36 @@ def test_ui_static_handles_terminal_stream_edge_cases():
         assert fragment in partial_source
     assert "function preserveTerminalPartialDraft" in UI_SOURCE
     assert "renderedPartialDrafts" in UI_SOURCE
+
+
+def test_ui_static_refreshes_native_run_after_process_exit():
+    terminal_source = UI_SOURCE[
+        UI_SOURCE.index("function renderNativeTerminalStatus") : UI_SOURCE.index(
+            "function maybeShowNativeTrustPrompt"
+        )
+    ]
+
+    for fragment in (
+        'effectiveStatus === "running" ? "active" : effectiveStatus',
+        "function syncNativeRunInBundle(run)",
+        "syncNativeRunInBundle(body.run);",
+        "renderInspector();",
+        'status !== "running"',
+        "await loadSession(state.currentSessionId",
+        "syncRoute: false",
+    ):
+        assert fragment in terminal_source
+    run_summary_source = UI_SOURCE[
+        UI_SOURCE.index("function renderRunSummary") : UI_SOURCE.index(
+            "function renderInspector"
+        )
+    ]
+    assert 'effectiveStatus === "running" && run.invocation_mode === "native"' in (
+        run_summary_source
+    )
+    assert '? "active"' in run_summary_source
+    assert 'displayStatus === "active" ? "active"' in run_summary_source
+    assert "Native CLIs stay active between turns." in INDEX_HTML
 
 
 def test_ui_static_keeps_advanced_panel_above_chat_and_closes_it_for_runs():

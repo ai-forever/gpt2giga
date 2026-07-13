@@ -107,6 +107,37 @@ def test_native_process_api_start_creates_managed_native_link(tmp_path):
     assert bundle.native_links[-1].native_session_id == "managed-native-1"
 
 
+def test_native_process_api_start_promotes_empty_session_to_native_chat(tmp_path):
+    script = _write_once_cli(tmp_path)
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(start_script=script, harness_id="codex-cli"),
+    )
+    session = store.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="direct-chat",
+    )
+
+    started = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "codex-cli",
+            "action": "start",
+            "prompt": "Привет! Готов помочь.",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert started.status_code == 200, started.text
+    bundle = store.get_session_bundle(session.id)
+    assert bundle.session.title == "Привет! Готов помочь."
+    assert bundle.session.default_harness_id == "codex-cli"
+    assert [message.content for message in bundle.messages] == ["Привет! Готов помочь."]
+    assert bundle.messages[0].run_id == started.json()["run"]["id"]
+    assert bundle.messages[0].harness_id == "codex-cli"
+
+
 def test_native_process_api_start_preserves_attachment_render_plan(tmp_path):
     workspace = tmp_path / "repo"
     workspace.mkdir()

@@ -105,7 +105,7 @@
 
     function readNativeTrustResolvedProcessIds() {
       try {
-        const values = JSON.parse(window.localStorage.getItem(NATIVE_TRUST_STORAGE_KEY) || "[]");
+        const values = JSON.parse(window.sessionStorage.getItem(NATIVE_TRUST_STORAGE_KEY) || "[]");
         return new Set(Array.isArray(values) ? values.filter((value) => typeof value === "string").slice(-100) : []);
       } catch (error) {
         return new Set();
@@ -116,7 +116,7 @@
       state.nativeTrustResolvedProcessIds.add(processId);
       try {
         const values = [...state.nativeTrustResolvedProcessIds].slice(-100);
-        window.localStorage.setItem(NATIVE_TRUST_STORAGE_KEY, JSON.stringify(values));
+        window.sessionStorage.setItem(NATIVE_TRUST_STORAGE_KEY, JSON.stringify(values));
       } catch (error) {
         // Native input still succeeds when browser storage is unavailable.
       }
@@ -4809,6 +4809,9 @@
       const events = (allEvents || []).filter((event) => !event.run_id || event.run_id === run.id);
       const draft = state.liveRuns.get(run.id) || null;
       const effectiveStatus = draft ? draft.status : run.status || "unknown";
+      const displayStatus = effectiveStatus === "running" && run.invocation_mode === "native"
+        ? "active"
+        : effectiveStatus;
       const metadata = run.metadata && typeof run.metadata === "object" ? run.metadata : {};
       const usage = mergeUsage(
         mergeUsage(usageFromEvents(events), metadata.usage),
@@ -4826,7 +4829,7 @@
       title.append(harness, identifier);
       const status = document.createElement("span");
       status.className = runStatusBadgeClass(effectiveStatus);
-      status.textContent = effectiveStatus;
+      status.textContent = displayStatus;
       header.append(title, status);
       panel.appendChild(header);
       const grid = document.createElement("div");
@@ -4835,7 +4838,11 @@
       appendRunSummaryField(grid, "Route", run.api_mode ? `/${run.api_mode}` : "-");
       appendRunSummaryField(grid, "Mode", run.mode || "-");
       appendRunSummaryField(grid, "Invocation", run.invocation_mode || "headless");
-      appendRunSummaryField(grid, "Duration", runDuration({ ...run, status: effectiveStatus }));
+      appendRunSummaryField(
+        grid,
+        "Duration",
+        displayStatus === "active" ? "active" : runDuration({ ...run, status: effectiveStatus })
+      );
       appendRunSummaryField(grid, "Workspace", run.workspace || "current");
       panel.appendChild(grid);
       appendUsageChips(panel, usage);
@@ -5501,13 +5508,23 @@
     function renderNativeTerminalStatus(status) {
       const process = state.activeNativeProcess || {};
       const effectiveStatus = status || process.status || "idle";
+      const displayStatus = effectiveStatus === "running" ? "active" : effectiveStatus;
       const badge = byId("native-terminal-status");
       badge.className = effectiveStatus === "running" ? "badge ok" : effectiveStatus === "idle" ? "badge info" : "badge warn";
-      badge.textContent = `Native: ${effectiveStatus}`;
+      badge.textContent = `Native: ${displayStatus}`;
       const running = effectiveStatus === "running";
       byId("send-native-input-button").disabled = !running;
       byId("stop-native-process-button").disabled = !process.id || !running;
       byId("poll-native-output-button").disabled = !process.id;
+    }
+
+    function syncNativeRunInBundle(run) {
+      if (!run || !state.currentBundle) return;
+      const runs = Array.isArray(state.currentBundle.runs) ? state.currentBundle.runs : [];
+      const index = runs.findIndex((item) => item.id === run.id);
+      state.currentBundle.runs = index === -1
+        ? [...runs, run]
+        : runs.map((item, itemIndex) => itemIndex === index ? run : item);
     }
 
     async function pollNativeOutput() {
@@ -5531,6 +5548,10 @@
       }
       const status = body.status || (body.run && body.run.status) || "running";
       state.activeNativeProcess = { ...process, status, exit_code: body.exit_code };
+      if (body.run) {
+        syncNativeRunInBundle(body.run);
+        renderInspector();
+      }
       renderNativeTerminalStatus(status);
       if (status !== "running") {
         stopNativePolling();
@@ -5538,6 +5559,16 @@
       }
       if (body.run) setNativeSummary(pretty({ process: state.activeNativeProcess, run: body.run }));
       maybeShowNativeTrustPrompt();
+      if (
+        status !== "running"
+        && state.currentSessionId
+        && state.currentSessionId === (body.run && body.run.session_id || process.session_id)
+      ) {
+        await loadSession(state.currentSessionId, {
+          runId: state.selectedRunId,
+          syncRoute: false
+        });
+      }
     }
 
     function maybeShowNativeTrustPrompt() {

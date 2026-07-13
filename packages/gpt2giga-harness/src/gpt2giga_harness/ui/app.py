@@ -1246,6 +1246,34 @@ def create_app(
                 started_at=utc_now(),
                 metadata=_native_process_run_metadata(options),
             )
+            if options["action"] == "start" and options["prompt"]:
+                store.append_message(
+                    HarnessMessage(
+                        id=new_id("msg"),
+                        session_id=session.id,
+                        run_id=run.id,
+                        role="user",
+                        content=options["prompt"],
+                        created_at=utc_now(),
+                        harness_id=options["harness_id"],
+                        model=options["model"],
+                        api_mode=options["api_mode"],
+                    )
+                )
+            session_patch: dict[str, Any] = {
+                "default_harness_id": options["harness_id"],
+                "default_model": options["model"],
+                "default_api_mode": options["api_mode"],
+                "default_mode": options["mode"],
+                "workspace": options["workspace"],
+            }
+            if (
+                session.title == "Untitled session"
+                and options["action"] == "start"
+                and options["prompt"]
+            ):
+                session_patch["title"] = title_from_prompt(options["prompt"])
+            store.update_session(session.id, **session_patch)
             process_ref = native_process_manager.start(
                 options["plan"],
                 session_id=session.id,

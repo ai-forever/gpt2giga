@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
   <link rel="icon" href="/assets/favicon.ico" sizes="any">
-  <link rel="stylesheet" href="/assets/app.css?v=38.21">
+  <link rel="stylesheet" href="/assets/app.css?v=38.22">
 </head>
 <body>
   <div class="app">
@@ -739,6 +739,7 @@
                 <button id="stop-native-process-button" class="danger" type="button">Stop process</button>
                 <button id="clear-native-terminal-button" class="secondary" type="button">Clear terminal</button>
               </div>
+              <p id="native-process-lifecycle-note" class="status-line">Native CLIs stay active between turns. A completed model response does not stop the process; use Stop process when you are done.</p>
               <section id="native-trust-prompt" class="native-trust-prompt" role="alertdialog" aria-labelledby="native-trust-title" hidden>
                 <div>
                   <strong id="native-trust-title">Do you trust the contents of this directory?</strong>
@@ -815,6 +816,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=38.21"></script>
+  <script src="/assets/app.js?v=38.22"></script>
 </body>
 </html>
