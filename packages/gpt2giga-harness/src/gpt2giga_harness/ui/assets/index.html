@@ -738,6 +738,18 @@
                 <button id="stop-native-process-button" class="danger" type="button">Stop process</button>
                 <button id="clear-native-terminal-button" class="secondary" type="button">Clear terminal</button>
               </div>
+              <section id="native-trust-prompt" class="native-trust-prompt" role="alertdialog" aria-labelledby="native-trust-title" hidden>
+                <div>
+                  <strong id="native-trust-title">Do you trust the contents of this directory?</strong>
+                  <p>Codex can load project-local configuration, hooks, and execution policies after you trust this workspace.</p>
+                  <code id="native-trust-workspace"></code>
+                  <p id="native-trust-status" class="status-line">Choose whether Codex should continue.</p>
+                </div>
+                <div class="native-trust-actions">
+                  <button id="native-trust-yes-button" type="button">Yes, continue</button>
+                  <button id="native-trust-no-button" class="secondary" type="button">No, quit</button>
+                </div>
+              </section>
               <pre id="native-process-summary">No native session selected.</pre>
               <pre id="native-terminal-output">Terminal output will appear here.</pre>
               <label>Native stdin

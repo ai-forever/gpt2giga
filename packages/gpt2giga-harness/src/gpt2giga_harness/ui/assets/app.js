@@ -1,4 +1,6 @@
     const NATIVE_SESSION_PAGE_SIZE = 5;
+    const NATIVE_TERMINAL_CHAR_LIMIT = 50000;
+    const NATIVE_TRUST_STORAGE_KEY = "gpt2giga.nativeTrustResolved.v1";
     const RUNS_CENTER_PAGE_SIZE = 25;
     const RUNS_TRACE_DOM_LIMIT = 200;
     const state = {
@@ -53,6 +55,8 @@
       nativeOutputCursor: 0,
       nativeTerminalText: "",
       nativePollTimer: null,
+      nativeTrustPromptProcessId: null,
+      nativeTrustResolvedProcessIds: readNativeTrustResolvedProcessIds(),
       attachments: [],
       fileMentionQuery: null,
       currentSessionId: null,
@@ -98,6 +102,25 @@
       const node = byId(id);
       if (node) node.textContent = value == null ? "" : String(value);
     };
+
+    function readNativeTrustResolvedProcessIds() {
+      try {
+        const values = JSON.parse(window.localStorage.getItem(NATIVE_TRUST_STORAGE_KEY) || "[]");
+        return new Set(Array.isArray(values) ? values.filter((value) => typeof value === "string").slice(-100) : []);
+      } catch (error) {
+        return new Set();
+      }
+    }
+
+    function rememberNativeTrustDecision(processId) {
+      state.nativeTrustResolvedProcessIds.add(processId);
+      try {
+        const values = [...state.nativeTrustResolvedProcessIds].slice(-100);
+        window.localStorage.setItem(NATIVE_TRUST_STORAGE_KEY, JSON.stringify(values));
+      } catch (error) {
+        // Native input still succeeds when browser storage is unavailable.
+      }
+    }
 
     async function getJson(url, options) {
       const response = await fetch(url, options);
@@ -2222,6 +2245,7 @@
       }))) return;
       setNativeSummary("Resuming native session...");
       showTab("native");
+      setInspectorOpen(true);
       const result = await getJson("/api/native/processes/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2253,6 +2277,7 @@
       restoreTerminalPartialDrafts();
       renderAll();
       resumeActiveHeadlessRun();
+      restoreActiveNativeProcess();
       setSidebarOpen(false);
       if (options.syncRoute !== false) {
         syncBrowserRoute(options.area || "work", options.runId || sessionId);
@@ -2275,6 +2300,7 @@
       restoreTerminalPartialDrafts();
       renderAll();
       resumeActiveHeadlessRun();
+      restoreActiveNativeProcess();
       setSidebarOpen(false);
       if (options.syncRoute !== false) syncBrowserRoute("runs", runId);
       else syncNavigation();
@@ -3572,6 +3598,7 @@
       setText("command-panel", commandPreview(payload));
       setNativeSummary("Starting native process...");
       showTab("native");
+      setInspectorOpen(true);
       byId("run-button").disabled = true;
       byId("run-button").textContent = "Starting...";
       try {
@@ -5374,6 +5401,76 @@
       showTab("run");
     }
 
+    function nativeTrustDecisionRecorded(bundle, processId) {
+      const events = bundle && Array.isArray(bundle.events) ? bundle.events : [];
+      let terminalText = "";
+      for (const event of events) {
+        const payload = event && event.payload ? event.payload : {};
+        if (payload.process_id !== processId) continue;
+        if (event.type === "terminal_output") {
+          terminalText = `${terminalText}${payload.text || ""}`.slice(-10000);
+          continue;
+        }
+        if (event.type !== "terminal_input" || !["1", "2"].includes(String(payload.text || "").trim())) continue;
+        const compact = terminalText.toLowerCase().replace(/[^a-z0-9]+/g, "");
+        if (
+          compact.includes("doyoutrustthecontentsofthisdirectory") &&
+          compact.includes("yescontinue") &&
+          compact.includes("noquit")
+        ) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function activeNativeProcessFromBundle(bundle) {
+      const runs = bundle && Array.isArray(bundle.runs) ? bundle.runs : [];
+      const links = bundle && Array.isArray(bundle.native_links) ? bundle.native_links : [];
+      const runsById = new Map(runs.map((run) => [run.id, run]));
+      for (let index = links.length - 1; index >= 0; index -= 1) {
+        const link = links[index] || {};
+        const metadata = link.metadata || {};
+        const run = runsById.get(metadata.run_id);
+        if (!metadata.native_process_id || metadata.process_status !== "running") continue;
+        if (!run || run.status !== "running" || run.invocation_mode !== "native") continue;
+        const process = {
+          id: metadata.native_process_id,
+          harness_id: link.harness_id || run.harness_id,
+          session_id: link.session_id || run.session_id,
+          run_id: metadata.run_id,
+          status: "running",
+          cwd: link.workspace || run.workspace || null,
+          native_home: metadata.native_home || null,
+          metadata: { reconnected: true }
+        };
+        if (nativeTrustDecisionRecorded(bundle, process.id)) rememberNativeTrustDecision(process.id);
+        return process;
+      }
+      return null;
+    }
+
+    function restoreActiveNativeProcess() {
+      const candidate = activeNativeProcessFromBundle(state.currentBundle);
+      if (candidate && state.activeNativeProcess && state.activeNativeProcess.id === candidate.id) return;
+      if (candidate) {
+        setActiveNativeProcess(candidate, { process: candidate, reconnected: true });
+        showTab("native");
+        setInspectorOpen(true);
+        return;
+      }
+      if (state.activeNativeProcess && state.activeNativeProcess.session_id !== state.currentSessionId) {
+        stopNativePolling();
+        state.activeNativeProcess = null;
+        state.nativeOutputCursor = 0;
+        state.nativeTerminalText = "";
+        resetNativeTrustPrompt();
+        renderNativeTerminalStatus("idle");
+        setNativeSummary(nativeInspectorText(state.currentBundle));
+        setText("native-terminal-output", "Terminal output will appear here.");
+      }
+    }
+
     function nativeInspectorText(bundle) {
       if (state.nativePreview) return pretty(state.nativePreview);
       if (state.activeNativeProcess) return pretty(state.activeNativeProcess);
@@ -5388,6 +5485,7 @@
 
     function setActiveNativeProcess(process, payload) {
       stopNativePolling();
+      resetNativeTrustPrompt();
       state.activeNativeProcess = process;
       state.nativeOutputCursor = 0;
       state.nativeTerminalText = "";
@@ -5434,8 +5532,67 @@
       const status = body.status || (body.run && body.run.status) || "running";
       state.activeNativeProcess = { ...process, status, exit_code: body.exit_code };
       renderNativeTerminalStatus(status);
-      if (status !== "running") stopNativePolling();
+      if (status !== "running") {
+        stopNativePolling();
+        resetNativeTrustPrompt();
+      }
       if (body.run) setNativeSummary(pretty({ process: state.activeNativeProcess, run: body.run }));
+      maybeShowNativeTrustPrompt();
+    }
+
+    function maybeShowNativeTrustPrompt() {
+      const process = state.activeNativeProcess || {};
+      if (!process.id || process.harness_id !== "codex-cli" || process.status !== "running") return;
+      if (state.nativeTrustResolvedProcessIds.has(process.id)) return;
+      const compact = state.nativeTerminalText.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      if (!compact.includes("doyoutrustthecontentsofthisdirectory")) return;
+      if (!compact.includes("yescontinue") || !compact.includes("noquit")) return;
+      state.nativeTrustPromptProcessId = process.id;
+      setText(
+        "native-trust-workspace",
+        process.cwd || (state.currentBundle && state.currentBundle.session && state.currentBundle.session.workspace) || "Current workspace"
+      );
+      setText("native-trust-status", "Choose whether Codex should continue.");
+      byId("native-trust-yes-button").disabled = false;
+      byId("native-trust-no-button").disabled = false;
+      byId("native-trust-prompt").hidden = false;
+      showTab("native");
+      setInspectorOpen(true);
+    }
+
+    function resetNativeTrustPrompt() {
+      state.nativeTrustPromptProcessId = null;
+      const prompt = byId("native-trust-prompt");
+      if (prompt) prompt.hidden = true;
+    }
+
+    async function respondToNativeTrust(allowed) {
+      const process = state.activeNativeProcess || {};
+      if (!process.id || state.nativeTrustPromptProcessId !== process.id) return;
+      byId("native-trust-yes-button").disabled = true;
+      byId("native-trust-no-button").disabled = true;
+      setText("native-trust-status", allowed ? "Continuing Codex…" : "Stopping Codex…");
+      const result = await sendNativeProcessInput(allowed ? "1\r" : "2\r");
+      if (!result.ok) {
+        setText("native-trust-status", result.data.detail || "Could not send the trust decision.");
+        byId("native-trust-yes-button").disabled = false;
+        byId("native-trust-no-button").disabled = false;
+        return;
+      }
+      rememberNativeTrustDecision(process.id);
+      resetNativeTrustPrompt();
+      if (result.data.process) state.activeNativeProcess = result.data.process;
+      await pollNativeOutput();
+    }
+
+    async function sendNativeProcessInput(data) {
+      const process = state.activeNativeProcess || {};
+      if (!process.id) return { ok: false, data: { detail: "Native process is unavailable." } };
+      return getJson(`/api/native/processes/${encodeURIComponent(process.id)}/input`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data })
+      });
     }
 
     async function sendNativeInput() {
@@ -5444,11 +5601,7 @@
       const input = byId("native-terminal-input");
       const data = input.value;
       if (!data) return;
-      const result = await getJson(`/api/native/processes/${encodeURIComponent(process.id)}/input`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data })
-      });
+      const result = await sendNativeProcessInput(data);
       if (!result.ok) {
         appendNativeTerminalLine(result.data.detail || "Native input failed.");
         return;
@@ -5481,11 +5634,15 @@
     function clearNativeTerminal() {
       state.nativeTerminalText = "";
       setText("native-terminal-output", "Terminal output will appear here.");
+      resetNativeTrustPrompt();
     }
 
     function appendNativeTerminal(text) {
       const clean = stripAnsi(text);
       state.nativeTerminalText += clean;
+      if (state.nativeTerminalText.length > NATIVE_TERMINAL_CHAR_LIMIT) {
+        state.nativeTerminalText = state.nativeTerminalText.slice(-NATIVE_TERMINAL_CHAR_LIMIT);
+      }
       setText("native-terminal-output", state.nativeTerminalText || "Terminal output will appear here.");
     }
 
@@ -5494,7 +5651,10 @@
     }
 
     function stripAnsi(text) {
-      return String(text || "").replace(/\\x1B\\[[0-?]*[ -/]*[@-~]/g, "");
+      return String(text || "")
+        .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, "")
+        .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
+        .replace(/\x1B[()][0-2A-Z0-9]/g, "");
     }
 
     function renderEvents(events) {
@@ -6184,6 +6344,8 @@
       byId("native-all-workspaces-checkbox").addEventListener("change", () => loadNativeSessions(false, { resetVisible: true }));
       byId("poll-native-output-button").addEventListener("click", pollNativeOutput);
       byId("send-native-input-button").addEventListener("click", sendNativeInput);
+      byId("native-trust-yes-button").addEventListener("click", () => respondToNativeTrust(true));
+      byId("native-trust-no-button").addEventListener("click", () => respondToNativeTrust(false));
       byId("stop-native-process-button").addEventListener("click", stopNativeProcess);
       byId("clear-native-terminal-button").addEventListener("click", clearNativeTerminal);
       byId("api-mode-v1").addEventListener("change", () => { updateRouteNote(); loadModels(); persistProjectState(); });

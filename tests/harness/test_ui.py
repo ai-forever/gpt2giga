@@ -288,6 +288,58 @@ def test_ui_static_resumes_active_stream_after_session_reload():
     ) in UI_SOURCE
 
 
+def test_ui_static_surfaces_codex_native_trust_and_reconnects_process():
+    load_session_source = UI_SOURCE[
+        UI_SOURCE.index("async function loadSession") : UI_SOURCE.index(
+            "async function loadAttachments"
+        )
+    ]
+    start_source = UI_SOURCE[
+        UI_SOURCE.index("async function startNativeProcess") : UI_SOURCE.index(
+            "async function ensureSessionForNative"
+        )
+    ]
+    reconnect_source = UI_SOURCE[
+        UI_SOURCE.index("function activeNativeProcessFromBundle") : UI_SOURCE.index(
+            "function nativeInspectorText"
+        )
+    ]
+    trust_source = UI_SOURCE[
+        UI_SOURCE.index("function maybeShowNativeTrustPrompt") : UI_SOURCE.index(
+            "async function sendNativeInput"
+        )
+    ]
+
+    assert load_session_source.count("restoreActiveNativeProcess();") == 2
+    for fragment in (
+        'run.invocation_mode !== "native"',
+        "metadata.native_process_id",
+        "metadata.process_status",
+        "nativeTrustDecisionRecorded(bundle, process.id)",
+        "setActiveNativeProcess(candidate",
+        'showTab("native")',
+        "setInspectorOpen(true)",
+    ):
+        assert fragment in reconnect_source
+    for fragment in (
+        'showTab("native")',
+        "setInspectorOpen(true)",
+        "setActiveNativeProcess(result.data.process || null, result.data)",
+    ):
+        assert fragment in start_source
+    for fragment in (
+        "doyoutrustthecontentsofthisdirectory",
+        "yescontinue",
+        "noquit",
+        "nativeTrustResolvedProcessIds",
+        "rememberNativeTrustDecision(process.id)",
+        'allowed ? "1\\r" : "2\\r"',
+        'showTab("native")',
+        "setInspectorOpen(true)",
+    ):
+        assert fragment in trust_source
+
+
 def test_ui_static_handles_terminal_stream_edge_cases():
     load_session_source = UI_SOURCE[
         UI_SOURCE.index("async function loadSession") : UI_SOURCE.index(
@@ -868,6 +920,12 @@ def test_ui_index_contains_control_panel_elements():
         "continue-preflight-button",
         "close-preflight-button",
         "native-terminal-status",
+        "native-trust-prompt",
+        "native-trust-title",
+        "native-trust-workspace",
+        "native-trust-status",
+        "native-trust-yes-button",
+        "native-trust-no-button",
         "native-process-summary",
         "native-terminal-output",
         "native-terminal-input",
@@ -1018,6 +1076,9 @@ def test_ui_index_contains_control_panel_elements():
         "Link to current chat",
         "Resume native",
         "Terminal output will appear here",
+        "Do you trust the contents of this directory?",
+        "Yes, continue",
+        "No, quit",
         "Native stdin",
         "Send input",
         "Stop process",

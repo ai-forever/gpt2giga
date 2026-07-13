@@ -586,6 +586,38 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
         "Liberation Mono", monospace;
     }
+    .native-trust-prompt {
+      display: grid;
+      gap: 12px;
+      margin: 10px 0;
+      border: 1px solid #2dd4bf;
+      border-radius: 10px;
+      background: rgb(20 184 166 / 0.1);
+      padding: 14px;
+      color: var(--text);
+    }
+    .native-trust-prompt[hidden] {
+      display: none;
+    }
+    .native-trust-prompt p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .native-trust-prompt code {
+      display: block;
+      margin-top: 8px;
+      overflow-wrap: anywhere;
+      color: #99f6e4;
+    }
+    .native-trust-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .native-trust-actions button {
+      min-height: 34px;
+    }
     .native-history-modal,
     .preflight-modal {
       position: fixed;

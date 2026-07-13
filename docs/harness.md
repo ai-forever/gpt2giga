@@ -1464,6 +1464,10 @@ Use this when validating the project cockpit manually:
   direct-chat.
 - [ ] Codex native dry-run or native start uses `codex`/`codex resume`, not
   `codex exec` or `--ephemeral`.
+- [ ] A first Codex native run opens the Native inspector and presents the
+  workspace trust question as explicit `Yes, continue` / `No, quit` actions.
+- [ ] Reloading a running native session restores output polling and stdin
+  controls without starting or resending the prompt.
 - [ ] A native process streams terminal output into the Native panel.
 - [ ] Stopping a native process updates process status and run status.
 - [ ] Native attachment runs show attachment render plan and warnings in the
