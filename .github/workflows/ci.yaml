@@ -27,7 +27,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # Exercise the supported boundaries plus the release/build runtime.
+        python-version: ["3.10", "3.13", "3.14"]
 
     steps:
       - name: Checkout repository
@@ -46,9 +47,11 @@ jobs:
         run: uv sync --all-packages --all-extras --dev
 
       - name: Lint with Ruff
+        if: matrix.python-version == '3.13'
         run: uv run ruff check .
 
       - name: Check formatting with Ruff
+        if: matrix.python-version == '3.13'
         run: uv run ruff format --check .
 
       - name: Run tests with coverage
@@ -57,6 +60,7 @@ jobs:
         continue-on-error: false
 
       - name: Upload coverage artifact
+        if: matrix.python-version == '3.13'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.python-version }}
@@ -116,7 +120,8 @@ jobs:
       fail-fast: false
       matrix:
         package: [gateway, harness]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # Clean installs only need the declared Python range boundaries.
+        python-version: ["3.10", "3.14"]
 
     steps:
       - name: Checkout repository
@@ -198,14 +203,14 @@ jobs:
       - name: Download coverage artifact from one Python version
         uses: actions/download-artifact@v7
         with:
-          name: coverage-3.12
+          name: coverage-3.13
           path: .
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install 3.13
 
       - name: Generate badge
         run: |

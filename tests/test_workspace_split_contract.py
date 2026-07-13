@@ -160,7 +160,8 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert "build-artifacts:" in workflow
     assert "artifact-smoke:" in workflow
     assert "package: [gateway, harness]" in workflow
-    assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in workflow
+    assert 'python-version: ["3.10", "3.13", "3.14"]' in workflow
+    assert 'python-version: ["3.10", "3.14"]' in workflow
     assert "uv build --package gpt2giga --wheel --sdist --no-sources" in workflow
     assert (
         "uv build --package gpt2giga-harness --wheel --sdist --no-sources" in workflow
