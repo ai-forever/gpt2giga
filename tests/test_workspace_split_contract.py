@@ -231,6 +231,11 @@ def test_release_workflow_routes_and_publishes_both_workspace_members():
     assert workflow.count("uses: actions/attest-build-provenance@v3") == 2
     assert "subject-path: dist/gpt2giga/*" in workflow
     assert "subject-path: dist/gpt2giga-harness/*" in workflow
+    assert workflow.count("\\( -name '*.whl' -o -name '*.tar.gz' \\)") == 2
+    assert '-name "gpt2giga-${GATEWAY_VERSION}*.whl"' in workflow
+    assert '-name "gpt2giga-${GATEWAY_VERSION}.tar.gz"' in workflow
+    assert '-name "gpt2giga_harness-${HARNESS_VERSION}*.whl"' in workflow
+    assert '-name "gpt2giga_harness-${HARNESS_VERSION}.tar.gz"' in workflow
     assert '"gpt2giga==${GATEWAY_VERSION}"' in workflow
     assert gateway_version not in workflow
     assert harness_version not in workflow

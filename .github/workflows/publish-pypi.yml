@@ -99,8 +99,9 @@ jobs:
           GATEWAY_VERSION: ${{ needs.release_metadata.outputs.gateway_version }}
         run: |
           set -euo pipefail
-          test "$(find dist/gpt2giga -maxdepth 1 -type f | wc -l | tr -d ' ')" = "2"
-          find dist/gpt2giga -maxdepth 1 -type f -name "gpt2giga-${GATEWAY_VERSION}*" | grep -q .
+          test "$(find dist/gpt2giga -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' \) | wc -l | tr -d ' ')" = "2"
+          test "$(find dist/gpt2giga -maxdepth 1 -type f -name "gpt2giga-${GATEWAY_VERSION}*.whl" | wc -l | tr -d ' ')" = "1"
+          test "$(find dist/gpt2giga -maxdepth 1 -type f -name "gpt2giga-${GATEWAY_VERSION}.tar.gz" | wc -l | tr -d ' ')" = "1"
           sha256sum dist/gpt2giga/* > dist/gpt2giga-SHA256SUMS
           cat dist/gpt2giga-SHA256SUMS
 
@@ -157,8 +158,9 @@ jobs:
           HARNESS_VERSION: ${{ needs.release_metadata.outputs.harness_version }}
         run: |
           set -euo pipefail
-          test "$(find dist/gpt2giga-harness -maxdepth 1 -type f | wc -l | tr -d ' ')" = "2"
-          find dist/gpt2giga-harness -maxdepth 1 -type f -name "gpt2giga_harness-${HARNESS_VERSION}*" | grep -q .
+          test "$(find dist/gpt2giga-harness -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' \) | wc -l | tr -d ' ')" = "2"
+          test "$(find dist/gpt2giga-harness -maxdepth 1 -type f -name "gpt2giga_harness-${HARNESS_VERSION}*.whl" | wc -l | tr -d ' ')" = "1"
+          test "$(find dist/gpt2giga-harness -maxdepth 1 -type f -name "gpt2giga_harness-${HARNESS_VERSION}.tar.gz" | wc -l | tr -d ' ')" = "1"
           sha256sum dist/gpt2giga-harness/* > dist/gpt2giga-harness-SHA256SUMS
           cat dist/gpt2giga-harness-SHA256SUMS
 
