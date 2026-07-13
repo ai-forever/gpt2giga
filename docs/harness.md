@@ -13,11 +13,11 @@ GigaChat credentials are already present in the environment.
 
 ## Quickstart
 
-Install the Harness distribution. It installs its exact
-`gpt2giga==0.2.2a1` dependency and provides both Harness commands:
+Install the Harness distribution. It installs the exact compatible gateway
+dependency declared in its package metadata and provides both Harness commands:
 
 ```bash
-uv tool install "gpt2giga-harness==0.0.1"
+uv tool install gpt2giga-harness
 giga doctor
 ```
 
@@ -1633,7 +1633,7 @@ Remove the old combined wheel before installing the split packages so stale
 
 ```bash
 python -m pip uninstall -y gpt2giga gpt2giga-harness
-python -m pip install "gpt2giga-harness==0.0.1"
+python -m pip install gpt2giga-harness
 ```
 
 For `uv` tool installations, recreate both tool environments:
@@ -1641,8 +1641,8 @@ For `uv` tool installations, recreate both tool environments:
 ```bash
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install "gpt2giga==0.2.2a1"
-uv tool install "gpt2giga-harness==0.0.1"
+uv tool install --prerelease allow gpt2giga
+uv tool install gpt2giga-harness
 ```
 
 This package migration does not move or rewrite Harness state. Existing

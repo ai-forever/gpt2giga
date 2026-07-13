@@ -45,19 +45,19 @@ cp .env.example .env
 docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
 ```
 
-Или локальный запуск только gateway с зафиксированной первой split-версией:
+Или локальный запуск только gateway с актуальной prerelease-версией:
 
 ```sh
-uv tool install "gpt2giga==0.2.2a1"
+uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
 Для локального Harness/control plane установите отдельный пакет. Он подтянет
-совместимый `gpt2giga==0.2.2a1` и добавит команды `giga` и
+совместимую gateway-версию из package metadata и добавит команды `giga` и
 `gpt2giga-harness`:
 
 ```sh
-uv tool install "gpt2giga-harness==0.0.1"
+uv tool install gpt2giga-harness
 giga doctor
 giga ui
 ```

@@ -20,6 +20,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 GATEWAY_MEMBER = REPO_ROOT / "packages/gpt2giga"
 HARNESS_MEMBER = REPO_ROOT / "packages/gpt2giga-harness"
 HARNESS_SOURCE = HARNESS_MEMBER / "src/gpt2giga_harness"
+
+
+def _project_version(member: Path) -> str:
+    with (member / "pyproject.toml").open("rb") as file:
+        return tomllib.load(file)["project"]["version"]
+
+
+GATEWAY_VERSION = _project_version(GATEWAY_MEMBER)
+HARNESS_VERSION = _project_version(HARNESS_MEMBER)
 IMPORT_DISTRIBUTIONS = {
     "dateutil": "python-dateutil",
     "fastapi": "fastapi",
@@ -117,6 +126,8 @@ sys.path.extend(json.loads(sys.argv[2]))
     )
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
+    env["EXPECTED_GATEWAY_VERSION"] = GATEWAY_VERSION
+    env["EXPECTED_HARNESS_VERSION"] = HARNESS_VERSION
     subprocess.run(
         [
             sys.executable,
@@ -137,6 +148,7 @@ sys.path.extend(json.loads(sys.argv[2]))
 GATEWAY_SMOKE = """
 import importlib.metadata
 import importlib.util
+import os
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -148,7 +160,7 @@ from gpt2giga.models.config import ProxyConfig
 assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
 assert importlib.util.find_spec("gpt2giga_harness") is None
 distribution = importlib.metadata.distribution("gpt2giga")
-assert distribution.version == "0.2.2a1"
+assert distribution.version == os.environ["EXPECTED_GATEWAY_VERSION"]
 scripts = {
     entry.name: entry.value
     for entry in distribution.entry_points
@@ -169,6 +181,7 @@ assert "/v1beta/models/{model}:generateContent" in paths
 
 HARNESS_SMOKE = """
 import importlib.metadata
+import os
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -181,10 +194,13 @@ from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 
 assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
 assert Path(gpt2giga_harness.__file__).resolve().is_relative_to(installed_root)
-assert importlib.metadata.version("gpt2giga") == "0.2.2a1"
+assert importlib.metadata.version("gpt2giga") == os.environ["EXPECTED_GATEWAY_VERSION"]
 harness_distribution = importlib.metadata.distribution("gpt2giga-harness")
-assert harness_distribution.version == "0.0.1"
-assert "gpt2giga==0.2.2a1" in (harness_distribution.requires or ())
+assert harness_distribution.version == os.environ["EXPECTED_HARNESS_VERSION"]
+assert (
+    f"gpt2giga=={os.environ['EXPECTED_GATEWAY_VERSION']}"
+    in (harness_distribution.requires or ())
+)
 scripts = {
     entry.name: entry.value
     for entry in harness_distribution.entry_points
@@ -253,8 +269,8 @@ def test_editable_workspace_members_resolve_to_member_sources():
     assert (
         Path(gpt2giga_harness.__file__).resolve().is_relative_to(HARNESS_MEMBER / "src")
     )
-    assert importlib.metadata.version("gpt2giga") == "0.2.2a1"
-    assert importlib.metadata.version("gpt2giga-harness") == "0.0.1"
+    assert importlib.metadata.version("gpt2giga") == GATEWAY_VERSION
+    assert importlib.metadata.version("gpt2giga-harness") == HARNESS_VERSION
 
 
 def _declared_distribution_names(metadata: dict) -> set[str]:
@@ -330,6 +346,7 @@ def test_harness_gateway_imports_stay_within_the_reviewed_boundary():
                     if alias.name == "gpt2giga" or alias.name.startswith("gpt2giga.")
                 )
     assert gateway_imports == {
+        "gpt2giga.cli",
         "gpt2giga.protocols.normalized",
         "gpt2giga.protocols.normalized.models",
     }
@@ -341,11 +358,11 @@ def _write_minimal_plugin(source_root: Path) -> None:
     package = source_root / "src/example_harness_plugin"
     package.mkdir(parents=True)
     (source_root / "pyproject.toml").write_text(
-        """[project]
+        f"""[project]
 name = "example-harness-plugin"
 version = "1.0.0"
 requires-python = ">=3.10"
-dependencies = ["gpt2giga-harness==0.0.1"]
+dependencies = ["gpt2giga-harness=={HARNESS_VERSION}"]
 
 [project.entry-points."gpt2giga.harnesses"]
 third-party-smoke = "example_harness_plugin:ThirdPartyHarness"

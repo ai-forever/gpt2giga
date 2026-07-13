@@ -60,7 +60,7 @@ Install only the compatibility gateway when you need the OpenAI-, Anthropic-,
 or Gemini-shaped HTTP API:
 
 ```sh
-uv tool install "gpt2giga==0.2.2a1"
+uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
@@ -68,7 +68,7 @@ Install the separate local control plane when you need the Harness CLI, worker,
 or browser UI. Its exact gateway dependency is installed with it:
 
 ```sh
-uv tool install "gpt2giga-harness==0.0.1"
+uv tool install gpt2giga-harness
 giga doctor
 giga ui
 ```

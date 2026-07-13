@@ -89,14 +89,14 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
     if not HARNESS_MEMBER.exists():
         assert set(members) == {"packages/gpt2giga"}
         assert gateway_metadata["name"] == "gpt2giga"
-        assert gateway_metadata["version"] == "0.3.0a1"
+        assert gateway_metadata["version"]
         assert (GATEWAY_MEMBER / "src/gpt2giga/harness").is_dir()
         return
 
     assert set(members) == {"packages/gpt2giga", "packages/gpt2giga-harness"}
     harness_metadata = _load_toml(HARNESS_MEMBER / "pyproject.toml")["project"]
     assert gateway_metadata["name"] == "gpt2giga"
-    assert gateway_metadata["version"] == "0.2.2a1"
+    assert gateway_metadata["version"]
     assert gateway_metadata["scripts"] == {"gpt2giga": "gpt2giga:run"}
     assert "entry-points" not in gateway_metadata
     assert not {
@@ -108,8 +108,10 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
         for dependency in gateway_metadata["dependencies"]
     }
     assert harness_metadata["name"] == "gpt2giga-harness"
-    assert harness_metadata["version"] == "0.0.1"
-    assert "gpt2giga==0.2.2a1" in harness_metadata["dependencies"]
+    assert harness_metadata["version"]
+    assert (
+        f"gpt2giga=={gateway_metadata['version']}" in harness_metadata["dependencies"]
+    )
     assert any(
         dependency.startswith("pyyaml")
         for dependency in harness_metadata["dependencies"]
@@ -149,6 +151,12 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
         return
 
     workflow = (REPO_ROOT / ".github/workflows/ci.yaml").read_text(encoding="utf-8")
+    gateway_version = _load_toml(GATEWAY_MEMBER / "pyproject.toml")["project"][
+        "version"
+    ]
+    harness_version = _load_toml(HARNESS_MEMBER / "pyproject.toml")["project"][
+        "version"
+    ]
     assert "build-artifacts:" in workflow
     assert "artifact-smoke:" in workflow
     assert "package: [gateway, harness]" in workflow
@@ -157,24 +165,37 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert (
         "uv build --package gpt2giga-harness --wheel --sdist --no-sources" in workflow
     )
-    assert "gpt2giga-0.2.2a1" in workflow
-    assert "gpt2giga-harness-0.0.1" in workflow
+    assert "id: versions" in workflow
+    assert "name: gpt2giga-${{ steps.versions.outputs.gateway }}" in workflow
+    assert "name: gpt2giga-harness-${{ steps.versions.outputs.harness }}" in workflow
+    assert "GATEWAY_VERSION: ${{ steps.versions.outputs.gateway }}" in workflow
+    assert "HARNESS_VERSION: ${{ steps.versions.outputs.harness }}" in workflow
+    assert gateway_version not in workflow
+    assert harness_version not in workflow
     assert ".venv-artifact/bin/gpt2giga --help" in workflow
     assert ".venv-artifact/bin/giga --help" in workflow
     assert ".venv-artifact/bin/gpt2giga-harness --help" in workflow
 
 
-def test_release_workflow_attests_both_artifacts_and_publishes_only_harness():
+def test_release_workflow_routes_and_publishes_both_workspace_members():
     if not HARNESS_MEMBER.exists():
         return
 
     workflow = (REPO_ROOT / ".github/workflows/publish-pypi.yml").read_text(
         encoding="utf-8"
     )
+    gateway_version = _load_toml(GATEWAY_MEMBER / "pyproject.toml")["project"][
+        "version"
+    ]
+    harness_version = _load_toml(HARNESS_MEMBER / "pyproject.toml")["project"][
+        "version"
+    ]
     assert "workflow_dispatch:" in workflow
-    assert 'test "${GATEWAY_VERSION}" = "0.2.2a1"' in workflow
-    assert 'test "${HARNESS_VERSION}" = "0.0.1"' in workflow
-    assert 'EXPECTED_TAG="gpt2giga-harness-v${HARNESS_VERSION}"' in workflow
+    assert "release_metadata:" in workflow
+    assert 'elif ref_name == f"v{gateway_version}":' in workflow
+    assert 'elif ref_name == f"gpt2giga-harness-v{harness_version}":' in workflow
+    assert "gateway_release:" in workflow
+    assert "harness_release:" in workflow
     assert "uv build --package gpt2giga --wheel --sdist --no-sources" in workflow
     assert (
         "uv build --package gpt2giga-harness --wheel --sdist --no-sources" in workflow
@@ -182,7 +203,9 @@ def test_release_workflow_attests_both_artifacts_and_publishes_only_harness():
     assert workflow.count("uses: actions/attest-build-provenance@v3") == 2
     assert "subject-path: dist/gpt2giga/*" in workflow
     assert "subject-path: dist/gpt2giga-harness/*" in workflow
-    assert "sha256sum dist/gpt2giga/* dist/gpt2giga-harness/*" in workflow
+    assert '"gpt2giga==${GATEWAY_VERSION}"' in workflow
+    assert gateway_version not in workflow
+    assert harness_version not in workflow
 
     publish_commands = [
         line.strip()
@@ -190,9 +213,9 @@ def test_release_workflow_attests_both_artifacts_and_publishes_only_harness():
         if line.strip().startswith("uv publish ")
     ]
     assert publish_commands == [
-        'uv publish --token "${PYPI_TOKEN}" dist/gpt2giga-harness/*'
+        'uv publish --token "${PYPI_TOKEN}" dist/gpt2giga/*',
+        'uv publish --token "${PYPI_TOKEN}" dist/gpt2giga-harness/*',
     ]
-    assert "if: github.event_name == 'release'" in workflow
 
 
 def test_split_install_and_namespace_migration_are_documented():
@@ -206,8 +229,8 @@ def test_split_install_and_namespace_migration_are_documented():
     harness_instructions = (HARNESS_MEMBER / "AGENTS.md").read_text(encoding="utf-8")
 
     for guide in (readme, quickstart):
-        assert "gpt2giga==0.2.2a1" in guide
-        assert "gpt2giga-harness==0.0.1" in guide
+        assert "uv tool install --prerelease allow gpt2giga" in guide
+        assert "uv tool install gpt2giga-harness" in guide
         assert "gpt2giga_harness" in guide
 
     assert "Migration from the Combined Prerelease" in harness_guide

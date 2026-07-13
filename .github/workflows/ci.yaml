@@ -80,6 +80,14 @@ jobs:
       - name: Set up Python 3.13
         run: uv python install 3.13
 
+      - name: Resolve package versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "gateway=$(uv version --package gpt2giga --short --frozen)" >> "$GITHUB_OUTPUT"
+          echo "harness=$(uv version --package gpt2giga-harness --short --frozen)" >> "$GITHUB_OUTPUT"
+
       - name: Build gateway wheel and sdist without workspace sources
         run: uv build --package gpt2giga --wheel --sdist --no-sources --out-dir dist/gpt2giga
 
@@ -89,14 +97,14 @@ jobs:
       - name: Upload gateway artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: gpt2giga-0.2.2a1
+          name: gpt2giga-${{ steps.versions.outputs.gateway }}
           path: dist/gpt2giga/*
           if-no-files-found: error
 
       - name: Upload Harness artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: gpt2giga-harness-0.0.1
+          name: gpt2giga-harness-${{ steps.versions.outputs.harness }}
           path: dist/gpt2giga-harness/*
           if-no-files-found: error
 
@@ -123,6 +131,14 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
+      - name: Resolve package versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "gateway=$(uv version --package gpt2giga --short --frozen)" >> "$GITHUB_OUTPUT"
+          echo "harness=$(uv version --package gpt2giga-harness --short --frozen)" >> "$GITHUB_OUTPUT"
+
       - name: Build gateway wheel without workspace sources
         run: uv build --package gpt2giga --wheel --no-sources --out-dir dist/smoke
 
@@ -143,16 +159,21 @@ jobs:
 
       - name: Smoke gateway-only imports and command
         if: matrix.package == 'gateway'
+        env:
+          GATEWAY_VERSION: ${{ steps.versions.outputs.gateway }}
         run: |
-          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.util, gpt2giga; assert m.version('gpt2giga') == '0.2.2a1'; assert importlib.util.find_spec('gpt2giga_harness') is None"
+          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.util, os, gpt2giga; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert importlib.util.find_spec('gpt2giga_harness') is None"
           .venv-artifact/bin/gpt2giga --help
           test ! -e .venv-artifact/bin/giga
           test ! -e .venv-artifact/bin/gpt2giga-harness
 
       - name: Smoke combined imports, UI assets, and commands
         if: matrix.package == 'harness'
+        env:
+          GATEWAY_VERSION: ${{ steps.versions.outputs.gateway }}
+          HARNESS_VERSION: ${{ steps.versions.outputs.harness }}
         run: |
-          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, gpt2giga, gpt2giga_harness; assert m.version('gpt2giga') == '0.2.2a1'; assert m.version('gpt2giga-harness') == '0.0.1'; assert r.files('gpt2giga_harness.ui').joinpath('assets/index.html').is_file()"
+          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, os, gpt2giga, gpt2giga_harness; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert m.version('gpt2giga-harness') == os.environ['HARNESS_VERSION']; assert r.files('gpt2giga_harness.ui').joinpath('assets/index.html').is_file()"
           .venv-artifact/bin/gpt2giga --help
           .venv-artifact/bin/giga --help
           .venv-artifact/bin/gpt2giga-harness --help
