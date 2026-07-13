@@ -205,6 +205,15 @@ def test_code_workflows_skip_documentation_only_changes():
     )
 
 
+def test_pr_labeler_tracks_harness_owned_paths():
+    labeler = (REPO_ROOT / ".github/labeler.yml").read_text(encoding="utf-8")
+
+    assert "harness:" in labeler
+    assert "- 'packages/gpt2giga-harness/**'" in labeler
+    assert "- 'tests/harness/**'" in labeler
+    assert "- 'docs/harness.md'" in labeler
+
+
 def test_release_workflow_routes_and_publishes_both_workspace_members():
     if not HARNESS_MEMBER.exists():
         return
