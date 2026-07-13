@@ -3,6 +3,13 @@ name: Dependency review
 on:
   pull_request:
     branches: [ main ]
+    paths:
+      - 'pyproject.toml'
+      - 'packages/*/pyproject.toml'
+      - 'uv.lock'
+      - 'docs-site/package.json'
+      - 'docs-site/package-lock.json'
+      - '.github/workflows/**'
 
 permissions:
   contents: read

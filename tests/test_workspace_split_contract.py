@@ -160,6 +160,7 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert "build-artifacts:" in workflow
     assert "artifact-smoke:" in workflow
     assert "package: [gateway, harness]" in workflow
+    assert "- '!packages/**/*.md'" in workflow
     assert 'python-version: ["3.10", "3.13", "3.14"]' in workflow
     assert 'python-version: ["3.10", "3.14"]' in workflow
     assert "uv build --package gpt2giga --wheel --sdist --no-sources" in workflow
@@ -171,11 +172,37 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert "name: gpt2giga-harness-${{ steps.versions.outputs.harness }}" in workflow
     assert "GATEWAY_VERSION: ${{ steps.versions.outputs.gateway }}" in workflow
     assert "HARNESS_VERSION: ${{ steps.versions.outputs.harness }}" in workflow
+    assert "- name: Commit coverage badge on main" in workflow
+    assert "if: github.event_name == 'push'" in workflow
     assert gateway_version not in workflow
     assert harness_version not in workflow
     assert ".venv-artifact/bin/gpt2giga --help" in workflow
     assert ".venv-artifact/bin/giga --help" in workflow
     assert ".venv-artifact/bin/gpt2giga-harness --help" in workflow
+
+
+def test_code_workflows_skip_documentation_only_changes():
+    codeql = (REPO_ROOT / ".github/workflows/codeql.yaml").read_text(encoding="utf-8")
+    dependency_review = (
+        REPO_ROOT / ".github/workflows/dependency-review.yaml"
+    ).read_text(encoding="utf-8")
+    docker_workflows = tuple(
+        (REPO_ROOT / path).read_text(encoding="utf-8")
+        for path in (
+            ".github/workflows/docker-smoke.yaml",
+            ".github/workflows/docker_image.yaml",
+            ".github/workflows/publish-ghcr.yml",
+        )
+    )
+
+    assert "- 'packages/**/*.py'" in codeql
+    assert "- 'packages/*/pyproject.toml'" in codeql
+    assert "- 'packages/**'" not in codeql
+    assert "- 'packages/*/pyproject.toml'" in dependency_review
+    assert "- 'docs-site/package-lock.json'" in dependency_review
+    assert all(
+        "- '!packages/gpt2giga/**/*.md'" in workflow for workflow in docker_workflows
+    )
 
 
 def test_release_workflow_routes_and_publishes_both_workspace_members():

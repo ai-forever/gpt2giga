@@ -6,6 +6,7 @@ on:
     paths:
       - 'Dockerfile'
       - 'packages/gpt2giga/**'
+      - '!packages/gpt2giga/**/*.md'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/docker_image.yaml'
