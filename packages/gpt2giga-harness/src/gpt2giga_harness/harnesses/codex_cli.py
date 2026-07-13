@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping
@@ -27,6 +26,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     prompt_with_attachments,
 )
 from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.native import HarnessInvocationMode
 from gpt2giga_harness.managed_mcp import write_startup_config
 from gpt2giga_harness.types import (
@@ -49,6 +49,13 @@ MODE_TO_SANDBOX = {
 
 class CodexCliHarness(BaseHarness):
     """Run Codex CLI in non-interactive mode against gpt2giga."""
+
+    def __init__(
+        self,
+        *,
+        executable_resolver: ExecutableResolver | None = None,
+    ) -> None:
+        self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
 
     @classmethod
     def spec(cls) -> HarnessSpec:
@@ -74,13 +81,24 @@ class CodexCliHarness(BaseHarness):
         )
 
     def availability(self) -> Availability:
-        executable = shutil.which("codex")
-        if executable is None:
+        resolution = self.executable_resolution()
+        if resolution.error is not None:
+            return Availability.error(resolution.error)
+        if resolution.executable is None:
             return Availability.missing(
                 "codex executable not found",
-                "Install OpenAI Codex CLI and ensure it is on PATH.",
+                (
+                    "Install OpenAI Codex CLI on PATH or configure "
+                    "executables.codex-cli in ~/.gpt2giga/harness/config.toml."
+                ),
             )
-        return Availability.available(f"codex executable found: {executable}")
+        return Availability.available(
+            f"codex executable found via {resolution.source}: {resolution.executable}"
+        )
+
+    def executable_resolution(self) -> ExecutableResolution:
+        """Return the configured or PATH-discovered Codex executable."""
+        return self.executable_resolver.resolve(self.spec().id, "codex")
 
     def build_command(
         self,
@@ -88,7 +106,8 @@ class CodexCliHarness(BaseHarness):
         context: HarnessContext,
     ) -> tuple[str, ...]:
         """Build the Codex command without executing it."""
-        executable = shutil.which("codex") or "codex"
+        resolution = self.executable_resolution()
+        executable = resolution.executable or resolution.configured or "codex"
         sandbox = MODE_TO_SANDBOX.get(request.mode, MODE_TO_SANDBOX["plan"])
         model = request.model or context.default_model or "GigaChat"
         prompt = prompt_with_attachments(request)

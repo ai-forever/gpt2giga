@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from gpt2giga_harness.config import DEFAULT_HARNESS_DATA_DIR
+from gpt2giga_harness.executables import ExecutableResolver
 from gpt2giga_harness.harnesses.agent_cli import build_safe_env
 from gpt2giga_harness.harnesses.attachment_plan import (
     attachment_raw_metadata,
@@ -46,6 +46,7 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
         data_dir: str | Path = DEFAULT_HARNESS_DATA_DIR,
         external_codex_home: str | Path | None = None,
         executable: str | None = None,
+        executable_resolver: ExecutableResolver | None = None,
     ) -> None:
         self.data_dir = Path(data_dir).expanduser()
         self.external_codex_home = (
@@ -54,6 +55,7 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
             else Path.home() / ".codex"
         )
         self.executable = executable
+        self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
 
     def discover(
         self,
@@ -214,7 +216,10 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
         return tuple(refs)
 
     def _executable(self) -> str:
-        return self.executable or shutil.which("codex") or "codex"
+        if self.executable is not None:
+            return self.executable
+        resolution = self.executable_resolver.resolve(self.harness_id, "codex")
+        return resolution.executable or resolution.configured or "codex"
 
 
 def _ref_from_file(

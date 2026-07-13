@@ -541,6 +541,7 @@ def executable_availability(
     executable_name: str,
     install_hint: str,
     version_args: tuple[str, ...] | None = ("--version",),
+    source: str | None = None,
 ) -> Availability:
     """Return availability for an executable, optionally probing startup."""
     if executable is None:
@@ -548,9 +549,10 @@ def executable_availability(
             f"{executable_name} executable not found",
             install_hint,
         )
+    source_detail = f" via {source}" if source else ""
     if version_args is None:
         return Availability.available(
-            f"{executable_name} executable found: {executable}"
+            f"{executable_name} executable found{source_detail}: {executable}"
         )
     try:
         completed = subprocess.run(
@@ -574,7 +576,7 @@ def executable_availability(
         )
     suffix = f" ({version})" if version else ""
     return Availability.available(
-        f"{executable_name} executable found: {executable}{suffix}"
+        f"{executable_name} executable found{source_detail}: {executable}{suffix}"
     )
 
 

@@ -27,12 +27,18 @@ def build_worker_fingerprint(registry: HarnessRegistry) -> dict[str, Any]:
         availability = harness.availability()
         capabilities = negotiate_execution_capabilities(harness)
         binary = _CLI_BINARIES.get(spec.id)
+        resolution = _executable_resolution(harness)
+        binary_path = resolution.executable if resolution is not None else None
         harnesses[spec.id] = {
             "available": availability.status is AvailabilityStatus.AVAILABLE,
             "kind": spec.kind,
             "distribution": str(spec.metadata.get("distribution") or "builtin"),
             "binary": binary,
-            "binary_version": _binary_version(binary) if binary else None,
+            "binary_path": binary_path,
+            "binary_source": resolution.source if resolution is not None else None,
+            "binary_version": _binary_version(binary_path or binary)
+            if binary
+            else None,
             "features": {
                 "structured_events": capabilities.structured_events,
                 "streaming": capabilities.streaming,
@@ -67,6 +73,11 @@ def _binary_version(binary: str) -> str | None:
         return "unknown"
     line = (completed.stdout or completed.stderr).strip().splitlines()
     return line[0][:200] if line else "unknown"
+
+
+def _executable_resolution(harness: Any) -> Any | None:
+    resolver = getattr(harness, "executable_resolution", None)
+    return resolver() if callable(resolver) else None
 
 
 def _distribution_version(distribution: str) -> str:

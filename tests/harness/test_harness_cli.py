@@ -154,6 +154,57 @@ def test_cli_harness_inspect_json_shows_native_support(capsys):
     assert payload["validation"]["ok"] is True
 
 
+def test_cli_harness_inspect_reports_executable_source(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    executable = tmp_path / "bin" / "claude"
+    executable.parent.mkdir()
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o755)
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f'[executables]\n"claude-code" = "{executable}"\n',
+        encoding="utf-8",
+    )
+    registry = cli.create_default_registry(
+        include_entry_points=False,
+        config_path=str(config_path),
+    )
+    monkeypatch.setattr(cli, "create_default_registry", lambda: registry)
+
+    assert cli.main(["harness", "inspect", "claude-code", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["executable"] == str(executable)
+    assert payload["executable_source"] == "user_config"
+
+
+def test_cli_config_set_path_unset_round_trip(capsys, monkeypatch, tmp_path):
+    config_path = tmp_path / "config.toml"
+    executable = tmp_path / "bin" / "codex"
+    executable.parent.mkdir()
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o755)
+    monkeypatch.setattr(cli, "user_config_path", lambda: config_path)
+
+    assert cli.main(["config", "path"]) == 0
+    assert capsys.readouterr().out.strip() == str(config_path)
+
+    assert cli.main(["config", "set", "executables.codex-cli", str(executable)]) == 0
+    assert '"codex-cli"' in config_path.read_text(encoding="utf-8")
+    capsys.readouterr()
+
+    assert cli.main(["config", "unset", "executables.codex-cli"]) == 0
+    assert '"codex-cli"' not in config_path.read_text(encoding="utf-8")
+
+
+def test_cli_config_rejects_non_executable_key(capsys):
+    assert cli.main(["config", "set", "proxy.url", "/tmp/proxy"]) == 2
+    assert "executables.<harness-id>" in capsys.readouterr().err
+
+
 def test_cli_harness_validate_json_reports_invalid_plugin(
     capsys,
     monkeypatch,

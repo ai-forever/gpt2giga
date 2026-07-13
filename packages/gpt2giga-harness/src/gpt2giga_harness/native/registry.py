@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from gpt2giga_harness.config import DEFAULT_HARNESS_DATA_DIR
+from gpt2giga_harness.executables import ExecutableResolver
 from gpt2giga_harness.native.base import (
     NativeDiscoveryError,
     NativeDiscoveryResult,
@@ -104,18 +105,30 @@ def _connector_error(
 def create_default_native_registry(
     *,
     data_dir: str | Path = DEFAULT_HARNESS_DATA_DIR,
+    config_path: str | Path | None = None,
+    executable_resolver: ExecutableResolver | None = None,
 ) -> NativeHistoryConnectorRegistry:
     """Create a registry with built-in native history connectors."""
     from gpt2giga_harness.native.claude import ClaudeNativeHistoryConnector
     from gpt2giga_harness.native.codex import CodexNativeHistoryConnector
     from gpt2giga_harness.native.gemini import GeminiNativeHistoryConnector
 
+    resolver = executable_resolver or ExecutableResolver.from_user_config(config_path)
     registry = NativeHistoryConnectorRegistry()
     registry.register_many(
         (
-            CodexNativeHistoryConnector(data_dir=data_dir),
-            ClaudeNativeHistoryConnector(data_dir=data_dir),
-            GeminiNativeHistoryConnector(data_dir=data_dir),
+            CodexNativeHistoryConnector(
+                data_dir=data_dir,
+                executable_resolver=resolver,
+            ),
+            ClaudeNativeHistoryConnector(
+                data_dir=data_dir,
+                executable_resolver=resolver,
+            ),
+            GeminiNativeHistoryConnector(
+                data_dir=data_dir,
+                executable_resolver=resolver,
+            ),
         )
     )
     return registry

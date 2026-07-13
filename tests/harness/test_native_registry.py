@@ -13,6 +13,7 @@ from gpt2giga_harness.native.models import (
 from gpt2giga_harness.native.registry import (
     NativeHistoryConnectorRegistry,
     UnknownNativeHistoryConnectorError,
+    create_default_native_registry,
 )
 from gpt2giga_harness.types import (
     GigaChatApiMode,
@@ -43,6 +44,29 @@ def test_native_history_registry_registers_and_discovers_fake_connector():
     assert connector.discovery_calls == (
         {"workspace": "/repo", "include_external": True},
     )
+
+
+def test_default_native_registry_uses_user_configured_executable(tmp_path):
+    executable = tmp_path / "bin" / "codex"
+    executable.parent.mkdir()
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o755)
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f'[executables]\n"codex-cli" = "{executable}"\n',
+        encoding="utf-8",
+    )
+
+    connector = create_default_native_registry(
+        data_dir=tmp_path / "data",
+        config_path=config_path,
+    ).get("codex-cli")
+    plan = connector.build_start_command(
+        HarnessRequest(prompt="inspect", workspace=str(tmp_path)),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert plan.command[0] == str(executable)
 
 
 def test_native_history_registry_unknown_get_raises():

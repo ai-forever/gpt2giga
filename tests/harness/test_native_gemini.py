@@ -335,7 +335,7 @@ def test_gemini_native_missing_executable_still_discovers_managed_files(
         raise AssertionError("gemini --list-sessions should not run")
 
     monkeypatch.setattr(
-        "gpt2giga_harness.native.gemini.shutil.which",
+        "gpt2giga_harness.executables.shutil.which",
         lambda executable: None,
     )
     connector = GeminiNativeHistoryConnector(

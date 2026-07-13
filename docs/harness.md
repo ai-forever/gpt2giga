@@ -849,6 +849,28 @@ then starts only an allowlisted terminal launcher without a shell.
 | `claude-code` | MVP | Builds and runs sanitized Claude Code print-mode commands against the local proxy. |
 | `gemini-cli` | MVP | Builds and runs sanitized Gemini CLI headless commands against the local proxy. |
 
+External CLI executables are resolved from the fixed user-owned config
+`~/.gpt2giga/harness/config.toml` first, then from the Harness process `PATH`:
+
+```toml
+[executables]
+"codex-cli" = "/custom/bin/codex"
+"claude-code" = "/custom/bin/claude"
+"gemini-cli" = "C:\\Users\\me\\bin\\gemini.cmd"
+```
+
+Configured paths must be absolute. Keep executable overrides out of the
+project-owned `.giga/harness.toml`: repositories cannot select programs for the
+user to execute. Manage the user config and inspect the effective resolution
+with:
+
+```bash
+giga config path
+giga config set executables.codex-cli /custom/bin/codex
+giga config unset executables.codex-cli
+giga harness inspect codex-cli --json
+```
+
 Inspect one harness:
 
 ```bash
@@ -1642,8 +1664,9 @@ Common checks:
 - the selected mode uses the intended explicit route: `/v1/chat/completions` or
   `/v2/chat/completions`;
 - external CLI harnesses report `missing` until the matching executable is on
-  `PATH`; startup errors from broken CLI installations are reported by the run
-  result;
+  `PATH` or configured in `~/.gpt2giga/harness/config.toml`; invalid configured
+  paths and startup errors from broken CLI installations are reported by
+  `giga harness inspect <id>` and the run result;
 - real external CLI harness runs perform proxy preflight before launching the
   CLI, so proxy auto-start errors are reported directly instead of being buried
   in agent stdout/stderr.

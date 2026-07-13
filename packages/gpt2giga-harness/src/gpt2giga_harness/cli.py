@@ -34,6 +34,12 @@ from gpt2giga_harness.editor import (
     execute_editor_plan,
     workspace_for_run,
 )
+from gpt2giga_harness.executables import (
+    executable_resolution_to_dict,
+    set_user_executable,
+    unset_user_executable,
+    user_config_path,
+)
 from gpt2giga_harness.evals import (
     EvalSpecNotFoundError,
     FilesystemHarnessEvalStore,
@@ -209,6 +215,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser("doctor", parents=[common])
     doctor.set_defaults(handler=_handle_doctor)
+
+    config_parser = subparsers.add_parser("config")
+    config_subparsers = config_parser.add_subparsers(dest="config_command")
+    config_path = config_subparsers.add_parser("path")
+    config_path.set_defaults(handler=_handle_config_path)
+    config_set = config_subparsers.add_parser("set")
+    config_set.add_argument("key")
+    config_set.add_argument("value")
+    config_set.set_defaults(handler=_handle_config_set)
+    config_unset = config_subparsers.add_parser("unset")
+    config_unset.add_argument("key")
+    config_unset.set_defaults(handler=_handle_config_unset)
 
     init = subparsers.add_parser("init")
     init.add_argument("--workspace", default=None)
@@ -669,6 +687,35 @@ def _handle_harness_list(args: argparse.Namespace, config: HarnessConfig) -> int
     return 0
 
 
+def _handle_config_path(args: argparse.Namespace, config: HarnessConfig) -> int:
+    print(user_config_path())
+    return 0
+
+
+def _handle_config_set(args: argparse.Namespace, config: HarnessConfig) -> int:
+    harness_id = _executable_config_harness_id(args.key)
+    path = set_user_executable(
+        harness_id,
+        args.value,
+        config_path=user_config_path(),
+    )
+    print(f"Updated {args.key} in {path}")
+    return 0
+
+
+def _handle_config_unset(args: argparse.Namespace, config: HarnessConfig) -> int:
+    harness_id = _executable_config_harness_id(args.key)
+    path, removed = unset_user_executable(
+        harness_id,
+        config_path=user_config_path(),
+    )
+    if removed:
+        print(f"Removed {args.key} from {path}")
+    else:
+        print(f"No override configured for {args.key} in {path}")
+    return 0
+
+
 def _handle_harness_inspect(args: argparse.Namespace, config: HarnessConfig) -> int:
     registry = create_default_registry()
     harness = registry.get(args.harness_id)
@@ -681,6 +728,9 @@ def _handle_harness_inspect(args: argparse.Namespace, config: HarnessConfig) -> 
         "availability": availability_to_dict(harness.availability()),
         "validation": harness_validation_report_to_dict(validation),
     }
+    resolution = getattr(harness, "executable_resolution", None)
+    if callable(resolution):
+        payload.update(executable_resolution_to_dict(resolution()))
     if args.json:
         _print_json(payload)
     else:
@@ -706,6 +756,13 @@ def _handle_harness_validate(args: argparse.Namespace, config: HarnessConfig) ->
             field = f" {issue.field}:" if issue.field else ""
             print(f"- {issue.level}{field} {issue.message}")
     return 0 if report.ok else 1
+
+
+def _executable_config_harness_id(key: str) -> str:
+    prefix = "executables."
+    if not key.startswith(prefix) or len(key) == len(prefix):
+        raise ValueError("Config key must use executables.<harness-id>")
+    return key[len(prefix) :]
 
 
 def _handle_harness_run(args: argparse.Namespace, config: HarnessConfig) -> int:

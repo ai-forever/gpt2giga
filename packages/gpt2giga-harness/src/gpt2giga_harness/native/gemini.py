@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from gpt2giga_harness.config import DEFAULT_HARNESS_DATA_DIR
+from gpt2giga_harness.executables import ExecutableResolver
 from gpt2giga_harness.harnesses.agent_cli import build_safe_env
 from gpt2giga_harness.harnesses.attachment_plan import (
     attachment_raw_metadata,
@@ -43,6 +43,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         data_dir: str | Path = DEFAULT_HARNESS_DATA_DIR,
         external_gemini_home: str | Path | None = None,
         executable: str | None = None,
+        executable_resolver: ExecutableResolver | None = None,
         list_sessions_runner: Callable[
             [tuple[str, ...], Mapping[str, str], str | None],
             subprocess.CompletedProcess[str],
@@ -56,6 +57,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
             else Path.home()
         )
         self.executable = executable
+        self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
         self.list_sessions_runner = list_sessions_runner or _run_list_sessions
 
     def discover(
@@ -252,12 +254,15 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         return tuple(refs)
 
     def _executable(self) -> str:
-        return self.executable or shutil.which("gemini") or "gemini"
+        if self.executable is not None:
+            return self.executable
+        resolution = self.executable_resolver.resolve(self.harness_id, "gemini")
+        return resolution.executable or resolution.configured or "gemini"
 
     def _available_executable(self) -> str | None:
         if self.executable is not None:
             return self.executable
-        return shutil.which("gemini")
+        return self.executable_resolver.resolve(self.harness_id, "gemini").executable
 
 
 def _refs_from_list_output(

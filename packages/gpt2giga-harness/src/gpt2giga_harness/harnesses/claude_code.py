@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping
@@ -28,6 +27,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     prompt_with_attachments,
 )
 from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.native import HarnessInvocationMode
 from gpt2giga_harness.managed_mcp import write_startup_config
 from gpt2giga_harness.types import (
@@ -50,6 +50,13 @@ MODE_TO_PERMISSION = {
 
 class ClaudeCodeHarness(BaseHarness):
     """Run Claude Code in print mode against gpt2giga."""
+
+    def __init__(
+        self,
+        *,
+        executable_resolver: ExecutableResolver | None = None,
+    ) -> None:
+        self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
 
     @classmethod
     def spec(cls) -> HarnessSpec:
@@ -80,13 +87,23 @@ class ClaudeCodeHarness(BaseHarness):
         )
 
     def availability(self) -> Availability:
-        executable = shutil.which("claude")
+        resolution = self.executable_resolution()
+        if resolution.error is not None:
+            return Availability.error(resolution.error)
         return executable_availability(
-            executable=executable,
+            executable=resolution.executable,
             executable_name="claude",
-            install_hint="Install Claude Code and ensure it is on PATH.",
+            install_hint=(
+                "Install Claude Code on PATH or configure executables.claude-code "
+                "in ~/.gpt2giga/harness/config.toml."
+            ),
             version_args=None,
+            source=resolution.source,
         )
+
+    def executable_resolution(self) -> ExecutableResolution:
+        """Return the configured or PATH-discovered Claude executable."""
+        return self.executable_resolver.resolve(self.spec().id, "claude")
 
     def build_command(
         self,
@@ -94,7 +111,8 @@ class ClaudeCodeHarness(BaseHarness):
         context: HarnessContext,
     ) -> tuple[str, ...]:
         """Build the Claude Code command without executing it."""
-        executable = shutil.which("claude") or "claude"
+        resolution = self.executable_resolution()
+        executable = resolution.executable or resolution.configured or "claude"
         model = request.model or context.default_model or "GigaChat"
         permission_mode = MODE_TO_PERMISSION.get(
             request.mode, MODE_TO_PERMISSION["plan"]

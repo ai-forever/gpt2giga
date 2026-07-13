@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from gpt2giga_harness.config import DEFAULT_HARNESS_DATA_DIR
+from gpt2giga_harness.executables import ExecutableResolver
 from gpt2giga_harness.harnesses.agent_cli import build_safe_env
 from gpt2giga_harness.harnesses.attachment_plan import (
     attachment_raw_metadata,
@@ -42,6 +42,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         data_dir: str | Path = DEFAULT_HARNESS_DATA_DIR,
         external_claude_home: str | Path | None = None,
         executable: str | None = None,
+        executable_resolver: ExecutableResolver | None = None,
     ) -> None:
         self.data_dir = Path(data_dir).expanduser()
         self.external_claude_home = (
@@ -50,6 +51,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
             else Path.home() / ".claude"
         )
         self.executable = executable
+        self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
 
     def discover(
         self,
@@ -203,7 +205,10 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         return tuple(refs)
 
     def _executable(self) -> str:
-        return self.executable or shutil.which("claude") or "claude"
+        if self.executable is not None:
+            return self.executable
+        resolution = self.executable_resolver.resolve(self.harness_id, "claude")
+        return resolution.executable or resolution.configured or "claude"
 
 
 def _write_claude_settings(home: Path) -> None:

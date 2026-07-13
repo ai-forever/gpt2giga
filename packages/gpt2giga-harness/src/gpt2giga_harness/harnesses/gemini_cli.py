@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping
@@ -29,6 +28,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     prompt_with_attachments,
 )
 from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.native import HarnessInvocationMode
 from gpt2giga_harness.managed_mcp import write_startup_config
 from gpt2giga_harness.types import (
@@ -52,6 +52,13 @@ PASS_MODEL_HEADER = "X-GPT2GIGA-Pass-Model"
 
 class GeminiCliHarness(BaseHarness):
     """Run Gemini CLI in headless mode against gpt2giga."""
+
+    def __init__(
+        self,
+        *,
+        executable_resolver: ExecutableResolver | None = None,
+    ) -> None:
+        self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
 
     @classmethod
     def spec(cls) -> HarnessSpec:
@@ -77,13 +84,23 @@ class GeminiCliHarness(BaseHarness):
         )
 
     def availability(self) -> Availability:
-        executable = shutil.which("gemini")
+        resolution = self.executable_resolution()
+        if resolution.error is not None:
+            return Availability.error(resolution.error)
         return executable_availability(
-            executable=executable,
+            executable=resolution.executable,
             executable_name="gemini",
-            install_hint="Install Gemini CLI and ensure it is on PATH.",
+            install_hint=(
+                "Install Gemini CLI on PATH or configure executables.gemini-cli "
+                "in ~/.gpt2giga/harness/config.toml."
+            ),
             version_args=None,
+            source=resolution.source,
         )
+
+    def executable_resolution(self) -> ExecutableResolution:
+        """Return the configured or PATH-discovered Gemini executable."""
+        return self.executable_resolver.resolve(self.spec().id, "gemini")
 
     def build_command(
         self,
@@ -91,7 +108,8 @@ class GeminiCliHarness(BaseHarness):
         context: HarnessContext,
     ) -> tuple[str, ...]:
         """Build the Gemini CLI command without executing it."""
-        executable = shutil.which("gemini") or "gemini"
+        resolution = self.executable_resolution()
+        executable = resolution.executable or resolution.configured or "gemini"
         model = request.model or context.default_model or "GigaChat"
         prompt = prompt_with_attachments(request)
         output_format = "stream-json" if request.stream else "json"

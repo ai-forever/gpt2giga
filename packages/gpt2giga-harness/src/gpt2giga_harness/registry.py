@@ -5,6 +5,7 @@ from __future__ import annotations
 from importlib.metadata import entry_points
 from typing import Iterable
 
+from gpt2giga_harness.executables import ExecutableResolver
 from gpt2giga_harness.harnesses import (
     ClaudeCodeHarness,
     CodexCliHarness,
@@ -66,10 +67,23 @@ class HarnessRegistry:
         return self.validation_reports.get(harness_id)
 
     @classmethod
-    def with_builtins(cls) -> "HarnessRegistry":
+    def with_builtins(
+        cls,
+        *,
+        executable_resolver: ExecutableResolver | None = None,
+    ) -> "HarnessRegistry":
         """Create a registry with built-in harnesses."""
+        resolver = executable_resolver or ExecutableResolver.path_only()
         registry = cls()
-        registry.register_many(harness_class() for harness_class in BUILTIN_HARNESSES)
+        registry.register_many(
+            (
+                DirectChatHarness(),
+                CodexCliHarness(executable_resolver=resolver),
+                ClaudeCodeHarness(executable_resolver=resolver),
+                GeminiCliHarness(executable_resolver=resolver),
+                EchoHarness(),
+            )
+        )
         return registry
 
     def register_many(self, harnesses: Iterable[BaseHarness]) -> None:
@@ -77,7 +91,11 @@ class HarnessRegistry:
         for harness in harnesses:
             self.register(harness)
 
-    def load_entry_points(self) -> None:
+    def load_entry_points(
+        self,
+        *,
+        executable_resolver: ExecutableResolver | None = None,
+    ) -> None:
         """Load third-party harnesses from package entry points."""
         try:
             selected = _select_entry_points()
@@ -86,17 +104,26 @@ class HarnessRegistry:
             return
         for entry_point in selected:
             try:
-                harness = _load_entry_point_harness(entry_point.load())
+                harness = _load_entry_point_harness(
+                    entry_point.load(),
+                    executable_resolver=executable_resolver,
+                )
                 self.register(harness)
             except Exception as exc:  # pragma: no cover - plugin failure path
                 self.discovery_errors.append(f"{entry_point.name}: {exc}")
 
 
-def create_default_registry(*, include_entry_points: bool = True) -> HarnessRegistry:
+def create_default_registry(
+    *,
+    include_entry_points: bool = True,
+    config_path: str | None = None,
+    executable_resolver: ExecutableResolver | None = None,
+) -> HarnessRegistry:
     """Create the default registry used by CLI and UI."""
-    registry = HarnessRegistry.with_builtins()
+    resolver = executable_resolver or ExecutableResolver.from_user_config(config_path)
+    registry = HarnessRegistry.with_builtins(executable_resolver=resolver)
     if include_entry_points:
-        registry.load_entry_points()
+        registry.load_entry_points(executable_resolver=resolver)
     return registry
 
 
@@ -107,11 +134,18 @@ def _select_entry_points():
     return all_entry_points.get(ENTRY_POINT_GROUP, ())
 
 
-def _load_entry_point_harness(loaded):
+def _load_entry_point_harness(
+    loaded,
+    *,
+    executable_resolver: ExecutableResolver | None = None,
+):
     if isinstance(loaded, BaseHarness):
         return loaded
     if isinstance(loaded, type):
-        harness = loaded()
+        if loaded in {CodexCliHarness, ClaudeCodeHarness, GeminiCliHarness}:
+            harness = loaded(executable_resolver=executable_resolver)
+        else:
+            harness = loaded()
     elif callable(loaded):
         harness = loaded()
     else:
