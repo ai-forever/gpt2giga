@@ -260,7 +260,7 @@ def test_codex_native_resume_command_requires_managed_ref(tmp_path):
         (
             {
                 "session_id": "managed-session",
-                "timestamp": "2026-07-09T10:00:00Z",
+                "timestamp": start_plan.execution_snapshot.created_at,
                 "role": "user",
                 "content": "resume me",
             },

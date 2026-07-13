@@ -210,6 +210,105 @@ def test_gemini_native_reads_current_projects_mapping_and_message_schema(tmp_pat
     }
 
 
+def test_gemini_native_reconciles_sequential_managed_checkpoints(tmp_path):
+    workspace = tmp_path / "repo"
+    data_dir = tmp_path / "data"
+    workspace.mkdir()
+    project_id = project_id_for_root(workspace)
+    project_hash = project_hash_for_workspace(workspace)
+    chats_dir = (
+        data_dir
+        / "native"
+        / "gemini"
+        / "homes"
+        / project_id
+        / ".gemini"
+        / "tmp"
+        / project_hash
+        / "chats"
+    )
+    connector = GeminiNativeHistoryConnector(
+        data_dir=data_dir,
+        executable="gemini",
+        capability_probe_runner=_supported_prompt_probe,
+    )
+    context = HarnessContext(proxy_url="http://127.0.0.1:8090")
+
+    first_plan = connector.build_start_command(
+        HarnessRequest(
+            prompt="first",
+            model="FirstModel",
+            workspace=str(workspace),
+        ),
+        context,
+    )
+    first_plan = replace(
+        first_plan,
+        execution_snapshot=replace(
+            first_plan.execution_snapshot,
+            created_at="2026-07-13T18:37:48Z",
+        ),
+    )
+    connector.record_start_snapshot(first_plan)
+    _write_jsonl(
+        chats_dir / "first.jsonl",
+        (
+            {
+                "sessionId": "first-session",
+                "startTime": "2026-07-13T18:37:51Z",
+                "kind": "main",
+            },
+            {
+                "id": "first-user",
+                "type": "user",
+                "content": [{"text": "first"}],
+                "timestamp": "2026-07-13T18:37:51Z",
+            },
+        ),
+    )
+
+    second_plan = connector.build_start_command(
+        HarnessRequest(
+            prompt="second",
+            model="SecondModel",
+            workspace=str(workspace),
+        ),
+        context,
+    )
+    second_plan = replace(
+        second_plan,
+        execution_snapshot=replace(
+            second_plan.execution_snapshot,
+            created_at="2026-07-13T18:38:27Z",
+        ),
+    )
+    connector.record_start_snapshot(second_plan)
+    _write_jsonl(
+        chats_dir / "second.jsonl",
+        (
+            {
+                "sessionId": "second-session",
+                "startTime": "2026-07-13T18:38:29Z",
+                "kind": "main",
+            },
+            {
+                "id": "second-user",
+                "type": "user",
+                "content": [{"text": "second"}],
+                "timestamp": "2026-07-13T18:38:29Z",
+            },
+        ),
+    )
+
+    refs = connector.discover(workspace=str(workspace), include_external=False)
+    snapshots_by_session = {
+        ref.native_session_id: ref.execution_snapshot for ref in refs
+    }
+
+    assert snapshots_by_session["first-session"] == first_plan.execution_snapshot
+    assert snapshots_by_session["second-session"] == second_plan.execution_snapshot
+
+
 def test_gemini_native_start_command_uses_managed_home_and_redacts_key(
     tmp_path,
     monkeypatch,
@@ -403,7 +502,7 @@ def test_gemini_native_resume_command_requires_managed_ref(tmp_path):
         (
             {
                 "session_id": "managed-gemini-session",
-                "timestamp": "2026-07-09T10:00:00Z",
+                "timestamp": start_plan.execution_snapshot.created_at,
                 "model": "GigaChat-2-Max",
                 "role": "user",
                 "content": "resume me",

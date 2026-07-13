@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,8 @@ from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.store import new_id
 
 SNAPSHOT_INDEX_FILE = "execution-snapshots.json"
+SNAPSHOT_BINDING_MAX_DELAY_SECONDS = 300.0
+SNAPSHOT_BINDING_CLOCK_SKEW_SECONDS = 5.0
 
 
 class NativeExecutionSnapshotStore:
@@ -126,7 +129,26 @@ class NativeExecutionSnapshotStore:
             for record in pending
             if (snapshot := _snapshot(record)) is not None
         }
+        temporal_pairs, temporally_scoped_records, temporally_scoped_refs = (
+            _temporal_binding_pairs(records_by_id, candidates_by_record)
+        )
+        for snapshot_id, ref in temporal_pairs.items():
+            snapshot = _snapshot(records_by_id[snapshot_id])
+            if snapshot is None:
+                continue
+            records_by_id[snapshot_id]["bound_source"] = ref.source
+            records_by_id[snapshot_id]["native_session_id"] = ref.native_session_id
+            attached[ref.id] = snapshot
+            changed = True
+
         for snapshot_id, candidates in candidates_by_record.items():
+            if snapshot_id in temporally_scoped_records:
+                continue
+            candidates = [
+                ref
+                for ref in candidates
+                if ref.id not in attached and ref.id not in temporally_scoped_refs
+            ]
             if len(candidates) != 1:
                 continue
             ref = candidates[0]
@@ -232,6 +254,93 @@ def _snapshot_matches_ref(
     return not (
         native_home and snapshot.native_home and native_home != snapshot.native_home
     )
+
+
+def _temporal_binding_pairs(
+    records_by_id: Mapping[str, Mapping[str, Any]],
+    candidates_by_record: Mapping[str, list[NativeSessionRef]],
+) -> tuple[dict[str, NativeSessionRef], set[str], set[str]]:
+    distances_by_record: dict[str, list[tuple[NativeSessionRef, float]]] = {}
+    distances_by_ref: dict[str, list[tuple[str, float]]] = {}
+    refs_by_id: dict[str, NativeSessionRef] = {}
+    temporally_scoped_records: set[str] = set()
+    temporally_scoped_refs: set[str] = set()
+    for snapshot_id, candidates in candidates_by_record.items():
+        snapshot = _snapshot(records_by_id[snapshot_id])
+        if snapshot is None:
+            continue
+        for ref in candidates:
+            if (
+                _timestamp(snapshot.created_at) is not None
+                and _timestamp(ref.created_at) is not None
+            ):
+                temporally_scoped_records.add(snapshot_id)
+                temporally_scoped_refs.add(ref.id)
+            distance = _snapshot_ref_delay(snapshot, ref)
+            if distance is None:
+                continue
+            distances_by_record.setdefault(snapshot_id, []).append((ref, distance))
+            distances_by_ref.setdefault(ref.id, []).append((snapshot_id, distance))
+            refs_by_id[ref.id] = ref
+
+    record_choices = {
+        snapshot_id: ref.id
+        for snapshot_id, values in distances_by_record.items()
+        if (ref := _unique_nearest_ref(values)) is not None
+    }
+    ref_choices = {
+        ref_id: snapshot_id
+        for ref_id, values in distances_by_ref.items()
+        if (snapshot_id := _unique_nearest_snapshot(values)) is not None
+    }
+    pairs = {
+        snapshot_id: refs_by_id[ref_id]
+        for snapshot_id, ref_id in record_choices.items()
+        if ref_choices.get(ref_id) == snapshot_id
+    }
+    return pairs, temporally_scoped_records, temporally_scoped_refs
+
+
+def _snapshot_ref_delay(
+    snapshot: NativeExecutionSnapshot,
+    ref: NativeSessionRef,
+) -> float | None:
+    snapshot_time = _timestamp(snapshot.created_at)
+    ref_time = _timestamp(ref.created_at)
+    if snapshot_time is None or ref_time is None:
+        return None
+    delay = (ref_time - snapshot_time).total_seconds()
+    if delay < -SNAPSHOT_BINDING_CLOCK_SKEW_SECONDS:
+        return None
+    if delay > SNAPSHOT_BINDING_MAX_DELAY_SECONDS:
+        return None
+    return abs(delay)
+
+
+def _unique_nearest_ref(
+    values: list[tuple[NativeSessionRef, float]],
+) -> NativeSessionRef | None:
+    nearest = min(distance for _, distance in values)
+    matches = [ref for ref, distance in values if distance == nearest]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _unique_nearest_snapshot(values: list[tuple[str, float]]) -> str | None:
+    nearest = min(distance for _, distance in values)
+    matches = [snapshot_id for snapshot_id, distance in values if distance == nearest]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _timestamp(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _optional_text(value: Any) -> str | None:

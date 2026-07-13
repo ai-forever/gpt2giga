@@ -231,6 +231,9 @@ from gpt2giga_harness.workspace import (
 )
 
 
+NATIVE_SUBMIT_KEY_DELAY_SECONDS = 0.05
+
+
 @dataclass
 class _ActiveHeadlessRun:
     task: asyncio.Task[Any]
@@ -1479,6 +1482,9 @@ def create_app(
         try:
             data = payload.get("data", payload.get("text", ""))
             process_ref = native_process_manager.write(process_id, str(data))
+            if payload.get("submit") is True:
+                await asyncio.sleep(NATIVE_SUBMIT_KEY_DELAY_SECONDS)
+                process_ref = native_process_manager.write(process_id, "\r")
             run = _sync_native_process_run(
                 store,
                 process_ref,
@@ -3685,7 +3691,7 @@ def _sync_native_process_transcript(
     run: HarnessRun,
     process_ref: NativeProcessRef,
 ) -> HarnessRun:
-    if run.harness_id != "gemini-cli":
+    if run.harness_id not in {"claude-code", "gemini-cli"}:
         return run
     snapshot = execution_snapshot_from_dict(
         _metadata_mapping(run.metadata.get("execution_snapshot"))

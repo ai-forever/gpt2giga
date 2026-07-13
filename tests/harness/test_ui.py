@@ -59,7 +59,7 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.26"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.27"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -401,7 +401,9 @@ def test_ui_static_refreshes_native_run_after_process_exit():
         "function syncNativeRunInBundle(run)",
         "syncNativeRunInBundle(body.run);",
         "function syncNativeMessagesInBundle(messages)",
-        "syncNativeMessagesInBundle(body.messages)",
+        "const nativeMessages = Array.isArray(body.messages) ? body.messages : [];",
+        "syncNativeMessagesInBundle(nativeMessages);",
+        "if (nativeMessages.length)",
         "renderMessages();",
         "renderInspector();",
         'status !== "running"',
@@ -420,6 +422,23 @@ def test_ui_static_refreshes_native_run_after_process_exit():
     assert '? "active"' in run_summary_source
     assert 'displayStatus === "active" ? "active"' in run_summary_source
     assert "Native CLIs stay active between turns." in INDEX_HTML
+
+
+def test_ui_native_continuation_requests_a_separate_submit_key():
+    continuation_source = APP_JS[
+        APP_JS.index("async function continueNativeConversation") : APP_JS.index(
+            "async function ensureSessionForNative"
+        )
+    ]
+    input_source = APP_JS[
+        APP_JS.index("async function sendNativeProcessInput") : APP_JS.index(
+            "async function stopNativeProcess"
+        )
+    ]
+
+    assert "sendNativeProcessInput(prompt, prompt, true)" in continuation_source
+    assert "if (submit) body.submit = true;" in input_source
+    assert "body: JSON.stringify(body)" in input_source
 
 
 def test_ui_static_routes_codex_work_through_structured_chat():

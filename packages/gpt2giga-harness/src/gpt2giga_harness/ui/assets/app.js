@@ -3724,7 +3724,7 @@
       byId("run-button").textContent = "Sending...";
       state.nativePollBurstUntil = Date.now() + NATIVE_POLL_BURST_MS;
       try {
-        const result = await sendNativeProcessInput(`${prompt}\r`, prompt);
+        const result = await sendNativeProcessInput(prompt, prompt, true);
         if (!result.ok) {
           setStatus(result.data.detail || "Native input failed.", "error");
           return;
@@ -5683,7 +5683,11 @@
         syncNativeRunInBundle(body.run);
         renderInspector();
       }
-      if (syncNativeMessagesInBundle(body.messages)) renderMessages();
+      const nativeMessages = Array.isArray(body.messages) ? body.messages : [];
+      if (nativeMessages.length) {
+        syncNativeMessagesInBundle(nativeMessages);
+        renderMessages();
+      }
       renderNativeTerminalStatus(status);
       if (status !== "running") {
         stopNativePolling();
@@ -5751,13 +5755,16 @@
       await pollNativeOutput();
     }
 
-    async function sendNativeProcessInput(data, message = null) {
+    async function sendNativeProcessInput(data, message = null, submit = false) {
       const process = state.activeNativeProcess || {};
       if (!process.id) return { ok: false, data: { detail: "Native process is unavailable." } };
+      const body = { data };
+      if (message) body.message = message;
+      if (submit) body.submit = true;
       return getJson(`/api/native/processes/${encodeURIComponent(process.id)}/input`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(message ? { data, message } : { data })
+        body: JSON.stringify(body)
       });
     }
 

@@ -54,6 +54,95 @@ def test_snapshot_store_refuses_ambiguous_pending_binding(tmp_path):
     assert ref.execution_snapshot is None
 
 
+def test_snapshot_store_binds_sequential_pending_runs_by_nearest_start_time(tmp_path):
+    store = NativeExecutionSnapshotStore(tmp_path)
+    first = replace(
+        _snapshot(model="first"),
+        created_at="2026-07-13T18:37:48Z",
+    )
+    second = replace(
+        _snapshot(model="second"),
+        created_at="2026-07-13T18:38:27Z",
+    )
+    store.record_start(NativeCommandPlan(command=("codex",), execution_snapshot=first))
+    store.record_start(
+        NativeCommandPlan(
+            command=("codex",),
+            execution_snapshot=second,
+            snapshot_known_sources=("/managed/first.jsonl",),
+        )
+    )
+    refs = (
+        _ref(
+            "first",
+            source="/managed/first.jsonl",
+            created_at="2026-07-13T18:37:51Z",
+        ),
+        _ref(
+            "second",
+            source="/managed/second.jsonl",
+            created_at="2026-07-13T18:38:29Z",
+        ),
+    )
+
+    reconciled = store.reconcile(refs, harness_id="codex-cli")
+
+    assert reconciled[0].execution_snapshot == first
+    assert reconciled[1].execution_snapshot == second
+
+
+def test_snapshot_store_does_not_bind_stale_snapshot_by_time(tmp_path):
+    store = NativeExecutionSnapshotStore(tmp_path)
+    snapshot = replace(
+        _snapshot(),
+        created_at="2026-07-13T10:00:00Z",
+    )
+    store.record_start(
+        NativeCommandPlan(command=("codex",), execution_snapshot=snapshot)
+    )
+
+    (ref,) = store.reconcile(
+        (
+            _ref(
+                "late",
+                source="/managed/late.jsonl",
+                created_at="2026-07-13T11:00:00Z",
+            ),
+        ),
+        harness_id="codex-cli",
+    )
+
+    assert ref.execution_snapshot is None
+
+
+def test_snapshot_store_refuses_temporally_tied_pending_binding(tmp_path):
+    store = NativeExecutionSnapshotStore(tmp_path)
+    snapshots = tuple(
+        replace(
+            _snapshot(model=model),
+            created_at="2026-07-13T18:40:20Z",
+        )
+        for model in ("first", "second")
+    )
+    for snapshot in snapshots:
+        store.record_start(
+            NativeCommandPlan(command=("codex",), execution_snapshot=snapshot)
+        )
+
+    (ref,) = store.reconcile(
+        (
+            _ref(
+                "tied",
+                source="/managed/tied.jsonl",
+                created_at="2026-07-13T18:40:22Z",
+            ),
+        ),
+        harness_id="codex-cli",
+    )
+
+    assert ref.execution_snapshot is None
+
+
 def test_validate_resume_snapshot_rejects_contradictory_project_identity():
     snapshot = _snapshot()
     ref = replace(
@@ -82,7 +171,12 @@ def _snapshot(*, model: str = "GigaChat-2-Max"):
     )
 
 
-def _ref(ref_id: str, *, source: str) -> NativeSessionRef:
+def _ref(
+    ref_id: str,
+    *,
+    source: str,
+    created_at: str | None = None,
+) -> NativeSessionRef:
     return NativeSessionRef(
         id=ref_id,
         harness_id="codex-cli",
@@ -91,7 +185,7 @@ def _ref(ref_id: str, *, source: str) -> NativeSessionRef:
         workspace="/repo",
         source=source,
         status=NativeSessionStatus.MANAGED_NATIVE,
-        created_at=None,
+        created_at=created_at,
         updated_at=None,
         message_count=1,
         can_preview=True,

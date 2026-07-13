@@ -429,11 +429,15 @@ def _message_from_event(event: Mapping[str, Any]) -> NativeTranscriptMessage | N
     content = _content_from_event(event)
     if role is None or content is None:
         return None
+    metadata = {"source": "claude"}
+    native_message_id = event.get("uuid")
+    if native_message_id is not None and str(native_message_id).strip():
+        metadata["native_message_id"] = str(native_message_id).strip()
     return NativeTranscriptMessage(
         role=role,
         content=content,
         created_at=_timestamp_from_event(event),
-        metadata={"source": "claude"},
+        metadata=metadata,
     )
 
 
@@ -503,6 +507,7 @@ def _session_name_from_event(event: Mapping[str, Any]) -> str | None:
     candidates = (
         event.get("session_name"),
         event.get("sessionName"),
+        event.get("customTitle") if event.get("type") == "custom-title" else None,
         _nested(event, "session", "name"),
         _nested(event, "conversation", "name"),
     )

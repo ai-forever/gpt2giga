@@ -112,6 +112,7 @@ def test_claude_native_preview_and_import_tolerate_unknown_jsonl(tmp_path):
                 ),
                 json.dumps(
                     {
+                        "uuid": "assistant-message-id",
                         "timestamp": "2026-07-09T10:01:00Z",
                         "message": {"role": "assistant", "content": "done"},
                     }
@@ -134,6 +135,7 @@ def test_claude_native_preview_and_import_tolerate_unknown_jsonl(tmp_path):
     assert preview[0].content == "first\nsecond"
     assert [message.role for message in imported] == ["user", "assistant"]
     assert imported[1].content == "done"
+    assert imported[1].metadata["native_message_id"] == "assistant-message-id"
 
 
 def test_claude_native_start_command_uses_managed_home_and_redacts_key(
@@ -263,14 +265,18 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
         / ".claude"
         / "projects"
         / "repo"
-        / f"{session_name}.jsonl"
+        / "managed-claude-id.jsonl"
     )
     _write_jsonl(
         session_file,
         (
             {
+                "type": "custom-title",
+                "customTitle": session_name,
                 "sessionId": "managed-claude-id",
-                "session_name": session_name,
+            },
+            {
+                "sessionId": "managed-claude-id",
                 "timestamp": "2026-07-09T10:00:00Z",
                 "type": "user",
                 "message": {"content": "resume me"},
