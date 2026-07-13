@@ -5,7 +5,7 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
-## [0.0.1] - 2026-07-13
+## [0.0.1a1] - 2026-07-13
 
 Первый отдельный alpha-релиз локального agentic control plane. API, форматы
 хранимого состояния и automation-контракты линии `0.0.x` пока не считаются
@@ -23,19 +23,6 @@
 - **Выбор и сравнение Harness**: добавлены deterministic Smart Router, multi-Harness Arena с отдельными workspace и compatibility Eval Lab с локальными матрицами результатов.
 - **Tools, MCP и policy**: добавлены общие tool/secret contracts, discovery и dry-run синхронизация MCP profiles, managed MCP configuration, preflight diagnostics и approval-gated действия.
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
-
-### Изменено
-- **Разделение пакетов**: прежний branch-only namespace `gpt2giga.harness` заменён на `gpt2giga_harness`; установка gateway больше не добавляет Harness-код и команды.
-- **Gemini CLI integration**: Harness закрепляет выбранную GigaChat-модель через доверенный gateway contract и поддерживает GigaChat v2 built-in tools.
-- **Отображение результатов**: UI показывает execution plans, Codex plan events, tool progress, generated files, response sources, attachment render details и compact session actions.
-
-### Исправлено
-- **Worker lifecycle**: `giga ui` надёжно запускает worker, а orphaned jobs не завершают его преждевременно.
-- **Worktree safety**: усилены границы workspace и безопасная обработка worktrees для edit/apply flows.
-- **Agent CLI attachments**: исправлена передача изображений и аргументов в Codex, извлечение финального текста и preflight gateway для внешних CLI.
-- **Generated files**: Direct Chat загружает и сохраняет сгенерированные изображения с корректной proxy-конфигурацией.
-- **Arena и UI state**: состояние Arena сохраняется между переходами, native runs корректно обновляются после завершения ответа, а начальный native prompt и выбранные defaults сохраняются в истории сессии.
-
 ---
 
-[0.0.1]: https://github.com/ai-forever/gpt2giga/releases/tag/gpt2giga-harness-v0.0.1
+[0.0.1a1]: https://github.com/ai-forever/gpt2giga/releases/tag/gpt2giga-harness-v0.0.1a1
