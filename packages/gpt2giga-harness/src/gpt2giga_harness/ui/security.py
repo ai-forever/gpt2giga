@@ -131,6 +131,7 @@ class HarnessUISecurityMiddleware(BaseHTTPMiddleware):
             path == "/"
             or path == "/work"
             or path.startswith("/work/")
+            or path == "/arena"
             or path == "/runs"
             or path.startswith("/runs/")
         )

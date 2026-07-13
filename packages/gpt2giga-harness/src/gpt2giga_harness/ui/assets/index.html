@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=38.15">
+  <link rel="stylesheet" href="/assets/app.css?v=38.21">
 </head>
 <body>
   <div class="app">
@@ -279,10 +279,18 @@
               <textarea id="arena-prompt-input" placeholder="Ask once, then compare every response side by side..." spellcheck="true"></textarea>
             </label>
             <div class="arena-controls-grid">
-              <label class="span-2">Response formats
-                <select id="arena-harness-select" multiple size="6" aria-label="Response formats"></select>
-                <span class="hint">Select two or more harnesses for a useful comparison.</span>
-              </label>
+              <fieldset class="span-2 arena-format-picker">
+                <legend>Response formats</legend>
+                <div class="arena-format-heading">
+                  <span id="arena-selection-count" class="badge info">0 selected</span>
+                  <div class="inline-actions">
+                    <button id="arena-select-all-button" class="secondary arena-picker-action" type="button">Select all</button>
+                    <button id="arena-clear-button" class="secondary arena-picker-action" type="button">Clear</button>
+                  </div>
+                </div>
+                <div id="arena-harness-options" class="arena-harness-options" aria-label="Response formats"></div>
+                <span class="hint">Click a row to include or exclude it. Choose two or more for a useful comparison.</span>
+              </fieldset>
               <label>Model
                 <input id="arena-model-input" placeholder="GigaChat-2-Max" autocomplete="off">
               </label>
@@ -794,6 +802,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=38.15"></script>
+  <script src="/assets/app.js?v=38.21"></script>
 </body>
 </html>

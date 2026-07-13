@@ -51,9 +51,9 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.15">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.21">' in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.15"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.21"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -359,12 +359,67 @@ def test_ui_static_keeps_arena_out_of_the_work_surface():
         )
     ]
 
-    assert 'id="arena-harness-select"' not in work_source
+    assert 'id="arena-harness-options"' not in work_source
     assert 'id="arena-compare-button"' not in work_source
-    assert 'id="arena-harness-select"' in arena_source
+    assert 'id="arena-harness-options"' in arena_source
     assert 'id="arena-compare-button"' in arena_source
     assert 'id="arena-panel"' in arena_source
     assert 'data-tab="arena"' not in UI_SOURCE
+
+
+def test_ui_static_arena_formats_use_clickable_checkbox_rows():
+    for fragment in (
+        'arenaCheckbox.type = "checkbox"',
+        'arenaCheckbox.name = "arena-harness"',
+        'option.classList.toggle("selected", checkbox.checked)',
+        'id="arena-selection-count"',
+        'id="arena-select-all-button"',
+        'id="arena-clear-button"',
+        "function selectAllArenaHarnesses(selected)",
+    ):
+        assert fragment in UI_SOURCE
+    assert 'multiple size="6"' not in UI_SOURCE
+
+
+def test_ui_static_restores_arena_without_replacing_work_session():
+    arena_source = UI_SOURCE[
+        UI_SOURCE.index("async function runArena") : UI_SOURCE.index(
+            "async function startHeadlessStream"
+        )
+    ]
+    load_session_source = UI_SOURCE[
+        UI_SOURCE.index("async function loadSession") : UI_SOURCE.index(
+            "async function loadAttachments"
+        )
+    ]
+    clear_route_source = UI_SOURCE[
+        UI_SOURCE.index("function clearRouteSelection") : UI_SOURCE.index(
+            "async function applyCurrentRoute"
+        )
+    ]
+    route_source = UI_SOURCE[
+        UI_SOURCE.index("async function loadCurrentRoute") : UI_SOURCE.index(
+            "async function boot"
+        )
+    ]
+
+    for fragment in (
+        "async function loadArenaCenter(options = {})",
+        "getJson(`/api/arena/runs?${params.toString()}`)",
+        "function applyArenaToControls(arena)",
+        "function scheduleArenaRefresh(arena)",
+        "state.currentArena = body.arena;",
+        "updateArenaStatus(state.currentArena);",
+    ):
+        assert fragment in UI_SOURCE
+    assert "state.currentSessionId = body.arena.session_id" not in arena_source
+    assert "await loadSession" not in arena_source
+    assert "state.currentArena = null" not in load_session_source
+    assert "state.currentArena = null" not in clear_route_source
+    assert (
+        "return loadArenaCenter({ hydrateControls: !state.currentArena });"
+        in route_source
+    )
 
 
 def test_ui_static_preserves_selected_defaults_while_stream_starts():
@@ -770,7 +825,10 @@ def test_ui_index_contains_control_panel_elements():
         "current-route-badge",
         "harness-list",
         "harness-select",
-        "arena-harness-select",
+        "arena-harness-options",
+        "arena-selection-count",
+        "arena-select-all-button",
+        "arena-clear-button",
         "invocation-select",
         "model-input",
         "model-menu-button",

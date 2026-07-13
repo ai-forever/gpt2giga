@@ -32,6 +32,24 @@ def test_local_shell_issues_strict_httponly_session_cookie():
     assert client.get("/api/defaults").status_code == 200
 
 
+def test_local_arena_deep_link_issues_browser_session_cookie():
+    app = create_app(
+        HarnessConfig(),
+        registry=create_default_registry(include_entry_points=False),
+    )
+    client = TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    )
+
+    response = client.get("/arena")
+
+    assert response.status_code == 200
+    assert "gpt2giga_harness_session=" in response.headers["set-cookie"]
+    assert client.get("/api/defaults").status_code == 200
+
+
 def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
     script = load_text_asset("app.js")
 

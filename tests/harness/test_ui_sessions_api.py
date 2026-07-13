@@ -444,6 +444,59 @@ def test_arena_api_creates_child_runs_without_shared_history(tmp_path):
     assert fetched.json()["arena"]["id"] == arena["id"]
 
 
+def test_arena_history_is_persisted_and_hidden_from_work_sessions(tmp_path):
+    store = InMemoryHarnessSessionStore()
+    registry = HarnessRegistry()
+    registry.register(_ArenaCaptureHarness("arena-history"))
+    client = _client(
+        config=HarnessConfig(data_dir=str(tmp_path / "data")),
+        registry=registry,
+        store=store,
+    )
+    normal = client.post(
+        "/api/sessions",
+        json={
+            "title": "Keep in Work",
+            "harness_id": "arena-history",
+            "workspace": str(tmp_path),
+        },
+    ).json()["session"]
+    created = client.post(
+        "/api/arena/runs",
+        json={
+            "prompt": "keep this in arena",
+            "harness_ids": ["arena-history"],
+            "workspace": str(tmp_path),
+        },
+    ).json()["arena"]
+
+    history = client.get(
+        "/api/arena/runs",
+        params={"workspace": str(tmp_path), "limit": 1},
+    )
+    work_sessions = client.get(
+        "/api/sessions",
+        params={"workspace": str(tmp_path), "include_archived": True},
+    )
+    all_sessions = client.get(
+        "/api/sessions",
+        params={
+            "workspace": str(tmp_path),
+            "include_archived": True,
+            "include_arena": True,
+        },
+    )
+
+    assert history.status_code == 200
+    assert [item["id"] for item in history.json()["arenas"]] == [created["id"]]
+    assert history.json()["arenas"][0]["child_runs"][0]["message"]["content"]
+    assert [item["id"] for item in work_sessions.json()["sessions"]] == [normal["id"]]
+    assert {item["id"] for item in all_sessions.json()["sessions"]} == {
+        normal["id"],
+        created["session_id"],
+    }
+
+
 def test_arena_api_child_failure_does_not_stop_remaining_harnesses(tmp_path):
     store = InMemoryHarnessSessionStore()
     succeeding = _ArenaCaptureHarness("arena-ok")

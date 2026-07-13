@@ -970,6 +970,7 @@ def create_app(
         harness_id: str | None = Query(default=None),
         q: str | None = Query(default=None),
         include_archived: bool = Query(default=False),
+        include_arena: bool = Query(default=False),
         limit: int = Query(default=50, ge=1, le=200),
     ) -> dict[str, Any]:
         resolved_workspace = resolve_workspace(_optional_text(workspace))
@@ -979,8 +980,16 @@ def create_app(
             harness_id=_optional_text(harness_id),
             q=_optional_text(q),
             include_archived=include_archived,
-            limit=limit,
+            limit=limit if include_arena else None,
         )
+        if not include_arena:
+            arena_session_ids = {
+                arena.session_id
+                for arena in arena_store.list(workspace=resolved_workspace)
+            }
+            items = tuple(
+                session for session in items if session.id not in arena_session_ids
+            )[:limit]
         return {"sessions": [_session_summary(store, session.id) for session in items]}
 
     @app.post("/api/sessions")
@@ -2104,6 +2113,15 @@ def create_app(
                 for event in events
             ]
         }
+
+    @app.get("/api/arena/runs")
+    async def list_arena_runs(
+        workspace: str | None = Query(default=None),
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> dict[str, Any]:
+        resolved_workspace = resolve_workspace(_optional_text(workspace))
+        arenas = arena_store.list(workspace=resolved_workspace, limit=limit)
+        return {"arenas": [_arena_response(arena, store)["arena"] for arena in arenas]}
 
     @app.post("/api/arena/runs")
     async def create_arena_run(

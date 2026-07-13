@@ -747,6 +747,85 @@
       width: 100%;
     }
     .arena-controls-grid .span-2 { grid-column: 1 / -1; }
+    .arena-format-picker {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+    .arena-format-picker legend {
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .arena-format-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .arena-picker-action {
+      min-height: 28px;
+      padding: 4px 8px;
+      font-size: 11px;
+    }
+    .arena-harness-options {
+      display: grid;
+      gap: 7px;
+      max-height: 300px;
+      min-width: 0;
+      overflow: auto;
+    }
+    .arena-harness-option {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: #0f1722;
+      padding: 9px 11px;
+      cursor: pointer;
+      transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+    }
+    .arena-harness-option:hover {
+      border-color: #3d586f;
+      background: #131e2b;
+    }
+    .arena-harness-option.selected {
+      border-color: var(--accent);
+      background: #102729;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .arena-harness-option input {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: var(--accent);
+    }
+    .arena-harness-option-copy {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+    .arena-harness-option-copy strong {
+      overflow: hidden;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .arena-harness-option-copy small {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .arena-results {
       min-width: 0;
       margin-top: 14px;

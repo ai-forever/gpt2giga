@@ -59,6 +59,7 @@
       selectedRunId: null,
       currentBundle: null,
       currentArena: null,
+      arenaPollTimer: null,
       activeHeadlessRun: null,
       headlessEventSource: null,
       headlessEventSourceRunId: null,
@@ -199,6 +200,7 @@
       const evaluateArea = route.area === "evaluate";
       const scheduledArea = route.area === "scheduled";
       document.body.classList.toggle("arena-area", arenaArea);
+      if (!arenaArea) stopArenaRefresh();
       document.body.classList.toggle("runs-area", runsArea);
       document.body.classList.toggle("approvals-area", approvalsArea);
       document.body.classList.toggle("tools-area", toolsArea);
@@ -1507,11 +1509,18 @@
 
     function renderHarnessSelect() {
       const select = byId("harness-select");
-      const arenaSelect = byId("arena-harness-select");
+      const arenaOptions = byId("arena-harness-options");
       const filter = byId("session-harness-filter");
+      const selectedArenaIds = new Set(arenaSelectedHarnessIds());
+      if (!selectedArenaIds.size && state.currentArena && state.currentArena.id) {
+        for (const harnessId of state.currentArena.harness_ids || []) {
+          selectedArenaIds.add(harnessId);
+        }
+      }
+      const selectionWasTouched = state.arenaSelectionTouched || Boolean(state.currentArena && state.currentArena.id);
       select.textContent = "";
-      arenaSelect.textContent = "";
-      state.arenaSelectionTouched = false;
+      arenaOptions.textContent = "";
+      state.arenaSelectionTouched = selectionWasTouched;
       filter.textContent = "";
       const all = document.createElement("option");
       all.value = "";
@@ -1523,12 +1532,28 @@
         option.value = spec.id;
         option.textContent = spec.title || spec.id;
         select.appendChild(option);
-        const arenaOption = option.cloneNode(true);
-        arenaSelect.appendChild(arenaOption);
+        const arenaOption = document.createElement("label");
+        arenaOption.className = "arena-harness-option";
+        const arenaCheckbox = document.createElement("input");
+        arenaCheckbox.type = "checkbox";
+        arenaCheckbox.name = "arena-harness";
+        arenaCheckbox.value = spec.id;
+        arenaCheckbox.checked = selectedArenaIds.has(spec.id);
+        const arenaCopy = document.createElement("span");
+        arenaCopy.className = "arena-harness-option-copy";
+        const arenaTitle = document.createElement("strong");
+        arenaTitle.textContent = spec.title || spec.id;
+        const availability = item.availability || {};
+        const arenaMeta = document.createElement("small");
+        arenaMeta.textContent = `${spec.id} · ${availability.status || "unknown"}`;
+        arenaCopy.append(arenaTitle, arenaMeta);
+        arenaOption.append(arenaCheckbox, arenaCopy);
+        arenaOptions.appendChild(arenaOption);
         const filterOption = option.cloneNode(true);
         filter.appendChild(filterOption);
       }
       byId("harness-count").textContent = String(state.harnesses.length);
+      updateArenaSelectionUi();
     }
 
     function renderHarnessCards() {
@@ -1664,16 +1689,85 @@
 
     function ensureArenaSelection(harnessId) {
       if (state.arenaSelectionTouched) return;
-      const select = byId("arena-harness-select");
-      for (const option of select.options) {
-        option.selected = option.value === harnessId;
+      for (const checkbox of document.querySelectorAll('input[name="arena-harness"]')) {
+        checkbox.checked = checkbox.value === harnessId;
       }
+      updateArenaSelectionUi();
     }
 
     function arenaSelectedHarnessIds() {
-      return Array.from(byId("arena-harness-select").selectedOptions)
-        .map((option) => option.value)
+      return Array.from(document.querySelectorAll('input[name="arena-harness"]:checked'))
+        .map((checkbox) => checkbox.value)
         .filter(Boolean);
+    }
+
+    function updateArenaSelectionUi() {
+      const checkboxes = Array.from(document.querySelectorAll('input[name="arena-harness"]'));
+      const selected = checkboxes.filter((checkbox) => checkbox.checked);
+      for (const checkbox of checkboxes) {
+        const option = checkbox.closest(".arena-harness-option");
+        if (option) option.classList.toggle("selected", checkbox.checked);
+      }
+      const count = byId("arena-selection-count");
+      count.textContent = `${selected.length} selected`;
+      count.className = `badge ${selected.length >= 2 ? "ok" : "info"}`;
+      byId("arena-select-all-button").disabled = checkboxes.length === 0 || selected.length === checkboxes.length;
+      byId("arena-clear-button").disabled = selected.length === 0;
+    }
+
+    function selectAllArenaHarnesses(selected) {
+      state.arenaSelectionTouched = true;
+      for (const checkbox of document.querySelectorAll('input[name="arena-harness"]')) {
+        checkbox.checked = selected;
+      }
+      updateArenaSelectionUi();
+    }
+
+    function applyArenaToControls(arena) {
+      if (!arena || !arena.id) return;
+      byId("arena-prompt-input").value = arena.prompt || "";
+      byId("arena-model-input").value = arena.model || "";
+      byId("arena-api-mode-select").value = arena.api_mode || "v2";
+      byId("arena-mode-select").value = arena.mode || "plan";
+      byId("arena-workspace-policy-select").value = arena.workspace_policy || "auto";
+      byId("arena-workspace-input").value = arena.workspace || "";
+      const selected = new Set(Array.isArray(arena.harness_ids) ? arena.harness_ids : []);
+      state.arenaSelectionTouched = true;
+      for (const checkbox of document.querySelectorAll('input[name="arena-harness"]')) {
+        checkbox.checked = selected.has(checkbox.value);
+      }
+      updateArenaSelectionUi();
+    }
+
+    function updateArenaStatus(arena) {
+      if (!arena || !arena.id) {
+        setText("arena-center-status", "Compare the same prompt across response formats.");
+        setText("arena-results-status", "Run a comparison to see responses here.");
+        return;
+      }
+      const children = Array.isArray(arena.child_runs) ? arena.child_runs : [];
+      const requested = Array.isArray(arena.harness_ids) ? arena.harness_ids.length : children.length;
+      const complete = children.filter((child) => !["queued", "running", "retry_wait"].includes(child.status)).length;
+      const status = arena.status || "running";
+      setText("arena-center-status", `Comparison ${status}.`);
+      setText(
+        "arena-results-status",
+        `${complete}/${requested} responses ready · same prompt · independent runs`
+      );
+    }
+
+    function stopArenaRefresh() {
+      if (state.arenaPollTimer) window.clearTimeout(state.arenaPollTimer);
+      state.arenaPollTimer = null;
+    }
+
+    function scheduleArenaRefresh(arena) {
+      stopArenaRefresh();
+      if (!arena || ["succeeded", "partial", "failed", "canceled"].includes(arena.status)) return;
+      state.arenaPollTimer = window.setTimeout(() => {
+        state.arenaPollTimer = null;
+        if (currentRoute().area === "arena") void loadArenaCenter({ hydrateControls: false });
+      }, 1000);
     }
 
     function renderCapabilityOptions(spec) {
@@ -2153,7 +2247,6 @@
       state.currentSessionId = sessionId;
       state.selectedRunId = options.runId || null;
       state.currentBundle = result.data;
-      if (state.currentArena && state.currentArena.session_id !== sessionId) state.currentArena = null;
       await loadAttachments(sessionId);
       applySessionDefaults(result.data.session || {});
       persistProjectState({ last_selected_session: sessionId });
@@ -2176,7 +2269,6 @@
       state.currentSessionId = sessionId;
       state.selectedRunId = runId;
       state.currentBundle = result.data;
-      if (state.currentArena && state.currentArena.session_id !== sessionId) state.currentArena = null;
       await loadAttachments(sessionId);
       applySessionDefaults(result.data.session);
       persistProjectState({ last_selected_session: sessionId });
@@ -3247,6 +3339,37 @@
       await startHeadlessStream(payload);
     }
 
+    async function loadArenaCenter(options = {}) {
+      const hydrateControls = options.hydrateControls !== false;
+      let result;
+      if (state.currentArena && state.currentArena.id) {
+        result = await getJson(`/api/arena/runs/${encodeURIComponent(state.currentArena.id)}`);
+      } else {
+        const params = new URLSearchParams({ limit: "1" });
+        const workspace = state.project && state.project.root ? state.project.root : byId("arena-workspace-input").value.trim();
+        if (workspace) params.set("workspace", workspace);
+        result = await getJson(`/api/arena/runs?${params.toString()}`);
+      }
+      if (!result.ok) {
+        setText("arena-center-status", result.data.detail || "Arena history is unavailable.");
+        return false;
+      }
+      const arena = result.data.arena || (Array.isArray(result.data.arenas) ? result.data.arenas[0] : null);
+      if (!arena) {
+        state.currentArena = null;
+        renderArenaCenter(null);
+        updateArenaStatus(null);
+        stopArenaRefresh();
+        return true;
+      }
+      state.currentArena = arena;
+      if (hydrateControls) applyArenaToControls(arena);
+      renderArenaCenter(arena);
+      updateArenaStatus(arena);
+      scheduleArenaRefresh(arena);
+      return true;
+    }
+
     async function runArena() {
       const payload = buildArenaPayload();
       if (!payload.prompt.trim()) {
@@ -3278,14 +3401,9 @@
           return;
         }
         state.currentArena = body.arena;
-        state.currentSessionId = body.arena.session_id || state.currentSessionId;
-        if (state.currentSessionId) await loadSession(state.currentSessionId, { syncRoute: false });
         renderArenaCenter(state.currentArena);
-        const children = Array.isArray(body.arena.child_runs) ? body.arena.child_runs : [];
-        setText("arena-center-status", `Comparison ${body.arena.status || "completed"}.`);
-        setText("arena-results-status", `${children.length} response${children.length === 1 ? "" : "s"} · same prompt · independent runs`);
-        await loadSessions();
-        persistProjectState({ last_selected_session: state.currentSessionId });
+        updateArenaStatus(state.currentArena);
+        scheduleArenaRefresh(state.currentArena);
       } finally {
         byId("arena-compare-button").disabled = false;
         byId("arena-compare-button").textContent = "Compare responses";
@@ -3318,7 +3436,6 @@
           return;
         }
         state.currentSessionId = body.session && body.session.id ? body.session.id : state.currentSessionId;
-        state.currentArena = null;
         state.activeHeadlessRun = body.run;
         ensureLiveRun(body.run.id, body.run);
         if (state.currentSessionId) {
@@ -5160,7 +5277,6 @@
         renderProvenanceInspector(run);
         return;
       }
-      state.currentArena = null;
       state.currentSessionId = result.data.session && result.data.session.id ? result.data.session.id : state.currentSessionId;
       state.currentBundle = result.data;
       state.attachments = [];
@@ -5466,7 +5582,6 @@
     function clearCurrentSession() {
       state.currentSessionId = null;
       state.currentBundle = null;
-      state.currentArena = null;
       state.attachments = [];
       renderAttachments();
       renderAll();
@@ -6034,9 +6149,13 @@
         selectHarness(event.target.value);
         renderRouteRecommendation(state.routeRecommendation);
       });
-      byId("arena-harness-select").addEventListener("change", () => {
+      byId("arena-harness-options").addEventListener("change", (event) => {
+        if (!event.target.matches('input[name="arena-harness"]')) return;
         state.arenaSelectionTouched = true;
+        updateArenaSelectionUi();
       });
+      byId("arena-select-all-button").addEventListener("click", () => selectAllArenaHarnesses(true));
+      byId("arena-clear-button").addEventListener("click", () => selectAllArenaHarnesses(false));
       byId("invocation-select").addEventListener("change", () => {
         updateHarnessDrivenControls();
         persistProjectState();
@@ -6239,7 +6358,6 @@
       state.currentSessionId = null;
       state.selectedRunId = null;
       state.currentBundle = null;
-      state.currentArena = null;
       state.attachments = [];
       renderAttachments();
       renderAll();
@@ -6274,8 +6392,7 @@
       }
       if (route.area === "arena") {
         closeRunsCenterEventStream();
-        renderArenaCenter(state.currentArena);
-        return true;
+        return loadArenaCenter({ hydrateControls: !state.currentArena });
       }
       if (route.area === "runs" && route.id) {
         await loadRunsCenter();

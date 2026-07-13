@@ -114,6 +114,31 @@ class FilesystemHarnessArenaStore:
             raise ArenaNotFoundError(arena_id) from exc
         return arena_from_dict(data)
 
+    def list(
+        self,
+        *,
+        workspace: str | None = None,
+        limit: int | None = None,
+    ) -> tuple[HarnessArenaRun, ...]:
+        """List persisted arena records newest first."""
+        arenas: list[HarnessArenaRun] = []
+        if not self.arenas_dir.exists():
+            return ()
+        for path in self.arenas_dir.glob("*.json"):
+            try:
+                arena = arena_from_dict(json.loads(path.read_text(encoding="utf-8")))
+            except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
+                continue
+            if workspace is not None and arena.workspace != workspace:
+                continue
+            arenas.append(arena)
+        arenas.sort(
+            key=lambda arena: (arena.updated_at, arena.created_at), reverse=True
+        )
+        if limit is not None:
+            arenas = arenas[: max(limit, 0)]
+        return tuple(arenas)
+
     def save(self, arena: HarnessArenaRun) -> HarnessArenaRun:
         """Persist one arena record."""
         self.arenas_dir.mkdir(parents=True, exist_ok=True)
