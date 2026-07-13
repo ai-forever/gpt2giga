@@ -283,6 +283,14 @@ giga harness list
 giga harness inspect codex-cli --json
 ```
 
+Для встроенных внешних CLI поле `protocol_capability_scope` имеет значение
+`harness_surface`: capability-описание фиксирует то, что Harness действительно
+наблюдает и гарантирует, а не все внутренние wire-протоколы CLI. В
+`adapter_capabilities` используются состояния `supported`, `partial`,
+`delegated` и `unsupported`, поэтому `giga harness inspect --json` и
+`/api/harnesses` явно показывают ограничения continuity, native policy, доставки
+первого prompt и managed tools.
+
 Проверьте:
 
 - доступен ли proxy по `GPT2GIGA_HARNESS_PROXY_URL`;

@@ -1044,6 +1044,14 @@ The registry validates these fields and reports issues through
 Unknown future capability strings are reported as validation warnings/errors and
 ignored by UI serialization instead of breaking the cockpit.
 
+For built-in external CLI adapters, `protocol_capability_scope` is
+`harness_surface`: the declared protocol capabilities describe what Harness can
+observe and guarantee, not every wire protocol or hidden behavior inside the
+CLI. The serialized `adapter_capabilities` matrix uses `supported`, `partial`,
+`delegated`, and `unsupported` states so `giga harness inspect --json` and
+`/api/harnesses` expose current continuity, native-policy, prompt-delivery, and
+managed-tool limitations without turning them into optimistic booleans.
+
 ## Codex CLI Harness
 
 The Codex harness is intentionally conservative. `plan` and `read` map to a

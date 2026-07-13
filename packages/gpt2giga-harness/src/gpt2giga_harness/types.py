@@ -51,6 +51,23 @@ class AvailabilityStatus(str, Enum):
     ERROR = "error"
 
 
+class AdapterSupportLevel(str, Enum):
+    """Describe how honestly an adapter provides one execution capability."""
+
+    SUPPORTED = "supported"
+    PARTIAL = "partial"
+    DELEGATED = "delegated"
+    UNSUPPORTED = "unsupported"
+
+
+@dataclass(frozen=True)
+class AdapterCapabilitySupport:
+    """One redaction-safe adapter capability claim exposed to clients."""
+
+    status: AdapterSupportLevel
+    detail: str
+
+
 class HarnessEventType(str, Enum):
     """Stable event names stored and streamed for harness runs."""
 
@@ -128,6 +145,10 @@ class HarnessSpec:
     tags: tuple[str, ...] = field(default_factory=tuple)
     config_schema: Mapping[str, Any] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    protocol_capability_scope: str = "harness_surface"
+    adapter_capabilities: Mapping[str, AdapterCapabilitySupport] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -400,6 +421,13 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         GigaChatApiMode.V2.value,
     )
     tags = _string_values(getattr(spec, "tags", ()))
+    protocol_capability_scope = (
+        _optional_text(getattr(spec, "protocol_capability_scope", None))
+        or "harness_surface"
+    )
+    adapter_capabilities = _adapter_capabilities_to_dict(
+        getattr(spec, "adapter_capabilities", {})
+    )
     return {
         "id": _optional_text(spec.id) or "",
         "title": _optional_text(spec.title) or "",
@@ -421,6 +449,8 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         "supported_builtin_tools": supported_builtin_tools,
         "default_invocation_mode": default_invocation_mode,
         "default_api_mode": default_api_mode,
+        "protocol_capability_scope": protocol_capability_scope,
+        "adapter_capabilities": adapter_capabilities,
         "tags": tags,
         "config_schema": config_schema,
         "metadata": metadata,
@@ -450,6 +480,8 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
                 "transport": attachment_transport,
             },
             "builtin_tools": supported_builtin_tools,
+            "protocol_capability_scope": protocol_capability_scope,
+            "adapter_capabilities": adapter_capabilities,
             "config_schema": config_schema,
             "metadata": metadata,
         },
@@ -481,6 +513,36 @@ def _safe_mapping(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         return {}
     return dict(redact_secrets(dict(value)))
+
+
+def _adapter_capabilities_to_dict(value: Any) -> dict[str, dict[str, str]]:
+    if not isinstance(value, Mapping):
+        return {}
+    serialized: dict[str, dict[str, str]] = {}
+    for raw_name, raw_support in value.items():
+        name = _optional_text(raw_name)
+        if name is None:
+            continue
+        if isinstance(raw_support, AdapterCapabilitySupport):
+            status = raw_support.status
+            detail = raw_support.detail
+        elif isinstance(raw_support, Mapping):
+            try:
+                status = AdapterSupportLevel(str(raw_support.get("status") or ""))
+            except ValueError:
+                continue
+            detail = str(raw_support.get("detail") or "")
+        else:
+            try:
+                status = AdapterSupportLevel(str(raw_support))
+            except ValueError:
+                continue
+            detail = ""
+        serialized[name] = {
+            "status": status.value,
+            "detail": str(redact_secrets(detail)),
+        }
+    return serialized
 
 
 def _string_values(value: Any) -> list[str]:

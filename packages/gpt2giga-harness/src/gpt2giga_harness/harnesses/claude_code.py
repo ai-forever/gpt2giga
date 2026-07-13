@@ -26,6 +26,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     cli_args_from_attachments,
     prompt_with_attachments,
 )
+from gpt2giga_harness.harnesses.adapter_parity import claude_adapter_capabilities
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.native import HarnessInvocationMode
@@ -84,6 +85,7 @@ class ClaudeCodeHarness(BaseHarness):
             supports_external_history=True,
             default_invocation_mode=HarnessInvocationMode.NATIVE,
             tags=("claude", "agent"),
+            adapter_capabilities=claude_adapter_capabilities(),
         )
 
     def availability(self) -> Availability:
