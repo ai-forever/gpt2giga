@@ -1,6 +1,8 @@
 import threading
 import time
 
+import pytest
+
 from gpt2giga_harness import proxy
 from gpt2giga_harness.types import GigaChatApiMode, HarnessContext
 
@@ -168,6 +170,7 @@ def test_ensure_proxy_available_starts_local_sidecar(monkeypatch):
 
     monkeypatch.setenv("GIGACHAT_CREDENTIALS", "secret")
     monkeypatch.setattr(proxy, "_SIDECAR_API_KEYS", {})
+    monkeypatch.setattr(proxy, "_OWNED_SIDECARS", {})
     monkeypatch.setattr(proxy, "_health_check_url", lambda url: health_results.pop(0))
     monkeypatch.setattr(proxy.subprocess, "Popen", fake_popen)
 
@@ -194,3 +197,143 @@ def test_ensure_proxy_available_starts_local_sidecar(monkeypatch):
     assert captured["env"]["GPT2GIGA_DISABLE_REASONING"] == "True"
     assert captured["env"]["GIGACHAT_MODEL"] == "GigaChat-2-Max"
     assert proxy.cached_sidecar_api_key("http://127.0.0.1:8090") == result.api_key
+
+
+@pytest.mark.parametrize("api_mode", [GigaChatApiMode.V1, GigaChatApiMode.V2])
+@pytest.mark.parametrize("api_key", [None, "configured-proxy-key"])
+def test_route_preflight_probes_exact_selected_route_without_cached_key(
+    monkeypatch,
+    api_mode,
+    api_key,
+):
+    captured = {}
+
+    def fake_ensure(context, selected_mode, *, use_cached_sidecar_key):
+        captured["ensure"] = (context.proxy_url, selected_mode, use_cached_sidecar_key)
+        return proxy.ProxyStartup(
+            ok=True,
+            proxy_url=context.proxy_url,
+            api_key=api_key,
+            health_path="/health",
+            health_status_code=200,
+            detail="external proxy",
+        )
+
+    def fake_request(method, url, *, api_key, timeout):
+        captured["request"] = (method, url, api_key, timeout)
+        return {"data": []}
+
+    monkeypatch.setattr(proxy, "ensure_proxy_available", fake_ensure)
+    monkeypatch.setattr(proxy, "request_json", fake_request)
+
+    result = proxy.ensure_proxy_route_available(
+        HarnessContext(proxy_url="http://127.0.0.1:8090", api_key=api_key),
+        api_mode,
+    )
+    evidence = proxy.proxy_route_preflight_to_dict(result)
+
+    assert result.ok is True
+    assert captured["ensure"] == (
+        "http://127.0.0.1:8090",
+        api_mode,
+        False,
+    )
+    assert captured["request"] == (
+        "GET",
+        f"http://127.0.0.1:8090/{api_mode.value}/models",
+        api_key,
+        5,
+    )
+    assert evidence["route_path"] == f"/{api_mode.value}/models"
+    assert evidence["auth"] == ("configured" if api_key else "not_configured")
+    assert evidence["ownership"] == "external"
+    assert "api_key" not in evidence
+
+
+def test_route_preflight_reports_missing_existing_proxy_auth(monkeypatch):
+    monkeypatch.setattr(
+        proxy,
+        "ensure_proxy_available",
+        lambda context, api_mode, *, use_cached_sidecar_key: proxy.ProxyStartup(
+            ok=True,
+            proxy_url=context.proxy_url,
+            health_path="/health",
+            health_status_code=200,
+        ),
+    )
+
+    def reject_auth(method, url, *, api_key, timeout):
+        del method, url, api_key, timeout
+        raise proxy.ProxyRequestError("proxy returned HTTP 401", status_code=401)
+
+    monkeypatch.setattr(proxy, "request_json", reject_auth)
+
+    result = proxy.ensure_proxy_route_available(
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+        GigaChatApiMode.V1,
+    )
+
+    assert result.ok is False
+    assert result.status_code == 401
+    assert "GPT2GIGA_HARNESS_API_KEY" in str(result.error)
+
+
+def test_route_preflight_evidence_removes_proxy_url_userinfo():
+    result = proxy.ProxyRoutePreflight(
+        ok=True,
+        proxy_url="https://user:password@example.test:8443/base?token=secret#frag",
+        api_mode=GigaChatApiMode.V2,
+        route_path="/v2/models",
+        startup=proxy.ProxyStartup(ok=True, api_key="proxy-key"),
+        status_code=200,
+    )
+
+    evidence = proxy.proxy_route_preflight_to_dict(result)
+
+    assert evidence["proxy_url"] == "https://example.test:8443/base"
+    assert "password" not in str(evidence)
+    assert "secret" not in str(evidence)
+
+
+def test_stop_owned_sidecar_terminates_only_exact_owned_process(monkeypatch):
+    calls = []
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            calls.append("terminate")
+
+        def wait(self, timeout):
+            calls.append(("wait", timeout))
+
+        def kill(self):
+            calls.append("kill")
+
+    process = FakeProcess()
+    monkeypatch.setattr(proxy, "_OWNED_SIDECARS", {"owner-1": process})
+    monkeypatch.setattr(
+        proxy,
+        "_SIDECAR_API_KEYS",
+        {"http://127.0.0.1:8090": "owned-key"},
+    )
+    owned = proxy.ProxyStartup(
+        ok=True,
+        proxy_url="http://127.0.0.1:8090",
+        started=True,
+        api_key="owned-key",
+        ownership_id="owner-1",
+    )
+    external = proxy.ProxyStartup(
+        ok=True,
+        proxy_url="http://127.0.0.1:8090",
+        started=False,
+    )
+
+    assert proxy.stop_owned_sidecar(external) is False
+    assert calls == []
+    assert proxy.stop_owned_sidecar(owned) is True
+    assert calls == ["terminate", ("wait", 2)]
+    assert proxy.cached_sidecar_api_key("http://127.0.0.1:8090") is None
+    assert proxy.stop_owned_sidecar(owned) is False

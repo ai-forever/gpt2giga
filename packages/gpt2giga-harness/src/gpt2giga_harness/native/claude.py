@@ -40,6 +40,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
     """Discover Claude Code native sessions and plan native commands."""
 
     harness_id = CLAUDE_HARNESS_ID
+    requires_proxy_preflight = True
 
     def __init__(
         self,

@@ -75,14 +75,39 @@ class ProxyStartup:
     """Result of preparing a local proxy for a harness request."""
 
     ok: bool
+    proxy_url: str | None = None
     started: bool = False
     api_key: str | None = None
     pid: int | None = None
+    ownership_id: str | None = None
+    health_path: str | None = None
+    health_status_code: int | None = None
     detail: str | None = None
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class ProxyRoutePreflight:
+    """Route-aware proxy preparation result for one CLI execution."""
+
+    ok: bool
+    proxy_url: str
+    api_mode: GigaChatApiMode
+    route_path: str
+    startup: ProxyStartup
+    status_code: int | None = None
+    detail: str | None = None
+    error: str | None = None
+
+    @property
+    def api_key(self) -> str | None:
+        """Return the transient proxy key without serializing it as evidence."""
+        return self.startup.api_key
+
+
 _SIDECAR_API_KEYS: dict[str, str] = {}
+_OWNED_SIDECARS: dict[str, subprocess.Popen[Any]] = {}
+_OWNED_SIDECARS_LOCK = threading.RLock()
 _STREAM_POLL_SECONDS = 0.02
 _STREAM_QUEUE_SIZE = 128
 
@@ -294,22 +319,137 @@ def cached_sidecar_api_key(proxy_url: str) -> str | None:
 def ensure_proxy_available(
     context: HarnessContext,
     api_mode: GigaChatApiMode,
+    *,
+    use_cached_sidecar_key: bool = True,
 ) -> ProxyStartup:
     """Return a reachable proxy or start a local sidecar when allowed."""
-    cached_api_key = context.api_key or cached_sidecar_api_key(context.proxy_url)
+    cached_api_key = context.api_key
+    if cached_api_key is None and use_cached_sidecar_key:
+        cached_api_key = cached_sidecar_api_key(context.proxy_url)
     health = _health_check_url(context.proxy_url)
     if health.ok:
         return ProxyStartup(
             ok=True,
+            proxy_url=context.proxy_url,
             api_key=cached_api_key,
+            health_path=health.path,
+            health_status_code=health.status_code,
             detail=f"proxy already reachable via {health.path}",
         )
 
     preflight = sidecar_preflight(context)
     if not preflight.ok:
-        return ProxyStartup(ok=False, api_key=cached_api_key, error=preflight.reason)
+        return ProxyStartup(
+            ok=False,
+            proxy_url=context.proxy_url,
+            api_key=cached_api_key,
+            error=preflight.reason,
+        )
 
     return _start_local_sidecar(context, api_mode, cached_api_key)
+
+
+def ensure_proxy_route_available(
+    context: HarnessContext,
+    api_mode: GigaChatApiMode,
+) -> ProxyRoutePreflight:
+    """Prepare a proxy and prove the selected compatibility route is usable."""
+    route_path = f"/{api_mode.value}/models"
+    startup = ensure_proxy_available(
+        context,
+        api_mode,
+        use_cached_sidecar_key=False,
+    )
+    if not startup.ok:
+        return ProxyRoutePreflight(
+            ok=False,
+            proxy_url=context.proxy_url,
+            api_mode=api_mode,
+            route_path=route_path,
+            startup=startup,
+            error=redact_secrets(startup.error or "proxy is not reachable"),
+        )
+    try:
+        request_json(
+            "GET",
+            f"{context.proxy_url.rstrip('/')}{route_path}",
+            api_key=startup.api_key or context.api_key,
+            timeout=5,
+        )
+    except ProxyRequestError as exc:
+        stop_owned_sidecar(startup)
+        if exc.status_code in {401, 403}:
+            error = (
+                f"proxy route {route_path} rejected authentication; configure "
+                "GPT2GIGA_HARNESS_API_KEY for an existing auth-enabled proxy"
+            )
+        else:
+            error = f"proxy compatibility route {route_path} is unavailable: {exc}"
+        return ProxyRoutePreflight(
+            ok=False,
+            proxy_url=context.proxy_url,
+            api_mode=api_mode,
+            route_path=route_path,
+            startup=startup,
+            status_code=exc.status_code,
+            error=redact_secrets(error),
+        )
+    return ProxyRoutePreflight(
+        ok=True,
+        proxy_url=context.proxy_url,
+        api_mode=api_mode,
+        route_path=route_path,
+        startup=startup,
+        status_code=200,
+        detail="selected compatibility route accepted authenticated model discovery",
+    )
+
+
+def proxy_route_preflight_to_dict(
+    result: ProxyRoutePreflight,
+) -> dict[str, Any]:
+    """Serialize route evidence without exposing the transient proxy key."""
+    ownership = "owned" if result.startup.started else "external"
+    return {
+        "ok": result.ok,
+        "proxy_url": _public_proxy_url(result.proxy_url),
+        "api_mode": result.api_mode.value,
+        "route_path": result.route_path,
+        "route_status_code": result.status_code,
+        "health_path": result.startup.health_path,
+        "health_status_code": result.startup.health_status_code,
+        "auth": "configured" if result.api_key else "not_configured",
+        "ownership": ownership,
+        "sidecar_pid": result.startup.pid if result.startup.started else None,
+        "ownership_id": (
+            result.startup.ownership_id if result.startup.started else None
+        ),
+        "detail": redact_secrets(result.detail or result.startup.detail),
+        "error": redact_secrets(result.error),
+    }
+
+
+def stop_owned_sidecar(startup: ProxyStartup) -> bool:
+    """Stop a sidecar only when this process owns the exact startup handle."""
+    ownership_id = startup.ownership_id
+    if not startup.started or ownership_id is None:
+        return False
+    with _OWNED_SIDECARS_LOCK:
+        process = _OWNED_SIDECARS.pop(ownership_id, None)
+    if process is None:
+        return False
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
+    if startup.proxy_url and startup.api_key == _SIDECAR_API_KEYS.get(
+        startup.proxy_url
+    ):
+        _SIDECAR_API_KEYS.pop(startup.proxy_url, None)
+    return True
 
 
 def _health_check_url(proxy_url: str) -> ProxyHealth:
@@ -481,21 +621,29 @@ def _start_local_sidecar(
         start_new_session=True,
     )
     deadline = time.monotonic() + context.proxy_start_timeout_seconds
+    ownership_id = f"sidecar_{secrets.token_hex(12)}"
     while time.monotonic() < deadline:
         if process.poll() is not None:
             return ProxyStartup(
                 ok=False,
+                proxy_url=context.proxy_url,
                 api_key=api_key,
                 error=f"proxy sidecar exited early with code {process.returncode}",
             )
         health = _health_check_url(context.proxy_url)
         if health.ok:
             _SIDECAR_API_KEYS[context.proxy_url] = api_key
+            with _OWNED_SIDECARS_LOCK:
+                _OWNED_SIDECARS[ownership_id] = process
             return ProxyStartup(
                 ok=True,
+                proxy_url=context.proxy_url,
                 started=True,
                 api_key=api_key,
                 pid=process.pid,
+                ownership_id=ownership_id,
+                health_path=health.path,
+                health_status_code=health.status_code,
                 detail=f"started local proxy sidecar on port {port}",
             )
         time.sleep(0.2)
@@ -507,6 +655,7 @@ def _start_local_sidecar(
         process.kill()
     return ProxyStartup(
         ok=False,
+        proxy_url=context.proxy_url,
         api_key=api_key,
         error=(
             f"timed out waiting for local proxy sidecar to start at {context.proxy_url}"
@@ -546,6 +695,18 @@ def _has_upstream_credentials(env: dict[str, str]) -> bool:
         if value and value.strip():
             return True
     return False
+
+
+def _public_proxy_url(proxy_url: str) -> str:
+    """Remove userinfo, query, and fragment from persisted proxy evidence."""
+    parsed = urlparse(proxy_url)
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = host
+    if parsed.port is not None:
+        netloc = f"{host}:{parsed.port}"
+    return parsed._replace(netloc=netloc, query="", fragment="").geturl()
 
 
 def _model_paths(api_mode: GigaChatApiMode) -> tuple[str, ...]:

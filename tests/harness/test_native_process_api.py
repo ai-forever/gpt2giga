@@ -5,9 +5,13 @@ import time
 from dataclasses import replace
 
 from fastapi.testclient import TestClient
+import pytest
 
+from gpt2giga_harness import proxy
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.native.base import NativeCommandPlan
+from gpt2giga_harness.native.claude import ClaudeNativeHistoryConnector
+from gpt2giga_harness.native.codex import CodexNativeHistoryConnector
 from gpt2giga_harness.native.gemini import GeminiNativeHistoryConnector
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
@@ -22,7 +26,12 @@ from gpt2giga_harness.sessions import (
     FilesystemHarnessSessionStore,
     InMemoryHarnessSessionStore,
 )
-from gpt2giga_harness.types import HarnessContext, HarnessRequest, REDACTED
+from gpt2giga_harness.types import (
+    GigaChatApiMode,
+    HarnessContext,
+    HarnessRequest,
+    REDACTED,
+)
 from gpt2giga_harness.ui.app import create_app
 
 
@@ -367,7 +376,7 @@ def test_native_process_api_legacy_builtin_resume_requires_reviewed_route(tmp_pa
     assert resumed.json()["native_link"]["metadata"]["limitations"] == ["route_unknown"]
 
 
-def test_native_process_api_rejects_snapshot_override(tmp_path):
+def test_native_process_api_rejects_snapshot_override(tmp_path, monkeypatch):
     script = _write_once_cli(tmp_path)
     snapshot = create_execution_snapshot(
         harness_id="codex-cli",
@@ -392,13 +401,28 @@ def test_native_process_api_rejects_snapshot_override(tmp_path):
     native_index.upsert_ref(ref, project_id="proj_native")
     client, store = _client(
         tmp_path,
-        FakeProcessConnector(start_script=script, harness_id="codex-cli"),
+        FakeProcessConnector(
+            start_script=script,
+            harness_id="codex-cli",
+            requires_proxy_preflight=True,
+        ),
         native_index_store=native_index,
     )
     session = store.create_session(
         workspace=str(tmp_path),
         default_harness_id="codex-cli",
     )
+    observed_modes = []
+
+    def successful_preflight(context, api_mode):
+        observed_modes.append(api_mode)
+        return _successful_route_preflight(
+            context.proxy_url,
+            api_mode,
+            api_key="resume-proxy-key",
+        )
+
+    monkeypatch.setattr(proxy, "ensure_proxy_route_available", successful_preflight)
 
     rejected = client.post(
         "/api/native/processes/start",
@@ -420,6 +444,7 @@ def test_native_process_api_rejects_snapshot_override(tmp_path):
     assert resumed.json()["run"]["api_mode"] == "v1"
     assert resumed.json()["run"]["model"] == "PinnedModel"
     assert resumed.json()["run"]["mode"] == "read"
+    assert observed_modes == [GigaChatApiMode.V1]
 
 
 def test_native_process_api_redacts_start_output_and_events(tmp_path):
@@ -466,7 +491,222 @@ def test_native_process_api_redacts_start_output_and_events(tmp_path):
     assert REDACTED in str(store.list_events(session.id))
 
 
-def test_gemini_native_api_delivers_prompt_once_and_persists_outcome(tmp_path):
+def test_native_proxy_preflight_failure_prevents_plan_and_process_start(
+    tmp_path,
+    monkeypatch,
+):
+    marker = tmp_path / "spawned"
+    script = tmp_path / "must_not_run.py"
+    script.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n",
+        encoding="utf-8",
+    )
+    connector = FakeProcessConnector(
+        start_script=script,
+        requires_proxy_preflight=True,
+    )
+    client, store = _client(tmp_path, connector)
+    session = store.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="fake-cli",
+    )
+    monkeypatch.setattr(
+        proxy,
+        "ensure_proxy_route_available",
+        lambda context, api_mode: proxy.ProxyRoutePreflight(
+            ok=False,
+            proxy_url=context.proxy_url,
+            api_mode=api_mode,
+            route_path=f"/{api_mode.value}/models",
+            startup=proxy.ProxyStartup(ok=False, proxy_url=context.proxy_url),
+            error="selected native proxy route is unavailable",
+        ),
+    )
+
+    response = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "prompt": "Inspect",
+            "api_mode": "v1",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 400
+    assert "proxy route is unavailable" in response.json()["detail"]
+    assert marker.exists() is False
+    assert store.list_runs(session.id) == ()
+
+
+def test_native_spawn_failure_stops_new_owned_sidecar(tmp_path, monkeypatch):
+    missing_script = tmp_path / "missing-native-cli"
+
+    class MissingExecutableConnector(FakeProcessConnector):
+        def build_start_command(self, request, context):
+            del context
+            return NativeCommandPlan(
+                command=(str(self.start_script),),
+                env=_python_env(),
+                cwd=request.workspace,
+                metadata={"harness_id": self.harness_id},
+            )
+
+    connector = MissingExecutableConnector(
+        start_script=missing_script,
+        requires_proxy_preflight=True,
+    )
+    client, store = _client(tmp_path, connector)
+    session = store.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="fake-cli",
+    )
+    startup = proxy.ProxyStartup(
+        ok=True,
+        proxy_url="http://127.0.0.1:8090",
+        started=True,
+        api_key="owned-proxy-key",
+        pid=4321,
+        ownership_id="owner-native-1",
+        health_path="/health",
+        health_status_code=200,
+    )
+    stopped = []
+    monkeypatch.setattr(
+        proxy,
+        "ensure_proxy_route_available",
+        lambda context, api_mode: proxy.ProxyRoutePreflight(
+            ok=True,
+            proxy_url=context.proxy_url,
+            api_mode=api_mode,
+            route_path=f"/{api_mode.value}/models",
+            startup=startup,
+            status_code=200,
+        ),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "stop_owned_sidecar",
+        lambda candidate: stopped.append(candidate) or True,
+    )
+
+    response = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 400
+    assert stopped == [startup]
+    (run,) = store.list_runs(session.id)
+    assert run.status == "failed"
+    assert run.metadata["proxy_preflight"]["ownership"] == "owned"
+
+
+@pytest.mark.parametrize(
+    ("harness_id", "api_mode", "proxy_env", "base_url_env"),
+    [
+        ("codex-cli", "v1", "GPT2GIGA_API_KEY", None),
+        ("claude-code", "v2", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"),
+        ("gemini-cli", "v1", "GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"),
+    ],
+)
+def test_builtin_native_preflight_passes_only_local_proxy_key(
+    tmp_path,
+    monkeypatch,
+    harness_id,
+    api_mode,
+    proxy_env,
+    base_url_env,
+):
+    capture_path = tmp_path / f"{harness_id}-env.json"
+    executable = _write_env_capture_cli(tmp_path, harness_id, capture_path)
+    data_dir = tmp_path / "data"
+    if harness_id == "codex-cli":
+        connector = CodexNativeHistoryConnector(
+            data_dir=data_dir,
+            executable=str(executable),
+        )
+    elif harness_id == "claude-code":
+        connector = ClaudeNativeHistoryConnector(
+            data_dir=data_dir,
+            executable=str(executable),
+        )
+    else:
+        connector = GeminiNativeHistoryConnector(
+            data_dir=data_dir,
+            executable=str(executable),
+            capability_probe_runner=_supported_gemini_probe,
+        )
+    local_proxy_key = "native-local-proxy-key"
+    observed_modes = []
+
+    def successful_preflight(context, selected_mode):
+        observed_modes.append(selected_mode)
+        return _successful_route_preflight(
+            context.proxy_url,
+            selected_mode,
+            api_key=local_proxy_key,
+        )
+
+    monkeypatch.setenv("GIGACHAT_CREDENTIALS", "upstream-secret-must-not-cross")
+    monkeypatch.setattr(proxy, "ensure_proxy_route_available", successful_preflight)
+    client, store = _client(
+        tmp_path,
+        connector,
+        config=HarnessConfig(data_dir=str(data_dir)),
+    )
+    session = store.create_session(
+        workspace=str(tmp_path),
+        default_harness_id=harness_id,
+    )
+
+    response = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": harness_id,
+            "prompt": "Inspect",
+            "api_mode": api_mode,
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    _wait_for_process_status(client, body["process"]["id"], {"succeeded"})
+    captured_env = json.loads(capture_path.read_text(encoding="utf-8"))
+    assert observed_modes == [GigaChatApiMode(api_mode)]
+    assert captured_env[proxy_env] == local_proxy_key
+    assert "GIGACHAT_CREDENTIALS" not in captured_env
+    if base_url_env is not None:
+        assert captured_env[base_url_env] == f"http://127.0.0.1:8090/{api_mode}"
+    assert local_proxy_key not in str(body)
+    assert body["run"]["metadata"]["proxy_preflight"] == {
+        "ok": True,
+        "proxy_url": "http://127.0.0.1:8090",
+        "api_mode": api_mode,
+        "route_path": f"/{api_mode}/models",
+        "route_status_code": 200,
+        "health_path": "/health",
+        "health_status_code": 200,
+        "auth": "configured",
+        "ownership": "external",
+        "sidecar_pid": None,
+        "ownership_id": None,
+        "detail": "route ready",
+        "error": None,
+    }
+
+
+def test_gemini_native_api_delivers_prompt_once_and_persists_outcome(
+    tmp_path,
+    monkeypatch,
+):
     secret = "native-gemini-prompt-secret"
     capture_path = tmp_path / "captured-prompts.jsonl"
     script = _write_gemini_argv_cli(tmp_path, capture_path)
@@ -481,6 +721,15 @@ def test_gemini_native_api_delivers_prompt_once_and_persists_outcome(tmp_path):
         api_key=secret,
         default_model="ConfiguredModel",
         data_dir=str(data_dir),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "ensure_proxy_route_available",
+        lambda context, api_mode: _successful_route_preflight(
+            context.proxy_url,
+            api_mode,
+            api_key=secret,
+        ),
     )
     client, _ = _client(tmp_path, connector, config=config, store=store)
     session = store.create_session(
@@ -550,13 +799,24 @@ def test_gemini_native_api_delivers_prompt_once_and_persists_outcome(tmp_path):
     assert len(capture_path.read_text(encoding="utf-8").splitlines()) == 1
 
 
-def test_gemini_native_api_persists_failed_prompt_delivery_on_spawn_error(tmp_path):
+def test_gemini_native_api_persists_failed_prompt_delivery_on_spawn_error(
+    tmp_path,
+    monkeypatch,
+):
     data_dir = tmp_path / "data"
     store = FilesystemHarnessSessionStore(data_dir)
     connector = GeminiNativeHistoryConnector(
         data_dir=data_dir,
         executable=str(tmp_path / "missing-gemini"),
         capability_probe_runner=_supported_gemini_probe,
+    )
+    monkeypatch.setattr(
+        proxy,
+        "ensure_proxy_route_available",
+        lambda context, api_mode: _successful_route_preflight(
+            context.proxy_url,
+            api_mode,
+        ),
     )
     client, _ = _client(
         tmp_path,
@@ -599,12 +859,14 @@ class FakeProcessConnector:
         pass_context_api_key: bool = False,
         native_session_id: str | None = None,
         harness_id: str = "fake-cli",
+        requires_proxy_preflight: bool = False,
     ) -> None:
         self.harness_id = harness_id
         self.start_script = start_script
         self.resume_script = resume_script or start_script
         self.pass_context_api_key = pass_context_api_key
         self.native_session_id = native_session_id
+        self.requires_proxy_preflight = requires_proxy_preflight
 
     def discover(self, *, workspace, include_external):
         return ()
@@ -720,6 +982,40 @@ def _write_gemini_argv_cli(tmp_path, capture_path):
     )
     script.chmod(0o755)
     return script
+
+
+def _write_env_capture_cli(tmp_path, harness_id, capture_path):
+    script = tmp_path / f"fake-{harness_id}"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "import os\n"
+        "import pathlib\n"
+        f"path = pathlib.Path({str(capture_path)!r})\n"
+        "path.write_text(json.dumps(dict(os.environ)), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+def _successful_route_preflight(proxy_url, api_mode, *, api_key=None):
+    return proxy.ProxyRoutePreflight(
+        ok=True,
+        proxy_url=proxy_url,
+        api_mode=api_mode,
+        route_path=f"/{api_mode.value}/models",
+        startup=proxy.ProxyStartup(
+            ok=True,
+            proxy_url=proxy_url,
+            api_key=api_key,
+            health_path="/health",
+            health_status_code=200,
+            detail="external proxy",
+        ),
+        status_code=200,
+        detail="route ready",
+    )
 
 
 def _supported_gemini_probe(command, env, cwd):

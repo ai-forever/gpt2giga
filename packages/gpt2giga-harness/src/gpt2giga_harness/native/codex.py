@@ -44,6 +44,7 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
     """Discover Codex native sessions and plan native commands."""
 
     harness_id = CODEX_HARNESS_ID
+    requires_proxy_preflight = True
 
     def __init__(
         self,

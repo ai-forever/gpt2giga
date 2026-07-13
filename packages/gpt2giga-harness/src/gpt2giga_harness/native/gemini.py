@@ -47,6 +47,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
     """Discover Gemini CLI native sessions and plan native commands."""
 
     harness_id = GEMINI_HARNESS_ID
+    requires_proxy_preflight = True
 
     def __init__(
         self,

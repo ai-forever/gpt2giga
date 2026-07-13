@@ -1722,6 +1722,18 @@ the Harness does not silently replace an unknown original route with `/v2`.
 Any route, model, home, workspace, project, or harness identity that contradicts
 a known snapshot is rejected before the native CLI starts.
 
+Managed Codex, Claude Code, and Gemini native start and resume now run a
+route-aware proxy preflight before spawning the CLI. The Harness first checks
+proxy health, then requires the exact selected `GET /v1/models` or
+`GET /v2/models` route to accept the configured local proxy key. An
+auth-enabled existing proxy without `GPT2GIGA_HARNESS_API_KEY`, an unreachable
+route, or a disallowed remote auto-start fails before spawn. A newly auto-started
+loopback sidecar is marked as Harness-owned in redaction-safe plan evidence and
+is stopped if native process startup fails before handoff; an existing proxy is
+marked external and is never stopped. The generated sidecar key is passed
+directly to the CLI startup context and is not recovered from the UI process's
+temporary key cache.
+
 Gemini native starts capability-probe the installed CLI for
 `--prompt-interactive`. When supported, the composed prompt and rendered
 attachment references are passed in that one interactive invocation, without

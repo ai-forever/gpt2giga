@@ -299,6 +299,17 @@ permission mode и hash управляемой tool-конфигурации. Э
 исходный route больше не подменяется молча на `/v2`. Противоречащие snapshot
 route, model, home, workspace, project или harness блокируются до запуска CLI.
 
+Управляемые native start и resume для Codex, Claude Code и Gemini выполняют
+route-aware proxy preflight до spawn CLI. Harness сначала проверяет health, затем
+требует, чтобы точный выбранный route `GET /v1/models` или `GET /v2/models`
+принял настроенный локальный proxy key. Недоступный route, auth-enabled внешний
+proxy без `GPT2GIGA_HARNESS_API_KEY` и запрещённый remote auto-start завершаются
+явной ошибкой до spawn. Новый loopback sidecar помечается как Harness-owned в
+безопасном plan evidence и останавливается при ошибке native startup до handoff;
+существующий proxy помечается external и никогда не останавливается. Созданный
+sidecar key передаётся напрямую в startup context CLI, а не восстанавливается из
+временного key cache UI-процесса.
+
 Перед новым Gemini native-запуском Harness проверяет поддержку
 `--prompt-interactive` установленной версией CLI. Если flag доступен, составной
 prompt вместе с отрендеренными ссылками на attachments передаётся ровно в одном

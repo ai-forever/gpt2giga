@@ -72,6 +72,7 @@ class NativeHistoryConnector(Protocol):
     """Connector interface for harness-specific native session behavior."""
 
     harness_id: str
+    requires_proxy_preflight: bool
 
     def discover(
         self,

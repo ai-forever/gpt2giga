@@ -1239,6 +1239,7 @@ def create_app(
     ) -> dict[str, Any]:
         run = None
         process_ref = None
+        options = None
         try:
             session = store.get_session(
                 _required_text(payload.get("session_id"), "session_id is required")
@@ -1340,6 +1341,10 @@ def create_app(
         except HTTPException:
             raise
         except (NativeProcessStartError, ValueError) as exc:
+            if isinstance(options, Mapping):
+                route_preflight = options.get("proxy_route_preflight")
+                if isinstance(route_preflight, proxy.ProxyRoutePreflight):
+                    proxy.stop_owned_sidecar(route_preflight.startup)
             if run is not None:
                 store.update_run(
                     run.id,
@@ -2815,8 +2820,39 @@ def _native_process_new_options(
         attachment_render_plan=attachment_render_plan_payload,
         extra=extra,
     )
-    plan = connector.build_start_command(request, config.to_context())
-    _reject_duplicate_native_prompt_delivery(store, session.id, plan.prompt_delivery)
+    context = config.to_context()
+    route_preflight = None
+    if bool(getattr(connector, "requires_proxy_preflight", False)):
+        route_preflight = proxy.ensure_proxy_route_available(context, api_mode)
+        if not route_preflight.ok:
+            raise NativeProcessStartError(
+                route_preflight.error or "Native proxy preflight failed"
+            )
+        context = replace(
+            context,
+            api_key=route_preflight.api_key or context.api_key,
+        )
+    try:
+        plan = connector.build_start_command(request, context)
+        if route_preflight is not None:
+            plan = replace(
+                plan,
+                metadata={
+                    **dict(plan.metadata),
+                    "proxy_preflight": proxy.proxy_route_preflight_to_dict(
+                        route_preflight
+                    ),
+                },
+            )
+        _reject_duplicate_native_prompt_delivery(
+            store,
+            session.id,
+            plan.prompt_delivery,
+        )
+    except (OSError, ValueError):
+        if route_preflight is not None:
+            proxy.stop_owned_sidecar(route_preflight.startup)
+        raise
     native_session_id = _native_session_id_from_plan(plan)
     return {
         "action": "start",
@@ -2835,6 +2871,7 @@ def _native_process_new_options(
         "attachments": attachment_payloads,
         "attachment_render_plan": attachment_render_plan_payload,
         "preflight": preflight_payload,
+        "proxy_route_preflight": route_preflight,
     }
 
 
@@ -2870,7 +2907,6 @@ def _native_process_resume_options(
     )
     snapshot = ref.execution_snapshot
     _reject_resume_snapshot_overrides(payload, snapshot)
-    plan = connector.build_resume_command(ref, config.to_context())
     api_mode = parse_api_mode(
         snapshot.api_mode
         if snapshot is not None
@@ -2886,6 +2922,32 @@ def _native_process_resume_options(
         or ref.workspace
         or session.workspace
     )
+    context = config.to_context()
+    route_preflight = None
+    if bool(getattr(connector, "requires_proxy_preflight", False)):
+        route_preflight = proxy.ensure_proxy_route_available(context, api_mode)
+        if not route_preflight.ok:
+            raise NativeProcessStartError(
+                route_preflight.error or "Native proxy preflight failed"
+            )
+        context = replace(
+            context,
+            api_key=route_preflight.api_key or context.api_key,
+        )
+    try:
+        plan = connector.build_resume_command(ref, context)
+    except (OSError, ValueError):
+        if route_preflight is not None:
+            proxy.stop_owned_sidecar(route_preflight.startup)
+        raise
+    if route_preflight is not None:
+        plan = replace(
+            plan,
+            metadata={
+                **dict(plan.metadata),
+                "proxy_preflight": proxy.proxy_route_preflight_to_dict(route_preflight),
+            },
+        )
     prompt = (
         _optional_text(payload.get("prompt")) or f"Resume native session: {ref.title}"
     )
@@ -2915,6 +2977,7 @@ def _native_process_resume_options(
         "attachments": (),
         "attachment_render_plan": None,
         "connector": connector,
+        "proxy_route_preflight": route_preflight,
     }
 
 
@@ -2979,6 +3042,11 @@ def _native_process_run_metadata(
     preflight = options.get("preflight")
     if isinstance(preflight, Mapping):
         metadata["preflight"] = dict(preflight)
+    route_preflight = options.get("proxy_route_preflight")
+    if isinstance(route_preflight, proxy.ProxyRoutePreflight):
+        metadata["proxy_preflight"] = proxy.proxy_route_preflight_to_dict(
+            route_preflight
+        )
     return metadata
 
 
