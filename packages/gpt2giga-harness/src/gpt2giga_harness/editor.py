@@ -11,6 +11,11 @@ import sys
 from typing import Any, Mapping
 
 from gpt2giga_harness.sessions.models import HarnessRun
+from gpt2giga_harness.safe_paths import (
+    PathBoundaryError,
+    resolve_operator_path,
+    resolve_path_within,
+)
 
 DEFAULT_EDITOR_COMMAND = "code"
 DEFAULT_TERMINAL_COMMAND = "auto"
@@ -132,7 +137,7 @@ def build_open_workspace_plan(
     command: str | None = None,
 ) -> EditorOpenPlan:
     """Build an editor plan that opens a workspace directory."""
-    path = Path(workspace).expanduser().resolve()
+    path = resolve_operator_path(workspace)
     if not path.exists() or not path.is_dir():
         raise EditorOpenError(f"Workspace does not exist: {path}")
     command_parts = (*parse_editor_command(command), str(path))
@@ -153,7 +158,7 @@ def build_open_file_plan(
     column: int | None = None,
 ) -> EditorOpenPlan:
     """Build an editor plan that opens a file inside a workspace."""
-    root = Path(workspace).expanduser().resolve()
+    root = resolve_operator_path(workspace)
     if not root.exists() or not root.is_dir():
         raise EditorOpenError(f"Workspace does not exist: {root}")
     target = _resolve_inside(root, file_path)
@@ -191,7 +196,7 @@ def build_open_terminal_plan(
     command: str | None = None,
 ) -> EditorOpenPlan:
     """Build a shell-free plan that opens a terminal in a workspace."""
-    path = Path(workspace).expanduser().resolve()
+    path = resolve_operator_path(workspace)
     if not path.exists() or not path.is_dir():
         raise EditorOpenError(f"Workspace does not exist: {path}")
     command_parts = _terminal_command_for_workspace(
@@ -297,15 +302,10 @@ def _plan(
 
 
 def _resolve_inside(root: Path, value: str | Path) -> Path:
-    candidate = Path(value).expanduser()
-    path = (
-        candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
-    )
     try:
-        path.relative_to(root)
-    except ValueError as exc:
+        return resolve_path_within(root, value)
+    except PathBoundaryError as exc:
         raise EditorOpenError("Editor target must stay inside the workspace.") from exc
-    return path
 
 
 def _target_arg_for_editor(

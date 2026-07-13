@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import os
 from pathlib import Path
 import tempfile
 
@@ -11,6 +12,11 @@ from fastapi.responses import FileResponse
 
 from gpt2giga_harness.attachments.limits import AttachmentLimits, is_denied_path
 from gpt2giga_harness.generated_files import GeneratedFileError, generated_file_path
+from gpt2giga_harness.safe_paths import (
+    PathBoundaryError,
+    resolve_operator_path,
+    resolve_path_within,
+)
 
 _MAX_PREVIEW_BYTES = 25 * 1024 * 1024
 _SAFE_IMAGE_TYPES = frozenset(
@@ -114,11 +120,16 @@ def create_file_preview_router(data_dir: str | None = None) -> APIRouter:
 
 def _resolve_preview_path(path: str, workspace: str | None) -> tuple[Path, Path]:
     workspace_root = _directory_root(workspace) if workspace else None
-    requested = Path(path).expanduser()
-    if requested.is_absolute():
-        resolved = requested.resolve()
+    if os.path.isabs(path):
+        resolved = resolve_operator_path(path)
     elif workspace_root is not None:
-        resolved = (workspace_root / requested).resolve()
+        try:
+            resolved = resolve_path_within(workspace_root, path)
+        except PathBoundaryError as exc:
+            raise HTTPException(
+                status_code=403,
+                detail="File is outside the workspace and temporary directories",
+            ) from exc
     else:
         raise HTTPException(
             status_code=400,
@@ -141,7 +152,7 @@ def _directory_root(value: str) -> Path:
     # A browser session is same-principal operator access: this root is the
     # operator-selected authority boundary, while _resolve_preview_path prevents
     # a requested child path from escaping it through traversal or symlinks.
-    root = Path(value).expanduser().resolve()
+    root = resolve_operator_path(value)
     if not root.exists() or not root.is_dir():
         raise HTTPException(status_code=400, detail="Workspace is not a directory")
     return root

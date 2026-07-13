@@ -11,6 +11,11 @@ import tempfile
 from typing import Callable, Generic, TypeVar
 
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
+from gpt2giga_harness.safe_paths import (
+    PathBoundaryError,
+    resolve_operator_path,
+    resolve_path_within,
+)
 from gpt2giga_harness.types import redact_secrets
 
 
@@ -36,7 +41,7 @@ class ProjectAuthoringService:
     """Draft and atomically apply validated files below one project root."""
 
     def __init__(self, project_root: str | Path) -> None:
-        self.root = Path(project_root).expanduser().resolve()
+        self.root = resolve_operator_path(project_root)
 
     def draft(
         self,
@@ -95,12 +100,10 @@ class ProjectAuthoringService:
         candidate = Path(relative_path)
         if candidate.is_absolute():
             raise ValueError("Project authoring paths must be relative")
-        path = (self.root / candidate).resolve()
         try:
-            path.relative_to(self.root)
-        except ValueError as exc:
+            return resolve_path_within(self.root, candidate)
+        except PathBoundaryError as exc:
             raise ValueError("Project authoring path escapes the project root") from exc
-        return path
 
     def _relative(self, path: Path) -> str:
         return path.relative_to(self.root).as_posix()

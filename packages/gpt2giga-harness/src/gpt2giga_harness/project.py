@@ -16,6 +16,7 @@ from gpt2giga_harness.native.models import (
     HarnessInvocationMode,
     parse_invocation_mode,
 )
+from gpt2giga_harness.safe_paths import resolve_operator_path
 from gpt2giga_harness.types import (
     SECRET_ENV_NAMES,
     SECRET_KEY_PARTS,
@@ -700,10 +701,9 @@ def project_state_from_dict(data: Mapping[str, Any]) -> HarnessProjectState:
 
 def _resolve_workspace_path(workspace: str | Path | None) -> Path:
     if workspace is None:
-        path = Path.cwd()
+        resolved = Path.cwd()
     else:
-        path = Path(workspace).expanduser()
-    resolved = path.resolve()
+        resolved = resolve_operator_path(workspace)
     if resolved.is_file():
         return resolved.parent
     return resolved

@@ -12,6 +12,7 @@ import yaml
 
 from gpt2giga_harness.authoring import ProjectAuthoringService, ProjectFileDraft
 from gpt2giga_harness.runtime.policy import permission_profile
+from gpt2giga_harness.safe_paths import resolve_operator_path, resolve_path_within
 from gpt2giga_harness.types import parse_api_mode, redact_secrets
 
 
@@ -206,7 +207,7 @@ def discover_agent_profiles(
     project_root: str | Path,
 ) -> tuple[tuple[AgentProfile, ...], tuple[AgentProfileLoadError, ...]]:
     """Load all project profiles while reporting invalid files independently."""
-    root = Path(project_root).resolve()
+    root = resolve_operator_path(project_root)
     directory = root / AGENT_DIRECTORY
     profiles: list[AgentProfile] = []
     errors: list[AgentProfileLoadError] = []
@@ -228,13 +229,14 @@ def load_agent_profile(project_root: str | Path, agent_id: str) -> AgentProfile:
     """Load one profile by safe id."""
     if not AGENT_ID_PATTERN.fullmatch(agent_id):
         raise KeyError(agent_id)
-    path = Path(project_root).resolve() / AGENT_DIRECTORY / f"{agent_id}.yaml"
+    root = resolve_operator_path(project_root)
+    path = resolve_path_within(root, AGENT_DIRECTORY / f"{agent_id}.yaml")
     try:
         content = path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
         raise KeyError(agent_id) from exc
     profile = parse_agent_profile(
-        content, source_path=path.relative_to(Path(project_root).resolve()).as_posix()
+        content, source_path=path.relative_to(root).as_posix()
     )
     if profile.id != agent_id:
         raise ValueError("Agent filename must match its id")

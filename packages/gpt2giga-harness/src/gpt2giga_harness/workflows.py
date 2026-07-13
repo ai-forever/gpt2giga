@@ -37,6 +37,7 @@ from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import title_from_prompt, utc_now
+from gpt2giga_harness.safe_paths import resolve_operator_path, resolve_path_within
 from gpt2giga_harness.worktrees import (
     WorktreeError,
     apply_run_diff,
@@ -254,7 +255,7 @@ def discover_workflows(
     project_root: str | Path,
 ) -> tuple[tuple[WorkflowDefinition, ...], tuple[WorkflowLoadError, ...]]:
     """Discover project workflows without hiding independent parse failures."""
-    root = Path(project_root).resolve()
+    root = resolve_operator_path(project_root)
     directory = root / WORKFLOW_DIRECTORY
     definitions: list[WorkflowDefinition] = []
     errors: list[WorkflowLoadError] = []
@@ -277,8 +278,8 @@ def discover_workflows(
 def load_workflow(project_root: str | Path, workflow_id: str) -> WorkflowDefinition:
     """Load one safe project workflow id."""
     safe_id = _safe_id(workflow_id, "workflow id")
-    root = Path(project_root).resolve()
-    path = root / WORKFLOW_DIRECTORY / f"{safe_id}.yaml"
+    root = resolve_operator_path(project_root)
+    path = resolve_path_within(root, WORKFLOW_DIRECTORY / f"{safe_id}.yaml")
     try:
         definition = parse_workflow_definition(
             path.read_text(encoding="utf-8"),

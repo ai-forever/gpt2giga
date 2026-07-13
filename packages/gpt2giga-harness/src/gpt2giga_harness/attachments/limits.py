@@ -9,6 +9,11 @@ import subprocess
 from typing import Any
 
 from gpt2giga_harness.project import DEFAULT_ATTACHMENT_IGNORE
+from gpt2giga_harness.safe_paths import (
+    PathBoundaryError,
+    resolve_operator_path,
+    resolve_path_within,
+)
 
 DEFAULT_MAX_FILE_BYTES = 25 * 1024 * 1024
 DEFAULT_MAX_TOTAL_BYTES_PER_RUN = 100 * 1024 * 1024
@@ -86,12 +91,13 @@ def normalize_workspace_file(
     limits: AttachmentLimits,
 ) -> tuple[Path, str]:
     """Resolve a workspace file reference and return absolute/relative paths."""
-    root = Path(workspace_root).expanduser().resolve()
-    raw_path = Path(requested_path).expanduser()
-    absolute = raw_path if raw_path.is_absolute() else root / raw_path
-    resolved = absolute.resolve()
-    if not _is_relative_to(resolved, root):
-        raise AttachmentValidationError("Workspace attachment path escapes workspace")
+    root = resolve_operator_path(workspace_root)
+    try:
+        resolved = resolve_path_within(root, requested_path)
+    except PathBoundaryError as exc:
+        raise AttachmentValidationError(
+            "Workspace attachment path escapes workspace"
+        ) from exc
     if not resolved.exists():
         raise AttachmentValidationError("Workspace attachment does not exist")
     if not resolved.is_file():
@@ -162,14 +168,6 @@ def is_git_ignored(workspace_root: Path, relative_path: str) -> bool:
 
 def _deny_patterns(limits: AttachmentLimits) -> tuple[str, ...]:
     return tuple(dict.fromkeys((*limits.ignore, *SECRET_ATTACHMENT_PATTERNS)))
-
-
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True
 
 
 def _mb_to_bytes(value: Any) -> int:
