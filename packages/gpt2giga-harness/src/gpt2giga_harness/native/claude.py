@@ -17,6 +17,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     cli_args_from_attachments,
     prompt_with_attachments,
 )
+from gpt2giga_harness.harnesses.claude_code import claude_code_custom_headers
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
     NativeHistoryConnector,
@@ -164,7 +165,12 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         prompt = prompt_with_attachments(request).strip()
         if prompt:
             command.append(prompt)
-        env = _claude_env(context, api_mode=request.api_mode, native_home=native_home)
+        env = _claude_env(
+            context,
+            api_mode=request.api_mode,
+            native_home=native_home,
+            model=model,
+        )
         snapshot = create_execution_snapshot(
             harness_id=self.harness_id,
             api_mode=request.api_mode.value,
@@ -218,7 +224,12 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
             native_home,
             workspace=snapshot.effective_workspace or ref.workspace,
         )
-        env = _claude_env(context, api_mode=api_mode, native_home=native_home)
+        env = _claude_env(
+            context,
+            api_mode=api_mode,
+            native_home=native_home,
+            model=snapshot.model,
+        )
         permission_mode = MODE_TO_PERMISSION.get(
             snapshot.permission_mode,
             MODE_TO_PERMISSION["plan"],
@@ -729,16 +740,23 @@ def _claude_env(
     *,
     api_mode: GigaChatApiMode,
     native_home: Path,
+    model: str | None,
 ) -> dict[str, str]:
+    extra = {
+        "ANTHROPIC_BASE_URL": context.api_base_url(api_mode),
+        "ANTHROPIC_AUTH_TOKEN": context.api_key or "0",
+        "GPT2GIGA_HARNESS_PROXY_URL": context.proxy_url,
+        "GPT2GIGA_HARNESS_API_MODE": api_mode.value,
+    }
+    if model is not None:
+        extra["ANTHROPIC_CUSTOM_HEADERS"] = claude_code_custom_headers(
+            context,
+            model,
+        )
     return build_safe_env(
         context,
         home=str(native_home),
-        extra={
-            "ANTHROPIC_BASE_URL": context.api_base_url(api_mode),
-            "ANTHROPIC_AUTH_TOKEN": context.api_key or "0",
-            "GPT2GIGA_HARNESS_PROXY_URL": context.proxy_url,
-            "GPT2GIGA_HARNESS_API_MODE": api_mode.value,
-        },
+        extra=extra,
     )
 
 

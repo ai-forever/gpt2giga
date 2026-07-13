@@ -1,6 +1,7 @@
 """Anthropic message endpoints."""
 
-from typing import Dict, List
+from typing import Any, Dict, List
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -47,6 +48,40 @@ from gpt2giga.sinks.observability.anthropic import (
 )
 
 router = APIRouter(tags=[OPENAPI_TAG_ANTHROPIC_MESSAGES])
+HARNESS_MODEL_HEADER = "x-gpt2giga-harness-model"
+PASS_MODEL_HEADER = "x-gpt2giga-pass-model"
+MAX_MODEL_LENGTH = 256
+
+
+def _claude_cli_harness_model(request: Request) -> str | None:
+    """Return the Harness-pinned model for an explicit Claude CLI request."""
+    user_agent = request.headers.get("user-agent", "").strip().lower()
+    if not user_agent.startswith("claude-cli/"):
+        return None
+    if request.headers.get(PASS_MODEL_HEADER, "").strip().lower() != "false":
+        return None
+    encoded_model = request.headers.get(HARNESS_MODEL_HEADER)
+    if not encoded_model:
+        return None
+    model = unquote(encoded_model).strip()
+    if not model or len(model) > MAX_MODEL_LENGTH:
+        return None
+    if any(ord(character) < 32 or ord(character) == 127 for character in model):
+        return None
+    return model
+
+
+def _force_harness_model(payload: Any, model: str | None) -> Any:
+    """Apply a trusted request-scoped model after global pass-model handling."""
+    if model is None:
+        return payload
+    if isinstance(payload, dict):
+        return {**payload, "model": model}
+    model_copy = getattr(payload, "model_copy", None)
+    if callable(model_copy):
+        return model_copy(update={"model": model})
+    setattr(payload, "model", model)
+    return payload
 
 
 @router.post(
@@ -59,7 +94,7 @@ async def count_tokens(request: Request):
     request_options = extract_gigachat_request_options(request, dict(data))
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
-    model = data.get("model", "unknown")
+    model = _claude_cli_harness_model(request) or data.get("model", "unknown")
 
     openai_messages = _convert_anthropic_messages_to_openai(
         data.get("system"), data.get("messages", [])
@@ -85,6 +120,7 @@ async def count_tokens(request: Request):
 async def messages(request: Request):
     """Anthropic Messages API compatible endpoint."""
     data = await read_request_json(request)
+    pinned_model = _claude_cli_harness_model(request)
     request_options = extract_gigachat_request_options(request, data)
     stream = data.get("stream", False)
     current_rquid = rquid_context.get()
@@ -118,6 +154,7 @@ async def messages(request: Request):
             chat_request = await state.request_transformer.prepare_chat_completion(
                 openai_data, giga_client
             )
+        chat_request = _force_harness_model(chat_request, pinned_model)
         effective_model = resolve_gigachat_model(chat_request, state.config)
         update_request_context(model_effective=effective_model)
         if not stream:
@@ -173,6 +210,7 @@ async def messages(request: Request):
         chat_messages = await state.request_transformer.prepare_chat(
             openai_data, giga_client
         )
+    chat_messages = _force_harness_model(chat_messages, pinned_model)
     effective_model = resolve_gigachat_model(chat_messages, state.config)
     update_request_context(model_effective=effective_model)
 

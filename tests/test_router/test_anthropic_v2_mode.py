@@ -309,6 +309,31 @@ def test_anthropic_messages_v2_mode_uses_chat_completion_create():
     ]
 
 
+def test_anthropic_messages_v2_pins_claude_cli_harness_model():
+    app = make_app("v2", pass_model=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages",
+        json={
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={
+            "user-agent": "claude-cli/2.1.197 (external, sdk-cli)",
+            "x-gpt2giga-harness-model": "GigaChat-Selected",
+            "x-gpt2giga-pass-model": "false",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["model"] == "claude-haiku-4-5-20251001"
+    assert app.state.gigachat_client.achat.chat_completion_calls == [
+        {"contract": "anthropic-v2", "model": "GigaChat-Selected"}
+    ]
+
+
 def test_anthropic_messages_v2_mode_passes_builtin_tools_to_transformer():
     app = make_app("v2")
     client = TestClient(app)

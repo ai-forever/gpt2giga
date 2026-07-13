@@ -292,6 +292,9 @@ def test_claude_native_start_command_uses_managed_home_and_redacts_key(
     assert "GIGACHAT_CREDENTIALS" not in plan.env
     assert plan.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v1"
     assert plan.env["ANTHROPIC_AUTH_TOKEN"] == secret
+    assert plan.env["ANTHROPIC_CUSTOM_HEADERS"] == (
+        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max\nX-GPT2GIGA-Pass-Model:false"
+    )
     assert "ANTHROPIC_API_KEY" not in plan.env
     assert plan.env["HOME"] == plan.native_home
     assert secret not in str(payload)
@@ -417,6 +420,9 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
     assert plan.execution_snapshot == start_plan.execution_snapshot
     assert plan.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v1"
     assert plan.env["ANTHROPIC_AUTH_TOKEN"] == "proxy-key"
+    assert plan.env["ANTHROPIC_CUSTOM_HEADERS"] == (
+        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max\nX-GPT2GIGA-Pass-Model:false"
+    )
     with pytest.raises(ValueError, match="Only managed"):
         connector.build_resume_command(external, context)
 

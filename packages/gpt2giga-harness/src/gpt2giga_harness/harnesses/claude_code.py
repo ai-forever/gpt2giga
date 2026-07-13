@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import quote
 
 from gpt2giga_harness.harnesses.agent_cli import (
     StreamTerminalOutcome,
@@ -47,6 +48,25 @@ MODE_TO_PERMISSION = {
     "read": "plan",
     "edit": "default",
 }
+HARNESS_MODEL_HEADER = "X-GPT2GIGA-Harness-Model"
+PASS_MODEL_HEADER = "X-GPT2GIGA-Pass-Model"
+
+
+def claude_code_custom_headers(
+    context: HarnessContext,
+    model: str,
+) -> str:
+    """Pin all Claude Code requests to the Harness-selected model."""
+    harness_headers = "\n".join(
+        (
+            f"{HARNESS_MODEL_HEADER}:{quote(model, safe='')}",
+            f"{PASS_MODEL_HEADER}:false",
+        )
+    )
+    existing_headers = context.extra_env.get("ANTHROPIC_CUSTOM_HEADERS")
+    if existing_headers:
+        return f"{existing_headers.rstrip()}\n{harness_headers}"
+    return harness_headers
 
 
 class ClaudeCodeHarness(BaseHarness):
@@ -149,12 +169,17 @@ class ClaudeCodeHarness(BaseHarness):
         home: str | None = None,
     ) -> dict[str, str]:
         """Build a sanitized environment for Claude Code."""
+        model = request.model or context.default_model or "GigaChat"
         return build_safe_env(
             context,
             home=home,
             extra={
                 "ANTHROPIC_BASE_URL": context.api_base_url(request.api_mode),
                 "ANTHROPIC_API_KEY": context.api_key or "0",
+                "ANTHROPIC_CUSTOM_HEADERS": claude_code_custom_headers(
+                    context,
+                    model,
+                ),
                 "GPT2GIGA_HARNESS_PROXY_URL": context.proxy_url,
                 "GPT2GIGA_HARNESS_API_MODE": request.api_mode.value,
             },
