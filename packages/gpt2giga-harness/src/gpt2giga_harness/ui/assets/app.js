@@ -3911,6 +3911,51 @@
         || null;
     }
 
+    function queuedHeadlessTurns(bundle = state.currentBundle) {
+      const runs = bundle && Array.isArray(bundle.runs) ? bundle.runs : [];
+      const messages = bundle && Array.isArray(bundle.messages) ? bundle.messages : [];
+      const prompts = new Map();
+      for (const message of messages) {
+        if (message.role === "user" && message.run_id && !prompts.has(message.run_id)) {
+          prompts.set(message.run_id, message.content || "Queued message");
+        }
+      }
+      return runs
+        .filter((run) => run.invocation_mode !== "native" && run.status === "queued")
+        .map((run) => ({ run, prompt: prompts.get(run.id) || "Queued message" }));
+    }
+
+    function renderComposerQueue() {
+      const queue = byId("composer-queue");
+      const turns = queuedHeadlessTurns();
+      const runs = state.currentBundle && Array.isArray(state.currentBundle.runs) ? state.currentBundle.runs : [];
+      const hasRunningTurn = runs.some((run) => run.invocation_mode !== "native" && run.status === "running");
+      queue.replaceChildren();
+      queue.hidden = turns.length === 0;
+      for (const [index, turn] of turns.entries()) {
+        const card = document.createElement("article");
+        card.className = "composer-queue-card";
+        card.dataset.runId = turn.run.id;
+
+        const heading = document.createElement("div");
+        heading.className = "composer-queue-heading";
+        const prompt = document.createElement("strong");
+        prompt.textContent = String(turn.prompt).replace(/\s+/g, " ").trim();
+        prompt.title = turn.prompt;
+        const position = document.createElement("span");
+        position.className = "composer-queue-position";
+        position.textContent = turns.length === 1 ? "Queued" : `${index + 1} of ${turns.length}`;
+        heading.append(prompt, position);
+
+        const status = document.createElement("small");
+        status.textContent = index === 0
+          ? hasRunningTurn ? "Waiting for the current turn to finish" : "Waiting to start"
+          : "Waiting behind earlier queued messages";
+        card.append(heading, status);
+        queue.appendChild(card);
+      }
+    }
+
     function latestEventIdForRun(runId) {
       const events = eventsForRun(runId);
       const latest = [...events].reverse().find((event) => event && event.id);
@@ -5006,6 +5051,7 @@
         list.appendChild(empty);
       }
       state.renderedSessionId = session && session.id;
+      renderComposerQueue();
       renderCurrentPlan();
       if (shouldStick) scrollChatToBottom();
     }

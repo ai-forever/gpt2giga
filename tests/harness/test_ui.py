@@ -53,13 +53,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.32">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.33">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.33"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.34"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -680,6 +680,25 @@ def test_ui_static_preserves_selected_defaults_while_stream_starts():
     ) < start_source.index("applyRunDefaults(payload);")
 
 
+def test_ui_static_renders_fifo_queue_beside_composer():
+    queue_source = UI_SOURCE[
+        UI_SOURCE.index("function queuedHeadlessTurns") : UI_SOURCE.index(
+            "function latestEventIdForRun"
+        )
+    ]
+    mobile_rule = APP_CSS.split("@media (max-width: 720px)", 1)[1]
+
+    assert 'run.status === "queued"' in queue_source
+    assert 'message.role === "user"' in queue_source
+    assert 'position.textContent = turns.length === 1 ? "Queued"' in queue_source
+    assert "Waiting for the current turn to finish" in queue_source
+    assert "Waiting behind earlier queued messages" in queue_source
+    assert 'byId("composer-queue")' in queue_source
+    assert ".composer-queue {" in APP_CSS
+    assert "position: absolute;" in APP_CSS
+    assert ".composer-queue {\n        position: static;" in mobile_rule
+
+
 def test_ui_static_command_previews_describe_streaming_honestly():
     command_source = UI_SOURCE[
         UI_SOURCE.index("function commandPreview") : UI_SOURCE.index(
@@ -1086,6 +1105,7 @@ def test_ui_index_contains_control_panel_elements():
         "dry-run-checkbox",
         "stream-checkbox",
         "composer",
+        "composer-queue",
         "prompt-input",
         "attachment-file-input",
         "attach-file-button",
