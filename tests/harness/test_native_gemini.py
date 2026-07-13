@@ -205,6 +205,9 @@ def test_gemini_native_start_command_uses_managed_home_and_redacts_key(
     assert plan.env["GOOGLE_GEMINI_BASE_URL"] == "http://127.0.0.1:8090/v2"
     assert plan.env["GEMINI_API_KEY"] == secret
     assert plan.env["GEMINI_MODEL"] == "GigaChat-2-Max"
+    assert plan.env["GEMINI_CLI_CUSTOM_HEADERS"] == (
+        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max,X-GPT2GIGA-Pass-Model:false"
+    )
     assert plan.env["HOME"] == plan.native_home
     assert json.loads(settings_path.read_text(encoding="utf-8")) == {
         "security": {"auth": {"selectedType": "gemini-api-key"}}
@@ -372,6 +375,9 @@ def test_gemini_native_resume_command_requires_managed_ref(tmp_path):
     assert plan.execution_snapshot == start_plan.execution_snapshot
     assert plan.env["GOOGLE_GEMINI_BASE_URL"] == "http://127.0.0.1:8090/v1"
     assert plan.env["GEMINI_MODEL"] == "GigaChat-2-Max"
+    assert plan.env["GEMINI_CLI_CUSTOM_HEADERS"] == (
+        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max,X-GPT2GIGA-Pass-Model:false"
+    )
     with pytest.raises(ValueError, match="Only managed"):
         connector.build_resume_command(external, context)
 

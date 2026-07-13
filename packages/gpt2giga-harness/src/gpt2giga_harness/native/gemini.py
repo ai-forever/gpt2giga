@@ -18,6 +18,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     attachment_raw_metadata,
     prompt_with_attachments,
 )
+from gpt2giga_harness.harnesses.gemini_cli import gemini_cli_custom_headers
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
     NativeHistoryConnector,
@@ -880,6 +881,10 @@ def _gemini_env(
     }
     if model is not None:
         extra["GEMINI_MODEL"] = model
+        extra["GEMINI_CLI_CUSTOM_HEADERS"] = gemini_cli_custom_headers(
+            context,
+            model,
+        )
     return build_safe_env(context, home=str(native_home), extra=extra)
 
 

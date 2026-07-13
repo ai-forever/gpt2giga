@@ -92,6 +92,51 @@ def test_native_process_api_start_poll_input_and_stop(tmp_path):
     }
 
 
+def test_native_process_failure_is_rendered_as_chat_error_once(tmp_path):
+    script = tmp_path / "failing_native.py"
+    script.write_text(
+        "import sys\n"
+        "print('selected model is unavailable', file=sys.stderr, flush=True)\n"
+        "raise SystemExit(3)\n",
+        encoding="utf-8",
+    )
+    client, store = _client(tmp_path, FakeProcessConnector(start_script=script))
+    session = store.create_session(
+        title="Native failure",
+        workspace=str(tmp_path),
+        default_harness_id="fake-cli",
+    )
+    started = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "action": "start",
+            "prompt": "boot",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    process_id = started.json()["process"]["id"]
+    completed = _wait_for_process_status(client, process_id, {"failed"})
+    client.get(f"/api/native/processes/{process_id}")
+
+    assert completed["run"]["error"] == "Native process exited with code 3"
+    error_messages = [
+        message
+        for message in store.list_messages(session.id)
+        if message.role == "error"
+    ]
+    assert len(error_messages) == 1
+    assert "Native process exited with code 3" in error_messages[0].content
+    assert "selected model is unavailable" in error_messages[0].content
+    assert error_messages[0].metadata == {
+        "source": "native_process",
+        "process_id": process_id,
+        "exit_code": 3,
+    }
+
+
 def test_native_process_api_approval_blocks_before_worktree_and_spawn(tmp_path):
     repo = _git_repo(tmp_path / "repo")
     data_dir = tmp_path / "data"
