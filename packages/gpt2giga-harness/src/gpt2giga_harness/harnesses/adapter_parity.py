@@ -136,9 +136,9 @@ def gemini_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
                 "and normalized history are not consumed.",
             ),
             "native_initial_prompt": _claim(
-                AdapterSupportLevel.UNSUPPORTED,
-                "The composed prompt is recorded as plan metadata but is not delivered "
-                "to the interactive Gemini process.",
+                AdapterSupportLevel.SUPPORTED,
+                "A capability-probed --prompt-interactive invocation delivers the "
+                "composed prompt once and records a redaction-safe outcome.",
             ),
             "native_permission_mode": _claim(
                 AdapterSupportLevel.UNSUPPORTED,

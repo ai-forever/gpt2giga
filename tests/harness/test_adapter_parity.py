@@ -65,7 +65,7 @@ EXPECTED_SUPPORT = {
         "headless_one_shot": "supported",
         "headless_structured_events": "supported",
         "headless_continuity": "unsupported",
-        "native_initial_prompt": "unsupported",
+        "native_initial_prompt": "supported",
         "native_permission_mode": "unsupported",
         "native_workspace": "partial",
         "native_resume": "partial",
@@ -163,7 +163,7 @@ def test_headless_request_field_consumption_is_explicit(
     (
         ("codex-cli", CodexNativeHistoryConnector, True, "read-only"),
         ("claude-code", ClaudeNativeHistoryConnector, True, None),
-        ("gemini-cli", GeminiNativeHistoryConnector, False, None),
+        ("gemini-cli", GeminiNativeHistoryConnector, True, None),
     ),
 )
 def test_native_request_field_consumption_and_policy_gap_are_explicit(
@@ -175,7 +175,14 @@ def test_native_request_field_consumption_and_policy_gap_are_explicit(
 ):
     workspace = tmp_path / "repo"
     workspace.mkdir()
-    connector = connector_cls(data_dir=tmp_path / "data", executable=harness_id)
+    connector_kwargs = {}
+    if connector_cls is GeminiNativeHistoryConnector:
+        connector_kwargs["capability_probe_runner"] = _supported_gemini_probe
+    connector = connector_cls(
+        data_dir=tmp_path / "data",
+        executable=harness_id,
+        **connector_kwargs,
+    )
     request = HarnessRequest(
         prompt="inspect the project",
         model="GigaChat-2-Max",
@@ -210,7 +217,12 @@ def test_native_request_field_consumption_and_policy_gap_are_explicit(
     else:
         assert permission_value in plan.command
     if harness_id == "gemini-cli":
-        assert plan.metadata["initial_prompt"] == "inspect the project"
+        assert plan.command[-2:] == (
+            "--prompt-interactive",
+            "inspect the project",
+        )
+        assert "initial_prompt" not in plan.metadata
+        assert plan.prompt_delivery is not None
 
     spec = BUILTIN_ADAPTERS[harness_id].spec()
     assert spec.adapter_capabilities["native_workspace"].status is (
@@ -274,3 +286,15 @@ def test_legacy_native_resume_route_is_limited_instead_of_guessed(
         .status
         is AdapterSupportLevel.SUPPORTED
     )
+
+
+def _supported_gemini_probe(command, env, cwd):
+    del env, cwd
+
+    class Completed:
+        returncode = 0
+        stdout = "--prompt-interactive Execute prompt and continue interactively"
+        stderr = ""
+
+    assert command[-1] == "--help"
+    return Completed()

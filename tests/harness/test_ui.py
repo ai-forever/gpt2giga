@@ -53,13 +53,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.24">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.25">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.24"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.25"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -1259,6 +1259,12 @@ def test_ui_index_contains_control_panel_elements():
         "persistProjectState",
     ):
         assert text in source
+
+
+def test_ui_native_submit_sends_a_per_submission_prompt_idempotency_key():
+    assert "const promptIdempotencyKey" in APP_JS
+    assert "native_prompt_${window.crypto.randomUUID()}" in APP_JS
+    assert "idempotency_key: promptIdempotencyKey" in APP_JS
 
 
 def test_ui_rejects_remote_bind_without_allow_remote():

@@ -6,6 +6,7 @@ import asyncio
 import base64
 import binascii
 from dataclasses import dataclass, replace
+import hashlib
 import json
 from pathlib import Path
 import threading
@@ -66,7 +67,10 @@ from gpt2giga_harness.editor import (
 )
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
+    NativePromptDelivery,
+    NativePromptDeliveryStatus,
     discovery_error_to_dict,
+    native_prompt_delivery_to_dict,
 )
 from gpt2giga_harness.native.models import (
     HarnessInvocationMode,
@@ -1234,6 +1238,7 @@ def create_app(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         run = None
+        process_ref = None
         try:
             session = store.get_session(
                 _required_text(payload.get("session_id"), "session_id is required")
@@ -1341,6 +1346,18 @@ def create_app(
                     status="failed",
                     error=str(exc),
                     finished_at=utc_now(),
+                    metadata=_native_process_run_metadata(
+                        options,
+                        process_ref,
+                        prompt_delivery_status=(
+                            NativePromptDeliveryStatus.FAILED
+                            if process_ref is None
+                            else None
+                        ),
+                        prompt_delivery_error=(
+                            str(exc) if process_ref is None else None
+                        ),
+                    ),
                 )
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
@@ -2713,6 +2730,7 @@ def _native_process_start_options(
         config=config,
         native_registry=native_registry,
         attachment_store=attachment_store,
+        store=store,
     )
 
 
@@ -2723,6 +2741,7 @@ def _native_process_new_options(
     config: HarnessConfig,
     native_registry: NativeHistoryConnectorRegistry,
     attachment_store: FilesystemAttachmentStore,
+    store: HarnessSessionStore,
 ) -> dict[str, Any]:
     harness_id = _required_text(
         payload.get("harness_id") or session.default_harness_id,
@@ -2778,6 +2797,11 @@ def _native_process_new_options(
         attachment_render_plan_payload,
     )
     extra["preflight"] = preflight_payload
+    extra["native_prompt_idempotency_key"] = _native_prompt_idempotency_key(
+        session.id,
+        _optional_text(payload.get("idempotency_key"))
+        or new_id("native_prompt_submit"),
+    )
     request = HarnessRequest(
         prompt=prompt,
         model=model,
@@ -2792,6 +2816,7 @@ def _native_process_new_options(
         extra=extra,
     )
     plan = connector.build_start_command(request, config.to_context())
+    _reject_duplicate_native_prompt_delivery(store, session.id, plan.prompt_delivery)
     native_session_id = _native_session_id_from_plan(plan)
     return {
         "action": "start",
@@ -2896,6 +2921,9 @@ def _native_process_resume_options(
 def _native_process_run_metadata(
     options: Mapping[str, Any],
     process_ref: NativeProcessRef | None = None,
+    *,
+    prompt_delivery_status: NativePromptDeliveryStatus | None = None,
+    prompt_delivery_error: str | None = None,
 ) -> dict[str, Any]:
     ref = options.get("native_ref")
     plan = options.get("plan")
@@ -2920,6 +2948,20 @@ def _native_process_run_metadata(
         metadata["execution_snapshot"] = execution_snapshot_to_dict(
             plan.execution_snapshot
         )
+    if isinstance(plan, NativeCommandPlan) and plan.prompt_delivery is not None:
+        process_delivery = (
+            process_ref.metadata.get("prompt_delivery")
+            if process_ref is not None
+            else None
+        )
+        if isinstance(process_delivery, Mapping) and prompt_delivery_status is None:
+            metadata["prompt_delivery"] = dict(process_delivery)
+        else:
+            metadata["prompt_delivery"] = native_prompt_delivery_to_dict(
+                plan.prompt_delivery,
+                status=prompt_delivery_status,
+                error=prompt_delivery_error,
+            )
     if process_ref is not None:
         metadata["native_process"] = {
             "id": process_ref.id,
@@ -2978,6 +3020,13 @@ def _append_native_process_link(
         )
     if isinstance(options.get("plan"), NativeCommandPlan):
         metadata["plan_metadata"] = dict(options["plan"].metadata)
+        if options["plan"].prompt_delivery is not None:
+            process_delivery = process_ref.metadata.get("prompt_delivery")
+            metadata["prompt_delivery"] = (
+                dict(process_delivery)
+                if isinstance(process_delivery, Mapping)
+                else native_prompt_delivery_to_dict(options["plan"].prompt_delivery)
+            )
         if options["plan"].execution_snapshot is not None:
             snapshot = options["plan"].execution_snapshot
             metadata["execution_snapshot"] = execution_snapshot_to_dict(snapshot)
@@ -3152,6 +3201,32 @@ def _native_session_id_from_plan(plan: NativeCommandPlan) -> str | None:
         if value is not None:
             return value
     return None
+
+
+def _native_prompt_idempotency_key(session_id: str, client_key: str) -> str:
+    digest = hashlib.sha256(f"{session_id}\0{client_key}".encode("utf-8")).hexdigest()
+    return f"nprompt_{digest[:32]}"
+
+
+def _reject_duplicate_native_prompt_delivery(
+    store: HarnessSessionStore,
+    session_id: str,
+    delivery: NativePromptDelivery | None,
+) -> None:
+    if delivery is None:
+        return
+    for existing_run in store.list_runs(session_id):
+        existing = existing_run.metadata.get("prompt_delivery")
+        if not isinstance(existing, Mapping):
+            continue
+        if existing.get("idempotency_key") != delivery.idempotency_key:
+            continue
+        if existing.get("prompt_sha256") != delivery.prompt_sha256:
+            raise ValueError(
+                "Native prompt idempotency key is already bound to a different prompt"
+            )
+        state = str(existing.get("status") or "pending")
+        raise ValueError(f"Native prompt delivery was already recorded as {state}")
 
 
 def _native_missing_session_id_reason() -> str:

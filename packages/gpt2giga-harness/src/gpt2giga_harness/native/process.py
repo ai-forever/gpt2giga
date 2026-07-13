@@ -12,7 +12,9 @@ from typing import Any, IO, Mapping
 
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
+    NativePromptDeliveryStatus,
     native_command_plan_to_dict,
+    native_prompt_delivery_to_dict,
 )
 from gpt2giga_harness.sessions.models import HarnessStoredEvent
 from gpt2giga_harness.sessions.store import HarnessSessionStore, new_id, utc_now
@@ -153,6 +155,17 @@ class NativeProcessManager:
             ) from exc
 
         now = utc_now()
+        public_command = (
+            plan.display_command
+            if plan.prompt_delivery is not None and plan.display_command
+            else plan.command
+        )
+        metadata = dict(plan.metadata)
+        if plan.prompt_delivery is not None:
+            metadata["prompt_delivery"] = native_prompt_delivery_to_dict(
+                plan.prompt_delivery,
+                status=NativePromptDeliveryStatus.DELIVERED,
+            )
         ref = NativeProcessRef(
             id=process_id,
             pid=process.pid,
@@ -161,7 +174,7 @@ class NativeProcessManager:
             run_id=event_run_id,
             native_ref_id=_metadata_text(plan.metadata, "native_ref_id"),
             status=NativeProcessStatus.RUNNING,
-            command=_redacted_command(plan.command, secret_values),
+            command=_redacted_command(public_command, secret_values),
             display_command=_redacted_command(
                 plan.display_command or plan.command,
                 secret_values,
@@ -174,7 +187,7 @@ class NativeProcessManager:
             transport=transport,
             started_at=now,
             updated_at=now,
-            metadata=_redact_value(dict(plan.metadata), secret_values),
+            metadata=_redact_value(metadata, secret_values),
         )
         record = _NativeProcessRecord(
             process=process,
@@ -197,6 +210,7 @@ class NativeProcessManager:
                         native_command_plan_to_dict(plan),
                         secret_values,
                     ),
+                    "prompt_delivery": metadata.get("prompt_delivery"),
                 },
             )
             record.reader_threads.extend(self._start_reader_threads(record))

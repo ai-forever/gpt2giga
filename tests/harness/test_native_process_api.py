@@ -1,4 +1,5 @@
 import os
+import json
 import sys
 import time
 from dataclasses import replace
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.native.base import NativeCommandPlan
+from gpt2giga_harness.native.gemini import GeminiNativeHistoryConnector
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
@@ -464,6 +466,128 @@ def test_native_process_api_redacts_start_output_and_events(tmp_path):
     assert REDACTED in str(store.list_events(session.id))
 
 
+def test_gemini_native_api_delivers_prompt_once_and_persists_outcome(tmp_path):
+    secret = "native-gemini-prompt-secret"
+    capture_path = tmp_path / "captured-prompts.jsonl"
+    script = _write_gemini_argv_cli(tmp_path, capture_path)
+    data_dir = tmp_path / "data"
+    store = FilesystemHarnessSessionStore(data_dir)
+    connector = GeminiNativeHistoryConnector(
+        data_dir=data_dir,
+        executable=str(script),
+        capability_probe_runner=_supported_gemini_probe,
+    )
+    config = HarnessConfig(
+        api_key=secret,
+        default_model="ConfiguredModel",
+        data_dir=str(data_dir),
+    )
+    client, _ = _client(tmp_path, connector, config=config, store=store)
+    session = store.create_session(
+        title="Gemini native API",
+        workspace=str(tmp_path),
+        default_harness_id="gemini-cli",
+    )
+    prompt = f"Inspect this project\n{secret}\n"
+    payload = {
+        "session_id": session.id,
+        "harness_id": "gemini-cli",
+        "action": "start",
+        "prompt": prompt,
+        "workspace": str(tmp_path),
+        "idempotency_key": "browser-submit-1",
+    }
+
+    started = client.post("/api/native/processes/start", json=payload)
+
+    assert started.status_code == 200, started.text
+    body = started.json()
+    process_id = body["process"]["id"]
+    assert body["process"]["command"][-1] == "<initial-prompt>"
+    assert body["run"]["metadata"]["prompt_delivery"]["status"] == "delivered"
+    assert body["native_link"]["metadata"]["prompt_delivery"]["status"] == ("delivered")
+    assert secret not in str(body["process"])
+    assert secret not in str(body["run"]["metadata"]["prompt_delivery"])
+    assert secret not in str(body["native_link"]["metadata"])
+    _wait_for_process_status(client, process_id, {"succeeded"})
+    output_body = client.get(f"/api/native/processes/{process_id}/output").json()
+    assert secret not in str(output_body["outputs"])
+    assert REDACTED in str(output_body["outputs"])
+    assert secret not in str(store.list_events(session.id))
+    first_capture = capture_path.read_text(encoding="utf-8").splitlines()
+    assert len(first_capture) == 1
+    assert json.loads(first_capture[0]) == prompt
+
+    client.get(f"/api/native/processes/{process_id}/output")
+    client.get(f"/api/native/processes/{process_id}/output")
+    duplicate = client.post("/api/native/processes/start", json=payload)
+    rebound = client.post(
+        "/api/native/processes/start",
+        json={**payload, "prompt": "different prompt"},
+    )
+
+    assert duplicate.status_code == 400
+    assert "already recorded as delivered" in duplicate.json()["detail"]
+    assert rebound.status_code == 400
+    assert "different prompt" in rebound.json()["detail"]
+    assert len(capture_path.read_text(encoding="utf-8").splitlines()) == 1
+
+    reloaded_connector = GeminiNativeHistoryConnector(
+        data_dir=data_dir,
+        executable=str(script),
+        capability_probe_runner=_supported_gemini_probe,
+    )
+    reloaded_client, _ = _client(
+        tmp_path,
+        reloaded_connector,
+        config=config,
+        store=FilesystemHarnessSessionStore(data_dir),
+    )
+    after_reload = reloaded_client.post("/api/native/processes/start", json=payload)
+
+    assert after_reload.status_code == 400
+    assert "already recorded as delivered" in after_reload.json()["detail"]
+    assert len(capture_path.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_gemini_native_api_persists_failed_prompt_delivery_on_spawn_error(tmp_path):
+    data_dir = tmp_path / "data"
+    store = FilesystemHarnessSessionStore(data_dir)
+    connector = GeminiNativeHistoryConnector(
+        data_dir=data_dir,
+        executable=str(tmp_path / "missing-gemini"),
+        capability_probe_runner=_supported_gemini_probe,
+    )
+    client, _ = _client(
+        tmp_path,
+        connector,
+        config=HarnessConfig(data_dir=str(data_dir)),
+        store=store,
+    )
+    session = store.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="gemini-cli",
+    )
+
+    response = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "gemini-cli",
+            "prompt": "Inspect",
+            "workspace": str(tmp_path),
+            "idempotency_key": "failed-submit",
+        },
+    )
+
+    assert response.status_code == 400
+    (run,) = store.list_runs(session.id)
+    assert run.status == "failed"
+    assert run.metadata["prompt_delivery"]["status"] == "failed"
+    assert run.metadata["prompt_delivery"]["idempotency_key"].startswith("nprompt_")
+    assert "failed-submit" not in str(run.metadata)
+
+
 class FakeProcessConnector:
     harness_id = "fake-cli"
 
@@ -578,6 +702,36 @@ def _write_once_cli(tmp_path):
         encoding="utf-8",
     )
     return script
+
+
+def _write_gemini_argv_cli(tmp_path, capture_path):
+    script = tmp_path / "fake_gemini"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "import pathlib\n"
+        "import sys\n"
+        f"capture = pathlib.Path({str(capture_path)!r})\n"
+        "prompt = sys.argv[sys.argv.index('--prompt-interactive') + 1]\n"
+        "with capture.open('a', encoding='utf-8') as handle:\n"
+        "    handle.write(json.dumps(prompt) + '\\n')\n"
+        "print(prompt, flush=True)\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+def _supported_gemini_probe(command, env, cwd):
+    del env, cwd
+
+    class Completed:
+        returncode = 0
+        stdout = "--prompt-interactive Execute prompt and continue interactively"
+        stderr = ""
+
+    assert command[-1] == "--help"
+    return Completed()
 
 
 def _native_ref(*, workspace: str) -> NativeSessionRef:

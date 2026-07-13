@@ -1722,6 +1722,16 @@ the Harness does not silently replace an unknown original route with `/v2`.
 Any route, model, home, workspace, project, or harness identity that contradicts
 a known snapshot is rejected before the native CLI starts.
 
+Gemini native starts capability-probe the installed CLI for
+`--prompt-interactive`. When supported, the composed prompt and rendered
+attachment references are passed in that one interactive invocation, without
+trimming or a follow-up stdin resend. Runs and native links persist a safe
+idempotency key, prompt hash, byte count, mechanism, and
+`pending|delivered|failed` outcome; the prompt itself is not copied into command
+or plan metadata. A repeated browser submission with the same key is rejected,
+including after a UI reload. Older Gemini versions without the probed flag fail
+explicitly before spawn instead of opening an empty terminal.
+
 ## Model Selection Notes
 
 The direct harness always sends the requested `model` field to the proxy. If the

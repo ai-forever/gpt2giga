@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import subprocess
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
@@ -17,7 +18,11 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     attachment_raw_metadata,
     prompt_with_attachments,
 )
-from gpt2giga_harness.native.base import NativeCommandPlan, NativeHistoryConnector
+from gpt2giga_harness.native.base import (
+    NativeCommandPlan,
+    NativeHistoryConnector,
+    NativePromptDelivery,
+)
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
@@ -34,6 +39,7 @@ from gpt2giga_harness.types import GigaChatApiMode, HarnessContext, HarnessReque
 
 GEMINI_HARNESS_ID = "gemini-cli"
 LIST_SESSIONS_TIMEOUT_SECONDS = 5.0
+CAPABILITY_PROBE_TIMEOUT_SECONDS = 5.0
 _SESSION_ID_RE = re.compile(r"(?P<id>[A-Za-z0-9][A-Za-z0-9_.:-]{3,})")
 
 
@@ -54,6 +60,11 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
             subprocess.CompletedProcess[str],
         ]
         | None = None,
+        capability_probe_runner: Callable[
+            [tuple[str, ...], Mapping[str, str], str | None],
+            subprocess.CompletedProcess[str],
+        ]
+        | None = None,
     ) -> None:
         self.data_dir = Path(data_dir).expanduser()
         self.external_gemini_home = (
@@ -64,7 +75,9 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         self.executable = executable
         self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
         self.list_sessions_runner = list_sessions_runner or _run_list_sessions
+        self.capability_probe_runner = capability_probe_runner or _run_capability_probe
         self.snapshot_store = NativeExecutionSnapshotStore(self.data_dir)
+        self._prompt_interactive_supported: bool | None = None
 
     def discover(
         self,
@@ -139,27 +152,50 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         native_home.mkdir(parents=True, exist_ok=True)
         tool_config_hash = _write_gemini_settings(native_home)
         model = request.model or context.default_model
-        command = [self._executable()]
+        executable = self._executable()
+        command = [executable]
         if model:
             command.extend(["-m", model])
-        prompt = prompt_with_attachments(request).strip()
+        prompt = prompt_with_attachments(request)
         metadata: dict[str, Any] = {
             "harness_id": self.harness_id,
             "project_id": project_id,
             "api_mode": request.api_mode.value,
             "managed": True,
-            "initial_prompt_present": bool(prompt),
             "chat_commands": ("/chat save <tag>", "/chat resume <tag>"),
             **attachment_raw_metadata(request),
         }
-        if prompt:
-            metadata["initial_prompt"] = prompt
         env = _gemini_env(
             context,
             api_mode=request.api_mode,
             native_home=native_home,
             model=model,
         )
+        prompt_delivery = None
+        display_command: list[str] = []
+        if prompt:
+            if not self._supports_prompt_interactive(
+                executable=executable,
+                env=env,
+                cwd=request.workspace,
+            ):
+                raise ValueError(
+                    "Installed Gemini CLI does not support safe native initial "
+                    "prompt delivery via --prompt-interactive"
+                )
+            command.extend(["--prompt-interactive", prompt])
+            display_command = [*command[:-1], "<initial-prompt>"]
+            prompt_delivery = NativePromptDelivery(
+                idempotency_key=_prompt_delivery_key(request),
+                mechanism="gemini_prompt_interactive",
+                prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                byte_count=len(prompt.encode("utf-8")),
+            )
+            metadata["prompt_delivery_capability"] = {
+                "supported": True,
+                "mechanism": "--prompt-interactive",
+                "evidence": "gemini --help",
+            }
         snapshot = create_execution_snapshot(
             harness_id=self.harness_id,
             api_mode=request.api_mode.value,
@@ -172,12 +208,14 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         )
         return NativeCommandPlan(
             command=tuple(command),
+            display_command=tuple(display_command),
             env=env,
             cwd=request.workspace,
             native_home=str(native_home),
             metadata=metadata,
             execution_snapshot=snapshot,
             snapshot_known_sources=known_sources,
+            prompt_delivery=prompt_delivery,
         )
 
     def build_resume_command(
@@ -226,6 +264,30 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
     def managed_home(self, project_id: str) -> Path:
         """Return the managed HOME used for one project's Gemini CLI sessions."""
         return self.data_dir / "native" / "gemini" / "homes" / project_id
+
+    def _supports_prompt_interactive(
+        self,
+        *,
+        executable: str,
+        env: Mapping[str, str],
+        cwd: str | None,
+    ) -> bool:
+        """Probe whether this Gemini CLI accepts an interactive initial prompt."""
+        if self._prompt_interactive_supported is not None:
+            return self._prompt_interactive_supported
+        try:
+            completed = self.capability_probe_runner(
+                (executable, "--help"),
+                env,
+                cwd,
+            )
+        except (OSError, subprocess.SubprocessError):
+            supported = False
+        else:
+            output = f"{completed.stdout}\n{completed.stderr}"
+            supported = completed.returncode == 0 and "--prompt-interactive" in output
+        self._prompt_interactive_supported = supported
+        return supported
 
     def _discover_from_cli_list(
         self,
@@ -744,6 +806,13 @@ def _project_id(workspace: str | None) -> str:
     return project_id_for_root(workspace or Path.cwd())
 
 
+def _prompt_delivery_key(request: HarnessRequest) -> str:
+    value = request.extra.get("native_prompt_idempotency_key")
+    if value is not None and str(value).strip():
+        return str(value).strip()
+    return f"nprompt_{uuid.uuid4().hex}"
+
+
 def project_hash_for_workspace(workspace: str | Path) -> str:
     """Return the best-effort Gemini project hash for a workspace path."""
     normalized = str(Path(workspace).expanduser().resolve())
@@ -789,6 +858,22 @@ def _run_list_sessions(
         capture_output=True,
         text=True,
         timeout=LIST_SESSIONS_TIMEOUT_SECONDS,
+        check=False,
+    )
+
+
+def _run_capability_probe(
+    command: tuple[str, ...],
+    env: Mapping[str, str],
+    cwd: str | None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        env=dict(env),
+        capture_output=True,
+        text=True,
+        timeout=CAPABILITY_PROBE_TIMEOUT_SECONDS,
         check=False,
     )
 

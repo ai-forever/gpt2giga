@@ -299,6 +299,16 @@ permission mode и hash управляемой tool-конфигурации. Э
 исходный route больше не подменяется молча на `/v2`. Противоречащие snapshot
 route, model, home, workspace, project или harness блокируются до запуска CLI.
 
+Перед новым Gemini native-запуском Harness проверяет поддержку
+`--prompt-interactive` установленной версией CLI. Если flag доступен, составной
+prompt вместе с отрендеренными ссылками на attachments передаётся ровно в одном
+interactive invocation, без обрезания и повторной отправки через stdin. Run и
+native link сохраняют безопасные idempotency key, hash prompt, число байт,
+механизм и состояние `pending|delivered|failed`; сам prompt не копируется в
+command или plan metadata. Повторный browser submit с тем же key отклоняется и
+после перезагрузки UI. Старая версия Gemini без подтверждённого flag завершается
+явной ошибкой до spawn, а не открывает пустой terminal.
+
 Проверьте:
 
 - доступен ли proxy по `GPT2GIGA_HARNESS_PROXY_URL`;

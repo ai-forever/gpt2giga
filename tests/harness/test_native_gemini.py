@@ -160,7 +160,11 @@ def test_gemini_native_start_command_uses_managed_home_and_redacts_key(
     workspace = tmp_path / "repo"
     data_dir = tmp_path / "data"
     workspace.mkdir()
-    connector = GeminiNativeHistoryConnector(data_dir=data_dir, executable="gemini")
+    connector = GeminiNativeHistoryConnector(
+        data_dir=data_dir,
+        executable="gemini",
+        capability_probe_runner=_supported_prompt_probe,
+    )
     request = HarnessRequest(
         prompt="Inspect this project",
         model="GigaChat-2-Max",
@@ -190,6 +194,11 @@ def test_gemini_native_start_command_uses_managed_home_and_redacts_key(
     assert plan.command[:1] == ("gemini",)
     assert "-m" in plan.command
     assert "GigaChat-2-Max" in plan.command
+    assert plan.command[-2:] == (
+        "--prompt-interactive",
+        "Inspect this project",
+    )
+    assert plan.display_command[-1] == "<initial-prompt>"
     assert "-p" not in plan.command
     assert "--skip-trust" not in plan.command
     assert "GIGACHAT_CREDENTIALS" not in plan.env
@@ -202,15 +211,23 @@ def test_gemini_native_start_command_uses_managed_home_and_redacts_key(
     }
     assert secret not in str(payload)
     assert REDACTED in str(payload)
+    assert "Inspect this project" not in str(payload)
+    assert payload["prompt_delivery"]["status"] == "pending"
 
 
-def test_gemini_native_start_command_records_attachment_prompt(tmp_path):
+def test_gemini_native_start_command_delivers_attachment_prompt_without_trimming(
+    tmp_path,
+):
     workspace = tmp_path / "repo"
     data_dir = tmp_path / "data"
     workspace.mkdir()
-    connector = GeminiNativeHistoryConnector(data_dir=data_dir, executable="gemini")
+    connector = GeminiNativeHistoryConnector(
+        data_dir=data_dir,
+        executable="gemini",
+        capability_probe_runner=_supported_prompt_probe,
+    )
     request = HarnessRequest(
-        prompt="Inspect this project",
+        prompt="Inspect this project\n",
         model="GigaChat-2-Max",
         api_mode=GigaChatApiMode.V2,
         capability=HarnessCapability.AGENT_CLI,
@@ -238,9 +255,14 @@ def test_gemini_native_start_command_records_attachment_prompt(tmp_path):
     plan = connector.build_start_command(request, context)
 
     assert "-p" not in plan.command
-    assert plan.metadata["initial_prompt"] == (
-        "Attachments:\n- @logs/debug.log\n\nInspect this project"
+    assert plan.command[-2:] == (
+        "--prompt-interactive",
+        "Attachments:\n- @logs/debug.log\n\nInspect this project\n",
     )
+    assert "initial_prompt" not in plan.metadata
+    assert "initial_prompt_present" not in plan.metadata
+    assert plan.prompt_delivery is not None
+    assert plan.prompt_delivery.byte_count == len(plan.command[-1].encode("utf-8"))
     assert plan.metadata["attachment_render_plan"]["metadata"]["transport"] == (
         "at_file_reference"
     )
@@ -249,13 +271,48 @@ def test_gemini_native_start_command_records_attachment_prompt(tmp_path):
     ]
 
 
+def test_gemini_native_start_rejects_cli_without_prompt_interactive(tmp_path):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    def unsupported_probe(command, env, cwd):
+        del command, env, cwd
+
+        class Completed:
+            returncode = 0
+            stdout = "Usage: gemini [query]"
+            stderr = ""
+
+        return Completed()
+
+    connector = GeminiNativeHistoryConnector(
+        data_dir=tmp_path / "data",
+        executable="gemini",
+        capability_probe_runner=unsupported_probe,
+    )
+
+    with pytest.raises(ValueError, match="does not support safe native initial"):
+        connector.build_start_command(
+            HarnessRequest(
+                prompt="Inspect",
+                api_mode=GigaChatApiMode.V2,
+                workspace=str(workspace),
+            ),
+            HarnessContext(proxy_url="http://127.0.0.1:8090"),
+        )
+
+
 def test_gemini_native_resume_command_requires_managed_ref(tmp_path):
     workspace = tmp_path / "repo"
     data_dir = tmp_path / "data"
     workspace.mkdir()
     project_id = project_id_for_root(workspace)
     project_hash = project_hash_for_workspace(workspace)
-    connector = GeminiNativeHistoryConnector(data_dir=data_dir, executable="gemini")
+    connector = GeminiNativeHistoryConnector(
+        data_dir=data_dir,
+        executable="gemini",
+        capability_probe_runner=_supported_prompt_probe,
+    )
     context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
     start_plan = connector.build_start_command(
         HarnessRequest(
@@ -360,6 +417,18 @@ def test_gemini_native_missing_executable_still_discovers_managed_files(
     refs = connector.discover(workspace=str(workspace), include_external=True)
 
     assert [ref.native_session_id for ref in refs] == ["managed-gemini-session"]
+
+
+def _supported_prompt_probe(command, env, cwd):
+    del env, cwd
+
+    class Completed:
+        returncode = 0
+        stdout = "--prompt-interactive Execute prompt and continue interactively"
+        stderr = ""
+
+    assert command[-1] == "--help"
+    return Completed()
 
 
 def _write_jsonl(path, rows):

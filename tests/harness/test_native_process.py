@@ -2,7 +2,7 @@ import os
 import sys
 import time
 
-from gpt2giga_harness.native.base import NativeCommandPlan
+from gpt2giga_harness.native.base import NativeCommandPlan, NativePromptDelivery
 from gpt2giga_harness.native.process import (
     NativeProcessManager,
     NativeProcessStatus,
@@ -86,6 +86,52 @@ def test_native_process_manager_redacts_output_and_session_events(tmp_path):
     assert secret not in str(events)
     assert REDACTED in str(payload)
     assert REDACTED in str(events)
+
+
+def test_native_process_manager_marks_argv_prompt_delivered_without_exposing_it(
+    tmp_path,
+):
+    prompt = "first line\nsecond line\n"
+    script = tmp_path / "argv.py"
+    script.write_text(
+        "import sys\nprint(repr(sys.argv[-1]), flush=True)\n",
+        encoding="utf-8",
+    )
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Native prompt")
+    manager = NativeProcessManager(session_store=store, use_pty=False)
+
+    ref = manager.start(
+        NativeCommandPlan(
+            command=(sys.executable, str(script), "--prompt-interactive", prompt),
+            display_command=(
+                sys.executable,
+                str(script),
+                "--prompt-interactive",
+                "<initial-prompt>",
+            ),
+            env=_python_env(),
+            cwd=str(tmp_path),
+            metadata={"harness_id": "gemini-cli"},
+            prompt_delivery=NativePromptDelivery(
+                idempotency_key="nprompt_test",
+                mechanism="gemini_prompt_interactive",
+                prompt_sha256="prompt-hash",
+                byte_count=len(prompt.encode("utf-8")),
+            ),
+        ),
+        session_id=session.id,
+    )
+
+    _wait_for_status(manager, ref.id, NativeProcessStatus.EXITED)
+    output = "".join(item.text for item in manager.read_since(ref.id, 0).outputs)
+    events = store.list_events(session.id)
+
+    assert repr(prompt) in output
+    assert ref.command[-1] == "<initial-prompt>"
+    assert ref.metadata["prompt_delivery"]["status"] == "delivered"
+    assert prompt not in str(events)
+    assert "<initial-prompt>" in str(events)
 
 
 def test_native_process_manager_cleanup_marks_exited_process(tmp_path):

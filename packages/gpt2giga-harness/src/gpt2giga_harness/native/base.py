@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Mapping, Protocol
 
 from gpt2giga_harness.native.models import (
@@ -12,6 +13,26 @@ from gpt2giga_harness.native.models import (
     execution_snapshot_to_dict,
 )
 from gpt2giga_harness.types import HarnessContext, HarnessRequest, redact_secrets
+
+
+class NativePromptDeliveryStatus(str, Enum):
+    """Describe the durable delivery outcome for one native initial prompt."""
+
+    PENDING = "pending"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class NativePromptDelivery:
+    """Redaction-safe contract for delivering one native initial prompt."""
+
+    idempotency_key: str
+    mechanism: str
+    prompt_sha256: str
+    byte_count: int
+    status: NativePromptDeliveryStatus = NativePromptDeliveryStatus.PENDING
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -26,6 +47,7 @@ class NativeCommandPlan:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     execution_snapshot: NativeExecutionSnapshot | None = None
     snapshot_known_sources: tuple[str, ...] = ()
+    prompt_delivery: NativePromptDelivery | None = None
 
 
 @dataclass(frozen=True)
@@ -94,8 +116,11 @@ class NativeHistoryConnector(Protocol):
 def native_command_plan_to_dict(plan: NativeCommandPlan) -> dict[str, Any]:
     """Serialize a native command plan with secret-looking values redacted."""
     display_command = plan.display_command or plan.command
+    public_command = (
+        display_command if plan.prompt_delivery is not None else plan.command
+    )
     return {
-        "command": redact_secrets(list(plan.command)),
+        "command": redact_secrets(list(public_command)),
         "display_command": redact_secrets(list(display_command)),
         "env": redact_secrets(dict(plan.env)),
         "cwd": redact_secrets(plan.cwd),
@@ -106,7 +131,33 @@ def native_command_plan_to_dict(plan: NativeCommandPlan) -> dict[str, Any]:
             if plan.execution_snapshot is not None
             else None
         ),
+        "prompt_delivery": (
+            native_prompt_delivery_to_dict(plan.prompt_delivery)
+            if plan.prompt_delivery is not None
+            else None
+        ),
     }
+
+
+def native_prompt_delivery_to_dict(
+    delivery: NativePromptDelivery,
+    *,
+    status: NativePromptDeliveryStatus | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    """Serialize prompt delivery without exposing the submitted prompt."""
+    effective_status = status or delivery.status
+    payload = {
+        "idempotency_key": delivery.idempotency_key,
+        "mechanism": delivery.mechanism,
+        "prompt_sha256": delivery.prompt_sha256,
+        "byte_count": delivery.byte_count,
+        "status": effective_status.value,
+    }
+    effective_error = error if error is not None else delivery.error
+    if effective_error is not None:
+        payload["error"] = redact_secrets(effective_error)
+    return payload
 
 
 def discovery_error_to_dict(error: NativeDiscoveryError) -> dict[str, Any]:

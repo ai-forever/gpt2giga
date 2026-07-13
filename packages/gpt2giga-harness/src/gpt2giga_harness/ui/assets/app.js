@@ -3628,6 +3628,9 @@
       setNativeSummary("Starting native process...");
       byId("run-button").disabled = true;
       byId("run-button").textContent = "Starting...";
+      const promptIdempotencyKey = window.crypto && typeof window.crypto.randomUUID === "function"
+        ? `native_prompt_${window.crypto.randomUUID()}`
+        : `native_prompt_${Date.now()}_${Math.random().toString(16).slice(2)}`;
       try {
         const result = await getJson("/api/native/processes/start", {
           method: "POST",
@@ -3635,6 +3638,7 @@
           body: JSON.stringify({
             session_id: state.currentSessionId,
             action: "start",
+            idempotency_key: promptIdempotencyKey,
             harness_id: payload.harness_id,
             prompt: payload.prompt,
             model: payload.model,
