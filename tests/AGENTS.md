@@ -1,151 +1,57 @@
-# AGENTS.md — tests/
+# AGENTS.md — tests
 
-## Package Identity
+## Scope
 
-- **What:** pytest suite for the `gpt2giga` proxy server
-- **Framework:** `pytest`, `pytest-asyncio`, `pytest-mock`, `pytest-cov`
-- **Coverage target:** `>= 80%`
+The root pytest configuration collects the entire `tests/` tree: gateway,
+Harness, compatibility/golden, integration, smoke, live, scripts, and workspace
+packaging contracts. Do not infer coverage from an old directory inventory.
 
-## Run Commands
+## Test design
 
-```bash
-# Full suite
-uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
+- Add the smallest regression test that fails for the bug or missing behavior,
+  then implement the fix.
+- Test at the owning layer: pure transformations and policy as unit tests,
+  mounted behavior through FastAPI clients, persistence through temporary
+  stores, and packaging through built/installed artifacts.
+- Mock GigaChat and other external services by default. Only `tests/live/` may
+  call real upstream services, and those tests must remain explicit opt-in.
+- Pytest asyncio auto mode is enabled. Do not add
+  `@pytest.mark.asyncio` unless a test needs explicit plugin options.
+- Use `create_app()` plus an explicit `ProxyConfig` for app-wide gateway
+  behavior. Avoid ambient env and singleton state.
+- Use `tmp_path`, isolated Git repositories, temporary homes, and a temporary
+  Harness data dir. Never read or mutate real `.giga/`,
+  `~/.gpt2giga/harness`, or native agent state.
+- Assert redaction whenever request bodies, tool arguments, credentials,
+  environment values, stored events, previews, or provenance are involved.
+- Change golden fixtures only for an intentional client-visible wire contract;
+  review the human-readable diff.
+- Keep package-boundary tests strict: gateway-only installs must not expose
+  Harness surfaces, and Harness artifacts must include their commands, entry
+  points, dependencies, and no-build UI assets.
+- Files/Batches modules exist without public aggregator mounts; tests must not
+  assume that importing a router makes its API public.
+- Admin, debug, replay, and metrics route tests must explicitly enable the
+  corresponding settings instead of relying on ambient defaults.
+- Markers are selective, not exhaustive. Do not use `pytest -m unit` as a
+  substitute for the relevant path or full suite.
 
-# Useful focused runs
-uv run pytest tests/test_api_server/test_api_server.py
-uv run pytest tests/test_router/test_router_batches.py
-uv run pytest tests/test_router/test_anthropic_router.py
-uv run pytest tests/test_protocol/test_protocol.py
+## Validation
 
-# Marker-based runs
-uv run pytest -m unit
-uv run pytest -m integration
-```
+During iteration, run the narrowest relevant pytest node with
+`uv run pytest ... -q`.
 
-## Test Layout
-
-| Path | What It Covers |
-|---|---|
-| `tests/test_api_server/` | App factory, lifespan, middleware/router wiring |
-| `tests/test_cli/` | CLI config loading and secret-warning behavior |
-| `tests/test_config/` | `ProxySettings` and `ProxyConfig` parsing/validation |
-| `tests/test_protocol/` | Legacy and normalized request/response transforms, attachments, schema handling, edge cases |
-| `tests/test_router/` | OpenAI, Anthropic, LiteLLM, system, metrics, admin/debug, and disabled batch/file route behavior |
-| `tests/test_sinks/` | Traffic-log, metrics, observability, Postgres, OpenSearch, retention, and redaction sinks |
-| `tests/test_utils/` | Shared helpers in `gpt2giga.common.*` |
-| `tests/test_golden/` | Compatibility fixtures for stable OpenAI/Anthropic shapes |
-| `tests/common/` | Shared behavioral tests for common utilities such as model concurrency |
-| `tests/integration/` | Integration-style tests that still run hermetically |
-| `tests/live/` | Opt-in live tests that call real GigaChat; skipped unless `GPT2GIGA_RUN_LIVE_TESTS=1` |
-| `tests/fixtures/` | JSON fixtures for debug translation and protocol compatibility |
-| `tests/golden/` | Expected wire shapes for golden tests |
-| `tests/test_auth.py` | API-key auth dependency |
-| `tests/test_logger.py` | Logger setup and redaction |
-| `tests/test_middleware.py` | Path normalization and token middleware |
-| `tests/test_embeddings_variants.py` | Embeddings input-shape variants |
-| `tests/test_openapi_specs.py` | Generated OpenAPI schema fragments |
-
-## Patterns & Conventions
-
-- Mirror the source behavior being tested; keep router, protocol, and helper coverage separated when practical.
-- Prefer standalone `test_*` functions over test classes.
-- Mock upstream GigaChat interactions by default; only `tests/live/` may call real
-  upstream GigaChat, and those tests must be opt-in and secret-free in git.
-- Build small `FastAPI()` apps in router tests and mount only the routers under test.
-- Reuse existing dummy-client and mocked-response patterns instead of introducing live API calls.
-- When testing app-wide behavior, prefer `create_app()` plus explicit `ProxyConfig` rather than relying on ambient environment.
-- Preserve golden fixture stability. Update `tests/golden/` only when a client-visible compatibility shape intentionally changes.
-- For admin/debug/metrics features, enable the matching `ProxySettings` flag in the test config instead of assuming routes are always mounted.
-- For Files/Batches, remember router modules exist but public aggregators intentionally do not mount them.
-
-## Example Patterns
-
-### Endpoint Tests
-
-```python
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from gpt2giga.routers.openai import router as openai_router
-from gpt2giga.routers.system_router import system_router
-
-app = FastAPI()
-app.include_router(openai_router)
-app.include_router(system_router)
-
-
-def test_health_endpoint():
-    client = TestClient(app)
-    response = client.get("/health")
-    assert response.status_code == 200
-```
-
-### Async Protocol Tests
-
-```python
-from loguru import logger
-
-from gpt2giga.models.config import ProxyConfig
-from gpt2giga.protocol import AttachmentProcessor, RequestTransformer
-
-
-async def test_transformer_merges_messages():
-    config = ProxyConfig()
-    attachments = AttachmentProcessor(logger)
-    transformer = RequestTransformer(config, logger, attachments)
-    data = {
-        "messages": [
-            {"role": "user", "content": "hello"},
-            {"role": "user", "content": "world"},
-        ]
-    }
-
-    chat = await transformer.prepare_chat(data)
-    assert len(chat.messages) == 1
-```
-
-## Markers
-
-Defined in `pytest.ini`:
-
-- `unit`
-- `integration`
-- `slow`
-- `live_gigachat`
-
-## Quick Find Commands
+Harness-focused gate:
 
 ```bash
-# Find async tests
-rg -n "async def test_" tests
-
-# Find router tests for a route family
-rg -n "batches|anthropic|responses|embeddings|metrics|admin|debug" tests/test_router
-
-# Find tests touching common helpers
-rg -n "gpt2giga.common" tests/test_utils
-
-# Find sink/storage tests
-rg -n "traffic_log|observability|metrics|postgres|opensearch|redact" tests/test_sinks tests/test_api_server
-
-# Find golden compatibility fixtures
-rg -n "golden|fixtures|normalized" tests
-
-# Find mock usage
-rg -n "mocker|MagicMock|AsyncMock|patch" tests
+uv run pytest tests/harness -n 4 -q
 ```
 
-## Common Gotchas
-
-- Async auto-mode is enabled in `pytest.ini`; do not add `@pytest.mark.asyncio` unless a test needs explicit pytest-asyncio options.
-- There is no root-level shared `conftest.py`; package-specific fixtures live close to the tests that use them, such as under `tests/test_api_server/` and `tests/test_cli/`.
-- Coverage omits `tests/`, `scripts/`, `docs/`, `examples/`, migrations, `__pycache__`, and `.local/` according to `pyproject.toml`.
-- Batch and file helpers rely on in-memory stores in app state; router tests should initialize or mock that state explicitly when covering those disabled modules.
-- Traffic-log content capture and observability payload capture must be tested with redaction expectations whenever payload bodies are involved.
-
-## Pre-PR Check
+Full pytest/coverage gate:
 
 ```bash
-uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
+uv run pytest tests/ -n 4 --cov=. --cov-report=term --cov-fail-under=80
 ```
+
+Run the full gate after shared fixtures/config, app composition, public protocol,
+durable Harness state, package metadata, or cross-package contracts change.

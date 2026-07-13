@@ -1,95 +1,43 @@
-# AGENTS.md — .github/
+# AGENTS.md — GitHub automation
 
-## Package Identity
+## Scope
 
-- **What:** GitHub Actions workflows plus PR and issue templates
-- **Scope:** CI, security automation, coverage badge generation, Docker publishing, PyPI release publishing, release drafting, triage automation
+These rules apply to `.github/**` in addition to the root instructions.
+Workflow files are executable release and security configuration: preserve
+their behavior deliberately and verify claims against the YAML itself.
 
-## Local Validation
+## Invariants
 
-```bash
-uv sync --all-extras --dev
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest tests/ --cov=. --cov-fail-under=80
-```
+- Keep the CI Python matrix aligned with both package `requires-python`
+  declarations. CI must continue to run Ruff check, Ruff format check, pytest
+  coverage, both member builds, and installed-artifact smoke checks.
+- Keep the production Docker image gateway-only. Harness commands, namespace,
+  dependencies, and UI assets must not enter `Dockerfile` or Docker workflows.
+- Treat `publish-pypi.yml` package selection, tag filters, attestations, and
+  manual-dispatch behavior as release policy. Do not widen publishing scope or
+  trigger a release as part of validation.
+- Minimize `permissions:`; never expose secrets to untrusted pull-request code
+  or print secret values.
+- Keep action versions explicit. Review third-party actions and permission
+  changes as supply-chain-sensitive code.
 
-CI currently runs Ruff check and pytest coverage; the local Definition of Done is stricter because it also includes `ruff format --check`.
+## Coupled changes
 
-## Workflow Map
+- Keep `ci.yaml`, `scripts/generate_badge.py`, coverage artifact names, and
+  `badges/coverage.svg` expectations aligned.
+- Keep `docker_image.yaml`, `publish-ghcr.yml`, `docker-smoke.yaml`, the
+  Dockerfile, and documented tag/health semantics aligned.
+- Keep `docs-pages.yaml`, `docs-site/package-lock.json`, and Docusaurus
+  commands aligned.
+- Keep English and Russian PR/issue templates structurally aligned.
+- When workspace paths or package boundaries change, audit every workflow path
+  filter, build command, cache key, and artifact assertion.
 
-| File | Purpose |
-|---|---|
-| `.github/workflows/ci.yaml` | Ruff + pytest across Python `3.10`–`3.14`, uploads coverage, regenerates badge |
-| `.github/workflows/docker_image.yaml` | Publishes Docker Hub images for Python `3.10`–`3.14` |
-| `.github/workflows/publish-ghcr.yml` | Publishes GHCR images for Python `3.10`–`3.14`; `latest` and unqualified version tags track Python `3.13` |
-| `.github/workflows/publish-pypi.yml` | Builds with `uv` and publishes to PyPI on release |
-| `.github/workflows/codeflash.yaml` | Runs Codeflash optimization on PRs touching `gpt2giga/**` |
-| `.github/workflows/stale-issues.yaml` | Marks inactive issues as stale and closes them after a grace period |
-| `.github/workflows/dependency-review.yaml` | Reviews dependency changes on pull requests |
-| `.github/workflows/actionlint.yaml` | Lints GitHub Actions workflow files |
-| `.github/workflows/codeql.yaml` | Runs weekly and on-change CodeQL analysis for Python |
-| `.github/workflows/pip-audit.yaml` | Audits installed Python dependencies for known vulnerabilities |
-| `.github/workflows/nightly-smoke.yaml` | Runs scheduled app-level smoke tests against the FastAPI app factory |
-| `.github/workflows/docker-smoke.yaml` | Builds the default Docker image and verifies `/health` comes up |
-| `.github/workflows/docs-pages.yaml` | Builds Docusaurus documentation from `docs-site/` and deploys it to GitHub Pages |
-| `.github/workflows/pr-labeler.yaml` | Applies path-based labels to pull requests |
-| `.github/workflows/release-drafter.yaml` | Keeps the draft GitHub release notes up to date |
-| `.github/dependabot.yml` | Weekly Dependabot updates for GitHub Actions dependencies |
-| `.github/labeler.yml` | Path-to-label mapping used by the PR labeler workflow |
-| `.github/release-drafter.yml` | Release note categories and templates for Release Drafter |
-| `.github/PULL_REQUEST_TEMPLATE.md` | PR checklist |
-| `.github/PULL_REQUEST_TEMPLATE/ru.md` | Russian PR checklist |
-| `.github/ISSUE_TEMPLATE/bug_report.md` | Bug report template |
-| `.github/ISSUE_TEMPLATE/bug_report.ru.md` | Russian bug report template |
+## Validation
 
-## Patterns & Conventions
-
-- Keep CI aligned with the root Definition of Done.
-- Preserve the Python compatibility matrix unless the package support policy changes too.
-- Use GitHub secrets only where required; never inline credentials in workflow YAML.
-- Badge generation depends on both `.github/workflows/ci.yaml` and `scripts/generate_badge.py`; change them together.
-- `publish-pypi.yml` validates that the release tag matches `pyproject.toml` version; keep that contract intact.
-- `codeflash.yaml` currently uses `pip` and `poetry`, unlike the rest of the repo's `uv`-first tooling. Treat that as intentional unless you are updating the workflow itself.
-- `actions/labeler` expects labels referenced in `.github/labeler.yml` to exist in the repository settings; this repo does not auto-create them.
-- `docker_image.yaml` and `publish-ghcr.yml` both build multi-arch images for Python `3.10`-`3.14`; keep Docker tag semantics aligned when changing either workflow.
-- PR templates still contain legacy `make lint` / `make mypy` / `make test` checklist text. If editing templates, prefer the real `uv run ruff ...` and `uv run pytest ...` commands unless Makefile targets are added.
-- Keep English and Russian templates structurally aligned when updating issue or PR wording.
-
-## Quick Find Commands
-
-```bash
-# Find uv-based workflow steps
-rg -n "uv sync|uv run|uv build|uv publish" .github/workflows
-
-# Find Docusaurus documentation workflow steps
-rg -n "npm ci|npm run build|docs-site" .github/workflows
-
-# Find Docker tag logic
-rg -n "tags:|IMAGE_NAME|VERSION" .github/workflows
-
-# Find coverage badge wiring
-rg -n "coverage.json|generate_badge|coverage.svg" .github/workflows
-
-# Find workflow action versions
-rg -n "uses:" .github/workflows
-
-# Find template command/checklist drift
-rg -n "make lint|make mypy|make test|uv run" .github
-```
-
-## Common Gotchas
-
-- `ci.yaml` downloads the `coverage-3.12` artifact to generate the badge; if artifact naming changes, update both steps.
-- `docker_image.yaml` and `publish-ghcr.yml` both build multi-arch images; keep version tagging consistent with `pyproject.toml`.
-- `publish-pypi.yml` clears `dist/` before build, so release packaging assumptions should not rely on checked-in artifacts.
-- `docker-smoke.yaml` builds with Python `3.13` and verifies `/health` on `127.0.0.1:18090`; keep that check lightweight and credential-free.
-- `nightly-smoke.yaml` runs `tests/test_api_server/test_ci_smoke.py`; avoid turning it into a full integration suite.
-
-## Pre-PR Check
-
-```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest tests/ --cov=. --cov-fail-under=80
-```
+- Run the exact local commands represented by a changed workflow when feasible.
+- Run `actionlint` if it is installed; otherwise inspect the complete workflow
+  diff and rely on repository contract tests plus GitHub validation.
+- For release or packaging changes, run the full root quality gate, both
+  `--no-sources` package builds, and the relevant package-isolation tests.
+- For docs workflow changes, run `npm --prefix docs-site run build`.

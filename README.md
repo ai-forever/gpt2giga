@@ -45,12 +45,27 @@ cp .env.example .env
 docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
 ```
 
-Или локальный запуск:
+Или локальный запуск только gateway с актуальной prerelease-версией:
 
 ```sh
-uv tool install gpt2giga
+uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
+
+Unified Harness пока доступен как активно разрабатываемое альфа-превью. Текущий
+способ запуска — [из source checkout](./docs/harness.md#quickstart). После
+появления отдельного пакета в вашем package index он подтянет совместимую
+gateway-версию и добавит команды `giga` и `gpt2giga-harness`:
+
+```sh
+uv tool install gpt2giga-harness
+giga doctor
+giga ui
+```
+
+Python namespace Harness — `gpt2giga_harness`; прежний
+`gpt2giga.harness` больше не поставляется. Подробности обновления со старого
+combined prerelease wheel — в [Unified Harness](./docs/harness.md#migration-from-the-combined-prerelease).
 
 Минимальный OpenAI SDK вызов:
 
@@ -115,6 +130,7 @@ make docs-dev-ru
 | Что поддерживается, отключено или намеренно игнорируется | [docs/api-compatibility.md](./docs/api-compatibility.md) |
 | Совместимость SDK `extra_*` и параметров клиентов | [docs/client-parameter-compatibility.md](./docs/client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [docs/builtin-tools.md](./docs/builtin-tools.md) |
+| Local harness CLI/UI для smoke tests и agent CLI adapters | [docs/harness.md](./docs/harness.md) |
 | Переменные окружения, CLI flags, backend modes | [docs/configuration.md](./docs/configuration.md) |
 | Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [docs/deployment.md](./docs/deployment.md) |
 | Logs, metrics, traffic logs, admin API, debug translation | [docs/operations.md](./docs/operations.md) |
@@ -123,6 +139,8 @@ make docs-dev-ru
 | Checklist для добавления provider/protocol | [docs/architecture/how-to-add-provider.md](./docs/architecture/how-to-add-provider.md) |
 | Редакторы, агенты, SDK examples, reverse proxies | [docs/integrations.md](./docs/integrations.md) |
 | Runnable-примеры | [examples/README.md](./examples/README.md) |
+| История изменений gateway | [RU](./packages/gpt2giga/CHANGELOG.md) · [EN](./packages/gpt2giga/CHANGELOG_en.md) |
+| История изменений Harness | [RU](./packages/gpt2giga-harness/CHANGELOG.md) · [EN](./packages/gpt2giga-harness/CHANGELOG_en.md) |
 
 ## Текущая API-Поверхность
 
@@ -175,7 +193,8 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 
 | Path | Назначение |
 |---|---|
-| `gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
+| `packages/gpt2giga/src/gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
+| `packages/gpt2giga-harness/src/gpt2giga_harness/` | Harness CLI, local UI, runtime, sessions, and agent adapters |
 | `tests/` | Unit, router, protocol, sink и integration tests |
 | `examples/` | Runnable OpenAI, Anthropic, Gemini, embeddings and agents examples; files/batches examples are prepared but not mounted |
 | `docs/` | Markdown-контент пользовательской документации и architecture notes |
@@ -190,13 +209,21 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 Установить зависимости:
 
 ```sh
-uv sync --all-extras --dev
+uv sync --all-packages --all-extras --dev
 ```
 
 Запустить сервис:
 
 ```sh
 uv run gpt2giga
+uv run giga doctor
+```
+
+Сборка двух дистрибутивов выполняется явно:
+
+```sh
+uv build --package gpt2giga
+uv build --package gpt2giga-harness
 ```
 
 Проверки перед PR:
@@ -204,7 +231,7 @@ uv run gpt2giga
 ```sh
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
+uv run pytest tests/ -n 4 --cov=. --cov-report=term --cov-fail-under=80
 ```
 
 Live-тесты с реальными вызовами GigaChat запускаются отдельно и требуют

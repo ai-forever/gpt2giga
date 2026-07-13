@@ -1,52 +1,5 @@
-[project]
-name = "gpt2giga"
-version = "0.2.2a1"
-description = "Утилита для проксирования OpenAI, Anthropic и Gemini запросов в GigaChat"
-authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
-requires-python = ">=3.10,<4,<3.15"
-readme = "README.md"
-license = "MIT"
-dependencies = [
-    "python-dotenv>=1.2.2,<2",
-    "aiohttp>=3.14.0,<4",
-    "tiktoken>=0.12.0,<1",
-    "pillow>=12.2.0,<13",
-    "uvicorn>=0.41.0,<1",
-    "openai>=2.3.0,<3",
-    "aioitertools>=0.13.0,<0.14",
-    "loguru>=0.7.3,<0.8",
-    "sse-starlette>=3.0.3,<4",
-    "pydantic-settings>=2.12.0,<3",
-    "fastapi>=0.133.0,<1",
-    "starlette>=1.1,<2",
-    "gigachat>=0.2.2a1,<0.3.0",
-    "anthropic>=0.79.0",
-    "google-genai>=2.8.0,<3",
-]
-
-[project.scripts]
-gpt2giga = "gpt2giga:run"
-
-[project.optional-dependencies]
-postgres = [
-    "asyncpg>=0.30.0,<1",
-    "sqlalchemy[asyncio]>=2.0.0,<3",
-    "alembic>=1.17.0,<2",
-]
-opensearch = [
-    "opensearch-py>=2.8.0,<3",
-]
-phoenix = [
-    "arize-phoenix-otel>=0.1,<1",
-    "opentelemetry-sdk>=1.28.0,<2",
-    "opentelemetry-exporter-otlp>=1.28.0,<2",
-    "openinference-semantic-conventions>=0.1,<1",
-]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
+[tool.uv.workspace]
+members = ["packages/*"]
 
 [tool.coverage.run]
 omit = [
@@ -77,6 +30,7 @@ dev = [
     "pytest (>=9.0.3, <10.0.0)",
     "pytest-asyncio (>=1.2.0,<2.0.0)",
     "pytest-mock (>=3.15.1,<4.0.0)",
+    "pytest-xdist (>=3.8.0,<4.0.0)",
     "ruff (>=0.15,<1)",
     "pytest-cov (>=7.0.0,<8.0.0)",
     "pre-commit (>=4.3.0,<5.0.0)",

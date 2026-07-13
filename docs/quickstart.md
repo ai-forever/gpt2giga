@@ -54,19 +54,44 @@ Check:
 curl http://localhost:8090/health
 ```
 
-## Local run
+## Choose an installation
 
-Install as a tool:
+Install only the compatibility gateway when you need the OpenAI-, Anthropic-,
+or Gemini-shaped HTTP API:
 
 ```sh
-uv tool install gpt2giga
+uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Or run from the repository:
+The current Unified Harness alpha runs from the source checkout described in
+the [Unified Harness guide](harness.md). After the standalone package appears
+in your package index, install the local control plane with:
 
 ```sh
-uv sync --all-extras --dev
+uv tool install gpt2giga-harness
+giga doctor
+giga ui
+```
+
+The Harness distribution uses the `gpt2giga_harness` Python namespace and
+provides the `giga` and `gpt2giga-harness` commands. The gateway distribution
+provides only the `gpt2giga` command.
+
+:::warning[Alpha preview]
+
+Unified Harness is under active development. Start with local, supervised
+workflows and read the [Unified Harness alpha guide](harness.md) before enabling
+edit mode, remote access, or scheduled jobs.
+
+:::
+
+## Run from the repository
+
+Install both editable workspace members and the development dependencies:
+
+```sh
+uv sync --all-packages --all-extras --dev
 uv run gpt2giga
 ```
 

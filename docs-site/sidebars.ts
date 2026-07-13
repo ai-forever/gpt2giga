@@ -6,7 +6,17 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Overview',
       collapsible: false,
-      items: ['index', 'quickstart', 'configuration'],
+      items: [
+        'index',
+        'quickstart',
+        {
+          type: 'doc',
+          id: 'harness',
+          label: 'Unified Harness (alpha)',
+          key: 'harness',
+        },
+        'configuration',
+      ],
     },
     {
       type: 'category',

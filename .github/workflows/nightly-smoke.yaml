@@ -28,7 +28,7 @@ jobs:
         run: uv python install 3.13
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --all-packages --all-extras --dev
 
       - name: Run smoke tests
         run: uv run pytest tests/test_api_server/test_ci_smoke.py

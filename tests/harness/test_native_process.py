@@ -1,0 +1,164 @@
+import os
+import sys
+import time
+
+from gpt2giga_harness.native.base import NativeCommandPlan
+from gpt2giga_harness.native.process import (
+    NativeProcessManager,
+    NativeProcessStatus,
+    native_output_chunk_to_dict,
+)
+from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga_harness.types import REDACTED
+
+
+def test_native_process_manager_starts_reads_writes_and_stops_fake_cli(tmp_path):
+    script = _write_echo_cli(tmp_path)
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Native process")
+    manager = NativeProcessManager(session_store=store, use_pty=False)
+
+    ref = manager.start(
+        NativeCommandPlan(
+            command=(sys.executable, str(script)),
+            env=_python_env(),
+            cwd=str(tmp_path),
+            metadata={"harness_id": "fake-cli"},
+        ),
+        session_id=session.id,
+        workspace=str(tmp_path),
+        run_id="run_fake",
+    )
+
+    cursor, output = _wait_for_text(manager, ref.id, 0, "ready")
+    assert ref.status is NativeProcessStatus.RUNNING
+    assert "ready" in output
+
+    manager.write(ref.id, "hello\n")
+    cursor, output = _wait_for_text(manager, ref.id, cursor, "echo:hello")
+    assert "echo:hello" in output
+
+    manager.write(ref.id, "quit\n")
+    cursor, output = _wait_for_text(manager, ref.id, cursor, "bye")
+    stopped = manager.stop(ref.id)
+
+    assert "bye" in output
+    assert stopped.status in {
+        NativeProcessStatus.EXITED,
+        NativeProcessStatus.STOPPED,
+    }
+    assert {event.type for event in store.list_events(session.id)} >= {
+        "terminal_start",
+        "terminal_input",
+        "terminal_output",
+        "terminal_exit",
+        "terminal_stop",
+    }
+
+
+def test_native_process_manager_redacts_output_and_session_events(tmp_path):
+    secret = "native-process-secret-value"
+    script = tmp_path / "print_secret.py"
+    script.write_text(
+        "import os\nprint(os.environ['GPT2GIGA_API_KEY'], flush=True)\n",
+        encoding="utf-8",
+    )
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Native process")
+    manager = NativeProcessManager(session_store=store, use_pty=False)
+
+    ref = manager.start(
+        NativeCommandPlan(
+            command=(sys.executable, str(script)),
+            env={**_python_env(), "GPT2GIGA_API_KEY": secret},
+            cwd=str(tmp_path),
+            metadata={"harness_id": "fake-cli", "api_key": secret},
+        ),
+        session_id=session.id,
+    )
+
+    _wait_for_status(manager, ref.id, NativeProcessStatus.EXITED)
+    chunk = manager.read_since(ref.id, 0)
+    payload = native_output_chunk_to_dict(chunk)
+    events = store.list_events(session.id)
+
+    assert secret not in str(payload)
+    assert secret not in str(events)
+    assert REDACTED in str(payload)
+    assert REDACTED in str(events)
+
+
+def test_native_process_manager_cleanup_marks_exited_process(tmp_path):
+    script = tmp_path / "exit.py"
+    script.write_text("print('done', flush=True)\n", encoding="utf-8")
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Native process")
+    manager = NativeProcessManager(session_store=store, use_pty=False)
+    ref = manager.start(
+        NativeCommandPlan(
+            command=(sys.executable, str(script)),
+            env=_python_env(),
+            cwd=str(tmp_path),
+            metadata={"harness_id": "fake-cli"},
+        ),
+        session_id=session.id,
+    )
+
+    _wait_for_status(manager, ref.id, NativeProcessStatus.EXITED)
+    refs = manager.cleanup()
+
+    assert refs[0].status is NativeProcessStatus.EXITED
+    assert refs[0].exit_code == 0
+    assert "done" in "".join(
+        output.text for output in manager.read_since(ref.id, 0).outputs
+    )
+
+
+def _write_echo_cli(tmp_path):
+    script = tmp_path / "echo_cli.py"
+    script.write_text(
+        "import sys\n"
+        "print('ready', flush=True)\n"
+        "for line in sys.stdin:\n"
+        "    text = line.strip()\n"
+        "    print(f'echo:{text}', flush=True)\n"
+        "    if text == 'quit':\n"
+        "        break\n"
+        "print('bye', flush=True)\n",
+        encoding="utf-8",
+    )
+    return script
+
+
+def _python_env():
+    env = {"PYTHONUNBUFFERED": "1"}
+    for key in ("PATH", "SYSTEMROOT"):
+        if value := os.environ.get(key):
+            env[key] = value
+    return env
+
+
+def _wait_for_text(manager, process_id, cursor, expected):
+    deadline = time.monotonic() + 3.0
+    seen = ""
+    latest_cursor = cursor
+    while time.monotonic() < deadline:
+        chunk = manager.read_since(process_id, latest_cursor)
+        latest_cursor = chunk.cursor
+        seen += "".join(output.text for output in chunk.outputs)
+        if expected in seen:
+            return latest_cursor, seen
+        time.sleep(0.02)
+    raise AssertionError(f"Timed out waiting for {expected!r}; saw {seen!r}")
+
+
+def _wait_for_status(manager, process_id, expected):
+    deadline = time.monotonic() + 3.0
+    status = None
+    while time.monotonic() < deadline:
+        ref = manager.status(process_id)
+        status = ref.status
+        if status is expected:
+            return ref
+        time.sleep(0.02)
+    raise AssertionError(f"Timed out waiting for {expected}; last status was {status}")
