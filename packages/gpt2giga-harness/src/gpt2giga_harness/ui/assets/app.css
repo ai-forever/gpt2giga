@@ -2464,6 +2464,10 @@
     #run-button {
       min-width: 92px;
     }
+    #interrupt-run-button,
+    #cancel-run-button {
+      min-width: 86px;
+    }
     .utility-action {
       min-height: 34px;
       border-color: transparent !important;
@@ -2806,15 +2810,22 @@
       }
       .composer-footer {
         display: grid;
+        justify-content: stretch;
         gap: 10px;
       }
       .composer-actions {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr);
+        grid-template-columns: minmax(0, 1fr);
+        width: 100%;
         order: -1;
       }
+      .composer-actions.headless-running {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
       #compare-button,
-      #run-button {
+      #run-button,
+      #interrupt-run-button,
+      #cancel-run-button {
         width: 100%;
         min-height: 44px;
       }

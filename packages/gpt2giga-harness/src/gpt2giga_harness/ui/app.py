@@ -1756,7 +1756,7 @@ def create_app(
                 session_id,
                 payload,
                 idempotency_key=idempotency_key,
-                origin="manual",
+                origin="interactive",
             )
             return submission.queued.run
         before_run_ids = {run.id for run in store.list_runs(session_id)}

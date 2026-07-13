@@ -795,12 +795,42 @@ class RuntimeCoordinationStore:
         with self._connect() as connection, _transaction(connection):
             rows = connection.execute(
                 """
-                SELECT * FROM jobs
-                WHERE status = ? AND (available_at IS NULL OR available_at <= ?)
-                  AND cancel_requested_at IS NULL
-                ORDER BY priority DESC, created_at, id
+                SELECT candidate.* FROM jobs AS candidate
+                WHERE candidate.status = ?
+                  AND (candidate.available_at IS NULL OR candidate.available_at <= ?)
+                  AND candidate.cancel_requested_at IS NULL
+                  AND (
+                    candidate.origin != 'interactive'
+                    OR NOT EXISTS (
+                      SELECT 1 FROM jobs AS blocker
+                      WHERE blocker.session_id = candidate.session_id
+                        AND blocker.id != candidate.id
+                        AND (
+                          blocker.status = ?
+                          OR (
+                            blocker.status IN (?, ?, ?, ?)
+                            AND (
+                              blocker.created_at < candidate.created_at
+                              OR (
+                                blocker.created_at = candidate.created_at
+                                AND blocker.id < candidate.id
+                              )
+                            )
+                          )
+                        )
+                    )
+                  )
+                ORDER BY candidate.priority DESC, candidate.created_at, candidate.id
                 """,
-                (JobStatus.QUEUED.value, now),
+                (
+                    JobStatus.QUEUED.value,
+                    now,
+                    JobStatus.RUNNING.value,
+                    JobStatus.QUEUED.value,
+                    JobStatus.RETRY_WAIT.value,
+                    JobStatus.WAITING_APPROVAL.value,
+                    JobStatus.WAITING_INPUT.value,
+                ),
             ).fetchall()
             job_row = next(
                 (

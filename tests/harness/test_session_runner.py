@@ -12,6 +12,8 @@ from gpt2giga_harness.project_memory import FilesystemProjectMemoryStore
 from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga_harness.sessions.models import HarnessMessage
+from gpt2giga_harness.sessions.store import new_id, utc_now
 from gpt2giga_harness.types import (
     Availability,
     GigaChatBuiltinTool,
@@ -154,6 +156,65 @@ def test_session_runner_passes_previous_messages_to_chat_harness():
     first = runner.create_and_run({"harness_id": "capture", "prompt": "first"})
 
     runner.run_in_session(first.session.id, {"prompt": "second"})
+
+    assert harness.last_request is not None
+    assert [
+        (message.role, message.content) for message in harness.last_request.messages
+    ] == [
+        ("user", "first"),
+        ("assistant", "answer: first"),
+        ("user", "second"),
+    ]
+
+
+def test_queued_turn_waits_for_preceding_assistant_in_request_history():
+    store = InMemoryHarnessSessionStore()
+    harness = _CaptureHarness()
+    runner = _runner(harness, store=store)
+    session = runner.create_session(default_harness_id="capture")
+    first_run = store.create_run(
+        session_id=session.id,
+        harness_id="capture",
+        prompt="first",
+        model=None,
+        api_mode=session.default_api_mode,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=session.workspace,
+        status="running",
+    )
+    store.append_message(
+        HarnessMessage(
+            id=new_id("msg"),
+            session_id=session.id,
+            run_id=first_run.id,
+            role="user",
+            content="first",
+            created_at=utc_now(),
+        )
+    )
+    queued = runner.enqueue_in_session(
+        session.id,
+        {"harness_id": "capture", "prompt": "second"},
+        run_id=new_id("run"),
+    )
+    store.append_message(
+        HarnessMessage(
+            id=new_id("msg"),
+            session_id=session.id,
+            run_id=first_run.id,
+            role="assistant",
+            content="answer: first",
+            created_at=utc_now(),
+        )
+    )
+
+    runner.run_in_session(
+        session.id,
+        {"harness_id": "capture", "prompt": "second"},
+        existing_run_id=queued.run.id,
+        user_message_id=queued.user_message.id,
+    )
 
     assert harness.last_request is not None
     assert [

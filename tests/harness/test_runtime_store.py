@@ -114,6 +114,67 @@ def test_runtime_store_allocates_attempt_and_trace_identity_concurrently(tmp_pat
     assert sorted(sequences) == list(range(1, 81))
 
 
+def test_interactive_jobs_are_claimed_fifo_per_session(tmp_path):
+    store = RuntimeCoordinationStore(tmp_path)
+    first = store.submit_job(
+        session_id="sess_1",
+        user_message_id="msg_1",
+        idempotency_key="interactive-first",
+        origin="interactive",
+    ).job
+    second = store.submit_job(
+        session_id="sess_1",
+        user_message_id="msg_2",
+        idempotency_key="interactive-second",
+        origin="interactive",
+    ).job
+    fingerprint = {"harnesses": {}}
+
+    first_claim = store.claim_next_job(
+        worker_id="worker_1",
+        capability_fingerprint=fingerprint,
+        lease_seconds=5,
+    )
+    blocked_claim = store.claim_next_job(
+        worker_id="worker_2",
+        capability_fingerprint=fingerprint,
+        lease_seconds=5,
+    )
+
+    assert first_claim is not None
+    assert first_claim.job.id == first.id
+    assert blocked_claim is None
+
+    store.request_cancel(first.id)
+    assert (
+        store.claim_next_job(
+            worker_id="worker_2",
+            capability_fingerprint=fingerprint,
+            lease_seconds=5,
+        )
+        is None
+    )
+
+    store.transition_attempt(
+        first_claim.attempt.id,
+        JobAttemptStatus.CANCELED,
+        expected_status=JobAttemptStatus.CLAIMED,
+    )
+    store.transition_job(
+        first.id,
+        JobStatus.CANCELED,
+        expected_status=JobStatus.RUNNING,
+    )
+    second_claim = store.claim_next_job(
+        worker_id="worker_2",
+        capability_fingerprint=fingerprint,
+        lease_seconds=5,
+    )
+
+    assert second_claim is not None
+    assert second_claim.job.id == second.id
+
+
 def test_runtime_store_terminal_transition_is_compare_and_swap(tmp_path):
     store = RuntimeCoordinationStore(tmp_path)
     job = store.submit_job(

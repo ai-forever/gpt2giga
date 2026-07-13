@@ -3380,7 +3380,7 @@
       return "";
     }
 
-    async function runHarness() {
+    async function runHarness(delivery = "queue") {
       const payload = buildPayload();
       if (!payload.prompt.trim()) return;
       if (!(await confirmRunPreflight(payload))) return;
@@ -3388,6 +3388,10 @@
       if (!(await retireLegacyNativeProcessForStructuredChat())) return;
       if (activeNativeConversation()) {
         await continueNativeConversation(payload);
+        return;
+      }
+      if (state.activeHeadlessRun && state.activeHeadlessRun.id) {
+        await queueHeadlessMessage(payload, { interrupt: delivery === "interrupt" });
         return;
       }
       if (payload.invocation_mode === "native" && currentHarnessSupportsNative()) {
@@ -3501,6 +3505,8 @@
           applyRunDefaults(payload);
           persistProjectState({ last_selected_session: state.currentSessionId });
         }
+        clearAcceptedComposer();
+        setHeadlessRunning(true);
         const initialEvents = Array.isArray(body.events) ? body.events : [];
         for (const event of [...eventsForRun(body.run.id), ...initialEvents]) consumeLiveEvent(event);
         renderLiveDraft(body.run.id);
@@ -3517,6 +3523,56 @@
         setText("run-panel", "Stream start failed.");
         setHeadlessRunning(false);
       }
+    }
+
+    function clearAcceptedComposer() {
+      byId("prompt-input").value = "";
+      state.attachments = [];
+      renderAttachments();
+      scheduleRouteRecommendation();
+    }
+
+    async function queueHeadlessMessage(payload, options = {}) {
+      const activeRun = state.activeHeadlessRun || {};
+      if (!state.currentSessionId || !activeRun.id) return;
+      const interrupt = options.interrupt === true;
+      byId("run-button").disabled = true;
+      byId("interrupt-run-button").disabled = true;
+      if (interrupt) {
+        setText("run-panel", "Requesting stop before queueing the next message...");
+        const stopped = await getJson(`/api/runs/${encodeURIComponent(activeRun.id)}/cancel`, {
+          method: "POST"
+        });
+        if (!stopped.ok) {
+          setText("run-panel", stopped.data.detail || "Interrupt failed.");
+          setHeadlessRunning(true);
+          return;
+        }
+      } else {
+        setText("run-panel", "Queueing the next message...");
+      }
+      const result = await getJson(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/run/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const body = result.data || {};
+      if (!result.ok || !body.run) {
+        setText("run-panel", body.detail || `Queue failed with HTTP ${result.status}`);
+        setHeadlessRunning(true);
+        return;
+      }
+      state.lastPayload = payload;
+      await loadSession(state.currentSessionId, { syncRoute: false });
+      clearAcceptedComposer();
+      setText(
+        "run-panel",
+        interrupt
+          ? "Interrupt requested. The message will run after the current operation stops."
+          : "Message queued. It will run after earlier turns finish."
+      );
+      if (body.job && body.job.status === "waiting_approval") await loadApprovals();
+      setHeadlessRunning(Boolean(state.activeHeadlessRun));
     }
 
     function openHeadlessEventStream(runId) {
@@ -3575,18 +3631,18 @@
 
     async function finishHeadlessStream(runId) {
       if (!runId || !state.activeHeadlessRun || state.activeHeadlessRun.id !== runId) return;
+      const draft = state.liveRuns.get(runId);
       closeHeadlessEventSource();
+      state.activeHeadlessRun = null;
       setHeadlessRunning(false);
       if (state.currentSessionId) {
         await loadSession(state.currentSessionId);
         await loadSessions();
       }
-      const draft = state.liveRuns.get(runId);
-      if (persistedMessageForRun(runId) && !preserveTerminalPartialDraft(draft)) state.liveRuns.delete(runId);
-      state.activeHeadlessRun = null;
-      byId("prompt-input").value = "";
-      state.attachments = [];
-      renderAttachments();
+      if (!preserveTerminalPartialDraft(draft)) {
+        state.liveRuns.delete(runId);
+        renderMessages();
+      }
     }
 
     function closeHeadlessEventSource() {
@@ -3598,11 +3654,16 @@
     }
 
     function setHeadlessRunning(running) {
-      byId("run-button").disabled = running;
-      if (running) byId("run-button").textContent = "Running...";
+      const active = running && Boolean(state.activeHeadlessRun && state.activeHeadlessRun.id);
+      byId("run-button").parentElement.classList.toggle("headless-running", active);
+      byId("run-button").disabled = running && !active;
+      if (active) byId("run-button").textContent = "Queue";
+      else if (running) byId("run-button").textContent = "Starting...";
       else updateHarnessDrivenControls();
-      byId("cancel-run-button").hidden = !running;
-      byId("cancel-run-button").disabled = !running;
+      byId("interrupt-run-button").hidden = !active;
+      byId("interrupt-run-button").disabled = !active;
+      byId("cancel-run-button").hidden = !active;
+      byId("cancel-run-button").disabled = !active;
     }
 
     async function cancelHeadlessRun() {
@@ -3621,6 +3682,7 @@
         byId("cancel-run-button").disabled = false;
         return;
       }
+      setText("run-panel", "Stop requested. The current operation may finish; no next step will start.");
     }
 
     async function startNativeProcess(payload) {
@@ -3843,9 +3905,10 @@
 
     function activeHeadlessRunFromBundle(bundle = state.currentBundle) {
       const runs = bundle && Array.isArray(bundle.runs) ? bundle.runs : [];
-      return [...runs].reverse().find((run) =>
-        ["queued", "running"].includes(run.status) && run.invocation_mode !== "native"
-      ) || null;
+      const headless = runs.filter((run) => run.invocation_mode !== "native");
+      return headless.find((run) => run.status === "running")
+        || headless.find((run) => run.status === "queued")
+        || null;
     }
 
     function latestEventIdForRun(runId) {
@@ -3880,7 +3943,10 @@
         if (!["failed", "canceled"].includes(run.status)) continue;
         const events = eventsForRun(run.id);
         const hasPartialText = events.some((event) => event.type === "message_delta" && liveDelta(event));
-        if (!hasPartialText) continue;
+        if (!hasPartialText) {
+          state.liveRuns.delete(run.id);
+          continue;
+        }
         const draft = ensureLiveRun(run.id, run);
         for (const event of events) consumeLiveEvent(event);
         draft.status = run.status;
@@ -4703,7 +4769,7 @@
         const status = document.createElement("span");
         const terminal = ["succeeded", "failed", "canceled"].includes(liveStatus);
         status.className = `live-status${liveStatus === "failed" || liveStatus === "canceled" ? " failed" : terminal ? " complete" : ""}`;
-        status.textContent = liveStatus === "succeeded" ? "Complete" : liveStatus === "canceled" ? "Canceled" : liveStatus === "failed" ? "Failed" : "Streaming";
+        status.textContent = liveStatus === "succeeded" ? "Complete" : liveStatus === "canceled" ? "Canceled" : liveStatus === "failed" ? "Failed" : liveStatus === "queued" ? "Queued" : "Streaming";
         header.appendChild(status);
       }
       return header;
@@ -4918,7 +4984,8 @@
             renderedPartialDrafts.add(message.run_id);
           }
         }
-        list.appendChild(buildMessageNode(message, { tools, generatedFiles, usage }));
+        const queuedStatus = message.role === "user" && run && run.status === "queued" ? "queued" : null;
+        list.appendChild(buildMessageNode(message, { tools, generatedFiles, usage, liveStatus: queuedStatus }));
       }
       for (const [runId, draft] of [...state.liveRuns.entries()]) {
         if (renderedPartialDrafts.has(runId)) continue;
@@ -4929,6 +4996,7 @@
         if (draft.sessionId === (session && session.id)) list.appendChild(liveMessageNode(draft));
       }
       appendNativeStreamingMessage(list, messages);
+      orderMessagesByRun(list);
       const hasVisibleMessages = list.childElementCount > 0;
       document.body.classList.toggle("new-session", !hasVisibleMessages);
       if (!hasVisibleMessages) {
@@ -4940,6 +5008,21 @@
       state.renderedSessionId = session && session.id;
       renderCurrentPlan();
       if (shouldStick) scrollChatToBottom();
+    }
+
+    function orderMessagesByRun(list) {
+      const runs = state.currentBundle && Array.isArray(state.currentBundle.runs) ? state.currentBundle.runs : [];
+      const order = new Map(runs.map((run, index) => [run.id, index]));
+      const nodes = [...list.children];
+      const originalOrder = new Map(nodes.map((node, index) => [node, index]));
+      nodes.sort((left, right) => {
+        const leftRun = left.dataset.runId;
+        const rightRun = right.dataset.runId;
+        const leftIndex = leftRun && order.has(leftRun) ? order.get(leftRun) : -1;
+        const rightIndex = rightRun && order.has(rightRun) ? order.get(rightRun) : -1;
+        return leftIndex - rightIndex || originalOrder.get(left) - originalOrder.get(right);
+      });
+      for (const node of nodes) list.appendChild(node);
     }
 
     function runStatusBadgeClass(status) {
@@ -6750,6 +6833,7 @@
       });
       byId("run-button").addEventListener("click", runHarness);
       byId("arena-compare-button").addEventListener("click", runArena);
+      byId("interrupt-run-button").addEventListener("click", () => runHarness("interrupt"));
       byId("cancel-run-button").addEventListener("click", cancelHeadlessRun);
       byId("apply-route-recommendation-button").addEventListener("click", applyRouteRecommendation);
       byId("apply-run-diff-button").addEventListener("click", applyRunDiff);

@@ -53,13 +53,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.30">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.32">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.31"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.33"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -274,8 +274,9 @@ def test_ui_static_resumes_active_stream_after_session_reload():
 
     assert "resumeActiveHeadlessRun();" in load_session_source
     for fragment in (
-        '["queued", "running"].includes(run.status)',
-        'run.invocation_mode !== "native"',
+        'runs.filter((run) => run.invocation_mode !== "native")',
+        'headless.find((run) => run.status === "running")',
+        'headless.find((run) => run.status === "queued")',
         "state.activeHeadlessRun = run",
         "ensureLiveRun(run.id, run)",
         "for (const event of eventsForRun(run.id)) consumeLiveEvent(event)",
@@ -296,6 +297,8 @@ def test_ui_static_resumes_active_stream_after_session_reload():
         "if (!runId || !state.activeHeadlessRun || "
         "state.activeHeadlessRun.id !== runId) return;"
     ) in UI_SOURCE
+    assert "state.liveRuns.delete(run.id);" in resume_source
+    assert "if (!preserveTerminalPartialDraft(draft))" in UI_SOURCE
 
 
 def test_ui_static_surfaces_codex_native_trust_and_reconnects_process():
@@ -1120,6 +1123,7 @@ def test_ui_index_contains_control_panel_elements():
         "stop-native-process-button",
         "clear-native-terminal-button",
         "run-button",
+        "interrupt-run-button",
         "arena-nav-link",
         "arena-center",
         "arena-prompt-input",
@@ -1241,6 +1245,9 @@ def test_ui_index_contains_control_panel_elements():
         "session-drawer-button",
     ):
         assert element_id in source
+    assert ">Stop</button>" in html
+    assert ">Interrupt</button>" in html
+    assert 'byId("run-button").textContent = "Queue"' in source
     for text in (
         "+ New session",
         "/api/project",
