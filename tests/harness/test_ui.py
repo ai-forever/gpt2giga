@@ -53,13 +53,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.22">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.24">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.22"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.24"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -316,7 +316,7 @@ def test_ui_static_surfaces_codex_native_trust_and_reconnects_process():
     ]
     trust_source = UI_SOURCE[
         UI_SOURCE.index("function maybeShowNativeTrustPrompt") : UI_SOURCE.index(
-            "async function sendNativeInput"
+            "async function stopNativeProcess"
         )
     ]
 
@@ -327,16 +327,13 @@ def test_ui_static_surfaces_codex_native_trust_and_reconnects_process():
         "metadata.process_status",
         "nativeTrustDecisionRecorded(bundle, process.id)",
         "setActiveNativeProcess(candidate",
-        'showTab("native")',
-        "setInspectorOpen(true)",
     ):
         assert fragment in reconnect_source
-    for fragment in (
-        'showTab("native")',
-        "setInspectorOpen(true)",
-        "setActiveNativeProcess(result.data.process || null, result.data)",
-    ):
-        assert fragment in start_source
+    assert "setActiveNativeProcess(result.data.process || null, result.data)" in (
+        start_source
+    )
+    assert 'showTab("native")' not in start_source
+    assert "setInspectorOpen(true)" not in start_source
     for fragment in (
         "doyoutrustthecontentsofthisdirectory",
         "yescontinue",
@@ -420,6 +417,49 @@ def test_ui_static_refreshes_native_run_after_process_exit():
     assert '? "active"' in run_summary_source
     assert 'displayStatus === "active" ? "active"' in run_summary_source
     assert "Native CLIs stay active between turns." in INDEX_HTML
+
+
+def test_ui_static_routes_codex_work_through_structured_chat():
+    run_source = UI_SOURCE[
+        UI_SOURCE.index("async function runHarness") : UI_SOURCE.index(
+            "async function loadArenaCenter"
+        )
+    ]
+    team_source = UI_SOURCE[
+        UI_SOURCE.index("async function loadWorkAgentTeam") : UI_SOURCE.index(
+            "async function loadRunsTrace"
+        )
+    ]
+    controls_source = UI_SOURCE[
+        UI_SOURCE.index("function usesStructuredWorkChat") : UI_SOURCE.index(
+            "async function loadSessions"
+        )
+    ]
+    terminal_source = UI_SOURCE[
+        UI_SOURCE.index("function setActiveNativeProcess") : UI_SOURCE.index(
+            "function renderEvents"
+        )
+    ]
+
+    assert "retireLegacyNativeProcessForStructuredChat" in run_source
+    assert 'run.invocation_mode === "native"' in team_source
+    assert 'selected.id === "codex-cli"' in controls_source
+    assert 'invocation.value = "headless";' in controls_source
+    assert 'byId("stream-checkbox").checked = true' in controls_source
+    assert "nativeTab.hidden = structuredWorkChat" in controls_source
+    assert '? "Send"' in controls_source
+    assert "function legacyNativeProcessForStructuredChat" in UI_SOURCE
+    assert "async function retireLegacyNativeProcessForStructuredChat" in UI_SOURCE
+    assert 'method: "DELETE"' in UI_SOURCE
+    assert "function nativeChatTranscriptNode()" not in UI_SOURCE
+    assert 'output.className = "native-chat-output";' not in UI_SOURCE
+    assert "NATIVE_ACTIVE_POLL_MS" in terminal_source
+    assert "NATIVE_IDLE_POLL_MS" in terminal_source
+    assert "scheduleNativePoll" in terminal_source
+    assert "setInterval(pollNativeOutput" not in terminal_source
+    assert "native-terminal-input" not in INDEX_HTML
+    assert "send-native-input-button" not in INDEX_HTML
+    assert "Technical terminal output" in INDEX_HTML
 
 
 def test_ui_static_keeps_advanced_panel_above_chat_and_closes_it_for_runs():
@@ -968,8 +1008,6 @@ def test_ui_index_contains_control_panel_elements():
         "native-trust-no-button",
         "native-process-summary",
         "native-terminal-output",
-        "native-terminal-input",
-        "send-native-input-button",
         "poll-native-output-button",
         "stop-native-process-button",
         "clear-native-terminal-button",
@@ -1119,8 +1157,7 @@ def test_ui_index_contains_control_panel_elements():
         "Do you trust the contents of this directory?",
         "Yes, continue",
         "No, quit",
-        "Native stdin",
-        "Send input",
+        "Technical terminal output",
         "Stop process",
         "Arena",
         "Compare",

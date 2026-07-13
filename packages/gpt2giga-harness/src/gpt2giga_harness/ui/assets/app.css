@@ -581,10 +581,10 @@
       background: #07090b;
       padding: 8px;
     }
-    #native-terminal-input {
-      min-height: 70px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-        "Liberation Mono", monospace;
+    .native-terminal-diagnostics > summary {
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
     }
     .native-trust-prompt {
       display: grid;

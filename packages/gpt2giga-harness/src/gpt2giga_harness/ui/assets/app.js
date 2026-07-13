@@ -1,5 +1,8 @@
     const NATIVE_SESSION_PAGE_SIZE = 5;
     const NATIVE_TERMINAL_CHAR_LIMIT = 50000;
+    const NATIVE_ACTIVE_POLL_MS = 750;
+    const NATIVE_IDLE_POLL_MS = 5000;
+    const NATIVE_POLL_BURST_MS = 12000;
     const NATIVE_TRUST_STORAGE_KEY = "gpt2giga.nativeTrustResolved.v1";
     const RUNS_CENTER_PAGE_SIZE = 25;
     const RUNS_TRACE_DOM_LIMIT = 200;
@@ -55,6 +58,7 @@
       nativeOutputCursor: 0,
       nativeTerminalText: "",
       nativePollTimer: null,
+      nativePollBurstUntil: 0,
       nativeTrustPromptProcessId: null,
       nativeTrustResolvedProcessIds: readNativeTrustResolvedProcessIds(),
       attachments: [],
@@ -1158,7 +1162,7 @@
 
     async function loadWorkAgentTeam(run) {
       const panel = byId("team-panel");
-      if (!run || !run.id) {
+      if (!run || !run.id || run.invocation_mode === "native") {
         renderAgentTeam(panel, null);
         return;
       }
@@ -1834,12 +1838,18 @@
       }
     }
 
+    function usesStructuredWorkChat(spec = null) {
+      const selected = spec || (state.selectedHarness && state.selectedHarness.spec) || {};
+      return selected.id === "codex-cli" && selected.supports_structured_events === true;
+    }
+
     function updateHarnessDrivenControls() {
       const spec = state.selectedHarness && state.selectedHarness.spec ? state.selectedHarness.spec : {};
       const invocation = byId("invocation-select");
       const supportsNative = spec.supports_native_sessions === true;
-      invocation.disabled = !supportsNative;
-      if (!supportsNative) {
+      const structuredWorkChat = usesStructuredWorkChat(spec);
+      invocation.disabled = !supportsNative || structuredWorkChat;
+      if (!supportsNative || structuredWorkChat) {
         invocation.value = "headless";
       } else if (!invocation.value) {
         invocation.value = spec.default_invocation_mode || "native";
@@ -1850,13 +1860,26 @@
       byId("api-mode-v1").disabled = spec.supports_api_mode_selection === false;
       byId("api-mode-v2").disabled = spec.supports_api_mode_selection === false;
       byId("workspace-input").disabled = spec.supports_workspace === false;
-      byId("stream-checkbox").disabled = spec.supports_streaming !== true || currentInvocationMode() === "native";
+      if (structuredWorkChat) byId("stream-checkbox").checked = true;
+      byId("stream-checkbox").disabled = structuredWorkChat || spec.supports_streaming !== true || currentInvocationMode() === "native";
       byId("copy-curl-button").disabled = spec.id !== "direct-chat";
+      const nativeTab = document.querySelector('[data-tab="native"]');
+      if (nativeTab) nativeTab.hidden = structuredWorkChat;
       updateBuiltinToolControls();
       const availability = state.selectedHarness && state.selectedHarness.availability ? state.selectedHarness.availability : {};
       const warning = availability.status === "missing" || availability.status === "error" ? availability.reason || availability.status : "";
       setText("harness-warning", warning);
-      byId("run-button").textContent = currentInvocationMode() === "native" && supportsNative ? "Start native" : "Run";
+      const continuingNative = Boolean(activeNativeConversation());
+      byId("run-button").textContent = structuredWorkChat
+        ? "Send"
+        : continuingNative
+        ? "Send"
+        : currentInvocationMode() === "native" && supportsNative ? "Start native" : "Run";
+      byId("prompt-input").placeholder = structuredWorkChat
+        ? "Message Codex..."
+        : continuingNative
+        ? "Message the active native session..."
+        : "Ask, plan, or describe a task...";
     }
 
     async function loadSessions() {
@@ -2588,7 +2611,7 @@
         capability: byId("capability-select").value || "chat_completions",
         invocation_mode: currentInvocationMode(),
         permission_profile: byId("permission-profile-select").value || "interactive",
-        stream: byId("stream-checkbox").checked,
+        stream: usesStructuredWorkChat() ? true : byId("stream-checkbox").checked,
         dry_run: byId("dry-run-checkbox").checked
       };
       const builtinTools = selectedBuiltinTools();
@@ -3358,6 +3381,11 @@
       if (!payload.prompt.trim()) return;
       if (!(await confirmRunPreflight(payload))) return;
       setAdvancedSettings(false);
+      if (!(await retireLegacyNativeProcessForStructuredChat())) return;
+      if (activeNativeConversation()) {
+        await continueNativeConversation(payload);
+        return;
+      }
       if (payload.invocation_mode === "native" && currentHarnessSupportsNative()) {
         await startNativeProcess(payload);
         return;
@@ -3567,7 +3595,8 @@
 
     function setHeadlessRunning(running) {
       byId("run-button").disabled = running;
-      byId("run-button").textContent = running ? "Running..." : "Run";
+      if (running) byId("run-button").textContent = "Running...";
+      else updateHarnessDrivenControls();
       byId("cancel-run-button").hidden = !running;
       byId("cancel-run-button").disabled = !running;
     }
@@ -3597,8 +3626,6 @@
       setText("raw-response-panel", "{}");
       setText("command-panel", commandPreview(payload));
       setNativeSummary("Starting native process...");
-      showTab("native");
-      setInspectorOpen(true);
       byId("run-button").disabled = true;
       byId("run-button").textContent = "Starting...";
       try {
@@ -3623,8 +3650,72 @@
         }
         setActiveNativeProcess(result.data.process || null, result.data);
         state.attachments = [];
+        byId("prompt-input").value = "";
         renderAttachments();
         if (state.currentSessionId) await loadSession(state.currentSessionId);
+      } finally {
+        byId("run-button").disabled = false;
+        updateHarnessDrivenControls();
+      }
+    }
+
+    function activeNativeConversation() {
+      const process = state.activeNativeProcess || {};
+      if (currentInvocationMode() !== "native") return null;
+      if (!process.id || process.status !== "running") return null;
+      if (!state.currentSessionId || process.session_id !== state.currentSessionId) return null;
+      return process;
+    }
+
+    function legacyNativeProcessForStructuredChat() {
+      const process = state.activeNativeProcess || {};
+      if (!usesStructuredWorkChat()) return null;
+      if (!process.id || process.status !== "running") return null;
+      if (process.harness_id !== "codex-cli" || process.session_id !== state.currentSessionId) return null;
+      return process;
+    }
+
+    async function retireLegacyNativeProcessForStructuredChat() {
+      const process = legacyNativeProcessForStructuredChat();
+      if (!process) return true;
+      stopNativePolling();
+      const result = await getJson(`/api/native/processes/${encodeURIComponent(process.id)}`, { method: "DELETE" });
+      if (!result.ok) {
+        setStatus(result.data.detail || "Could not switch the terminal session to structured chat.", "error");
+        return false;
+      }
+      if (result.data.run) syncNativeRunInBundle(result.data.run);
+      state.activeNativeProcess = result.data.process || { ...process, status: "stopped" };
+      resetNativeTrustPrompt();
+      renderNativeTerminalStatus(state.activeNativeProcess.status);
+      setNativeSummary(pretty(result.data));
+      return true;
+    }
+
+    async function continueNativeConversation(payload) {
+      const prompt = payload.prompt.trim();
+      if (!prompt || !activeNativeConversation()) return;
+      byId("run-button").disabled = true;
+      byId("run-button").textContent = "Sending...";
+      state.nativePollBurstUntil = Date.now() + NATIVE_POLL_BURST_MS;
+      try {
+        const result = await sendNativeProcessInput(`${prompt}\r`, prompt);
+        if (!result.ok) {
+          setStatus(result.data.detail || "Native input failed.", "error");
+          return;
+        }
+        if (result.data.process) state.activeNativeProcess = result.data.process;
+        if (result.data.message && state.currentBundle) {
+          const messages = Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
+          if (!messages.some((message) => message.id === result.data.message.id)) {
+            state.currentBundle.messages = [...messages, result.data.message];
+          }
+        }
+        byId("prompt-input").value = "";
+        state.attachments = [];
+        renderAttachments();
+        renderMessages();
+        await pollNativeOutput();
       } finally {
         byId("run-button").disabled = false;
         updateHarnessDrivenControls();
@@ -5462,8 +5553,6 @@
       if (candidate && state.activeNativeProcess && state.activeNativeProcess.id === candidate.id) return;
       if (candidate) {
         setActiveNativeProcess(candidate, { process: candidate, reconnected: true });
-        showTab("native");
-        setInspectorOpen(true);
         return;
       }
       if (state.activeNativeProcess && state.activeNativeProcess.session_id !== state.currentSessionId) {
@@ -5496,12 +5585,12 @@
       state.activeNativeProcess = process;
       state.nativeOutputCursor = 0;
       state.nativeTerminalText = "";
+      state.nativePollBurstUntil = Date.now() + NATIVE_POLL_BURST_MS;
       setNativeSummary(pretty(payload || process || {}));
       setText("native-terminal-output", "Terminal output will appear here.");
       renderNativeTerminalStatus();
       if (process && process.id) {
         pollNativeOutput();
-        state.nativePollTimer = window.setInterval(pollNativeOutput, 1000);
       }
     }
 
@@ -5513,9 +5602,9 @@
       badge.className = effectiveStatus === "running" ? "badge ok" : effectiveStatus === "idle" ? "badge info" : "badge warn";
       badge.textContent = `Native: ${displayStatus}`;
       const running = effectiveStatus === "running";
-      byId("send-native-input-button").disabled = !running;
       byId("stop-native-process-button").disabled = !process.id || !running;
       byId("poll-native-output-button").disabled = !process.id;
+      updateHarnessDrivenControls();
     }
 
     function syncNativeRunInBundle(run) {
@@ -5546,6 +5635,7 @@
       for (const output of outputs) {
         appendNativeTerminal(output.text || "");
       }
+      if (outputs.length) state.nativePollBurstUntil = Date.now() + NATIVE_POLL_BURST_MS;
       const status = body.status || (body.run && body.run.status) || "running";
       state.activeNativeProcess = { ...process, status, exit_code: body.exit_code };
       if (body.run) {
@@ -5556,6 +5646,8 @@
       if (status !== "running") {
         stopNativePolling();
         resetNativeTrustPrompt();
+      } else {
+        scheduleNativePoll(Date.now() < state.nativePollBurstUntil ? NATIVE_ACTIVE_POLL_MS : NATIVE_IDLE_POLL_MS);
       }
       if (body.run) setNativeSummary(pretty({ process: state.activeNativeProcess, run: body.run }));
       maybeShowNativeTrustPrompt();
@@ -5573,6 +5665,7 @@
 
     function maybeShowNativeTrustPrompt() {
       const process = state.activeNativeProcess || {};
+      if (usesStructuredWorkChat() && process.harness_id === "codex-cli") return;
       if (!process.id || process.harness_id !== "codex-cli" || process.status !== "running") return;
       if (state.nativeTrustResolvedProcessIds.has(process.id)) return;
       const compact = state.nativeTerminalText.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -5616,30 +5709,14 @@
       await pollNativeOutput();
     }
 
-    async function sendNativeProcessInput(data) {
+    async function sendNativeProcessInput(data, message = null) {
       const process = state.activeNativeProcess || {};
       if (!process.id) return { ok: false, data: { detail: "Native process is unavailable." } };
       return getJson(`/api/native/processes/${encodeURIComponent(process.id)}/input`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data })
+        body: JSON.stringify(message ? { data, message } : { data })
       });
-    }
-
-    async function sendNativeInput() {
-      const process = state.activeNativeProcess || {};
-      if (!process.id) return;
-      const input = byId("native-terminal-input");
-      const data = input.value;
-      if (!data) return;
-      const result = await sendNativeProcessInput(data);
-      if (!result.ok) {
-        appendNativeTerminalLine(result.data.detail || "Native input failed.");
-        return;
-      }
-      input.value = "";
-      if (result.data.process) state.activeNativeProcess = result.data.process;
-      await pollNativeOutput();
     }
 
     async function stopNativeProcess() {
@@ -5657,9 +5734,17 @@
 
     function stopNativePolling() {
       if (state.nativePollTimer) {
-        window.clearInterval(state.nativePollTimer);
+        window.clearTimeout(state.nativePollTimer);
         state.nativePollTimer = null;
       }
+    }
+
+    function scheduleNativePoll(delay) {
+      stopNativePolling();
+      state.nativePollTimer = window.setTimeout(() => {
+        state.nativePollTimer = null;
+        pollNativeOutput();
+      }, delay);
     }
 
     function clearNativeTerminal() {
@@ -6374,7 +6459,6 @@
       });
       byId("native-all-workspaces-checkbox").addEventListener("change", () => loadNativeSessions(false, { resetVisible: true }));
       byId("poll-native-output-button").addEventListener("click", pollNativeOutput);
-      byId("send-native-input-button").addEventListener("click", sendNativeInput);
       byId("native-trust-yes-button").addEventListener("click", () => respondToNativeTrust(true));
       byId("native-trust-no-button").addEventListener("click", () => respondToNativeTrust(false));
       byId("stop-native-process-button").addEventListener("click", stopNativeProcess);

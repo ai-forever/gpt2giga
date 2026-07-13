@@ -1329,10 +1329,27 @@ def create_app(
         process_id: str,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
+        message = None
         try:
             data = payload.get("data", payload.get("text", ""))
             process_ref = native_process_manager.write(process_id, str(data))
             run = _sync_native_process_run(store, process_ref)
+            message_content = _optional_text(payload.get("message"))
+            if message_content is not None and run is not None:
+                message = store.append_message(
+                    HarnessMessage(
+                        id=new_id("msg"),
+                        session_id=run.session_id,
+                        run_id=run.id,
+                        role="user",
+                        content=str(redact_for_storage(message_content)),
+                        created_at=utc_now(),
+                        harness_id=run.harness_id,
+                        model=run.model,
+                        api_mode=run.api_mode,
+                        metadata={"source": "native_stdin"},
+                    )
+                )
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
                 status_code=404, detail="Native process not found"
@@ -1342,6 +1359,7 @@ def create_app(
         return {
             "process": native_process_ref_to_dict(process_ref),
             "run": run_to_dict(run) if run is not None else None,
+            "message": message_to_dict(message) if message is not None else None,
         }
 
     @app.get("/api/native/processes/{process_id}/output")

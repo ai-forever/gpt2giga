@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
   <link rel="icon" href="/assets/favicon.ico" sizes="any">
-  <link rel="stylesheet" href="/assets/app.css?v=38.22">
+  <link rel="stylesheet" href="/assets/app.css?v=38.24">
 </head>
 <body>
   <div class="app">
@@ -753,13 +753,10 @@
                 </div>
               </section>
               <pre id="native-process-summary">No native session selected.</pre>
-              <pre id="native-terminal-output">Terminal output will appear here.</pre>
-              <label>Native stdin
-                <textarea id="native-terminal-input" spellcheck="false"></textarea>
-              </label>
-              <div class="inline-actions">
-                <button id="send-native-input-button" type="button">Send input</button>
-              </div>
+              <details class="native-terminal-diagnostics">
+                <summary>Technical terminal output</summary>
+                <pre id="native-terminal-output">Terminal output will appear here.</pre>
+              </details>
             </div>
             <pre id="storage-panel" class="mono-panel tab-panel">No storage selected.</pre>
           </div>
@@ -816,6 +813,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=38.22"></script>
+  <script src="/assets/app.js?v=38.24"></script>
 </body>
 </html>

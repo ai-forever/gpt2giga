@@ -52,11 +52,17 @@ def test_native_process_api_start_poll_input_and_stop(tmp_path):
 
     sent = client.post(
         f"/api/native/processes/{process_id}/input",
-        json={"data": "hello\n"},
+        json={"data": "hello\n", "message": "hello"},
     )
     assert sent.status_code == 200, sent.text
+    assert sent.json()["message"]["content"] == "hello"
+    assert sent.json()["message"]["metadata"] == {"source": "native_stdin"}
     cursor, output = _wait_for_output(client, process_id, cursor, "echo:hello")
     assert "echo:hello" in output
+    assert [message.content for message in store.list_messages(session.id)] == [
+        "boot",
+        "hello",
+    ]
 
     stopped = client.delete(f"/api/native/processes/{process_id}")
 

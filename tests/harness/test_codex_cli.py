@@ -6,13 +6,43 @@ from gpt2giga_harness.harnesses.codex_cli import (
     CodexCliHarness,
     _CodexStreamParser,
 )
+from gpt2giga_harness.native import HarnessInvocationMode
 from gpt2giga_harness.types import (
     Availability,
     GigaChatApiMode,
+    HarnessChatMessage,
     HarnessContext,
     HarnessRequest,
     HarnessResult,
 )
+
+
+def test_codex_cli_defaults_to_structured_headless_chat():
+    assert (
+        CodexCliHarness.spec().default_invocation_mode is HarnessInvocationMode.HEADLESS
+    )
+
+
+def test_codex_cli_includes_harness_chat_history_in_ephemeral_turn():
+    request = HarnessRequest(
+        prompt="What about the tests?",
+        messages=(
+            HarnessChatMessage(role="user", content="Explain the parser"),
+            HarnessChatMessage(role="assistant", content="It parses JSONL events."),
+            HarnessChatMessage(role="user", content="What about the tests?"),
+        ),
+    )
+
+    command = CodexCliHarness().build_command(
+        request,
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    prompt = command[-1]
+    assert "CONVERSATION HISTORY" in prompt
+    assert "[USER]\nExplain the parser" in prompt
+    assert "[ASSISTANT]\nIt parses JSONL events." in prompt
+    assert prompt.endswith("CURRENT USER REQUEST\nWhat about the tests?")
 
 
 def test_codex_cli_sanitizes_env(monkeypatch):

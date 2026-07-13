@@ -138,7 +138,7 @@ def test_cli_harness_list_json_shows_native_metadata(capsys):
     assert exit_code == 0
     by_id = {row["id"]: row for row in rows}
     assert by_id["codex-cli"]["native"] is True
-    assert by_id["codex-cli"]["default_invocation_mode"] == "native"
+    assert by_id["codex-cli"]["default_invocation_mode"] == "headless"
     assert by_id["direct-chat"]["native"] is False
 
 

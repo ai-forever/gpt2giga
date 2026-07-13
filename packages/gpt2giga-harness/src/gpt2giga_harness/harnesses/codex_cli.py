@@ -76,7 +76,7 @@ class CodexCliHarness(BaseHarness):
             attachment_transport=("cli_image_flag", "prompt_path_reference"),
             supports_native_sessions=True,
             supports_external_history=True,
-            default_invocation_mode=HarnessInvocationMode.NATIVE,
+            default_invocation_mode=HarnessInvocationMode.HEADLESS,
             tags=("codex", "agent"),
         )
 
@@ -110,7 +110,7 @@ class CodexCliHarness(BaseHarness):
         executable = resolution.executable or resolution.configured or "codex"
         sandbox = MODE_TO_SANDBOX.get(request.mode, MODE_TO_SANDBOX["plan"])
         model = request.model or context.default_model or "GigaChat"
-        prompt = prompt_with_attachments(request)
+        prompt = _structured_chat_prompt(request)
         attachment_args = cli_args_from_attachments(request)
         prompt_separator = ("--",) if attachment_args and prompt else ()
         stream_args = ("--json",) if request.stream else ()
@@ -243,6 +243,23 @@ def _write_codex_config(
         "supports_websockets = false\n"
     )
     write_startup_config("codex-cli", codex_home, config)
+
+
+def _structured_chat_prompt(request: HarnessRequest) -> str:
+    """Include normalized Harness chat history in each ephemeral Codex turn."""
+    prompt = prompt_with_attachments(request)
+    history = tuple(request.messages[:-1]) if request.messages else ()
+    if not history:
+        return prompt
+    transcript = "\n\n".join(
+        f"[{message.role.upper()}]\n{message.content}" for message in history
+    )
+    return (
+        "Continue the conversation below. Treat the final CURRENT USER REQUEST "
+        "as the task to answer now.\n\n"
+        f"CONVERSATION HISTORY\n{transcript}\n\n"
+        f"CURRENT USER REQUEST\n{prompt}"
+    )
 
 
 def _toml_escape(value: str) -> str:
