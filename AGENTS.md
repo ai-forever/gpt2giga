@@ -104,7 +104,9 @@ Documentation build:
 npm --prefix docs-site run build
 ```
 
-Use focused pytest node IDs during iteration. Run the full quality gate for
+Use focused pytest node IDs during iteration. Use `pytest -n 4` by default for
+directory, multi-file, and full-suite runs because sequential test execution is
+slow; focused single-node runs may omit xdist. Run the full quality gate for
 cross-package changes, broad refactors, public compatibility changes, release
 work, or whenever the user asks for full verification. Run both package builds
 after metadata, dependency, entry-point, package-data, Docker, or release

@@ -44,7 +44,7 @@ During iteration, run the narrowest relevant pytest node with
 Harness-focused gate:
 
 ```bash
-uv run pytest tests/harness -q
+uv run pytest tests/harness -n 4 -q
 ```
 
 Full pytest/coverage gate:
