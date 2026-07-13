@@ -15,7 +15,7 @@ from gpt2giga_harness.ui.security import HarnessUISecurity
 from gpt2giga_harness.ui.static import INDEX_HTML, UIAssetNotFoundError, load_asset
 
 _SPA_PATH = re.compile(
-    r"(?:(?:work|runs|workflows|scheduled)(?:/[^/]+)?|agents|approvals|tools|evaluate)/?"
+    r"(?:(?:work|runs|workflows|scheduled)(?:/[^/]+)?|arena|agents|approvals|tools|evaluate)/?"
 )
 
 

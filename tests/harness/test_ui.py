@@ -51,9 +51,9 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.14">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.15">' in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.14"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.15"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -336,11 +336,6 @@ def test_ui_static_keeps_advanced_panel_above_chat_and_closes_it_for_runs():
             "async function runArena"
         )
     ]
-    arena_source = UI_SOURCE[
-        UI_SOURCE.index("async function runArena") : UI_SOURCE.index(
-            "async function startHeadlessStream"
-        )
-    ]
     config_css = UI_SOURCE[
         UI_SOURCE.index(".config-section {") : UI_SOURCE.index(".workspace-welcome {")
     ]
@@ -348,9 +343,28 @@ def test_ui_static_keeps_advanced_panel_above_chat_and_closes_it_for_runs():
     assert "function setAdvancedSettings(open)" in UI_SOURCE
     assert "setAdvancedSettings(false);" in run_source
     assert "await startHeadlessStream(payload);" in run_source
-    assert "setAdvancedSettings(false);" in arena_source
     assert "position: relative;" in config_css
     assert "z-index: 30;" in config_css
+
+
+def test_ui_static_keeps_arena_out_of_the_work_surface():
+    work_source = UI_SOURCE[
+        UI_SOURCE.index('<section class="center"') : UI_SOURCE.index(
+            '<section id="arena-center"'
+        )
+    ]
+    arena_source = UI_SOURCE[
+        UI_SOURCE.index('<section id="arena-center"') : UI_SOURCE.index(
+            '<section id="agents-center"'
+        )
+    ]
+
+    assert 'id="arena-harness-select"' not in work_source
+    assert 'id="arena-compare-button"' not in work_source
+    assert 'id="arena-harness-select"' in arena_source
+    assert 'id="arena-compare-button"' in arena_source
+    assert 'id="arena-panel"' in arena_source
+    assert 'data-tab="arena"' not in UI_SOURCE
 
 
 def test_ui_static_preserves_selected_defaults_while_stream_starts():
@@ -804,6 +818,14 @@ def test_ui_index_contains_control_panel_elements():
         "stop-native-process-button",
         "clear-native-terminal-button",
         "run-button",
+        "arena-nav-link",
+        "arena-center",
+        "arena-prompt-input",
+        "arena-model-input",
+        "arena-api-mode-select",
+        "arena-mode-select",
+        "arena-workspace-policy-select",
+        "arena-workspace-input",
         "approvals-nav-link",
         "scheduled-nav-link",
         "attention-count",
@@ -817,7 +839,7 @@ def test_ui_index_contains_control_panel_elements():
         "approvals-center",
         "approvals-list",
         "refresh-approvals-button",
-        "compare-button",
+        "arena-compare-button",
         "cancel-run-button",
         "copy-cli-button",
         "copy-curl-button",

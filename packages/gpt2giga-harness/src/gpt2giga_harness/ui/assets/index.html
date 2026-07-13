@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
-  <link rel="stylesheet" href="/assets/app.css?v=38.14">
+  <link rel="stylesheet" href="/assets/app.css?v=38.15">
 </head>
 <body>
   <div class="app">
@@ -22,6 +22,7 @@
         </div>
         <nav class="primary-nav" aria-label="Primary">
           <a id="work-nav-link" class="primary-nav-link" href="/work">Work</a>
+          <a id="arena-nav-link" class="primary-nav-link" href="/arena">Arena</a>
           <a id="runs-nav-link" class="primary-nav-link" href="/runs">Runs</a>
           <a id="agents-nav-link" class="primary-nav-link" href="/agents">Agents</a>
           <a id="workflows-nav-link" class="primary-nav-link" href="/workflows">Workflows</a>
@@ -124,9 +125,6 @@
           <div class="config-grid quick-config">
             <label class="quick-harness"><span>Harness</span>
               <select id="harness-select"></select>
-            </label>
-            <label class="span-2 advanced-control">Arena harnesses
-              <select id="arena-harness-select" multiple size="4" aria-label="Arena harnesses"></select>
             </label>
             <label class="advanced-control">Invocation
               <select id="invocation-select">
@@ -254,7 +252,6 @@
               </details>
             </div>
             <div class="composer-actions">
-              <button id="compare-button" class="secondary" type="button">Compare</button>
               <button id="run-button" type="button">Run</button>
               <button id="cancel-run-button" class="danger" type="button" hidden>Cancel</button>
             </div>
@@ -265,6 +262,65 @@
           <button class="example-prompt" type="button">Explain this codebase architecture</button>
           <button class="example-prompt" type="button">Write tests for the selected function</button>
           <button class="example-prompt" type="button">Refactor this module for clarity</button>
+        </div>
+      </section>
+
+      <section id="arena-center" class="arena-center" aria-label="Arena response comparison" hidden>
+        <header class="runs-center-header">
+          <div>
+            <h2>Arena</h2>
+            <p id="arena-center-status" class="status-line">Compare the same prompt across response formats.</p>
+          </div>
+          <button id="arena-compare-button" type="button">Compare responses</button>
+        </header>
+        <div class="arena-workbench">
+          <section class="arena-setup-panel" aria-label="Arena setup">
+            <label class="arena-prompt-label">Prompt
+              <textarea id="arena-prompt-input" placeholder="Ask once, then compare every response side by side..." spellcheck="true"></textarea>
+            </label>
+            <div class="arena-controls-grid">
+              <label class="span-2">Response formats
+                <select id="arena-harness-select" multiple size="6" aria-label="Response formats"></select>
+                <span class="hint">Select two or more harnesses for a useful comparison.</span>
+              </label>
+              <label>Model
+                <input id="arena-model-input" placeholder="GigaChat-2-Max" autocomplete="off">
+              </label>
+              <label>API mode
+                <select id="arena-api-mode-select">
+                  <option value="v2">/v2</option>
+                  <option value="v1">/v1</option>
+                </select>
+              </label>
+              <label>Mode
+                <select id="arena-mode-select">
+                  <option value="plan">plan</option>
+                  <option value="read">read</option>
+                  <option value="edit">edit</option>
+                </select>
+              </label>
+              <label>Workspace policy
+                <select id="arena-workspace-policy-select">
+                  <option value="auto">auto</option>
+                  <option value="current">current</option>
+                  <option value="worktree">worktree</option>
+                  <option value="temp_copy">temp copy</option>
+                </select>
+              </label>
+              <label class="span-2">Workspace
+                <input id="arena-workspace-input" placeholder="." autocomplete="off">
+              </label>
+            </div>
+          </section>
+          <section class="arena-results-panel" aria-label="Arena results">
+            <div class="agent-editor-header">
+              <div>
+                <h3>Responses</h3>
+                <p id="arena-results-status" class="status-line">Run a comparison to see responses here.</p>
+              </div>
+            </div>
+            <div id="arena-panel" class="arena-results" aria-live="polite">No comparison yet.</div>
+          </section>
         </div>
       </section>
 
@@ -547,7 +603,6 @@
             <div class="tabs" role="tablist">
               <button class="tab active" type="button" data-tab="run">Run</button>
               <button class="tab" type="button" data-tab="team">Team</button>
-              <button class="tab" type="button" data-tab="arena">Arena</button>
               <button class="tab" type="button" data-tab="events">Events</button>
               <button class="tab" type="button" data-tab="raw-request">Raw request</button>
               <button class="tab" type="button" data-tab="raw-response">Raw response</button>
@@ -565,7 +620,6 @@
             </div>
             <div id="run-panel" class="run-summary tab-panel active">No run selected.</div>
             <div id="team-panel" class="mono-panel tab-panel">This run is not part of an agent team.</div>
-            <div id="arena-panel" class="mono-panel tab-panel">No arena selected.</div>
             <div id="events-panel" class="mono-panel tab-panel">No events yet.</div>
             <pre id="raw-request-panel" class="mono-panel tab-panel">{}</pre>
             <pre id="raw-response-panel" class="mono-panel tab-panel">{}</pre>
@@ -740,6 +794,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=38.14"></script>
+  <script src="/assets/app.js?v=38.15"></script>
 </body>
 </html>

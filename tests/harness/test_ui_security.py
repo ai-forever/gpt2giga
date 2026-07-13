@@ -37,6 +37,7 @@ def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
 
     for fragment in (
         'id="work-nav-link"',
+        'id="arena-nav-link"',
         'id="runs-nav-link"',
         'id="tools-nav-link"',
         'id="agents-nav-link"',
@@ -151,6 +152,7 @@ def test_shell_deep_links_and_unknown_paths_fail_closed():
         "/",
         "/work",
         "/work/sess_123",
+        "/arena",
         "/runs",
         "/runs/run_123",
         "/approvals",

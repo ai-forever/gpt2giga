@@ -688,22 +688,118 @@
     .event-row:last-child {
       border-bottom: 0;
     }
+    .arena-center {
+      grid-column: 1 / -1;
+      min-width: 0;
+      min-height: calc(100vh - var(--header-height, 64px));
+      padding: 20px;
+      overflow: auto;
+      background: #0f141b;
+    }
+    .arena-center[hidden] { display: none; }
+    body.arena-area .shell { grid-template-columns: minmax(0, 1fr); }
+    body.arena-area .sidebar,
+    body.arena-area .center,
+    body.arena-area .agents-center,
+    body.arena-area .workflows-center,
+    body.arena-area .scheduled-center,
+    body.arena-area .approvals-center,
+    body.arena-area .evaluate-center,
+    body.arena-area .tools-center,
+    body.arena-area .runs-center,
+    body.arena-area .inspector,
+    body.arena-area .details-toggle,
+    body.arena-area .inspector-backdrop,
+    body.arena-area .sidebar-backdrop { display: none; }
+    .arena-workbench {
+      display: grid;
+      grid-template-columns: minmax(300px, 0.62fr) minmax(0, 1.38fr);
+      gap: 16px;
+      margin-top: 18px;
+    }
+    .arena-setup-panel,
+    .arena-results-panel {
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #151c25;
+      padding: 15px;
+    }
+    .arena-setup-panel {
+      display: grid;
+      align-content: start;
+      gap: 14px;
+    }
+    .arena-prompt-label textarea {
+      min-height: 170px;
+      resize: vertical;
+    }
+    .arena-controls-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+    .arena-controls-grid > label,
+    .arena-controls-grid input,
+    .arena-controls-grid select {
+      min-width: 0;
+      width: 100%;
+    }
+    .arena-controls-grid .span-2 { grid-column: 1 / -1; }
+    .arena-results {
+      min-width: 0;
+      margin-top: 14px;
+    }
+    .arena-run-summary {
+      display: grid;
+      gap: 9px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 13px;
+    }
+    .arena-run-prompt {
+      max-width: 900px;
+      color: var(--text);
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
     .arena-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 10px;
-      margin-top: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
     }
     .arena-card {
+      display: grid;
+      align-content: start;
+      gap: 10px;
       min-width: 0;
-      border: 1px solid #232830;
-      border-radius: 6px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
       background: #0f1216;
-      padding: 10px;
+      padding: 13px;
+    }
+    .arena-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .arena-card h4 {
+      margin: 0 0 5px;
+      font-size: 14px;
     }
     .arena-card pre {
-      margin-top: 8px;
-      max-height: 220px;
+      min-width: 0;
+      max-height: 480px;
+      overflow: auto;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
     .empty {
       color: var(--muted);
@@ -711,6 +807,7 @@
       text-align: center;
     }
     @media (max-width: 1100px) {
+      .arena-workbench { grid-template-columns: minmax(0, 1fr); }
       .shell {
         grid-template-columns: 240px minmax(0, 1fr);
       }
@@ -857,6 +954,10 @@
       gap: 12px;
       min-width: 0;
     }
+    .brand-lockup {
+      flex: 1 1 auto;
+      overflow: hidden;
+    }
     .brand-lockup h1 {
       font-size: 19px;
       letter-spacing: -0.02em;
@@ -868,10 +969,16 @@
     }
     .primary-nav {
       display: flex;
+      flex: 1 1 auto;
       align-items: center;
       gap: 4px;
+      min-width: 0;
+      overflow-x: auto;
+      scrollbar-width: none;
     }
+    .primary-nav::-webkit-scrollbar { display: none; }
     .primary-nav-link {
+      flex: 0 0 auto;
       border-radius: 8px;
       color: var(--muted);
       padding: 7px 10px;
@@ -2461,6 +2568,7 @@
       }
       .top-actions { flex: 0 0 auto; }
       body.agents-area #session-drawer-button,
+      body.arena-area #session-drawer-button,
       body.runs-area #session-drawer-button,
       body.approvals-area #session-drawer-button,
       body.tools-area #session-drawer-button,
@@ -3324,4 +3432,28 @@
       .attention-panel { width: 100%; max-width: 100%; min-width: 0; }
       .schedule-form-grid { grid-template-columns: minmax(0, 1fr); }
       .schedule-form-grid .span-2 { grid-column: auto; }
+    }
+    @media (max-width: 520px) {
+      .arena-center {
+        width: 100%;
+        max-width: 100vw;
+        min-width: 0;
+        padding: 14px;
+        overflow-x: hidden;
+      }
+      .arena-center .runs-center-header {
+        align-items: stretch;
+        width: 100%;
+        min-width: 0;
+      }
+      .arena-center .runs-center-header > button { width: 100%; }
+      .arena-workbench,
+      .arena-setup-panel,
+      .arena-results-panel,
+      .arena-grid,
+      .arena-card { width: 100%; max-width: 100%; min-width: 0; }
+      .arena-controls-grid { grid-template-columns: minmax(0, 1fr); }
+      .arena-controls-grid .span-2 { grid-column: auto; }
+      .arena-grid { grid-template-columns: minmax(0, 1fr); }
+      .arena-card-header .badge-row { width: 100%; justify-content: space-between; }
     }

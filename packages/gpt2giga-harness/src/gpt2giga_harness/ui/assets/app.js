@@ -114,8 +114,10 @@
       if (!result.ok) return result;
       state.defaults = result.data;
       byId("model-input").value = result.data.default_model || "GigaChat-2-Max";
+      byId("arena-model-input").value = result.data.default_model || "GigaChat-2-Max";
       const mode = result.data.default_api_mode || "v2";
       byId(`api-mode-${mode}`).checked = true;
+      byId("arena-api-mode-select").value = mode;
       updateRouteNote();
       updateHeaderBadges();
       if (result.data.note) setText("model-status", result.data.note);
@@ -126,6 +128,7 @@
       const path = window.location.pathname.replace(/\/+$/, "") || "/";
       if (path === "/") return { area: "legacy", id: null };
       if (path === "/work") return { area: "work", id: null };
+      if (path === "/arena") return { area: "arena", id: null };
       if (path === "/runs") return { area: "runs", id: null };
       if (path === "/agents") return { area: "agents", id: null };
       if (path === "/workflows") return { area: "workflows", id: null };
@@ -160,6 +163,7 @@
     function syncNavigation() {
       const route = currentRoute();
       const workLink = byId("work-nav-link");
+      const arenaLink = byId("arena-nav-link");
       const runsLink = byId("runs-nav-link");
       const approvalsLink = byId("approvals-nav-link");
       const toolsLink = byId("tools-nav-link");
@@ -168,6 +172,7 @@
       const evaluateLink = byId("evaluate-nav-link");
       const scheduledLink = byId("scheduled-nav-link");
       workLink.classList.toggle("active", route.area === "work" || route.area === "legacy");
+      arenaLink.classList.toggle("active", route.area === "arena");
       runsLink.classList.toggle("active", route.area === "runs");
       approvalsLink.classList.toggle("active", route.area === "approvals");
       toolsLink.classList.toggle("active", route.area === "tools");
@@ -185,6 +190,7 @@
       workLink.href = state.currentSessionId ? `/work/${encodeURIComponent(state.currentSessionId)}` : "/work";
       const run = currentRun();
       runsLink.href = run && run.id ? `/runs/${encodeURIComponent(run.id)}` : "/runs";
+      const arenaArea = route.area === "arena";
       const runsArea = route.area === "runs";
       const approvalsArea = route.area === "approvals";
       const toolsArea = route.area === "tools";
@@ -192,6 +198,7 @@
       const workflowsArea = route.area === "workflows";
       const evaluateArea = route.area === "evaluate";
       const scheduledArea = route.area === "scheduled";
+      document.body.classList.toggle("arena-area", arenaArea);
       document.body.classList.toggle("runs-area", runsArea);
       document.body.classList.toggle("approvals-area", approvalsArea);
       document.body.classList.toggle("tools-area", toolsArea);
@@ -199,6 +206,7 @@
       document.body.classList.toggle("workflows-area", workflowsArea);
       document.body.classList.toggle("evaluate-area", evaluateArea);
       document.body.classList.toggle("scheduled-area", scheduledArea);
+      byId("arena-center").hidden = !arenaArea;
       byId("runs-center").hidden = !runsArea;
       byId("approvals-center").hidden = !approvalsArea;
       byId("tools-center").hidden = !toolsArea;
@@ -1347,6 +1355,9 @@
       if (project.root && !byId("workspace-input").value) {
         byId("workspace-input").value = project.root;
       }
+      if (project.root && !byId("arena-workspace-input").value) {
+        byId("arena-workspace-input").value = project.root;
+      }
       if (config.exists && config.defaults) {
         byId("model-input").value = projectState.last_model || config.defaults.model || byId("model-input").value;
         byId("mode-select").value = projectState.last_run_mode || config.defaults.mode || "plan";
@@ -1361,6 +1372,9 @@
           if (apiMode) apiMode.checked = true;
         }
       }
+      byId("arena-model-input").value = byId("model-input").value;
+      byId("arena-api-mode-select").value = currentApiMode();
+      byId("arena-mode-select").value = byId("mode-select").value;
       if (projectState.last_invocation_mode) byId("invocation-select").value = projectState.last_invocation_mode;
       updateRouteNote();
       renderPresetButtons();
@@ -1419,6 +1433,7 @@
       state.modelSource = data.source || `/${mode}/models`;
       renderModelList();
       if (!byId("model-input").value && state.models[0]) byId("model-input").value = state.models[0];
+      if (!byId("arena-model-input").value && state.models[0]) byId("arena-model-input").value = state.models[0];
       const status = data.ok ? `Models: ${data.source}` : `Models: ${state.modelSource} unavailable${data.error ? " - " + data.error : ""}`;
       setText("model-status", data.note ? `${status}. ${data.note}` : status);
       updateHeaderBadges();
@@ -2466,15 +2481,16 @@
     }
 
     function buildArenaPayload() {
-      const payload = {
-        ...buildSessionDefaults(),
-        prompt: byId("prompt-input").value,
+      return {
+        prompt: byId("arena-prompt-input").value,
         harness_ids: arenaSelectedHarnessIds(),
-        session_id: state.currentSessionId || null
+        model: byId("arena-model-input").value.trim() || null,
+        api_mode: byId("arena-api-mode-select").value || "v2",
+        mode: byId("arena-mode-select").value || "plan",
+        workspace_policy: byId("arena-workspace-policy-select").value || "auto",
+        workspace: byId("arena-workspace-input").value.trim() || null,
+        session_id: null
       };
-      const attachmentIds = state.attachments.map((attachment) => attachment.id).filter(Boolean);
-      if (attachmentIds.length) payload.attachment_ids = attachmentIds;
-      return payload;
     }
 
     function buildRecommendationPayload() {
@@ -3233,23 +3249,21 @@
 
     async function runArena() {
       const payload = buildArenaPayload();
-      if (!payload.prompt.trim()) return;
-      if (!payload.harness_ids.length) {
-        setText("arena-panel", "Select at least one arena harness.");
-        showTab("arena");
+      if (!payload.prompt.trim()) {
+        setText("arena-center-status", "Enter a prompt to compare responses.");
+        byId("arena-prompt-input").focus();
         return;
       }
-      setAdvancedSettings(false);
+      if (!payload.harness_ids.length) {
+        setText("arena-center-status", "Select at least one response format.");
+        return;
+      }
       state.lastPayload = payload;
-      setText("raw-request-panel", pretty(payload));
-      setText("raw-response-panel", "{}");
-      setText("command-panel", "Arena runs use normalized headless harness execution.");
-      renderDiffInspector(null);
-      renderPrInspector(null);
+      setText("arena-center-status", "Starting comparison...");
+      setText("arena-results-status", `${payload.harness_ids.length} responses requested.`);
       setText("arena-panel", "Arena is starting...");
-      showTab("arena");
-      byId("compare-button").disabled = true;
-      byId("compare-button").textContent = "Comparing...";
+      byId("arena-compare-button").disabled = true;
+      byId("arena-compare-button").textContent = "Comparing...";
       try {
         const result = await getJson("/api/arena/runs", {
           method: "POST",
@@ -3258,24 +3272,23 @@
         });
         const body = result.data || {};
         if (!result.ok || !body.arena) {
-          setText("raw-response-panel", pretty(body));
           setText("arena-panel", body.detail || `Arena failed with HTTP ${result.status}`);
+          setText("arena-center-status", "Comparison failed.");
+          setText("arena-results-status", body.detail || `HTTP ${result.status}`);
           return;
         }
         state.currentArena = body.arena;
         state.currentSessionId = body.arena.session_id || state.currentSessionId;
-        if (state.currentSessionId) await loadSession(state.currentSessionId);
-        byId("prompt-input").value = "";
-        state.attachments = [];
-        renderAttachments();
-        renderArenaInspector(state.currentArena);
-        setText("raw-response-panel", pretty(body));
-        showTab("arena");
+        if (state.currentSessionId) await loadSession(state.currentSessionId, { syncRoute: false });
+        renderArenaCenter(state.currentArena);
+        const children = Array.isArray(body.arena.child_runs) ? body.arena.child_runs : [];
+        setText("arena-center-status", `Comparison ${body.arena.status || "completed"}.`);
+        setText("arena-results-status", `${children.length} response${children.length === 1 ? "" : "s"} · same prompt · independent runs`);
         await loadSessions();
         persistProjectState({ last_selected_session: state.currentSessionId });
       } finally {
-        byId("compare-button").disabled = false;
-        byId("compare-button").textContent = "Compare";
+        byId("arena-compare-button").disabled = false;
+        byId("arena-compare-button").textContent = "Compare responses";
       }
     }
 
@@ -4704,7 +4717,7 @@
       setText("selected-session-line", session ? `${session.title} - ${session.id}` : "No session selected");
       renderRunSummary(run, events);
       void loadWorkAgentTeam(run);
-      renderArenaInspector(state.currentArena);
+      renderArenaCenter(state.currentArena);
       renderEvents(events);
       setText("raw-request-panel", rawRequests.length ? pretty(rawRequests[rawRequests.length - 1].payload) : "{}");
       setText("raw-response-panel", rawResponses.length ? pretty(rawResponses[rawResponses.length - 1].payload) : "{}");
@@ -4720,24 +4733,25 @@
       byId("archive-session-button").textContent = session && session.archived ? "Unarchive" : "Archive";
     }
 
-    function renderArenaInspector(arena) {
+    function renderArenaCenter(arena) {
       const panel = byId("arena-panel");
       if (!panel) return;
       panel.textContent = "";
       if (!arena || !arena.id) {
-        panel.textContent = "No arena selected.";
+        panel.textContent = "No comparison yet.";
         return;
       }
       const header = document.createElement("div");
+      header.className = "arena-run-summary";
       header.innerHTML = `
         <div class="badge-row">
           <span class="badge info">Arena</span>
           <span class="badge ${arena.status === "succeeded" ? "ok" : arena.status === "partial" ? "warn" : arena.status === "failed" ? "warn" : "info"}">${escapeHtml(arena.status || "unknown")}</span>
         </div>
+        <p class="arena-run-prompt">${escapeHtml(arena.prompt || "")}</p>
         <div class="session-meta">
           <span>${escapeHtml(arena.id)}</span>
           <span>${escapeHtml(arena.harness_ids ? arena.harness_ids.join(", ") : "")}</span>
-          <span>/api/arena/runs/${escapeHtml(arena.id)}/events/stream</span>
         </div>
       `;
       panel.appendChild(header);
@@ -4752,17 +4766,25 @@
       const grid = document.createElement("div");
       grid.className = "arena-grid";
       for (const child of children) {
-        const card = document.createElement("div");
+        const card = document.createElement("article");
         card.className = "arena-card";
         const message = child.message && child.message.content ? child.message.content : child.result_text || child.error || "No output";
+        const runLink = child.run_id
+          ? `<a class="secondary link-button" href="/runs/${encodeURIComponent(child.run_id)}">Open run</a>`
+          : "";
         card.innerHTML = `
-          <div class="badge-row">
-            <span class="badge info">${escapeHtml(child.harness_id || "harness")}</span>
-            <span class="badge ${child.status === "succeeded" ? "ok" : "warn"}">${escapeHtml(child.status || "unknown")}</span>
-          </div>
-          <div class="session-meta">
-            <span>${escapeHtml(child.run_id || "no run")}</span>
-            <span>${escapeHtml(String(child.event_count || 0))} events</span>
+          <div class="arena-card-header">
+            <div>
+              <h4>${escapeHtml(child.harness_id || "harness")}</h4>
+              <div class="session-meta">
+                <span>${escapeHtml(child.run_id || "no run")}</span>
+                <span>${escapeHtml(String(child.event_count || 0))} events</span>
+              </div>
+            </div>
+            <div class="badge-row">
+              <span class="badge ${child.status === "succeeded" ? "ok" : child.status === "running" || child.status === "queued" ? "info" : "warn"}">${escapeHtml(child.status || "unknown")}</span>
+              ${runLink}
+            </div>
           </div>
           <pre>${escapeHtml(message)}</pre>
         `;
@@ -6083,7 +6105,7 @@
         if (!byId("model-picker").contains(event.target)) closeModelList();
       });
       byId("run-button").addEventListener("click", runHarness);
-      byId("compare-button").addEventListener("click", runArena);
+      byId("arena-compare-button").addEventListener("click", runArena);
       byId("cancel-run-button").addEventListener("click", cancelHeadlessRun);
       byId("apply-route-recommendation-button").addEventListener("click", applyRouteRecommendation);
       byId("apply-run-diff-button").addEventListener("click", applyRunDiff);
@@ -6167,6 +6189,12 @@
           .filter((file) => file && String(file.type || "").startsWith("image/"));
         if (files.length) attachFiles(files, "paste");
       });
+      byId("arena-prompt-input").addEventListener("keydown", (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+          event.preventDefault();
+          runArena();
+        }
+      });
     }
 
     function bindPrimaryNavigation() {
@@ -6242,6 +6270,11 @@
       if (route.area === "work" && route.id) {
         closeRunsCenterEventStream();
         await loadSession(route.id, { syncRoute: false });
+        return true;
+      }
+      if (route.area === "arena") {
+        closeRunsCenterEventStream();
+        renderArenaCenter(state.currentArena);
         return true;
       }
       if (route.area === "runs" && route.id) {
