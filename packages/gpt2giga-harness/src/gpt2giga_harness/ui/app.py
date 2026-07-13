@@ -6,6 +6,7 @@ import asyncio
 import base64
 import binascii
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -1478,7 +1479,11 @@ def create_app(
         try:
             data = payload.get("data", payload.get("text", ""))
             process_ref = native_process_manager.write(process_id, str(data))
-            run = _sync_native_process_run(store, process_ref)
+            run = _sync_native_process_run(
+                store,
+                process_ref,
+                native_registry=native_registry,
+            )
             message_content = _optional_text(payload.get("message"))
             if message_content is not None and run is not None:
                 message = store.append_message(
@@ -1515,20 +1520,33 @@ def create_app(
         try:
             chunk = native_process_manager.read_since(process_id, cursor)
             process_ref = native_process_manager.status(process_id)
-            run = _sync_native_process_run(store, process_ref)
+            run = _sync_native_process_run(
+                store,
+                process_ref,
+                native_registry=native_registry,
+            )
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
                 status_code=404, detail="Native process not found"
             ) from exc
         payload = native_output_chunk_to_dict(chunk)
         payload["run"] = run_to_dict(run) if run is not None else None
+        payload["messages"] = (
+            [message_to_dict(message) for message in _native_run_messages(store, run)]
+            if run is not None
+            else []
+        )
         return payload
 
     @app.get("/api/native/processes/{process_id}")
     async def native_process_status(process_id: str) -> dict[str, Any]:
         try:
             process_ref = native_process_manager.status(process_id)
-            run = _sync_native_process_run(store, process_ref)
+            run = _sync_native_process_run(
+                store,
+                process_ref,
+                native_registry=native_registry,
+            )
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
                 status_code=404, detail="Native process not found"
@@ -1542,7 +1560,11 @@ def create_app(
     async def native_process_stop(process_id: str) -> dict[str, Any]:
         try:
             process_ref = native_process_manager.stop(process_id)
-            run = _sync_native_process_run(store, process_ref)
+            run = _sync_native_process_run(
+                store,
+                process_ref,
+                native_registry=native_registry,
+            )
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
                 status_code=404, detail="Native process not found"
@@ -3611,6 +3633,8 @@ def _native_request_extra(
 def _sync_native_process_run(
     store: HarnessSessionStore,
     process_ref: NativeProcessRef,
+    *,
+    native_registry: NativeHistoryConnectorRegistry | None = None,
 ):
     status = _run_status_from_process(process_ref)
     metadata = _existing_run_metadata(store, process_ref)
@@ -3645,7 +3669,172 @@ def _sync_native_process_run(
         return None
     if run.status is RunStatus.FAILED:
         _ensure_native_process_error_message(store, run, process_ref)
+    if native_registry is not None:
+        run = _sync_native_process_transcript(
+            store,
+            native_registry,
+            run,
+            process_ref,
+        )
     return run
+
+
+def _sync_native_process_transcript(
+    store: HarnessSessionStore,
+    native_registry: NativeHistoryConnectorRegistry,
+    run: HarnessRun,
+    process_ref: NativeProcessRef,
+) -> HarnessRun:
+    if run.harness_id != "gemini-cli":
+        return run
+    snapshot = execution_snapshot_from_dict(
+        _metadata_mapping(run.metadata.get("execution_snapshot"))
+    )
+    if snapshot is None:
+        return run
+    workspace = snapshot.effective_workspace or process_ref.cwd or run.workspace
+    discovery = native_registry.discover(
+        harness_id=run.harness_id,
+        workspace=workspace,
+        include_external=False,
+    )
+    candidates = [
+        ref
+        for ref in discovery.sessions
+        if ref.execution_snapshot is not None
+        and ref.execution_snapshot.id == snapshot.id
+    ]
+    if len(candidates) != 1:
+        return run
+    ref = candidates[0]
+    try:
+        connector = native_registry.get(run.harness_id)
+        transcript = connector.import_ref(ref)
+    except (OSError, ValueError, UnknownNativeHistoryConnectorError):
+        return run
+    existing_messages = store.list_messages(run.session_id)
+    known_keys = {
+        str(message.metadata["native_message_key"])
+        for message in existing_messages
+        if message.run_id == run.id and message.metadata.get("native_message_key")
+    }
+    appended_count = 0
+    for message in transcript:
+        if _native_import_message_role(message.role) != "assistant":
+            continue
+        if not _native_message_belongs_to_run(message, run):
+            continue
+        message_key = _native_message_key(ref, message)
+        if message_key in known_keys:
+            continue
+        store.append_message(
+            HarnessMessage(
+                id=new_id("msg"),
+                session_id=run.session_id,
+                run_id=run.id,
+                role="assistant",
+                content=str(redact_for_storage(message.content)),
+                created_at=message.created_at or utc_now(),
+                harness_id=run.harness_id,
+                model=run.model,
+                api_mode=run.api_mode,
+                metadata={
+                    "source": "native_process",
+                    "process_id": process_ref.id,
+                    "native_ref_id": ref.id,
+                    "native_session_id": ref.native_session_id,
+                    "native_message_key": message_key,
+                    "native_metadata": _redacted_mapping(message.metadata),
+                },
+            )
+        )
+        store.append_event(
+            HarnessStoredEvent(
+                id=new_id("evt"),
+                session_id=run.session_id,
+                run_id=run.id,
+                type=HarnessEventType.MESSAGE_COMPLETED.value,
+                message="Native assistant message synchronized.",
+                payload={
+                    "role": "assistant",
+                    "process_id": process_ref.id,
+                    "native_ref_id": ref.id,
+                    "native_session_id": ref.native_session_id,
+                },
+                created_at=message.created_at or utc_now(),
+            )
+        )
+        known_keys.add(message_key)
+        appended_count += 1
+    if not appended_count and run.native_session_id == ref.native_session_id:
+        return run
+    metadata = {
+        **dict(run.metadata),
+        "native_transcript_sync": {
+            "native_ref_id": ref.id,
+            "native_session_id": ref.native_session_id,
+            "synced_message_count": len(known_keys),
+            "updated_at": utc_now(),
+        },
+    }
+    return store.update_run(
+        run.id,
+        native_session_id=ref.native_session_id,
+        metadata=metadata,
+    )
+
+
+def _native_message_belongs_to_run(
+    message: NativeTranscriptMessage,
+    run: HarnessRun,
+) -> bool:
+    if run.started_at is None:
+        return True
+    message_time = _parse_native_timestamp(message.created_at)
+    run_time = _parse_native_timestamp(run.started_at)
+    return (
+        message_time is not None and run_time is not None and message_time >= run_time
+    )
+
+
+def _parse_native_timestamp(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _native_message_key(
+    ref: NativeSessionRef,
+    message: NativeTranscriptMessage,
+) -> str:
+    native_message_id = _optional_text(message.metadata.get("native_message_id"))
+    if native_message_id is not None:
+        return f"{ref.id}:id:{native_message_id}"
+    digest = hashlib.sha256(
+        json.dumps(
+            [message.role, message.created_at, message.content],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"{ref.id}:sha256:{digest}"
+
+
+def _native_run_messages(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+) -> tuple[HarnessMessage, ...]:
+    return tuple(
+        message
+        for message in store.list_messages(run.session_id)
+        if message.run_id == run.id and message.role in {"assistant", "error"}
+    )
 
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)?)")

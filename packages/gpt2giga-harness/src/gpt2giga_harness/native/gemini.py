@@ -591,8 +591,44 @@ def _checkpoint_files(gemini_home: Path, workspace: str | None) -> tuple[Path, .
 def _checkpoint_roots(gemini_home: Path, workspace: str | None) -> tuple[Path, ...]:
     tmp_root = gemini_home / ".gemini" / "tmp"
     if workspace is not None:
-        return (tmp_root / project_hash_for_workspace(workspace),)
+        roots: list[Path] = []
+        storage_key = _project_storage_key(gemini_home, workspace)
+        if storage_key is not None:
+            roots.append(tmp_root / storage_key)
+        roots.append(tmp_root / project_hash_for_workspace(workspace))
+        return tuple(dict.fromkeys(roots))
     return (tmp_root,)
+
+
+def _project_storage_key(gemini_home: Path, workspace: str) -> str | None:
+    projects_path = gemini_home / ".gemini" / "projects.json"
+    try:
+        decoded = json.loads(projects_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    projects = decoded.get("projects") if isinstance(decoded, Mapping) else None
+    if not isinstance(projects, Mapping):
+        return None
+    normalized_workspace = str(Path(workspace).expanduser().resolve())
+    value = projects.get(normalized_workspace)
+    if value is None:
+        for candidate_workspace, candidate_value in projects.items():
+            try:
+                candidate = str(Path(str(candidate_workspace)).expanduser().resolve())
+            except (OSError, ValueError):
+                continue
+            if candidate == normalized_workspace:
+                value = candidate_value
+                break
+    if value is None or not str(value).strip():
+        return None
+    storage_key = str(value).strip()
+    tmp_root = (gemini_home / ".gemini" / "tmp").resolve()
+    try:
+        (tmp_root / storage_key).resolve().relative_to(tmp_root)
+    except (OSError, ValueError):
+        return None
+    return storage_key
 
 
 def _iter_events(path: Path) -> Iterable[Mapping[str, Any]]:
@@ -665,11 +701,16 @@ def _message_from_event(event: Mapping[str, Any]) -> NativeTranscriptMessage | N
     content = _content_from_event(event)
     if role is None or content is None:
         return None
+    metadata: dict[str, Any] = {"source": "gemini"}
+    if event.get("id") is not None:
+        metadata["native_message_id"] = str(event["id"])
+    if event.get("model") is not None:
+        metadata["model"] = str(event["model"])
     return NativeTranscriptMessage(
         role=role,
         content=content,
         created_at=_timestamp_from_event(event),
-        metadata={"source": "gemini"},
+        metadata=metadata,
     )
 
 
@@ -684,7 +725,7 @@ def _role_from_event(event: Mapping[str, Any]) -> str | None:
         if candidate is None:
             continue
         role = str(candidate).strip().lower()
-        if role == "model":
+        if role in {"model", "gemini"}:
             return "assistant"
         if role == "function":
             return "tool"

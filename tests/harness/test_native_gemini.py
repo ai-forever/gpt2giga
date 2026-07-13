@@ -151,6 +151,65 @@ def test_gemini_native_checkpoint_scanner_and_preview_import(tmp_path):
     assert imported[1].content == "done"
 
 
+def test_gemini_native_reads_current_projects_mapping_and_message_schema(tmp_path):
+    workspace = tmp_path / "repo"
+    data_dir = tmp_path / "data"
+    workspace.mkdir()
+    project_id = project_id_for_root(workspace)
+    gemini_home = data_dir / "native" / "gemini" / "homes" / project_id
+    projects_path = gemini_home / ".gemini" / "projects.json"
+    projects_path.parent.mkdir(parents=True)
+    projects_path.write_text(
+        json.dumps({"projects": {str(workspace.resolve()): "repo-storage"}}),
+        encoding="utf-8",
+    )
+    session_file = (
+        gemini_home
+        / ".gemini"
+        / "tmp"
+        / "repo-storage"
+        / "chats"
+        / "session-current.jsonl"
+    )
+    _write_jsonl(
+        session_file,
+        (
+            {
+                "kind": "main",
+                "projectHash": "full-project-hash",
+                "sessionId": "current-gemini-session",
+                "startTime": "2026-07-13T18:15:56.685Z",
+            },
+            {
+                "id": "user-message-1",
+                "type": "user",
+                "content": [{"text": "Привет как дела?"}],
+                "timestamp": "2026-07-13T18:15:56.712Z",
+            },
+            {
+                "id": "assistant-message-1",
+                "type": "gemini",
+                "content": "Привет! Всё хорошо.",
+                "model": "GigaChat-3.5-432B-A28B",
+                "timestamp": "2026-07-13T18:15:59.501Z",
+            },
+        ),
+    )
+    connector = GeminiNativeHistoryConnector(data_dir=data_dir)
+
+    (ref,) = connector.discover(workspace=str(workspace), include_external=False)
+    imported = connector.import_ref(ref)
+
+    assert ref.native_session_id == "current-gemini-session"
+    assert [message.role for message in imported] == ["user", "assistant"]
+    assert imported[1].content == "Привет! Всё хорошо."
+    assert imported[1].metadata == {
+        "source": "gemini",
+        "native_message_id": "assistant-message-1",
+        "model": "GigaChat-3.5-432B-A28B",
+    }
+
+
 def test_gemini_native_start_command_uses_managed_home_and_redacts_key(
     tmp_path,
     monkeypatch,

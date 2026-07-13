@@ -18,6 +18,7 @@ from gpt2giga_harness.native.gemini import GeminiNativeHistoryConnector
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
+    NativeTranscriptMessage,
     create_execution_snapshot,
 )
 from gpt2giga_harness.native.process import NativeProcessManager
@@ -135,6 +136,105 @@ def test_native_process_failure_is_rendered_as_chat_error_once(tmp_path):
         "process_id": process_id,
         "exit_code": 3,
     }
+
+
+def test_native_gemini_process_syncs_assistant_message_while_running(tmp_path):
+    script = _write_echo_cli(tmp_path)
+
+    class TranscriptConnector(FakeProcessConnector):
+        def __init__(self):
+            super().__init__(start_script=script, harness_id="gemini-cli")
+            self.snapshot = None
+
+        def build_start_command(self, request, context):
+            plan = super().build_start_command(request, context)
+            self.snapshot = create_execution_snapshot(
+                harness_id=self.harness_id,
+                api_mode=request.api_mode.value,
+                model=request.model,
+                native_home=request.workspace,
+                workspace=request.workspace,
+                project_id="proj_native_transcript",
+                permission_mode=request.mode,
+                tool_config_hash=None,
+            )
+            return replace(plan, execution_snapshot=self.snapshot)
+
+        def discover(self, *, workspace, include_external):
+            del include_external
+            return (
+                NativeSessionRef(
+                    id="native_gemini_live",
+                    harness_id=self.harness_id,
+                    native_session_id="gemini-live-session",
+                    title="Live Gemini",
+                    workspace=workspace,
+                    source="managed-live.jsonl",
+                    status=NativeSessionStatus.MANAGED_NATIVE,
+                    created_at="2099-01-01T00:00:00Z",
+                    updated_at="2099-01-01T00:00:01Z",
+                    message_count=2,
+                    can_preview=True,
+                    can_import=True,
+                    can_resume=True,
+                    execution_snapshot=self.snapshot,
+                ),
+            )
+
+        def import_ref(self, ref):
+            del ref
+            return (
+                NativeTranscriptMessage(
+                    role="assistant",
+                    content="Привет! Всё хорошо.",
+                    created_at="2099-01-01T00:00:01Z",
+                    metadata={"native_message_id": "assistant-live-1"},
+                ),
+            )
+
+    connector = TranscriptConnector()
+    client, store = _client(tmp_path, connector)
+    session = store.create_session(
+        title="Native Gemini transcript",
+        workspace=str(tmp_path),
+        default_harness_id="gemini-cli",
+    )
+    started = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "gemini-cli",
+            "action": "start",
+            "prompt": "Привет как дела?",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    process_id = started.json()["process"]["id"]
+    _wait_for_output(client, process_id, 0, "ready")
+    first_poll = client.get(f"/api/native/processes/{process_id}/output").json()
+    second_poll = client.get(f"/api/native/processes/{process_id}/output").json()
+
+    assert first_poll["status"] == "running"
+    assert [message["content"] for message in first_poll["messages"]] == [
+        "Привет! Всё хорошо."
+    ]
+    assert [message["content"] for message in second_poll["messages"]] == [
+        "Привет! Всё хорошо."
+    ]
+    assistant_messages = [
+        message
+        for message in store.list_messages(session.id)
+        if message.role == "assistant"
+    ]
+    assert len(assistant_messages) == 1
+    assert (
+        assistant_messages[0]
+        .metadata["native_message_key"]
+        .endswith(":id:assistant-live-1")
+    )
+    (run,) = store.list_runs(session.id)
+    assert run.native_session_id == "gemini-live-session"
 
 
 def test_native_process_api_approval_blocks_before_worktree_and_spawn(tmp_path):

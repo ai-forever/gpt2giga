@@ -5641,6 +5641,22 @@
         : runs.map((item, itemIndex) => itemIndex === index ? run : item);
     }
 
+    function syncNativeMessagesInBundle(messages) {
+      if (!state.currentBundle || !Array.isArray(messages) || !messages.length) return false;
+      const current = Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
+      const byMessageId = new Map(current.map((message) => [message.id, message]));
+      let changed = false;
+      for (const message of messages) {
+        if (!message || !message.id) continue;
+        const previous = byMessageId.get(message.id);
+        if (!previous || JSON.stringify(previous) !== JSON.stringify(message)) changed = true;
+        byMessageId.set(message.id, message);
+      }
+      if (!changed) return false;
+      state.currentBundle.messages = [...byMessageId.values()];
+      return true;
+    }
+
     async function pollNativeOutput() {
       const process = state.activeNativeProcess || {};
       if (!process.id) {
@@ -5667,6 +5683,7 @@
         syncNativeRunInBundle(body.run);
         renderInspector();
       }
+      if (syncNativeMessagesInBundle(body.messages)) renderMessages();
       renderNativeTerminalStatus(status);
       if (status !== "running") {
         stopNativePolling();
