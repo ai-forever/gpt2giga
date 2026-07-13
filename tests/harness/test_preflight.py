@@ -21,6 +21,15 @@ def test_preflight_blocks_private_key_prompt_without_echoing_secret():
     assert "not-real-secret" not in str(payload)
 
 
+def test_preflight_blocks_incomplete_private_key_header_without_backtracking():
+    prompt = "-----BEGIN RSA PRIVATE KEY-----" + ("-----BEGIN PRIVATE KEY-----" * 2_000)
+
+    report = build_preflight_report(prompt=prompt, workspace=None)
+
+    assert report.hard_block is True
+    assert {finding.code for finding in report.findings} == {"private_key_material"}
+
+
 def test_preflight_blocks_credential_assignment_without_false_positive_noise():
     report = build_preflight_report(
         prompt="TOKEN=abcdefghijklmnopqrstuvwxyz123456",

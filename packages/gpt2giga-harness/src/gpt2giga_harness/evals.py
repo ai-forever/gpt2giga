@@ -1162,7 +1162,7 @@ def protocol_conformance_matrix(registry: Any) -> list[dict[str, Any]]:
             for harness in registry.list()
             if capability.value in spec_capability_values(harness.spec())
         ]
-        for api_mode in GigaChatApiMode:
+        for api_mode in (GigaChatApiMode.V1, GigaChatApiMode.V2):
             cells.append(
                 {
                     "fixture_id": fixture_id,

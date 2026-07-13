@@ -163,7 +163,8 @@ def test_attachments_api_unknown_session_and_attachment_return_404(tmp_path):
     assert upload.status_code == 404
 
     assert client.get("/api/attachments/att_missing/metadata").status_code == 404
-    assert client.delete("/api/attachments/att_missing").status_code == 404
+    delete = client.delete("/api/attachments/att_missing")
+    assert delete.status_code == 404
 
 
 def _create_session(client: TestClient, *, workspace: str | None = None) -> str:

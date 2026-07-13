@@ -6,6 +6,7 @@ from typing import Any, Literal, Optional
 
 ProviderName = Literal["openai", "anthropic"]
 DEFAULT_GIGACHAT_MODEL = "GigaChat"
+MODEL_CONCURRENCY_LIMIT_MESSAGE = "Concurrency limit reached for the requested model"
 
 
 class ModelConcurrencyTimeoutError(Exception):

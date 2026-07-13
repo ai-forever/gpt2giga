@@ -161,7 +161,8 @@ class GrantStore(Protocol):
         project_id: str | None,
         run_id: str | None,
         job_id: str | None,
-    ) -> bool: ...
+    ) -> bool:
+        raise NotImplementedError
 
 
 INTERACTIVE_PROFILE = PermissionProfile(

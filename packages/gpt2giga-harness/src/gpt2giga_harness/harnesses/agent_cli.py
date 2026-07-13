@@ -273,6 +273,7 @@ def run_streaming_command(
                 }
             )
         except (OSError, RuntimeError, TypeError, ValueError):
+            # Process reporting is best-effort and must not abort the harness run.
             pass
 
     output_queue: Queue[tuple[str, str | None]] = Queue(maxsize=STREAM_QUEUE_MAX_ITEMS)
@@ -623,12 +624,14 @@ def _start_stream_reader(
                     if stop_event.is_set():
                         break
         except (OSError, ValueError):
+            # Shutdown may close the pipe while the daemon reader is draining it.
             pass
         finally:
             if stream is not None:
                 try:
                     stream.close()
                 except (OSError, ValueError):
+                    # The process or another cleanup path may already own the pipe.
                     pass
             enqueue((stream_name, None))
 
@@ -650,12 +653,14 @@ def _stop_process(process: subprocess.Popen[str]) -> None:
     try:
         process.terminate()
     except OSError:
+        # The child may exit between poll() and terminate().
         pass
     if _wait_for_process(process, PROCESS_STOP_TIMEOUT_SECONDS):
         return
     try:
         process.kill()
     except OSError:
+        # The child may exit before the forced-kill fallback runs.
         pass
     _wait_for_process(process, PROCESS_STOP_TIMEOUT_SECONDS)
 
@@ -692,6 +697,7 @@ def _stop_posix_process_group(process: subprocess.Popen[str]) -> None:
         try:
             process.terminate()
         except OSError:
+            # The direct child may exit while its process group is being stopped.
             pass
 
     # Reap the direct child with a bounded grace period. Descendants can keep the
@@ -707,6 +713,7 @@ def _stop_posix_process_group(process: subprocess.Popen[str]) -> None:
         try:
             process.kill()
         except OSError:
+            # The direct child may exit after the group-wide signal.
             pass
         _wait_for_process(process, PROCESS_STOP_TIMEOUT_SECONDS)
 
@@ -737,6 +744,7 @@ def _close_finished_process_pipes(
         try:
             stream.close()
         except (OSError, ValueError):
+            # Reader shutdown can close the pipe before this cleanup pass.
             pass
 
 

@@ -243,6 +243,8 @@ async def test_stream_chat_generator_gigachat_exception():
     assert len(lines) == 2
     # Проверяем, что ошибка содержит тип и код
     assert "GigaChatException" in lines[0]
+    assert "Upstream service error" in lines[0]
+    assert "GigaChat API error occurred" not in lines[0]
     assert "stream_error" in lines[0]
     assert lines[1].strip() == "data: [DONE]"
 
@@ -515,6 +517,8 @@ async def test_stream_chat_completion_generator_gigachat_exception():
 
     assert len(lines) == 2
     assert "GigaChatException" in lines[0]
+    assert "Upstream service error" in lines[0]
+    assert "GigaChat API error occurred" not in lines[0]
     assert "stream_error" in lines[0]
     assert lines[1].strip() == "data: [DONE]"
 
@@ -541,7 +545,8 @@ async def test_stream_responses_generator_gigachat_exception():
     assert len(lines) == 3
     assert "event: response.created" in lines[0]
     assert "event: response.in_progress" in lines[1]
-    assert "GigaChat" in lines[2]
+    assert "Upstream service error" in lines[2]
+    assert "GigaChat API error occurred" not in lines[2]
     assert "stream_error" in lines[2]
     assert "event: error" in lines[2]
 
@@ -1090,6 +1095,8 @@ async def test_stream_responses_chat_completion_generator_gigachat_exception():
     assert len(lines) == 3
     assert "event: response.created" in lines[0]
     assert "event: response.in_progress" in lines[1]
+    assert "Upstream service error" in lines[2]
+    assert "GigaChat API error occurred" not in lines[2]
     assert "stream_error" in lines[2]
     assert "event: error" in lines[2]
 

@@ -349,6 +349,12 @@ never accepted in a URL. Without remote authentication, data APIs return `401`
 and mutating APIs fail closed with `403`. Host and same-origin checks apply to
 the shell, API, assets, and SSE connections.
 
+Treat the bootstrap token as same-principal operator access, not as a tenant or
+read-only credential. An authenticated operator can select any workspace the
+Harness OS account can access, preview supported files, and start approved
+processes there. Share the token only with operators who may act with that OS
+account's filesystem and process privileges.
+
 ## Configuration
 
 CLI flags override environment variables. Useful variables:

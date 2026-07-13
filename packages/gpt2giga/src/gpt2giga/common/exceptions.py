@@ -12,7 +12,10 @@ from gpt2giga.common.client_params import (
     openai_compatibility_error,
     openai_error_payload,
 )
-from gpt2giga.common.model_concurrency import ModelConcurrencyTimeoutError
+from gpt2giga.common.model_concurrency import (
+    MODEL_CONCURRENCY_LIMIT_MESSAGE,
+    ModelConcurrencyTimeoutError,
+)
 from gpt2giga.logger import rquid_context
 
 ERROR_MAPPING = {
@@ -72,7 +75,7 @@ def exceptions_handler(func):
             ).warning(str(e))
             if e.provider == "anthropic":
                 return anthropic_compatibility_response(
-                    str(e),
+                    MODEL_CONCURRENCY_LIMIT_MESSAGE,
                     status_code=429,
                     error_type="rate_limit_error",
                     code="model_concurrency_limit",
@@ -80,7 +83,7 @@ def exceptions_handler(func):
             return JSONResponse(
                 status_code=429,
                 content=openai_error_payload(
-                    str(e),
+                    MODEL_CONCURRENCY_LIMIT_MESSAGE,
                     error_type="rate_limit_error",
                     param="model",
                     code="model_concurrency_limit",
@@ -165,7 +168,7 @@ def exceptions_handler(func):
                 status_code=500,
                 content={
                     "error": {
-                        "message": str(e),
+                        "message": "Internal server error",
                         "type": "server_error",
                         "param": None,
                         "code": None,

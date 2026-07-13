@@ -277,36 +277,36 @@ def _fixture_parser(payload):
     event_type = payload.get("type")
     if event_type == "message":
         event = message_delta_event(payload.get("delta"))
-        return (event,) if event is not None else ()
+        return [event] if event is not None else []
     if event_type == "tool_start":
-        return (
+        return [
             tool_call_event(
                 "tool_call_started",
                 tool_call_id=payload.get("id"),
                 name=payload.get("name"),
                 arguments=payload.get("arguments"),
                 status="running",
-            ),
-        )
+            )
+        ]
     if event_type == "tool_finish":
-        return (
+        return [
             tool_call_event(
                 "tool_call_finished",
                 tool_call_id=payload.get("id"),
                 result=payload.get("result"),
                 status=payload.get("status"),
-            ),
-        )
+            )
+        ]
     if event_type == "tool_delta":
-        return (
+        return [
             tool_call_event(
                 "tool_call_delta",
                 tool_call_id=payload.get("id"),
                 arguments=payload.get("arguments_delta"),
                 status="running",
-            ),
-        )
+            )
+        ]
     if event_type == "usage":
         event = usage_event(payload)
-        return (event,) if event is not None else ()
-    return ()
+        return [event] if event is not None else []
+    return []

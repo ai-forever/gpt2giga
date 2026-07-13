@@ -2442,7 +2442,7 @@ async def _wait_for_started_run(
         if runs:
             return runs[-1]
         if task.done():
-            await task
+            task.result()
             break
         await asyncio.sleep(0.01)
     raise RuntimeError("Harness run did not start")

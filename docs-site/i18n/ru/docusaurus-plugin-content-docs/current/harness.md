@@ -253,6 +253,12 @@ giga ui --host 0.0.0.0 --allow-remote
 Не передавайте token через URL. Размещайте TLS reverse proxy перед UI. Alpha не
 позиционируется как публичный Internet-facing или multi-tenant сервис.
 
+Bootstrap token даёт доступ доверенного оператора с правами того же OS account,
+а не изолированного tenant или read-only пользователя. Аутентифицированный
+оператор может выбрать любой доступный этому account workspace, открыть
+поддерживаемые файлы и запускать там разрешённые policy процессы. Передавайте
+token только операторам, которым допустимы эти filesystem и process privileges.
+
 ## Ограничения preview
 
 - Поведение Codex, Claude и Gemini зависит от поддержки custom endpoints,

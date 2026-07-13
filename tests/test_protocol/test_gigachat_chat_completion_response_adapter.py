@@ -139,6 +139,7 @@ def test_adapted_chat_completion_response_preserves_provider_state_ids_in_respon
 
     parsed = Response.model_validate(processed)
     assert parsed.metadata["gigachat_thread_id"] == "thread_1"
+    assert parsed.usage.input_tokens_details.cache_write_tokens == 0
 
 
 def test_adapted_chat_completion_text_response_preserves_called_tools_from_responses_input():
@@ -454,6 +455,7 @@ async def test_adapted_chat_completion_builtin_tool_outputs_flow_through_respons
     ]
 
     parsed = Response.model_validate(processed)
+    assert parsed.usage.input_tokens_details.cache_write_tokens == 0
     assert parsed.output[0].type == "web_search_call"
     assert parsed.output[1].type == "image_generation_call"
     assert parsed.output[1].result == "aW1n"

@@ -476,11 +476,13 @@ class NativeProcessManager:
             try:
                 record.stdin.close()
             except OSError:
+                # The native process may already have closed its stdin pipe.
                 pass
         if record.master_fd is not None:
             try:
                 os.close(record.master_fd)
             except OSError:
+                # PTY teardown may race with process exit or another cleanup path.
                 pass
         record.resources_closed = True
 

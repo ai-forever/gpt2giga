@@ -138,6 +138,9 @@ def _resolve_preview_path(path: str, workspace: str | None) -> tuple[Path, Path]
 
 
 def _directory_root(value: str) -> Path:
+    # A browser session is same-principal operator access: this root is the
+    # operator-selected authority boundary, while _resolve_preview_path prevents
+    # a requested child path from escaping it through traversal or symlinks.
     root = Path(value).expanduser().resolve()
     if not root.exists() or not root.is_dir():
         raise HTTPException(status_code=400, detail="Workspace is not a directory")

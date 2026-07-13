@@ -31,8 +31,8 @@ ACTION_EXCLUDE_ATTACHMENT = "exclude_attachment"
 ACTION_SEND_PATH_ONLY = "send_path_only"
 
 PRIVATE_KEY_RE = re.compile(
-    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
-    re.DOTALL | re.IGNORECASE,
+    r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----",
+    re.IGNORECASE,
 )
 CREDENTIAL_ASSIGNMENT_RE = re.compile(
     r"""(?ix)

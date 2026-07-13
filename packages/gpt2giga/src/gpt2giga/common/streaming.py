@@ -20,6 +20,7 @@ from gpt2giga.common.gigachat_options import (
     gigachat_request_options,
 )
 from gpt2giga.common.model_concurrency import (
+    MODEL_CONCURRENCY_LIMIT_MESSAGE,
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
     resolve_gigachat_model,
@@ -151,10 +152,10 @@ async def stream_chat_generator(
                 async for event in emit_stream():
                     yield event
 
-    except ModelConcurrencyTimeoutError as e:
+    except ModelConcurrencyTimeoutError:
         error_response = {
             "error": {
-                "message": str(e),
+                "message": MODEL_CONCURRENCY_LIMIT_MESSAGE,
                 "type": "rate_limit_error",
                 "param": "model",
                 "code": "model_concurrency_limit",
@@ -172,7 +173,7 @@ async def stream_chat_generator(
             )
         error_response = {
             "error": {
-                "message": error_message,
+                "message": "Upstream service error",
                 "type": error_type,
                 "code": "stream_error",
             }
@@ -313,10 +314,10 @@ async def stream_chat_completion_generator(
                 async for event in emit_stream():
                     yield event
 
-    except ModelConcurrencyTimeoutError as e:
+    except ModelConcurrencyTimeoutError:
         error_response = {
             "error": {
-                "message": str(e),
+                "message": MODEL_CONCURRENCY_LIMIT_MESSAGE,
                 "type": "rate_limit_error",
                 "param": "model",
                 "code": "model_concurrency_limit",
@@ -334,7 +335,7 @@ async def stream_chat_completion_generator(
             )
         error_response = {
             "error": {
-                "message": error_message,
+                "message": "Upstream service error",
                 "type": error_type,
                 "code": "stream_error",
             }
@@ -1447,11 +1448,11 @@ async def stream_responses_generator(
                 },
             )
 
-    except ModelConcurrencyTimeoutError as e:
+    except ModelConcurrencyTimeoutError:
         error_response = {
             "type": "error",
             "code": "model_concurrency_limit",
-            "message": str(e),
+            "message": MODEL_CONCURRENCY_LIMIT_MESSAGE,
             "param": "model",
             "sequence_number": sequence_number,
         }
@@ -1467,7 +1468,7 @@ async def stream_responses_generator(
         error_response = {
             "type": "error",
             "code": "stream_error",
-            "message": error_message,
+            "message": "Upstream service error",
             "param": None,
             "sequence_number": sequence_number,
         }

@@ -111,9 +111,11 @@ class ResolvedSecret:
 class SecretResolver(Protocol):
     """Resolve supported references at the final owning boundary."""
 
-    def supports(self, kind: SecretReferenceKind) -> bool: ...
+    def supports(self, kind: SecretReferenceKind) -> bool:
+        raise NotImplementedError
 
-    def resolve(self, reference: SecretReference, *, owner: str) -> ResolvedSecret: ...
+    def resolve(self, reference: SecretReference, *, owner: str) -> ResolvedSecret:
+        raise NotImplementedError
 
 
 class EnvironmentSecretResolver:

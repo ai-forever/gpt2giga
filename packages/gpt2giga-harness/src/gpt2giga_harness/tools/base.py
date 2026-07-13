@@ -42,6 +42,8 @@ class ToolProvider(Protocol):
     """Describe tools without requiring discovery or execution side effects."""
 
     @property
-    def id(self) -> str: ...
+    def id(self) -> str:
+        raise NotImplementedError
 
-    def list_tools(self) -> tuple[ToolDescriptor, ...]: ...
+    def list_tools(self) -> tuple[ToolDescriptor, ...]:
+        raise NotImplementedError

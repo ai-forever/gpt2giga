@@ -268,6 +268,7 @@ def _job_summary(
         run = session_store.get_run(run_id)
         session_title = session_store.get_session(job.session_id).title
     except (RunNotFoundError, SessionNotFoundError):
+        # Durable jobs may outlive pruned session history; summary data stays partial.
         pass
     status_group = _status_group(job.status)
     can_retry = bool(
