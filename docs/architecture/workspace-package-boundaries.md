@@ -9,10 +9,11 @@ describe the current `uv` workspace layout.
 
 | Owner | Distribution | Python namespace | Version | Commands |
 | --- | --- | --- | --- | --- |
-| Gateway | `gpt2giga` | `gpt2giga` | `0.2.2a1` | `gpt2giga` |
+| Gateway | `gpt2giga` | `gpt2giga` | `0.2.3a1` | `gpt2giga` |
 | Harness | `gpt2giga-harness` | `gpt2giga_harness` | `0.0.1` | `giga`, `gpt2giga-harness` |
 
-The Harness distribution initially depends on exactly `gpt2giga==0.2.2a1`.
+The first published Harness distribution depends on exactly
+`gpt2giga==0.2.3a1`; the extraction baseline initially used `0.2.2a1`.
 The gateway must never import `gpt2giga_harness`. The existing
 `gpt2giga.harnesses` plugin entry-point group remains unchanged; only its
 targets move to `gpt2giga_harness.harnesses.*`.
@@ -97,7 +98,7 @@ commands or entry points, relocated tool contracts, or relocated accumulator.
 
 The Harness artifact contains `gpt2giga_harness`, its UI assets, both Harness
 commands, all built-in entries in `gpt2giga.harnesses`, and an exact published
-requirement on `gpt2giga==0.2.2a1`. Workspace source wiring must not appear in
+requirement on `gpt2giga==0.2.3a1`. Workspace source wiring must not appear in
 built metadata.
 
 `tests/test_workspace_split_contract.py` enforces the dependency direction now

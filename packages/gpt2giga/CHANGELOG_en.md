@@ -5,6 +5,21 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3a1] - 2026-07-13
+
+### Added
+- **Codex ImageGen handoff**: OpenAI Responses now recognizes a flat or namespaced ImageGen tool advertised by the client and returns the GigaChat `image_generate` result as a compatible `function_call` with the original tool name in streaming and non-streaming responses.
+- **Harness-aware Gemini model pinning**: trusted Gemini CLI requests from Harness can pin the configured upstream model for `generateContent`, `streamGenerateContent`, and `countTokens` when client model forwarding is disabled.
+
+### Changed
+- **Independent gateway package**: `gpt2giga` moved to `packages/gpt2giga/` as a standalone `uv` workspace member; the distribution keeps the `gpt2giga` namespace and CLI command but no longer includes Harness namespaces, commands, or package data.
+- **Separate build and release contracts**: CI builds and validates the gateway independently from `gpt2giga-harness`, while gateway publishing uses `v<version>` tags.
+- **Installation documentation**: README, quickstart, and architecture docs now distinguish the compatibility gateway installation from the local control plane.
+
+### Fixed
+- **Gemini sources**: source markers and `inline_data.sources` are now rendered as a visible sources list in Gemini-compatible responses.
+- **Docker workspace layout**: Docker build and deployment paths were aligned with the package layout so the image contains the installed gateway after the workspace move.
+
 ## [0.2.2a1] - 2026-06-26
 
 ### Added
@@ -465,6 +480,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.2.3a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.2a1...v0.2.3a1
 [0.2.2a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.1a1...v0.2.2a1
 [0.2.1a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a2...v0.2.1a1
 [0.2.0a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a1...v0.2.0a2

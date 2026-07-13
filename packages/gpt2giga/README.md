@@ -48,7 +48,7 @@ docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
 Или локальный запуск gateway:
 
 ```sh
-uv tool install "gpt2giga==0.2.2a1"
+uv tool install "gpt2giga==0.2.3a1"
 gpt2giga
 ```
 
@@ -128,6 +128,7 @@ make docs-dev-ru
 | Checklist для добавления provider/protocol | [docs/architecture/how-to-add-provider.md](./docs/architecture/how-to-add-provider.md) |
 | Редакторы, агенты, SDK examples, reverse proxies | [docs/integrations.md](./docs/integrations.md) |
 | Runnable-примеры | [examples/README.md](./examples/README.md) |
+| История изменений | [RU](./CHANGELOG.md) · [EN](./CHANGELOG_en.md) |
 
 ## Текущая API-Поверхность
 

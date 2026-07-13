@@ -139,6 +139,8 @@ make docs-dev-ru
 | Checklist для добавления provider/protocol | [docs/architecture/how-to-add-provider.md](./docs/architecture/how-to-add-provider.md) |
 | Редакторы, агенты, SDK examples, reverse proxies | [docs/integrations.md](./docs/integrations.md) |
 | Runnable-примеры | [examples/README.md](./examples/README.md) |
+| История изменений gateway | [RU](./packages/gpt2giga/CHANGELOG.md) · [EN](./packages/gpt2giga/CHANGELOG_en.md) |
+| История изменений Harness | [RU](./packages/gpt2giga-harness/CHANGELOG.md) · [EN](./packages/gpt2giga-harness/CHANGELOG_en.md) |
 
 ## Текущая API-Поверхность
 

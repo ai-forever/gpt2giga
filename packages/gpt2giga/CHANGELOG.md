@@ -5,6 +5,21 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.2.3a1] - 2026-07-13
+
+### Добавлено
+- **Codex ImageGen handoff**: OpenAI Responses теперь распознаёт объявленный клиентом плоский или namespaced ImageGen tool и возвращает результат GigaChat `image_generate` как совместимый `function_call` с исходным именем инструмента в streaming и non-streaming ответах.
+- **Harness-aware Gemini model pinning**: доверенные запросы Gemini CLI из Harness могут закрепить настроенную upstream-модель для `generateContent`, `streamGenerateContent` и `countTokens`, когда передача клиентской модели отключена.
+
+### Изменено
+- **Независимый gateway-пакет**: `gpt2giga` перенесён в `packages/gpt2giga/` как самостоятельный member `uv` workspace; дистрибутив сохраняет namespace `gpt2giga` и одноимённую CLI-команду, но больше не включает Harness namespace, команды и package data.
+- **Раздельные build/release-контракты**: CI собирает и проверяет gateway независимо от `gpt2giga-harness`, а публикация gateway привязана к тегам вида `v<version>`.
+- **Документация установки**: README, quickstart и architecture docs разделяют установку compatibility gateway и локального control plane.
+
+### Исправлено
+- **Gemini sources**: source markers и `inline_data.sources` теперь отображаются в Gemini-compatible ответах как видимый список источников.
+- **Docker workspace layout**: Docker-сборка и deploy-пути обновлены под package layout, чтобы образ содержал установленный gateway после переноса в workspace.
+
 ## [0.2.2a1] - 2026-06-26
 
 ### Добавлено
@@ -462,6 +477,7 @@
 
 ---
 
+[0.2.3a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.2a1...v0.2.3a1
 [0.2.2a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.1a1...v0.2.2a1
 [0.2.1a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a2...v0.2.1a1
 [0.2.0a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a1...v0.2.0a2

@@ -5,6 +5,8 @@ Local agentic control plane for the `gpt2giga` compatibility gateway.
 The distribution provides the `giga` and `gpt2giga-harness` commands and uses
 the `gpt2giga_harness` Python namespace.
 
+Release notes: [Russian](./CHANGELOG.md) · [English](./CHANGELOG_en.md).
+
 Install the first split release:
 
 ```sh
@@ -31,7 +33,7 @@ Use `giga config path`, `giga config set executables.codex-cli /custom/bin/codex
 and `giga harness inspect codex-cli --json` to manage and diagnose resolution.
 Configured executable paths take precedence over `PATH` and must be absolute.
 
-`gpt2giga-harness==0.0.1` depends on exactly `gpt2giga==0.2.2a1`. The gateway
+`gpt2giga-harness==0.0.1` depends on exactly `gpt2giga==0.2.3a1`. The gateway
 can be started separately with `gpt2giga`; Harness can also start a temporary
 local sidecar for supported direct runs.
 
