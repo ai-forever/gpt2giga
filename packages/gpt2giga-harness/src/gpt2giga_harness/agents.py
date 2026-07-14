@@ -655,7 +655,6 @@ def build_agent_execution_plan(
         ("skills", profile.skills),
         ("memory_selectors", profile.memory_selectors),
         ("context_selectors", profile.context_selectors),
-        ("tool_ids", profile.tool_ids),
     )
     for name, values in deferred_fields:
         if values:
@@ -681,6 +680,46 @@ def build_agent_execution_plan(
                 source="not_requested",
                 detail=f"No {name} values were requested.",
             )
+    if profile.tool_ids:
+        if profile.invocation_mode == "headless" and profile.harness_id in {
+            "codex-cli",
+            "claude-code",
+            "gemini-cli",
+        }:
+            add(
+                "tool_ids",
+                status=AgentOptionStatus.EFFECTIVE,
+                requested=list(profile.tool_ids),
+                effective=list(profile.tool_ids),
+                source="managed_mcp_snapshot",
+                detail=(
+                    "Resolved to a trusted immutable project MCP snapshot before "
+                    "queueing and materialized into the active temporary CLI home."
+                ),
+            )
+        else:
+            message = (
+                "tool_ids require a built-in Codex, Claude, or Gemini headless "
+                "adapter managed-MCP snapshot."
+            )
+            warnings.append(message)
+            add(
+                "tool_ids",
+                status=AgentOptionStatus.UNSUPPORTED,
+                requested=list(profile.tool_ids),
+                effective=None,
+                source="unsupported",
+                detail=message,
+            )
+    else:
+        add(
+            "tool_ids",
+            status=AgentOptionStatus.EFFECTIVE,
+            requested=[],
+            effective=[],
+            source="not_requested",
+            detail="No managed MCP servers were requested.",
+        )
     add(
         "expected_artifact",
         status=(
@@ -761,7 +800,7 @@ def agent_run_payload(
             "tool_bindings": [
                 {
                     "server_id": server_id,
-                    "enforcement": "provenance_only_until_headless_snapshot",
+                    "enforcement": "managed_headless_snapshot",
                     "observability": "opaque_unless_structured_adapter",
                 }
                 for server_id in profile.tool_ids

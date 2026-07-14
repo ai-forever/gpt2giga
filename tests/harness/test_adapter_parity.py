@@ -41,7 +41,7 @@ EXPECTED_SUPPORT = {
         "native_durable_lifecycle": "supported",
         "native_terminal_transport": "supported",
         "managed_mcp_native": "supported",
-        "managed_mcp_headless": "unsupported",
+        "managed_mcp_headless": "supported",
         "interactive_approvals": "delegated",
         "external_history": "partial",
         "structured_app_server": "unsupported",
@@ -60,7 +60,7 @@ EXPECTED_SUPPORT = {
         "native_durable_lifecycle": "supported",
         "native_terminal_transport": "supported",
         "managed_mcp_native": "supported",
-        "managed_mcp_headless": "unsupported",
+        "managed_mcp_headless": "supported",
         "interactive_approvals": "delegated",
         "external_history": "partial",
         "structured_app_server": "unsupported",
@@ -79,7 +79,7 @@ EXPECTED_SUPPORT = {
         "native_durable_lifecycle": "supported",
         "native_terminal_transport": "supported",
         "managed_mcp_native": "supported",
-        "managed_mcp_headless": "unsupported",
+        "managed_mcp_headless": "supported",
         "interactive_approvals": "delegated",
         "external_history": "partial",
         "structured_app_server": "unsupported",
@@ -161,7 +161,7 @@ def test_headless_request_field_consumption_is_explicit(
     )
     assert harness.build_command(without_unconsumed_fields, context) == command
     assert harness.spec().adapter_capabilities["managed_mcp_headless"].status is (
-        AdapterSupportLevel.UNSUPPORTED
+        AdapterSupportLevel.SUPPORTED
     )
 
 

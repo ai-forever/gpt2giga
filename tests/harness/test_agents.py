@@ -222,7 +222,7 @@ def test_unsupported_profile_options_fail_before_queueing(profile):
         agent_run_payload(profile, "Review", workspace=".", harness=harness)
 
 
-def test_profile_warns_when_context_and_managed_tools_are_provenance_only():
+def test_profile_warns_for_context_but_applies_managed_tools_to_headless_home():
     profile = replace(
         parse_agent_profile(render_starter_agent("reviewer")),
         context_selectors=("src",),
@@ -233,8 +233,9 @@ def test_profile_warns_when_context_and_managed_tools_are_provenance_only():
 
     assert plan.queueable is True
     assert plan.options["context_selectors"].status is AgentOptionStatus.UNSUPPORTED
-    assert plan.options["tool_ids"].status is AgentOptionStatus.UNSUPPORTED
-    assert len(plan.warnings) == 2
+    assert plan.options["tool_ids"].status is AgentOptionStatus.EFFECTIVE
+    assert plan.options["tool_ids"].enforcement_source == "managed_mcp_snapshot"
+    assert len(plan.warnings) == 1
 
 
 def test_workflow_overrides_preserve_requested_and_record_effective_values():

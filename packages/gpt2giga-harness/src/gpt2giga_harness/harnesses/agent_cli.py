@@ -156,6 +156,23 @@ def with_events(
     )
 
 
+def with_raw_metadata(
+    result: HarnessResult,
+    metadata: Mapping[str, Any] | None,
+) -> HarnessResult:
+    """Return a result with additional redaction-safe execution evidence."""
+    if not metadata:
+        return result
+    return HarnessResult(
+        ok=result.ok,
+        text=result.text,
+        raw={**dict(result.raw), **dict(metadata)},
+        events=result.events,
+        command=result.command,
+        error=result.error,
+    )
+
+
 def run_command(
     *,
     label: str,

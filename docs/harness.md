@@ -473,13 +473,16 @@ Current headless option contract:
 | timeout and retry attempts | Harness-enforced | Harness-enforced | Harness-enforced |
 | `reasoning_effort` | capability-proven config | capability-proven `--effort` | unsupported |
 | `allowed_tools` / `disallowed_tools` | unsupported | capability-proven fixed flags | unsupported |
+| `tool_ids` | immutable managed-MCP snapshot | immutable managed-MCP snapshot | immutable managed-MCP snapshot |
 | `max_tokens` | unsupported | unsupported | unsupported |
 
 `max_concurrency: 1` describes a standalone agent run; larger fan-out belongs
-to a Workflow or Schedule coordinator. `tool_ids`, prompt files, skills, and
-context/memory selectors remain visible as unsupported provenance until their
-reviewed headless materialization slices land. Tool selectors are values for
-fixed adapter flags and can never inject additional flags.
+to a Workflow or Schedule coordinator. Selected `tool_ids` must name enabled,
+trusted, adapter-compatible project MCP profiles. They are frozen before
+queueing and materialized only into the active temporary headless home. Prompt
+files, skills, and context/memory selectors remain visible as unsupported
+provenance. Tool selectors are values for fixed adapter flags and can never
+inject additional flags.
 
 Authenticated APIs:
 
@@ -685,12 +688,16 @@ Rollback succeeds only while the ownership marker and hash still match. Config
 changes are rejected while a managed native process owns the home. User-owned
 `~/.codex`, Claude, and Gemini settings are never changed.
 
-Only enabled, trusted servers are composed. Secret references are deliberately
-not copied into CLI config; preview reports them as skipped until a separate
-explicit secret flow exists. No package installation or OAuth occurs. Headless
-Claude now uses an isolated temporary HOME, matching the existing isolated
-Codex and Gemini execution model, and every CLI startup goes through the same
-composer so synchronized MCP entries are preserved.
+Only enabled, trusted servers are composed. Native-home preview/apply never
+copies secret references into persistent CLI config. For headless AgentProfile
+runs, selected `tool_ids` instead create an immutable descriptor-free public
+snapshot reference plus a content-verified internal snapshot under the Harness
+data directory. Replay reuses the same snapshot even if project TOML changes.
+The adapter resolves allowed secret references only while constructing the
+subprocess config, writes the exact reviewed entries into its temporary active
+home, and exposes only descriptor-free snapshot identity in run provenance.
+Temp-home contents disappear after the process; user-owned homes remain
+unchanged. No package installation or OAuth occurs.
 
 MCP profiles can additionally describe a stdio or Streamable HTTP connection:
 

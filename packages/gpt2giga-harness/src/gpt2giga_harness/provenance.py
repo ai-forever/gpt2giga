@@ -168,6 +168,9 @@ def _execution_provenance(
 ) -> dict[str, Any]:
     raw = _mapping(raw_response_payload.get("raw"))
     workspace_execution = _mapping(run.metadata.get("workspace_execution"))
+    managed_mcp_snapshot = _mapping(raw.get("managed_mcp_snapshot")) or _mapping(
+        run.metadata.get("managed_mcp_snapshot")
+    )
     payload = {
         "status": run.status,
         "started_at": run.started_at,
@@ -176,6 +179,7 @@ def _execution_provenance(
         "command": list(run.command),
         "env": _mapping(raw.get("env")),
         "workspace_execution": workspace_execution or None,
+        "managed_mcp_snapshot": managed_mcp_snapshot or None,
         "native_session_id": run.native_session_id,
         "native": _native_execution(run),
         "raw_response_ok": raw_response_payload.get("ok"),

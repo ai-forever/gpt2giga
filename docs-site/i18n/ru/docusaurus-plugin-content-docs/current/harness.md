@@ -225,12 +225,22 @@ provenance-only selectors дают явное предупреждение.
 | timeout и retry attempts | enforced by Harness | enforced by Harness | enforced by Harness |
 | `reasoning_effort` | capability-proven config | capability-proven `--effort` | unsupported |
 | `allowed_tools` / `disallowed_tools` | unsupported | capability-proven fixed flags | unsupported |
+| `tool_ids` | immutable managed-MCP snapshot | immutable managed-MCP snapshot | immutable managed-MCP snapshot |
 | `max_tokens` | unsupported | unsupported | unsupported |
 
 `max_concurrency` больше 1 относится к coordinator уровня Workflow или
-Schedule. `tool_ids`, prompt files, skills и context/memory selectors пока
-сохраняются как явно unsupported provenance до отдельных slices их безопасной
-materialization. Профиль не принимает произвольные CLI flags или secret literals.
+Schedule. `tool_ids` должны ссылаться на enabled, trusted и совместимые с
+адаптером project MCP profiles. До queueing они замораживаются в неизменяемый
+snapshot и materialize только в активный временный headless home. Prompt files,
+skills и context/memory selectors пока сохраняются как явно unsupported
+provenance. Профиль не принимает произвольные CLI flags или secret literals.
+
+Для headless run публичные metadata содержат только descriptor-free identity;
+полный безопасный snapshot проверяется по content hash внутри Harness data dir.
+Replay повторно использует тот же snapshot даже после изменения project TOML.
+Secret refs разрешаются только на границе создания subprocess config, а точная
+конфигурация записывается во временный Codex/Claude/Gemini home и удаляется после
+процесса. Пользовательские native homes при этом не меняются.
 
 ## Безопасный edit-сценарий
 

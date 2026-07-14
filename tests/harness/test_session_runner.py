@@ -105,6 +105,65 @@ def test_session_runner_rejects_builtin_tools_for_v1():
         )
 
 
+def test_managed_mcp_snapshot_is_bound_to_provenance_and_reused_for_replay(tmp_path):
+    workspace = tmp_path / "project"
+    config_path = workspace / ".giga" / "harness.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        """
+[tools.issues]
+enabled = true
+kind = "mcp"
+transport = "stdio"
+command = "issue-mcp-v1"
+trusted = true
+harnesses = ["codex-cli"]
+""",
+        encoding="utf-8",
+    )
+    harness = _ManagedCaptureHarness()
+    runner = _runner(harness, data_dir=tmp_path / "data")
+
+    first = runner.create_and_run(
+        {
+            "harness_id": "codex-cli",
+            "prompt": "inspect issues",
+            "workspace": str(workspace),
+            "extra": {"tool_ids": ["issues"]},
+        }
+    )
+    first_ref = harness.requests[-1].extra["managed_mcp_snapshot"]
+    replay_request = first.run.metadata["provenance"]["replay_request"]
+
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("issue-mcp-v1", "issue-mcp-v2"),
+        encoding="utf-8",
+    )
+    second = runner.run_in_session(first.session.id, replay_request)
+    second_ref = harness.requests[-1].extra["managed_mcp_snapshot"]
+
+    assert first_ref["snapshot_id"] == second_ref["snapshot_id"]
+    assert first_ref["snapshot_hash"] == second_ref["snapshot_hash"]
+    assert first.run.metadata["managed_mcp_snapshot"] == first_ref
+    assert second.run.metadata["managed_mcp_snapshot"] == second_ref
+    assert (
+        second.run.metadata["provenance"]["execution"]["managed_mcp_snapshot"][
+            "snapshot_id"
+        ]
+        == first_ref["snapshot_id"]
+    )
+    snapshot_path = (
+        tmp_path
+        / "data"
+        / "tools"
+        / "headless_mcp_snapshots"
+        / f"{first_ref['snapshot_id']}.json"
+    )
+    snapshot_content = snapshot_path.read_text(encoding="utf-8")
+    assert "issue-mcp-v1" in snapshot_content
+    assert "issue-mcp-v2" not in snapshot_content
+
+
 def test_session_runner_failed_harness_stores_error_message():
     runner = _runner(_FailingHarness())
 
@@ -416,6 +475,37 @@ class _CaptureHarness(BaseHarness):
             text=f"answer: {request.prompt}",
             raw={"request_id": "ok"},
             command=("capture", request.prompt),
+        )
+
+
+class _ManagedCaptureHarness(BaseHarness):
+    def __init__(self) -> None:
+        self.requests: list[HarnessRequest] = []
+
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="codex-cli",
+            title="Managed capture",
+            kind="agent-cli",
+            description="Capture managed MCP snapshots",
+            capabilities=(HarnessCapability.AGENT_CLI,),
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available("test")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        self.requests.append(request)
+        return HarnessResult(
+            ok=True,
+            text="captured",
+            raw={"managed_mcp_snapshot": request.extra["managed_mcp_snapshot"]},
+            command=("capture-managed",),
         )
 
 

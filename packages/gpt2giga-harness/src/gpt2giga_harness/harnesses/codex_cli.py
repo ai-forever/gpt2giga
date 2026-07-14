@@ -22,6 +22,7 @@ from gpt2giga_harness.harnesses.agent_cli import (
     tool_call_event,
     usage_event,
     with_events,
+    with_raw_metadata,
     workspace_error,
 )
 from gpt2giga_harness.harnesses.attachment_plan import (
@@ -34,7 +35,10 @@ from gpt2giga_harness.harnesses.adapter_parity import codex_adapter_capabilities
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.native import HarnessInvocationMode
-from gpt2giga_harness.managed_mcp import write_startup_config
+from gpt2giga_harness.managed_mcp import (
+    materialize_headless_mcp_snapshot,
+    write_startup_config,
+)
 from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
@@ -203,6 +207,12 @@ class CodexCliHarness(BaseHarness):
             codex_home = str(Path(temp_dir) / ".codex")
             Path(codex_home).mkdir(parents=True, exist_ok=True)
             _write_codex_config(Path(codex_home), request, prepared_context)
+            managed_mcp = materialize_headless_mcp_snapshot(
+                "codex-cli",
+                codex_home,
+                _managed_mcp_reference(request),
+                data_dir=context.data_dir,
+            )
             env = self.build_env(request, prepared_context, codex_home=codex_home)
             if request.stream:
                 result = run_streaming_command(
@@ -222,9 +232,12 @@ class CodexCliHarness(BaseHarness):
                     cwd=request.workspace or None,
                     timeout_seconds=context.timeout_seconds,
                 )
-            return with_events(
-                result,
-                (*attachment_warning_events(request), *proxy_events),
+            return with_raw_metadata(
+                with_events(
+                    result,
+                    (*attachment_warning_events(request), *proxy_events),
+                ),
+                {"managed_mcp_snapshot": managed_mcp} if managed_mcp else None,
             )
 
 
@@ -254,6 +267,11 @@ def _write_codex_config(
         "supports_websockets = false\n"
     )
     write_startup_config("codex-cli", codex_home, config)
+
+
+def _managed_mcp_reference(request: HarnessRequest) -> Mapping[str, Any] | None:
+    value = request.extra.get("managed_mcp_snapshot")
+    return dict(value) if isinstance(value, Mapping) else None
 
 
 def _structured_chat_prompt(request: HarnessRequest) -> str:

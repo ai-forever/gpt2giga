@@ -16,8 +16,10 @@ from gpt2giga_harness.attachments import (
     render_plan_to_dict,
 )
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.managed_mcp import HeadlessManagedMCPSnapshotStore
+from gpt2giga_harness.mcp import build_mcp_inventory
 from gpt2giga_harness.native.models import parse_invocation_mode
-from gpt2giga_harness.project import resolve_project
+from gpt2giga_harness.project import load_project_config, resolve_project
 from gpt2giga_harness.project_memory import (
     FilesystemProjectMemoryStore,
     ProjectMemoryEntry,
@@ -224,6 +226,7 @@ class HarnessSessionRunner:
         report = self.preflight(payload, session_id=session_id)
         if report.hard_block:
             raise PreflightBlockedError(report)
+        managed_mcp_snapshot = self._prepare_managed_mcp_snapshot(options)
         message_id = new_id("msg")
         run = self.store.create_run(
             run_id=run_id,
@@ -241,6 +244,11 @@ class HarnessSessionRunner:
                 "invocation_mode": options["invocation_mode"].value,
                 "preflight": preflight_report_to_dict(report),
                 "durable": True,
+                **(
+                    {"managed_mcp_snapshot": managed_mcp_snapshot}
+                    if managed_mcp_snapshot is not None
+                    else {}
+                ),
                 **_agent_metadata(options),
             },
         )
@@ -337,6 +345,7 @@ class HarnessSessionRunner:
         )
         if preflight.hard_block:
             raise PreflightBlockedError(preflight)
+        managed_mcp_snapshot = self._prepare_managed_mcp_snapshot(options)
         preflight_payload = preflight_report_to_dict(preflight)
         effective_prompt = _prompt_with_project_memory(
             options["prompt"],
@@ -346,6 +355,11 @@ class HarnessSessionRunner:
             "invocation_mode": options["invocation_mode"].value,
             "native_resume": _native_resume_metadata(options["harness_id"]),
             "preflight": preflight_payload,
+            **(
+                {"managed_mcp_snapshot": managed_mcp_snapshot}
+                if managed_mcp_snapshot is not None
+                else {}
+            ),
             **_agent_metadata(options),
         }
         if options["builtin_tools"]:
@@ -892,6 +906,75 @@ class HarnessSessionRunner:
             return ()
         return self.memory_store.enabled_for_prompt(project)
 
+    def _prepare_managed_mcp_snapshot(
+        self,
+        options: dict[str, Any],
+    ) -> Mapping[str, Any] | None:
+        """Resolve or freeze the selected managed tools before run creation."""
+        extra = dict(_mapping(options.get("extra")))
+        reference = extra.get("managed_mcp_snapshot")
+        store = HeadlessManagedMCPSnapshotStore(self.config.data_dir)
+        if isinstance(reference, Mapping):
+            snapshot = store.load(reference)
+            if snapshot.harness_id != options["harness_id"]:
+                raise ValueError("Managed MCP snapshot harness does not match run")
+            project = resolve_project(
+                options.get("workspace"),
+                data_dir=self.config.data_dir,
+                load_config_name=False,
+            )
+            if snapshot.project_id != project.id:
+                raise ValueError("Managed MCP snapshot project does not match run")
+            public_ref = snapshot.public_ref()
+            extra["managed_mcp_snapshot"] = public_ref
+            extra["tool_ids"] = list(snapshot.server_ids)
+            options["extra"] = extra
+            return public_ref
+        tool_ids = _managed_tool_ids(extra.get("tool_ids"))
+        if not tool_ids:
+            return None
+        if options["invocation_mode"].value != "headless":
+            raise ValueError(
+                "Managed MCP run snapshots currently require headless mode"
+            )
+        if options["harness_id"] not in {
+            "codex-cli",
+            "claude-code",
+            "gemini-cli",
+        }:
+            raise ValueError(
+                f"{options['harness_id']} does not support managed MCP snapshots"
+            )
+        project = resolve_project(
+            options.get("workspace"),
+            data_dir=self.config.data_dir,
+            load_config_name=False,
+        )
+        loaded = load_project_config(project.root)
+        descriptors, errors = build_mcp_inventory(loaded.tool_profiles)
+        selected_errors = {
+            str(item.get("server_id")): str(item.get("error"))
+            for item in errors
+            if str(item.get("server_id")) in tool_ids
+        }
+        if selected_errors:
+            details = "; ".join(
+                f"{server_id}: {selected_errors[server_id]}"
+                for server_id in sorted(selected_errors)
+            )
+            raise ValueError(f"Managed MCP inventory is invalid: {details}")
+        snapshot = store.create(
+            project_id=project.id,
+            harness_id=options["harness_id"],
+            descriptors=descriptors,
+            server_ids=tool_ids,
+        )
+        public_ref = snapshot.public_ref()
+        extra["managed_mcp_snapshot"] = public_ref
+        extra["tool_ids"] = list(snapshot.server_ids)
+        options["extra"] = extra
+        return public_ref
+
     def _append_event(
         self,
         session_id: str,
@@ -973,6 +1056,21 @@ def _attachment_ids(value: Any) -> tuple[str, ...]:
             raise ValueError("attachment_ids must contain non-empty strings")
         ids.append(attachment_id)
     return tuple(ids)
+
+
+def _managed_tool_ids(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("tool_ids must be a list")
+    result: list[str] = []
+    for item in value:
+        server_id = _optional_text(item)
+        if server_id is None:
+            raise ValueError("tool_ids must contain non-empty strings")
+        if server_id not in result:
+            result.append(server_id)
+    return tuple(result)
 
 
 def _run_attachment_metadata(

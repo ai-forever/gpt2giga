@@ -54,9 +54,10 @@ def _common_contract() -> dict[str, AdapterCapabilitySupport]:
             "Reviewed managed MCP configuration can be applied to the project native home.",
         ),
         "managed_mcp_headless": _claim(
-            AdapterSupportLevel.UNSUPPORTED,
-            "Headless execution creates a fresh temporary home and does not materialize "
-            "the selected managed MCP snapshot into it.",
+            AdapterSupportLevel.SUPPORTED,
+            "Freezes selected trusted project MCP descriptors into an immutable "
+            "redaction-safe snapshot, resolves secret references only at subprocess "
+            "construction, and materializes it into the active temporary CLI home.",
         ),
         "interactive_approvals": _claim(
             AdapterSupportLevel.DELEGATED,
@@ -101,8 +102,8 @@ def codex_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
             "agent_profile_options": _claim(
                 AdapterSupportLevel.PARTIAL,
                 "Applies model, mode, route, workspace, durable timeout/retry budgets, "
-                "and capability-proven reasoning effort; token and tool-list limits are "
-                "reported unsupported before queueing.",
+                "capability-proven reasoning effort, and managed MCP tool ids; token "
+                "limits remain unsupported before queueing.",
             ),
         }
     )
@@ -136,8 +137,8 @@ def claude_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
             "agent_profile_options": _claim(
                 AdapterSupportLevel.PARTIAL,
                 "Applies model, mode, route, workspace, durable timeout/retry budgets, "
-                "and capability-proven effort plus allowed/disallowed tool restrictions; "
-                "token limits are reported unsupported before queueing.",
+                "capability-proven effort, allowed/disallowed tool restrictions, and "
+                "managed MCP tool ids; token limits remain unsupported before queueing.",
             ),
         }
     )
@@ -171,9 +172,9 @@ def gemini_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
             ),
             "agent_profile_options": _claim(
                 AdapterSupportLevel.PARTIAL,
-                "Applies model, mode, route, workspace, and durable timeout/retry budgets; "
-                "reasoning effort, token limits, and tool-list restrictions are reported "
-                "unsupported before queueing.",
+                "Applies model, mode, route, workspace, durable timeout/retry budgets, "
+                "and managed MCP tool ids; reasoning effort and token limits are "
+                "reported unsupported before queueing.",
             ),
         }
     )

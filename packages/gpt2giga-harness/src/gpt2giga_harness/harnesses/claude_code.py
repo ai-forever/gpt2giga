@@ -23,6 +23,7 @@ from gpt2giga_harness.harnesses.agent_cli import (
     tool_call_event,
     usage_event,
     with_events,
+    with_raw_metadata,
     workspace_error,
 )
 from gpt2giga_harness.harnesses.attachment_plan import (
@@ -35,7 +36,10 @@ from gpt2giga_harness.harnesses.adapter_parity import claude_adapter_capabilitie
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.native import HarnessInvocationMode
-from gpt2giga_harness.managed_mcp import write_startup_config
+from gpt2giga_harness.managed_mcp import (
+    materialize_headless_mcp_snapshot,
+    write_startup_config,
+)
 from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
@@ -236,6 +240,12 @@ class ClaudeCodeHarness(BaseHarness):
             return proxy_error
         with tempfile.TemporaryDirectory(prefix="gpt2giga-claude-") as temp_dir:
             _write_claude_settings(Path(temp_dir))
+            managed_mcp = materialize_headless_mcp_snapshot(
+                "claude-code",
+                temp_dir,
+                _managed_mcp_reference(request),
+                data_dir=context.data_dir,
+            )
             prepared_env = self.build_env(request, prepared_context, home=temp_dir)
             if request.stream:
                 result = run_streaming_command(
@@ -255,14 +265,22 @@ class ClaudeCodeHarness(BaseHarness):
                     cwd=request.workspace,
                     timeout_seconds=context.timeout_seconds,
                 )
-            return with_events(
-                result,
-                (*attachment_warning_events(request), *proxy_events),
+            return with_raw_metadata(
+                with_events(
+                    result,
+                    (*attachment_warning_events(request), *proxy_events),
+                ),
+                {"managed_mcp_snapshot": managed_mcp} if managed_mcp else None,
             )
 
 
 def _write_claude_settings(home: Path) -> None:
     write_startup_config("claude-code", home, {})
+
+
+def _managed_mcp_reference(request: HarnessRequest) -> Mapping[str, Any] | None:
+    value = request.extra.get("managed_mcp_snapshot")
+    return dict(value) if isinstance(value, Mapping) else None
 
 
 def _agent_profile_args(request: HarnessRequest) -> tuple[str, ...]:
