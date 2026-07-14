@@ -337,6 +337,17 @@ lease reconciliation явно фиксирует `interrupted`, `exited` или 
 оставляет managed home и изолированный worktree для review, а живой orphan
 помечает `process_alive_not_adopted` без ложного reconnect.
 
+Панель Native по умолчанию читает terminal output через аутентифицированный
+cursor-based SSE endpoint
+`GET /api/native/processes/{process_id}/output/stream`. Ограниченные batches
+несут монотонный cursor; reconnect принимает и query `cursor`, и браузерный
+`Last-Event-ID`, поэтому уже показанный output не дублируется. Ограниченный
+`/output` polling сохранён как compatibility fallback. Для PTY локального owner
+endpoint `POST /api/native/processes/{process_id}/resize` валидирует и применяет
+rows/columns; pipe transport и чужой owner завершаются явной ошибкой. При
+навигации и завершении terminal UI закрывает EventSource, polling timers и
+resize observer.
+
 Перед новым Gemini native-запуском Harness проверяет поддержку
 `--prompt-interactive` установленной версией CLI. Если flag доступен, составной
 prompt вместе с отрендеренными ссылками на attachments передаётся ровно в одном

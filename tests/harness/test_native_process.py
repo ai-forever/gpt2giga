@@ -1,7 +1,11 @@
 import os
+import struct
 import sys
 import time
 
+import pytest
+
+from gpt2giga_harness.native import process as native_process_module
 from gpt2giga_harness.native.base import NativeCommandPlan, NativePromptDelivery
 from gpt2giga_harness.native.process import (
     NativeProcessManager,
@@ -158,6 +162,56 @@ def test_native_process_manager_cleanup_marks_exited_process(tmp_path):
     assert "done" in "".join(
         output.text for output in manager.read_since(ref.id, 0).outputs
     )
+
+
+@pytest.mark.skipif(
+    native_process_module.fcntl is None or native_process_module.termios is None,
+    reason="PTY resize is POSIX-only",
+)
+def test_native_process_manager_resizes_owned_pty_with_bounded_dimensions(
+    tmp_path,
+    monkeypatch,
+):
+    script = _write_echo_cli(tmp_path)
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Resizable native process")
+    manager = NativeProcessManager(session_store=store, use_pty=True)
+    ref = manager.start(
+        NativeCommandPlan(
+            command=(sys.executable, str(script)),
+            env=_python_env(),
+            cwd=str(tmp_path),
+            metadata={"harness_id": "fake-cli"},
+        ),
+        session_id=session.id,
+    )
+    _wait_for_text(manager, ref.id, 0, "ready")
+    calls = []
+    monkeypatch.setattr(
+        native_process_module.fcntl,
+        "ioctl",
+        lambda fd, operation, payload: calls.append((fd, operation, payload)),
+    )
+
+    resized = manager.resize(ref.id, rows=36, columns=120)
+
+    assert resized.status is NativeProcessStatus.RUNNING
+    assert len(calls) == 1
+    assert calls[0][1] == native_process_module.termios.TIOCSWINSZ
+    assert struct.unpack("HHHH", calls[0][2]) == (36, 120, 0, 0)
+    resize_events = [
+        event
+        for event in store.list_events(session.id)
+        if event.type == "terminal_resize"
+    ]
+    assert resize_events[-1].payload == {
+        "process_id": ref.id,
+        "rows": 36,
+        "columns": 120,
+    }
+    with pytest.raises(ValueError, match="rows must be between 2 and 200"):
+        manager.resize(ref.id, rows=1, columns=120)
+    manager.stop(ref.id)
 
 
 def _write_echo_cli(tmp_path):

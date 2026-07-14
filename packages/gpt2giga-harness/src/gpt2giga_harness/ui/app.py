@@ -14,7 +14,7 @@ import re
 import threading
 from typing import Any, Mapping
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -1551,6 +1551,103 @@ def create_app(
         )
         return payload
 
+    @app.get("/api/native/processes/{process_id}/output/stream")
+    async def native_process_output_stream(
+        process_id: str,
+        cursor: int = Query(default=0, ge=0),
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    ) -> StreamingResponse:
+        stream_cursor = max(cursor, _native_sse_cursor(last_event_id))
+        try:
+            native_process_manager.status(process_id)
+        except NativeProcessNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="Native process not found"
+            ) from exc
+
+        async def stream_output():
+            current_cursor = stream_cursor
+            last_keepalive = asyncio.get_running_loop().time()
+            while True:
+                try:
+                    chunk = native_process_manager.read_since(
+                        process_id, current_cursor
+                    )
+                    process_ref = native_process_manager.status(process_id)
+                except NativeProcessNotFoundError:
+                    break
+                should_emit = (
+                    bool(chunk.outputs)
+                    or chunk.truncated
+                    or (process_ref.status is not NativeProcessStatus.RUNNING)
+                )
+                if should_emit:
+                    current_cursor = chunk.cursor
+                    run = _sync_native_process_run(
+                        store,
+                        process_ref,
+                        native_registry=native_registry,
+                    )
+                    event_payload = native_output_chunk_to_dict(chunk)
+                    event_payload["run"] = run_to_dict(run) if run is not None else None
+                    event_payload["messages"] = (
+                        [
+                            message_to_dict(message)
+                            for message in _native_run_messages(store, run)
+                        ]
+                        if run is not None
+                        else []
+                    )
+                    event_payload["events"] = (
+                        [
+                            event_to_dict(event)
+                            for event in _native_run_events(store, run)
+                        ]
+                        if run is not None
+                        else []
+                    )
+                    yield _native_output_sse(event_payload)
+                    last_keepalive = asyncio.get_running_loop().time()
+                if process_ref.status is not NativeProcessStatus.RUNNING:
+                    break
+                now = asyncio.get_running_loop().time()
+                if now - last_keepalive >= 10:
+                    yield ": keepalive\n\n"
+                    last_keepalive = now
+                await asyncio.sleep(0.1)
+
+        return StreamingResponse(
+            stream_output(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.post("/api/native/processes/{process_id}/resize")
+    async def native_process_resize(
+        process_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            process_ref = native_process_manager.resize(
+                process_id,
+                rows=payload.get("rows"),
+                columns=payload.get("columns"),
+            )
+        except NativeProcessNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="Native process not found"
+            ) from exc
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "process": native_process_ref_to_dict(process_ref),
+            "rows": payload["rows"],
+            "columns": payload["columns"],
+        }
+
     @app.get("/api/native/processes/{process_id}")
     async def native_process_status(process_id: str) -> dict[str, Any]:
         try:
@@ -2678,6 +2775,22 @@ def _sse_event(event: HarnessStoredEvent) -> str:
     payload = _event_response(event)
     data = json.dumps(payload, ensure_ascii=False)
     return f"id: {event.id}\ndata: {data}\n\n"
+
+
+def _native_sse_cursor(last_event_id: str | None) -> int:
+    value = _optional_text(last_event_id)
+    if value is None:
+        return 0
+    try:
+        return max(int(value), 0)
+    except ValueError:
+        return 0
+
+
+def _native_output_sse(payload: Mapping[str, Any]) -> str:
+    cursor = max(int(payload.get("cursor") or 0), 0)
+    data = json.dumps(payload, ensure_ascii=False)
+    return f"id: {cursor}\ndata: {data}\n\n"
 
 
 def _arena_response(

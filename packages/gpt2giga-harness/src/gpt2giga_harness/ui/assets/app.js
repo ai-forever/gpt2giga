@@ -3,6 +3,12 @@
     const NATIVE_ACTIVE_POLL_MS = 750;
     const NATIVE_IDLE_POLL_MS = 5000;
     const NATIVE_POLL_BURST_MS = 12000;
+    const NATIVE_STREAM_FAILURE_LIMIT = 3;
+    const NATIVE_RESIZE_DELAY_MS = 150;
+    const NATIVE_MIN_ROWS = 2;
+    const NATIVE_MAX_ROWS = 200;
+    const NATIVE_MIN_COLUMNS = 20;
+    const NATIVE_MAX_COLUMNS = 500;
     const NATIVE_TRUST_STORAGE_KEY = "gpt2giga.nativeTrustResolved.v1";
     const RUNS_CENTER_PAGE_SIZE = 25;
     const RUNS_TRACE_DOM_LIMIT = 200;
@@ -62,6 +68,12 @@
       nativeStreamingText: "",
       nativePollTimer: null,
       nativePollBurstUntil: 0,
+      nativeEventSource: null,
+      nativeEventSourceProcessId: null,
+      nativeStreamFailures: 0,
+      nativeResizeObserver: null,
+      nativeResizeTimer: null,
+      nativeTerminalSize: null,
       nativeTrustPromptProcessId: null,
       nativeTrustResolvedProcessIds: readNativeTrustResolvedProcessIds(),
       attachments: [],
@@ -5786,7 +5798,7 @@
         return;
       }
       if (state.activeNativeProcess && state.activeNativeProcess.session_id !== state.currentSessionId) {
-        stopNativePolling();
+        stopNativeOutputTransport();
         state.activeNativeProcess = null;
         state.nativeOutputCursor = 0;
         state.nativeTerminalText = "";
@@ -5811,7 +5823,7 @@
     }
 
     function setActiveNativeProcess(process, payload) {
-      stopNativePolling();
+      stopNativeOutputTransport();
       resetNativeTrustPrompt();
       state.activeNativeProcess = process;
       state.nativeOutputCursor = 0;
@@ -5828,7 +5840,8 @@
       renderNativeTerminalStatus();
       renderNativeStreamingDraft();
       if (process && process.id) {
-        pollNativeOutput();
+        startNativeOutputTransport();
+        startNativeResizeObserver();
       }
     }
 
@@ -5979,20 +5992,9 @@
       return true;
     }
 
-    async function pollNativeOutput() {
+    async function consumeNativeOutputPayload(body, processId) {
       const process = state.activeNativeProcess || {};
-      if (!process.id) {
-        renderNativeTerminalStatus("idle");
-        return;
-      }
-      const result = await getJson(`/api/native/processes/${encodeURIComponent(process.id)}/output?cursor=${state.nativeOutputCursor}`);
-      if (!result.ok) {
-        appendNativeTerminalLine(result.data.detail || "Native output polling failed.");
-        stopNativePolling();
-        renderNativeTerminalStatus("error");
-        return;
-      }
-      const body = result.data || {};
+      if (!process.id || (processId && process.id !== processId)) return;
       state.nativeOutputCursor = body.cursor || state.nativeOutputCursor;
       const outputs = Array.isArray(body.outputs) ? body.outputs : [];
       let nativeStreamChanged = false;
@@ -6031,9 +6033,9 @@
         const hadNativeStream = state.nativeStreamingActive;
         finishNativeResponseStream();
         if (hadNativeStream && !messagesChanged && !eventsChanged) renderNativeStreamingDraft();
-        stopNativePolling();
+        stopNativeOutputTransport();
         resetNativeTrustPrompt();
-      } else {
+      } else if (!state.nativeEventSource) {
         scheduleNativePoll(Date.now() < state.nativePollBurstUntil ? NATIVE_ACTIVE_POLL_MS : NATIVE_IDLE_POLL_MS);
       }
       if (body.run) setNativeSummary(pretty({ process: state.activeNativeProcess, run: body.run }));
@@ -6048,6 +6050,73 @@
           syncRoute: false
         });
       }
+    }
+
+    async function pollNativeOutput() {
+      const process = state.activeNativeProcess || {};
+      if (!process.id) {
+        renderNativeTerminalStatus("idle");
+        return;
+      }
+      const result = await getJson(`/api/native/processes/${encodeURIComponent(process.id)}/output?cursor=${state.nativeOutputCursor}`);
+      if (!result.ok) {
+        appendNativeTerminalLine(result.data.detail || "Native output polling failed.");
+        stopNativePolling();
+        renderNativeTerminalStatus("error");
+        return;
+      }
+      await consumeNativeOutputPayload(result.data || {}, process.id);
+    }
+
+    function startNativeOutputTransport() {
+      const process = state.activeNativeProcess || {};
+      if (!process.id) return;
+      stopNativePolling();
+      if (!window.EventSource) {
+        scheduleNativePoll(0);
+        return;
+      }
+      openNativeOutputStream(process.id);
+    }
+
+    function openNativeOutputStream(processId) {
+      closeNativeOutputStream();
+      const query = `?cursor=${encodeURIComponent(state.nativeOutputCursor)}`;
+      const source = new EventSource(`/api/native/processes/${encodeURIComponent(processId)}/output/stream${query}`);
+      state.nativeEventSource = source;
+      state.nativeEventSourceProcessId = processId;
+      state.nativeStreamFailures = 0;
+      source.onmessage = async (event) => {
+        if (state.nativeEventSource !== source || state.nativeEventSourceProcessId !== processId) return;
+        state.nativeStreamFailures = 0;
+        let payload = {};
+        try {
+          payload = JSON.parse(event.data || "{}");
+        } catch (error) {
+          appendNativeTerminalLine("Native output stream returned an invalid event.");
+          return;
+        }
+        await consumeNativeOutputPayload(payload, processId);
+      };
+      source.onerror = () => {
+        if (state.nativeEventSource !== source || state.nativeEventSourceProcessId !== processId) return;
+        const process = state.activeNativeProcess || {};
+        if (process.id !== processId || process.status !== "running") {
+          closeNativeOutputStream();
+          return;
+        }
+        state.nativeStreamFailures += 1;
+        if (state.nativeStreamFailures < NATIVE_STREAM_FAILURE_LIMIT) return;
+        closeNativeOutputStream();
+        scheduleNativePoll(NATIVE_ACTIVE_POLL_MS);
+      };
+    }
+
+    function closeNativeOutputStream() {
+      if (state.nativeEventSource) state.nativeEventSource.close();
+      state.nativeEventSource = null;
+      state.nativeEventSourceProcessId = null;
+      state.nativeStreamFailures = 0;
     }
 
     function maybeShowNativeTrustPrompt() {
@@ -6135,6 +6204,76 @@
         state.nativePollTimer = null;
         pollNativeOutput();
       }, delay);
+    }
+
+    function stopNativeOutputTransport() {
+      closeNativeOutputStream();
+      stopNativePolling();
+      stopNativeResizeObserver();
+    }
+
+    function nativeTerminalDimensions() {
+      const terminal = byId("native-terminal-output");
+      if (!terminal || terminal.clientWidth <= 0 || terminal.clientHeight <= 0) {
+        return { rows: 24, columns: 80 };
+      }
+      const style = window.getComputedStyle(terminal);
+      const fontSize = Number.parseFloat(style.fontSize) || 12;
+      const lineHeight = Number.parseFloat(style.lineHeight) || fontSize * 1.4;
+      const horizontalPadding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+      const verticalPadding = (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0);
+      const rows = Math.max(NATIVE_MIN_ROWS, Math.min(NATIVE_MAX_ROWS, Math.floor((terminal.clientHeight - verticalPadding) / lineHeight)));
+      const columns = Math.max(NATIVE_MIN_COLUMNS, Math.min(NATIVE_MAX_COLUMNS, Math.floor((terminal.clientWidth - horizontalPadding) / (fontSize * 0.62))));
+      return { rows, columns };
+    }
+
+    async function resizeNativeTerminal() {
+      const process = state.activeNativeProcess || {};
+      if (!process.id || process.status !== "running" || process.transport === "pipes") return;
+      const size = nativeTerminalDimensions();
+      if (
+        state.nativeTerminalSize
+        && state.nativeTerminalSize.rows === size.rows
+        && state.nativeTerminalSize.columns === size.columns
+      ) return;
+      const result = await getJson(`/api/native/processes/${encodeURIComponent(process.id)}/resize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(size)
+      });
+      if (!result.ok) {
+        stopNativeResizeObserver();
+        return;
+      }
+      state.nativeTerminalSize = size;
+    }
+
+    function scheduleNativeResize() {
+      if (state.nativeResizeTimer) window.clearTimeout(state.nativeResizeTimer);
+      state.nativeResizeTimer = window.setTimeout(() => {
+        state.nativeResizeTimer = null;
+        resizeNativeTerminal();
+      }, NATIVE_RESIZE_DELAY_MS);
+    }
+
+    function startNativeResizeObserver() {
+      stopNativeResizeObserver();
+      const process = state.activeNativeProcess || {};
+      if (!process.id || process.status !== "running" || process.transport === "pipes") return;
+      state.nativeTerminalSize = null;
+      if (window.ResizeObserver) {
+        state.nativeResizeObserver = new ResizeObserver(scheduleNativeResize);
+        state.nativeResizeObserver.observe(byId("native-terminal-output"));
+      }
+      scheduleNativeResize();
+    }
+
+    function stopNativeResizeObserver() {
+      if (state.nativeResizeTimer) window.clearTimeout(state.nativeResizeTimer);
+      state.nativeResizeTimer = null;
+      if (state.nativeResizeObserver) state.nativeResizeObserver.disconnect();
+      state.nativeResizeObserver = null;
+      state.nativeTerminalSize = null;
     }
 
     function clearNativeTerminal() {
@@ -6847,7 +6986,11 @@
       byId("continue-preflight-button").addEventListener("click", () => closePreflightModal(true));
       byId("auth-form").addEventListener("submit", authenticateBrowser);
       window.addEventListener("popstate", () => applyCurrentRoute());
-      window.addEventListener("resize", syncNavigation);
+      window.addEventListener("resize", () => {
+        syncNavigation();
+        scheduleNativeResize();
+      });
+      window.addEventListener("beforeunload", stopNativeOutputTransport);
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && state.nativeModalOpen) closeNativeHistory();
         if (event.key === "Escape" && state.preflightModalOpen) closePreflightModal(false);
@@ -6856,6 +6999,7 @@
       });
       byId("native-all-workspaces-checkbox").addEventListener("change", () => loadNativeSessions(false, { resetVisible: true }));
       byId("poll-native-output-button").addEventListener("click", pollNativeOutput);
+      byId("native-terminal-diagnostics").addEventListener("toggle", scheduleNativeResize);
       byId("native-trust-yes-button").addEventListener("click", () => respondToNativeTrust(true));
       byId("native-trust-no-button").addEventListener("click", () => respondToNativeTrust(false));
       byId("stop-native-process-button").addEventListener("click", stopNativeProcess);

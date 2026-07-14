@@ -59,7 +59,7 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.35"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.36"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -392,6 +392,61 @@ def test_ui_static_handles_terminal_stream_edge_cases():
     assert "renderedPartialDrafts" in UI_SOURCE
 
 
+def test_ui_native_terminal_streams_with_poll_fallback_and_resizes():
+    transport_source = APP_JS[
+        APP_JS.index("async function consumeNativeOutputPayload") : APP_JS.index(
+            "function maybeShowNativeTrustPrompt"
+        )
+    ]
+    lifecycle_source = APP_JS[
+        APP_JS.index("function stopNativePolling") : APP_JS.index(
+            "function clearNativeTerminal"
+        )
+    ]
+
+    for fragment in (
+        "nativeEventSource: null",
+        "nativeEventSourceProcessId: null",
+        "nativeResizeObserver: null",
+        "nativeResizeTimer: null",
+        "nativeTerminalSize: null",
+    ):
+        assert fragment in APP_JS
+    for fragment in (
+        "function startNativeOutputTransport()",
+        "function openNativeOutputStream(processId)",
+        "/output/stream${query}",
+        "state.nativeOutputCursor",
+        "NATIVE_STREAM_FAILURE_LIMIT",
+        "scheduleNativePoll(NATIVE_ACTIVE_POLL_MS)",
+        "await consumeNativeOutputPayload(payload, processId)",
+        "stopNativeOutputTransport();",
+    ):
+        assert fragment in transport_source
+    for fragment in (
+        "function stopNativeOutputTransport()",
+        "closeNativeOutputStream();",
+        "stopNativePolling();",
+        "stopNativeResizeObserver();",
+        "function nativeTerminalDimensions()",
+        "NATIVE_MIN_ROWS",
+        "NATIVE_MAX_COLUMNS",
+        "/resize`, {",
+        "new ResizeObserver(scheduleNativeResize)",
+        "state.nativeResizeObserver.disconnect();",
+    ):
+        assert fragment in lifecycle_source
+    assert (
+        'window.addEventListener("beforeunload", stopNativeOutputTransport);' in APP_JS
+    )
+    assert (
+        'byId("native-terminal-diagnostics").addEventListener("toggle", scheduleNativeResize);'
+        in APP_JS
+    )
+    assert 'id="native-terminal-diagnostics"' in INDEX_HTML
+    assert "polling remains available as a fallback" in INDEX_HTML
+
+
 def test_ui_static_refreshes_native_run_after_process_exit():
     terminal_source = UI_SOURCE[
         UI_SOURCE.index("function renderNativeTerminalStatus") : UI_SOURCE.index(
@@ -459,7 +514,7 @@ def test_ui_native_tools_render_once_stream_live_and_keep_expansion_state():
         )
     ]
     poll_source = APP_JS[
-        APP_JS.index("async function pollNativeOutput") : APP_JS.index(
+        APP_JS.index("async function consumeNativeOutputPayload") : APP_JS.index(
             "function maybeShowNativeTrustPrompt"
         )
     ]

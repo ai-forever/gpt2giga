@@ -1624,9 +1624,12 @@ Use this when validating the project cockpit manually:
   `codex exec` or `--ephemeral`.
 - [ ] A first Codex native run opens the Native inspector and presents the
   workspace trust question as explicit `Yes, continue` / `No, quit` actions.
-- [ ] Reloading a running native session restores output polling and stdin
-  controls without starting or resending the prompt.
+- [ ] Reloading a running native session resumes SSE output from its cursor and
+  restores stdin controls without starting or resending the prompt; polling
+  remains available as a fallback.
 - [ ] A native process streams terminal output into the Native panel.
+- [ ] Resizing an open native terminal reaches the owner-local PTY without
+  accepting out-of-range rows or columns.
 - [ ] Stopping a native process updates process status and run status.
 - [ ] Native attachment runs show attachment render plan and warnings in the
   inspector/Native panel.
@@ -1767,6 +1770,17 @@ PTY. If the owner lease expires, restart reconciliation records the process as
 worktree for review. A still-running orphan is explicitly marked
 `process_alive_not_adopted`; reconnect never pretends that a new UI owns it.
 
+The Native panel prefers the authenticated cursor-based SSE endpoint
+`GET /api/native/processes/{process_id}/output/stream`. Output is sent in bounded
+batches with a monotonic cursor; reconnect accepts both the explicit `cursor`
+query and the browser's `Last-Event-ID`, so already rendered chunks are not
+duplicated. The bounded `/output` polling endpoint remains a compatibility
+fallback. For an owner-local PTY, `POST
+/api/native/processes/{process_id}/resize` validates and applies terminal rows
+and columns; pipe transports and foreign owners fail explicitly. Navigation and
+terminal completion close the browser EventSource, polling timers, and resize
+observer.
+
 Gemini native starts capability-probe the installed CLI for
 `--prompt-interactive`. When supported, the composed prompt and rendered
 attachment references are passed in that one interactive invocation, without
@@ -1906,6 +1920,7 @@ preview or import support for that connector is confirmed.
 
 Attachment support is intentionally conservative. Document and binary transport
 through external CLIs is path/reference based unless local CLI behavior has been
-verified. Rich headless output uses persisted SSE events; native terminal output
-continues to use its separate local polling transport. Harnesses or plugins that
-do not emit structured deltas still appear atomically when their run completes.
+verified. Rich headless output and native terminal output use separate persisted
+SSE contracts; native terminals retain bounded polling as a compatibility
+fallback. Harnesses or plugins that do not emit structured deltas still appear
+atomically when their run completes.

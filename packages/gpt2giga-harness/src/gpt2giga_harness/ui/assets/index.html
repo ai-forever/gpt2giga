@@ -737,11 +737,11 @@
             <div id="native-panel" class="mono-panel tab-panel">
               <div class="badge-row">
                 <span id="native-terminal-status" class="badge info">Native: idle</span>
-                <button id="poll-native-output-button" class="secondary" type="button">Poll output</button>
+                <button id="poll-native-output-button" class="secondary" type="button">Poll fallback</button>
                 <button id="stop-native-process-button" class="danger" type="button">Stop process</button>
                 <button id="clear-native-terminal-button" class="secondary" type="button">Clear terminal</button>
               </div>
-              <p id="native-process-lifecycle-note" class="status-line">Native CLIs stay active between turns. A completed model response does not stop the process; use Stop process when you are done.</p>
+              <p id="native-process-lifecycle-note" class="status-line">Native CLIs stay active between turns. Terminal output streams automatically, polling remains available as a fallback, and Stop process ends the session.</p>
               <section id="native-trust-prompt" class="native-trust-prompt" role="alertdialog" aria-labelledby="native-trust-title" hidden>
                 <div>
                   <strong id="native-trust-title">Do you trust the contents of this directory?</strong>
@@ -755,7 +755,7 @@
                 </div>
               </section>
               <pre id="native-process-summary">No native session selected.</pre>
-              <details class="native-terminal-diagnostics">
+              <details id="native-terminal-diagnostics" class="native-terminal-diagnostics">
                 <summary>Technical terminal output</summary>
                 <pre id="native-terminal-output">Terminal output will appear here.</pre>
               </details>
@@ -815,6 +815,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=38.35"></script>
+  <script src="/assets/app.js?v=38.36"></script>
 </body>
 </html>

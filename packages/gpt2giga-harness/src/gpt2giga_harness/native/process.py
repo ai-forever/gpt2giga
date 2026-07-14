@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import os
 from pathlib import Path
+import struct
 import subprocess
 import threading
 import time
@@ -40,6 +41,19 @@ try:  # pragma: no cover - import availability is platform-specific.
     import pty as pty_module
 except ImportError:  # pragma: no cover - Windows fallback.
     pty_module = None
+
+try:  # pragma: no cover - import availability is platform-specific.
+    import fcntl
+    import termios
+except ImportError:  # pragma: no cover - Windows fallback.
+    fcntl = None
+    termios = None
+
+
+MIN_TERMINAL_ROWS = 2
+MAX_TERMINAL_ROWS = 200
+MIN_TERMINAL_COLUMNS = 20
+MAX_TERMINAL_COLUMNS = 500
 
 
 class NativeProcessStatus(str, Enum):
@@ -315,6 +329,49 @@ class NativeProcessManager:
                     "process_id": process_id,
                     "bytes": len(payload),
                     "text": _redact_text(text, record.secret_values),
+                },
+            )
+            return record.ref
+
+    def resize(self, process_id: str, *, rows: int, columns: int) -> NativeProcessRef:
+        """Resize the owned PTY after validating bounded terminal dimensions."""
+        validated_rows = _terminal_dimension(
+            rows,
+            name="rows",
+            minimum=MIN_TERMINAL_ROWS,
+            maximum=MAX_TERMINAL_ROWS,
+        )
+        validated_columns = _terminal_dimension(
+            columns,
+            name="columns",
+            minimum=MIN_TERMINAL_COLUMNS,
+            maximum=MAX_TERMINAL_COLUMNS,
+        )
+        with self._lock:
+            record = self._owned_record(process_id)
+            self._refresh_locked(record)
+            if record.ref.status is not NativeProcessStatus.RUNNING:
+                raise RuntimeError(f"Native process is not running: {process_id}")
+            if record.master_fd is None or fcntl is None or termios is None:
+                raise RuntimeError(
+                    "Native terminal resize is unavailable for this process transport."
+                )
+            try:
+                fcntl.ioctl(
+                    record.master_fd,
+                    termios.TIOCSWINSZ,
+                    struct.pack("HHHH", validated_rows, validated_columns, 0, 0),
+                )
+            except OSError as exc:
+                raise RuntimeError("Native terminal resize failed.") from exc
+            self._append_session_event_locked(
+                record,
+                "terminal_resize",
+                "Resized native process terminal.",
+                {
+                    "process_id": process_id,
+                    "rows": validated_rows,
+                    "columns": validated_columns,
                 },
             )
             return record.ref
@@ -1068,6 +1125,20 @@ def _positive_timeout(value: float | None) -> float:
     if timeout <= 0:
         raise ValueError("timeout_seconds must be positive")
     return timeout
+
+
+def _terminal_dimension(
+    value: int,
+    *,
+    name: str,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    if value < minimum or value > maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
 
 
 def _timestamp_expired(value: str) -> bool:

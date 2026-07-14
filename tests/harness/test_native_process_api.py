@@ -93,6 +93,91 @@ def test_native_process_api_start_poll_input_and_stop(tmp_path):
     }
 
 
+def test_native_process_output_stream_resumes_from_persisted_cursor(tmp_path):
+    script = _write_echo_cli(tmp_path)
+    client, store = _client(tmp_path, FakeProcessConnector(start_script=script))
+    session = store.create_session(
+        title="Native output stream",
+        workspace=str(tmp_path),
+        default_harness_id="fake-cli",
+    )
+    started = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "action": "start",
+            "prompt": "boot",
+            "workspace": str(tmp_path),
+        },
+    )
+    process_id = started.json()["process"]["id"]
+    ready_cursor, _ = _wait_for_output(client, process_id, 0, "ready")
+    client.post(
+        f"/api/native/processes/{process_id}/input",
+        json={"data": "streamed\n"},
+    )
+    echo_cursor, _ = _wait_for_output(client, process_id, ready_cursor, "echo:streamed")
+    client.delete(f"/api/native/processes/{process_id}")
+
+    response = client.get(
+        f"/api/native/processes/{process_id}/output/stream",
+        headers={"Last-Event-ID": str(ready_cursor)},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    payloads = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert len(payloads) == 1
+    assert payloads[0]["cursor"] == echo_cursor
+    assert "echo:streamed" in "".join(
+        output["text"] for output in payloads[0]["outputs"]
+    )
+    assert "ready" not in str(payloads[0]["outputs"])
+    assert payloads[0]["status"] in {"stopped", "exited"}
+    assert f"id: {echo_cursor}" in response.text
+
+
+def test_native_process_resize_api_validates_terminal_limits(tmp_path):
+    script = _write_echo_cli(tmp_path)
+    client, store = _client(tmp_path, FakeProcessConnector(start_script=script))
+    session = store.create_session(
+        title="Native resize",
+        workspace=str(tmp_path),
+        default_harness_id="fake-cli",
+    )
+    started = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "action": "start",
+            "prompt": "boot",
+            "workspace": str(tmp_path),
+        },
+    )
+    process_id = started.json()["process"]["id"]
+
+    invalid = client.post(
+        f"/api/native/processes/{process_id}/resize",
+        json={"rows": 1, "columns": 120},
+    )
+    unavailable = client.post(
+        f"/api/native/processes/{process_id}/resize",
+        json={"rows": 36, "columns": 120},
+    )
+
+    assert invalid.status_code == 400
+    assert invalid.json()["detail"] == "rows must be between 2 and 200"
+    assert unavailable.status_code == 400
+    assert "unavailable for this process transport" in unavailable.json()["detail"]
+    client.delete(f"/api/native/processes/{process_id}")
+
+
 def test_native_process_api_submit_sends_enter_after_input(tmp_path):
     script = _write_echo_cli(tmp_path)
     client, store = _client(tmp_path, FakeProcessConnector(start_script=script))
