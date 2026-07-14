@@ -56,6 +56,7 @@ from gpt2giga_harness.native.base import (
     discovery_error_to_dict,
     native_command_plan_to_dict,
 )
+from gpt2giga_harness.native.discovery import normalize_native_workspace
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
@@ -347,6 +348,8 @@ def build_parser() -> argparse.ArgumentParser:
     native_sync.add_argument("--harness", dest="harness_id", default=None)
     native_sync.add_argument("--workspace", default=None)
     native_sync.add_argument("--include-external", action="store_true")
+    native_sync.add_argument("--cursor", default=None)
+    native_sync.add_argument("--limit", type=int, default=100)
     native_sync.add_argument("--json", action="store_true")
     native_sync.set_defaults(handler=_handle_native_sync)
 
@@ -1112,6 +1115,8 @@ def _schedule_service(config: HarnessConfig) -> ScheduleService:
 
 
 def _handle_native_sync(args: argparse.Namespace, config: HarnessConfig) -> int:
+    if not 1 <= args.limit <= 500:
+        raise ValueError("native sync limit must be between 1 and 500")
     workspace = resolve_workspace(args.workspace) if args.workspace else None
     project_id = _project_id_for_workspace(workspace, config)
     registry = create_default_native_registry(data_dir=config.data_dir)
@@ -1120,18 +1125,32 @@ def _handle_native_sync(args: argparse.Namespace, config: HarnessConfig) -> int:
         harness_id=args.harness_id,
         workspace=workspace,
         include_external=args.include_external,
+        cursor=args.cursor,
+        limit=args.limit,
     )
     stored = [
-        index_store.upsert_ref(ref, project_id=project_id) for ref in result.sessions
+        index_store.upsert_ref(
+            ref,
+            project_id=_native_ref_project_id(
+                ref,
+                workspace=workspace,
+                project_id=project_id,
+            ),
+        )
+        for ref in result.sessions
     ]
     payload = {
         "sessions": [native_session_ref_to_dict(ref) for ref in stored],
         "errors": [discovery_error_to_dict(error) for error in result.errors],
+        "next_cursor": result.next_cursor,
+        "scanned_count": result.scanned_count,
     }
     if args.json:
         _print_json(payload)
     else:
         print(f"Synced {len(stored)} native session(s).")
+        if result.next_cursor is not None:
+            print(f"Next cursor: {result.next_cursor}")
         _print_native_table(payload["sessions"])
         for error in payload["errors"]:
             print(f"{error['harness_id']}: {error['message']}", file=sys.stderr)
@@ -2130,6 +2149,23 @@ def _project_id_for_workspace(
         data_dir=config.data_dir,
         load_config_name=False,
     ).id
+
+
+def _native_ref_project_id(
+    ref: NativeSessionRef,
+    *,
+    workspace: str | None,
+    project_id: str | None,
+) -> str | None:
+    if (
+        project_id is not None
+        and ref.workspace is not None
+        and normalize_native_workspace(ref.workspace)
+        == normalize_native_workspace(workspace)
+    ):
+        return project_id
+    value = ref.metadata.get("project_id")
+    return str(value).strip() if value is not None and str(value).strip() else None
 
 
 def _editor_command_for_workspace(

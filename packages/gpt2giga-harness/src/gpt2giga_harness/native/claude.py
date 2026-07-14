@@ -25,6 +25,11 @@ from gpt2giga_harness.native.base import (
     native_source_workspace,
     native_workspace_policy,
 )
+from gpt2giga_harness.native.discovery import (
+    canonicalize_native_refs,
+    native_workspace_metadata,
+    normalize_native_workspace,
+)
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
@@ -101,7 +106,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
                 source_kind="external",
                 can_resume=False,
             )
-        return (*managed, *external)
+        return canonicalize_native_refs((*managed, *external))
 
     def preview(
         self,
@@ -342,11 +347,26 @@ def _ref_from_file(
     )
     if summary.message_count == 0 and not native_session_id:
         return None
+    discovered_workspace = summary.workspace
+    effective_workspace = discovered_workspace or (
+        normalize_native_workspace(workspace) if source_kind == "managed" else None
+    )
     metadata = {
         "path": str(path),
-        "project_id": project_id,
         "source_kind": source_kind,
+        **native_workspace_metadata(
+            effective_workspace,
+            evidence=(
+                summary.workspace_evidence
+                if discovered_workspace is not None
+                else "managed_home"
+                if effective_workspace is not None
+                else None
+            ),
+        ),
     }
+    if source_kind == "managed":
+        metadata["project_id"] = project_id
     if native_home is not None:
         metadata["native_home"] = native_home
     if summary.session_name is not None:
@@ -360,7 +380,7 @@ def _ref_from_file(
         harness_id=CLAUDE_HARNESS_ID,
         native_session_id=native_session_id,
         title=summary.title or native_session_id or "Untitled Claude session",
-        workspace=workspace,
+        workspace=effective_workspace,
         source=str(path),
         status=status,
         created_at=summary.created_at,
@@ -754,6 +774,8 @@ class _SessionSummary:
         self.updated_at: str | None = None
         self.message_count = 0
         self.roles: set[str] = set()
+        self.workspace: str | None = None
+        self.workspace_evidence: str | None = None
         try:
             self.updated_at = _mtime_timestamp(path)
         except OSError:
@@ -762,6 +784,10 @@ class _SessionSummary:
     def observe_event(self, event: Mapping[str, Any]) -> None:
         if self.native_session_id is None:
             self.native_session_id = _session_id_from_event(event)
+        if self.workspace is None:
+            workspace, evidence = _workspace_from_event(event)
+            self.workspace = workspace
+            self.workspace_evidence = evidence
         if self.session_name is None:
             self.session_name = _session_name_from_event(event)
         if self.title is None:
@@ -815,10 +841,27 @@ def _slugify(value: str, *, fallback: str) -> str:
 
 
 def _ref_id(path: Path, native_session_id: str, source_kind: str) -> str:
+    del path, source_kind
     digest = hashlib.sha256(
-        f"{source_kind}:{path}:{native_session_id}".encode("utf-8")
+        f"{CLAUDE_HARNESS_ID}:{native_session_id}".encode("utf-8")
     ).hexdigest()
     return f"native_claude_{digest[:16]}"
+
+
+def _workspace_from_event(event: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    candidates = (
+        (event.get("cwd"), "history.cwd"),
+        (event.get("workspace"), "history.workspace"),
+        (event.get("projectPath"), "history.projectPath"),
+        (_nested(event, "session", "cwd"), "history.session.cwd"),
+        (_nested(event, "context", "cwd"), "history.context.cwd"),
+        (_nested(event, "metadata", "cwd"), "history.metadata.cwd"),
+    )
+    for value, evidence in candidates:
+        workspace = normalize_native_workspace(value)
+        if workspace is not None:
+            return workspace, evidence
+    return None, None
 
 
 def _path_from_ref(ref: NativeSessionRef) -> Path | None:

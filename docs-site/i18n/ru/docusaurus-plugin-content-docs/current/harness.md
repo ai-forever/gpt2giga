@@ -376,6 +376,16 @@ permission mode и hash управляемой tool-конфигурации. Э
 исходный route больше не подменяется молча на `/v2`. Противоречащие snapshot
 route, model, home, workspace, project или harness блокируются до запуска CLI.
 
+Native discovery теперь берёт workspace/project identity из самой истории CLI,
+а не приписывает каждому внешнему ref проект, из которого запустили sync. Если
+такого evidence нет, ref явно остаётся unscoped и не попадает в project-filtered
+списки по умолчанию. CLI-list и file-backed записи с одинаковым native session
+id сводятся к одному стабильному metadata ref без автоматического импорта
+transcript. Большие выборки sync можно обходить через `--limit` и возвращённый
+`--cursor`. Когда управляемые Codex или Gemini записывают новую history, Harness
+автоматически связывает ref с owning run только при однозначном совпадении
+execution snapshot.
+
 Управляемые native start и resume для Codex, Claude Code и Gemini выполняют
 route-aware proxy preflight до spawn CLI. Harness сначала проверяет health, затем
 требует, чтобы точный выбранный route `GET /v1/models` или `GET /v2/models`

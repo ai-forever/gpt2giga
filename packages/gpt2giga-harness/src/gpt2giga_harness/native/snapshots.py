@@ -221,7 +221,20 @@ def validate_resume_snapshot(
         )
     if snapshot.harness_id != harness_id or ref.harness_id != harness_id:
         raise ValueError("Native resume harness identity contradicts its snapshot")
-    if ref.workspace and snapshot.workspace and ref.workspace != snapshot.workspace:
+    snapshot_workspaces = {
+        value
+        for value in (
+            snapshot.workspace,
+            snapshot.source_workspace,
+            snapshot.effective_workspace,
+        )
+        if value
+    }
+    if (
+        ref.workspace
+        and snapshot_workspaces
+        and ref.workspace not in snapshot_workspaces
+    ):
         raise ValueError("Native resume workspace contradicts its snapshot")
     project_id = _optional_text(ref.metadata.get("project_id"))
     if project_id and project_id != snapshot.project_id:
@@ -245,7 +258,20 @@ def _snapshot_matches_ref(
         return False
     if snapshot.harness_id != ref.harness_id:
         return False
-    if snapshot.workspace and ref.workspace and snapshot.workspace != ref.workspace:
+    snapshot_workspaces = {
+        value
+        for value in (
+            snapshot.workspace,
+            snapshot.source_workspace,
+            snapshot.effective_workspace,
+        )
+        if value
+    }
+    if (
+        ref.workspace
+        and snapshot_workspaces
+        and ref.workspace not in snapshot_workspaces
+    ):
         return False
     project_id = _optional_text(ref.metadata.get("project_id"))
     if project_id and snapshot.project_id != project_id:

@@ -130,6 +130,22 @@ def test_native_session_index_store_deletes_refs(tmp_path):
     assert store.get_ref(stored.id) is None
 
 
+def test_native_session_index_store_keeps_unknown_workspace_unscoped(tmp_path):
+    store = FilesystemNativeSessionIndexStore(tmp_path)
+    unknown = _ref(
+        "legacy_unknown",
+        workspace=None,
+        metadata={"workspace_known": False, "workspace_reason": "not_recorded"},
+    )
+
+    stored = store.upsert_ref(unknown)
+
+    assert stored.metadata["workspace_known"] is False
+    assert store.list_refs(project_id="proj_requested") == ()
+    assert store.list_refs(workspace="/requested") == ()
+    assert store.list_refs() == (stored,)
+
+
 def test_native_session_index_store_preserves_execution_snapshot(tmp_path):
     store = FilesystemNativeSessionIndexStore(tmp_path)
     snapshot = NativeExecutionSnapshot(

@@ -55,6 +55,8 @@ class NativeHistoryConnectorRegistry:
         harness_id: str | None = None,
         workspace: str | None = None,
         include_external: bool = False,
+        cursor: str | None = None,
+        limit: int | None = None,
     ) -> NativeDiscoveryResult:
         """Discover native sessions and return connector failures as data."""
         connectors = self._connectors_for_discovery(harness_id)
@@ -78,7 +80,18 @@ class NativeHistoryConnectorRegistry:
                     message=f"Native history connector is not registered: {harness_id}",
                 )
             )
-        return NativeDiscoveryResult(sessions=tuple(sessions), errors=tuple(errors))
+        offset = _discovery_offset(cursor)
+        scanned_count = len(sessions)
+        page_limit = scanned_count if limit is None else max(limit, 0)
+        page = sessions[offset : offset + page_limit]
+        next_offset = offset + len(page)
+        next_cursor = str(next_offset) if next_offset < scanned_count else None
+        return NativeDiscoveryResult(
+            sessions=tuple(page),
+            errors=tuple(errors),
+            next_cursor=next_cursor,
+            scanned_count=scanned_count,
+        )
 
     def _connectors_for_discovery(
         self,
@@ -100,6 +113,20 @@ def _connector_error(
         message=str(redact_secrets(str(exc))),
         detail=type(exc).__name__,
     )
+
+
+def _discovery_offset(cursor: str | None) -> int:
+    if cursor is None or not cursor.strip():
+        return 0
+    try:
+        offset = int(cursor)
+    except ValueError as exc:
+        raise ValueError(
+            "native discovery cursor must be a non-negative integer"
+        ) from exc
+    if offset < 0:
+        raise ValueError("native discovery cursor must be a non-negative integer")
+    return offset
 
 
 def create_default_native_registry(

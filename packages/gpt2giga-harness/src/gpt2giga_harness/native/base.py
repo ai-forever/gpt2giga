@@ -70,6 +70,8 @@ class NativeDiscoveryResult:
 
     sessions: tuple[NativeSessionRef, ...]
     errors: tuple[NativeDiscoveryError, ...] = ()
+    next_cursor: str | None = None
+    scanned_count: int = 0
 
 
 class NativeHistoryConnector(Protocol):
@@ -221,4 +223,6 @@ def discovery_result_to_dict(result: NativeDiscoveryResult) -> dict[str, Any]:
     return {
         "sessions": [native_session_ref_to_dict(ref) for ref in result.sessions],
         "errors": [discovery_error_to_dict(error) for error in result.errors],
+        "next_cursor": result.next_cursor,
+        "scanned_count": result.scanned_count,
     }

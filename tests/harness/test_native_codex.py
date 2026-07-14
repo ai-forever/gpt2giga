@@ -132,6 +132,75 @@ def test_codex_native_preview_and_import_tolerate_unknown_jsonl(tmp_path):
     assert imported[1].content == "done"
 
 
+def test_codex_native_discovery_uses_recorded_workspace_and_stable_identity(tmp_path):
+    requested_workspace = tmp_path / "requested"
+    other_workspace = tmp_path / "other"
+    external_home = tmp_path / ".codex"
+    requested_workspace.mkdir()
+    other_workspace.mkdir()
+    first_path = external_home / "sessions" / "first.jsonl"
+    other_path = external_home / "sessions" / "other.jsonl"
+    unknown_path = external_home / "sessions" / "unknown.jsonl"
+    _write_jsonl(
+        first_path,
+        (
+            {
+                "type": "session_meta",
+                "payload": {
+                    "id": "recorded-session",
+                    "cwd": str(requested_workspace),
+                },
+                "session_id": "recorded-session",
+            },
+            {"role": "user", "content": "recorded"},
+        ),
+    )
+    _write_jsonl(
+        other_path,
+        (
+            {
+                "session_id": "other-session",
+                "cwd": str(other_workspace),
+                "role": "user",
+                "content": "other",
+            },
+        ),
+    )
+    _write_jsonl(
+        unknown_path,
+        ({"session_id": "unknown-session", "role": "user", "content": "unknown"},),
+    )
+    connector = CodexNativeHistoryConnector(
+        data_dir=tmp_path / "data",
+        external_codex_home=external_home,
+    )
+
+    refs = connector.discover(
+        workspace=str(requested_workspace),
+        include_external=True,
+    )
+    by_session = {ref.native_session_id: ref for ref in refs}
+    original_id = by_session["recorded-session"].id
+    moved_path = first_path.with_name("moved.jsonl")
+    first_path.rename(moved_path)
+    moved_refs = connector.discover(workspace=None, include_external=True)
+    moved = next(
+        ref for ref in moved_refs if ref.native_session_id == "recorded-session"
+    )
+
+    assert by_session["recorded-session"].workspace == str(
+        requested_workspace.resolve()
+    )
+    assert by_session["recorded-session"].metadata["workspace_evidence"] == (
+        "history.payload.cwd"
+    )
+    assert by_session["other-session"].workspace == str(other_workspace.resolve())
+    assert by_session["unknown-session"].workspace is None
+    assert by_session["unknown-session"].metadata["workspace_known"] is False
+    assert "project_id" not in by_session["unknown-session"].metadata
+    assert moved.id == original_id
+
+
 def test_codex_native_start_command_uses_managed_home_and_redacts_key(
     tmp_path,
     monkeypatch,

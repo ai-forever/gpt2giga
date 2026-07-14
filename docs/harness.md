@@ -1256,11 +1256,22 @@ store as the browser UI. They do not execute Codex, Claude Code, or Gemini CLI;
 they discover metadata, list cached refs, and import transcripts into
 gpt2giga-owned session history.
 
+Discovery uses workspace/project identity recorded by the CLI history itself.
+External records without that evidence remain explicitly unscoped and do not
+appear in project-filtered lists merely because sync was launched from that
+project. CLI-list and file-backed records with the same native session id are
+reconciled into one stable metadata ref; transcript content is read only by
+preview/import or while synchronizing the managed process that owns the run.
+Large discovery results can be advanced with `--limit` and the returned
+`--cursor`. Newly written managed Codex and Gemini history is linked to the
+owning run automatically when its execution snapshot matches unambiguously.
+
 Sync native refs for one harness:
 
 ```bash
 giga native sync --harness codex-cli --workspace .
 giga native sync --harness codex-cli --workspace . --include-external --json
+giga native sync --harness codex-cli --workspace . --limit 100 --cursor 100 --json
 ```
 
 List cached native refs:

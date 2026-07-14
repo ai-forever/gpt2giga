@@ -27,6 +27,11 @@ from gpt2giga_harness.native.base import (
     native_source_workspace,
     native_workspace_policy,
 )
+from gpt2giga_harness.native.discovery import (
+    canonicalize_native_refs,
+    native_workspace_metadata,
+    normalize_native_workspace,
+)
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
@@ -111,6 +116,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
                 status=NativeSessionStatus.MANAGED_NATIVE,
                 source_kind="managed",
                 can_resume=True,
+                scan_all=True,
             ),
             harness_id=self.harness_id,
         )
@@ -124,7 +130,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
                 source_kind="external",
                 can_resume=False,
             )
-        return (*listed, *managed, *external)
+        return canonicalize_native_refs((*listed, *managed, *external))
 
     def preview(
         self,
@@ -370,10 +376,14 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         status: NativeSessionStatus,
         source_kind: str,
         can_resume: bool,
+        scan_all: bool = False,
     ) -> tuple[NativeSessionRef, ...]:
         refs = [
             ref
-            for path in _checkpoint_files(gemini_home, workspace)
+            for path in _checkpoint_files(
+                gemini_home,
+                None if scan_all else workspace,
+            )
             if (
                 ref := _ref_from_file(
                     path,
@@ -500,9 +510,11 @@ def _listed_ref(
     message_count: int | None = None,
 ) -> NativeSessionRef:
     metadata = {
-        "project_id": project_id,
         "source_kind": "cli_list",
+        **native_workspace_metadata(workspace, evidence="gemini_cli_cwd"),
     }
+    if workspace is not None and "project_id" not in metadata:
+        metadata["project_id"] = project_id
     return NativeSessionRef(
         id=_ref_id(Path("gemini-list-sessions"), session_id, "cli_list"),
         harness_id=GEMINI_HARNESS_ID,
@@ -539,11 +551,24 @@ def _ref_from_file(
     native_session_id = summary.native_session_id or path.stem
     if summary.message_count == 0 and not summary.native_session_id:
         return None
+    discovered_workspace = summary.workspace
+    effective_workspace = discovered_workspace or normalize_native_workspace(workspace)
     metadata = {
         "path": str(path),
-        "project_id": project_id,
         "source_kind": source_kind,
+        **native_workspace_metadata(
+            effective_workspace,
+            evidence=(
+                summary.workspace_evidence
+                if discovered_workspace is not None
+                else "gemini_project_storage"
+                if effective_workspace is not None
+                else None
+            ),
+        ),
     }
+    if status is NativeSessionStatus.MANAGED_NATIVE:
+        metadata["project_id"] = project_id
     if native_home is not None:
         metadata["native_home"] = native_home
     if summary.model is not None:
@@ -555,7 +580,7 @@ def _ref_from_file(
         harness_id=GEMINI_HARNESS_ID,
         native_session_id=native_session_id,
         title=summary.title or native_session_id,
-        workspace=workspace,
+        workspace=effective_workspace,
         source=str(path),
         status=status,
         created_at=summary.created_at,
@@ -873,7 +898,14 @@ def _optional_tool_id(value: Any) -> str | None:
 
 
 def _timestamp_from_event(event: Mapping[str, Any]) -> str | None:
-    for key in ("timestamp", "created_at", "createdAt", "time", "updated_at"):
+    for key in (
+        "timestamp",
+        "created_at",
+        "createdAt",
+        "startTime",
+        "time",
+        "updated_at",
+    ):
         value = event.get(key)
         if value is not None and str(value).strip():
             return str(value).strip()
@@ -921,6 +953,8 @@ class _SessionSummary:
         self.model: str | None = None
         self.message_count = 0
         self.roles: set[str] = set()
+        self.workspace: str | None = None
+        self.workspace_evidence: str | None = None
         try:
             self.updated_at = _mtime_timestamp(path)
         except OSError:
@@ -929,6 +963,10 @@ class _SessionSummary:
     def observe_event(self, event: Mapping[str, Any]) -> None:
         if self.native_session_id is None:
             self.native_session_id = _session_id_from_event(event)
+        if self.workspace is None:
+            workspace, evidence = _workspace_from_event(event)
+            self.workspace = workspace
+            self.workspace_evidence = evidence
         if self.title is None:
             self.title = _title_from_event(event)
         if self.model is None:
@@ -963,10 +1001,27 @@ def _title_from_content(content: str) -> str:
 
 
 def _ref_id(path: Path, native_session_id: str, source_kind: str) -> str:
+    del path, source_kind
     digest = hashlib.sha256(
-        f"{source_kind}:{path}:{native_session_id}".encode("utf-8")
+        f"{GEMINI_HARNESS_ID}:{native_session_id}".encode("utf-8")
     ).hexdigest()
     return f"native_gemini_{digest[:16]}"
+
+
+def _workspace_from_event(event: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    candidates = (
+        (event.get("cwd"), "history.cwd"),
+        (event.get("workspace"), "history.workspace"),
+        (event.get("projectPath"), "history.projectPath"),
+        (event.get("project_path"), "history.project_path"),
+        (_nested(event, "project", "path"), "history.project.path"),
+        (_nested(event, "context", "cwd"), "history.context.cwd"),
+    )
+    for value, evidence in candidates:
+        workspace = normalize_native_workspace(value)
+        if workspace is not None:
+            return workspace, evidence
+    return None, None
 
 
 def _path_from_ref(ref: NativeSessionRef) -> Path | None:

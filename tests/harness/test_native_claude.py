@@ -138,6 +138,53 @@ def test_claude_native_preview_and_import_tolerate_unknown_jsonl(tmp_path):
     assert imported[1].metadata["native_message_id"] == "assistant-message-id"
 
 
+def test_claude_native_discovery_does_not_stamp_unknown_external_workspace(tmp_path):
+    requested_workspace = tmp_path / "requested"
+    actual_workspace = tmp_path / "actual"
+    external_home = tmp_path / ".claude"
+    requested_workspace.mkdir()
+    actual_workspace.mkdir()
+    known = external_home / "projects" / "known.jsonl"
+    unknown = external_home / "projects" / "unknown.jsonl"
+    _write_jsonl(
+        known,
+        (
+            {
+                "sessionId": "known-session",
+                "cwd": str(actual_workspace),
+                "type": "user",
+                "message": {"content": "known"},
+            },
+        ),
+    )
+    _write_jsonl(
+        unknown,
+        (
+            {
+                "sessionId": "unknown-session",
+                "type": "user",
+                "message": {"content": "unknown"},
+            },
+        ),
+    )
+    connector = ClaudeNativeHistoryConnector(
+        data_dir=tmp_path / "data",
+        external_claude_home=external_home,
+    )
+
+    refs = connector.discover(
+        workspace=str(requested_workspace),
+        include_external=True,
+    )
+    by_session = {ref.native_session_id: ref for ref in refs}
+
+    assert by_session["known-session"].workspace == str(actual_workspace.resolve())
+    assert by_session["known-session"].metadata["workspace_evidence"] == "history.cwd"
+    assert by_session["unknown-session"].workspace is None
+    assert by_session["unknown-session"].metadata["workspace_reason"] == "not_recorded"
+    assert "project_id" not in by_session["unknown-session"].metadata
+
+
 def test_claude_native_import_normalizes_tool_calls_and_results(tmp_path):
     workspace = tmp_path / "repo"
     data_dir = tmp_path / "data"

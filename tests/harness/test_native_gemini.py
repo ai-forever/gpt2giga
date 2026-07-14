@@ -151,6 +151,66 @@ def test_gemini_native_checkpoint_scanner_and_preview_import(tmp_path):
     assert imported[1].content == "done"
 
 
+def test_gemini_native_reconciles_cli_list_with_file_backed_session(tmp_path):
+    workspace = tmp_path / "repo"
+    external_home = tmp_path / "external-home"
+    workspace.mkdir()
+    project_hash = project_hash_for_workspace(workspace)
+    session_file = (
+        external_home
+        / ".gemini"
+        / "tmp"
+        / project_hash
+        / "chats"
+        / "same-session.jsonl"
+    )
+    _write_jsonl(
+        session_file,
+        (
+            {
+                "sessionId": "same-session",
+                "cwd": str(workspace),
+                "type": "user",
+                "content": "File-backed title",
+            },
+        ),
+    )
+
+    class Completed:
+        returncode = 0
+        stdout = json.dumps(
+            {
+                "sessions": [
+                    {
+                        "id": "same-session",
+                        "title": "CLI title",
+                        "message_count": 1,
+                    }
+                ]
+            }
+        )
+        stderr = ""
+
+    connector = GeminiNativeHistoryConnector(
+        data_dir=tmp_path / "data",
+        external_gemini_home=external_home,
+        executable="gemini",
+        list_sessions_runner=lambda command, env, cwd: Completed(),
+    )
+
+    (ref,) = connector.discover(workspace=str(workspace), include_external=True)
+
+    assert ref.native_session_id == "same-session"
+    assert ref.source == str(session_file)
+    assert ref.can_preview is True
+    assert ref.can_import is True
+    assert ref.metadata["source_kinds"] == ("cli_list", "external")
+    assert set(ref.metadata["reconciled_sources"]) == {
+        "gemini --list-sessions",
+        str(session_file),
+    }
+
+
 def test_gemini_native_reads_current_projects_mapping_and_message_schema(tmp_path):
     workspace = tmp_path / "repo"
     data_dir = tmp_path / "data"
@@ -417,6 +477,68 @@ def test_gemini_native_reconciles_sequential_managed_checkpoints(tmp_path):
 
     assert snapshots_by_session["first-session"] == first_plan.execution_snapshot
     assert snapshots_by_session["second-session"] == second_plan.execution_snapshot
+
+
+def test_gemini_managed_discovery_reconciles_effective_worktree_history(tmp_path):
+    source_workspace = tmp_path / "repo"
+    effective_workspace = tmp_path / "worktree"
+    data_dir = tmp_path / "data"
+    source_workspace.mkdir()
+    effective_workspace.mkdir()
+    project_id = project_id_for_root(source_workspace)
+    connector = GeminiNativeHistoryConnector(
+        data_dir=data_dir,
+        executable="gemini",
+        capability_probe_runner=_supported_prompt_probe,
+    )
+    plan = connector.build_start_command(
+        HarnessRequest(
+            prompt="edit",
+            workspace=str(effective_workspace),
+            extra={"native_source_workspace": str(source_workspace)},
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+    plan = replace(
+        plan,
+        execution_snapshot=replace(
+            plan.execution_snapshot,
+            created_at="2026-07-14T12:00:00Z",
+        ),
+    )
+    connector.record_start_snapshot(plan)
+    session_file = (
+        data_dir
+        / "native"
+        / "gemini"
+        / "homes"
+        / project_id
+        / ".gemini"
+        / "tmp"
+        / project_hash_for_workspace(effective_workspace)
+        / "chats"
+        / "worktree-session.jsonl"
+    )
+    _write_jsonl(
+        session_file,
+        (
+            {
+                "sessionId": "worktree-session",
+                "startTime": "2026-07-14T12:00:01Z",
+                "cwd": str(effective_workspace),
+                "kind": "main",
+            },
+        ),
+    )
+
+    (ref,) = connector.discover(
+        workspace=str(source_workspace),
+        include_external=False,
+    )
+
+    assert ref.workspace == str(effective_workspace.resolve())
+    assert ref.metadata["project_id"] == project_id
+    assert ref.execution_snapshot == plan.execution_snapshot
 
 
 def test_gemini_native_start_command_uses_managed_home_and_redacts_key(

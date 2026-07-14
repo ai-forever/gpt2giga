@@ -158,6 +158,25 @@ def test_validate_resume_snapshot_rejects_contradictory_project_identity():
         validate_resume_snapshot(ref, harness_id="codex-cli")
 
 
+def test_validate_resume_snapshot_accepts_effective_worktree_identity():
+    snapshot = replace(
+        _snapshot(),
+        source_workspace="/repo",
+        effective_workspace="/worktrees/run-1",
+    )
+    ref = replace(
+        _ref("managed", source="/managed/session.jsonl"),
+        workspace="/worktrees/run-1",
+        execution_snapshot=snapshot,
+        metadata={
+            "project_id": "proj_repo",
+            "native_home": "/managed/codex",
+        },
+    )
+
+    assert validate_resume_snapshot(ref, harness_id="codex-cli") == snapshot
+
+
 def _snapshot(*, model: str = "GigaChat-2-Max"):
     return create_execution_snapshot(
         harness_id="codex-cli",

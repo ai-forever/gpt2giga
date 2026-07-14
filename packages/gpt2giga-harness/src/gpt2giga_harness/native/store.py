@@ -14,6 +14,10 @@ from gpt2giga_harness.native.models import (
     execution_snapshot_from_dict,
     execution_snapshot_to_dict,
 )
+from gpt2giga_harness.native.discovery import (
+    merge_native_refs,
+    native_ref_identity,
+)
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import new_id
 
@@ -82,6 +86,16 @@ class FilesystemNativeSessionIndexStore:
         """Create or replace one native session reference."""
         stored = _redacted_ref(_with_project_id(ref, project_id))
         refs = {existing.id: existing for existing in self._read_refs()}
+        identity = native_ref_identity(stored)
+        if identity is not None:
+            duplicates = [
+                existing
+                for existing in refs.values()
+                if native_ref_identity(existing) == identity
+            ]
+            for duplicate in duplicates:
+                stored = _redacted_ref(merge_native_refs(duplicate, stored))
+                refs.pop(duplicate.id, None)
         refs[stored.id] = stored
         self._write_refs(refs.values())
         return stored

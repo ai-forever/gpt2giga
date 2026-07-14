@@ -74,6 +74,7 @@ from gpt2giga_harness.native.base import (
     discovery_error_to_dict,
     native_prompt_delivery_to_dict,
 )
+from gpt2giga_harness.native.discovery import normalize_native_workspace
 from gpt2giga_harness.native.models import (
     HarnessInvocationMode,
     NativeExecutionSnapshot,
@@ -1071,18 +1072,32 @@ def create_app(
             workspace=resolved_workspace,
             data_dir=config.data_dir,
         )
-        result = native_registry.discover(
-            harness_id=_optional_text(payload.get("harness_id")),
-            workspace=resolved_workspace,
-            include_external=bool(payload.get("include_external")),
-        )
+        try:
+            result = native_registry.discover(
+                harness_id=_optional_text(payload.get("harness_id")),
+                workspace=resolved_workspace,
+                include_external=bool(payload.get("include_external")),
+                cursor=_optional_text(payload.get("cursor")),
+                limit=_native_discovery_limit(payload.get("limit")),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         stored = [
-            native_index_store.upsert_ref(ref, project_id=resolved_project_id)
+            native_index_store.upsert_ref(
+                ref,
+                project_id=_native_discovered_project_id(
+                    ref,
+                    workspace=resolved_workspace,
+                    project_id=resolved_project_id,
+                ),
+            )
             for ref in result.sessions
         ]
         return {
             "sessions": [native_session_ref_to_dict(ref) for ref in stored],
             "errors": [discovery_error_to_dict(error) for error in result.errors],
+            "next_cursor": result.next_cursor,
+            "scanned_count": result.scanned_count,
         }
 
     @app.get("/api/native/sessions/{native_ref_id}/preview")
@@ -1499,6 +1514,7 @@ def create_app(
                 store,
                 process_ref,
                 native_registry=native_registry,
+                native_index_store=native_index_store,
             )
             message_content = _optional_text(payload.get("message"))
             if message_content is not None and run is not None:
@@ -1540,6 +1556,7 @@ def create_app(
                 store,
                 process_ref,
                 native_registry=native_registry,
+                native_index_store=native_index_store,
             )
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
@@ -1595,6 +1612,7 @@ def create_app(
                         store,
                         process_ref,
                         native_registry=native_registry,
+                        native_index_store=native_index_store,
                     )
                     event_payload = native_output_chunk_to_dict(chunk)
                     event_payload["run"] = run_to_dict(run) if run is not None else None
@@ -1664,6 +1682,7 @@ def create_app(
                 store,
                 process_ref,
                 native_registry=native_registry,
+                native_index_store=native_index_store,
             )
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
@@ -1685,6 +1704,7 @@ def create_app(
                 store,
                 process_ref,
                 native_registry=native_registry,
+                native_index_store=native_index_store,
             )
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
@@ -2946,6 +2966,35 @@ def _native_project_id(
     return resolve_project(workspace, data_dir=data_dir).id
 
 
+def _native_discovery_limit(value: Any) -> int:
+    if value is None:
+        return 100
+    try:
+        limit = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="limit must be an integer") from exc
+    if not 1 <= limit <= 500:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 500")
+    return limit
+
+
+def _native_discovered_project_id(
+    ref: NativeSessionRef,
+    *,
+    workspace: str | None,
+    project_id: str | None,
+) -> str | None:
+    """Apply request scope only when the discovered ref proves the same workspace."""
+    if (
+        project_id is not None
+        and normalize_native_workspace(ref.workspace)
+        == normalize_native_workspace(workspace)
+        and ref.workspace is not None
+    ):
+        return project_id
+    return _optional_text(ref.metadata.get("project_id"))
+
+
 def _filter_external_native_refs(
     refs: tuple[NativeSessionRef, ...],
     *,
@@ -3816,6 +3865,7 @@ def _sync_native_process_run(
     process_ref: NativeProcessRef,
     *,
     native_registry: NativeHistoryConnectorRegistry | None = None,
+    native_index_store: NativeSessionIndexStore | None = None,
 ):
     status = _run_status_from_process(process_ref)
     metadata = _existing_run_metadata(store, process_ref)
@@ -3871,6 +3921,7 @@ def _sync_native_process_run(
             native_registry,
             run,
             process_ref,
+            native_index_store=native_index_store,
         )
     return run
 
@@ -3880,15 +3931,17 @@ def _sync_native_process_transcript(
     native_registry: NativeHistoryConnectorRegistry,
     run: HarnessRun,
     process_ref: NativeProcessRef,
+    *,
+    native_index_store: NativeSessionIndexStore | None = None,
 ) -> HarnessRun:
-    if run.harness_id not in {"claude-code", "gemini-cli"}:
+    if run.harness_id not in {"codex-cli", "claude-code", "gemini-cli"}:
         return run
     snapshot = execution_snapshot_from_dict(
         _metadata_mapping(run.metadata.get("execution_snapshot"))
     )
     if snapshot is None:
         return run
-    workspace = snapshot.effective_workspace or process_ref.cwd or run.workspace
+    workspace = snapshot.source_workspace or snapshot.workspace or run.workspace
     discovery = native_registry.discover(
         harness_id=run.harness_id,
         workspace=workspace,
@@ -3903,6 +3956,34 @@ def _sync_native_process_transcript(
     if len(candidates) != 1:
         return run
     ref = candidates[0]
+    if native_index_store is not None:
+        ref = native_index_store.upsert_ref(
+            ref,
+            project_id=(
+                _optional_text(ref.metadata.get("project_id"))
+                or (
+                    ref.execution_snapshot.project_id
+                    if ref.execution_snapshot is not None
+                    else None
+                )
+            ),
+        )
+        _append_reconciled_native_link(store, run, ref)
+    if run.native_session_id != ref.native_session_id:
+        run = store.update_run(
+            run.id,
+            native_session_id=ref.native_session_id,
+            metadata={
+                **dict(run.metadata),
+                "native_history_reconciliation": {
+                    "native_ref_id": ref.id,
+                    "native_session_id": ref.native_session_id,
+                    "updated_at": utc_now(),
+                },
+            },
+        )
+    if run.harness_id == "codex-cli":
+        return run
     try:
         connector = native_registry.get(run.harness_id)
         transcript = connector.import_ref(ref)
@@ -4044,6 +4125,45 @@ def _sync_native_process_transcript(
         run.id,
         native_session_id=ref.native_session_id,
         metadata=metadata,
+    )
+
+
+def _append_reconciled_native_link(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+    ref: NativeSessionRef,
+) -> None:
+    current = store.get_native_link(run.session_id, run.harness_id)
+    if current is not None and current.native_ref_id == ref.id:
+        return
+    now = utc_now()
+    metadata = dict(current.metadata) if current is not None else {}
+    metadata.update(
+        {
+            "auto_reconciled": True,
+            "project_id": ref.metadata.get("project_id"),
+            "execution_snapshot": (
+                execution_snapshot_to_dict(ref.execution_snapshot)
+                if ref.execution_snapshot is not None
+                else None
+            ),
+        }
+    )
+    store.append_native_link(
+        run.session_id,
+        HarnessNativeLink(
+            id=new_id("nlink"),
+            session_id=run.session_id,
+            harness_id=run.harness_id,
+            status=ref.status,
+            created_at=current.created_at if current is not None else now,
+            updated_at=now,
+            native_session_id=ref.native_session_id,
+            native_ref_id=ref.id,
+            source="native_history_reconciliation",
+            workspace=ref.workspace or run.workspace,
+            metadata=metadata,
+        ),
     )
 
 

@@ -25,6 +25,7 @@ from gpt2giga_harness.native.models import (
 from gpt2giga_harness.native.process import NativeProcessManager
 from gpt2giga_harness.native.registry import NativeHistoryConnectorRegistry
 from gpt2giga_harness.native.store import FilesystemNativeSessionIndexStore
+from gpt2giga_harness.project import project_id_for_root
 from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.sessions import (
     FilesystemHarnessSessionStore,
@@ -414,6 +415,88 @@ def test_native_process_syncs_assistant_message_while_running(
     )
     (run,) = store.list_runs(session.id)
     assert run.native_session_id == native_session_id
+    indexed = client.get("/api/native/sessions").json()["sessions"]
+    assert [item["id"] for item in indexed] == [native_ref_id]
+    links = store.list_native_links(session.id)
+    assert links[-1].native_ref_id == native_ref_id
+    assert links[-1].native_session_id == native_session_id
+    assert links[-1].metadata["auto_reconciled"] is True
+
+
+def test_native_process_auto_reconciles_codex_history_ref(tmp_path):
+    script = _write_echo_cli(tmp_path)
+
+    class CodexReconcileConnector(FakeProcessConnector):
+        def __init__(self):
+            super().__init__(start_script=script, harness_id="codex-cli")
+            self.snapshot = None
+
+        def build_start_command(self, request, context):
+            plan = super().build_start_command(request, context)
+            self.snapshot = create_execution_snapshot(
+                harness_id=self.harness_id,
+                api_mode=request.api_mode.value,
+                model=request.model,
+                native_home=request.workspace,
+                workspace=request.workspace,
+                project_id=project_id_for_root(request.workspace),
+                permission_mode=request.mode,
+                tool_config_hash=None,
+            )
+            return replace(plan, execution_snapshot=self.snapshot)
+
+        def discover(self, *, workspace, include_external):
+            del include_external
+            return (
+                NativeSessionRef(
+                    id="native_codex_reconciled",
+                    harness_id=self.harness_id,
+                    native_session_id="codex-reconciled-session",
+                    title="Reconciled Codex session",
+                    workspace=workspace,
+                    source="managed-codex.jsonl",
+                    status=NativeSessionStatus.MANAGED_NATIVE,
+                    created_at="2099-01-01T00:00:00Z",
+                    updated_at="2099-01-01T00:00:01Z",
+                    message_count=1,
+                    can_preview=True,
+                    can_import=True,
+                    can_resume=True,
+                    metadata={"project_id": project_id_for_root(workspace)},
+                    execution_snapshot=self.snapshot,
+                ),
+            )
+
+    connector = CodexReconcileConnector()
+    client, store = _client(tmp_path, connector)
+    session = store.create_session(
+        title="Codex reconciliation",
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+    )
+    started = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "codex-cli",
+            "action": "start",
+            "prompt": "inspect",
+            "workspace": str(tmp_path),
+        },
+    )
+    process_id = started.json()["process"]["id"]
+
+    _wait_for_output(client, process_id, 0, "ready")
+    client.get(f"/api/native/processes/{process_id}/output")
+
+    (run,) = store.list_runs(session.id)
+    assert run.native_session_id == "codex-reconciled-session"
+    assert client.get("/api/native/sessions").json()["sessions"][0]["id"] == (
+        "native_codex_reconciled"
+    )
+    assert store.get_native_link(session.id, "codex-cli").native_ref_id == (
+        "native_codex_reconciled"
+    )
 
 
 def test_native_process_syncs_claude_tool_events_while_running(tmp_path):
