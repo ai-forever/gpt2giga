@@ -135,6 +135,108 @@ make phoenix-mitm-dev-d
 
 Интерфейс mitmproxy доступен на `http://localhost:${MITMPROXY_WEB_PORT:-8081}`. Порт прокси по умолчанию привязан к `127.0.0.1:${MITMPROXY_PORT:-8080}`.
 
+## Фиксация версий
+
+Для удобного ознакомления примеры используют
+`ghcr.io/ai-forever/gpt2giga:latest`. В production замените `latest` на
+проверенный release tag или неизменяемый digest и зафиксируйте версии сторонних
+образов. Храните ссылки на образы рядом с Compose-файлами в системе контроля
+версий.
+
+Перед развёртыванием зафиксируйте tag и digest gateway, активные Compose-файлы
+и профили, состояние backup Postgres и предыдущий рабочий образ.
+`docker compose config` раскрывает секреты, поэтому не прикладывайте его
+необработанный вывод к задачам или CI-артефактам.
+
+## Обновление
+
+Для базового развёртывания:
+
+```sh
+docker compose --env-file .env -f deploy/base.yaml pull
+docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
+docker compose --env-file .env -f deploy/base.yaml --profile PROD ps
+curl --fail http://127.0.0.1:8090/health
+```
+
+Для overlays повторите полный набор `-f` и `--profile`. Не используйте
+`down -v` при обновлении: `-v` удаляет именованные volumes.
+
+Init-скрипты Postgres запускаются автоматически только при создании нового
+volume. Для существующего volume сначала сделайте backup, затем явно примените
+поставляемую идемпотентную миграцию traffic logs:
+
+```sh
+docker compose --env-file .env \
+  -f deploy/base.yaml -f deploy/postgres.yaml \
+  --profile PROD --profile postgres \
+  exec -T postgres sh /docker-entrypoint-initdb.d/001_apply_traffic_log_migration.sh
+```
+
+После обновления проверьте `/health`, один аутентифицированный запрос модели,
+streaming, tool calling (если используется) и все storage/telemetry sinks. До
+увеличения трафика проверьте логи на ошибки редактирования и повторяющиеся
+upstream failures.
+
+## Резервное копирование и восстановление
+
+Перед обновлением схемы или образа сохраните traffic logs из Postgres:
+
+```sh
+docker compose --env-file .env \
+  -f deploy/base.yaml -f deploy/postgres.yaml \
+  --profile PROD --profile postgres \
+  exec -T postgres sh -c \
+  'pg_dump --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --format=custom' \
+  > gpt2giga-traffic-logs.dump
+```
+
+Команда читает имена БД и пользователя внутри контейнера; одинарные кавычки
+намеренно блокируют подстановку host shell. Dump может содержать content модели:
+шифруйте его, ограничивайте доступ и применяйте retention policy исходной БД.
+
+Сначала восстановите backup в пустую изолированную БД и проверьте её:
+
+```sh
+docker compose --env-file .env \
+  -f deploy/base.yaml -f deploy/postgres.yaml \
+  --profile PROD --profile postgres \
+  exec -T postgres sh -c \
+  'pg_restore --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --clean --if-exists' \
+  < gpt2giga-traffic-logs.dump
+```
+
+Unified Harness не входит в манифесты gateway. Если он работает на том же
+хосте, отдельно сохраните `~/.gpt2giga/harness/` и проектные `.giga/`,
+предварительно остановив UI, worker и native-процессы. Защищайте эти backup как
+пользовательский content. Не перезаписывайте vendor-owned homes native CLI при
+миграции.
+
+## Откат
+
+1. Прекратите направлять новый трафик на instance и сохраните отредактированную
+   диагностику.
+2. Верните предыдущую зафиксированную ссылку на образ gateway.
+3. Запустите те же overlays и profiles без удаления volumes.
+4. Восстанавливайте Postgres только после несовместимого изменения данных; при
+   совместимой схеме безопаснее откатить только бинарную версию.
+5. Проверьте health и минимальный аутентифицированный запрос до возврата трафика.
+
+Если инцидент связан с утечкой credentials или небезопасным content capture,
+смените ключи и изолируйте артефакты, а не только запускайте старый образ.
+
+## Диагностика после запуска
+
+```sh
+docker compose --env-file .env -f deploy/base.yaml --profile PROD ps
+docker compose --env-file .env -f deploy/base.yaml --profile PROD logs --tail 200 gpt2giga-prod
+curl --fail http://127.0.0.1:8090/health
+curl --fail -H "Authorization: Bearer <proxy-api-key>" http://127.0.0.1:8090/v1/models
+```
+
+Метрики, traffic logs, admin-диагностика и разница между runtime logs и
+захваченным content модели описаны в [Operations](./operations.md).
+
 ## Чек-лист усиления безопасности для production
 
 - Установите `GPT2GIGA_MODE=PROD`.

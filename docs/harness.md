@@ -78,7 +78,7 @@ During the alpha:
 The source checkout is the current, always-available alpha path:
 
 ```bash
-git clone --branch feature/unified_harness \
+git clone --branch feature/harness_enrichment \
   https://github.com/ai-forever/gpt2giga.git
 cd gpt2giga
 uv sync --all-packages --all-extras --dev
@@ -96,7 +96,7 @@ After the standalone preview appears in your package index, the shorter install
 path is:
 
 ```bash
-uv tool install gpt2giga-harness
+uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 

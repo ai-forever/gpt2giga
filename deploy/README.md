@@ -91,6 +91,30 @@ docker compose --env-file .env -f deploy/observability.yaml --profile DEV up -d
 
 Используйте только для локальной отладки. Не открывайте mitmproxy наружу.
 
+## Обновление и остановка
+
+В production замените `:latest` в манифесте на проверенный tag или digest.
+Затем используйте тот же набор Compose-файлов и профилей, с которым stack был
+запущен:
+
+```sh
+docker compose --env-file .env -f deploy/base.yaml pull
+docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
+docker compose --env-file .env -f deploy/base.yaml --profile PROD ps
+curl --fail http://127.0.0.1:8090/health
+```
+
+Для остановки без удаления данных:
+
+```sh
+docker compose --env-file .env -f deploy/base.yaml --profile PROD down
+```
+
+Не добавляйте `-v`, если нужно сохранить Postgres, OpenSearch или Phoenix
+volumes. Backup/restore, применение Postgres migration к существующему volume,
+rollback и диагностика описаны в
+[полном руководстве](../docs/deployment.md#upgrade-procedure).
+
 ## Подробнее
 
 Production hardening, TLS, reverse proxy и optional storage/observability settings описаны в [docs/deployment.md](../docs/deployment.md).

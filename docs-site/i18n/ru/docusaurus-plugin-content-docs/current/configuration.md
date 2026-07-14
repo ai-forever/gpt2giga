@@ -131,6 +131,8 @@ GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch
 | `GPT2GIGA_PASS_MODEL` | `True` | Передавать `model` из запроса в GigaChat. Поставьте `False`, чтобы всегда использовать настроенную модель GigaChat. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Разбирать клиентский `Authorization` как учётные данные GigaChat для авторизации в вышестоящем сервисе для каждого запроса. |
 | `GPT2GIGA_EMBEDDINGS` | `EmbeddingsGigaR` | Модель эмбеддингов по умолчанию, если модель из запроса не используется. |
+| `GPT2GIGA_ENABLE_IMAGES` | `True` | Принимать и преобразовывать поддержанные входные изображения. Отключите, если развёртывание должно запрещать обработку изображений. |
+| `GPT2GIGA_DEFAULT_MAX_TOKENS` | empty | Добавлять это положительное значение `max_tokens`, только если клиент не передал `max_tokens`, `max_completion_tokens` или `max_output_tokens`. Пустое значение не добавляет лимит. |
 | `GPT2GIGA_MAX_REQUEST_BODY_BYTES` | `10485760` | Максимальный размер тела HTTP-запроса. |
 | `GPT2GIGA_LOG_LEVEL` | `INFO` | Уровень журналов выполнения. В production избегайте `DEBUG`. |
 | `GPT2GIGA_LOG_FILENAME` | `gpt2giga.log` | Файл журналов выполнения. |
@@ -299,12 +301,14 @@ GPT2GIGA_CONVERSATION_ON_DIVERGENCE=client_wins
 ```dotenv
 GIGACHAT_MAX_CONNECTIONS=7
 GPT2GIGA_MODEL_MAX_CONNECTIONS='{"GigaChat-2-Max":5}'
+GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT=1
 GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=30
 ```
 
 Семантика:
 
-- пустой `GPT2GIGA_MODEL_MAX_CONNECTIONS` и пустое значение по умолчанию выключают ограничитель;
+- пустой `GPT2GIGA_MODEL_MAX_CONNECTIONS` и пустой
+  `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` выключают ограничитель;
 - явный лимит модели важнее значения по умолчанию;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=0` сразу возвращает локальный `429`;
 - потоковые вызовы удерживают слот до завершения потока или отключения клиента;
@@ -469,10 +473,15 @@ GPT2GIGA_METRICS_PATH=/metrics
 ```dotenv
 GPT2GIGA_OBSERVABILITY_ENABLED=False
 GPT2GIGA_OBSERVABILITY_BACKEND=phoenix
-PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
-PHOENIX_PROJECT_NAME=gpt2giga
-PHOENIX_API_KEY=
+GPT2GIGA_PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
+GPT2GIGA_PHOENIX_PROJECT_NAME=gpt2giga
+GPT2GIGA_PHOENIX_API_KEY=
 ```
+
+Имена без префикса — `PHOENIX_COLLECTOR_ENDPOINT`, `PHOENIX_PROJECT_NAME` и
+`PHOENIX_API_KEY` — остаются fallback-вариантами для совместимости с
+инструментами Phoenix. В настройках самого gateway предпочитайте
+`GPT2GIGA_PHOENIX_*`, чтобы владелец переменной был очевиден.
 
 Флаги захвата независимы и выключены по умолчанию:
 

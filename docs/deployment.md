@@ -135,6 +135,106 @@ make phoenix-mitm-dev-d
 
 The mitmproxy UI is available at `http://localhost:${MITMPROXY_WEB_PORT:-8081}`. The proxy port is bound to `127.0.0.1:${MITMPROXY_PORT:-8080}` by default.
 
+## Version pinning
+
+The example manifests use `ghcr.io/ai-forever/gpt2giga:latest` for convenient
+evaluation. A production deployment should replace `latest` with a reviewed
+release tag or immutable image digest and pin third-party images as well. Keep
+the selected image references in version control next to the Compose files.
+
+Before rollout, record the gateway image tag and digest, the active Compose
+files and profiles, Postgres backup status, and the previous known-good image.
+`docker compose config` expands secrets, so never attach its raw output to a
+ticket or CI artifact.
+
+## Upgrade procedure
+
+For a base deployment:
+
+```sh
+docker compose --env-file .env -f deploy/base.yaml pull
+docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
+docker compose --env-file .env -f deploy/base.yaml --profile PROD ps
+curl --fail http://127.0.0.1:8090/health
+```
+
+Use the same complete `-f` and `--profile` set for overlays. Do not run
+`down -v` during an upgrade: `-v` deletes named data volumes.
+
+Postgres init scripts run automatically only when a new database volume is
+created. For an existing volume, back up the database and apply the packaged
+idempotent traffic-log migration explicitly:
+
+```sh
+docker compose --env-file .env \
+  -f deploy/base.yaml -f deploy/postgres.yaml \
+  --profile PROD --profile postgres \
+  exec -T postgres sh /docker-entrypoint-initdb.d/001_apply_traffic_log_migration.sh
+```
+
+After an upgrade, check `/health`, one authenticated model request, streaming,
+tool calling if used, and every configured storage/telemetry sink. Review logs
+for redaction failures and repeated upstream errors before increasing traffic.
+
+## Backup and restore
+
+Back up Postgres traffic logs before a schema or image upgrade:
+
+```sh
+docker compose --env-file .env \
+  -f deploy/base.yaml -f deploy/postgres.yaml \
+  --profile PROD --profile postgres \
+  exec -T postgres sh -c \
+  'pg_dump --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --format=custom' \
+  > gpt2giga-traffic-logs.dump
+```
+
+The command reads the database and user names inside the container; the single
+quotes intentionally prevent host-shell expansion. The dump may contain
+captured model content; encrypt it, restrict access, and apply the source
+retention policy.
+
+Restore into an empty, isolated database first and validate it before replacing
+production data:
+
+```sh
+docker compose --env-file .env \
+  -f deploy/base.yaml -f deploy/postgres.yaml \
+  --profile PROD --profile postgres \
+  exec -T postgres sh -c \
+  'pg_restore --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --clean --if-exists' \
+  < gpt2giga-traffic-logs.dump
+```
+
+Unified Harness is not part of these gateway manifests. If it runs on the same
+host, back up `~/.gpt2giga/harness/` and project `.giga/` separately while its
+UI, worker, and native processes are stopped. Protect those backups as user
+content. Never overwrite vendor-owned native CLI homes during migration.
+
+## Rollback
+
+1. Stop routing new traffic to the instance and preserve redacted diagnostics.
+2. Restore the previous pinned gateway image reference.
+3. Start the same overlays and profiles without deleting volumes.
+4. Restore Postgres only after an incompatible data change; a binary-only
+   rollback is safer while schemas remain compatible.
+5. Verify health and a minimal authenticated request before restoring traffic.
+
+If the incident involved leaked credentials or unsafe content capture, rotate
+keys and quarantine stored artifacts instead of only restarting the old image.
+
+## Day-two diagnostics
+
+```sh
+docker compose --env-file .env -f deploy/base.yaml --profile PROD ps
+docker compose --env-file .env -f deploy/base.yaml --profile PROD logs --tail 200 gpt2giga-prod
+curl --fail http://127.0.0.1:8090/health
+curl --fail -H "Authorization: Bearer <proxy-api-key>" http://127.0.0.1:8090/v1/models
+```
+
+Use [Operations](./operations.md) for metrics, traffic logs, admin diagnostics,
+and the distinction between runtime logs and captured model content.
+
 ## Production hardening checklist
 
 - Set `GPT2GIGA_MODE=PROD`.

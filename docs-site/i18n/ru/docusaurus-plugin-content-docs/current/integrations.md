@@ -63,30 +63,37 @@ http://localhost:8090
 | Xcode | [integrations/xcode/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/xcode/README.md) |
 | nginx (обратный прокси) | [integrations/nginx/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/nginx/README.md) |
 
-## Проверенные приложения и фреймворки
+## Записи о проверке
 
-| Название | URL | Примечание |
-|---|---|---|
-| OpenCode | https://opencode.ai/ | Опенсорсный агент для кода. |
-| KiloCode | https://kilo.ai/ | Агент для кода для JetBrains/VS Code. |
-| OpenHands | https://openhands.dev/ | Агент для разработки. |
-| Zed | https://zed.dev/ | ИИ-ассистент в редакторе. |
-| Cline | https://cline.bot/ | Агент для разработчиков. |
-| OpenAI Codex | https://github.com/openai/codex | CLI-агент для кода. |
-| Gemini CLI | https://github.com/google-gemini/gemini-cli | CLI-агент для кода от Google. |
-| Aider | https://aider.chat/ | Ассистент для создания приложений. |
-| Langflow | https://github.com/langflow-ai/langflow | Конструктор агентов в low-code/no-code. |
-| DeepAgentsCLI | https://github.com/langchain-ai/deepagents | Платформа агентов на LangChain/LangGraph. |
-| CrewAI | https://github.com/crewAIInc/crewAI | Фреймворк оркестрации агентов. |
-| Qwen Agent | https://github.com/QwenLM/Qwen-Agent | Фреймворк агентов. |
-| PydanticAI | https://github.com/pydantic/pydantic-ai | Фреймворк GenAI-агентов в стиле Pydantic. |
-| Camel | https://github.com/camel-ai/camel | Мультиагентный фреймворк. |
-| smolagents | https://github.com/huggingface/smolagents | Фреймворк агентов от Hugging Face. |
-| Openclaw | https://openclaw.ai/ | Персональный ИИ-ассистент. |
-| Claude Code | https://code.claude.com/docs/en/overview | CLI-агент для кода от Anthropic. |
-| Claude Desktop App | https://claude.com/download | Десктопное приложение для macOS и Windows. |
-| OpenAI Agents SDK | https://github.com/openai/openai-agents-python | SDK для агентов с вызовом функций и передачей управления (handoffs). |
-| Anthropic SDK | https://github.com/anthropics/anthropic-sdk-python | Официальный Python SDK от Anthropic. |
-| Cursor | https://cursor.com/ | ИИ-редактор. |
-| Qwen Code | https://github.com/QwenLM/qwen-code | CLI-агент для кода. |
-| Xcode | https://developer.apple.com/xcode/ | Apple Coding Intelligence и инструменты для внешних агентов. |
+Слово «проверено» ниже означает, что в репозитории есть датированная ручная
+проверка конкретной версии по связанному руководству. Это не обещание
+совместимости с более новой версией клиента. После обновления клиента повторите
+проверку и обновите запись.
+
+| Клиент | Зафиксированная версия | Дата | Протокол и пути | Статус |
+|---|---|---|---|---|
+| OpenAI Codex | `codex-cli 0.142.1` | 2026-06-26 | OpenAI Chat, `/v1` и `/v2` | Проверено |
+| Claude Code | `2.1.187` | 2026-06-26 | Anthropic Messages, `/v1` и `/v2` | Проверено |
+| Gemini CLI | `gemini 0.46.0` | 2026-06-26 | Gemini content API, `/v1` и `/v2` | Проверено |
+| Claude Desktop | `1.12603.1` с Claude Code `2.1.170` | 2026-06-13 | Anthropic Messages через 3p gateway | Beta-проверка |
+
+Страницы OpenHands, Aider, Cursor, Qwen Code, Xcode и nginx поддерживаются как
+инструкции по настройке, но пока не содержат актуальной датированной записи.
+Считайте их воспроизводимыми рецептами и при подтверждении или регрессии
+указывайте версию клиента и проверенный маршрут.
+
+## Каталог совместимости
+
+Следующие клиенты и фреймворки потенциально можно подключить, потому что они
+принимают произвольный OpenAI-, Anthropic- или Gemini-совместимый base URL.
+Наличие в каталоге само по себе не означает, что интеграция проверена.
+
+| Категория | Проекты |
+|---|---|
+| Агенты и редакторы | [OpenCode](https://opencode.ai/), [KiloCode](https://kilo.ai/), [OpenHands](https://openhands.dev/), [Zed](https://zed.dev/), [Cline](https://cline.bot/), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Aider](https://aider.chat/), [Claude Code](https://code.claude.com/docs/en/overview), [Cursor](https://cursor.com/), [Qwen Code](https://github.com/QwenLM/qwen-code), [Xcode](https://developer.apple.com/xcode/) |
+| Агентные фреймворки | [Langflow](https://github.com/langflow-ai/langflow), [DeepAgents](https://github.com/langchain-ai/deepagents), [CrewAI](https://github.com/crewAIInc/crewAI), [Qwen Agent](https://github.com/QwenLM/Qwen-Agent), [PydanticAI](https://github.com/pydantic/pydantic-ai), [CAMEL](https://github.com/camel-ai/camel), [smolagents](https://github.com/huggingface/smolagents), [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) |
+| SDK и desktop-клиенты | [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python), [Claude Desktop](https://claude.com/download) |
+
+В полезном отчёте о проверке укажите версию клиента, ОС, версию gateway,
+настроенный base URL, режим backend GigaChat, минимальный prompt, использование
+streaming/tools и отредактированную ошибку или форму ответа.

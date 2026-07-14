@@ -19,11 +19,26 @@ const config: Config = {
   markdown: {
     mermaid: true,
     hooks: {
-      onBrokenMarkdownLinks: 'warn',
+      onBrokenMarkdownLinks: 'throw',
     },
   },
 
   themes: ['@docusaurus/theme-mermaid'],
+
+  plugins: [
+    [
+      '@cmfcmf/docusaurus-search-local',
+      {
+        indexDocs: true,
+        indexDocSidebarParentCategories: 2,
+        includeParentCategoriesInPageTitle: true,
+        indexBlog: false,
+        indexPages: false,
+        language: ['en', 'ru'],
+        maxSearchResults: 10,
+      },
+    ],
+  ],
 
   i18n: {
     defaultLocale: 'en',

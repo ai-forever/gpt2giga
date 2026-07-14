@@ -62,30 +62,36 @@ If `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, use `GPT2GIGA_API_KEY` as the client API
 | Xcode | [integrations/xcode/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/xcode/README.md) |
 | nginx (reverse proxy) | [integrations/nginx/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/nginx/README.md) |
 
-## Verified apps and frameworks
+## Verification records
 
-| Name | URL | Note |
-|---|---|---|
-| OpenCode | https://opencode.ai/ | Open-source coding agent. |
-| KiloCode | https://kilo.ai/ | Coding agent for JetBrains/VS Code. |
-| OpenHands | https://openhands.dev/ | Development agent. |
-| Zed | https://zed.dev/ | Editor AI assistant. |
-| Cline | https://cline.bot/ | Developer agent. |
-| OpenAI Codex | https://github.com/openai/codex | CLI coding agent. |
-| Gemini CLI | https://github.com/google-gemini/gemini-cli | Google CLI coding agent. |
-| Aider | https://aider.chat/ | App-building coding assistant. |
-| Langflow | https://github.com/langflow-ai/langflow | Low-code/no-code agent builder. |
-| DeepAgentsCLI | https://github.com/langchain-ai/deepagents | Agent platform on LangChain/LangGraph. |
-| CrewAI | https://github.com/crewAIInc/crewAI | Agent orchestration framework. |
-| Qwen Agent | https://github.com/QwenLM/Qwen-Agent | Agent framework. |
-| PydanticAI | https://github.com/pydantic/pydantic-ai | Pydantic-style GenAI agent framework. |
-| Camel | https://github.com/camel-ai/camel | Multi-agent framework. |
-| smolagents | https://github.com/huggingface/smolagents | Hugging Face agent framework. |
-| Openclaw | https://openclaw.ai/ | Personal AI assistant. |
-| Claude Code | https://code.claude.com/docs/en/overview | Anthropic CLI coding agent. |
-| Claude Desktop App | https://claude.com/download | Desktop app for macOS and Windows. |
-| OpenAI Agents SDK | https://github.com/openai/openai-agents-python | Agent SDK with function calling and handoffs. |
-| Anthropic SDK | https://github.com/anthropics/anthropic-sdk-python | Official Anthropic Python SDK. |
-| Cursor | https://cursor.com/ | AI editor. |
-| Qwen Code | https://github.com/QwenLM/qwen-code | CLI coding agent. |
-| Xcode | https://developer.apple.com/xcode/ | Apple Coding Intelligence and external agent tooling. |
+“Verified” below means the repository contains a dated, versioned manual check
+for the linked guide. It does not promise compatibility with newer client
+versions. Re-run the guide after a client upgrade and update its record.
+
+| Client | Recorded version | Date | Protocol and paths | Status |
+|---|---|---|---|---|
+| OpenAI Codex | `codex-cli 0.142.1` | 2026-06-26 | OpenAI Chat, `/v1` and `/v2` | Verified record |
+| Claude Code | `2.1.187` | 2026-06-26 | Anthropic Messages, `/v1` and `/v2` | Verified record |
+| Gemini CLI | `gemini 0.46.0` | 2026-06-26 | Gemini content API, `/v1` and `/v2` | Verified record |
+| Claude Desktop | `1.12603.1` with Claude Code `2.1.170` | 2026-06-13 | Anthropic Messages through a 3p gateway | Beta record |
+
+The OpenHands, Aider, Cursor, Qwen Code, Xcode, and nginx pages are maintained
+setup guides, but they do not yet contain a current dated verification record.
+Treat them as reproducible recipes and report the client version and tested
+route when confirming or reporting a regression.
+
+## Compatibility directory
+
+The following clients and frameworks are plausible integration targets because
+they expose a custom OpenAI-, Anthropic-, or Gemini-compatible base URL. An
+entry in this directory is not a verification claim.
+
+| Category | Projects |
+|---|---|
+| Coding agents and editors | [OpenCode](https://opencode.ai/), [KiloCode](https://kilo.ai/), [OpenHands](https://openhands.dev/), [Zed](https://zed.dev/), [Cline](https://cline.bot/), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Aider](https://aider.chat/), [Claude Code](https://code.claude.com/docs/en/overview), [Cursor](https://cursor.com/), [Qwen Code](https://github.com/QwenLM/qwen-code), [Xcode](https://developer.apple.com/xcode/) |
+| Agent frameworks | [Langflow](https://github.com/langflow-ai/langflow), [DeepAgents](https://github.com/langchain-ai/deepagents), [CrewAI](https://github.com/crewAIInc/crewAI), [Qwen Agent](https://github.com/QwenLM/Qwen-Agent), [PydanticAI](https://github.com/pydantic/pydantic-ai), [CAMEL](https://github.com/camel-ai/camel), [smolagents](https://github.com/huggingface/smolagents), [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) |
+| SDKs and desktop clients | [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python), [Claude Desktop](https://claude.com/download) |
+
+For a useful verification report, include the client version, operating system,
+gateway version, configured base URL, GigaChat backend mode, minimal prompt,
+whether streaming/tools were used, and the redacted error or response shape.
