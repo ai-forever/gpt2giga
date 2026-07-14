@@ -46,6 +46,7 @@ from gpt2giga_harness.config import (
     HarnessConfig,
     pass_model_env_note,
 )
+from gpt2giga_harness.harnesses.attachment_plan import attachment_capability_error
 from gpt2giga_harness.evals import (
     EvalRunNotFoundError,
     EvalSpecNotFoundError,
@@ -185,7 +186,10 @@ from gpt2giga_harness.sessions.models import (
     session_to_dict,
 )
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
-from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
+from gpt2giga_harness.cli_capabilities import (
+    CliCapabilitySnapshot,
+    cli_capability_snapshot_to_dict,
+)
 from gpt2giga_harness.types import (
     GigaChatApiMode,
     HarnessCapability,
@@ -3035,16 +3039,16 @@ def _native_connector_or_404(
 def _require_native_cli_compatibility(
     registry: HarnessRegistry,
     harness_id: str,
-) -> None:
+) -> CliCapabilitySnapshot | None:
     """Reject native starts when a built-in CLI contract is not proven."""
     if harness_id not in registry.ids():
-        return
+        return None
     capability_probe = getattr(registry.get(harness_id), "capability_probe", None)
     if not callable(capability_probe):
-        return
+        return None
     snapshot = capability_probe()
     if snapshot.compatible:
-        return
+        return snapshot
     raise NativeProcessStartError(
         snapshot.warning or f"{harness_id} is not adapter-compatible"
     )
@@ -3237,7 +3241,7 @@ def _native_process_new_options(
         "harness_id is required",
     )
     connector = _native_connector_or_404(native_registry, harness_id)
-    _require_native_cli_compatibility(registry, harness_id)
+    cli_capabilities = _require_native_cli_compatibility(registry, harness_id)
     api_mode = parse_api_mode(payload.get("api_mode") or session.default_api_mode)
     capability = parse_capability(
         payload.get("capability") or HarnessCapability.AGENT_CLI.value
@@ -3305,6 +3309,14 @@ def _native_process_new_options(
         attachment_render_plan=attachment_render_plan_payload,
         extra=extra,
     )
+    if cli_capabilities is not None:
+        attachment_error = attachment_capability_error(
+            request,
+            cli_capabilities.capabilities,
+            surface="native",
+        )
+        if attachment_error is not None:
+            raise NativeProcessStartError(attachment_error)
     context = config.to_context()
     route_preflight = None
     if bool(getattr(connector, "requires_proxy_preflight", False)):
@@ -4515,6 +4527,7 @@ def _attachment_response(
     payload.pop("storage_path", None)
     payload["url"] = f"/api/attachments/{attachment.id}"
     payload["supported_by"] = _attachment_supported_by(registry, attachment)
+    payload["transport_by"] = _attachment_transport_by(registry, attachment)
     payload["warnings"] = _attachment_warnings(registry, attachment)
     return payload
 
@@ -4544,7 +4557,70 @@ def _attachment_warnings(
             warnings.append(f"{spec.id} does not support attachments.")
         elif attachment.kind not in spec.accepted_attachment_kinds:
             warnings.append(f"{spec.id} does not accept {attachment.kind} attachments.")
+        else:
+            transport = _attachment_transport_for(spec, attachment)
+            if (
+                transport
+                and not transport["rich"]
+                and _effective_attachment_kind(attachment) in {"image", "document"}
+            ):
+                warnings.append(
+                    f"{spec.id} uses path or metadata reference only for "
+                    f"{_effective_attachment_kind(attachment)} attachments."
+                )
     return warnings
+
+
+def _attachment_transport_by(
+    registry: HarnessRegistry,
+    attachment: HarnessAttachment,
+) -> dict[str, dict[str, Any]]:
+    return {
+        harness.spec().id: transport
+        for harness in registry.list()
+        if (transport := _attachment_transport_for(harness.spec(), attachment))
+    }
+
+
+def _attachment_transport_for(
+    spec,
+    attachment: HarnessAttachment,
+) -> dict[str, Any]:
+    capabilities = getattr(spec, "attachment_capabilities", {})
+    if not isinstance(capabilities, Mapping):
+        return {}
+    support = capabilities.get(_effective_attachment_kind(attachment))
+    if support is None:
+        support = capabilities.get(attachment.kind)
+    if support is None:
+        return {}
+    if isinstance(support, Mapping):
+        headless = support.get("headless", ())
+        native = support.get("native", ())
+        rich = bool(support.get("rich", False))
+        required = support.get("required_cli_capabilities", ())
+        detail = str(support.get("detail") or "")
+    else:
+        headless = getattr(support, "headless", ())
+        native = getattr(support, "native", ())
+        rich = bool(getattr(support, "rich", False))
+        required = getattr(support, "required_cli_capabilities", ())
+        detail = str(getattr(support, "detail", ""))
+    return {
+        "headless": [str(item) for item in headless],
+        "native": [str(item) for item in native],
+        "rich": rich,
+        "required_cli_capabilities": [str(item) for item in required],
+        "detail": detail,
+    }
+
+
+def _effective_attachment_kind(attachment: HarnessAttachment) -> str:
+    if attachment.kind == "workspace_file":
+        detected = attachment.metadata.get("detected_kind")
+        if isinstance(detected, str) and detected:
+            return detected
+    return attachment.kind
 
 
 def _content_disposition(filename: str) -> str:

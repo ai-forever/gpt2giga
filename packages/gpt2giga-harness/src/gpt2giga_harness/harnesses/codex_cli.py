@@ -27,6 +27,7 @@ from gpt2giga_harness.harnesses.agent_cli import (
     workspace_error,
 )
 from gpt2giga_harness.harnesses.attachment_plan import (
+    attachment_capability_error,
     attachment_raw_metadata,
     attachment_warning_events,
     cli_args_from_attachments,
@@ -41,6 +42,7 @@ from gpt2giga_harness.managed_mcp import (
     write_startup_config,
 )
 from gpt2giga_harness.types import (
+    AttachmentTransportSupport,
     Availability,
     HarnessCapability,
     HarnessContext,
@@ -89,6 +91,32 @@ class CodexCliHarness(BaseHarness):
             supports_attachments=True,
             accepted_attachment_kinds=("image", "text", "workspace_file"),
             attachment_transport=("cli_image_flag", "prompt_path_reference"),
+            attachment_capabilities={
+                "image": AttachmentTransportSupport(
+                    headless=("cli_image_flag",),
+                    native=("cli_image_flag",),
+                    rich=True,
+                    required_cli_capabilities=("--image",),
+                    detail=(
+                        "Images use the capability-probed Codex --image flag for "
+                        "one-shot and native CLI runs; structured app-server image "
+                        "delivery is not claimed."
+                    ),
+                ),
+                "text": AttachmentTransportSupport(
+                    headless=("prompt_path_reference",),
+                    native=("prompt_path_reference",),
+                    detail="Text files are referenced by a contained local path.",
+                ),
+                "workspace_file": AttachmentTransportSupport(
+                    headless=("prompt_path_reference",),
+                    native=("prompt_path_reference",),
+                    detail=(
+                        "Workspace files are referenced by path unless their detected "
+                        "kind is an image eligible for --image."
+                    ),
+                ),
+            },
             supports_native_sessions=True,
             supports_external_history=True,
             default_invocation_mode=HarnessInvocationMode.HEADLESS,
@@ -214,6 +242,19 @@ class CodexCliHarness(BaseHarness):
                 raw={},
                 command=command,
                 error=availability.reason,
+            )
+        attachment_error = attachment_capability_error(
+            request,
+            self.capability_probe().capabilities,
+            surface="structured_thread" if uses_app_server else "headless_one_shot",
+        )
+        if attachment_error is not None:
+            return HarnessResult(
+                ok=False,
+                text="",
+                raw=attachment_raw_metadata(request),
+                command=command,
+                error=attachment_error,
             )
         prepared_context, proxy_events, proxy_error = prepare_proxy_for_agent(
             request,

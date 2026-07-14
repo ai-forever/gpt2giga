@@ -8,6 +8,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
 )
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.types import (
+    AttachmentTransportSupport,
     Availability,
     HarnessCapability,
     HarnessContext,
@@ -38,6 +39,13 @@ class EchoHarness(BaseHarness):
                 "workspace_file",
             ),
             attachment_transport=("metadata_only",),
+            attachment_capabilities={
+                kind: AttachmentTransportSupport(
+                    headless=("metadata_only",),
+                    detail="Echo records metadata and does not deliver attachment content.",
+                )
+                for kind in ("image", "text", "document", "binary", "workspace_file")
+            },
             tags=("local", "test"),
         )
 

@@ -29,6 +29,7 @@ BUILTIN_ADAPTERS = {
 
 EXPECTED_SUPPORT = {
     "codex-cli": {
+        "attachment_transport": "supported",
         "headless_one_shot": "supported",
         "headless_structured_events": "supported",
         "cli_capability_probe": "supported",
@@ -48,6 +49,7 @@ EXPECTED_SUPPORT = {
         "agent_profile_options": "partial",
     },
     "claude-code": {
+        "attachment_transport": "partial",
         "headless_one_shot": "supported",
         "headless_structured_events": "supported",
         "cli_capability_probe": "supported",
@@ -67,6 +69,7 @@ EXPECTED_SUPPORT = {
         "agent_profile_options": "partial",
     },
     "gemini-cli": {
+        "attachment_transport": "partial",
         "headless_one_shot": "supported",
         "headless_structured_events": "supported",
         "cli_capability_probe": "supported",
@@ -104,6 +107,22 @@ def test_builtin_adapter_capability_matrix_is_serialized_from_specs(harness_id):
         == payload["adapter_capabilities"]
     )
     assert all(claim["detail"] for claim in payload["adapter_capabilities"].values())
+
+    attachments = payload["attachment_capabilities"]
+    assert attachments == payload["plugin_metadata"]["attachments"]["capabilities"]
+    assert set(attachments) == set(payload["accepted_attachment_kinds"])
+    assert all(item["detail"] for item in attachments.values())
+    if harness_id == "codex-cli":
+        assert attachments["image"] == {
+            "headless": ["cli_image_flag"],
+            "native": ["cli_image_flag"],
+            "rich": True,
+            "required_cli_capabilities": ["--image"],
+            "detail": attachments["image"]["detail"],
+        }
+    else:
+        assert attachments["image"]["rich"] is False
+        assert "prompt_path_reference" in attachments["image"]["headless"]
 
 
 @pytest.mark.parametrize(

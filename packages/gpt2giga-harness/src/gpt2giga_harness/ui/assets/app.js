@@ -2575,12 +2575,14 @@
     function attachmentWarning(attachment) {
       const harnessId = currentHarnessId();
       const supported = attachment.supported_by || {};
+      const transport = (attachment.transport_by || {})[harnessId] || null;
+      const warning = (attachment.warnings || []).find((item) => String(item).startsWith(`${harnessId} `));
       if (Object.prototype.hasOwnProperty.call(supported, harnessId) && !supported[harnessId]) {
-        const warning = (attachment.warnings || []).find((item) => String(item).startsWith(`${harnessId} `));
         return warning || `${harnessId} does not accept this attachment`;
       }
-      if (attachment.kind === "image" && harnessId === "gemini-cli") {
-        return "path reference only";
+      if (warning) return warning;
+      if (transport && !transport.rich && ["image", "document"].includes(attachment.kind)) {
+        return `${harnessId} reference-only transport`;
       }
       return "";
     }
@@ -6372,6 +6374,12 @@
         lines.push("Render plan");
         const metadata = renderPlan.metadata || {};
         if (metadata.transport) lines.push(`transport: ${metadata.transport}`);
+        if (Array.isArray(metadata.deliveries) && metadata.deliveries.length) {
+          lines.push("deliveries:");
+          for (const delivery of metadata.deliveries) {
+            lines.push(`- ${delivery.kind || "attachment"}: ${delivery.transport || "unknown"} · ${delivery.rich ? "rich" : "reference-only"}`);
+          }
+        }
         if (Array.isArray(renderPlan.warnings) && renderPlan.warnings.length) {
           lines.push("warnings:");
           for (const warning of renderPlan.warnings) lines.push(`- ${warning}`);

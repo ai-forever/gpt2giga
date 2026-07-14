@@ -1,3 +1,4 @@
+import base64
 import os
 import json
 from pathlib import Path
@@ -38,6 +39,8 @@ from gpt2giga_harness.types import (
     REDACTED,
 )
 from gpt2giga_harness.ui.app import create_app
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
 
 def test_native_process_api_start_poll_input_and_stop(tmp_path):
@@ -950,6 +953,54 @@ def test_native_process_api_start_preserves_attachment_render_plan(tmp_path):
         output["run"]["metadata"]["attachment_render_plan"]["prompt_prefix"]
         == metadata["attachment_render_plan"]["prompt_prefix"]
     )
+
+
+def test_native_process_api_rejects_unproven_codex_image_transport(tmp_path):
+    marker = tmp_path / "spawned"
+    script = tmp_path / "marker_cli.py"
+    script.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('spawned')\n",
+        encoding="utf-8",
+    )
+    data_dir = tmp_path / "data"
+    session_store = FilesystemHarnessSessionStore(data_dir)
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(
+            start_script=script,
+            harness_id="codex-cli",
+        ),
+        config=HarnessConfig(data_dir=str(data_dir)),
+        store=session_store,
+    )
+    session = store.create_session(
+        title="Native image",
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+    )
+    attachment = client.post(
+        f"/api/sessions/{session.id}/attachments",
+        json={
+            "filename": "screen.png",
+            "mime_type": "image/png",
+            "data_base64": base64.b64encode(PNG_BYTES).decode("ascii"),
+        },
+    ).json()["attachment"]
+
+    response = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "codex-cli",
+            "prompt": "Inspect",
+            "workspace": str(tmp_path),
+            "attachment_ids": [attachment["id"]],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "--image" in response.json()["detail"]
+    assert marker.exists() is False
 
 
 def test_native_process_api_resume_uses_cached_native_ref(tmp_path):

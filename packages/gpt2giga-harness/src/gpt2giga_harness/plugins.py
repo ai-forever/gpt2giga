@@ -92,6 +92,7 @@ def validate_harness_spec(spec: HarnessSpec) -> HarnessValidationReport:
     issues.extend(_validate_mapping_field(spec, "config_schema"))
     issues.extend(_validate_mapping_field(spec, "metadata"))
     issues.extend(_validate_mapping_field(spec, "adapter_capabilities"))
+    issues.extend(_validate_mapping_field(spec, "attachment_capabilities"))
     issues.extend(_validate_config_schema(getattr(spec, "config_schema", {})))
     ok = not any(issue.level == "error" for issue in issues)
     return HarnessValidationReport(

@@ -59,6 +59,11 @@ def _common_contract() -> dict[str, AdapterCapabilitySupport]:
             "redaction-safe snapshot, resolves secret references only at subprocess "
             "construction, and materializes it into the active temporary CLI home.",
         ),
+        "attachment_transport": _claim(
+            AdapterSupportLevel.PARTIAL,
+            "Attachment delivery is exposed per kind and invocation mode; path-only "
+            "delivery remains explicit when no richer CLI capability is proven.",
+        ),
         "interactive_approvals": _claim(
             AdapterSupportLevel.DELEGATED,
             "Interactive approval prompts remain owned by the external CLI terminal.",
@@ -110,6 +115,12 @@ def codex_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
                 "Applies model, mode, route, workspace, durable timeout/retry budgets, "
                 "capability-proven reasoning effort, and managed MCP tool ids; token "
                 "limits remain unsupported before queueing.",
+            ),
+            "attachment_transport": _claim(
+                AdapterSupportLevel.SUPPORTED,
+                "Images use the version-probed --image flag for one-shot and native "
+                "CLI runs; other files remain path references and structured "
+                "app-server image transport is not claimed.",
             ),
         }
     )

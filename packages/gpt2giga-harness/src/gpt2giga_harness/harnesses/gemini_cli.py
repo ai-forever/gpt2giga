@@ -27,6 +27,7 @@ from gpt2giga_harness.harnesses.agent_cli import (
     workspace_error,
 )
 from gpt2giga_harness.harnesses.attachment_plan import (
+    attachment_capability_error,
     attachment_raw_metadata,
     attachment_warning_events,
     cli_args_from_attachments,
@@ -41,6 +42,7 @@ from gpt2giga_harness.managed_mcp import (
     write_startup_config,
 )
 from gpt2giga_harness.types import (
+    AttachmentTransportSupport,
     Availability,
     HarnessCapability,
     HarnessContext,
@@ -101,6 +103,17 @@ class GeminiCliHarness(BaseHarness):
             supports_attachments=True,
             accepted_attachment_kinds=("text", "workspace_file", "document", "image"),
             attachment_transport=("at_file_reference", "prompt_path_reference"),
+            attachment_capabilities={
+                kind: AttachmentTransportSupport(
+                    headless=("prompt_path_reference", "at_file_reference"),
+                    native=("prompt_path_reference", "at_file_reference"),
+                    detail=(
+                        "Gemini CLI receives a contained path reference; rich image "
+                        "or document transport is not claimed without CLI evidence."
+                    ),
+                )
+                for kind in ("image", "text", "workspace_file", "document")
+            },
             supports_native_sessions=True,
             supports_external_history=True,
             default_invocation_mode=HarnessInvocationMode.NATIVE,
@@ -216,6 +229,19 @@ class GeminiCliHarness(BaseHarness):
                 raw={},
                 command=command,
                 error=availability.reason,
+            )
+        attachment_error = attachment_capability_error(
+            request,
+            self.capability_probe().capabilities,
+            surface="headless_one_shot",
+        )
+        if attachment_error is not None:
+            return HarnessResult(
+                ok=False,
+                text="",
+                raw=attachment_raw_metadata(request),
+                command=command,
+                error=attachment_error,
             )
         prepared_context, proxy_events, proxy_error = prepare_proxy_for_agent(
             request,

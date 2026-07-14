@@ -79,6 +79,17 @@ class AdapterCapabilitySupport:
     detail: str
 
 
+@dataclass(frozen=True)
+class AttachmentTransportSupport:
+    """Describe attachment delivery for one kind without overstating richness."""
+
+    headless: tuple[str, ...] = field(default_factory=tuple)
+    native: tuple[str, ...] = field(default_factory=tuple)
+    rich: bool = False
+    required_cli_capabilities: tuple[str, ...] = field(default_factory=tuple)
+    detail: str = ""
+
+
 class HarnessEventType(str, Enum):
     """Stable event names stored and streamed for harness runs."""
 
@@ -150,6 +161,9 @@ class HarnessSpec:
     supports_attachments: bool = False
     accepted_attachment_kinds: tuple[str, ...] = field(default_factory=tuple)
     attachment_transport: tuple[str, ...] = field(default_factory=tuple)
+    attachment_capabilities: Mapping[str, AttachmentTransportSupport] = field(
+        default_factory=dict
+    )
     supports_native_sessions: bool = False
     supports_external_history: bool = False
     supported_builtin_tools: tuple[GigaChatBuiltinTool, ...] = field(
@@ -427,6 +441,9 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         getattr(spec, "accepted_attachment_kinds", ())
     )
     attachment_transport = _string_values(getattr(spec, "attachment_transport", ()))
+    attachment_capabilities = _attachment_capabilities_to_dict(
+        getattr(spec, "attachment_capabilities", {})
+    )
     supported_builtin_tools = [
         tool.value if isinstance(tool, GigaChatBuiltinTool) else str(tool)
         for tool in getattr(spec, "supported_builtin_tools", ())
@@ -467,6 +484,7 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         "supports_attachments": spec.supports_attachments,
         "accepted_attachment_kinds": accepted_attachment_kinds,
         "attachment_transport": attachment_transport,
+        "attachment_capabilities": attachment_capabilities,
         "supports_native_sessions": spec.supports_native_sessions,
         "supports_external_history": spec.supports_external_history,
         "supported_builtin_tools": supported_builtin_tools,
@@ -502,6 +520,7 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
                 "supported": spec.supports_attachments,
                 "accepted_kinds": accepted_attachment_kinds,
                 "transport": attachment_transport,
+                "capabilities": attachment_capabilities,
             },
             "builtin_tools": supported_builtin_tools,
             "protocol_capability_scope": protocol_capability_scope,
@@ -565,6 +584,38 @@ def _adapter_capabilities_to_dict(value: Any) -> dict[str, dict[str, str]]:
             detail = ""
         serialized[name] = {
             "status": status.value,
+            "detail": str(redact_secrets(detail)),
+        }
+    return serialized
+
+
+def _attachment_capabilities_to_dict(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        return {}
+    serialized: dict[str, dict[str, Any]] = {}
+    for raw_kind, raw_support in value.items():
+        kind = _optional_text(raw_kind)
+        if kind is None:
+            continue
+        if isinstance(raw_support, AttachmentTransportSupport):
+            headless = raw_support.headless
+            native = raw_support.native
+            rich = raw_support.rich
+            required = raw_support.required_cli_capabilities
+            detail = raw_support.detail
+        elif isinstance(raw_support, Mapping):
+            headless = raw_support.get("headless", ())
+            native = raw_support.get("native", ())
+            rich = bool(raw_support.get("rich", False))
+            required = raw_support.get("required_cli_capabilities", ())
+            detail = str(raw_support.get("detail") or "")
+        else:
+            continue
+        serialized[kind] = {
+            "headless": _string_values(headless),
+            "native": _string_values(native),
+            "rich": bool(rich),
+            "required_cli_capabilities": _string_values(required),
             "detail": str(redact_secrets(detail)),
         }
     return serialized

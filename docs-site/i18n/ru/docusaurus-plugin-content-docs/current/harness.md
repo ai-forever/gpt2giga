@@ -445,6 +445,17 @@ command или plan metadata. Повторный browser submit с тем же k
 после перезагрузки UI. Старая версия Gemini без подтверждённого flag завершается
 явной ошибкой до spawn, а не открывает пустой terminal.
 
+Attachment capability теперь описывается по типу файла и transport отдельно для
+headless и native. У Codex изображение передаётся через `--image` только после
+успешной version-aware проверки этого флага; обычные файлы остаются безопасными
+path references, а rich image transport через app-server не заявляется. Claude
+Code и Gemini CLI получают изображения и документы только как ограниченные
+ссылки на путь, пока установленная версия CLI не докажет более богатый transport.
+UI, Smart Router и render-plan показывают это как `reference-only`, а не как
+полноценную multimodal-доставку. Legacy-поля `supports_attachments` и
+`accepted_attachment_kinds` сохранены для совместимости плагинов, но больше не
+используются как доказательство rich transport.
+
 Проверьте:
 
 - доступен ли proxy по `GPT2GIGA_HARNESS_PROXY_URL`;

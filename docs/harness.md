@@ -1519,9 +1519,17 @@ The selected harness determines the render plan:
 |---|---|
 | `echo` | Reports attachment metadata and events without credentials. |
 | `direct-chat` | Uses OpenAI-style image content parts for stored images and inlines small text files with truncation warnings. Workspace files are referenced by path. |
-| `codex-cli` | Passes images separately with the Codex `--image` flag. Non-image files remain safe path or `@file` prompt references. |
-| `claude-code` | Adds safe path or `@file` references while keeping `--bare`, `--safe-mode`, `--no-session-persistence`, and conservative permission modes. |
-| `gemini-cli` | Adds `@file` or path references and warns when images are path-only. |
+| `codex-cli` | Passes images separately with the Codex `--image` flag only when the installed CLI probe proves that flag. Non-image files remain safe path or `@file` prompt references. Structured app-server image delivery is not claimed. |
+| `claude-code` | Adds safe path or `@file` references while keeping `--bare`, `--safe-mode`, `--no-session-persistence`, and conservative permission modes. Images and documents remain explicitly path-only because no richer CLI transport is currently proven. |
+| `gemini-cli` | Adds `@file` or path references. Images and documents remain explicitly path-only because no richer CLI transport is currently proven. |
+
+Harness specs expose `attachment_capabilities` per attachment kind. Each entry
+separates headless and native transports, whether delivery is rich, any required
+version-probed CLI capability, and a human-readable boundary. The legacy
+`supports_attachments`, `accepted_attachment_kinds`, and `attachment_transport`
+fields remain for plugin compatibility, but they do not imply rich multimodal
+delivery. Render plans and provenance record one delivery entry per attachment,
+including its actual transport and `rich` versus reference-only status.
 
 Use dry-run to inspect what would be sent without launching an external CLI or
 calling the upstream proxy:
@@ -1566,6 +1574,10 @@ Codex dry-run with image:
 Claude Code with workspace file:
   type @src/foo.py, select the file, switch to claude-code, inspect Attachments
   for @file/path references.
+
+Claude Code with image or PDF:
+  inspect the attachment warning and render-plan delivery; both remain contained
+  path references rather than claimed multimodal/document upload.
 
 Gemini CLI with @file:
   type @src/foo.py, select the file, switch to gemini-cli, inspect Attachments
