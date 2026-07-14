@@ -5,6 +5,11 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.2.3a2] - 2026-07-14
+
+### Исправлено
+- **Закрепление модели Claude Code**: доверенные запросы Claude CLI из Harness теперь сохраняют выбранную upstream-модель GigaChat для Anthropic Messages и `count_tokens` в режимах GigaChat v1/v2 и при учёте лимитов конкурентности, не меняя модель в публичном Anthropic-ответе.
+
 ## [0.2.3a1] - 2026-07-13
 
 ### Добавлено
@@ -477,6 +482,7 @@
 
 ---
 
+[0.2.3a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a1...v0.2.3a2
 [0.2.3a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.2a1...v0.2.3a1
 [0.2.2a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.1a1...v0.2.2a1
 [0.2.1a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a2...v0.2.1a1
