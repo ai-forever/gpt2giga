@@ -234,11 +234,18 @@ def _write_codex_config(
     context: HarnessContext,
 ) -> None:
     model = request.model or context.default_model or "GigaChat"
+    options = request.extra.get("agent_adapter_options")
+    reasoning_effort = (
+        str(options.get("reasoning_effort"))
+        if isinstance(options, Mapping)
+        and options.get("reasoning_effort") in {"none", "low", "medium", "high"}
+        else "none"
+    )
     base_url = context.api_base_url(request.api_mode)
     config = (
         f'model = "{_toml_escape(model)}"\n'
         'model_provider = "gpt2giga_harness"\n'
-        'model_reasoning_effort = "none"\n\n'
+        f'model_reasoning_effort = "{reasoning_effort}"\n\n'
         "[model_providers.gpt2giga_harness]\n"
         'name = "gpt2giga_harness"\n'
         f'base_url = "{_toml_escape(base_url)}"\n'

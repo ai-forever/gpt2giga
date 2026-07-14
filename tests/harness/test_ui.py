@@ -30,6 +30,8 @@ def test_ui_assets_load_from_package_resources():
     assert load_asset("index.html").startswith(b"<!doctype html>")
     assert load_asset("favicon.ico").startswith(b"\x00\x00\x01\x00")
     assert "function boot()" in APP_JS
+    assert "function agentPlanSummary(agent)" in APP_JS
+    assert "executable with current adapter options" in APP_JS
     assert ".app {" in APP_CSS
     with pytest.raises(UIAssetNotFoundError):
         load_asset("missing.js")
@@ -59,7 +61,7 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.37"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.38"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200

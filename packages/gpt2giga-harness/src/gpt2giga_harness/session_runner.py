@@ -837,6 +837,11 @@ class HarnessSessionRunner:
                 if isinstance(payload.get("agent_profile_snapshot"), Mapping)
                 else None
             ),
+            "agent_execution_plan": (
+                dict(payload["agent_execution_plan"])
+                if isinstance(payload.get("agent_execution_plan"), Mapping)
+                else None
+            ),
         }
 
     def _build_request_messages(
@@ -995,10 +1000,14 @@ def _agent_metadata(options: Mapping[str, Any]) -> dict[str, Any]:
     snapshot = options.get("agent_profile_snapshot")
     if agent_id is None or not isinstance(snapshot, Mapping):
         return {}
-    return {
+    metadata = {
         "agent_id": agent_id,
         "agent_profile_snapshot": dict(snapshot),
     }
+    execution_plan = options.get("agent_execution_plan")
+    if isinstance(execution_plan, Mapping):
+        metadata["agent_execution_plan"] = dict(execution_plan)
+    return metadata
 
 
 def _request_extra(

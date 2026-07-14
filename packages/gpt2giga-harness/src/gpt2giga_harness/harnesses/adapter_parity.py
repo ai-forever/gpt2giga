@@ -98,6 +98,12 @@ def codex_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
                 "Managed resume works after history discovery reconciles a native session "
                 "id; the execution snapshot is preserved once that id is reconciled.",
             ),
+            "agent_profile_options": _claim(
+                AdapterSupportLevel.PARTIAL,
+                "Applies model, mode, route, workspace, durable timeout/retry budgets, "
+                "and capability-proven reasoning effort; token and tool-list limits are "
+                "reported unsupported before queueing.",
+            ),
         }
     )
     return contract
@@ -126,6 +132,12 @@ def claude_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
                 AdapterSupportLevel.SUPPORTED,
                 "Uses a deterministic managed session name and preserves its immutable "
                 "execution snapshot for immediate native resume.",
+            ),
+            "agent_profile_options": _claim(
+                AdapterSupportLevel.PARTIAL,
+                "Applies model, mode, route, workspace, durable timeout/retry budgets, "
+                "and capability-proven effort plus allowed/disallowed tool restrictions; "
+                "token limits are reported unsupported before queueing.",
             ),
         }
     )
@@ -156,6 +168,12 @@ def gemini_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
                 AdapterSupportLevel.PARTIAL,
                 "Managed resume works after history discovery reconciles a native session "
                 "id; the execution snapshot is preserved once that id is reconciled.",
+            ),
+            "agent_profile_options": _claim(
+                AdapterSupportLevel.PARTIAL,
+                "Applies model, mode, route, workspace, and durable timeout/retry budgets; "
+                "reasoning effort, token limits, and tool-list restrictions are reported "
+                "unsupported before queueing.",
             ),
         }
     )

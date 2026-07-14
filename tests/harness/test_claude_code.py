@@ -94,6 +94,26 @@ def test_claude_code_stream_command_uses_partial_stream_json():
     assert "--include-hook-events" not in command
 
 
+def test_claude_code_applies_fixed_agent_effort_and_tool_restrictions():
+    command = ClaudeCodeHarness().build_command(
+        HarnessRequest(
+            prompt="inspect",
+            extra={
+                "agent_adapter_options": {
+                    "reasoning_effort": "high",
+                    "allowed_tools": ["Read", "Bash(git status)"],
+                    "disallowed_tools": ["Edit"],
+                }
+            },
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert command[command.index("--effort") + 1] == "high"
+    assert command[command.index("--allowedTools") + 1] == ("Read,Bash(git status)")
+    assert command[command.index("--disallowedTools") + 1] == "Edit"
+
+
 def test_claude_stream_parser_normalizes_partial_text_tools_and_usage():
     parser = _ClaudeStreamParser()
     payloads = (

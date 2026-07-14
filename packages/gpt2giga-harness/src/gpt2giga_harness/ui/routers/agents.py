@@ -10,8 +10,10 @@ from starlette.concurrency import run_in_threadpool
 import yaml
 
 from gpt2giga_harness.agents import (
+    agent_execution_plan_to_dict,
     agent_profile_to_dict,
     agent_run_payload,
+    build_agent_execution_plan,
     discover_agent_profiles,
     draft_agent_profile,
     load_agent_profile,
@@ -36,7 +38,7 @@ async def agent_list(
     profiles, errors = discover_agent_profiles(project.root)
     return {
         "project": project_to_dict(project),
-        "agents": [agent_profile_to_dict(profile) for profile in profiles],
+        "agents": [_profile_payload(request, profile) for profile in profiles],
         "errors": [error.__dict__ for error in errors],
     }
 
@@ -61,20 +63,23 @@ async def agent_detail(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
-        "profile": agent_profile_to_dict(profile),
+        "profile": _profile_payload(request, profile),
         "source": source,
         "project_root": str(project_root),
     }
 
 
 @router.post("/api/agents/validate")
-async def agent_validate(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+async def agent_validate(
+    request: Request,
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
     """Validate AgentProfile YAML without reading or writing a project file."""
     try:
         profile = parse_agent_profile(str(payload.get("content") or ""))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"valid": True, "profile": agent_profile_to_dict(profile)}
+    return {"valid": True, "profile": _profile_payload(request, profile)}
 
 
 @router.post("/api/agents/{agent_id}/draft")
@@ -97,7 +102,7 @@ async def agent_draft(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
-        "profile": agent_profile_to_dict(draft.value),
+        "profile": _profile_payload(request, draft.value),
         "relative_path": draft.relative_path,
         "source_hash": draft.source_hash,
         "redacted_diff": draft.redacted_diff,
@@ -127,7 +132,7 @@ async def agent_apply(
     return {
         "applied": True,
         "source_hash": new_hash,
-        "profile": agent_profile_to_dict(draft.value),
+        "profile": _profile_payload(request, draft.value),
     }
 
 
@@ -161,7 +166,7 @@ async def agent_duplicate(
         "content": content,
         "source_hash": draft.source_hash,
         "redacted_diff": draft.redacted_diff,
-        "profile": agent_profile_to_dict(draft.value),
+        "profile": _profile_payload(request, draft.value),
     }
 
 
@@ -179,8 +184,14 @@ async def agent_run(
     try:
         profile = load_agent_profile(project.root, agent_id)
         registry = request.app.state.harness_registry
-        registry.get(profile.harness_id)
-        run_payload = agent_run_payload(profile, prompt, workspace=project.root)
+        harness = registry.get(profile.harness_id)
+        run_payload = agent_run_payload(
+            profile,
+            prompt,
+            workspace=project.root,
+            harness=harness,
+            default_timeout_seconds=request.app.state.harness_config.timeout_seconds,
+        )
         runner = request.app.state.harness_session_runner
         session = runner.create_session(
             title=title_from_prompt(prompt),
@@ -211,7 +222,8 @@ async def agent_run(
     return {
         "session": {"id": session.id, "title": session.title},
         "run": run_to_dict(submission.queued.run),
-        "profile": agent_profile_to_dict(profile),
+        "profile": _profile_payload(request, profile),
+        "execution_plan": run_payload["agent_execution_plan"],
         "stream_url": f"/api/runs/{submission.queued.run.id}/events/stream",
     }
 
@@ -224,6 +236,33 @@ def _project(request: Request, workspace: Any):
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _profile_payload(request: Request, profile: Any) -> dict[str, Any]:
+    payload = agent_profile_to_dict(profile)
+    try:
+        harness = request.app.state.harness_registry.get(profile.harness_id)
+    except KeyError:
+        payload["execution_plan"] = {
+            "schema_version": 1,
+            "harness_id": profile.harness_id,
+            "invocation_mode": profile.invocation_mode,
+            "queueable": False,
+            "binary_version": None,
+            "capability_evidence": None,
+            "options": {},
+            "adapter_options": {},
+            "errors": [f"Unknown harness: {profile.harness_id}"],
+            "warnings": [],
+        }
+        return payload
+    plan = build_agent_execution_plan(
+        profile,
+        harness,
+        default_timeout_seconds=request.app.state.harness_config.timeout_seconds,
+    )
+    payload["execution_plan"] = agent_execution_plan_to_dict(plan)
+    return payload
 
 
 def _optional_text(value: Any) -> str | None:

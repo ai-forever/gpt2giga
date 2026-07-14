@@ -15,7 +15,11 @@ from uuid import uuid4
 
 import yaml
 
-from gpt2giga_harness.agents import agent_run_payload, load_agent_profile
+from gpt2giga_harness.agents import (
+    agent_run_payload,
+    apply_agent_run_overrides,
+    load_agent_profile,
+)
 from gpt2giga_harness.arena import FilesystemHarnessArenaStore, queue_arena
 from gpt2giga_harness.evals import (
     FilesystemHarnessEvalStore,
@@ -834,7 +838,13 @@ class WorkflowCoordinator:
         if step.kind is WorkflowStepKind.AGENT:
             profile = load_agent_profile(self.project.root, step.agent_id or "")
             prompt = _render_step_prompt(step, run.inputs, dependencies)
-            payload = agent_run_payload(profile, prompt, workspace=self.project.root)
+            payload = agent_run_payload(
+                profile,
+                prompt,
+                workspace=self.project.root,
+                harness=self.runner.registry.get(profile.harness_id),
+                default_timeout_seconds=self.runner.config.timeout_seconds,
+            )
             if profile.mode == "edit":
                 # Agent teams never share the source checkout or another agent's
                 # worktree, even if a profile was authored with a weaker policy.
@@ -859,6 +869,15 @@ class WorkflowCoordinator:
                         "workspace_policy": "worktree",
                     }
                 )
+            payload = apply_agent_run_overrides(
+                payload,
+                workspace_policy=str(payload.get("workspace_policy") or "auto"),
+                permission_profile=str(
+                    payload.get("permission_profile") or "interactive"
+                ),
+                timeout_seconds=payload.get("timeout_seconds"),
+                max_attempts=int(payload.get("max_attempts") or 1),
+            )
             submission = self.dispatcher.submit(
                 run.session_id,
                 payload,

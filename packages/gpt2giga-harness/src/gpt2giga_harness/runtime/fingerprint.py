@@ -29,6 +29,7 @@ def build_worker_fingerprint(registry: HarnessRegistry) -> dict[str, Any]:
         resolution = _executable_resolution(harness)
         binary_path = resolution.executable if resolution is not None else None
         probe = _capability_probe(harness)
+        profile_features = _agent_profile_features(spec.id, probe)
         harnesses[spec.id] = {
             "available": availability.status is AvailabilityStatus.AVAILABLE,
             "kind": spec.kind,
@@ -45,6 +46,7 @@ def build_worker_fingerprint(registry: HarnessRegistry) -> dict[str, Any]:
                 "streaming": capabilities.streaming,
                 "cancellation": capabilities.cancellation,
                 "synchronous_fallback": capabilities.synchronous_fallback,
+                **profile_features,
             },
         }
     return {
@@ -66,6 +68,25 @@ def _executable_resolution(harness: Any) -> Any | None:
 def _capability_probe(harness: Any) -> Any | None:
     probe = getattr(harness, "capability_probe", None)
     return probe() if callable(probe) else None
+
+
+def _agent_profile_features(harness_id: str, probe: Any | None) -> dict[str, bool]:
+    capabilities = getattr(probe, "capabilities", {})
+    if not isinstance(capabilities, dict):
+        capabilities = dict(capabilities) if capabilities is not None else {}
+    return {
+        "agent_reasoning_effort": bool(
+            capabilities.get("--config" if harness_id == "codex-cli" else "--effort")
+            if harness_id in {"codex-cli", "claude-code"}
+            else False
+        ),
+        "agent_allowed_tools": bool(
+            harness_id == "claude-code" and capabilities.get("--allowedTools")
+        ),
+        "agent_disallowed_tools": bool(
+            harness_id == "claude-code" and capabilities.get("--disallowedTools")
+        ),
+    }
 
 
 def _distribution_version(distribution: str) -> str:

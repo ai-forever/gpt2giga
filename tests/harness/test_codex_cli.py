@@ -5,6 +5,7 @@ from gpt2giga_harness.harnesses.agent_cli import run_streaming_command
 from gpt2giga_harness.harnesses.codex_cli import (
     CodexCliHarness,
     _CodexStreamParser,
+    _write_codex_config,
 )
 from gpt2giga_harness.native import HarnessInvocationMode
 from gpt2giga_harness.types import (
@@ -128,6 +129,21 @@ def test_codex_cli_stream_command_uses_json_events():
         HarnessRequest(prompt="x"),
         HarnessContext(proxy_url="http://127.0.0.1:8090"),
     )
+
+
+def test_codex_cli_applies_fixed_agent_reasoning_config(tmp_path):
+    home = tmp_path / ".codex"
+
+    _write_codex_config(
+        home,
+        HarnessRequest(
+            prompt="inspect",
+            extra={"agent_adapter_options": {"reasoning_effort": "high"}},
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert 'model_reasoning_effort = "high"' in (home / "config.toml").read_text()
 
 
 def test_codex_stream_parser_normalizes_message_tool_and_usage():

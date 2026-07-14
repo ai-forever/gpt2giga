@@ -438,9 +438,10 @@ after reviewing the filled request.
 Project agents are reusable role/configuration profiles over existing harnesses.
 They live in `.giga/agents/*.yaml`; `giga init` creates Planner, Explorer,
 Implementer, Reviewer, Test Runner, and Release Assistant starters. Profiles can
-bind instructions, harness/model/reasoning effort/route, context and memory selectors, MCP tool
-descriptor ids, permission/workspace policy, budgets, and an expected artifact.
-They never contain literal secrets or paths that escape the project.
+bind instructions, harness/model/reasoning effort/route, context and memory
+selectors, MCP tool descriptor ids, fixed allow/deny tool selectors,
+permission/workspace policy, budgets, and an expected artifact. They never
+contain literal secrets, arbitrary CLI flags, or paths that escape the project.
 
 ```bash
 giga agent list --workspace .
@@ -455,10 +456,30 @@ Apply. Duplicate creates a draft until Apply is selected. The same reusable
 project authoring service is intended for later Workflow Builder and Schedule
 Wizard surfaces; those features must not write project YAML directly.
 
-`Run as Agent` submits a normal durable manual job. Each run stores an immutable
-redacted `agent_profile_snapshot` and `agent_id`, so later YAML edits do not
-rewrite history. Live activity remains in Work and Runs rather than being
-duplicated in Agent Studio.
+`Run as Agent` submits a normal durable manual job. Agent Studio resolves every
+operational field into an `effective`, `delegated`, or `unsupported` execution
+outcome before queueing. The API and each run store the immutable redacted
+`agent_profile_snapshot`, `agent_execution_plan`, requested/effective values,
+enforcement source, and `agent_id`, so later YAML edits do not rewrite history.
+Unsupported safety or budget options block queueing; provenance-only selectors
+produce explicit warnings. Live activity remains in Work and Runs rather than
+being duplicated in Agent Studio.
+
+Current headless option contract:
+
+| Profile option | Codex CLI | Claude Code | Gemini CLI |
+| --- | --- | --- | --- |
+| model, route, mode, workspace/permission policy | effective | effective | effective |
+| timeout and retry attempts | Harness-enforced | Harness-enforced | Harness-enforced |
+| `reasoning_effort` | capability-proven config | capability-proven `--effort` | unsupported |
+| `allowed_tools` / `disallowed_tools` | unsupported | capability-proven fixed flags | unsupported |
+| `max_tokens` | unsupported | unsupported | unsupported |
+
+`max_concurrency: 1` describes a standalone agent run; larger fan-out belongs
+to a Workflow or Schedule coordinator. `tool_ids`, prompt files, skills, and
+context/memory selectors remain visible as unsupported provenance until their
+reviewed headless materialization slices land. Tool selectors are values for
+fixed adapter flags and can never inject additional flags.
 
 Authenticated APIs:
 

@@ -24,7 +24,7 @@ def test_worker_fingerprint_uses_resolved_user_executable(tmp_path):
     executable.parent.mkdir()
     executable.write_text(
         '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex 1.2.3"; '
-        'else echo "--json --sandbox --ephemeral --image"; fi\n',
+        'else echo "--json --sandbox --ephemeral --image --config"; fi\n',
         encoding="utf-8",
     )
     executable.chmod(0o755)
@@ -45,3 +45,5 @@ def test_worker_fingerprint_uses_resolved_user_executable(tmp_path):
     assert codex["binary_source"] == "user_config"
     assert codex["binary_version"] == "codex 1.2.3"
     assert codex["compatibility"]["status"] == "supported"
+    assert codex["features"]["agent_reasoning_effort"] is True
+    assert codex["features"]["agent_allowed_tools"] is False

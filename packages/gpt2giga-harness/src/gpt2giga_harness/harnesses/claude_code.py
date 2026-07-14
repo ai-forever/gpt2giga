@@ -146,6 +146,7 @@ class ClaudeCodeHarness(BaseHarness):
         stream_args = (
             ("--include-partial-messages", "--verbose") if request.stream else ()
         )
+        profile_args = _agent_profile_args(request)
         return (
             *executable_argv,
             "--bare",
@@ -159,6 +160,7 @@ class ClaudeCodeHarness(BaseHarness):
             "--no-session-persistence",
             "--permission-mode",
             permission_mode,
+            *profile_args,
             *cli_args_from_attachments(request),
             prompt,
         )
@@ -261,6 +263,36 @@ class ClaudeCodeHarness(BaseHarness):
 
 def _write_claude_settings(home: Path) -> None:
     write_startup_config("claude-code", home, {})
+
+
+def _agent_profile_args(request: HarnessRequest) -> tuple[str, ...]:
+    """Return only fixed, validated AgentProfile CLI options."""
+    options = request.extra.get("agent_adapter_options")
+    if not isinstance(options, Mapping):
+        return ()
+    args: list[str] = []
+    effort = options.get("reasoning_effort")
+    if effort in {"low", "medium", "high"}:
+        args.extend(("--effort", str(effort)))
+    for name, flag in (
+        ("allowed_tools", "--allowedTools"),
+        ("disallowed_tools", "--disallowedTools"),
+    ):
+        values = options.get(name)
+        if not isinstance(values, list):
+            continue
+        safe_values = [
+            value
+            for value in values
+            if isinstance(value, str)
+            and value
+            and len(value) <= 200
+            and not value.startswith("-")
+            and not any(character in value for character in ("\x00", "\n", "\r"))
+        ]
+        if safe_values and len(safe_values) == len(values):
+            args.extend((flag, ",".join(safe_values)))
+    return tuple(args)
 
 
 class _ClaudeStreamParser:

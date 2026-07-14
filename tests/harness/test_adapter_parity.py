@@ -45,6 +45,7 @@ EXPECTED_SUPPORT = {
         "interactive_approvals": "delegated",
         "external_history": "partial",
         "structured_app_server": "unsupported",
+        "agent_profile_options": "partial",
     },
     "claude-code": {
         "headless_one_shot": "supported",
@@ -63,6 +64,7 @@ EXPECTED_SUPPORT = {
         "interactive_approvals": "delegated",
         "external_history": "partial",
         "structured_app_server": "unsupported",
+        "agent_profile_options": "partial",
     },
     "gemini-cli": {
         "headless_one_shot": "supported",
@@ -81,6 +83,7 @@ EXPECTED_SUPPORT = {
         "interactive_approvals": "delegated",
         "external_history": "partial",
         "structured_app_server": "unsupported",
+        "agent_profile_options": "partial",
     },
 }
 

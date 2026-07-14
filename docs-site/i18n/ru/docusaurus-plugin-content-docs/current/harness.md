@@ -210,6 +210,28 @@ giga ui --no-start-worker
 | Tools | Discovery и проверка MCP, preview/apply/rollback управляемой конфигурации. |
 | Scheduled | Проверяемые расписания, история occurrences и Attention Inbox. |
 
+## Эффективные параметры Agent Profiles
+
+Перед постановкой `Run as Agent` в durable queue Agent Studio раскладывает
+каждое исполняемое поле профиля на `effective`, `delegated` или `unsupported` и
+показывает источник enforcement. В run сохраняются неизменяемые redacted
+`agent_profile_snapshot` и `agent_execution_plan` с requested/effective
+значениями. Неподдерживаемые safety- и budget-параметры блокируют queueing, а
+provenance-only selectors дают явное предупреждение.
+
+| Параметр профиля | Codex CLI | Claude Code | Gemini CLI |
+| --- | --- | --- | --- |
+| model, route, mode, workspace/permission policy | effective | effective | effective |
+| timeout и retry attempts | enforced by Harness | enforced by Harness | enforced by Harness |
+| `reasoning_effort` | capability-proven config | capability-proven `--effort` | unsupported |
+| `allowed_tools` / `disallowed_tools` | unsupported | capability-proven fixed flags | unsupported |
+| `max_tokens` | unsupported | unsupported | unsupported |
+
+`max_concurrency` больше 1 относится к coordinator уровня Workflow или
+Schedule. `tool_ids`, prompt files, skills и context/memory selectors пока
+сохраняются как явно unsupported provenance до отдельных slices их безопасной
+materialization. Профиль не принимает произвольные CLI flags или secret literals.
+
 ## Безопасный edit-сценарий
 
 1. Сначала выполните задачу в `plan` или `read` либо используйте `--dry-run`.

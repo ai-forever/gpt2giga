@@ -33,14 +33,15 @@ def clear_probe_cache():
         (
             "codex-cli",
             "codex-cli 0.144.3",
-            "exec --json --sandbox --ephemeral --image",
+            "exec --json --sandbox --ephemeral --image --config --strict-config",
             "codex-exec-jsonl-v1",
         ),
         (
             "claude-code",
             "2.1.197 (Claude Code)",
             "--output-format stream-json --permission-mode "
-            "--no-session-persistence --include-partial-messages --resume",
+            "--no-session-persistence --include-partial-messages --resume "
+            "--effort --allowedTools --disallowedTools",
             "claude-stream-json-v1",
         ),
         (

@@ -1522,10 +1522,17 @@ def _handle_agent_validate(args: argparse.Namespace, config: HarnessConfig) -> i
 def _handle_agent_profile_run(args: argparse.Namespace, config: HarnessConfig) -> int:
     project = resolve_project(args.workspace, data_dir=config.data_dir)
     profile = load_agent_profile(project.root, args.agent_id)
-    payload = agent_run_payload(profile, args.prompt, workspace=project.root)
+    registry = create_default_registry()
+    payload = agent_run_payload(
+        profile,
+        args.prompt,
+        workspace=project.root,
+        harness=registry.get(profile.harness_id),
+        default_timeout_seconds=config.timeout_seconds,
+    )
     payload["dry_run"] = args.dry_run
     runner = HarnessSessionRunner(
-        registry=create_default_registry(),
+        registry=registry,
         config=config,
         store=FilesystemHarnessSessionStore(config.data_dir),
     )

@@ -572,9 +572,20 @@
       }
       state.agents = Array.isArray(result.data.agents) ? result.data.agents : [];
       state.agentErrors = Array.isArray(result.data.errors) ? result.data.errors : [];
-      setText("agents-center-status", `${state.agents.length} reusable profiles · immutable snapshots on runs`);
+      const executable = state.agents.filter((agent) => agent.execution_plan && agent.execution_plan.queueable).length;
+      setText("agents-center-status", `${state.agents.length} reusable profiles · ${executable} executable with current adapter options`);
       renderAgentsCenter();
       return true;
+    }
+
+    function agentPlanSummary(agent) {
+      const plan = agent && agent.execution_plan ? agent.execution_plan : {};
+      const options = plan.options && typeof plan.options === "object" ? Object.values(plan.options) : [];
+      const counts = { effective: 0, delegated: 0, unsupported: 0 };
+      for (const option of options) {
+        if (option && Object.prototype.hasOwnProperty.call(counts, option.status)) counts[option.status] += 1;
+      }
+      return { plan, counts };
     }
 
     function renderAgentsCenter() {
@@ -589,11 +600,12 @@
         errors.appendChild(row);
       }
       for (const agent of state.agents) {
+        const { plan, counts } = agentPlanSummary(agent);
         const card = document.createElement("button");
         card.type = "button";
         card.className = "agent-card";
         card.classList.toggle("active", state.selectedAgent && state.selectedAgent.id === agent.id);
-        card.innerHTML = `<span><strong>${escapeHtml(agent.title)}</strong><small>${escapeHtml(agent.description || agent.instructions)}</small></span><span class="badge info">${escapeHtml(agent.mode)}</span><span class="runs-center-item-meta">${escapeHtml(agent.harness_id)} · ${escapeHtml(agent.workspace_policy)} · ${escapeHtml(agent.permission_profile)}</span>`;
+        card.innerHTML = `<span><strong>${escapeHtml(agent.title)}</strong><small>${escapeHtml(agent.description || agent.instructions)}</small></span><span class="badge ${plan.queueable ? "info" : "warning"}">${plan.queueable ? "executable" : "review options"}</span><span class="runs-center-item-meta">${escapeHtml(agent.harness_id)} · ${counts.effective} effective · ${counts.delegated} delegated · ${counts.unsupported} unsupported</span>`;
         card.addEventListener("click", () => selectAgent(agent.id));
         list.appendChild(card);
       }
@@ -612,17 +624,20 @@
         return;
       }
       state.selectedAgent = result.data.profile;
+      const { plan, counts } = agentPlanSummary(state.selectedAgent);
       state.agentDraft = null;
       byId("agent-source-input").value = result.data.source || "";
       byId("agent-source-input").disabled = false;
       byId("agent-run-prompt").disabled = false;
       byId("validate-agent-button").disabled = false;
       byId("duplicate-agent-button").disabled = false;
-      byId("run-agent-button").disabled = false;
+      byId("run-agent-button").disabled = !plan.queueable;
       byId("apply-agent-button").disabled = true;
       byId("agent-diff-panel").hidden = true;
       setText("agent-editor-title", state.selectedAgent.title);
-      setText("agent-editor-meta", `${state.selectedAgent.id} · ${state.selectedAgent.harness_id} · source ${String(state.selectedAgent.source_hash || "").slice(0, 12)}`);
+      setText("agent-editor-meta", `${state.selectedAgent.id} · ${state.selectedAgent.harness_id} · ${counts.effective} effective · ${counts.delegated} delegated · ${counts.unsupported} unsupported · source ${String(state.selectedAgent.source_hash || "").slice(0, 12)}`);
+      const planMessages = [...(plan.errors || []), ...(plan.warnings || [])];
+      setText("agents-center-status", planMessages.length ? planMessages.join(" · ") : "All requested profile options have an explicit execution outcome.");
       renderAgentsCenter();
     }
 

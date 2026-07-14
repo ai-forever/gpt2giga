@@ -77,3 +77,29 @@ def test_agent_api_duplicates_as_preview_and_runs_with_snapshot(tmp_path):
     assert (
         run.json()["run"]["metadata"]["agent_profile_snapshot"]["title"] == "Reviewer"
     )
+    plan = run.json()["run"]["metadata"]["agent_execution_plan"]
+    assert plan["queueable"] is True
+    assert plan["options"]["budgets.max_attempts"]["effective"] == 1
+
+
+def test_agent_api_rejects_unsupported_options_before_creating_a_run(tmp_path):
+    client, workspace = _client(tmp_path)
+    path = workspace / ".giga" / "agents" / "reviewer.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "budgets:\n",
+            "budgets:\n  max_tokens: 512\n",
+        ),
+        encoding="utf-8",
+    )
+
+    detail = client.get("/api/agents/reviewer", params={"workspace": str(workspace)})
+    run = client.post(
+        "/api/agents/reviewer/run",
+        json={"workspace": str(workspace), "prompt": "Review the patch"},
+    )
+
+    assert detail.status_code == 200
+    assert detail.json()["profile"]["execution_plan"]["queueable"] is False
+    assert run.status_code == 400
+    assert "max_tokens cannot be enforced" in run.json()["detail"]
