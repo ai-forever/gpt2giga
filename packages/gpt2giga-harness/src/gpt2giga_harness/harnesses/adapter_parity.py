@@ -81,9 +81,15 @@ def codex_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
     contract.update(
         {
             "headless_continuity": _claim(
-                AdapterSupportLevel.PARTIAL,
-                "Replays normalized history into a fresh codex exec --ephemeral prompt; "
-                "native_session_id is not consumed and this is not native continuity.",
+                AdapterSupportLevel.SUPPORTED,
+                "Uses a supervised Codex app-server thread for repeated turns when the "
+                "capability probe succeeds; codex exec history replay remains an "
+                "explicit degraded fallback.",
+            ),
+            "structured_app_server": _claim(
+                AdapterSupportLevel.SUPPORTED,
+                "Maps Harness sessions, turns, forks, cancellation, and reconnect to "
+                "the version-probed Codex app-server JSON-RPC protocol.",
             ),
             "native_initial_prompt": _claim(
                 AdapterSupportLevel.SUPPORTED,

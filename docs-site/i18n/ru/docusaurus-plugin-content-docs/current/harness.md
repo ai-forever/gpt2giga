@@ -322,6 +322,9 @@ giga harness inspect codex-cli --json
 `delegated` и `unsupported`, поэтому `giga harness inspect --json` и
 `/api/harnesses` явно показывают ограничения continuity, native policy, доставки
 первого prompt и managed tools.
+Отдельное поле `headless_continuation` сообщает фактическую стратегию:
+`structured_thread`, `structured_replay`, `native_cli_resume`,
+`degraded_replay`, `one_shot` или `unsupported`.
 
 Перед тем как считать Codex CLI, Claude Code или Gemini CLI доступным, Harness
 выполняет ограниченные `--version` и `--help` probes во временном изолированном
@@ -333,6 +336,37 @@ cockpit. Для Gemini wrapper можно задать безопасный TOML
 `~/.gpt2giga/harness/config.toml`; элементы передаются напрямую без `shell=True`.
 Парсеры допускают неизвестные добавочные поля из versioned fixtures, но поток
 без единого распознанного обязательного event contract завершается ошибкой.
+
+Для Codex main chat Harness дополнительно проверяет контракт
+`codex app-server --help`. Если доступен reviewed stdio JSON-RPC v2, первая
+реплика создаёт `thread/start` и `turn/start`, а следующие реплики используют
+тот же `thread_id` без нового TUI или `codex exec --ephemeral`. Один supervised
+app-server процесс может держать несколько совместимых Harness sessions как
+разные Codex threads. Явный Harness fork отображается в `thread/fork`, cancel —
+в `turn/interrupt`, а после смены owner Harness выполняет `thread/read` и
+`thread/resume` и сохраняет recovery outcome.
+
+Durable link содержит только opaque runtime id, `thread_id`, последний
+`turn_id`, protocol/version evidence, status и неизменяемый execution snapshot.
+Route, model, managed home identity, source/effective workspace, permission mode
+и hash managed-MCP snapshot должны совпадать при продолжении; изменить их можно
+только через явный fork. Стабильный внутренний message id передаётся как
+`clientUserMessageId`, поэтому повторная доставка prompt блокируется. Raw stdio
+и PID app-server не попадают в browser. `turn/*`, `item/*`, tool, file-change и
+assistant delta преобразуются в обычные normalized Run events.
+
+App-server запускает headless turns с reviewed sandbox и
+`approvalPolicy=never`. Неожиданный server-side approval или elicitation
+отклоняется fail-closed и фиксируется warning. MCP secret refs разрешаются
+только на границе запуска owning process, после initialize удаляются из
+Harness-owned config, а durable metadata хранит только snapshot id/hash.
+
+Если app-server contract не доказан, Codex сохраняет совместимый
+`codex exec --ephemeral --json`, но full-history replay явно помечается
+`degraded_replay`, а не resume того же Codex thread. Direct Chat использует
+`structured_replay`. Headless continuation Claude Code и Gemini CLI пока
+`unsupported`: ограничение публикуется до их one-shot процесса. Plugins по
+умолчанию остаются `one_shot`, пока не объявят отдельный проверенный contract.
 
 Для новых управляемых native-запусков Harness сохраняет неизменяемый безопасный
 execution snapshot: route `v1|v2`, model, managed home, workspace, project id,

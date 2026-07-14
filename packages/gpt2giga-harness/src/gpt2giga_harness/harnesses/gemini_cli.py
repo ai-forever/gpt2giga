@@ -45,6 +45,7 @@ from gpt2giga_harness.types import (
     HarnessCapability,
     HarnessContext,
     HarnessEvent,
+    HeadlessContinuationStrategy,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -103,6 +104,7 @@ class GeminiCliHarness(BaseHarness):
             supports_native_sessions=True,
             supports_external_history=True,
             default_invocation_mode=HarnessInvocationMode.NATIVE,
+            headless_continuation=HeadlessContinuationStrategy.UNSUPPORTED,
             tags=("gemini", "agent"),
             adapter_capabilities=gemini_adapter_capabilities(),
         )

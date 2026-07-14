@@ -28,13 +28,20 @@ def clear_probe_cache():
 
 
 @pytest.mark.parametrize(
-    ("harness_id", "version", "help_output", "expected_schema"),
+    (
+        "harness_id",
+        "version",
+        "help_output",
+        "expected_schema",
+        "expected_calls",
+    ),
     (
         (
             "codex-cli",
             "codex-cli 0.144.3",
             "exec --json --sandbox --ephemeral --image --config --strict-config",
             "codex-exec-jsonl-v1",
+            7,
         ),
         (
             "claude-code",
@@ -43,6 +50,7 @@ def clear_probe_cache():
             "--no-session-persistence --include-partial-messages --resume "
             "--effort --allowedTools --disallowedTools",
             "claude-stream-json-v1",
+            5,
         ),
         (
             "gemini-cli",
@@ -50,17 +58,28 @@ def clear_probe_cache():
             "--output-format stream-json --approval-mode --skip-trust "
             "--prompt-interactive --list-sessions --resume",
             "gemini-stream-json-v1",
+            5,
         ),
     ),
 )
 def test_probe_proves_required_contract_and_caches_by_command_version(
-    monkeypatch, harness_id, version, help_output, expected_schema
+    monkeypatch,
+    harness_id,
+    version,
+    help_output,
+    expected_schema,
+    expected_calls,
 ):
     calls = []
 
     def fake_run(command, **kwargs):
         calls.append(command)
-        output = version if command[-1] == "--version" else help_output
+        if command[-1] == "--version":
+            output = version
+        elif "app-server" in command:
+            output = "--listen stdio:// generate-json-schema"
+        else:
+            output = help_output
         return _Completed(stdout=output)
 
     monkeypatch.setattr(
@@ -86,7 +105,9 @@ def test_probe_proves_required_contract_and_caches_by_command_version(
     assert first.parsed_version is not None
     assert first.event_schema == expected_schema
     assert calls[0][0:3] == ("/tmp/wrapper", "--profile", "safe")
-    assert len(calls) == 5  # cached call only refreshes the version cache key
+    assert len(calls) == expected_calls  # cached call only refreshes the version key
+    if harness_id == "codex-cli":
+        assert first.capabilities["app-server"] is True
     assert cli_capability_snapshot_to_dict(first)["warning"] is None
 
 

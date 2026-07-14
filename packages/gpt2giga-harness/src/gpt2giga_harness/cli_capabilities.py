@@ -153,6 +153,14 @@ def probe_cli_capabilities(
             token: token in output
             for token in (*contract.required_tokens, *contract.optional_tokens)
         }
+        if harness_id == "codex-cli":
+            app_server_run = _run_probe(command + ("app-server", "--help"), harness_id)
+            app_server_output = app_server_run[1] if app_server_run[0] == "ok" else ""
+            capabilities["app-server"] = (
+                app_server_run[0] == "ok"
+                and "stdio://" in app_server_output
+                and "generate-json-schema" in app_server_output
+            )
         missing = [
             token for token in contract.required_tokens if not capabilities[token]
         ]

@@ -45,6 +45,7 @@ from gpt2giga_harness.types import (
     HarnessCapability,
     HarnessContext,
     HarnessEvent,
+    HeadlessContinuationStrategy,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -112,6 +113,7 @@ class ClaudeCodeHarness(BaseHarness):
             supports_native_sessions=True,
             supports_external_history=True,
             default_invocation_mode=HarnessInvocationMode.NATIVE,
+            headless_continuation=HeadlessContinuationStrategy.UNSUPPORTED,
             tags=("claude", "agent"),
             adapter_capabilities=claude_adapter_capabilities(),
         )

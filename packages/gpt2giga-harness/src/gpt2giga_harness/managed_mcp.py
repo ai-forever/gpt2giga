@@ -399,6 +399,32 @@ def materialize_headless_mcp_snapshot(
     }
 
 
+def clear_headless_mcp_materialization(
+    harness_id: str,
+    home: str | Path,
+) -> None:
+    """Remove resolved MCP values after the owning process loaded its config."""
+    home_path = Path(home).expanduser().resolve()
+    path = config_path_for_home(harness_id, home_path)
+    with exclusive_file_lock(home_path / ".gpt2giga-config"):
+        current = _read_text(path)
+        if harness_id == "codex-cli":
+            content = _remove_codex_managed_block(current).rstrip() + "\n"
+        else:
+            try:
+                parsed = json.loads(current) if current.strip() else {}
+            except json.JSONDecodeError as exc:
+                raise ValueError("Managed CLI JSON config is invalid") from exc
+            data = dict(parsed) if isinstance(parsed, Mapping) else {}
+            data.pop("mcpServers", None)
+            data.pop("_gpt2giga", None)
+            content = (
+                json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+            )
+        if content != current:
+            _atomic_write(path, content)
+
+
 def compose_startup_config(
     harness_id: str,
     current: str,

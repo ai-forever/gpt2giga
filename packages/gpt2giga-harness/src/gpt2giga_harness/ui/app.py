@@ -2667,11 +2667,29 @@ def _fork_session_from_run(
     run: HarnessRun,
 ) -> HarnessSession:
     source = store.get_session(run.session_id)
+    run_thread = run.metadata.get("app_server_thread")
+    session_thread = source.metadata.get("app_server_thread")
+    source_thread = (
+        dict(run_thread)
+        if isinstance(run_thread, Mapping)
+        else dict(session_thread)
+        if isinstance(session_thread, Mapping)
+        else {}
+    )
     metadata = {
         **dict(source.metadata),
         "forked_from_session_id": source.id,
         "forked_from_run_id": run.id,
     }
+    metadata.pop("app_server_thread", None)
+    metadata.pop("app_server_fork", None)
+    if source_thread.get("thread_id"):
+        metadata["app_server_fork"] = {
+            "thread_id": source_thread["thread_id"],
+            "turn_id": source_thread.get("latest_turn_id"),
+            "source_session_id": source.id,
+            "source_run_id": run.id,
+        }
     fork = store.create_session(
         title=f"Fork: {source.title}",
         workspace=run.workspace or source.workspace,

@@ -32,7 +32,7 @@ EXPECTED_SUPPORT = {
         "headless_one_shot": "supported",
         "headless_structured_events": "supported",
         "cli_capability_probe": "supported",
-        "headless_continuity": "partial",
+        "headless_continuity": "supported",
         "native_initial_prompt": "supported",
         "native_permission_mode": "supported",
         "native_workspace": "supported",
@@ -44,7 +44,7 @@ EXPECTED_SUPPORT = {
         "managed_mcp_headless": "supported",
         "interactive_approvals": "delegated",
         "external_history": "partial",
-        "structured_app_server": "unsupported",
+        "structured_app_server": "supported",
         "agent_profile_options": "partial",
     },
     "claude-code": {

@@ -1016,7 +1016,7 @@ then starts only an allowlisted terminal launcher without a shell.
 |---|---|---|
 | `direct-chat` | MVP | Sends OpenAI-style Chat Completions to `/v1/chat/completions` or `/v2/chat/completions`. |
 | `echo` | MVP | Local no-network smoke harness for tests and UI checks. |
-| `codex-cli` | MVP | Builds and runs a sanitized `codex exec` command against the local proxy. |
+| `codex-cli` | MVP | Uses supervised `codex app-server` threads for Harness chat continuity, with sanitized `codex exec` as a capability-gated one-shot fallback. |
 | `claude-code` | MVP | Builds and runs sanitized Claude Code print-mode commands against the local proxy. |
 | `gemini-cli` | MVP | Builds and runs sanitized Gemini CLI headless commands against the local proxy. |
 
@@ -1096,6 +1096,9 @@ CLI. The serialized `adapter_capabilities` matrix uses `supported`, `partial`,
 `delegated`, and `unsupported` states so `giga harness inspect --json` and
 `/api/harnesses` expose current continuity, native-policy, prompt-delivery, and
 managed-tool limitations without turning them into optimistic booleans.
+`headless_continuation` separately reports the effective strategy:
+`structured_thread`, `structured_replay`, `native_cli_resume`,
+`degraded_replay`, `one_shot`, or `unsupported`.
 
 ## Codex CLI Harness
 
@@ -1125,6 +1128,44 @@ launching Codex:
 giga harness run codex-cli --prompt "Inspect" --dry-run --json
 giga harness run codex-cli --native --dry-run --prompt "Inspect" --json
 ```
+
+Harness chat sessions use the version-probed Codex app-server JSON-RPC v2
+surface when `codex app-server --help` proves the reviewed stdio contract. One
+supervised process can host multiple compatible Harness sessions as distinct
+Codex threads. The first prompt maps to `thread/start` plus `turn/start`; later
+prompts use the same `thread_id`; an explicit Harness fork maps to
+`thread/fork`. After an owner change Harness checks `thread/read`, calls
+`thread/resume`, and records the recovery outcome before submitting another
+turn. Cancellation maps to `turn/interrupt`.
+
+The durable public link contains only an opaque runtime id, `thread_id`, latest
+`turn_id`, protocol/version evidence, runtime/recovery status, and an immutable
+execution snapshot. Route, model, managed home identity, source/effective
+workspace, permission mode, and managed-MCP snapshot hash must match on every
+continued turn; change any of them through an explicit fork. A stable internal
+message id is sent as `clientUserMessageId`, and duplicate delivery is rejected
+without replaying the prompt. Normalized Harness messages remain canonical;
+Codex rollout files are linked as execution metadata rather than imported as a
+second transcript.
+
+App-server `turn/*`, `item/*`, tool, file-change, and assistant-delta
+notifications become the same normalized Run events used by the chat SSE
+surface. Raw stdio and process IDs never reach the browser. Headless app-server
+turns use the reviewed sandbox with `approvalPolicy=never`; an unexpected
+server-initiated approval or elicitation is declined and recorded as a
+fail-closed warning instead of accepting hidden user input. Managed-MCP secret
+references are resolved only while the owning process initializes and are then
+removed from the Harness-owned config; durable metadata retains only snapshot
+ids and hashes.
+
+If the installed Codex binary lacks the app-server contract, Harness keeps the
+existing `codex exec --ephemeral --json` path and labels normalized full-history
+replay `degraded_replay`; it is not reported as a resumed Codex thread. Direct
+Chat reports `structured_replay` because it sends normalized messages in one
+structured request. Claude Code and Gemini CLI currently report headless
+continuation as `unsupported` and emit that limitation before their one-shot
+process runs. Third-party plugins remain `one_shot` unless their future spec
+explicitly advertises another reviewed strategy.
 
 ## Claude Code Harness
 
@@ -1653,6 +1694,13 @@ Use this when validating the project cockpit manually:
   are not confused with preflight estimates.
 - [ ] Cancel on a streamed headless run writes `cancel_requested`,
   `run_canceled`, and `run_finished` events without exposing secrets.
+- [ ] Two Codex headless prompts reuse one app-server `thread_id`; reconnect
+  performs `thread/read` plus `thread/resume`, and an explicit fork creates a
+  different thread without replaying normalized history.
+- [ ] Changing route, model, workspace, permission mode, managed home, or MCP
+  snapshot on a continued Codex thread fails before another turn is submitted.
+- [ ] Claude Code and Gemini CLI show `unsupported` headless continuity before
+  a second one-shot run instead of presenting it as a resumed session.
 - [ ] Native sessions are separate from normalized GPT2Giga chats.
 - [ ] `Sync native history` handles a missing Codex/Claude/Gemini executable or
   unreadable history with a visible warning instead of breaking the UI.

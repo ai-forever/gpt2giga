@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,6 +21,7 @@ from gpt2giga_harness.types import (
     HarnessCapability,
     HarnessContext,
     HarnessEvent,
+    HeadlessContinuationStrategy,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -70,6 +72,62 @@ def test_session_runner_blocks_private_key_before_harness_invocation():
 
     assert harness.last_request is None
     assert "private_key_material" in str(exc_info.value)
+
+
+def test_session_runner_persists_structured_thread_and_rejects_identity_change(
+    tmp_path,
+):
+    harness = _StructuredThreadHarness()
+    runner = _runner(harness, data_dir=tmp_path / "data")
+    session = runner.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+        default_model="GigaChat-2-Max",
+    )
+
+    first = runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "codex-cli",
+            "prompt": "first",
+            "model": "GigaChat-2-Max",
+            "stream": True,
+        },
+    )
+    second = runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "codex-cli",
+            "prompt": "second",
+            "model": "GigaChat-2-Max",
+            "stream": True,
+        },
+    )
+
+    assert first.run.metadata["continuation"]["action"] == "start"
+    assert second.run.metadata["continuation"]["action"] == "continue"
+    assert [
+        request.extra["continuation"]["action"] for request in harness.requests
+    ] == [
+        "start",
+        "continue",
+    ]
+    assert harness.requests[1].extra["continuation"]["history_replayed"] is False
+    assert second.session.metadata["app_server_thread"]["thread_id"] == "thread-1"
+
+    with pytest.raises(ValueError, match="fork explicitly"):
+        runner.run_in_session(
+            session.id,
+            {
+                "harness_id": "codex-cli",
+                "prompt": "incompatible",
+                "model": "DifferentModel",
+                "stream": True,
+            },
+        )
+    assert len(harness.requests) == 2
+    assert len(runner.store.list_runs(session.id)) == 2
+    assert len(runner.store.list_messages(session.id)) == 4
 
 
 def test_session_runner_passes_and_records_selected_builtin_tools():
@@ -506,6 +564,56 @@ class _ManagedCaptureHarness(BaseHarness):
             text="captured",
             raw={"managed_mcp_snapshot": request.extra["managed_mcp_snapshot"]},
             command=("capture-managed",),
+        )
+
+
+class _StructuredThreadHarness(BaseHarness):
+    def __init__(self) -> None:
+        self.requests: list[HarnessRequest] = []
+
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="codex-cli",
+            title="Structured Codex",
+            kind="agent-cli",
+            description="Capture structured continuation plans",
+            capabilities=(HarnessCapability.AGENT_CLI,),
+            supports_streaming=True,
+            headless_continuation=HeadlessContinuationStrategy.STRUCTURED_THREAD,
+        )
+
+    def capability_probe(self):
+        return SimpleNamespace(capabilities={"app-server": True})
+
+    def availability(self) -> Availability:
+        return Availability.available("test")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        del context
+        self.requests.append(request)
+        continuation = request.extra["continuation"]
+        link = continuation.get("link") or {}
+        return HarnessResult(
+            ok=True,
+            text=f"answer: {request.prompt}",
+            raw={
+                "app_server_thread": {
+                    "schema_version": 1,
+                    "protocol": continuation["protocol"],
+                    "runtime_id": "runtime-1",
+                    "thread_id": link.get("thread_id") or "thread-1",
+                    "latest_turn_id": f"turn-{len(self.requests)}",
+                    "snapshot": continuation["snapshot"],
+                    "snapshot_hash": continuation["snapshot"]["snapshot_hash"],
+                    "runtime_status": "loaded",
+                }
+            },
+            command=("codex", "app-server", "--stdio"),
         )
 
 

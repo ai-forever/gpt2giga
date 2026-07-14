@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from gpt2giga_harness.codex_app_server import CodexAppServerSupervisor
 from gpt2giga_harness.cli_capabilities import (
     CliCapabilitySnapshot,
     cli_probe_availability,
@@ -44,6 +45,7 @@ from gpt2giga_harness.types import (
     HarnessCapability,
     HarnessContext,
     HarnessEvent,
+    HeadlessContinuationStrategy,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -64,8 +66,11 @@ class CodexCliHarness(BaseHarness):
         self,
         *,
         executable_resolver: ExecutableResolver | None = None,
+        app_server_supervisor: CodexAppServerSupervisor | None = None,
     ) -> None:
         self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
+        self.app_server_supervisor = app_server_supervisor
+        self._app_server_supervisors: dict[str, CodexAppServerSupervisor] = {}
 
     @classmethod
     def spec(cls) -> HarnessSpec:
@@ -87,6 +92,7 @@ class CodexCliHarness(BaseHarness):
             supports_native_sessions=True,
             supports_external_history=True,
             default_invocation_mode=HarnessInvocationMode.HEADLESS,
+            headless_continuation=HeadlessContinuationStrategy.STRUCTURED_THREAD,
             tags=("codex", "agent"),
             adapter_capabilities=codex_adapter_capabilities(),
         )
@@ -163,7 +169,17 @@ class CodexCliHarness(BaseHarness):
         request: HarnessRequest,
         context: HarnessContext,
     ) -> HarnessResult:
-        command = self.build_command(request, context)
+        continuation = request.extra.get("continuation")
+        uses_app_server = (
+            isinstance(continuation, Mapping)
+            and continuation.get("strategy") == "structured_thread"
+        )
+        resolution = self.executable_resolution()
+        command = (
+            (*resolution.command, "app-server", "--stdio", "--strict-config")
+            if uses_app_server and resolution.command
+            else self.build_command(request, context)
+        )
         if request.extra.get("dry_run"):
             return HarnessResult(
                 ok=True,
@@ -173,6 +189,9 @@ class CodexCliHarness(BaseHarness):
                         self.build_env(request, context, codex_home="<temp>")
                     ),
                     "workspace": request.workspace,
+                    "continuation": dict(continuation)
+                    if isinstance(continuation, Mapping)
+                    else {"strategy": "degraded_replay"},
                     **attachment_raw_metadata(request),
                 },
                 events=attachment_warning_events(request),
@@ -203,6 +222,41 @@ class CodexCliHarness(BaseHarness):
         )
         if proxy_error is not None:
             return proxy_error
+        if uses_app_server:
+            if not self.capability_probe().capabilities.get("app-server"):
+                return HarnessResult(
+                    ok=False,
+                    text="",
+                    command=command,
+                    error=(
+                        "Installed Codex CLI does not provide the reviewed app-server "
+                        "stdio protocol."
+                    ),
+                )
+            if context.data_dir is None:
+                return HarnessResult(
+                    ok=False,
+                    text="",
+                    command=command,
+                    error="Harness data_dir is required for Codex app-server continuity.",
+                )
+            supervisor = self.app_server_supervisor
+            if supervisor is None:
+                supervisor = self._app_server_supervisors.setdefault(
+                    context.data_dir,
+                    CodexAppServerSupervisor(context.data_dir),
+                )
+            result = supervisor.run_turn(
+                request,
+                prepared_context,
+                resolution=resolution,
+                prompt=prompt_with_attachments(request),
+                continuation=dict(continuation),
+            )
+            return with_events(
+                result,
+                (*attachment_warning_events(request), *proxy_events),
+            )
         with tempfile.TemporaryDirectory(prefix="gpt2giga-codex-") as temp_dir:
             codex_home = str(Path(temp_dir) / ".codex")
             Path(codex_home).mkdir(parents=True, exist_ok=True)

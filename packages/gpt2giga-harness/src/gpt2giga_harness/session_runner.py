@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import hashlib
 import json
+from pathlib import Path
 from typing import Any, Mapping
 
 from gpt2giga_harness.attachments import (
@@ -16,6 +18,7 @@ from gpt2giga_harness.attachments import (
     render_plan_to_dict,
 )
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.codex_app_server import build_execution_snapshot
 from gpt2giga_harness.managed_mcp import HeadlessManagedMCPSnapshotStore
 from gpt2giga_harness.mcp import build_mcp_inventory
 from gpt2giga_harness.native.models import parse_invocation_mode
@@ -57,6 +60,7 @@ from gpt2giga_harness.types import (
     HarnessChatMessage,
     HarnessEvent,
     HarnessEventType,
+    HeadlessContinuationStrategy,
     HarnessRequest,
     HarnessResult,
     event_to_dict,
@@ -66,6 +70,8 @@ from gpt2giga_harness.types import (
     result_to_dict,
 )
 from gpt2giga_harness.worktrees import (
+    WorkspaceExecution,
+    WorkspacePolicy,
     capture_workspace_diff,
     parse_workspace_policy,
     prepare_workspace_execution,
@@ -227,6 +233,7 @@ class HarnessSessionRunner:
         if report.hard_block:
             raise PreflightBlockedError(report)
         managed_mcp_snapshot = self._prepare_managed_mcp_snapshot(options)
+        _validate_continuation_identity(session, options)
         message_id = new_id("msg")
         run = self.store.create_run(
             run_id=run_id,
@@ -298,6 +305,7 @@ class HarnessSessionRunner:
         session = self.store.get_session(session_id)
         options = self._run_options(payload, session=session)
         harness = self.registry.get(options["harness_id"])
+        logical_user_message_id = user_message_id or new_id("msg")
         previous_messages = (
             ()
             if bool(_mapping(options["extra"]).get("isolated_history"))
@@ -346,6 +354,7 @@ class HarnessSessionRunner:
         if preflight.hard_block:
             raise PreflightBlockedError(preflight)
         managed_mcp_snapshot = self._prepare_managed_mcp_snapshot(options)
+        _validate_continuation_identity(session, options)
         preflight_payload = preflight_report_to_dict(preflight)
         effective_prompt = _prompt_with_project_memory(
             options["prompt"],
@@ -416,22 +425,28 @@ class HarnessSessionRunner:
                 started_at=utc_now(),
                 metadata=run_metadata,
             )
-        workspace_execution = prepare_workspace_execution(
-            requested_policy=options["workspace_policy"],
-            harness_kind=options["harness_kind"],
-            mode=options["mode"],
-            workspace=options["workspace"],
+        workspace_execution = _continued_workspace_execution(
+            session,
+            options,
             data_dir=self.config.data_dir,
-            session_id=session.id,
-            run_id=run.id,
-            dry_run=bool(options["extra"].get("dry_run")),
         )
+        if workspace_execution is None:
+            workspace_execution = prepare_workspace_execution(
+                requested_policy=options["workspace_policy"],
+                harness_kind=options["harness_kind"],
+                mode=options["mode"],
+                workspace=options["workspace"],
+                data_dir=self.config.data_dir,
+                session_id=session.id,
+                run_id=run.id,
+                dry_run=bool(options["extra"].get("dry_run")),
+            )
         run_metadata["workspace_execution"] = workspace_execution.to_metadata()
         run = self.store.update_run(run.id, metadata=run_metadata)
         if user_message_id is None:
             self.store.append_message(
                 HarnessMessage(
-                    id=new_id("msg"),
+                    id=logical_user_message_id,
                     session_id=session.id,
                     run_id=run.id,
                     role="user",
@@ -521,6 +536,32 @@ class HarnessSessionRunner:
             process_sink=process_sink,
             extra=request_extra,
         )
+        continuation = _continuation_plan(
+            request,
+            harness=harness,
+            session=session,
+            previous_messages=previous_messages,
+            prompt_id=logical_user_message_id,
+        )
+        request_extra["continuation"] = continuation
+        request = replace(request, extra=request_extra)
+        run_metadata["continuation"] = _public_continuation(continuation)
+        run = self.store.update_run(run.id, metadata=run_metadata)
+        if previous_messages and continuation.get("strategy") in {
+            HeadlessContinuationStrategy.UNSUPPORTED.value,
+            HeadlessContinuationStrategy.DEGRADED_REPLAY.value,
+            HeadlessContinuationStrategy.ONE_SHOT.value,
+        }:
+            self._append_event(
+                session.id,
+                run.id,
+                HarnessEventType.WARNING.value,
+                str(continuation.get("reason") or "Headless continuity is degraded."),
+                {
+                    "strategy": continuation.get("strategy"),
+                    "continuity_proven": False,
+                },
+            )
         raw_request = {
             "harness_id": options["harness_id"],
             "prompt": effective_prompt,
@@ -540,6 +581,7 @@ class HarnessSessionRunner:
             ],
             "builtin_tools": [tool.value for tool in options["builtin_tools"]],
             "extra": options["extra"],
+            "continuation": _public_continuation(continuation),
         }
         if effective_prompt != options["prompt"]:
             raw_request["original_prompt"] = options["prompt"]
@@ -671,6 +713,9 @@ class HarnessSessionRunner:
             {"role": role},
         )
         metadata = dict(run_metadata)
+        app_server_thread = _mapping(result.raw).get("app_server_thread")
+        if isinstance(app_server_thread, Mapping) and app_server_thread:
+            metadata["app_server_thread"] = dict(app_server_thread)
         if latest_usage:
             metadata["usage"] = dict(latest_usage)
         if options["mode"] == "edit":
@@ -742,8 +787,12 @@ class HarnessSessionRunner:
             options["workspace"],
             data_dir=self.config.data_dir,
         )
-        if project_metadata:
-            session_patch["metadata"] = {**session.metadata, **project_metadata}
+        session_metadata = {**session.metadata, **project_metadata}
+        if isinstance(app_server_thread, Mapping) and app_server_thread:
+            session_metadata["app_server_thread"] = dict(app_server_thread)
+            session_metadata.pop("app_server_fork", None)
+        if session_metadata:
+            session_patch["metadata"] = session_metadata
         if session.title == "Untitled session":
             session_patch["title"] = title_from_prompt(options["prompt"])
         updated_session = self.store.update_session(session.id, **session_patch)
@@ -1006,6 +1055,191 @@ def _native_resume_metadata(harness_id: str) -> dict[str, Any]:
         "supported": False,
         "reason": "native sessions do not apply to this harness",
     }
+
+
+def _validate_continuation_identity(
+    session: HarnessSession,
+    options: Mapping[str, Any],
+) -> None:
+    """Reject incompatible structured continuation before run side effects."""
+    if session.metadata.get("app_server_fork"):
+        return
+    link = _mapping(session.metadata.get("app_server_thread"))
+    snapshot = _mapping(link.get("snapshot"))
+    if not link or options.get("harness_id") != "codex-cli":
+        return
+    extra = _mapping(options.get("extra"))
+    managed_mcp = _mapping(extra.get("managed_mcp_snapshot"))
+    actual = {
+        "harness_id": options.get("harness_id"),
+        "api_mode": getattr(options.get("api_mode"), "value", options.get("api_mode")),
+        "model": options.get("model"),
+        "source_workspace": options.get("workspace"),
+        "permission_mode": options.get("mode"),
+        "tool_snapshot_hash": managed_mcp.get("snapshot_hash"),
+    }
+    mismatched = [key for key, value in actual.items() if snapshot.get(key) != value]
+    if mismatched:
+        raise ValueError(
+            "Codex app-server continuation changed "
+            + ", ".join(mismatched)
+            + "; fork explicitly."
+        )
+
+
+def _continuation_plan(
+    request: HarnessRequest,
+    *,
+    harness: Any,
+    session: HarnessSession,
+    previous_messages: tuple[HarnessMessage, ...],
+    prompt_id: str,
+) -> dict[str, Any]:
+    """Select one truthful, machine-readable headless continuation strategy."""
+    if request.invocation_mode.value != "headless":
+        return {
+            "strategy": HeadlessContinuationStrategy.NATIVE_CLI_RESUME.value,
+            "supported": bool(request.native_session_id),
+            "reason": "Native continuity is owned by the managed native connector.",
+        }
+    spec = harness.spec()
+    configured = getattr(
+        spec,
+        "headless_continuation",
+        HeadlessContinuationStrategy.ONE_SHOT,
+    )
+    strategy = (
+        configured.value
+        if isinstance(configured, HeadlessContinuationStrategy)
+        else str(configured)
+    )
+    if strategy == HeadlessContinuationStrategy.STRUCTURED_THREAD.value:
+        probe = getattr(harness, "capability_probe", None)
+        snapshot = probe() if callable(probe) else None
+        capabilities = getattr(snapshot, "capabilities", {})
+        if not isinstance(capabilities, Mapping) or not capabilities.get("app-server"):
+            return {
+                "strategy": HeadlessContinuationStrategy.DEGRADED_REPLAY.value,
+                "supported": True,
+                "continuity_proven": False,
+                "reason": (
+                    "Codex app-server is unavailable; normalized history is replayed "
+                    "into a fresh codex exec --ephemeral process."
+                ),
+            }
+        managed_mcp = _mapping(request.extra.get("managed_mcp_snapshot"))
+        home_identity = (
+            "apphome_"
+            + hashlib.sha256(
+                (
+                    f"{request.api_mode.value}\0"
+                    f"{managed_mcp.get('snapshot_hash') or 'no-tools'}"
+                ).encode("utf-8")
+            ).hexdigest()[:24]
+        )
+        execution_snapshot = build_execution_snapshot(
+            request,
+            managed_home_id=home_identity,
+        )
+        link = _mapping(session.metadata.get("app_server_thread"))
+        fork = _mapping(session.metadata.get("app_server_fork"))
+        if link:
+            expected = str(link.get("snapshot_hash") or "")
+            if expected != execution_snapshot["snapshot_hash"]:
+                raise ValueError(
+                    "Codex app-server continuation changed route, model, workspace, "
+                    "permission mode, managed home, or tool snapshot; fork explicitly."
+                )
+        action = "fork" if fork else ("continue" if link else "start")
+        return {
+            "strategy": HeadlessContinuationStrategy.STRUCTURED_THREAD.value,
+            "supported": True,
+            "continuity_proven": True,
+            "action": action,
+            "prompt_id": prompt_id,
+            "snapshot": execution_snapshot,
+            "link": link or None,
+            "fork_thread_id": fork.get("thread_id"),
+            "fork_turn_id": fork.get("turn_id"),
+            "protocol": "codex-app-server-json-rpc-v2",
+            "normalized_history_canonical": True,
+            "history_replayed": False,
+        }
+    if strategy == HeadlessContinuationStrategy.STRUCTURED_REPLAY.value:
+        return {
+            "strategy": strategy,
+            "supported": True,
+            "continuity_proven": True,
+            "history_replayed": bool(previous_messages),
+            "reason": "Normalized Harness messages are sent as one structured request.",
+        }
+    if strategy == HeadlessContinuationStrategy.UNSUPPORTED.value:
+        return {
+            "strategy": strategy,
+            "supported": False,
+            "continuity_proven": False,
+            "reason": (
+                f"{spec.title} headless mode does not consume a stable external "
+                "session id or normalized prior turns; this run is one-shot."
+            ),
+        }
+    return {
+        "strategy": HeadlessContinuationStrategy.ONE_SHOT.value,
+        "supported": False,
+        "continuity_proven": False,
+        "reason": "This adapter advertises one-shot execution only.",
+    }
+
+
+def _public_continuation(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Remove delivery-only ids while retaining truthful continuity evidence."""
+    return {
+        key: item for key, item in value.items() if key not in {"prompt_id", "link"}
+    }
+
+
+def _continued_workspace_execution(
+    session: HarnessSession,
+    options: Mapping[str, Any],
+    *,
+    data_dir: str,
+) -> WorkspaceExecution | None:
+    """Reuse the first isolated edit worktree for later app-server turns."""
+    link = _mapping(session.metadata.get("app_server_thread"))
+    snapshot = _mapping(link.get("snapshot"))
+    if not link or snapshot.get("permission_mode") != "edit":
+        return None
+    if options.get("harness_id") != "codex-cli" or options.get("mode") != "edit":
+        return None
+    source = _optional_text(snapshot.get("source_workspace"))
+    effective = _optional_text(snapshot.get("workspace"))
+    requested_source = _optional_text(options.get("workspace"))
+    if source != requested_source or effective is None:
+        raise ValueError(
+            "Codex app-server edit continuation changed its source workspace; "
+            "fork explicitly."
+        )
+    effective_path = Path(effective).expanduser().resolve()
+    owned_root = Path(data_dir).expanduser().resolve() / "worktrees"
+    try:
+        effective_path.relative_to(owned_root)
+    except ValueError as exc:
+        raise ValueError(
+            "Stored Codex app-server worktree is outside Harness ownership"
+        ) from exc
+    if not effective_path.is_dir():
+        raise ValueError(
+            "Stored Codex app-server worktree is unavailable; fork explicitly."
+        )
+    requested_policy = parse_workspace_policy(options.get("workspace_policy"))
+    return WorkspaceExecution(
+        requested_policy=requested_policy,
+        policy=WorkspacePolicy.WORKTREE,
+        source_workspace=source,
+        source_git_root=_optional_text(snapshot.get("source_git_root")),
+        effective_workspace=str(effective_path),
+        worktree_path=str(effective_path),
+    )
 
 
 def _project_metadata(workspace: str | None, *, data_dir: str) -> dict[str, str]:

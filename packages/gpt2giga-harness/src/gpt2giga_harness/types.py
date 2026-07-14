@@ -60,6 +60,17 @@ class AdapterSupportLevel(str, Enum):
     UNSUPPORTED = "unsupported"
 
 
+class HeadlessContinuationStrategy(str, Enum):
+    """Describe how a headless adapter carries context between turns."""
+
+    STRUCTURED_THREAD = "structured_thread"
+    STRUCTURED_REPLAY = "structured_replay"
+    NATIVE_CLI_RESUME = "native_cli_resume"
+    DEGRADED_REPLAY = "degraded_replay"
+    ONE_SHOT = "one_shot"
+    UNSUPPORTED = "unsupported"
+
+
 @dataclass(frozen=True)
 class AdapterCapabilitySupport:
     """One redaction-safe adapter capability claim exposed to clients."""
@@ -72,6 +83,10 @@ class HarnessEventType(str, Enum):
     """Stable event names stored and streamed for harness runs."""
 
     RUN_STARTED = "run_started"
+    EXTERNAL_THREAD_STARTED = "external_thread_started"
+    EXTERNAL_THREAD_STATUS = "external_thread_status"
+    EXTERNAL_TURN_STARTED = "external_turn_started"
+    EXTERNAL_TURN_COMPLETED = "external_turn_completed"
     MESSAGE_DELTA = "message_delta"
     STDOUT_DELTA = "stdout_delta"
     STDERR_DELTA = "stderr_delta"
@@ -146,6 +161,9 @@ class HarnessSpec:
     config_schema: Mapping[str, Any] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
     protocol_capability_scope: str = "harness_surface"
+    headless_continuation: HeadlessContinuationStrategy = (
+        HeadlessContinuationStrategy.ONE_SHOT
+    )
     adapter_capabilities: Mapping[str, AdapterCapabilitySupport] = field(
         default_factory=dict
     )
@@ -426,6 +444,10 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         _optional_text(getattr(spec, "protocol_capability_scope", None))
         or "harness_surface"
     )
+    headless_continuation = _enum_text(
+        getattr(spec, "headless_continuation", None),
+        HeadlessContinuationStrategy.ONE_SHOT.value,
+    )
     adapter_capabilities = _adapter_capabilities_to_dict(
         getattr(spec, "adapter_capabilities", {})
     )
@@ -451,6 +473,7 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         "default_invocation_mode": default_invocation_mode,
         "default_api_mode": default_api_mode,
         "protocol_capability_scope": protocol_capability_scope,
+        "headless_continuation": headless_continuation,
         "adapter_capabilities": adapter_capabilities,
         "tags": tags,
         "config_schema": config_schema,
@@ -482,6 +505,7 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
             },
             "builtin_tools": supported_builtin_tools,
             "protocol_capability_scope": protocol_capability_scope,
+            "headless_continuation": headless_continuation,
             "adapter_capabilities": adapter_capabilities,
             "config_schema": config_schema,
             "metadata": metadata,
