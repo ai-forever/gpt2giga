@@ -5,6 +5,7 @@ from gpt2giga_harness.harnesses.agent_cli import run_streaming_command
 from gpt2giga_harness.harnesses.codex_cli import (
     CodexCliHarness,
     _CodexStreamParser,
+    _write_codex_config,
 )
 from gpt2giga_harness.native import HarnessInvocationMode
 from gpt2giga_harness.types import (
@@ -130,6 +131,21 @@ def test_codex_cli_stream_command_uses_json_events():
     )
 
 
+def test_codex_cli_applies_fixed_agent_reasoning_config(tmp_path):
+    home = tmp_path / ".codex"
+
+    _write_codex_config(
+        home,
+        HarnessRequest(
+            prompt="inspect",
+            extra={"agent_adapter_options": {"reasoning_effort": "high"}},
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert 'model_reasoning_effort = "high"' in (home / "config.toml").read_text()
+
+
 def test_codex_stream_parser_normalizes_message_tool_and_usage():
     parser = _CodexStreamParser()
     payloads = (
@@ -175,6 +191,7 @@ def test_codex_stream_parser_normalizes_message_tool_and_usage():
     assert [event.type for event in events] == [
         "tool_call_started",
         "tool_call_finished",
+        "command_completed",
         "message_delta",
         "message_delta",
         "usage",
@@ -187,6 +204,12 @@ def test_codex_stream_parser_normalizes_message_tool_and_usage():
     )
     assert events[0].payload["name"] == "shell"
     assert events[1].payload["result"] == "/tmp"
+    assert events[2].payload == {
+        "artifact_id": "tool-1",
+        "artifact_type": "command",
+        "command": "pwd",
+        "status": "completed",
+    }
     assert events[-1].payload == {
         "input_tokens": 8,
         "output_tokens": 2,
@@ -243,6 +266,9 @@ def test_codex_stream_parser_explains_failed_tool_without_output():
     assert tool_event.payload["result"] == (
         "Command exited with code 1 and produced no output."
     )
+    command_event = next(event for event in events if event.type == "command_completed")
+    assert command_event.payload["exit_code"] == 1
+    assert command_event.payload["status"] == "failed"
 
 
 def test_codex_stream_parser_preserves_update_plan_payload():
@@ -274,6 +300,28 @@ def test_codex_stream_parser_preserves_update_plan_payload():
     assert events[0].payload["arguments"] == {
         "explanation": "Rendering the plan.",
         "plan": plan,
+    }
+
+
+def test_codex_stream_parser_emits_explicit_test_artifact():
+    events = _CodexStreamParser()(
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "test-1",
+                "type": "test_result",
+                "name": "pytest",
+                "status": "passed",
+            },
+        }
+    )
+
+    artifact = next(event for event in events if event.type == "test_completed")
+    assert artifact.payload == {
+        "artifact_id": "test-1",
+        "artifact_type": "test",
+        "name": "pytest",
+        "status": "passed",
     }
 
 

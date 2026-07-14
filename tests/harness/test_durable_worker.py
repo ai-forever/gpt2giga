@@ -151,6 +151,60 @@ def test_dispatcher_serializes_concurrent_idempotent_submissions(tmp_path):
     assert len(sessions.list_messages(session.id)) == 1
 
 
+def test_dispatcher_persists_exact_managed_mcp_snapshot_for_worker(tmp_path):
+    workspace = tmp_path / "project"
+    config_path = workspace / ".giga" / "harness.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        """
+[tools.issues]
+enabled = true
+kind = "mcp"
+transport = "stdio"
+command = "issue-mcp-v1"
+trusted = true
+harnesses = ["codex-cli"]
+""",
+        encoding="utf-8",
+    )
+    config = HarnessConfig(data_dir=str(tmp_path / "data"))
+    registry = HarnessRegistry()
+    registry.register(_ManagedQueueHarness())
+    sessions = FilesystemHarnessSessionStore(config.data_dir)
+    runtime = RuntimeCoordinationStore(config.data_dir)
+    payloads = DurableJobPayloadStore(config.data_dir)
+    runner = HarnessSessionRunner(registry=registry, config=config, store=sessions)
+    dispatcher = DurableJobDispatcher(
+        runtime_store=runtime,
+        payload_store=payloads,
+        runner=runner,
+    )
+    session = runner.create_session(title="managed", workspace=str(workspace))
+
+    submitted = dispatcher.submit(
+        session.id,
+        {
+            "harness_id": "codex-cli",
+            "prompt": "inspect",
+            "workspace": str(workspace),
+            "extra": {"tool_ids": ["issues"]},
+        },
+        idempotency_key="managed-mcp",
+    )
+    stored = payloads.load(submitted.job.id)
+    stored_ref = stored["extra"]["managed_mcp_snapshot"]
+
+    assert stored_ref == submitted.queued.run.metadata["managed_mcp_snapshot"]
+    assert stored["extra"]["tool_ids"] == ["issues"]
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("issue-mcp-v1", "issue-mcp-v2"),
+        encoding="utf-8",
+    )
+    assert payloads.load(submitted.job.id)["extra"]["managed_mcp_snapshot"] == (
+        stored_ref
+    )
+
+
 def test_claim_rejects_mismatched_binary_fingerprint(tmp_path):
     store = RuntimeCoordinationStore(tmp_path)
     job = store.submit_job(
@@ -517,6 +571,24 @@ class _SlowHarness(BaseHarness):
         while request.cancel_event is None or not request.cancel_event.is_set():
             time.sleep(0.01)
         return HarnessResult(ok=False, text="", error="canceled")
+
+
+class _ManagedQueueHarness(BaseHarness):
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="codex-cli",
+            title="Managed queue",
+            kind="agent-cli",
+            description="captures managed queue payloads",
+            capabilities=(HarnessCapability.AGENT_CLI,),
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available()
+
+    def run(self, request: HarnessRequest, context: HarnessContext) -> HarnessResult:
+        return HarnessResult(ok=True, text="done")
 
 
 class _FlakyHarness(BaseHarness):

@@ -1,6 +1,10 @@
 import json
 
-from gpt2giga_harness.native import NativeSessionRef, NativeSessionStatus
+from gpt2giga_harness.native import (
+    NativeExecutionSnapshot,
+    NativeSessionRef,
+    NativeSessionStatus,
+)
 from gpt2giga_harness.native.store import (
     FilesystemNativeSessionIndexStore,
     native_session_ref_to_dict,
@@ -126,6 +130,52 @@ def test_native_session_index_store_deletes_refs(tmp_path):
     assert store.get_ref(stored.id) is None
 
 
+def test_native_session_index_store_keeps_unknown_workspace_unscoped(tmp_path):
+    store = FilesystemNativeSessionIndexStore(tmp_path)
+    unknown = _ref(
+        "legacy_unknown",
+        workspace=None,
+        metadata={"workspace_known": False, "workspace_reason": "not_recorded"},
+    )
+
+    stored = store.upsert_ref(unknown)
+
+    assert stored.metadata["workspace_known"] is False
+    assert store.list_refs(project_id="proj_requested") == ()
+    assert store.list_refs(workspace="/requested") == ()
+    assert store.list_refs() == (stored,)
+
+
+def test_native_session_index_store_preserves_execution_snapshot(tmp_path):
+    store = FilesystemNativeSessionIndexStore(tmp_path)
+    snapshot = NativeExecutionSnapshot(
+        id="nexec_123",
+        harness_id="codex-cli",
+        api_mode="v1",
+        model="GigaChat-2-Max",
+        native_home="/managed/codex",
+        workspace="/repo",
+        project_id="proj_repo",
+        permission_mode="plan",
+        tool_config_hash="config-hash",
+        created_at="2026-07-13T10:00:00+00:00",
+    )
+
+    stored = store.upsert_ref(
+        _ref(
+            "native_codex_snapshot",
+            status=NativeSessionStatus.MANAGED_NATIVE,
+            metadata={"project_id": "proj_repo"},
+            execution_snapshot=snapshot,
+        )
+    )
+
+    payload = native_session_ref_to_dict(stored)
+    assert store.get_ref(stored.id).execution_snapshot == snapshot
+    assert payload["execution_snapshot"]["api_mode"] == "v1"
+    assert payload["limitations"] == []
+
+
 def _ref(
     ref_id: str,
     *,
@@ -139,6 +189,7 @@ def _ref(
     updated_at: str | None = "2026-07-09T09:00:00Z",
     message_count: int | None = 2,
     metadata: dict | None = None,
+    execution_snapshot: NativeExecutionSnapshot | None = None,
 ) -> NativeSessionRef:
     return NativeSessionRef(
         id=ref_id,
@@ -156,4 +207,5 @@ def _ref(
         can_resume=status is NativeSessionStatus.MANAGED_NATIVE,
         resume_reason=None,
         metadata=metadata or {},
+        execution_snapshot=execution_snapshot,
     )

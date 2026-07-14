@@ -68,6 +68,22 @@ def test_resolver_reports_invalid_override(tmp_path, document, expected):
     assert str(config_path) in (resolution.error or "")
 
 
+def test_resolver_accepts_safe_wrapper_argv_without_shell(tmp_path):
+    wrapper = _executable(tmp_path / "bin" / "gemini-wrapper")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f'[executables]\n"gemini-cli" = ["{wrapper}", "--profile", "safe"]\n',
+        encoding="utf-8",
+    )
+
+    resolution = ExecutableResolver.from_user_config(config_path).resolve(
+        "gemini-cli", "gemini"
+    )
+
+    assert resolution.command == (str(wrapper), "--profile", "safe")
+    assert resolution.available is True
+
+
 def test_resolver_reports_invalid_toml_without_crashing_registry(tmp_path):
     config_path = tmp_path / "config.toml"
     config_path.write_text("[executables\n", encoding="utf-8")
@@ -161,6 +177,13 @@ def test_registry_uses_same_resolution_for_command_and_availability(tmp_path):
 
 def _executable(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "--version" ]; then echo "fixture 1.2.3"; exit 0; fi\n'
+        'echo "--json --sandbox --ephemeral --image --output-format stream-json '
+        "--permission-mode --no-session-persistence --include-partial-messages "
+        '--approval-mode --skip-trust --prompt-interactive --list-sessions --resume"\n',
+        encoding="utf-8",
+    )
     path.chmod(0o755)
     return path

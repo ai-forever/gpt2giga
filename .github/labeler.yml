@@ -18,6 +18,16 @@ protocol:
       - any-glob-to-any-file:
           - 'packages/gpt2giga/src/gpt2giga/protocols/**'
 
+harness:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'packages/gpt2giga-harness/**'
+          - 'tests/harness/**'
+          - 'tests/test_package_isolation.py'
+          - 'tests/test_workspace_split_contract.py'
+          - 'docs/harness.md'
+          - 'docs-site/i18n/**/docusaurus-plugin-content-docs/current/harness.md'
+
 docker:
   - changed-files:
       - any-glob-to-any-file:

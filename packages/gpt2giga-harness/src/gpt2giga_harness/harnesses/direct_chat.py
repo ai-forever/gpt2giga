@@ -21,6 +21,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
 )
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.types import (
+    AttachmentTransportSupport,
     Availability,
     GIGACHAT_BUILTIN_TOOLS,
     HarnessChatMessage,
@@ -28,6 +29,7 @@ from gpt2giga_harness.types import (
     HarnessContext,
     HarnessEvent,
     HarnessEventType,
+    HeadlessContinuationStrategy,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -65,7 +67,23 @@ class DirectChatHarness(BaseHarness):
             supports_attachments=True,
             accepted_attachment_kinds=("image", "text", "workspace_file"),
             attachment_transport=("openai_content_parts", "inline_text"),
+            attachment_capabilities={
+                "image": AttachmentTransportSupport(
+                    headless=("openai_content_parts",),
+                    rich=True,
+                    detail="Stored images are sent as OpenAI-style image content parts.",
+                ),
+                "text": AttachmentTransportSupport(
+                    headless=("inline_text",),
+                    detail="Small text attachments are inlined with a size limit.",
+                ),
+                "workspace_file": AttachmentTransportSupport(
+                    headless=("prompt_path_reference",),
+                    detail="Workspace files remain contained path references.",
+                ),
+            },
             supported_builtin_tools=GIGACHAT_BUILTIN_TOOLS,
+            headless_continuation=HeadlessContinuationStrategy.STRUCTURED_REPLAY,
             tags=("chat", "proxy"),
         )
 

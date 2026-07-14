@@ -1,6 +1,7 @@
 # Быстрый старт
 
-Этот документ помогает быстро запустить прокси к GigaChat, совместимый с OpenAI и Anthropic.
+Этот документ помогает запустить gateway к GigaChat, совместимый с OpenAI,
+Anthropic и Gemini, и проверить каждый протокол первым запросом.
 
 ## Требования
 
@@ -139,6 +140,31 @@ message = client.messages.create(
 print(message.content[0].text)
 ```
 
+## Gemini SDK
+
+Официальный клиент Gemini сам добавляет `/v1beta/models/...`, поэтому передайте
+ему корень gateway, а не `/v1` или `/v2`:
+
+```python
+from google import genai
+from google.genai import types
+
+client = genai.Client(
+    api_key="<local-proxy-api-key>",
+    http_options=types.HttpOptions(base_url="http://localhost:8090"),
+)
+response = client.models.generate_content(
+    model="GigaChat-2-Max",
+    contents="Кратко объясни SSE",
+)
+print(response.text)
+```
+
+Чтобы выбрать контракт GigaChat для Gemini, добавьте `/v1` или `/v2` в URL
+операции либо используйте соответствующую настройку интеграции. В
+[примерах Gemini](https://github.com/ai-forever/gpt2giga/tree/main/examples/gemini)
+есть streaming, tools, structured output, подсчёт токенов и embeddings.
+
 ## Авторизация GigaChat для каждого запроса
 
 Если клиент должен передавать авторизацию GigaChat через `Authorization`, включите:
@@ -160,4 +186,5 @@ GPT2GIGA_PASS_TOKEN=True
 - OpenAI Chat Completions: [examples/openai/chat_completions/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/chat_completions/README.md)
 - OpenAI Responses: [examples/openai/responses/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/responses/README.md)
 - Anthropic Messages: [examples/anthropic/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/anthropic/README.md)
+- Gemini GenerateContent: [examples/gemini/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/gemini/README.md)
 - Все примеры: [examples/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/README.md)

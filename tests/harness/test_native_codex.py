@@ -132,6 +132,75 @@ def test_codex_native_preview_and_import_tolerate_unknown_jsonl(tmp_path):
     assert imported[1].content == "done"
 
 
+def test_codex_native_discovery_uses_recorded_workspace_and_stable_identity(tmp_path):
+    requested_workspace = tmp_path / "requested"
+    other_workspace = tmp_path / "other"
+    external_home = tmp_path / ".codex"
+    requested_workspace.mkdir()
+    other_workspace.mkdir()
+    first_path = external_home / "sessions" / "first.jsonl"
+    other_path = external_home / "sessions" / "other.jsonl"
+    unknown_path = external_home / "sessions" / "unknown.jsonl"
+    _write_jsonl(
+        first_path,
+        (
+            {
+                "type": "session_meta",
+                "payload": {
+                    "id": "recorded-session",
+                    "cwd": str(requested_workspace),
+                },
+                "session_id": "recorded-session",
+            },
+            {"role": "user", "content": "recorded"},
+        ),
+    )
+    _write_jsonl(
+        other_path,
+        (
+            {
+                "session_id": "other-session",
+                "cwd": str(other_workspace),
+                "role": "user",
+                "content": "other",
+            },
+        ),
+    )
+    _write_jsonl(
+        unknown_path,
+        ({"session_id": "unknown-session", "role": "user", "content": "unknown"},),
+    )
+    connector = CodexNativeHistoryConnector(
+        data_dir=tmp_path / "data",
+        external_codex_home=external_home,
+    )
+
+    refs = connector.discover(
+        workspace=str(requested_workspace),
+        include_external=True,
+    )
+    by_session = {ref.native_session_id: ref for ref in refs}
+    original_id = by_session["recorded-session"].id
+    moved_path = first_path.with_name("moved.jsonl")
+    first_path.rename(moved_path)
+    moved_refs = connector.discover(workspace=None, include_external=True)
+    moved = next(
+        ref for ref in moved_refs if ref.native_session_id == "recorded-session"
+    )
+
+    assert by_session["recorded-session"].workspace == str(
+        requested_workspace.resolve()
+    )
+    assert by_session["recorded-session"].metadata["workspace_evidence"] == (
+        "history.payload.cwd"
+    )
+    assert by_session["other-session"].workspace == str(other_workspace.resolve())
+    assert by_session["unknown-session"].workspace is None
+    assert by_session["unknown-session"].metadata["workspace_known"] is False
+    assert "project_id" not in by_session["unknown-session"].metadata
+    assert moved.id == original_id
+
+
 def test_codex_native_start_command_uses_managed_home_and_redacts_key(
     tmp_path,
     monkeypatch,
@@ -233,6 +302,19 @@ def test_codex_native_resume_command_requires_managed_ref(tmp_path):
     data_dir = tmp_path / "data"
     workspace.mkdir()
     project_id = project_id_for_root(workspace)
+    connector = CodexNativeHistoryConnector(data_dir=data_dir, executable="codex")
+    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+    start_plan = connector.build_start_command(
+        HarnessRequest(
+            prompt="start",
+            model="GigaChat-2-Max",
+            api_mode=GigaChatApiMode.V1,
+            mode="edit",
+            workspace=str(workspace),
+        ),
+        context,
+    )
+    connector.record_start_snapshot(start_plan)
     session_file = (
         data_dir
         / "native"
@@ -247,14 +329,12 @@ def test_codex_native_resume_command_requires_managed_ref(tmp_path):
         (
             {
                 "session_id": "managed-session",
-                "timestamp": "2026-07-09T10:00:00Z",
+                "timestamp": start_plan.execution_snapshot.created_at,
                 "role": "user",
                 "content": "resume me",
             },
         ),
     )
-    connector = CodexNativeHistoryConnector(data_dir=data_dir, executable="codex")
-    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
     (managed,) = connector.discover(workspace=str(workspace), include_external=False)
 
     plan = connector.build_resume_command(managed, context)
@@ -264,11 +344,23 @@ def test_codex_native_resume_command_requires_managed_ref(tmp_path):
         can_resume=False,
     )
 
-    assert plan.command == ("codex", "resume", "managed-session")
+    assert plan.command == (
+        "codex",
+        "--ask-for-approval",
+        "on-request",
+        "--sandbox",
+        "workspace-write",
+        "resume",
+        "managed-session",
+    )
+    assert plan.metadata["permission_enforcement"]["requested_mode"] == "edit"
     assert "exec" not in plan.command
     assert "--ephemeral" not in plan.command
     assert plan.env["CODEX_HOME"] == managed.metadata["native_home"]
-    assert 'base_url = "http://127.0.0.1:8090/v2"' in (
+    assert managed.execution_snapshot == start_plan.execution_snapshot
+    assert plan.execution_snapshot == start_plan.execution_snapshot
+    assert plan.metadata["api_mode"] == "v1"
+    assert 'base_url = "http://127.0.0.1:8090/v1"' in (
         session_file.parents[1] / "config.toml"
     ).read_text(encoding="utf-8")
     with pytest.raises(ValueError, match="Only managed"):

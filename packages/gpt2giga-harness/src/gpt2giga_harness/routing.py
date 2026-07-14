@@ -265,11 +265,24 @@ def _score_candidate(harness: BaseHarness, features: _RouteFeatures) -> _Candida
 
     if features.has_image_context:
         if "image" in spec.accepted_attachment_kinds:
-            score += 24
-            _append_unique(
-                reasons, "Image context is present and this harness accepts images."
-            )
-            if spec.id == "direct-chat":
+            if _supports_rich_attachment(spec, "image", invocation="headless"):
+                score += 24
+                _append_unique(
+                    reasons,
+                    "Image context is present and this harness has rich image transport.",
+                )
+            else:
+                score += 4
+                _append_unique(
+                    reasons,
+                    "Image context is accepted as a path or metadata reference only.",
+                )
+                warnings.append(
+                    f"{spec.title} does not claim rich image delivery for headless runs."
+                )
+            if spec.id == "direct-chat" and _supports_rich_attachment(
+                spec, "image", invocation="headless"
+            ):
                 score += 12
                 _append_unique(
                     reasons, "Direct chat can send images through content parts."
@@ -428,6 +441,27 @@ def _unsupported_attachment_kinds(
     if not accepted:
         return set(kinds)
     return {kind for kind in kinds if kind not in accepted}
+
+
+def _supports_rich_attachment(
+    spec: HarnessSpec,
+    kind: str,
+    *,
+    invocation: str,
+) -> bool:
+    capabilities = getattr(spec, "attachment_capabilities", {})
+    if not isinstance(capabilities, Mapping):
+        return False
+    support = capabilities.get(kind)
+    if support is None:
+        return False
+    if isinstance(support, Mapping):
+        rich = bool(support.get("rich", False))
+        transports = support.get(invocation, ())
+    else:
+        rich = bool(getattr(support, "rich", False))
+        transports = getattr(support, invocation, ())
+    return rich and bool(transports)
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:

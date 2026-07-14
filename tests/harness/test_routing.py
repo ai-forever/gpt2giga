@@ -6,6 +6,7 @@ from gpt2giga_harness.routing import (
     route_recommendation_to_dict,
 )
 from gpt2giga_harness.types import (
+    AttachmentTransportSupport,
     Availability,
     HarnessCapability,
     HarnessContext,
@@ -27,6 +28,12 @@ def test_router_recommends_direct_chat_for_image_explanation():
                 capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
                 supports_attachments=True,
                 accepted_attachment_kinds=("image", "text"),
+                attachment_capabilities={
+                    "image": AttachmentTransportSupport(
+                        headless=("openai_content_parts",),
+                        rich=True,
+                    )
+                },
             )
         )
     )
@@ -42,7 +49,28 @@ def test_router_recommends_direct_chat_for_image_explanation():
     assert recommendation.harness_id == "direct-chat"
     assert recommendation.mode == "read"
     assert recommendation.invocation_mode == HarnessInvocationMode.HEADLESS
-    assert any("images" in reason for reason in recommendation.reasons)
+    assert any("rich image" in reason for reason in recommendation.reasons)
+
+
+def test_router_warns_when_image_delivery_is_path_only():
+    registry = HarnessRegistry()
+    registry.register(_agent("claude-code"))
+
+    recommendation = recommend_harness_route(
+        registry,
+        prompt="Inspect this screenshot in the repository",
+        mode="read",
+        workspace="/repo",
+        attachments=({"kind": "image", "filename": "screen.png"},),
+    )
+
+    assert recommendation.harness_id == "claude-code"
+    assert any(
+        "path or metadata reference only" in item for item in recommendation.reasons
+    )
+    assert any(
+        "does not claim rich image delivery" in item for item in recommendation.warnings
+    )
 
 
 def test_router_recommends_codex_for_explicit_edit_workspace():
@@ -130,6 +158,12 @@ def _direct_chat() -> BaseHarness:
             capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
             supports_attachments=True,
             accepted_attachment_kinds=("image", "text", "workspace_file"),
+            attachment_capabilities={
+                "image": AttachmentTransportSupport(
+                    headless=("openai_content_parts",),
+                    rich=True,
+                )
+            },
         )
     )
 
@@ -145,6 +179,13 @@ def _agent(harness_id: str, *, available: bool = True) -> BaseHarness:
             supports_workspace=True,
             supports_attachments=True,
             accepted_attachment_kinds=("image", "text", "workspace_file", "document"),
+            attachment_capabilities={
+                "image": AttachmentTransportSupport(
+                    headless=("prompt_path_reference",),
+                    native=("prompt_path_reference",),
+                    detail="path only",
+                )
+            },
             supports_native_sessions=True,
         ),
         available=available,

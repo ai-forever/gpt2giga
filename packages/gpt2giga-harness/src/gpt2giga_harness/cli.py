@@ -23,6 +23,7 @@ from gpt2giga_harness.agents import (
     parse_agent_profile,
 )
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
 from gpt2giga_harness.doctor import run_doctor
 from gpt2giga_harness.editor import (
     build_open_diff_plan,
@@ -55,9 +56,11 @@ from gpt2giga_harness.native.base import (
     discovery_error_to_dict,
     native_command_plan_to_dict,
 )
+from gpt2giga_harness.native.discovery import normalize_native_workspace
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
+    execution_snapshot_to_dict,
 )
 from gpt2giga_harness.native.registry import (
     UnknownNativeHistoryConnectorError,
@@ -345,6 +348,8 @@ def build_parser() -> argparse.ArgumentParser:
     native_sync.add_argument("--harness", dest="harness_id", default=None)
     native_sync.add_argument("--workspace", default=None)
     native_sync.add_argument("--include-external", action="store_true")
+    native_sync.add_argument("--cursor", default=None)
+    native_sync.add_argument("--limit", type=int, default=100)
     native_sync.add_argument("--json", action="store_true")
     native_sync.set_defaults(handler=_handle_native_sync)
 
@@ -731,6 +736,9 @@ def _handle_harness_inspect(args: argparse.Namespace, config: HarnessConfig) -> 
     resolution = getattr(harness, "executable_resolution", None)
     if callable(resolution):
         payload.update(executable_resolution_to_dict(resolution()))
+    capability_probe = getattr(harness, "capability_probe", None)
+    if callable(capability_probe):
+        payload["compatibility"] = cli_capability_snapshot_to_dict(capability_probe())
     if args.json:
         _print_json(payload)
     else:
@@ -1107,6 +1115,8 @@ def _schedule_service(config: HarnessConfig) -> ScheduleService:
 
 
 def _handle_native_sync(args: argparse.Namespace, config: HarnessConfig) -> int:
+    if not 1 <= args.limit <= 500:
+        raise ValueError("native sync limit must be between 1 and 500")
     workspace = resolve_workspace(args.workspace) if args.workspace else None
     project_id = _project_id_for_workspace(workspace, config)
     registry = create_default_native_registry(data_dir=config.data_dir)
@@ -1115,18 +1125,32 @@ def _handle_native_sync(args: argparse.Namespace, config: HarnessConfig) -> int:
         harness_id=args.harness_id,
         workspace=workspace,
         include_external=args.include_external,
+        cursor=args.cursor,
+        limit=args.limit,
     )
     stored = [
-        index_store.upsert_ref(ref, project_id=project_id) for ref in result.sessions
+        index_store.upsert_ref(
+            ref,
+            project_id=_native_ref_project_id(
+                ref,
+                workspace=workspace,
+                project_id=project_id,
+            ),
+        )
+        for ref in result.sessions
     ]
     payload = {
         "sessions": [native_session_ref_to_dict(ref) for ref in stored],
         "errors": [discovery_error_to_dict(error) for error in result.errors],
+        "next_cursor": result.next_cursor,
+        "scanned_count": result.scanned_count,
     }
     if args.json:
         _print_json(payload)
     else:
         print(f"Synced {len(stored)} native session(s).")
+        if result.next_cursor is not None:
+            print(f"Next cursor: {result.next_cursor}")
         _print_native_table(payload["sessions"])
         for error in payload["errors"]:
             print(f"{error['harness_id']}: {error['message']}", file=sys.stderr)
@@ -1165,12 +1189,19 @@ def _handle_native_import(args: argparse.Namespace, config: HarnessConfig) -> in
     )
     imported = connector.import_ref(ref)
     session_store = FilesystemHarnessSessionStore(config.data_dir)
+    snapshot = ref.execution_snapshot
     session = session_store.create_session(
         title=f"Imported: {ref.title}",
         workspace=ref.workspace,
         default_harness_id=ref.harness_id,
-        default_model=_optional_text(ref.metadata.get("model")),
-        default_api_mode=parse_api_mode(ref.metadata.get("api_mode")),
+        default_model=(
+            snapshot.model
+            if snapshot is not None
+            else _optional_text(ref.metadata.get("model"))
+        ),
+        default_api_mode=parse_api_mode(
+            snapshot.api_mode if snapshot is not None else ref.metadata.get("api_mode")
+        ),
         native={
             "source": "native_import",
             "native_ref_id": ref.id,
@@ -1239,6 +1270,7 @@ def _handle_native_import(args: argparse.Namespace, config: HarnessConfig) -> in
                 "imported_message_count": len(messages),
                 "skipped_item_count": skipped_count,
                 "project_id": ref.metadata.get("project_id"),
+                **_native_snapshot_metadata(ref),
             },
         ),
     )
@@ -1509,10 +1541,17 @@ def _handle_agent_validate(args: argparse.Namespace, config: HarnessConfig) -> i
 def _handle_agent_profile_run(args: argparse.Namespace, config: HarnessConfig) -> int:
     project = resolve_project(args.workspace, data_dir=config.data_dir)
     profile = load_agent_profile(project.root, args.agent_id)
-    payload = agent_run_payload(profile, args.prompt, workspace=project.root)
+    registry = create_default_registry()
+    payload = agent_run_payload(
+        profile,
+        args.prompt,
+        workspace=project.root,
+        harness=registry.get(profile.harness_id),
+        default_timeout_seconds=config.timeout_seconds,
+    )
     payload["dry_run"] = args.dry_run
     runner = HarnessSessionRunner(
-        registry=create_default_registry(),
+        registry=registry,
         config=config,
         store=FilesystemHarnessSessionStore(config.data_dir),
     )
@@ -2112,6 +2151,23 @@ def _project_id_for_workspace(
     ).id
 
 
+def _native_ref_project_id(
+    ref: NativeSessionRef,
+    *,
+    workspace: str | None,
+    project_id: str | None,
+) -> str | None:
+    if (
+        project_id is not None
+        and ref.workspace is not None
+        and normalize_native_workspace(ref.workspace)
+        == normalize_native_workspace(workspace)
+    ):
+        return project_id
+    value = ref.metadata.get("project_id")
+    return str(value).strip() if value is not None and str(value).strip() else None
+
+
 def _editor_command_for_workspace(
     workspace: str | None,
     config: HarnessConfig,
@@ -2171,7 +2227,19 @@ def _native_import_session_metadata(ref: NativeSessionRef) -> dict[str, Any]:
         metadata["project_id"] = project_id
     if ref.workspace is not None:
         metadata["project_root"] = ref.workspace
+    metadata.update(_native_snapshot_metadata(ref))
     return metadata
+
+
+def _native_snapshot_metadata(ref: NativeSessionRef) -> dict[str, Any]:
+    if ref.execution_snapshot is None:
+        return {"limitations": ["route_unknown"]} if ref.can_resume else {}
+    return {
+        "execution_snapshot": execution_snapshot_to_dict(ref.execution_snapshot),
+        "limitations": (
+            [] if ref.execution_snapshot.route_known else ["route_unknown"]
+        ),
+    }
 
 
 def _native_import_message_role(role: str) -> str | None:

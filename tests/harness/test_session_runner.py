@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,12 +13,15 @@ from gpt2giga_harness.project_memory import FilesystemProjectMemoryStore
 from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga_harness.sessions.models import HarnessMessage
+from gpt2giga_harness.sessions.store import new_id, utc_now
 from gpt2giga_harness.types import (
     Availability,
     GigaChatBuiltinTool,
     HarnessCapability,
     HarnessContext,
     HarnessEvent,
+    HeadlessContinuationStrategy,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -70,6 +74,62 @@ def test_session_runner_blocks_private_key_before_harness_invocation():
     assert "private_key_material" in str(exc_info.value)
 
 
+def test_session_runner_persists_structured_thread_and_rejects_identity_change(
+    tmp_path,
+):
+    harness = _StructuredThreadHarness()
+    runner = _runner(harness, data_dir=tmp_path / "data")
+    session = runner.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+        default_model="GigaChat-2-Max",
+    )
+
+    first = runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "codex-cli",
+            "prompt": "first",
+            "model": "GigaChat-2-Max",
+            "stream": True,
+        },
+    )
+    second = runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "codex-cli",
+            "prompt": "second",
+            "model": "GigaChat-2-Max",
+            "stream": True,
+        },
+    )
+
+    assert first.run.metadata["continuation"]["action"] == "start"
+    assert second.run.metadata["continuation"]["action"] == "continue"
+    assert [
+        request.extra["continuation"]["action"] for request in harness.requests
+    ] == [
+        "start",
+        "continue",
+    ]
+    assert harness.requests[1].extra["continuation"]["history_replayed"] is False
+    assert second.session.metadata["app_server_thread"]["thread_id"] == "thread-1"
+
+    with pytest.raises(ValueError, match="fork explicitly"):
+        runner.run_in_session(
+            session.id,
+            {
+                "harness_id": "codex-cli",
+                "prompt": "incompatible",
+                "model": "DifferentModel",
+                "stream": True,
+            },
+        )
+    assert len(harness.requests) == 2
+    assert len(runner.store.list_runs(session.id)) == 2
+    assert len(runner.store.list_messages(session.id)) == 4
+
+
 def test_session_runner_passes_and_records_selected_builtin_tools():
     harness = _CaptureHarness()
     runner = _runner(harness)
@@ -101,6 +161,65 @@ def test_session_runner_rejects_builtin_tools_for_v1():
                 "builtin_tools": ["web_search"],
             }
         )
+
+
+def test_managed_mcp_snapshot_is_bound_to_provenance_and_reused_for_replay(tmp_path):
+    workspace = tmp_path / "project"
+    config_path = workspace / ".giga" / "harness.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        """
+[tools.issues]
+enabled = true
+kind = "mcp"
+transport = "stdio"
+command = "issue-mcp-v1"
+trusted = true
+harnesses = ["codex-cli"]
+""",
+        encoding="utf-8",
+    )
+    harness = _ManagedCaptureHarness()
+    runner = _runner(harness, data_dir=tmp_path / "data")
+
+    first = runner.create_and_run(
+        {
+            "harness_id": "codex-cli",
+            "prompt": "inspect issues",
+            "workspace": str(workspace),
+            "extra": {"tool_ids": ["issues"]},
+        }
+    )
+    first_ref = harness.requests[-1].extra["managed_mcp_snapshot"]
+    replay_request = first.run.metadata["provenance"]["replay_request"]
+
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("issue-mcp-v1", "issue-mcp-v2"),
+        encoding="utf-8",
+    )
+    second = runner.run_in_session(first.session.id, replay_request)
+    second_ref = harness.requests[-1].extra["managed_mcp_snapshot"]
+
+    assert first_ref["snapshot_id"] == second_ref["snapshot_id"]
+    assert first_ref["snapshot_hash"] == second_ref["snapshot_hash"]
+    assert first.run.metadata["managed_mcp_snapshot"] == first_ref
+    assert second.run.metadata["managed_mcp_snapshot"] == second_ref
+    assert (
+        second.run.metadata["provenance"]["execution"]["managed_mcp_snapshot"][
+            "snapshot_id"
+        ]
+        == first_ref["snapshot_id"]
+    )
+    snapshot_path = (
+        tmp_path
+        / "data"
+        / "tools"
+        / "headless_mcp_snapshots"
+        / f"{first_ref['snapshot_id']}.json"
+    )
+    snapshot_content = snapshot_path.read_text(encoding="utf-8")
+    assert "issue-mcp-v1" in snapshot_content
+    assert "issue-mcp-v2" not in snapshot_content
 
 
 def test_session_runner_failed_harness_stores_error_message():
@@ -154,6 +273,65 @@ def test_session_runner_passes_previous_messages_to_chat_harness():
     first = runner.create_and_run({"harness_id": "capture", "prompt": "first"})
 
     runner.run_in_session(first.session.id, {"prompt": "second"})
+
+    assert harness.last_request is not None
+    assert [
+        (message.role, message.content) for message in harness.last_request.messages
+    ] == [
+        ("user", "first"),
+        ("assistant", "answer: first"),
+        ("user", "second"),
+    ]
+
+
+def test_queued_turn_waits_for_preceding_assistant_in_request_history():
+    store = InMemoryHarnessSessionStore()
+    harness = _CaptureHarness()
+    runner = _runner(harness, store=store)
+    session = runner.create_session(default_harness_id="capture")
+    first_run = store.create_run(
+        session_id=session.id,
+        harness_id="capture",
+        prompt="first",
+        model=None,
+        api_mode=session.default_api_mode,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=session.workspace,
+        status="running",
+    )
+    store.append_message(
+        HarnessMessage(
+            id=new_id("msg"),
+            session_id=session.id,
+            run_id=first_run.id,
+            role="user",
+            content="first",
+            created_at=utc_now(),
+        )
+    )
+    queued = runner.enqueue_in_session(
+        session.id,
+        {"harness_id": "capture", "prompt": "second"},
+        run_id=new_id("run"),
+    )
+    store.append_message(
+        HarnessMessage(
+            id=new_id("msg"),
+            session_id=session.id,
+            run_id=first_run.id,
+            role="assistant",
+            content="answer: first",
+            created_at=utc_now(),
+        )
+    )
+
+    runner.run_in_session(
+        session.id,
+        {"harness_id": "capture", "prompt": "second"},
+        existing_run_id=queued.run.id,
+        user_message_id=queued.user_message.id,
+    )
 
     assert harness.last_request is not None
     assert [
@@ -355,6 +533,87 @@ class _CaptureHarness(BaseHarness):
             text=f"answer: {request.prompt}",
             raw={"request_id": "ok"},
             command=("capture", request.prompt),
+        )
+
+
+class _ManagedCaptureHarness(BaseHarness):
+    def __init__(self) -> None:
+        self.requests: list[HarnessRequest] = []
+
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="codex-cli",
+            title="Managed capture",
+            kind="agent-cli",
+            description="Capture managed MCP snapshots",
+            capabilities=(HarnessCapability.AGENT_CLI,),
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available("test")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        self.requests.append(request)
+        return HarnessResult(
+            ok=True,
+            text="captured",
+            raw={"managed_mcp_snapshot": request.extra["managed_mcp_snapshot"]},
+            command=("capture-managed",),
+        )
+
+
+class _StructuredThreadHarness(BaseHarness):
+    def __init__(self) -> None:
+        self.requests: list[HarnessRequest] = []
+
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="codex-cli",
+            title="Structured Codex",
+            kind="agent-cli",
+            description="Capture structured continuation plans",
+            capabilities=(HarnessCapability.AGENT_CLI,),
+            supports_streaming=True,
+            headless_continuation=HeadlessContinuationStrategy.STRUCTURED_THREAD,
+        )
+
+    def capability_probe(self):
+        return SimpleNamespace(capabilities={"app-server": True})
+
+    def availability(self) -> Availability:
+        return Availability.available("test")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        del context
+        self.requests.append(request)
+        continuation = request.extra["continuation"]
+        link = continuation.get("link") or {}
+        return HarnessResult(
+            ok=True,
+            text=f"answer: {request.prompt}",
+            raw={
+                "app_server_thread": {
+                    "schema_version": 1,
+                    "protocol": continuation["protocol"],
+                    "runtime_id": "runtime-1",
+                    "thread_id": link.get("thread_id") or "thread-1",
+                    "latest_turn_id": f"turn-{len(self.requests)}",
+                    "snapshot": continuation["snapshot"],
+                    "snapshot_hash": continuation["snapshot"]["snapshot_hash"],
+                    "runtime_status": "loaded",
+                }
+            },
+            command=("codex", "app-server", "--stdio"),
         )
 
 

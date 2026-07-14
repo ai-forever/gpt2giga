@@ -30,7 +30,26 @@ def test_claude_code_sanitizes_env(monkeypatch):
     assert "GIGACHAT_ACCESS_TOKEN" not in env
     assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v1"
     assert env["ANTHROPIC_API_KEY"] == "proxy-key"
+    assert env["ANTHROPIC_CUSTOM_HEADERS"] == (
+        "X-GPT2GIGA-Harness-Model:GigaChat\nX-GPT2GIGA-Pass-Model:false"
+    )
     assert env["GPT2GIGA_HARNESS_API_MODE"] == "v1"
+
+
+def test_claude_code_preserves_custom_headers_and_encodes_pinned_model():
+    env = ClaudeCodeHarness().build_env(
+        HarnessRequest(prompt="inspect", model="team/model,preview"),
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            extra_env={"ANTHROPIC_CUSTOM_HEADERS": "X-Team:blue"},
+        ),
+    )
+
+    assert env["ANTHROPIC_CUSTOM_HEADERS"] == (
+        "X-Team:blue\n"
+        "X-GPT2GIGA-Harness-Model:team%2Fmodel%2Cpreview\n"
+        "X-GPT2GIGA-Pass-Model:false"
+    )
 
 
 def test_claude_code_dry_run_redacts_proxy_key(monkeypatch):
@@ -73,6 +92,26 @@ def test_claude_code_stream_command_uses_partial_stream_json():
     assert command[command.index("--output-format") + 1] == "stream-json"
     assert "--include-partial-messages" in command
     assert "--include-hook-events" not in command
+
+
+def test_claude_code_applies_fixed_agent_effort_and_tool_restrictions():
+    command = ClaudeCodeHarness().build_command(
+        HarnessRequest(
+            prompt="inspect",
+            extra={
+                "agent_adapter_options": {
+                    "reasoning_effort": "high",
+                    "allowed_tools": ["Read", "Bash(git status)"],
+                    "disallowed_tools": ["Edit"],
+                }
+            },
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert command[command.index("--effort") + 1] == "high"
+    assert command[command.index("--allowedTools") + 1] == ("Read,Bash(git status)")
+    assert command[command.index("--disallowedTools") + 1] == "Edit"
 
 
 def test_claude_stream_parser_normalizes_partial_text_tools_and_usage():

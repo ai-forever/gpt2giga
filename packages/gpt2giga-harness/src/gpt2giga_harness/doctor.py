@@ -6,6 +6,7 @@ import os
 import platform
 
 from gpt2giga_harness import proxy
+from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
 from gpt2giga_harness.config import (
     DEFAULT_MODEL_HINTS,
     HarnessConfig,
@@ -59,6 +60,16 @@ def run_doctor(
         availability = harness.availability()
         suffix = f" - {availability.reason}" if availability.reason else ""
         lines.append(f"  {spec.id}: {availability.status.value}{suffix}")
+        probe_method = getattr(harness, "capability_probe", None)
+        if callable(probe_method):
+            probe = cli_capability_snapshot_to_dict(probe_method())
+            lines.append(
+                "    compatibility: "
+                f"{probe['status']} ({probe['version'] or 'version unknown'}; "
+                f"events={probe['event_schema']}; history={probe['history_schema']})"
+            )
+            if probe["warning"]:
+                lines.append(f"    warning: {probe['warning']}")
     if registry.discovery_errors:
         lines.extend(["", "Plugin discovery errors:"])
         lines.extend(f"  {error}" for error in registry.discovery_errors)

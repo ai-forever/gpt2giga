@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -111,6 +112,7 @@ def test_claude_native_preview_and_import_tolerate_unknown_jsonl(tmp_path):
                 ),
                 json.dumps(
                     {
+                        "uuid": "assistant-message-id",
                         "timestamp": "2026-07-09T10:01:00Z",
                         "message": {"role": "assistant", "content": "done"},
                     }
@@ -133,6 +135,300 @@ def test_claude_native_preview_and_import_tolerate_unknown_jsonl(tmp_path):
     assert preview[0].content == "first\nsecond"
     assert [message.role for message in imported] == ["user", "assistant"]
     assert imported[1].content == "done"
+    assert imported[1].metadata["native_message_id"] == "assistant-message-id"
+
+
+def test_claude_native_discovery_does_not_stamp_unknown_external_workspace(tmp_path):
+    requested_workspace = tmp_path / "requested"
+    actual_workspace = tmp_path / "actual"
+    external_home = tmp_path / ".claude"
+    requested_workspace.mkdir()
+    actual_workspace.mkdir()
+    known = external_home / "projects" / "known.jsonl"
+    unknown = external_home / "projects" / "unknown.jsonl"
+    _write_jsonl(
+        known,
+        (
+            {
+                "sessionId": "known-session",
+                "cwd": str(actual_workspace),
+                "type": "user",
+                "message": {"content": "known"},
+            },
+        ),
+    )
+    _write_jsonl(
+        unknown,
+        (
+            {
+                "sessionId": "unknown-session",
+                "type": "user",
+                "message": {"content": "unknown"},
+            },
+        ),
+    )
+    connector = ClaudeNativeHistoryConnector(
+        data_dir=tmp_path / "data",
+        external_claude_home=external_home,
+    )
+
+    refs = connector.discover(
+        workspace=str(requested_workspace),
+        include_external=True,
+    )
+    by_session = {ref.native_session_id: ref for ref in refs}
+
+    assert by_session["known-session"].workspace == str(actual_workspace.resolve())
+    assert by_session["known-session"].metadata["workspace_evidence"] == "history.cwd"
+    assert by_session["unknown-session"].workspace is None
+    assert by_session["unknown-session"].metadata["workspace_reason"] == "not_recorded"
+    assert "project_id" not in by_session["unknown-session"].metadata
+
+
+def test_claude_native_import_normalizes_tool_calls_and_results(tmp_path):
+    workspace = tmp_path / "repo"
+    data_dir = tmp_path / "data"
+    external_home = tmp_path / ".claude"
+    workspace.mkdir()
+    session_file = external_home / "projects" / "repo" / "external.jsonl"
+    _write_jsonl(
+        session_file,
+        (
+            {
+                "uuid": "tool-call-message",
+                "timestamp": "2026-07-13T19:28:18Z",
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_read",
+                            "name": "Read",
+                            "input": {"file_path": "/repo/README.md"},
+                        }
+                    ],
+                },
+            },
+            {
+                "uuid": "tool-result-message",
+                "timestamp": "2026-07-13T19:28:19Z",
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_read",
+                            "content": "README contents",
+                        }
+                    ],
+                },
+            },
+            {
+                "timestamp": "2026-07-13T19:28:20Z",
+                "role": "assistant",
+                "tools_state_id": "toolu_glob",
+                "content": [
+                    {
+                        "function_call": {
+                            "name": "Glob",
+                            "arguments": {"pattern": "**/*.py"},
+                        }
+                    }
+                ],
+            },
+            {
+                "timestamp": "2026-07-13T19:28:21Z",
+                "role": "tool",
+                "tools_state_id": "toolu_glob",
+                "content": [
+                    {
+                        "function_result": {
+                            "name": "Glob",
+                            "result": {"result": "a.py\nb.py"},
+                        }
+                    }
+                ],
+            },
+        ),
+    )
+    connector = ClaudeNativeHistoryConnector(
+        data_dir=data_dir,
+        external_claude_home=external_home,
+    )
+    (ref,) = connector.discover(workspace=str(workspace), include_external=True)
+
+    imported = connector.import_ref(ref)
+
+    assert [message.role for message in imported] == [
+        "assistant",
+        "tool",
+        "assistant",
+        "tool",
+    ]
+    assert [message.content for message in imported] == ["", "", "", ""]
+    assert imported[0].metadata["tool_calls"] == [
+        {
+            "tool_call_id": "toolu_read",
+            "name": "Read",
+            "arguments": {"file_path": "/repo/README.md"},
+            "status": "running",
+        }
+    ]
+    assert imported[1].metadata["tool_results"] == [
+        {
+            "tool_call_id": "toolu_read",
+            "result": "README contents",
+            "status": "completed",
+        }
+    ]
+    assert imported[2].metadata["tool_calls"][0]["tool_call_id"] == "toolu_glob"
+    assert imported[2].metadata["tool_calls"][0]["name"] == "Glob"
+    assert imported[3].metadata["tool_results"] == [
+        {
+            "tool_call_id": "toolu_glob",
+            "name": "Glob",
+            "result": {"result": "a.py\nb.py"},
+            "status": "completed",
+        }
+    ]
+
+
+def test_claude_native_import_includes_subagent_tool_activity(tmp_path):
+    workspace = tmp_path / "repo"
+    data_dir = tmp_path / "data"
+    external_home = tmp_path / ".claude"
+    workspace.mkdir()
+    session_file = external_home / "projects" / "repo" / "external.jsonl"
+    _write_jsonl(
+        session_file,
+        (
+            {
+                "uuid": "root-agent-call",
+                "sessionId": "external-session",
+                "timestamp": "2026-07-13T19:28:18Z",
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_agent",
+                            "name": "Agent",
+                            "input": {"subagent_type": "Explore"},
+                        }
+                    ],
+                },
+            },
+            {
+                "uuid": "root-agent-result",
+                "timestamp": "2026-07-13T19:28:22Z",
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_agent",
+                            "content": "exploration complete",
+                        }
+                    ],
+                },
+            },
+        ),
+    )
+    subagent_file = (
+        session_file.parent / session_file.stem / "subagents" / "agent-explore.jsonl"
+    )
+    _write_jsonl(
+        subagent_file,
+        (
+            {
+                "uuid": "nested-read-call",
+                "timestamp": "2026-07-13T19:28:19Z",
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_read",
+                            "name": "Read",
+                            "input": {"file_path": "/repo/README.md"},
+                        }
+                    ],
+                },
+            },
+            {
+                "uuid": "nested-read-result",
+                "timestamp": "2026-07-13T19:28:20Z",
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_read",
+                            "content": "README contents",
+                        }
+                    ],
+                },
+            },
+            {
+                "uuid": "nested-answer",
+                "timestamp": "2026-07-13T19:28:21Z",
+                "type": "assistant",
+                "message": {"role": "assistant", "content": "private summary"},
+            },
+        ),
+    )
+    subagent_file.with_suffix(".meta.json").write_text(
+        json.dumps(
+            {
+                "toolUseId": "toolu_agent",
+                "agentType": "Explore",
+                "description": "Inspect repository structure",
+                "spawnDepth": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    connector = ClaudeNativeHistoryConnector(
+        data_dir=data_dir,
+        external_claude_home=external_home,
+    )
+
+    refs = connector.discover(workspace=str(workspace), include_external=True)
+    imported = connector.import_ref(refs[0])
+
+    assert len(refs) == 1
+    assert [message.created_at for message in imported] == [
+        "2026-07-13T19:28:18Z",
+        "2026-07-13T19:28:19Z",
+        "2026-07-13T19:28:20Z",
+        "2026-07-13T19:28:22Z",
+    ]
+    nested_call = imported[1].metadata["tool_calls"][0]
+    nested_result = imported[2].metadata["tool_results"][0]
+    assert nested_call == {
+        "tool_call_id": "toolu_read",
+        "name": "Read",
+        "arguments": {"file_path": "/repo/README.md"},
+        "status": "running",
+        "parent_tool_call_id": "toolu_agent",
+        "subagent_id": "agent-explore",
+        "subagent_type": "Explore",
+        "subagent_description": "Inspect repository structure",
+        "subagent_depth": 1,
+    }
+    assert nested_result["parent_tool_call_id"] == "toolu_agent"
+    assert nested_result["subagent_type"] == "Explore"
+    assert imported[1].metadata["native_message_id"] == (
+        "agent-explore:nested-read-call"
+    )
+    assert all(message.content != "private summary" for message in imported)
+    assert connector.preview(refs[0], max_messages=2) == imported[:2]
 
 
 def test_claude_native_start_command_uses_managed_home_and_redacts_key(
@@ -163,7 +459,13 @@ def test_claude_native_start_command_uses_managed_home_and_redacts_key(
     plan = connector.build_start_command(request, context)
     payload = native_command_plan_to_dict(plan)
 
-    assert plan.command[:3] == ("claude", "-n", plan.metadata["session_name"])
+    assert plan.command[:5] == (
+        "claude",
+        "--permission-mode",
+        "default",
+        "-n",
+        plan.metadata["session_name"],
+    )
     assert str(plan.metadata["session_name"]).startswith("gpt2giga-sess-abcdef")
     assert "--model" in plan.command
     assert "GigaChat-2-Max" in plan.command
@@ -172,10 +474,19 @@ def test_claude_native_start_command_uses_managed_home_and_redacts_key(
     assert "--no-session-persistence" not in plan.command
     assert "GIGACHAT_CREDENTIALS" not in plan.env
     assert plan.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v1"
-    assert plan.env["ANTHROPIC_API_KEY"] == secret
+    assert plan.env["ANTHROPIC_AUTH_TOKEN"] == secret
+    assert plan.env["ANTHROPIC_CUSTOM_HEADERS"] == (
+        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max\nX-GPT2GIGA-Pass-Model:false"
+    )
+    assert "ANTHROPIC_API_KEY" not in plan.env
     assert plan.env["HOME"] == plan.native_home
     assert secret not in str(payload)
     assert REDACTED in str(payload)
+    startup = json.loads((Path(plan.native_home) / ".claude.json").read_text())
+    assert startup["hasCompletedOnboarding"] is True
+    assert (
+        startup["projects"][str(workspace.resolve())]["hasTrustDialogAccepted"] is True
+    )
 
 
 def test_claude_native_start_command_applies_attachment_plan(tmp_path):
@@ -226,6 +537,21 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
     data_dir = tmp_path / "data"
     workspace.mkdir()
     project_id = project_id_for_root(workspace)
+    connector = ClaudeNativeHistoryConnector(data_dir=data_dir, executable="claude")
+    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+    start_plan = connector.build_start_command(
+        HarnessRequest(
+            prompt="start",
+            model="GigaChat-2-Max",
+            api_mode=GigaChatApiMode.V1,
+            mode="read",
+            workspace=str(workspace),
+            session_id="sess_resume_contract",
+        ),
+        context,
+    )
+    session_name = str(start_plan.metadata["session_name"])
+    connector.record_start_snapshot(start_plan)
     session_file = (
         data_dir
         / "native"
@@ -235,22 +561,24 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
         / ".claude"
         / "projects"
         / "repo"
-        / "gpt2giga-sess-fix.jsonl"
+        / "managed-claude-id.jsonl"
     )
     _write_jsonl(
         session_file,
         (
             {
+                "type": "custom-title",
+                "customTitle": session_name,
                 "sessionId": "managed-claude-id",
-                "session_name": "gpt2giga-sess-fix",
+            },
+            {
+                "sessionId": "managed-claude-id",
                 "timestamp": "2026-07-09T10:00:00Z",
                 "type": "user",
                 "message": {"content": "resume me"},
             },
         ),
     )
-    connector = ClaudeNativeHistoryConnector(data_dir=data_dir, executable="claude")
-    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
     (managed,) = connector.discover(workspace=str(workspace), include_external=False)
 
     plan = connector.build_resume_command(managed, context)
@@ -260,11 +588,24 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
         can_resume=False,
     )
 
-    assert plan.command == ("claude", "--resume", "gpt2giga-sess-fix")
+    assert plan.command == (
+        "claude",
+        "--permission-mode",
+        "plan",
+        "--resume",
+        session_name,
+    )
+    assert plan.metadata["permission_enforcement"]["read_only"] is True
     assert "-p" not in plan.command
     assert "--no-session-persistence" not in plan.command
     assert plan.env["HOME"] == managed.metadata["native_home"]
-    assert plan.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v2"
+    assert managed.execution_snapshot == start_plan.execution_snapshot
+    assert plan.execution_snapshot == start_plan.execution_snapshot
+    assert plan.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v1"
+    assert plan.env["ANTHROPIC_AUTH_TOKEN"] == "proxy-key"
+    assert plan.env["ANTHROPIC_CUSTOM_HEADERS"] == (
+        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max\nX-GPT2GIGA-Pass-Model:false"
+    )
     with pytest.raises(ValueError, match="Only managed"):
         connector.build_resume_command(external, context)
 

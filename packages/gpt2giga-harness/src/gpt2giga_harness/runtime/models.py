@@ -213,6 +213,44 @@ class RuntimeOutboxEntry:
 
 
 @dataclass(frozen=True)
+class NativeProcessRecord:
+    """Durable public ownership and recovery state for a native process."""
+
+    id: str
+    owner_id: str
+    owner_process_id: int
+    session_id: str
+    run_id: str
+    harness_id: str
+    status: str
+    process_id: int | None
+    process_group_id: int | None
+    transport: str
+    ref: Mapping[str, Any]
+    started_at: str
+    updated_at: str
+    heartbeat_at: str
+    leased_until: str
+    timeout_at: str | None = None
+    cancel_requested_at: str | None = None
+    finished_at: str | None = None
+    terminal_cursor: int = 0
+    recovery_outcome: str | None = None
+    version: int = 0
+
+
+@dataclass(frozen=True)
+class NativeProcessOutputRecord:
+    """One bounded redacted native terminal output reference."""
+
+    process_id: str
+    cursor: int
+    stream: str
+    text: str
+    created_at: str
+
+
+@dataclass(frozen=True)
 class JobSubmission:
     """Result of an idempotent job submission."""
 
@@ -305,4 +343,31 @@ def worker_to_dict(worker: RuntimeWorker) -> dict[str, Any]:
         "heartbeat_at": worker.heartbeat_at,
         "stopped_at": worker.stopped_at,
         "capability_fingerprint": dict(worker.capability_fingerprint),
+    }
+
+
+def native_process_record_to_dict(record: NativeProcessRecord) -> dict[str, Any]:
+    """Serialize one durable native process ownership record."""
+    return {
+        "id": record.id,
+        "owner_id": record.owner_id,
+        "owner_process_id": record.owner_process_id,
+        "session_id": record.session_id,
+        "run_id": record.run_id,
+        "harness_id": record.harness_id,
+        "status": record.status,
+        "process_id": record.process_id,
+        "process_group_id": record.process_group_id,
+        "transport": record.transport,
+        "ref": dict(record.ref),
+        "started_at": record.started_at,
+        "updated_at": record.updated_at,
+        "heartbeat_at": record.heartbeat_at,
+        "leased_until": record.leased_until,
+        "timeout_at": record.timeout_at,
+        "cancel_requested_at": record.cancel_requested_at,
+        "finished_at": record.finished_at,
+        "terminal_cursor": record.terminal_cursor,
+        "recovery_outcome": record.recovery_outcome,
+        "version": record.version,
     }

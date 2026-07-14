@@ -6,6 +6,12 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from gpt2giga_harness.codex_app_server import CodexAppServerSupervisor
+from gpt2giga_harness.cli_capabilities import (
+    CliCapabilitySnapshot,
+    cli_probe_availability,
+    probe_cli_capabilities,
+)
 from gpt2giga_harness.harnesses.agent_cli import (
     StreamTerminalOutcome,
     build_safe_env,
@@ -17,23 +23,31 @@ from gpt2giga_harness.harnesses.agent_cli import (
     tool_call_event,
     usage_event,
     with_events,
+    with_raw_metadata,
     workspace_error,
 )
 from gpt2giga_harness.harnesses.attachment_plan import (
+    attachment_capability_error,
     attachment_raw_metadata,
     attachment_warning_events,
     cli_args_from_attachments,
     prompt_with_attachments,
 )
+from gpt2giga_harness.harnesses.adapter_parity import codex_adapter_capabilities
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.native import HarnessInvocationMode
-from gpt2giga_harness.managed_mcp import write_startup_config
+from gpt2giga_harness.managed_mcp import (
+    materialize_headless_mcp_snapshot,
+    write_startup_config,
+)
 from gpt2giga_harness.types import (
+    AttachmentTransportSupport,
     Availability,
     HarnessCapability,
     HarnessContext,
     HarnessEvent,
+    HeadlessContinuationStrategy,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -54,8 +68,11 @@ class CodexCliHarness(BaseHarness):
         self,
         *,
         executable_resolver: ExecutableResolver | None = None,
+        app_server_supervisor: CodexAppServerSupervisor | None = None,
     ) -> None:
         self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
+        self.app_server_supervisor = app_server_supervisor
+        self._app_server_supervisors: dict[str, CodexAppServerSupervisor] = {}
 
     @classmethod
     def spec(cls) -> HarnessSpec:
@@ -74,27 +91,52 @@ class CodexCliHarness(BaseHarness):
             supports_attachments=True,
             accepted_attachment_kinds=("image", "text", "workspace_file"),
             attachment_transport=("cli_image_flag", "prompt_path_reference"),
+            attachment_capabilities={
+                "image": AttachmentTransportSupport(
+                    headless=("cli_image_flag",),
+                    native=("cli_image_flag",),
+                    rich=True,
+                    required_cli_capabilities=("--image",),
+                    detail=(
+                        "Images use the capability-probed Codex --image flag for "
+                        "one-shot and native CLI runs; structured app-server image "
+                        "delivery is not claimed."
+                    ),
+                ),
+                "text": AttachmentTransportSupport(
+                    headless=("prompt_path_reference",),
+                    native=("prompt_path_reference",),
+                    detail="Text files are referenced by a contained local path.",
+                ),
+                "workspace_file": AttachmentTransportSupport(
+                    headless=("prompt_path_reference",),
+                    native=("prompt_path_reference",),
+                    detail=(
+                        "Workspace files are referenced by path unless their detected "
+                        "kind is an image eligible for --image."
+                    ),
+                ),
+            },
             supports_native_sessions=True,
             supports_external_history=True,
             default_invocation_mode=HarnessInvocationMode.HEADLESS,
+            headless_continuation=HeadlessContinuationStrategy.STRUCTURED_THREAD,
             tags=("codex", "agent"),
+            adapter_capabilities=codex_adapter_capabilities(),
         )
 
     def availability(self) -> Availability:
-        resolution = self.executable_resolution()
-        if resolution.error is not None:
-            return Availability.error(resolution.error)
-        if resolution.executable is None:
-            return Availability.missing(
-                "codex executable not found",
-                (
-                    "Install OpenAI Codex CLI on PATH or configure "
-                    "executables.codex-cli in ~/.gpt2giga/harness/config.toml."
-                ),
-            )
-        return Availability.available(
-            f"codex executable found via {resolution.source}: {resolution.executable}"
+        return cli_probe_availability(
+            self.capability_probe(),
+            install_hint=(
+                "Install OpenAI Codex CLI on PATH or configure "
+                "executables.codex-cli in ~/.gpt2giga/harness/config.toml."
+            ),
         )
+
+    def capability_probe(self) -> CliCapabilitySnapshot:
+        """Return cached, version-aware Codex adapter evidence."""
+        return probe_cli_capabilities(self.executable_resolution(), self.spec().id)
 
     def executable_resolution(self) -> ExecutableResolution:
         """Return the configured or PATH-discovered Codex executable."""
@@ -107,7 +149,7 @@ class CodexCliHarness(BaseHarness):
     ) -> tuple[str, ...]:
         """Build the Codex command without executing it."""
         resolution = self.executable_resolution()
-        executable = resolution.executable or resolution.configured or "codex"
+        executable_argv = resolution.command or ("codex",)
         sandbox = MODE_TO_SANDBOX.get(request.mode, MODE_TO_SANDBOX["plan"])
         model = request.model or context.default_model or "GigaChat"
         prompt = _structured_chat_prompt(request)
@@ -115,7 +157,7 @@ class CodexCliHarness(BaseHarness):
         prompt_separator = ("--",) if attachment_args and prompt else ()
         stream_args = ("--json",) if request.stream else ()
         return (
-            executable,
+            *executable_argv,
             "--ask-for-approval",
             "on-request",
             "exec",
@@ -155,7 +197,17 @@ class CodexCliHarness(BaseHarness):
         request: HarnessRequest,
         context: HarnessContext,
     ) -> HarnessResult:
-        command = self.build_command(request, context)
+        continuation = request.extra.get("continuation")
+        uses_app_server = (
+            isinstance(continuation, Mapping)
+            and continuation.get("strategy") == "structured_thread"
+        )
+        resolution = self.executable_resolution()
+        command = (
+            (*resolution.command, "app-server", "--stdio", "--strict-config")
+            if uses_app_server and resolution.command
+            else self.build_command(request, context)
+        )
         if request.extra.get("dry_run"):
             return HarnessResult(
                 ok=True,
@@ -165,6 +217,9 @@ class CodexCliHarness(BaseHarness):
                         self.build_env(request, context, codex_home="<temp>")
                     ),
                     "workspace": request.workspace,
+                    "continuation": dict(continuation)
+                    if isinstance(continuation, Mapping)
+                    else {"strategy": "degraded_replay"},
                     **attachment_raw_metadata(request),
                 },
                 events=attachment_warning_events(request),
@@ -188,6 +243,19 @@ class CodexCliHarness(BaseHarness):
                 command=command,
                 error=availability.reason,
             )
+        attachment_error = attachment_capability_error(
+            request,
+            self.capability_probe().capabilities,
+            surface="structured_thread" if uses_app_server else "headless_one_shot",
+        )
+        if attachment_error is not None:
+            return HarnessResult(
+                ok=False,
+                text="",
+                raw=attachment_raw_metadata(request),
+                command=command,
+                error=attachment_error,
+            )
         prepared_context, proxy_events, proxy_error = prepare_proxy_for_agent(
             request,
             context,
@@ -195,10 +263,51 @@ class CodexCliHarness(BaseHarness):
         )
         if proxy_error is not None:
             return proxy_error
+        if uses_app_server:
+            if not self.capability_probe().capabilities.get("app-server"):
+                return HarnessResult(
+                    ok=False,
+                    text="",
+                    command=command,
+                    error=(
+                        "Installed Codex CLI does not provide the reviewed app-server "
+                        "stdio protocol."
+                    ),
+                )
+            if context.data_dir is None:
+                return HarnessResult(
+                    ok=False,
+                    text="",
+                    command=command,
+                    error="Harness data_dir is required for Codex app-server continuity.",
+                )
+            supervisor = self.app_server_supervisor
+            if supervisor is None:
+                supervisor = self._app_server_supervisors.setdefault(
+                    context.data_dir,
+                    CodexAppServerSupervisor(context.data_dir),
+                )
+            result = supervisor.run_turn(
+                request,
+                prepared_context,
+                resolution=resolution,
+                prompt=prompt_with_attachments(request),
+                continuation=dict(continuation),
+            )
+            return with_events(
+                result,
+                (*attachment_warning_events(request), *proxy_events),
+            )
         with tempfile.TemporaryDirectory(prefix="gpt2giga-codex-") as temp_dir:
             codex_home = str(Path(temp_dir) / ".codex")
             Path(codex_home).mkdir(parents=True, exist_ok=True)
             _write_codex_config(Path(codex_home), request, prepared_context)
+            managed_mcp = materialize_headless_mcp_snapshot(
+                "codex-cli",
+                codex_home,
+                _managed_mcp_reference(request),
+                data_dir=context.data_dir,
+            )
             env = self.build_env(request, prepared_context, codex_home=codex_home)
             if request.stream:
                 result = run_streaming_command(
@@ -218,9 +327,12 @@ class CodexCliHarness(BaseHarness):
                     cwd=request.workspace or None,
                     timeout_seconds=context.timeout_seconds,
                 )
-            return with_events(
-                result,
-                (*attachment_warning_events(request), *proxy_events),
+            return with_raw_metadata(
+                with_events(
+                    result,
+                    (*attachment_warning_events(request), *proxy_events),
+                ),
+                {"managed_mcp_snapshot": managed_mcp} if managed_mcp else None,
             )
 
 
@@ -230,11 +342,18 @@ def _write_codex_config(
     context: HarnessContext,
 ) -> None:
     model = request.model or context.default_model or "GigaChat"
+    options = request.extra.get("agent_adapter_options")
+    reasoning_effort = (
+        str(options.get("reasoning_effort"))
+        if isinstance(options, Mapping)
+        and options.get("reasoning_effort") in {"none", "low", "medium", "high"}
+        else "none"
+    )
     base_url = context.api_base_url(request.api_mode)
     config = (
         f'model = "{_toml_escape(model)}"\n'
         'model_provider = "gpt2giga_harness"\n'
-        'model_reasoning_effort = "none"\n\n'
+        f'model_reasoning_effort = "{reasoning_effort}"\n\n'
         "[model_providers.gpt2giga_harness]\n"
         'name = "gpt2giga_harness"\n'
         f'base_url = "{_toml_escape(base_url)}"\n'
@@ -243,6 +362,11 @@ def _write_codex_config(
         "supports_websockets = false\n"
     )
     write_startup_config("codex-cli", codex_home, config)
+
+
+def _managed_mcp_reference(request: HarnessRequest) -> Mapping[str, Any] | None:
+    value = request.extra.get("managed_mcp_snapshot")
+    return dict(value) if isinstance(value, Mapping) else None
 
 
 def _structured_chat_prompt(request: HarnessRequest) -> str:
@@ -272,10 +396,23 @@ class _CodexStreamParser:
     def __init__(self) -> None:
         self._item_text: dict[str, str] = {}
         self.terminal_outcome: StreamTerminalOutcome | None = None
+        self.recognized_payloads = 0
 
     def __call__(self, payload: Mapping[str, Any]) -> tuple[HarnessEvent, ...]:
         events: list[HarnessEvent] = []
         event_type = str(payload.get("type") or "")
+        if event_type in {
+            "thread.started",
+            "turn.started",
+            "turn.completed",
+            "turn.failed",
+            "item.started",
+            "item.updated",
+            "item.completed",
+            "item.failed",
+            "error",
+        }:
+            self.recognized_payloads += 1
         item = _mapping(payload.get("item"))
         item_type = str(item.get("type") or "")
         item_id = str(item.get("id") or payload.get("item_id") or item_type or "item")
@@ -288,6 +425,9 @@ class _CodexStreamParser:
             tool_event = _codex_tool_event(event_type, item, item_id)
             if tool_event is not None:
                 events.append(tool_event)
+            artifact_event = _codex_artifact_event(event_type, item, item_id)
+            if artifact_event is not None:
+                events.append(artifact_event)
 
         normalized_usage = usage_event(payload.get("usage"))
         if normalized_usage is not None:
@@ -355,6 +495,7 @@ def _is_codex_tool_item(item_type: str) -> bool:
         "todo_list",
         "web_search",
         "dynamic_tool_call",
+        "test_result",
     } or item_type.endswith("_tool_call")
 
 
@@ -431,6 +572,58 @@ def _codex_tool_result(item: Mapping[str, Any], *, failed: bool) -> Any:
     if exit_code is not None:
         return f"Command exited with code {exit_code} and produced no output."
     return "Codex marked this tool call as failed without an error message."
+
+
+def _codex_artifact_event(
+    event_type: str,
+    item: Mapping[str, Any],
+    item_id: str,
+) -> HarnessEvent | None:
+    """Emit stable artifacts only for explicit structured Codex item kinds."""
+    if event_type not in {"item.completed", "item.failed"}:
+        return None
+    item_type = str(item.get("type") or "")
+    status = str(
+        item.get("status") or ("failed" if event_type == "item.failed" else "completed")
+    )
+    if item_type == "command_execution":
+        payload = {
+            "artifact_id": item_id,
+            "artifact_type": "command",
+            "command": item.get("command"),
+            "exit_code": item.get("exit_code"),
+            "status": status,
+        }
+        return HarnessEvent(
+            type="command_completed",
+            message="Command execution completed.",
+            payload={key: value for key, value in payload.items() if value is not None},
+        )
+    if item_type == "file_change":
+        payload = {
+            "artifact_id": item_id,
+            "artifact_type": "file_change",
+            "changes": item.get("changes"),
+            "status": status,
+        }
+        return HarnessEvent(
+            type="file_changed",
+            message="File change completed.",
+            payload={key: value for key, value in payload.items() if value is not None},
+        )
+    if item_type == "test_result":
+        payload = {
+            "artifact_id": item_id,
+            "artifact_type": "test",
+            "name": item.get("name"),
+            "status": status,
+        }
+        return HarnessEvent(
+            type="test_completed",
+            message="Test execution completed.",
+            payload={key: value for key, value in payload.items() if value is not None},
+        )
+    return None
 
 
 def _codex_tool_name(item_type: str, item: Mapping[str, Any]) -> str:

@@ -11,6 +11,7 @@ on:
       - '.github/workflows/codeql.yaml'
   pull_request:
     branches: [ main ]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'packages/**/*.py'
       - 'packages/*/pyproject.toml'
@@ -30,6 +31,7 @@ jobs:
   analyze:
     name: Analyze Python
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
 
     strategy:
       fail-fast: false

@@ -148,7 +148,18 @@ class DurableJobDispatcher:
             timeout_seconds=timeout_seconds,
             initial_status="waiting_input",
         )
-        self.payload_store.save(submission.job.id, payload)
+        persisted_payload = dict(payload)
+        managed_mcp_snapshot = queued.run.metadata.get("managed_mcp_snapshot")
+        if isinstance(managed_mcp_snapshot, Mapping):
+            extra = (
+                dict(persisted_payload["extra"])
+                if isinstance(persisted_payload.get("extra"), Mapping)
+                else {}
+            )
+            extra["managed_mcp_snapshot"] = dict(managed_mcp_snapshot)
+            extra["tool_ids"] = list(managed_mcp_snapshot.get("server_ids") or ())
+            persisted_payload["extra"] = extra
+        self.payload_store.save(submission.job.id, persisted_payload)
         selected_profile = permission_profile(
             payload.get("permission_profile"), origin=origin
         )

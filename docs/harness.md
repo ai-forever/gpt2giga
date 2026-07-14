@@ -78,7 +78,7 @@ During the alpha:
 The source checkout is the current, always-available alpha path:
 
 ```bash
-git clone --branch feature/unified_harness \
+git clone --branch feature/harness_enrichment \
   https://github.com/ai-forever/gpt2giga.git
 cd gpt2giga
 uv sync --all-packages --all-extras --dev
@@ -96,7 +96,7 @@ After the standalone preview appears in your package index, the shorter install
 path is:
 
 ```bash
-uv tool install gpt2giga-harness
+uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
@@ -438,9 +438,10 @@ after reviewing the filled request.
 Project agents are reusable role/configuration profiles over existing harnesses.
 They live in `.giga/agents/*.yaml`; `giga init` creates Planner, Explorer,
 Implementer, Reviewer, Test Runner, and Release Assistant starters. Profiles can
-bind instructions, harness/model/reasoning effort/route, context and memory selectors, MCP tool
-descriptor ids, permission/workspace policy, budgets, and an expected artifact.
-They never contain literal secrets or paths that escape the project.
+bind instructions, harness/model/reasoning effort/route, context and memory
+selectors, MCP tool descriptor ids, fixed allow/deny tool selectors,
+permission/workspace policy, budgets, and an expected artifact. They never
+contain literal secrets, arbitrary CLI flags, or paths that escape the project.
 
 ```bash
 giga agent list --workspace .
@@ -455,10 +456,33 @@ Apply. Duplicate creates a draft until Apply is selected. The same reusable
 project authoring service is intended for later Workflow Builder and Schedule
 Wizard surfaces; those features must not write project YAML directly.
 
-`Run as Agent` submits a normal durable manual job. Each run stores an immutable
-redacted `agent_profile_snapshot` and `agent_id`, so later YAML edits do not
-rewrite history. Live activity remains in Work and Runs rather than being
-duplicated in Agent Studio.
+`Run as Agent` submits a normal durable manual job. Agent Studio resolves every
+operational field into an `effective`, `delegated`, or `unsupported` execution
+outcome before queueing. The API and each run store the immutable redacted
+`agent_profile_snapshot`, `agent_execution_plan`, requested/effective values,
+enforcement source, and `agent_id`, so later YAML edits do not rewrite history.
+Unsupported safety or budget options block queueing; provenance-only selectors
+produce explicit warnings. Live activity remains in Work and Runs rather than
+being duplicated in Agent Studio.
+
+Current headless option contract:
+
+| Profile option | Codex CLI | Claude Code | Gemini CLI |
+| --- | --- | --- | --- |
+| model, route, mode, workspace/permission policy | effective | effective | effective |
+| timeout and retry attempts | Harness-enforced | Harness-enforced | Harness-enforced |
+| `reasoning_effort` | capability-proven config | capability-proven `--effort` | unsupported |
+| `allowed_tools` / `disallowed_tools` | unsupported | capability-proven fixed flags | unsupported |
+| `tool_ids` | immutable managed-MCP snapshot | immutable managed-MCP snapshot | immutable managed-MCP snapshot |
+| `max_tokens` | unsupported | unsupported | unsupported |
+
+`max_concurrency: 1` describes a standalone agent run; larger fan-out belongs
+to a Workflow or Schedule coordinator. Selected `tool_ids` must name enabled,
+trusted, adapter-compatible project MCP profiles. They are frozen before
+queueing and materialized only into the active temporary headless home. Prompt
+files, skills, and context/memory selectors remain visible as unsupported
+provenance. Tool selectors are values for fixed adapter flags and can never
+inject additional flags.
 
 Authenticated APIs:
 
@@ -664,12 +688,16 @@ Rollback succeeds only while the ownership marker and hash still match. Config
 changes are rejected while a managed native process owns the home. User-owned
 `~/.codex`, Claude, and Gemini settings are never changed.
 
-Only enabled, trusted servers are composed. Secret references are deliberately
-not copied into CLI config; preview reports them as skipped until a separate
-explicit secret flow exists. No package installation or OAuth occurs. Headless
-Claude now uses an isolated temporary HOME, matching the existing isolated
-Codex and Gemini execution model, and every CLI startup goes through the same
-composer so synchronized MCP entries are preserved.
+Only enabled, trusted servers are composed. Native-home preview/apply never
+copies secret references into persistent CLI config. For headless AgentProfile
+runs, selected `tool_ids` instead create an immutable descriptor-free public
+snapshot reference plus a content-verified internal snapshot under the Harness
+data directory. Replay reuses the same snapshot even if project TOML changes.
+The adapter resolves allowed secret references only while constructing the
+subprocess config, writes the exact reviewed entries into its temporary active
+home, and exposes only descriptor-free snapshot identity in run provenance.
+Temp-home contents disappear after the process; user-owned homes remain
+unchanged. No package installation or OAuth occurs.
 
 MCP profiles can additionally describe a stdio or Streamable HTTP connection:
 
@@ -817,9 +845,27 @@ Completed cells normalize latency, available token counts, retry count, changed
 files, patch size, and recorded test status. Repeated pass/fail disagreement is
 reported as a flake. A completed scorecard can be pinned as the spec baseline;
 the immutable snapshot records the project Git SHA when available and a config
-hash, then later runs show pass-rate and metric deltas. Deterministic checks are
+hash plus the exact adapter binary version, event schemas, and `/v1|/v2` route,
+then later runs show pass-rate and metric deltas only with an explicit dimension
+match. Deterministic checks are
 the default gate. Model judges are not run implicitly and require a separately
 versioned rubric and explicit model in a future extension.
+
+Installed adapter probes and the route-aware compatibility matrix are opt-in and
+do not submit a model task:
+
+```bash
+GPT2GIGA_RUN_CLI_COMPAT_MATRIX=1 GPT2GIGA_COMPAT_API_MODE=v2 \
+  uv run pytest -q tests/live/test_adapter_compatibility_matrix.py
+```
+
+Headless and Codex app-server streams emit stable tool, command, file, usage,
+failure, and lifecycle evidence only from capability-probed structured schemas.
+Usage retains available cached-input, reasoning-output, and tool token details.
+Native Codex, Claude, and Gemini TUI sessions remain redacted `raw-terminal-v1`
+streams with explicit `tool_lifecycle_opaque`, `usage_unavailable`, and
+`artifacts_unclassified` limits; Harness does not infer structured activity from
+terminal text.
 
 The matching API surface is:
 
@@ -988,7 +1034,7 @@ then starts only an allowlisted terminal launcher without a shell.
 |---|---|---|
 | `direct-chat` | MVP | Sends OpenAI-style Chat Completions to `/v1/chat/completions` or `/v2/chat/completions`. |
 | `echo` | MVP | Local no-network smoke harness for tests and UI checks. |
-| `codex-cli` | MVP | Builds and runs a sanitized `codex exec` command against the local proxy. |
+| `codex-cli` | MVP | Uses supervised `codex app-server` threads for Harness chat continuity, with sanitized `codex exec` as a capability-gated one-shot fallback. |
 | `claude-code` | MVP | Builds and runs sanitized Claude Code print-mode commands against the local proxy. |
 | `gemini-cli` | MVP | Builds and runs sanitized Gemini CLI headless commands against the local proxy. |
 
@@ -1002,6 +1048,13 @@ External CLI executables are resolved from the fixed user-owned config
 "gemini-cli" = "C:\\Users\\me\\bin\\gemini.cmd"
 ```
 
+Wrapper argv is also allowed; every element is passed directly without a shell:
+
+```toml
+[executables]
+"gemini-cli" = ["/custom/bin/gemini-wrapper", "--profile", "gpt2giga"]
+```
+
 Configured paths must be absolute. Keep executable overrides out of the
 project-owned `.giga/harness.toml`: repositories cannot select programs for the
 user to execute. Manage the user config and inspect the effective resolution
@@ -1013,6 +1066,16 @@ giga config set executables.codex-cli /custom/bin/codex
 giga config unset executables.codex-cli
 giga harness inspect codex-cli --json
 ```
+
+Harness runs bounded `--version` and `--help` probes in a temporary isolated
+home before reporting Codex CLI, Claude Code, or Gemini CLI as available. The
+probe reads no user history/config and stores no environment or secret values.
+Its result is cached by command argv and version and can distinguish a present
+but incompatible binary from a proven adapter contract. Doctor, worker
+fingerprints, `giga harness inspect --json`, `/api/harnesses`, and the cockpit
+expose the redaction-safe version, event/history schema, proven flags, and any
+compatibility warning. Structured parsers ignore unknown additive fields, but a
+stream with no recognized required event contract fails explicitly.
 
 Inspect one harness:
 
@@ -1044,6 +1107,17 @@ The registry validates these fields and reports issues through
 Unknown future capability strings are reported as validation warnings/errors and
 ignored by UI serialization instead of breaking the cockpit.
 
+For built-in external CLI adapters, `protocol_capability_scope` is
+`harness_surface`: the declared protocol capabilities describe what Harness can
+observe and guarantee, not every wire protocol or hidden behavior inside the
+CLI. The serialized `adapter_capabilities` matrix uses `supported`, `partial`,
+`delegated`, and `unsupported` states so `giga harness inspect --json` and
+`/api/harnesses` expose current continuity, native-policy, prompt-delivery, and
+managed-tool limitations without turning them into optimistic booleans.
+`headless_continuation` separately reports the effective strategy:
+`structured_thread`, `structured_replay`, `native_cli_resume`,
+`degraded_replay`, `one_shot`, or `unsupported`.
+
 ## Codex CLI Harness
 
 The Codex harness is intentionally conservative. `plan` and `read` map to a
@@ -1072,6 +1146,44 @@ launching Codex:
 giga harness run codex-cli --prompt "Inspect" --dry-run --json
 giga harness run codex-cli --native --dry-run --prompt "Inspect" --json
 ```
+
+Harness chat sessions use the version-probed Codex app-server JSON-RPC v2
+surface when `codex app-server --help` proves the reviewed stdio contract. One
+supervised process can host multiple compatible Harness sessions as distinct
+Codex threads. The first prompt maps to `thread/start` plus `turn/start`; later
+prompts use the same `thread_id`; an explicit Harness fork maps to
+`thread/fork`. After an owner change Harness checks `thread/read`, calls
+`thread/resume`, and records the recovery outcome before submitting another
+turn. Cancellation maps to `turn/interrupt`.
+
+The durable public link contains only an opaque runtime id, `thread_id`, latest
+`turn_id`, protocol/version evidence, runtime/recovery status, and an immutable
+execution snapshot. Route, model, managed home identity, source/effective
+workspace, permission mode, and managed-MCP snapshot hash must match on every
+continued turn; change any of them through an explicit fork. A stable internal
+message id is sent as `clientUserMessageId`, and duplicate delivery is rejected
+without replaying the prompt. Normalized Harness messages remain canonical;
+Codex rollout files are linked as execution metadata rather than imported as a
+second transcript.
+
+App-server `turn/*`, `item/*`, tool, file-change, and assistant-delta
+notifications become the same normalized Run events used by the chat SSE
+surface. Raw stdio and process IDs never reach the browser. Headless app-server
+turns use the reviewed sandbox with `approvalPolicy=never`; an unexpected
+server-initiated approval or elicitation is declined and recorded as a
+fail-closed warning instead of accepting hidden user input. Managed-MCP secret
+references are resolved only while the owning process initializes and are then
+removed from the Harness-owned config; durable metadata retains only snapshot
+ids and hashes.
+
+If the installed Codex binary lacks the app-server contract, Harness keeps the
+existing `codex exec --ephemeral --json` path and labels normalized full-history
+replay `degraded_replay`; it is not reported as a resumed Codex thread. Direct
+Chat reports `structured_replay` because it sends normalized messages in one
+structured request. Claude Code and Gemini CLI currently report headless
+continuation as `unsupported` and emit that limitation before their one-shot
+process runs. Third-party plugins remain `one_shot` unless their future spec
+explicitly advertises another reviewed strategy.
 
 ## Claude Code Harness
 
@@ -1162,11 +1274,22 @@ store as the browser UI. They do not execute Codex, Claude Code, or Gemini CLI;
 they discover metadata, list cached refs, and import transcripts into
 gpt2giga-owned session history.
 
+Discovery uses workspace/project identity recorded by the CLI history itself.
+External records without that evidence remain explicitly unscoped and do not
+appear in project-filtered lists merely because sync was launched from that
+project. CLI-list and file-backed records with the same native session id are
+reconciled into one stable metadata ref; transcript content is read only by
+preview/import or while synchronizing the managed process that owns the run.
+Large discovery results can be advanced with `--limit` and the returned
+`--cursor`. Newly written managed Codex and Gemini history is linked to the
+owning run automatically when its execution snapshot matches unambiguously.
+
 Sync native refs for one harness:
 
 ```bash
 giga native sync --harness codex-cli --workspace .
 giga native sync --harness codex-cli --workspace . --include-external --json
+giga native sync --harness codex-cli --workspace . --limit 100 --cursor 100 --json
 ```
 
 List cached native refs:
@@ -1414,9 +1537,17 @@ The selected harness determines the render plan:
 |---|---|
 | `echo` | Reports attachment metadata and events without credentials. |
 | `direct-chat` | Uses OpenAI-style image content parts for stored images and inlines small text files with truncation warnings. Workspace files are referenced by path. |
-| `codex-cli` | Passes images separately with the Codex `--image` flag. Non-image files remain safe path or `@file` prompt references. |
-| `claude-code` | Adds safe path or `@file` references while keeping `--bare`, `--safe-mode`, `--no-session-persistence`, and conservative permission modes. |
-| `gemini-cli` | Adds `@file` or path references and warns when images are path-only. |
+| `codex-cli` | Passes images separately with the Codex `--image` flag only when the installed CLI probe proves that flag. Non-image files remain safe path or `@file` prompt references. Structured app-server image delivery is not claimed. |
+| `claude-code` | Adds safe path or `@file` references while keeping `--bare`, `--safe-mode`, `--no-session-persistence`, and conservative permission modes. Images and documents remain explicitly path-only because no richer CLI transport is currently proven. |
+| `gemini-cli` | Adds `@file` or path references. Images and documents remain explicitly path-only because no richer CLI transport is currently proven. |
+
+Harness specs expose `attachment_capabilities` per attachment kind. Each entry
+separates headless and native transports, whether delivery is rich, any required
+version-probed CLI capability, and a human-readable boundary. The legacy
+`supports_attachments`, `accepted_attachment_kinds`, and `attachment_transport`
+fields remain for plugin compatibility, but they do not imply rich multimodal
+delivery. Render plans and provenance record one delivery entry per attachment,
+including its actual transport and `rich` versus reference-only status.
 
 Use dry-run to inspect what would be sent without launching an external CLI or
 calling the upstream proxy:
@@ -1461,6 +1592,10 @@ Codex dry-run with image:
 Claude Code with workspace file:
   type @src/foo.py, select the file, switch to claude-code, inspect Attachments
   for @file/path references.
+
+Claude Code with image or PDF:
+  inspect the attachment warning and render-plan delivery; both remain contained
+  path references rather than claimed multimodal/document upload.
 
 Gemini CLI with @file:
   type @src/foo.py, select the file, switch to gemini-cli, inspect Attachments
@@ -1521,6 +1656,11 @@ JSON/JSONL rewrites when UI and worker processes overlap. Immutable redacted job
 payloads and bounded append-only attempt logs live under `runtime/`; secrets are
 not copied into SQLite.
 
+Native terminals also have a public coordination record in `runtime.sqlite3`:
+owner and process ids, lease and heartbeat timestamps, timeout/cancel state,
+terminal cursor, bounded redacted output chunks, and an explicit recovery
+outcome. The raw PTY and process handles remain owner-local and are never stored.
+
 Inspect the schema/counts or export all coordination rows as safe JSON:
 
 ```bash
@@ -1544,7 +1684,9 @@ does not append the logical user message again. Expired leases become explicit
 automatic retry. Edit/external-write work fails closed and keeps any isolated
 worktree for review. Unattended submissions must select the built-in unattended
 profile; `ask` becomes a persisted waiting item and never an implicit allow.
-Native terminal processes remain manual and are not scheduled by the worker.
+Native terminal processes remain manual and are not scheduled by the worker,
+but their lifecycle is durable and supervised by the UI process that spawned
+them.
 
 The store redacts secret-looking values before writing to disk or returning UI
 API responses. It must not store API keys, authorization headers, cookies,
@@ -1593,6 +1735,13 @@ Use this when validating the project cockpit manually:
   are not confused with preflight estimates.
 - [ ] Cancel on a streamed headless run writes `cancel_requested`,
   `run_canceled`, and `run_finished` events without exposing secrets.
+- [ ] Two Codex headless prompts reuse one app-server `thread_id`; reconnect
+  performs `thread/read` plus `thread/resume`, and an explicit fork creates a
+  different thread without replaying normalized history.
+- [ ] Changing route, model, workspace, permission mode, managed home, or MCP
+  snapshot on a continued Codex thread fails before another turn is submitted.
+- [ ] Claude Code and Gemini CLI show `unsupported` headless continuity before
+  a second one-shot run instead of presenting it as a resumed session.
 - [ ] Native sessions are separate from normalized GPT2Giga chats.
 - [ ] `Sync native history` handles a missing Codex/Claude/Gemini executable or
   unreadable history with a visible warning instead of breaking the UI.
@@ -1609,9 +1758,12 @@ Use this when validating the project cockpit manually:
   `codex exec` or `--ephemeral`.
 - [ ] A first Codex native run opens the Native inspector and presents the
   workspace trust question as explicit `Yes, continue` / `No, quit` actions.
-- [ ] Reloading a running native session restores output polling and stdin
-  controls without starting or resending the prompt.
+- [ ] Reloading a running native session resumes SSE output from its cursor and
+  restores stdin controls without starting or resending the prompt; polling
+  remains available as a fallback.
 - [ ] A native process streams terminal output into the Native panel.
+- [ ] Resizing an open native terminal reaches the owner-local PTY without
+  accepting out-of-range rows or columns.
 - [ ] Stopping a native process updates process status and run status.
 - [ ] Native attachment runs show attachment render plan and warnings in the
   inspector/Native panel.
@@ -1699,11 +1851,79 @@ automation. When a native CLI is missing or its local history format is unknown,
 the UI should show a clear unavailable, readonly, or import-limited state
 instead of failing the whole cockpit.
 
-Managed native resume is best-effort. Claude Code uses a deterministic managed
-session name, while Codex and Gemini resume support depends on discovering a
-real native session id/name after the CLI has written its history. Until that id
-is known, the normalized session stores a managed native link with
-`can_resume=false` and an explicit reason.
+Every new managed native start persists an immutable, redaction-safe execution
+snapshot containing the selected API mode, model, managed home, workspace,
+project id, permission mode, and managed tool-config hash. Discovery, sync,
+import, link, and resume carry that snapshot forward. Claude Code uses a
+deterministic managed session name immediately; Codex and Gemini become
+resumable after discovery can bind one newly written native session id to the
+start without ambiguity. Until then, the normalized link keeps
+`can_resume=false` with an explicit reason.
+
+Legacy managed refs without an execution snapshot remain readable but expose a
+`route_unknown` limitation. Resume requires an explicit reviewed `api_mode`;
+the Harness does not silently replace an unknown original route with `/v2`.
+Any route, model, home, workspace, project, or harness identity that contradicts
+a known snapshot is rejected before the native CLI starts.
+
+Managed Codex, Claude Code, and Gemini native start and resume now run a
+route-aware proxy preflight before spawning the CLI. The Harness first checks
+proxy health, then requires the exact selected `GET /v1/models` or
+`GET /v2/models` route to accept the configured local proxy key. An
+auth-enabled existing proxy without `GPT2GIGA_HARNESS_API_KEY`, an unreachable
+route, or a disallowed remote auto-start fails before spawn. A newly auto-started
+loopback sidecar is marked as Harness-owned in redaction-safe plan evidence and
+is stopped if native process startup fails before handoff; an existing proxy is
+marked external and is never stopped. The generated sidecar key is passed
+directly to the CLI startup context and is not recovered from the UI process's
+temporary key cache.
+
+Native process spawn also passes through the shared `process.spawn` Approval
+Center action before worktree creation, proxy startup, or CLI spawn. The
+`review_every_action` profile returns a retryable approval request; a denial
+starts no process and creates no worktree. Under the safe `auto` or explicit
+`worktree` policy, native `edit` creates a detached Git worktree and passes only
+that effective path to the CLI. Isolation failure stops the start instead of
+falling back to the source checkout. Runs, links, and public plan metadata keep
+both source and effective workspace evidence plus the Harness policy result.
+
+Permission controls remain CLI-owned after spawn: Codex maps `plan|read` to
+`--sandbox read-only` and `edit` to `workspace-write`; Claude Code maps
+`plan|read` to `--permission-mode plan` and `edit` to `default`; Gemini maps
+`plan|read` to `--approval-mode plan` and `edit` to `default`. Harness records
+these controls as delegated to the CLI sandbox and keeps interactive in-CLI
+approval prompts explicitly delegated rather than claiming that Approval
+Center can observe or answer them.
+
+Every managed native process now persists an owner lease, heartbeat, process and
+process-group diagnostics, timeout/cancel state, terminal cursor, and bounded
+redacted output references. Another UI/API client can read that public state and
+request cooperative cancellation, but it cannot write to or adopt an unproven
+PTY. If the owner lease expires, restart reconciliation records the process as
+`interrupted`, `exited`, or `unknown` and keeps its managed home and isolated
+worktree for review. A still-running orphan is explicitly marked
+`process_alive_not_adopted`; reconnect never pretends that a new UI owns it.
+
+The Native panel prefers the authenticated cursor-based SSE endpoint
+`GET /api/native/processes/{process_id}/output/stream`. Output is sent in bounded
+batches with a monotonic cursor; reconnect accepts both the explicit `cursor`
+query and the browser's `Last-Event-ID`, so already rendered chunks are not
+duplicated. The bounded `/output` polling endpoint remains a compatibility
+fallback. For an owner-local PTY, `POST
+/api/native/processes/{process_id}/resize` validates and applies terminal rows
+and columns; pipe transports and foreign owners fail explicitly. Navigation and
+terminal completion close the browser EventSource, polling timers, and resize
+observer.
+
+Gemini native starts capability-probe the installed CLI for
+`--prompt-interactive`. When supported, the composed prompt and rendered
+attachment references are passed in that one interactive invocation, without
+trimming or a follow-up stdin resend. Runs and native links persist a safe
+idempotency key, prompt hash, byte count, mechanism, and
+`pending|delivered|failed` outcome; the prompt itself is not copied into command
+or plan metadata. A repeated browser submission with the same key is rejected,
+including after a UI reload. Older Gemini versions without the probed flag fail
+explicitly before spawn instead of opening an empty terminal.
 
 ## Model Selection Notes
 
@@ -1834,6 +2054,7 @@ preview or import support for that connector is confirmed.
 
 Attachment support is intentionally conservative. Document and binary transport
 through external CLIs is path/reference based unless local CLI behavior has been
-verified. Rich headless output uses persisted SSE events; native terminal output
-continues to use its separate local polling transport. Harnesses or plugins that
-do not emit structured deltas still appear atomically when their run completes.
+verified. Rich headless output and native terminal output use separate persisted
+SSE contracts; native terminals retain bounded polling as a compatibility
+fallback. Harnesses or plugins that do not emit structured deltas still appear
+atomically when their run completes.

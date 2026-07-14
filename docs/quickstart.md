@@ -1,6 +1,7 @@
 # Quickstart
 
-This document helps you quickly launch an OpenAI/Anthropic-compatible proxy to GigaChat.
+This document helps you launch an OpenAI-, Anthropic-, and Gemini-compatible
+gateway to GigaChat and verify each protocol with a first request.
 
 ## Requirements
 
@@ -139,6 +140,31 @@ message = client.messages.create(
 print(message.content[0].text)
 ```
 
+## Gemini SDK
+
+The official Gemini client appends `/v1beta/models/...` itself, so pass the
+gateway root rather than `/v1` or `/v2`:
+
+```python
+from google import genai
+from google.genai import types
+
+client = genai.Client(
+    api_key="<local-proxy-api-key>",
+    http_options=types.HttpOptions(base_url="http://localhost:8090"),
+)
+response = client.models.generate_content(
+    model="GigaChat-2-Max",
+    contents="Briefly explain SSE",
+)
+print(response.text)
+```
+
+To select a GigaChat backend contract for Gemini, include `/v1` or `/v2` in
+the operation URL or use the corresponding integration configuration. See the
+[Gemini examples](https://github.com/ai-forever/gpt2giga/tree/main/examples/gemini)
+for streaming, tools, structured output, token counting, and embeddings.
+
 ## Per-request GigaChat authorization
 
 If a client must pass GigaChat authorization via `Authorization`, enable:
@@ -160,4 +186,5 @@ For typical deployment scenarios, server-side `GIGACHAT_*` credentials are prefe
 - OpenAI Chat Completions: [examples/openai/chat_completions/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/chat_completions/README.md)
 - OpenAI Responses: [examples/openai/responses/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/responses/README.md)
 - Anthropic Messages: [examples/anthropic/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/anthropic/README.md)
+- Gemini GenerateContent: [examples/gemini/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/gemini/README.md)
 - All examples: [examples/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/README.md)

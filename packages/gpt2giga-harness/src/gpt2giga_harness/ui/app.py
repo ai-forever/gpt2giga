@@ -5,12 +5,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+from contextlib import suppress
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
+import hashlib
 import json
+from pathlib import Path
+import re
 import threading
 from typing import Any, Mapping
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -42,6 +47,7 @@ from gpt2giga_harness.config import (
     HarnessConfig,
     pass_model_env_note,
 )
+from gpt2giga_harness.harnesses.attachment_plan import attachment_capability_error
 from gpt2giga_harness.evals import (
     EvalRunNotFoundError,
     EvalSpecNotFoundError,
@@ -65,13 +71,21 @@ from gpt2giga_harness.editor import (
 )
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
+    NativePromptDelivery,
+    NativePromptDeliveryStatus,
     discovery_error_to_dict,
+    native_prompt_delivery_to_dict,
 )
+from gpt2giga_harness.native.discovery import normalize_native_workspace
 from gpt2giga_harness.native.models import (
     HarnessInvocationMode,
+    NativeExecutionSnapshot,
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
+    create_execution_snapshot,
+    execution_snapshot_from_dict,
+    execution_snapshot_to_dict,
 )
 from gpt2giga_harness.native.process import (
     NativeProcessManager,
@@ -145,6 +159,7 @@ from gpt2giga_harness.runtime.policy import (
     PolicyDecision,
     PolicyEngine,
     approval_request_to_dict,
+    permission_profile,
 )
 from gpt2giga_harness.runtime.reconcile import RuntimeReconciler
 from gpt2giga_harness.runtime.store import JobNotFoundError, RuntimeCoordinationStore
@@ -172,6 +187,10 @@ from gpt2giga_harness.sessions.models import (
     session_to_dict,
 )
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
+from gpt2giga_harness.cli_capabilities import (
+    CliCapabilitySnapshot,
+    cli_capability_snapshot_to_dict,
+)
 from gpt2giga_harness.types import (
     GigaChatApiMode,
     HarnessCapability,
@@ -209,6 +228,7 @@ from gpt2giga_harness.worktrees import (
     apply_run_diff,
     discard_run_worktree,
     open_worktree_response,
+    prepare_workspace_execution,
     run_diff_response,
 )
 from gpt2giga_harness.workspace import (
@@ -216,6 +236,9 @@ from gpt2giga_harness.workspace import (
     workspace_file_metadata,
     workspace_tree,
 )
+
+
+NATIVE_SUBMIT_KEY_DELAY_SECONDS = 0.05
 
 
 @dataclass
@@ -251,7 +274,8 @@ def create_app(
         config.data_dir
     )
     native_process_manager = native_process_manager or NativeProcessManager(
-        session_store=store
+        session_store=store,
+        runtime_store=runtime_store,
     )
     attachment_store = FilesystemAttachmentStore(config.data_dir)
     arena_store = FilesystemHarnessArenaStore(config.data_dir)
@@ -389,10 +413,16 @@ def create_app(
             validation = registry.validation_report(spec.id) or validate_harness_spec(
                 spec
             )
+            capability_probe = getattr(harness, "capability_probe", None)
             harness_items.append(
                 {
                     "spec": spec_to_dict(spec),
                     "availability": availability_to_dict(harness.availability()),
+                    "compatibility": (
+                        cli_capability_snapshot_to_dict(capability_probe())
+                        if callable(capability_probe)
+                        else None
+                    ),
                     "validation": harness_validation_report_to_dict(validation),
                 }
             )
@@ -1047,18 +1077,32 @@ def create_app(
             workspace=resolved_workspace,
             data_dir=config.data_dir,
         )
-        result = native_registry.discover(
-            harness_id=_optional_text(payload.get("harness_id")),
-            workspace=resolved_workspace,
-            include_external=bool(payload.get("include_external")),
-        )
+        try:
+            result = native_registry.discover(
+                harness_id=_optional_text(payload.get("harness_id")),
+                workspace=resolved_workspace,
+                include_external=bool(payload.get("include_external")),
+                cursor=_optional_text(payload.get("cursor")),
+                limit=_native_discovery_limit(payload.get("limit")),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         stored = [
-            native_index_store.upsert_ref(ref, project_id=resolved_project_id)
+            native_index_store.upsert_ref(
+                ref,
+                project_id=_native_discovered_project_id(
+                    ref,
+                    workspace=resolved_workspace,
+                    project_id=resolved_project_id,
+                ),
+            )
             for ref in result.sessions
         ]
         return {
             "sessions": [native_session_ref_to_dict(ref) for ref in stored],
             "errors": [discovery_error_to_dict(error) for error in result.errors],
+            "next_cursor": result.next_cursor,
+            "scanned_count": result.scanned_count,
         }
 
     @app.get("/api/native/sessions/{native_ref_id}/preview")
@@ -1095,8 +1139,16 @@ def create_app(
             title=str(redact_for_storage(ref.title)),
             workspace=ref.workspace,
             default_harness_id=ref.harness_id,
-            default_model=_optional_text(ref.metadata.get("model")),
-            default_api_mode=config.default_api_mode,
+            default_model=(
+                ref.execution_snapshot.model
+                if ref.execution_snapshot is not None
+                else _optional_text(ref.metadata.get("model"))
+            ),
+            default_api_mode=parse_api_mode(
+                ref.execution_snapshot.api_mode
+                if ref.execution_snapshot is not None
+                else config.default_api_mode
+            ),
             default_mode="plan",
             native={
                 "source": "native_import",
@@ -1166,6 +1218,7 @@ def create_app(
                     "imported_message_count": len(messages),
                     "skipped_item_count": skipped_count,
                     "project_id": ref.metadata.get("project_id"),
+                    **_native_snapshot_link_metadata(ref),
                 },
             ),
         )
@@ -1206,6 +1259,7 @@ def create_app(
                     "project_id": ref.metadata.get("project_id"),
                     "can_resume": ref.can_resume,
                     "resume_reason": ref.resume_reason,
+                    **_native_snapshot_link_metadata(ref),
                 },
             ),
         )
@@ -1214,25 +1268,102 @@ def create_app(
             "native_link": native_link_to_dict(link),
         }
 
-    @app.post("/api/native/processes/start")
+    @app.post("/api/native/processes/start", response_model=None)
     async def native_process_start(
         payload: dict[str, Any] = Body(default_factory=dict),
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | JSONResponse:
         run = None
+        process_ref = None
+        options = None
+        workspace_execution = None
         try:
             session = store.get_session(
                 _required_text(payload.get("session_id"), "session_id is required")
             )
-            options = _native_process_start_options(
+            action = str(payload.get("action") or "start").strip().lower()
+            if action not in {"start", "resume"}:
+                raise ValueError("action must be start or resume")
+            if action == "start":
+                _native_permission_mode(payload.get("mode") or session.default_mode)
+            policy_result = _native_process_policy_gate(
                 payload=payload,
                 session=session,
+                policy_engine=policy_engine,
+                runtime_store=runtime_store,
+            )
+            if isinstance(policy_result, JSONResponse):
+                return policy_result
+            run_id, policy_metadata = policy_result
+            effective_payload = dict(payload)
+            if action == "start":
+                mode = _native_permission_mode(
+                    payload.get("mode") or session.default_mode
+                )
+                source_workspace = resolve_workspace(
+                    _optional_text(payload.get("workspace")) or session.workspace
+                )
+                if mode == "edit" and source_workspace is None:
+                    raise WorktreeError(
+                        "Native edit isolation requires an explicit workspace; "
+                        "refusing to inherit the UI server checkout."
+                    )
+                workspace_execution = prepare_workspace_execution(
+                    requested_policy=payload.get("workspace_policy"),
+                    harness_kind="agent-cli",
+                    mode=mode,
+                    workspace=source_workspace,
+                    data_dir=config.data_dir,
+                    session_id=session.id,
+                    run_id=run_id,
+                )
+                effective_payload["mode"] = mode
+                effective_payload["workspace"] = workspace_execution.request_workspace
+                extra = _metadata_mapping(payload.get("extra"))
+                extra["native_source_workspace"] = source_workspace
+                extra["workspace_execution"] = workspace_execution.to_metadata()
+                effective_payload["extra"] = extra
+            options = _native_process_start_options(
+                payload=effective_payload,
+                session=session,
                 config=config,
+                registry=registry,
                 native_registry=native_registry,
                 native_index_store=native_index_store,
                 store=store,
                 attachment_store=attachment_store,
             )
+            if workspace_execution is None:
+                workspace_metadata = _native_resume_workspace_execution(options)
+            else:
+                workspace_metadata = workspace_execution.to_metadata()
+            requested_workspace_policy = (
+                str(payload.get("workspace_policy") or "auto").strip().lower()
+            )
+            if (
+                action == "resume"
+                and options["mode"] == "edit"
+                and requested_workspace_policy in {"auto", "worktree"}
+                and workspace_metadata.get("policy") != "worktree"
+            ):
+                raise NativeProcessStartError(
+                    "Native edit resume has no isolated worktree evidence; "
+                    "refusing to resume in the source checkout."
+                )
+            options["source_workspace"] = (
+                workspace_metadata.get("source_workspace") or options["workspace"]
+            )
+            options["workspace_execution"] = workspace_metadata
+            options["policy"] = policy_metadata
+            options["plan"] = replace(
+                options["plan"],
+                metadata={
+                    **dict(options["plan"].metadata),
+                    "workspace_execution": workspace_metadata,
+                    "policy": policy_metadata,
+                },
+            )
             run = store.create_run(
+                run_id=run_id,
                 session_id=session.id,
                 harness_id=options["harness_id"],
                 status="running",
@@ -1265,7 +1396,7 @@ def create_app(
                 "default_model": options["model"],
                 "default_api_mode": options["api_mode"],
                 "default_mode": options["mode"],
-                "workspace": options["workspace"],
+                "workspace": options["source_workspace"],
             }
             if (
                 session.title == "Untitled session"
@@ -1274,12 +1405,37 @@ def create_app(
             ):
                 session_patch["title"] = title_from_prompt(options["prompt"])
             store.update_session(session.id, **session_patch)
+            store.append_event(
+                HarnessStoredEvent(
+                    id=new_id("evt"),
+                    session_id=session.id,
+                    run_id=run.id,
+                    type="policy_allowed",
+                    message="Harness policy allowed native process spawn.",
+                    payload=policy_metadata,
+                    created_at=utc_now(),
+                    trace_id=run.id,
+                    span_kind="policy",
+                    span_status="allowed",
+                )
+            )
             process_ref = native_process_manager.start(
                 options["plan"],
                 session_id=session.id,
                 workspace=options["workspace"],
                 run_id=run.id,
+                timeout_seconds=_native_timeout_seconds(payload.get("timeout_seconds")),
             )
+            if options["action"] == "start":
+                recorder = getattr(options["connector"], "record_start_snapshot", None)
+                if recorder is not None:
+                    try:
+                        recorder(options["plan"])
+                    except (OSError, ValueError) as exc:
+                        native_process_manager.stop(process_ref.id)
+                        raise NativeProcessStartError(
+                            "Could not persist native execution snapshot"
+                        ) from exc
             run = store.update_run(
                 run.id,
                 command=process_ref.display_command,
@@ -1310,13 +1466,34 @@ def create_app(
         except HTTPException:
             raise
         except (NativeProcessStartError, ValueError) as exc:
+            if isinstance(options, Mapping):
+                route_preflight = options.get("proxy_route_preflight")
+                if isinstance(route_preflight, proxy.ProxyRoutePreflight):
+                    proxy.stop_owned_sidecar(route_preflight.startup)
             if run is not None:
                 store.update_run(
                     run.id,
                     status="failed",
                     error=str(exc),
                     finished_at=utc_now(),
+                    metadata=_native_process_run_metadata(
+                        options,
+                        process_ref,
+                        prompt_delivery_status=(
+                            NativePromptDeliveryStatus.FAILED
+                            if process_ref is None
+                            else None
+                        ),
+                        prompt_delivery_error=(
+                            str(exc) if process_ref is None else None
+                        ),
+                    ),
                 )
+            elif workspace_execution is not None and workspace_execution.worktree_path:
+                with suppress(WorktreeError):
+                    discard_run_worktree(
+                        {"workspace_execution": workspace_execution.to_metadata()}
+                    )
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
             "process": native_process_ref_to_dict(process_ref),
@@ -1333,7 +1510,15 @@ def create_app(
         try:
             data = payload.get("data", payload.get("text", ""))
             process_ref = native_process_manager.write(process_id, str(data))
-            run = _sync_native_process_run(store, process_ref)
+            if payload.get("submit") is True:
+                await asyncio.sleep(NATIVE_SUBMIT_KEY_DELAY_SECONDS)
+                process_ref = native_process_manager.write(process_id, "\r")
+            run = _sync_native_process_run(
+                store,
+                process_ref,
+                native_registry=native_registry,
+                native_index_store=native_index_store,
+            )
             message_content = _optional_text(payload.get("message"))
             if message_content is not None and run is not None:
                 message = store.append_message(
@@ -1370,20 +1555,138 @@ def create_app(
         try:
             chunk = native_process_manager.read_since(process_id, cursor)
             process_ref = native_process_manager.status(process_id)
-            run = _sync_native_process_run(store, process_ref)
+            run = _sync_native_process_run(
+                store,
+                process_ref,
+                native_registry=native_registry,
+                native_index_store=native_index_store,
+            )
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
                 status_code=404, detail="Native process not found"
             ) from exc
         payload = native_output_chunk_to_dict(chunk)
         payload["run"] = run_to_dict(run) if run is not None else None
+        payload["messages"] = (
+            [message_to_dict(message) for message in _native_run_messages(store, run)]
+            if run is not None
+            else []
+        )
+        payload["events"] = (
+            [event_to_dict(event) for event in _native_run_events(store, run)]
+            if run is not None
+            else []
+        )
         return payload
+
+    @app.get("/api/native/processes/{process_id}/output/stream")
+    async def native_process_output_stream(
+        process_id: str,
+        cursor: int = Query(default=0, ge=0),
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    ) -> StreamingResponse:
+        stream_cursor = max(cursor, _native_sse_cursor(last_event_id))
+        try:
+            native_process_manager.status(process_id)
+        except NativeProcessNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="Native process not found"
+            ) from exc
+
+        async def stream_output():
+            current_cursor = stream_cursor
+            last_keepalive = asyncio.get_running_loop().time()
+            while True:
+                try:
+                    chunk = native_process_manager.read_since(
+                        process_id, current_cursor
+                    )
+                    process_ref = native_process_manager.status(process_id)
+                except NativeProcessNotFoundError:
+                    break
+                should_emit = (
+                    bool(chunk.outputs)
+                    or chunk.truncated
+                    or (process_ref.status is not NativeProcessStatus.RUNNING)
+                )
+                if should_emit:
+                    current_cursor = chunk.cursor
+                    run = _sync_native_process_run(
+                        store,
+                        process_ref,
+                        native_registry=native_registry,
+                        native_index_store=native_index_store,
+                    )
+                    event_payload = native_output_chunk_to_dict(chunk)
+                    event_payload["run"] = run_to_dict(run) if run is not None else None
+                    event_payload["messages"] = (
+                        [
+                            message_to_dict(message)
+                            for message in _native_run_messages(store, run)
+                        ]
+                        if run is not None
+                        else []
+                    )
+                    event_payload["events"] = (
+                        [
+                            event_to_dict(event)
+                            for event in _native_run_events(store, run)
+                        ]
+                        if run is not None
+                        else []
+                    )
+                    yield _native_output_sse(event_payload)
+                    last_keepalive = asyncio.get_running_loop().time()
+                if process_ref.status is not NativeProcessStatus.RUNNING:
+                    break
+                now = asyncio.get_running_loop().time()
+                if now - last_keepalive >= 10:
+                    yield ": keepalive\n\n"
+                    last_keepalive = now
+                await asyncio.sleep(0.1)
+
+        return StreamingResponse(
+            stream_output(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.post("/api/native/processes/{process_id}/resize")
+    async def native_process_resize(
+        process_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            process_ref = native_process_manager.resize(
+                process_id,
+                rows=payload.get("rows"),
+                columns=payload.get("columns"),
+            )
+        except NativeProcessNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="Native process not found"
+            ) from exc
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "process": native_process_ref_to_dict(process_ref),
+            "rows": payload["rows"],
+            "columns": payload["columns"],
+        }
 
     @app.get("/api/native/processes/{process_id}")
     async def native_process_status(process_id: str) -> dict[str, Any]:
         try:
             process_ref = native_process_manager.status(process_id)
-            run = _sync_native_process_run(store, process_ref)
+            run = _sync_native_process_run(
+                store,
+                process_ref,
+                native_registry=native_registry,
+                native_index_store=native_index_store,
+            )
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
                 status_code=404, detail="Native process not found"
@@ -1396,14 +1699,23 @@ def create_app(
     @app.delete("/api/native/processes/{process_id}")
     async def native_process_stop(process_id: str) -> dict[str, Any]:
         try:
-            process_ref = native_process_manager.stop(process_id)
-            run = _sync_native_process_run(store, process_ref)
+            process_ref = await run_in_threadpool(
+                native_process_manager.stop,
+                process_id,
+            )
+            run = _sync_native_process_run(
+                store,
+                process_ref,
+                native_registry=native_registry,
+                native_index_store=native_index_store,
+            )
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
                 status_code=404, detail="Native process not found"
             ) from exc
         return {
-            "stopped": True,
+            "stopped": process_ref.status is not NativeProcessStatus.RUNNING,
+            "cancel_requested": process_ref.cancel_requested_at is not None,
             "process": native_process_ref_to_dict(process_ref),
             "run": run_to_dict(run) if run is not None else None,
         }
@@ -1578,7 +1890,7 @@ def create_app(
                 session_id,
                 payload,
                 idempotency_key=idempotency_key,
-                origin="manual",
+                origin="interactive",
             )
             return submission.queued.run
         before_run_ids = {run.id for run in store.list_runs(session_id)}
@@ -2378,11 +2690,29 @@ def _fork_session_from_run(
     run: HarnessRun,
 ) -> HarnessSession:
     source = store.get_session(run.session_id)
+    run_thread = run.metadata.get("app_server_thread")
+    session_thread = source.metadata.get("app_server_thread")
+    source_thread = (
+        dict(run_thread)
+        if isinstance(run_thread, Mapping)
+        else dict(session_thread)
+        if isinstance(session_thread, Mapping)
+        else {}
+    )
     metadata = {
         **dict(source.metadata),
         "forked_from_session_id": source.id,
         "forked_from_run_id": run.id,
     }
+    metadata.pop("app_server_thread", None)
+    metadata.pop("app_server_fork", None)
+    if source_thread.get("thread_id"):
+        metadata["app_server_fork"] = {
+            "thread_id": source_thread["thread_id"],
+            "turn_id": source_thread.get("latest_turn_id"),
+            "source_session_id": source.id,
+            "source_run_id": run.id,
+        }
     fork = store.create_session(
         title=f"Fork: {source.title}",
         workspace=run.workspace or source.workspace,
@@ -2494,6 +2824,22 @@ def _sse_event(event: HarnessStoredEvent) -> str:
     payload = _event_response(event)
     data = json.dumps(payload, ensure_ascii=False)
     return f"id: {event.id}\ndata: {data}\n\n"
+
+
+def _native_sse_cursor(last_event_id: str | None) -> int:
+    value = _optional_text(last_event_id)
+    if value is None:
+        return 0
+    try:
+        return max(int(value), 0)
+    except ValueError:
+        return 0
+
+
+def _native_output_sse(payload: Mapping[str, Any]) -> str:
+    cursor = max(int(payload.get("cursor") or 0), 0)
+    data = json.dumps(payload, ensure_ascii=False)
+    return f"id: {cursor}\ndata: {data}\n\n"
 
 
 def _arena_response(
@@ -2623,6 +2969,35 @@ def _native_project_id(
     return resolve_project(workspace, data_dir=data_dir).id
 
 
+def _native_discovery_limit(value: Any) -> int:
+    if value is None:
+        return 100
+    try:
+        limit = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="limit must be an integer") from exc
+    if not 1 <= limit <= 500:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 500")
+    return limit
+
+
+def _native_discovered_project_id(
+    ref: NativeSessionRef,
+    *,
+    workspace: str | None,
+    project_id: str | None,
+) -> str | None:
+    """Apply request scope only when the discovered ref proves the same workspace."""
+    if (
+        project_id is not None
+        and normalize_native_workspace(ref.workspace)
+        == normalize_native_workspace(workspace)
+        and ref.workspace is not None
+    ):
+        return project_id
+    return _optional_text(ref.metadata.get("project_id"))
+
+
 def _filter_external_native_refs(
     refs: tuple[NativeSessionRef, ...],
     *,
@@ -2660,11 +3035,202 @@ def _native_connector_or_404(
         ) from exc
 
 
+def _require_native_cli_compatibility(
+    registry: HarnessRegistry,
+    harness_id: str,
+) -> CliCapabilitySnapshot | None:
+    """Reject native starts when a built-in CLI contract is not proven."""
+    if harness_id not in registry.ids():
+        return None
+    capability_probe = getattr(registry.get(harness_id), "capability_probe", None)
+    if not callable(capability_probe):
+        return None
+    snapshot = capability_probe()
+    if snapshot.compatible:
+        return snapshot
+    raise NativeProcessStartError(
+        snapshot.warning or f"{harness_id} is not adapter-compatible"
+    )
+
+
+def _plan_with_native_telemetry(
+    plan: NativeCommandPlan,
+    snapshot: CliCapabilitySnapshot,
+    *,
+    api_mode: GigaChatApiMode,
+) -> NativeCommandPlan:
+    """Bind truthful native observability evidence to the durable process plan."""
+    return replace(
+        plan,
+        metadata={
+            **dict(plan.metadata),
+            "telemetry": {
+                "api_mode": api_mode.value,
+                "binary_version": snapshot.parsed_version or snapshot.version,
+                "event_schema": snapshot.native_event_schema,
+                "structured_events": snapshot.native_structured_events,
+                "transport": (
+                    "structured"
+                    if snapshot.native_structured_events
+                    else "raw_terminal"
+                ),
+                "observability_limits": (
+                    []
+                    if snapshot.native_structured_events
+                    else [
+                        "tool_lifecycle_opaque",
+                        "usage_unavailable",
+                        "artifacts_unclassified",
+                    ]
+                ),
+            },
+        },
+    )
+
+
+def _native_process_policy_gate(
+    *,
+    payload: Mapping[str, Any],
+    session: HarnessSession,
+    policy_engine: PolicyEngine,
+    runtime_store: RuntimeCoordinationStore | None,
+) -> tuple[str, dict[str, Any]] | JSONResponse:
+    """Resolve the Harness-owned spawn action before sidecars or CLIs start."""
+    profile = permission_profile(payload.get("permission_profile"), origin="manual")
+    run_id = _native_policy_run_id(payload, session.id)
+    context = PolicyContext(
+        project_id=_session_project_id(session),
+        session_id=session.id,
+        run_id=run_id,
+        reason="Start or resume a managed native CLI process.",
+        preview={
+            "harness_id": payload.get("harness_id") or session.default_harness_id,
+            "action": payload.get("action") or "start",
+            "mode": payload.get("mode") or session.default_mode,
+            "workspace": payload.get("workspace") or session.workspace,
+            "workspace_policy": payload.get("workspace_policy") or "auto",
+        },
+    )
+    resolution = policy_engine.resolve(
+        PermissionAction.PROCESS_SPAWN,
+        profile=profile,
+        context=context,
+        enforcement=EnforcementLevel.ENFORCED_BY_HARNESS,
+    )
+    policy_metadata = {
+        "action": resolution.action.value,
+        "decision": resolution.decision.value,
+        "enforcement": resolution.enforcement.value,
+        "policy_source": resolution.policy_source,
+        "permission_profile": profile.id,
+    }
+    if resolution.decision is PolicyDecision.DENY:
+        raise HTTPException(
+            status_code=403, detail="Native process spawn denied by policy"
+        )
+    if resolution.decision is PolicyDecision.ALLOW:
+        return run_id, policy_metadata
+    if runtime_store is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Durable runtime is required for native process approval",
+        )
+    approval = runtime_store.create_approval_request(resolution, context)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "approval_required": True,
+            "approval": approval_request_to_dict(approval),
+            "retry": {
+                "action": "retry_native_process_start",
+                "idempotency_key": payload.get("idempotency_key"),
+            },
+        },
+    )
+
+
+def _native_policy_run_id(payload: Mapping[str, Any], session_id: str) -> str:
+    """Return a stable approval scope without persisting prompt contents."""
+    idempotency_key = _optional_text(payload.get("idempotency_key"))
+    identity = {
+        "session_id": session_id,
+        "idempotency_key": idempotency_key,
+        "action": payload.get("action") or "start",
+        "harness_id": payload.get("harness_id"),
+        "native_ref_id": payload.get("native_ref_id"),
+        "prompt_sha256": hashlib.sha256(
+            str(payload.get("prompt") or "").encode("utf-8")
+        ).hexdigest(),
+        "workspace": payload.get("workspace"),
+        "mode": payload.get("mode"),
+        "model": payload.get("model"),
+        "api_mode": payload.get("api_mode"),
+        "capability": payload.get("capability"),
+        "workspace_policy": payload.get("workspace_policy"),
+        "attachment_ids": payload.get("attachment_ids"),
+    }
+    digest = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    return f"run_native_{digest[:20]}"
+
+
+def _native_permission_mode(value: Any) -> str:
+    mode = str(value or "plan").strip().lower()
+    if mode not in {"plan", "read", "edit"}:
+        raise ValueError("native mode must be plan, read, or edit")
+    return mode
+
+
+def _native_resume_workspace_execution(options: Mapping[str, Any]) -> dict[str, Any]:
+    ref = options.get("native_ref")
+    if isinstance(ref, NativeSessionRef):
+        plan_metadata = _metadata_mapping(ref.metadata.get("plan_metadata"))
+        stored = _metadata_mapping(plan_metadata.get("workspace_execution"))
+        if stored:
+            return stored
+        snapshot = ref.execution_snapshot
+        if snapshot is not None and (
+            snapshot.source_workspace is not None
+            or snapshot.effective_workspace is not None
+            or snapshot.workspace_policy is not None
+        ):
+            effective_workspace = snapshot.effective_workspace or snapshot.workspace
+            return {
+                "requested_policy": snapshot.workspace_policy or "current",
+                "policy": snapshot.workspace_policy or "current",
+                "source_workspace": snapshot.source_workspace or snapshot.workspace,
+                "source_git_root": snapshot.source_workspace,
+                "effective_workspace": effective_workspace,
+                "worktree_path": (
+                    effective_workspace
+                    if snapshot.workspace_policy == "worktree"
+                    else None
+                ),
+                "base_branch": None,
+                "base_commit": None,
+                "fallback_reason": None,
+            }
+    workspace = _optional_text(options.get("workspace"))
+    return {
+        "requested_policy": "current",
+        "policy": "current",
+        "source_workspace": workspace,
+        "source_git_root": None,
+        "effective_workspace": workspace,
+        "worktree_path": None,
+        "base_branch": None,
+        "base_commit": None,
+        "fallback_reason": "legacy native resume has no stored workspace isolation",
+    }
+
+
 def _native_process_start_options(
     *,
     payload: Mapping[str, Any],
     session: HarnessSession,
     config: HarnessConfig,
+    registry: HarnessRegistry,
     native_registry: NativeHistoryConnectorRegistry,
     native_index_store: NativeSessionIndexStore,
     store: HarnessSessionStore,
@@ -2678,6 +3244,7 @@ def _native_process_start_options(
             payload=payload,
             session=session,
             config=config,
+            registry=registry,
             native_registry=native_registry,
             native_index_store=native_index_store,
             store=store,
@@ -2686,8 +3253,10 @@ def _native_process_start_options(
         payload=payload,
         session=session,
         config=config,
+        registry=registry,
         native_registry=native_registry,
         attachment_store=attachment_store,
+        store=store,
     )
 
 
@@ -2696,14 +3265,17 @@ def _native_process_new_options(
     payload: Mapping[str, Any],
     session: HarnessSession,
     config: HarnessConfig,
+    registry: HarnessRegistry,
     native_registry: NativeHistoryConnectorRegistry,
     attachment_store: FilesystemAttachmentStore,
+    store: HarnessSessionStore,
 ) -> dict[str, Any]:
     harness_id = _required_text(
         payload.get("harness_id") or session.default_harness_id,
         "harness_id is required",
     )
     connector = _native_connector_or_404(native_registry, harness_id)
+    cli_capabilities = _require_native_cli_compatibility(registry, harness_id)
     api_mode = parse_api_mode(payload.get("api_mode") or session.default_api_mode)
     capability = parse_capability(
         payload.get("capability") or HarnessCapability.AGENT_CLI.value
@@ -2713,7 +3285,7 @@ def _native_process_new_options(
     )
     prompt = str(payload.get("prompt") or "")
     model = _optional_text(payload.get("model")) or session.default_model
-    mode = str(payload.get("mode") or session.default_mode)
+    mode = _native_permission_mode(payload.get("mode") or session.default_mode)
     attachment_ids = _attachment_ids(payload.get("attachment_ids"))
     attachments = _load_native_attachments(
         attachment_store,
@@ -2753,6 +3325,11 @@ def _native_process_new_options(
         attachment_render_plan_payload,
     )
     extra["preflight"] = preflight_payload
+    extra["native_prompt_idempotency_key"] = _native_prompt_idempotency_key(
+        session.id,
+        _optional_text(payload.get("idempotency_key"))
+        or new_id("native_prompt_submit"),
+    )
     request = HarnessRequest(
         prompt=prompt,
         model=model,
@@ -2766,7 +3343,53 @@ def _native_process_new_options(
         attachment_render_plan=attachment_render_plan_payload,
         extra=extra,
     )
-    plan = connector.build_start_command(request, config.to_context())
+    if cli_capabilities is not None:
+        attachment_error = attachment_capability_error(
+            request,
+            cli_capabilities.capabilities,
+            surface="native",
+        )
+        if attachment_error is not None:
+            raise NativeProcessStartError(attachment_error)
+    context = config.to_context()
+    route_preflight = None
+    if bool(getattr(connector, "requires_proxy_preflight", False)):
+        route_preflight = proxy.ensure_proxy_route_available(context, api_mode)
+        if not route_preflight.ok:
+            raise NativeProcessStartError(
+                route_preflight.error or "Native proxy preflight failed"
+            )
+        context = replace(
+            context,
+            api_key=route_preflight.api_key or context.api_key,
+        )
+    try:
+        plan = connector.build_start_command(request, context)
+        if cli_capabilities is not None:
+            plan = _plan_with_native_telemetry(
+                plan,
+                cli_capabilities,
+                api_mode=api_mode,
+            )
+        if route_preflight is not None:
+            plan = replace(
+                plan,
+                metadata={
+                    **dict(plan.metadata),
+                    "proxy_preflight": proxy.proxy_route_preflight_to_dict(
+                        route_preflight
+                    ),
+                },
+            )
+        _reject_duplicate_native_prompt_delivery(
+            store,
+            session.id,
+            plan.prompt_delivery,
+        )
+    except (OSError, ValueError):
+        if route_preflight is not None:
+            proxy.stop_owned_sidecar(route_preflight.startup)
+        raise
     native_session_id = _native_session_id_from_plan(plan)
     return {
         "action": "start",
@@ -2780,10 +3403,12 @@ def _native_process_new_options(
         "workspace": workspace,
         "native_ref": None,
         "native_session_id": native_session_id,
+        "connector": connector,
         "attachment_ids": attachment_ids,
         "attachments": attachment_payloads,
         "attachment_render_plan": attachment_render_plan_payload,
         "preflight": preflight_payload,
+        "proxy_route_preflight": route_preflight,
     }
 
 
@@ -2792,6 +3417,7 @@ def _native_process_resume_options(
     payload: Mapping[str, Any],
     session: HarnessSession,
     config: HarnessConfig,
+    registry: HarnessRegistry,
     native_registry: NativeHistoryConnectorRegistry,
     native_index_store: NativeSessionIndexStore,
     store: HarnessSessionStore,
@@ -2811,14 +3437,62 @@ def _native_process_resume_options(
             detail=ref.resume_reason or "Native session cannot be resumed",
         )
     connector = _native_connector_or_404(native_registry, ref.harness_id)
-    plan = connector.build_resume_command(ref, config.to_context())
-    api_mode = parse_api_mode(payload.get("api_mode") or session.default_api_mode)
+    cli_capabilities = _require_native_cli_compatibility(registry, ref.harness_id)
+    ref = _native_ref_with_reviewed_resume_snapshot(
+        ref=ref,
+        payload=payload,
+        session=session,
+        data_dir=config.data_dir,
+    )
+    snapshot = ref.execution_snapshot
+    _reject_resume_snapshot_overrides(payload, snapshot)
+    api_mode = parse_api_mode(
+        snapshot.api_mode
+        if snapshot is not None
+        else payload.get("api_mode") or session.default_api_mode
+    )
     capability = parse_capability(
         payload.get("capability") or HarnessCapability.AGENT_CLI.value
     )
     workspace = resolve_workspace(
-        _optional_text(payload.get("workspace")) or ref.workspace or session.workspace
+        snapshot.effective_workspace or snapshot.workspace
+        if snapshot is not None
+        else _optional_text(payload.get("workspace"))
+        or ref.workspace
+        or session.workspace
     )
+    context = config.to_context()
+    route_preflight = None
+    if bool(getattr(connector, "requires_proxy_preflight", False)):
+        route_preflight = proxy.ensure_proxy_route_available(context, api_mode)
+        if not route_preflight.ok:
+            raise NativeProcessStartError(
+                route_preflight.error or "Native proxy preflight failed"
+            )
+        context = replace(
+            context,
+            api_key=route_preflight.api_key or context.api_key,
+        )
+    try:
+        plan = connector.build_resume_command(ref, context)
+        if cli_capabilities is not None:
+            plan = _plan_with_native_telemetry(
+                plan,
+                cli_capabilities,
+                api_mode=api_mode,
+            )
+    except (OSError, ValueError):
+        if route_preflight is not None:
+            proxy.stop_owned_sidecar(route_preflight.startup)
+        raise
+    if route_preflight is not None:
+        plan = replace(
+            plan,
+            metadata={
+                **dict(plan.metadata),
+                "proxy_preflight": proxy.proxy_route_preflight_to_dict(route_preflight),
+            },
+        )
     prompt = (
         _optional_text(payload.get("prompt")) or f"Resume native session: {ref.title}"
     )
@@ -2827,24 +3501,37 @@ def _native_process_resume_options(
         "plan": plan,
         "harness_id": ref.harness_id,
         "prompt": prompt,
-        "model": _optional_text(payload.get("model"))
-        or _optional_text(ref.metadata.get("model"))
-        or session.default_model,
+        "model": (
+            snapshot.model
+            if snapshot is not None
+            else _optional_text(payload.get("model"))
+            or _optional_text(ref.metadata.get("model"))
+            or session.default_model
+        ),
         "api_mode": api_mode,
         "capability": capability,
-        "mode": str(payload.get("mode") or session.default_mode),
+        "mode": (
+            snapshot.permission_mode
+            if snapshot is not None
+            else str(payload.get("mode") or session.default_mode)
+        ),
         "workspace": workspace,
         "native_ref": ref,
         "native_session_id": ref.native_session_id,
         "attachment_ids": (),
         "attachments": (),
         "attachment_render_plan": None,
+        "connector": connector,
+        "proxy_route_preflight": route_preflight,
     }
 
 
 def _native_process_run_metadata(
     options: Mapping[str, Any],
     process_ref: NativeProcessRef | None = None,
+    *,
+    prompt_delivery_status: NativePromptDeliveryStatus | None = None,
+    prompt_delivery_error: str | None = None,
 ) -> dict[str, Any]:
     ref = options.get("native_ref")
     plan = options.get("plan")
@@ -2865,6 +3552,28 @@ def _native_process_run_metadata(
         )
     elif isinstance(plan, NativeCommandPlan) and plan.native_home is not None:
         metadata["native_home"] = plan.native_home
+    if isinstance(plan, NativeCommandPlan) and plan.execution_snapshot is not None:
+        metadata["execution_snapshot"] = execution_snapshot_to_dict(
+            plan.execution_snapshot
+        )
+    if isinstance(plan, NativeCommandPlan):
+        telemetry = plan.metadata.get("telemetry")
+        if isinstance(telemetry, Mapping):
+            metadata["telemetry"] = dict(telemetry)
+    if isinstance(plan, NativeCommandPlan) and plan.prompt_delivery is not None:
+        process_delivery = (
+            process_ref.metadata.get("prompt_delivery")
+            if process_ref is not None
+            else None
+        )
+        if isinstance(process_delivery, Mapping) and prompt_delivery_status is None:
+            metadata["prompt_delivery"] = dict(process_delivery)
+        else:
+            metadata["prompt_delivery"] = native_prompt_delivery_to_dict(
+                plan.prompt_delivery,
+                status=prompt_delivery_status,
+                error=prompt_delivery_error,
+            )
     if process_ref is not None:
         metadata["native_process"] = {
             "id": process_ref.id,
@@ -2882,6 +3591,17 @@ def _native_process_run_metadata(
     preflight = options.get("preflight")
     if isinstance(preflight, Mapping):
         metadata["preflight"] = dict(preflight)
+    route_preflight = options.get("proxy_route_preflight")
+    if isinstance(route_preflight, proxy.ProxyRoutePreflight):
+        metadata["proxy_preflight"] = proxy.proxy_route_preflight_to_dict(
+            route_preflight
+        )
+    workspace_execution = options.get("workspace_execution")
+    if isinstance(workspace_execution, Mapping):
+        metadata["workspace_execution"] = dict(workspace_execution)
+    policy = options.get("policy")
+    if isinstance(policy, Mapping):
+        metadata["policy"] = dict(policy)
     return metadata
 
 
@@ -2911,6 +3631,12 @@ def _append_native_process_link(
         "command": list(process_ref.display_command),
         "process_status": process_ref.status.value,
     }
+    workspace_execution = options.get("workspace_execution")
+    if isinstance(workspace_execution, Mapping):
+        metadata["workspace_execution"] = dict(workspace_execution)
+    policy = options.get("policy")
+    if isinstance(policy, Mapping):
+        metadata["policy"] = dict(policy)
     if process_ref.native_home is not None:
         metadata["native_home"] = process_ref.native_home
     if isinstance(ref, NativeSessionRef):
@@ -2923,6 +3649,17 @@ def _append_native_process_link(
         )
     if isinstance(options.get("plan"), NativeCommandPlan):
         metadata["plan_metadata"] = dict(options["plan"].metadata)
+        if options["plan"].prompt_delivery is not None:
+            process_delivery = process_ref.metadata.get("prompt_delivery")
+            metadata["prompt_delivery"] = (
+                dict(process_delivery)
+                if isinstance(process_delivery, Mapping)
+                else native_prompt_delivery_to_dict(options["plan"].prompt_delivery)
+            )
+        if options["plan"].execution_snapshot is not None:
+            snapshot = options["plan"].execution_snapshot
+            metadata["execution_snapshot"] = execution_snapshot_to_dict(snapshot)
+            metadata["limitations"] = [] if snapshot.route_known else ["route_unknown"]
     return store.append_native_link(
         session.id,
         HarnessNativeLink(
@@ -2935,7 +3672,9 @@ def _append_native_process_link(
             native_session_id=native_session_id,
             native_ref_id=ref.id if isinstance(ref, NativeSessionRef) else None,
             source=f"native_process_{options['action']}",
-            workspace=_optional_text(options.get("workspace")) or session.workspace,
+            workspace=(
+                _optional_text(options.get("source_workspace")) or session.workspace
+            ),
             metadata=metadata,
         ),
     )
@@ -2972,7 +3711,110 @@ def _native_ref_from_session_link(
         can_resume=can_resume,
         resume_reason=resume_reason,
         metadata=link.metadata,
+        execution_snapshot=execution_snapshot_from_dict(
+            _metadata_mapping(link.metadata.get("execution_snapshot"))
+        ),
     )
+
+
+def _native_ref_with_reviewed_resume_snapshot(
+    *,
+    ref: NativeSessionRef,
+    payload: Mapping[str, Any],
+    session: HarnessSession,
+    data_dir: str,
+) -> NativeSessionRef:
+    if ref.execution_snapshot is not None:
+        return ref
+    if ref.harness_id not in {"codex-cli", "claude-code", "gemini-cli"}:
+        return ref
+    explicit_api_mode = _optional_text(payload.get("api_mode"))
+    if explicit_api_mode is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "route_unknown: legacy native ref requires an explicit reviewed "
+                "api_mode before resume"
+            ),
+        )
+    api_mode = parse_api_mode(explicit_api_mode)
+    workspace = resolve_workspace(
+        _optional_text(payload.get("workspace")) or ref.workspace or session.workspace
+    )
+    project_id = _optional_text(ref.metadata.get("project_id"))
+    if project_id is None:
+        if workspace is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Legacy native ref is missing project identity",
+            )
+        project_id = resolve_project(workspace, data_dir=data_dir).id
+    native_home = _optional_text(ref.metadata.get("native_home"))
+    if native_home is None:
+        family = {
+            "codex-cli": "codex",
+            "claude-code": "claude",
+            "gemini-cli": "gemini",
+        }[ref.harness_id]
+        native_home = str(
+            Path(data_dir).expanduser() / "native" / family / "homes" / project_id
+        )
+    snapshot = create_execution_snapshot(
+        harness_id=ref.harness_id,
+        api_mode=api_mode.value,
+        model=_optional_text(payload.get("model"))
+        or _optional_text(ref.metadata.get("model"))
+        or session.default_model,
+        native_home=native_home,
+        workspace=workspace,
+        project_id=project_id,
+        permission_mode=str(payload.get("mode") or session.default_mode),
+        tool_config_hash=_optional_text(ref.metadata.get("tool_config_hash")),
+        route_known=False,
+        warnings=(
+            "Legacy native ref had no route snapshot; this explicit route override "
+            "applies only to the reviewed resume.",
+        ),
+    )
+    return replace(ref, execution_snapshot=snapshot)
+
+
+def _reject_resume_snapshot_overrides(
+    payload: Mapping[str, Any],
+    snapshot: NativeExecutionSnapshot | None,
+) -> None:
+    if snapshot is None:
+        return
+    checks = {
+        "api_mode": snapshot.api_mode,
+        "model": snapshot.model,
+        "mode": snapshot.permission_mode,
+        "workspace": snapshot.workspace,
+    }
+    for key, expected in checks.items():
+        if key not in payload or payload.get(key) is None:
+            continue
+        actual = str(payload[key]).strip()
+        if key == "api_mode":
+            actual = parse_api_mode(actual).value
+        elif key == "workspace":
+            actual = resolve_workspace(actual) or ""
+        if actual != (expected or ""):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Native resume {key} contradicts the execution snapshot",
+            )
+
+
+def _native_snapshot_link_metadata(ref: NativeSessionRef) -> dict[str, Any]:
+    if ref.execution_snapshot is None:
+        return {"limitations": ["route_unknown"]} if ref.can_resume else {}
+    return {
+        "execution_snapshot": execution_snapshot_to_dict(ref.execution_snapshot),
+        "limitations": (
+            [] if ref.execution_snapshot.route_known else ["route_unknown"]
+        ),
+    }
 
 
 def _native_session_id_from_plan(plan: NativeCommandPlan) -> str | None:
@@ -2990,6 +3832,32 @@ def _native_session_id_from_plan(plan: NativeCommandPlan) -> str | None:
         if value is not None:
             return value
     return None
+
+
+def _native_prompt_idempotency_key(session_id: str, client_key: str) -> str:
+    digest = hashlib.sha256(f"{session_id}\0{client_key}".encode("utf-8")).hexdigest()
+    return f"nprompt_{digest[:32]}"
+
+
+def _reject_duplicate_native_prompt_delivery(
+    store: HarnessSessionStore,
+    session_id: str,
+    delivery: NativePromptDelivery | None,
+) -> None:
+    if delivery is None:
+        return
+    for existing_run in store.list_runs(session_id):
+        existing = existing_run.metadata.get("prompt_delivery")
+        if not isinstance(existing, Mapping):
+            continue
+        if existing.get("idempotency_key") != delivery.idempotency_key:
+            continue
+        if existing.get("prompt_sha256") != delivery.prompt_sha256:
+            raise ValueError(
+                "Native prompt idempotency key is already bound to a different prompt"
+            )
+        state = str(existing.get("status") or "pending")
+        raise ValueError(f"Native prompt delivery was already recorded as {state}")
 
 
 def _native_missing_session_id_reason() -> str:
@@ -3057,6 +3925,9 @@ def _native_request_extra(
 def _sync_native_process_run(
     store: HarnessSessionStore,
     process_ref: NativeProcessRef,
+    *,
+    native_registry: NativeHistoryConnectorRegistry | None = None,
+    native_index_store: NativeSessionIndexStore | None = None,
 ):
     status = _run_status_from_process(process_ref)
     metadata = _existing_run_metadata(store, process_ref)
@@ -3066,9 +3937,19 @@ def _sync_native_process_run(
             "native_process": {
                 "id": process_ref.id,
                 "pid": process_ref.pid,
+                "process_group_id": process_ref.process_group_id,
                 "transport": process_ref.transport,
                 "status": process_ref.status.value,
                 "exit_code": process_ref.exit_code,
+                "owner_id": process_ref.owner_id,
+                "owner_process_id": process_ref.owner_process_id,
+                "heartbeat_at": process_ref.heartbeat_at,
+                "leased_until": process_ref.leased_until,
+                "timeout_at": process_ref.timeout_at,
+                "cancel_requested_at": process_ref.cancel_requested_at,
+                "terminal_cursor": process_ref.terminal_cursor,
+                "recovery_outcome": process_ref.recovery_outcome,
+                "reconnectable": process_ref.reconnectable,
             },
         }
     )
@@ -3079,12 +3960,430 @@ def _sync_native_process_run(
     }
     if process_ref.status is not NativeProcessStatus.RUNNING:
         patch["finished_at"] = process_ref.updated_at
-    if process_ref.status is NativeProcessStatus.EXITED and process_ref.exit_code:
-        patch["error"] = f"Native process exited with code {process_ref.exit_code}"
+    if status is RunStatus.FAILED:
+        if process_ref.recovery_outcome is not None:
+            patch["error"] = (
+                f"Native process could not be recovered: {process_ref.recovery_outcome}"
+            )
+        else:
+            patch["error"] = (
+                f"Native process exited with code {process_ref.exit_code}"
+                if process_ref.exit_code is not None
+                else "Native process failed"
+            )
     try:
-        return store.update_run(process_ref.run_id, **patch)
+        run = store.update_run(process_ref.run_id, **patch)
     except RunNotFoundError:
         return None
+    if run.status is RunStatus.FAILED:
+        _ensure_native_process_error_message(store, run, process_ref)
+    if native_registry is not None:
+        run = _sync_native_process_transcript(
+            store,
+            native_registry,
+            run,
+            process_ref,
+            native_index_store=native_index_store,
+        )
+    return run
+
+
+def _sync_native_process_transcript(
+    store: HarnessSessionStore,
+    native_registry: NativeHistoryConnectorRegistry,
+    run: HarnessRun,
+    process_ref: NativeProcessRef,
+    *,
+    native_index_store: NativeSessionIndexStore | None = None,
+) -> HarnessRun:
+    if run.harness_id not in {"codex-cli", "claude-code", "gemini-cli"}:
+        return run
+    snapshot = execution_snapshot_from_dict(
+        _metadata_mapping(run.metadata.get("execution_snapshot"))
+    )
+    if snapshot is None:
+        return run
+    workspace = snapshot.source_workspace or snapshot.workspace or run.workspace
+    discovery = native_registry.discover(
+        harness_id=run.harness_id,
+        workspace=workspace,
+        include_external=False,
+    )
+    candidates = [
+        ref
+        for ref in discovery.sessions
+        if ref.execution_snapshot is not None
+        and ref.execution_snapshot.id == snapshot.id
+    ]
+    if len(candidates) != 1:
+        return run
+    ref = candidates[0]
+    if native_index_store is not None:
+        ref = native_index_store.upsert_ref(
+            ref,
+            project_id=(
+                _optional_text(ref.metadata.get("project_id"))
+                or (
+                    ref.execution_snapshot.project_id
+                    if ref.execution_snapshot is not None
+                    else None
+                )
+            ),
+        )
+        _append_reconciled_native_link(store, run, ref)
+    if run.native_session_id != ref.native_session_id:
+        run = store.update_run(
+            run.id,
+            native_session_id=ref.native_session_id,
+            metadata={
+                **dict(run.metadata),
+                "native_history_reconciliation": {
+                    "native_ref_id": ref.id,
+                    "native_session_id": ref.native_session_id,
+                    "updated_at": utc_now(),
+                },
+            },
+        )
+    if run.harness_id == "codex-cli":
+        return run
+    try:
+        connector = native_registry.get(run.harness_id)
+        transcript = connector.import_ref(ref)
+    except (OSError, ValueError, UnknownNativeHistoryConnectorError):
+        return run
+    existing_messages = store.list_messages(run.session_id)
+    known_keys = {
+        str(message.metadata["native_message_key"])
+        for message in existing_messages
+        if message.run_id == run.id and message.metadata.get("native_message_key")
+    }
+    known_event_keys = {
+        str(event.payload["native_event_key"])
+        for event in store.list_events(run.session_id, run_id=run.id)
+        if event.payload.get("native_event_key")
+    }
+    appended_message_count = 0
+    appended_event_count = 0
+    for message in transcript:
+        if not _native_message_belongs_to_run(message, run):
+            continue
+        message_key = _native_message_key(ref, message)
+        for tool_call in _native_tool_records(message.metadata.get("tool_calls")):
+            event_key = _native_tool_event_key(
+                message_key,
+                HarnessEventType.TOOL_CALL_STARTED.value,
+                tool_call,
+            )
+            if event_key in known_event_keys:
+                continue
+            store.append_event(
+                HarnessStoredEvent(
+                    id=new_id("evt"),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    type=HarnessEventType.TOOL_CALL_STARTED.value,
+                    message="Native tool call started.",
+                    payload={
+                        **tool_call,
+                        "native_event_key": event_key,
+                        "native_message_key": message_key,
+                        "native_ref_id": ref.id,
+                        "native_session_id": ref.native_session_id,
+                    },
+                    created_at=message.created_at or utc_now(),
+                )
+            )
+            known_event_keys.add(event_key)
+            appended_event_count += 1
+        for tool_result in _native_tool_records(message.metadata.get("tool_results")):
+            event_key = _native_tool_event_key(
+                message_key,
+                HarnessEventType.TOOL_CALL_FINISHED.value,
+                tool_result,
+            )
+            if event_key in known_event_keys:
+                continue
+            store.append_event(
+                HarnessStoredEvent(
+                    id=new_id("evt"),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    type=HarnessEventType.TOOL_CALL_FINISHED.value,
+                    message="Native tool call finished.",
+                    payload={
+                        **tool_result,
+                        "native_event_key": event_key,
+                        "native_message_key": message_key,
+                        "native_ref_id": ref.id,
+                        "native_session_id": ref.native_session_id,
+                    },
+                    created_at=message.created_at or utc_now(),
+                )
+            )
+            known_event_keys.add(event_key)
+            appended_event_count += 1
+        if (
+            _native_import_message_role(message.role) != "assistant"
+            or not message.content.strip()
+            or message_key in known_keys
+        ):
+            continue
+        store.append_message(
+            HarnessMessage(
+                id=new_id("msg"),
+                session_id=run.session_id,
+                run_id=run.id,
+                role="assistant",
+                content=str(redact_for_storage(message.content)),
+                created_at=message.created_at or utc_now(),
+                harness_id=run.harness_id,
+                model=run.model,
+                api_mode=run.api_mode,
+                metadata={
+                    "source": "native_process",
+                    "process_id": process_ref.id,
+                    "native_ref_id": ref.id,
+                    "native_session_id": ref.native_session_id,
+                    "native_message_key": message_key,
+                    "native_metadata": _redacted_mapping(message.metadata),
+                },
+            )
+        )
+        store.append_event(
+            HarnessStoredEvent(
+                id=new_id("evt"),
+                session_id=run.session_id,
+                run_id=run.id,
+                type=HarnessEventType.MESSAGE_COMPLETED.value,
+                message="Native assistant message synchronized.",
+                payload={
+                    "role": "assistant",
+                    "process_id": process_ref.id,
+                    "native_ref_id": ref.id,
+                    "native_session_id": ref.native_session_id,
+                },
+                created_at=message.created_at or utc_now(),
+            )
+        )
+        known_keys.add(message_key)
+        appended_message_count += 1
+    if (
+        not appended_message_count
+        and not appended_event_count
+        and run.native_session_id == ref.native_session_id
+    ):
+        return run
+    metadata = {
+        **dict(run.metadata),
+        "native_transcript_sync": {
+            "native_ref_id": ref.id,
+            "native_session_id": ref.native_session_id,
+            "synced_message_count": len(known_keys),
+            "synced_tool_event_count": len(known_event_keys),
+            "updated_at": utc_now(),
+        },
+    }
+    return store.update_run(
+        run.id,
+        native_session_id=ref.native_session_id,
+        metadata=metadata,
+    )
+
+
+def _append_reconciled_native_link(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+    ref: NativeSessionRef,
+) -> None:
+    current = store.get_native_link(run.session_id, run.harness_id)
+    if current is not None and current.native_ref_id == ref.id:
+        return
+    now = utc_now()
+    metadata = dict(current.metadata) if current is not None else {}
+    metadata.update(
+        {
+            "auto_reconciled": True,
+            "project_id": ref.metadata.get("project_id"),
+            "execution_snapshot": (
+                execution_snapshot_to_dict(ref.execution_snapshot)
+                if ref.execution_snapshot is not None
+                else None
+            ),
+        }
+    )
+    store.append_native_link(
+        run.session_id,
+        HarnessNativeLink(
+            id=new_id("nlink"),
+            session_id=run.session_id,
+            harness_id=run.harness_id,
+            status=ref.status,
+            created_at=current.created_at if current is not None else now,
+            updated_at=now,
+            native_session_id=ref.native_session_id,
+            native_ref_id=ref.id,
+            source="native_history_reconciliation",
+            workspace=ref.workspace or run.workspace,
+            metadata=metadata,
+        ),
+    )
+
+
+def _native_message_belongs_to_run(
+    message: NativeTranscriptMessage,
+    run: HarnessRun,
+) -> bool:
+    if run.started_at is None:
+        return True
+    message_time = _parse_native_timestamp(message.created_at)
+    run_time = _parse_native_timestamp(run.started_at)
+    return (
+        message_time is not None and run_time is not None and message_time >= run_time
+    )
+
+
+def _parse_native_timestamp(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _native_message_key(
+    ref: NativeSessionRef,
+    message: NativeTranscriptMessage,
+) -> str:
+    native_message_id = _optional_text(message.metadata.get("native_message_id"))
+    if native_message_id is not None:
+        return f"{ref.id}:id:{native_message_id}"
+    digest = hashlib.sha256(
+        json.dumps(
+            [
+                message.role,
+                message.created_at,
+                message.content,
+                message.metadata.get("tool_calls"),
+                message.metadata.get("tool_results"),
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"{ref.id}:sha256:{digest}"
+
+
+def _native_run_messages(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+) -> tuple[HarnessMessage, ...]:
+    return tuple(
+        message
+        for message in store.list_messages(run.session_id)
+        if message.run_id == run.id and message.role in {"assistant", "error"}
+    )
+
+
+def _native_run_events(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+) -> tuple[HarnessStoredEvent, ...]:
+    return store.list_events(run.session_id, run_id=run.id)
+
+
+def _native_tool_records(value: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(dict(item) for item in value if isinstance(item, Mapping))
+
+
+def _native_tool_event_key(
+    message_key: str,
+    event_type: str,
+    payload: Mapping[str, Any],
+) -> str:
+    tool_call_id = _optional_text(payload.get("tool_call_id")) or "tool-call"
+    return f"{message_key}:{event_type}:{tool_call_id}"
+
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)?)")
+_NATIVE_ERROR_OUTPUT_LIMIT = 4000
+
+
+def _ensure_native_process_error_message(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+    process_ref: NativeProcessRef,
+) -> None:
+    messages = store.list_messages(run.session_id)
+    if any(
+        message.run_id == run.id and message.role == "error" for message in messages
+    ):
+        return
+    content = _native_process_error_content(store, run, process_ref)
+    store.append_message(
+        HarnessMessage(
+            id=new_id("msg"),
+            session_id=run.session_id,
+            run_id=run.id,
+            role="error",
+            content=content,
+            created_at=utc_now(),
+            harness_id=run.harness_id,
+            model=run.model,
+            api_mode=run.api_mode,
+            metadata={
+                "source": "native_process",
+                "process_id": process_ref.id,
+                "exit_code": process_ref.exit_code,
+            },
+        )
+    )
+    store.append_event(
+        HarnessStoredEvent(
+            id=new_id("evt"),
+            session_id=run.session_id,
+            run_id=run.id,
+            type=HarnessEventType.ERROR.value,
+            message="Native process failed.",
+            payload={
+                "process_id": process_ref.id,
+                "exit_code": process_ref.exit_code,
+                "role": "error",
+            },
+            created_at=utc_now(),
+        )
+    )
+
+
+def _native_process_error_content(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+    process_ref: NativeProcessRef,
+) -> str:
+    summary = run.error or "Native process failed"
+    output = "".join(
+        str(event.payload.get("text") or "")
+        for event in store.list_events(run.session_id, run_id=run.id)
+        if event.type == "terminal_output"
+        and event.payload.get("process_id") == process_ref.id
+    )
+    output = _ANSI_ESCAPE_RE.sub("", output)
+    output = "".join(
+        character
+        for character in output
+        if character in "\n\r\t" or ord(character) >= 32
+    ).strip()
+    if not output:
+        return summary
+    excerpt = output[-_NATIVE_ERROR_OUTPUT_LIMIT:]
+    indented = "\n".join(f"    {line}" for line in excerpt.splitlines())
+    return f"{summary}.\n\nTerminal output:\n\n{indented}"
 
 
 def _existing_run_metadata(
@@ -3107,9 +4406,27 @@ def _run_status_from_process(process_ref: NativeProcessRef) -> RunStatus:
         return RunStatus.CANCELED
     if process_ref.status is NativeProcessStatus.FAILED:
         return RunStatus.FAILED
+    if process_ref.status in {
+        NativeProcessStatus.TIMED_OUT,
+        NativeProcessStatus.INTERRUPTED,
+        NativeProcessStatus.UNKNOWN,
+    }:
+        return RunStatus.FAILED
     if process_ref.exit_code == 0:
         return RunStatus.SUCCEEDED
     return RunStatus.FAILED
+
+
+def _native_timeout_seconds(value: Any) -> float | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("timeout_seconds must be a positive number") from exc
+    if timeout <= 0:
+        raise ValueError("timeout_seconds must be a positive number")
+    return timeout
 
 
 def _native_transcript_message_to_dict(
@@ -3136,6 +4453,7 @@ def _native_import_session_metadata(ref: NativeSessionRef) -> dict[str, Any]:
         metadata["project_id"] = project_id
     if ref.workspace is not None:
         metadata["project_root"] = ref.workspace
+    metadata.update(_native_snapshot_link_metadata(ref))
     return metadata
 
 
@@ -3259,6 +4577,7 @@ def _attachment_response(
     payload.pop("storage_path", None)
     payload["url"] = f"/api/attachments/{attachment.id}"
     payload["supported_by"] = _attachment_supported_by(registry, attachment)
+    payload["transport_by"] = _attachment_transport_by(registry, attachment)
     payload["warnings"] = _attachment_warnings(registry, attachment)
     return payload
 
@@ -3288,7 +4607,70 @@ def _attachment_warnings(
             warnings.append(f"{spec.id} does not support attachments.")
         elif attachment.kind not in spec.accepted_attachment_kinds:
             warnings.append(f"{spec.id} does not accept {attachment.kind} attachments.")
+        else:
+            transport = _attachment_transport_for(spec, attachment)
+            if (
+                transport
+                and not transport["rich"]
+                and _effective_attachment_kind(attachment) in {"image", "document"}
+            ):
+                warnings.append(
+                    f"{spec.id} uses path or metadata reference only for "
+                    f"{_effective_attachment_kind(attachment)} attachments."
+                )
     return warnings
+
+
+def _attachment_transport_by(
+    registry: HarnessRegistry,
+    attachment: HarnessAttachment,
+) -> dict[str, dict[str, Any]]:
+    return {
+        harness.spec().id: transport
+        for harness in registry.list()
+        if (transport := _attachment_transport_for(harness.spec(), attachment))
+    }
+
+
+def _attachment_transport_for(
+    spec,
+    attachment: HarnessAttachment,
+) -> dict[str, Any]:
+    capabilities = getattr(spec, "attachment_capabilities", {})
+    if not isinstance(capabilities, Mapping):
+        return {}
+    support = capabilities.get(_effective_attachment_kind(attachment))
+    if support is None:
+        support = capabilities.get(attachment.kind)
+    if support is None:
+        return {}
+    if isinstance(support, Mapping):
+        headless = support.get("headless", ())
+        native = support.get("native", ())
+        rich = bool(support.get("rich", False))
+        required = support.get("required_cli_capabilities", ())
+        detail = str(support.get("detail") or "")
+    else:
+        headless = getattr(support, "headless", ())
+        native = getattr(support, "native", ())
+        rich = bool(getattr(support, "rich", False))
+        required = getattr(support, "required_cli_capabilities", ())
+        detail = str(getattr(support, "detail", ""))
+    return {
+        "headless": [str(item) for item in headless],
+        "native": [str(item) for item in native],
+        "rich": rich,
+        "required_cli_capabilities": [str(item) for item in required],
+        "detail": detail,
+    }
+
+
+def _effective_attachment_kind(attachment: HarnessAttachment) -> str:
+    if attachment.kind == "workspace_file":
+        detected = attachment.metadata.get("detected_kind")
+        if isinstance(detected, str) and detected:
+            return detected
+    return attachment.kind
 
 
 def _content_disposition(filename: str) -> str:
