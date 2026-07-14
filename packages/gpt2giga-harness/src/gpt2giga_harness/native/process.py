@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -421,22 +422,18 @@ class NativeProcessManager:
             record = self._records.get(process_id)
             if record is None:
                 if self.runtime_store is not None:
-                    try:
+                    with suppress(NativeProcessRecordNotFoundError):
                         self.runtime_store.request_native_process_cancel(process_id)
-                    except NativeProcessRecordNotFoundError:
-                        pass
                 return self._wait_for_foreign_cancel(process_id)
             cancel_requested_at = utc_now()
             if self.runtime_store is not None:
-                try:
+                with suppress(NativeProcessRecordNotFoundError):
                     durable = self.runtime_store.request_native_process_cancel(
                         process_id
                     )
                     cancel_requested_at = (
                         durable.cancel_requested_at or cancel_requested_at
                     )
-                except NativeProcessRecordNotFoundError:
-                    pass
             record.ref = replace(
                 record.ref,
                 status=NativeProcessStatus.STOPPED,

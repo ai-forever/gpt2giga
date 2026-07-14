@@ -831,6 +831,17 @@ def test_cli_native_dry_run_prints_command_plan_without_headless_run(
 ):
     secret = "sk-native-cli-key-123"
 
+    def supported_gemini_prompt_probe(command, env, cwd):
+        del env, cwd
+
+        class Completed:
+            returncode = 0
+            stdout = "--prompt-interactive Execute prompt and continue interactively"
+            stderr = ""
+
+        assert command[-1] == "--help"
+        return Completed()
+
     def fail_run(self, request, context):
         raise AssertionError("headless run should not be called for native dry-run")
 
@@ -839,6 +850,10 @@ def test_cli_native_dry_run_prints_command_plan_without_headless_run(
     monkeypatch.setattr(CodexCliHarness, "run", fail_run)
     monkeypatch.setattr(ClaudeCodeHarness, "run", fail_run)
     monkeypatch.setattr(GeminiCliHarness, "run", fail_run)
+    monkeypatch.setattr(
+        "gpt2giga_harness.native.gemini._run_capability_probe",
+        supported_gemini_prompt_probe,
+    )
 
     exit_code = cli.main(
         [

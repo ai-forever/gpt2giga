@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
@@ -1489,12 +1490,10 @@ def create_app(
                     ),
                 )
             elif workspace_execution is not None and workspace_execution.worktree_path:
-                try:
+                with suppress(WorktreeError):
                     discard_run_worktree(
                         {"workspace_execution": workspace_execution.to_metadata()}
                     )
-                except WorktreeError:
-                    pass
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
             "process": native_process_ref_to_dict(process_ref),
