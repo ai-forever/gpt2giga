@@ -17,6 +17,7 @@ http://localhost:8090
 | Behavior of `extra_headers`, `extra_query`, `extra_body`, and optional fields | [Client parameters](client-parameter-compatibility.md) |
 | GigaChat built-in tools and their mapping to OpenAI/Anthropic/Gemini | [Built-in tools](builtin-tools.md) |
 | Alpha-preview project cockpit for agent runs, comparisons, approvals, and workflows | [Unified Harness](harness.md) |
+| Unified Harness components, execution flow, storage, and control-plane API | [Harness architecture](architecture/harness.md) |
 | Environment variables, authentication, limits, metrics, observability | [Configuration](configuration.md) |
 | Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Deployment](deployment.md) |
 | Runtime logs, traffic logs, admin API, debug translate | [Operations](operations.md) |
@@ -53,6 +54,7 @@ OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are pr
 
 ## For developers
 
+- [Harness architecture](architecture/harness.md) explains the local control plane, durable runtime, storage boundaries, and why each API family exists.
 - [Normalized messages](architecture/normalized-messages.md) describes the experimental layer of protocol-independent models.
 - [Logging and observability](architecture/logging-and-observability.md) sets the boundaries between runtime logs, traffic logs, metrics, and traces.
 - [Adding a provider or protocol](architecture/how-to-add-provider.md) gives a checklist for extending the public protocol surface and upstream providers.
