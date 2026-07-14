@@ -142,6 +142,20 @@ def test_cli_harness_list_json_shows_native_metadata(capsys):
     assert by_id["direct-chat"]["native"] is False
 
 
+def test_cli_harness_capabilities_outputs_generated_matrix(capsys):
+    assert cli.main(["harness", "capabilities", "--json"]) == 0
+
+    matrix = json.loads(capsys.readouterr().out)
+    assert matrix["generated_from"] == "HarnessSpec.adapter_capabilities"
+    assert {item["id"] for item in matrix["adapters"]} == {
+        "codex-cli",
+        "claude-code",
+        "gemini-cli",
+    }
+    assert cli.main(["harness", "capabilities"]) == 0
+    assert "# Harness adapter capability matrix" in capsys.readouterr().out
+
+
 def test_cli_harness_inspect_json_shows_native_support(capsys):
     exit_code = cli.main(["harness", "inspect", "claude-code", "--json"])
 

@@ -1118,6 +1118,19 @@ managed-tool limitations without turning them into optimistic booleans.
 `structured_thread`, `structured_replay`, `native_cli_resume`,
 `degraded_replay`, `one_shot`, or `unsupported`.
 
+Generate one reviewable matrix for all built-in external CLI adapters directly
+from those runtime contracts:
+
+```bash
+giga harness capabilities
+giga harness capabilities --json
+```
+
+The Markdown and versioned JSON views are deterministic and do not probe
+installed binaries or read native CLI homes. An undeclared cell stays
+`null`/`undeclared`; the generator never upgrades a missing claim to supported.
+Use `giga harness inspect <id> --json` separately for installed-version evidence.
+
 ## Codex CLI Harness
 
 The Codex harness is intentionally conservative. `plan` and `read` map to a

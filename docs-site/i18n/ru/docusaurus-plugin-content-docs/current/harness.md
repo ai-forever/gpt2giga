@@ -584,6 +584,20 @@ giga harness inspect codex-cli --json
 `structured_thread`, `structured_replay`, `native_cli_resume`,
 `degraded_replay`, `one_shot` или `unsupported`.
 
+Единую проверяемую матрицу для всех встроенных внешних CLI можно сгенерировать
+непосредственно из этих runtime-контрактов:
+
+```bash
+giga harness capabilities
+giga harness capabilities --json
+```
+
+Markdown и версионированный JSON детерминированы, не запускают probes
+установленных бинарных файлов и не читают native CLI homes. Необъявленная
+ячейка остаётся `null`/`undeclared`: генератор не превращает отсутствие claim в
+поддержку. Evidence для установленной версии по-прежнему доступно отдельно
+через `giga harness inspect <id> --json`.
+
 Перед тем как считать Codex CLI, Claude Code или Gemini CLI доступным, Harness
 выполняет ограниченные `--version` и `--help` probes во временном изолированном
 home. Они не читают пользовательские history/config и не сохраняют environment

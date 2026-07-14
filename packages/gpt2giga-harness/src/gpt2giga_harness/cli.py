@@ -22,6 +22,10 @@ from gpt2giga_harness.agents import (
     load_agent_profile,
     parse_agent_profile,
 )
+from gpt2giga_harness.capability_matrix import (
+    build_adapter_capability_matrix,
+    render_adapter_capability_matrix_markdown,
+)
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
 from gpt2giga_harness.doctor import run_doctor
@@ -573,6 +577,10 @@ def build_parser() -> argparse.ArgumentParser:
     harness_list.add_argument("--json", action="store_true")
     harness_list.set_defaults(handler=_handle_harness_list)
 
+    harness_capabilities = harness_subparsers.add_parser("capabilities")
+    harness_capabilities.add_argument("--json", action="store_true")
+    harness_capabilities.set_defaults(handler=_handle_harness_capabilities)
+
     harness_inspect = harness_subparsers.add_parser("inspect", parents=[common])
     harness_inspect.add_argument("harness_id")
     harness_inspect.add_argument("--json", action="store_true")
@@ -689,6 +697,19 @@ def _handle_harness_list(args: argparse.Namespace, config: HarnessConfig) -> int
         _print_json(rows)
     else:
         _print_table(rows)
+    return 0
+
+
+def _handle_harness_capabilities(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    registry = create_default_registry(include_entry_points=False)
+    matrix = build_adapter_capability_matrix(registry)
+    if args.json:
+        _print_json(matrix)
+    else:
+        print(render_adapter_capability_matrix_markdown(matrix), end="")
     return 0
 
 
