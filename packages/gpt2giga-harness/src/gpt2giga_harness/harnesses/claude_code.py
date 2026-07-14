@@ -7,10 +7,14 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
 
+from gpt2giga_harness.cli_capabilities import (
+    CliCapabilitySnapshot,
+    cli_probe_availability,
+    probe_cli_capabilities,
+)
 from gpt2giga_harness.harnesses.agent_cli import (
     StreamTerminalOutcome,
     build_safe_env,
-    executable_availability,
     message_delta_event,
     prepare_proxy_for_agent,
     run_command,
@@ -109,19 +113,17 @@ class ClaudeCodeHarness(BaseHarness):
         )
 
     def availability(self) -> Availability:
-        resolution = self.executable_resolution()
-        if resolution.error is not None:
-            return Availability.error(resolution.error)
-        return executable_availability(
-            executable=resolution.executable,
-            executable_name="claude",
+        return cli_probe_availability(
+            self.capability_probe(),
             install_hint=(
                 "Install Claude Code on PATH or configure executables.claude-code "
                 "in ~/.gpt2giga/harness/config.toml."
             ),
-            version_args=None,
-            source=resolution.source,
         )
+
+    def capability_probe(self) -> CliCapabilitySnapshot:
+        """Return cached, version-aware Claude adapter evidence."""
+        return probe_cli_capabilities(self.executable_resolution(), self.spec().id)
 
     def executable_resolution(self) -> ExecutableResolution:
         """Return the configured or PATH-discovered Claude executable."""
@@ -134,7 +136,7 @@ class ClaudeCodeHarness(BaseHarness):
     ) -> tuple[str, ...]:
         """Build the Claude Code command without executing it."""
         resolution = self.executable_resolution()
-        executable = resolution.executable or resolution.configured or "claude"
+        executable_argv = resolution.command or ("claude",)
         model = request.model or context.default_model or "GigaChat"
         permission_mode = MODE_TO_PERMISSION.get(
             request.mode, MODE_TO_PERMISSION["plan"]
@@ -145,7 +147,7 @@ class ClaudeCodeHarness(BaseHarness):
             ("--include-partial-messages", "--verbose") if request.stream else ()
         )
         return (
-            executable,
+            *executable_argv,
             "--bare",
             "--safe-mode",
             "-p",
@@ -269,9 +271,12 @@ class _ClaudeStreamParser:
         self._blocks: dict[int, dict[str, Any]] = {}
         self._started_tools: set[str] = set()
         self.terminal_outcome: StreamTerminalOutcome | None = None
+        self.recognized_payloads = 0
 
     def __call__(self, payload: Mapping[str, Any]) -> tuple[HarnessEvent, ...]:
         event_type = str(payload.get("type") or "")
+        if event_type in {"stream_event", "assistant", "user", "result", "error"}:
+            self.recognized_payloads += 1
         events: list[HarnessEvent] = []
         if event_type == "stream_event":
             events.extend(self._stream_events(_mapping(payload.get("event"))))

@@ -7,10 +7,14 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
 
+from gpt2giga_harness.cli_capabilities import (
+    CliCapabilitySnapshot,
+    cli_probe_availability,
+    probe_cli_capabilities,
+)
 from gpt2giga_harness.harnesses.agent_cli import (
     StreamTerminalOutcome,
     build_safe_env,
-    executable_availability,
     message_delta_event,
     prepare_proxy_for_agent,
     run_command,
@@ -100,19 +104,17 @@ class GeminiCliHarness(BaseHarness):
         )
 
     def availability(self) -> Availability:
-        resolution = self.executable_resolution()
-        if resolution.error is not None:
-            return Availability.error(resolution.error)
-        return executable_availability(
-            executable=resolution.executable,
-            executable_name="gemini",
+        return cli_probe_availability(
+            self.capability_probe(),
             install_hint=(
                 "Install Gemini CLI on PATH or configure executables.gemini-cli "
                 "in ~/.gpt2giga/harness/config.toml."
             ),
-            version_args=None,
-            source=resolution.source,
         )
+
+    def capability_probe(self) -> CliCapabilitySnapshot:
+        """Return cached, version-aware Gemini adapter evidence."""
+        return probe_cli_capabilities(self.executable_resolution(), self.spec().id)
 
     def executable_resolution(self) -> ExecutableResolution:
         """Return the configured or PATH-discovered Gemini executable."""
@@ -125,12 +127,12 @@ class GeminiCliHarness(BaseHarness):
     ) -> tuple[str, ...]:
         """Build the Gemini CLI command without executing it."""
         resolution = self.executable_resolution()
-        executable = resolution.executable or resolution.configured or "gemini"
+        executable_argv = resolution.command or ("gemini",)
         model = request.model or context.default_model or "GigaChat"
         prompt = prompt_with_attachments(request)
         output_format = "stream-json" if request.stream else "json"
         command = [
-            executable,
+            *executable_argv,
             "-m",
             model,
             *cli_args_from_attachments(request),
@@ -256,9 +258,19 @@ class _GeminiStreamParser:
 
     def __init__(self) -> None:
         self.terminal_outcome: StreamTerminalOutcome | None = None
+        self.recognized_payloads = 0
 
     def __call__(self, payload: Mapping[str, Any]) -> tuple[HarnessEvent, ...]:
         event_type = str(payload.get("type") or "")
+        if event_type in {
+            "init",
+            "message",
+            "tool_use",
+            "tool_result",
+            "result",
+            "error",
+        }:
+            self.recognized_payloads += 1
         events: list[HarnessEvent] = []
         if event_type == "message" and payload.get("role") in {"assistant", "agent"}:
             message = message_delta_event(payload.get("content"))

@@ -145,7 +145,7 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
             read_only=sandbox == "read-only",
         )
         model = request.model or context.default_model
-        command = [self._executable(), "--ask-for-approval", "on-request"]
+        command = [*self._executable_argv(), "--ask-for-approval", "on-request"]
         if model:
             command.extend(["-m", model])
         command.extend(["--sandbox", sandbox])
@@ -227,7 +227,7 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
         )
         return NativeCommandPlan(
             command=(
-                self._executable(),
+                *self._executable_argv(),
                 "--ask-for-approval",
                 "on-request",
                 "--sandbox",
@@ -288,11 +288,11 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
         refs.reverse()
         return tuple(refs)
 
-    def _executable(self) -> str:
+    def _executable_argv(self) -> tuple[str, ...]:
         if self.executable is not None:
-            return self.executable
+            return (self.executable,)
         resolution = self.executable_resolver.resolve(self.harness_id, "codex")
-        return resolution.executable or resolution.configured or "codex"
+        return resolution.command or ("codex",)
 
 
 def _ref_from_file(

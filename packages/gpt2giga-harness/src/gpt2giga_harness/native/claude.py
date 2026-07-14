@@ -152,7 +152,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
             read_only=permission_mode == "plan",
         )
         command = [
-            self._executable(),
+            *self._executable_argv(),
             "--permission-mode",
             permission_mode,
             "-n",
@@ -242,7 +242,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         )
         return NativeCommandPlan(
             command=(
-                self._executable(),
+                *self._executable_argv(),
                 "--permission-mode",
                 permission_mode,
                 "--resume",
@@ -309,11 +309,11 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         refs.reverse()
         return tuple(refs)
 
-    def _executable(self) -> str:
+    def _executable_argv(self) -> tuple[str, ...]:
         if self.executable is not None:
-            return self.executable
+            return (self.executable,)
         resolution = self.executable_resolver.resolve(self.harness_id, "claude")
-        return resolution.executable or resolution.configured or "claude"
+        return resolution.command or ("claude",)
 
 
 def _write_claude_settings(home: Path, *, workspace: str | None) -> str:

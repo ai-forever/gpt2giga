@@ -23,6 +23,11 @@ def _common_contract() -> dict[str, AdapterCapabilitySupport]:
             AdapterSupportLevel.SUPPORTED,
             "Consumes the CLI JSON or JSONL surface and emits normalized Harness events.",
         ),
+        "cli_capability_probe": _claim(
+            AdapterSupportLevel.SUPPORTED,
+            "Uses bounded isolated --version and --help probes, caches evidence by "
+            "command and version, and rejects binaries missing required adapter flags.",
+        ),
         "native_workspace": _claim(
             AdapterSupportLevel.SUPPORTED,
             "Native process spawn passes through shared policy and edit mode uses an "
@@ -40,9 +45,9 @@ def _common_contract() -> dict[str, AdapterCapabilitySupport]:
             "cursors, and explicit non-adopting recovery after owner restart.",
         ),
         "native_terminal_transport": _claim(
-            AdapterSupportLevel.PARTIAL,
-            "Provides PTY or pipes, stdin, bounded durable cursor polling, and stop, but "
-            "does not yet provide streaming transport or resize.",
+            AdapterSupportLevel.SUPPORTED,
+            "Provides authenticated cursor-based streaming, reconnect, bounded polling "
+            "fallback, terminal resize, stdin, and stop for owned native processes.",
         ),
         "managed_mcp_native": _claim(
             AdapterSupportLevel.SUPPORTED,
@@ -59,8 +64,8 @@ def _common_contract() -> dict[str, AdapterCapabilitySupport]:
         ),
         "external_history": _claim(
             AdapterSupportLevel.PARTIAL,
-            "Discovery and import are defensive but rely on heuristic, unversioned native "
-            "history formats and coarse project identity.",
+            "Discovery and import remain heuristic and use coarse project identity, while "
+            "supported shapes are frozen in versioned additive-field-tolerant fixtures.",
         ),
         "structured_app_server": _claim(
             AdapterSupportLevel.UNSUPPORTED,

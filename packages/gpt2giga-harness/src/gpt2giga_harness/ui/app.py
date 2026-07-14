@@ -184,6 +184,7 @@ from gpt2giga_harness.sessions.models import (
     session_to_dict,
 )
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
+from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
 from gpt2giga_harness.types import (
     GigaChatApiMode,
     HarnessCapability,
@@ -406,10 +407,16 @@ def create_app(
             validation = registry.validation_report(spec.id) or validate_harness_spec(
                 spec
             )
+            capability_probe = getattr(harness, "capability_probe", None)
             harness_items.append(
                 {
                     "spec": spec_to_dict(spec),
                     "availability": availability_to_dict(harness.availability()),
+                    "compatibility": (
+                        cli_capability_snapshot_to_dict(capability_probe())
+                        if callable(capability_probe)
+                        else None
+                    ),
                     "validation": harness_validation_report_to_dict(validation),
                 }
             )
@@ -1299,6 +1306,7 @@ def create_app(
                 payload=effective_payload,
                 session=session,
                 config=config,
+                registry=registry,
                 native_registry=native_registry,
                 native_index_store=native_index_store,
                 store=store,
@@ -2957,6 +2965,24 @@ def _native_connector_or_404(
         ) from exc
 
 
+def _require_native_cli_compatibility(
+    registry: HarnessRegistry,
+    harness_id: str,
+) -> None:
+    """Reject native starts when a built-in CLI contract is not proven."""
+    if harness_id not in registry.ids():
+        return
+    capability_probe = getattr(registry.get(harness_id), "capability_probe", None)
+    if not callable(capability_probe):
+        return
+    snapshot = capability_probe()
+    if snapshot.compatible:
+        return
+    raise NativeProcessStartError(
+        snapshot.warning or f"{harness_id} is not adapter-compatible"
+    )
+
+
 def _native_process_policy_gate(
     *,
     payload: Mapping[str, Any],
@@ -3099,6 +3125,7 @@ def _native_process_start_options(
     payload: Mapping[str, Any],
     session: HarnessSession,
     config: HarnessConfig,
+    registry: HarnessRegistry,
     native_registry: NativeHistoryConnectorRegistry,
     native_index_store: NativeSessionIndexStore,
     store: HarnessSessionStore,
@@ -3112,6 +3139,7 @@ def _native_process_start_options(
             payload=payload,
             session=session,
             config=config,
+            registry=registry,
             native_registry=native_registry,
             native_index_store=native_index_store,
             store=store,
@@ -3120,6 +3148,7 @@ def _native_process_start_options(
         payload=payload,
         session=session,
         config=config,
+        registry=registry,
         native_registry=native_registry,
         attachment_store=attachment_store,
         store=store,
@@ -3131,6 +3160,7 @@ def _native_process_new_options(
     payload: Mapping[str, Any],
     session: HarnessSession,
     config: HarnessConfig,
+    registry: HarnessRegistry,
     native_registry: NativeHistoryConnectorRegistry,
     attachment_store: FilesystemAttachmentStore,
     store: HarnessSessionStore,
@@ -3140,6 +3170,7 @@ def _native_process_new_options(
         "harness_id is required",
     )
     connector = _native_connector_or_404(native_registry, harness_id)
+    _require_native_cli_compatibility(registry, harness_id)
     api_mode = parse_api_mode(payload.get("api_mode") or session.default_api_mode)
     capability = parse_capability(
         payload.get("capability") or HarnessCapability.AGENT_CLI.value
@@ -3267,6 +3298,7 @@ def _native_process_resume_options(
     payload: Mapping[str, Any],
     session: HarnessSession,
     config: HarnessConfig,
+    registry: HarnessRegistry,
     native_registry: NativeHistoryConnectorRegistry,
     native_index_store: NativeSessionIndexStore,
     store: HarnessSessionStore,
@@ -3286,6 +3318,7 @@ def _native_process_resume_options(
             detail=ref.resume_reason or "Native session cannot be resumed",
         )
     connector = _native_connector_or_404(native_registry, ref.harness_id)
+    _require_native_cli_compatibility(registry, ref.harness_id)
     ref = _native_ref_with_reviewed_resume_snapshot(
         ref=ref,
         payload=payload,

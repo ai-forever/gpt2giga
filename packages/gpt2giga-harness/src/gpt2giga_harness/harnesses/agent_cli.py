@@ -932,7 +932,15 @@ def _stream_terminal_outcome(
     parse_payload: StreamPayloadParser,
 ) -> StreamTerminalOutcome | None:
     outcome = getattr(parse_payload, "terminal_outcome", None)
-    return outcome if isinstance(outcome, StreamTerminalOutcome) else None
+    if isinstance(outcome, StreamTerminalOutcome):
+        return outcome
+    recognized_payloads = getattr(parse_payload, "recognized_payloads", None)
+    if recognized_payloads == 0:
+        return stream_terminal_failure(
+            None,
+            fallback="Structured CLI output did not contain a recognized event contract",
+        )
+    return None
 
 
 def _concise_stream_error(value: Any, *, fallback: str) -> str:

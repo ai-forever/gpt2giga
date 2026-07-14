@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from gpt2giga_harness import proxy
+from gpt2giga_harness.cli_capabilities import CliCapabilitySnapshot
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.native.base import NativeCommandPlan
 from gpt2giga_harness.native.claude import ClaudeNativeHistoryConnector
@@ -91,6 +92,49 @@ def test_native_process_api_start_poll_input_and_stop(tmp_path):
         "terminal_output",
         "terminal_stop",
     }
+
+
+def test_native_process_api_rejects_unproven_builtin_cli_contract(tmp_path):
+    registry = create_default_registry(include_entry_points=False)
+    harness = registry.get("codex-cli")
+    harness.capability_probe = lambda: CliCapabilitySnapshot(
+        harness_id="codex-cli",
+        status="unsupported",
+        version="fixture 0.0.0",
+        parsed_version="0.0.0",
+        command=("/tmp/codex-fixture",),
+        capabilities={"--json": False},
+        event_schema="codex-exec-jsonl-v1",
+        history_schema="codex-session-jsonl-v1",
+        warning="Codex CLI fixture is missing --json.",
+        evidence="test fixture",
+    )
+    script = _write_once_cli(tmp_path)
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(start_script=script, harness_id="codex-cli"),
+        registry=registry,
+    )
+    session = store.create_session(
+        title="Unsupported native CLI",
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+    )
+
+    response = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "codex-cli",
+            "action": "start",
+            "prompt": "boot",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Codex CLI fixture is missing --json."
+    assert store.list_runs(session.id) == ()
 
 
 def test_native_process_output_stream_resumes_from_persisted_cursor(tmp_path):
@@ -1534,19 +1578,37 @@ def _client(
     *,
     config: HarnessConfig | None = None,
     native_index_store=None,
+    registry=None,
     store=None,
 ):
     store = store or InMemoryHarnessSessionStore()
     native_registry = NativeHistoryConnectorRegistry()
     native_registry.register(connector)
     manager = NativeProcessManager(session_store=store, use_pty=False)
+    if registry is None:
+        registry = create_default_registry(include_entry_points=False)
+        if connector.harness_id in {"codex-cli", "claude-code", "gemini-cli"}:
+            registry.get(connector.harness_id).capability_probe = lambda: (
+                CliCapabilitySnapshot(
+                    harness_id=connector.harness_id,
+                    status="supported",
+                    version="fixture 1.0.0",
+                    parsed_version="1.0.0",
+                    command=(f"/tmp/{connector.harness_id}-fixture",),
+                    capabilities={},
+                    event_schema="fixture-event-v1",
+                    history_schema="fixture-history-v1",
+                    warning=None,
+                    evidence="test fixture",
+                )
+            )
     app = create_app(
         config
         or HarnessConfig(
             default_model="ConfiguredModel",
             data_dir=str(tmp_path / "data"),
         ),
-        registry=create_default_registry(include_entry_points=False),
+        registry=registry,
         store=store,
         native_registry=native_registry,
         native_index_store=native_index_store,

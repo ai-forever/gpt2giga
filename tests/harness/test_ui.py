@@ -53,13 +53,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.34">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.35">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.36"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.37"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -107,9 +107,13 @@ def test_ui_harnesses_endpoint_returns_specs():
     response = client.get("/api/harnesses")
 
     assert response.status_code == 200
-    ids = {item["spec"]["id"] for item in response.json()["harnesses"]}
+    harnesses = response.json()["harnesses"]
+    ids = {item["spec"]["id"] for item in harnesses}
     assert "direct-chat" in ids
     assert "echo" in ids
+    codex = next(item for item in harnesses if item["spec"]["id"] == "codex-cli")
+    assert codex["compatibility"]["event_schema"] == "codex-exec-jsonl-v1"
+    assert codex["compatibility"]["history_schema"] == "codex-session-jsonl-v1"
 
 
 def test_ui_harnesses_endpoint_includes_discovery_errors():

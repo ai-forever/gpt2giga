@@ -23,6 +23,7 @@ from gpt2giga_harness.agents import (
     parse_agent_profile,
 )
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
 from gpt2giga_harness.doctor import run_doctor
 from gpt2giga_harness.editor import (
     build_open_diff_plan,
@@ -732,6 +733,9 @@ def _handle_harness_inspect(args: argparse.Namespace, config: HarnessConfig) -> 
     resolution = getattr(harness, "executable_resolution", None)
     if callable(resolution):
         payload.update(executable_resolution_to_dict(resolution()))
+    capability_probe = getattr(harness, "capability_probe", None)
+    if callable(capability_probe):
+        payload["compatibility"] = cli_capability_snapshot_to_dict(capability_probe())
     if args.json:
         _print_json(payload)
     else:

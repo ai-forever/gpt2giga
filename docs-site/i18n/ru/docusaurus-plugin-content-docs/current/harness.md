@@ -291,6 +291,17 @@ giga harness inspect codex-cli --json
 `/api/harnesses` явно показывают ограничения continuity, native policy, доставки
 первого prompt и managed tools.
 
+Перед тем как считать Codex CLI, Claude Code или Gemini CLI доступным, Harness
+выполняет ограниченные `--version` и `--help` probes во временном изолированном
+home. Они не читают пользовательские history/config и не сохраняют environment
+или секреты. Результат кэшируется по безопасному argv и версии; поэтому
+найденный, но несовместимый binary получает явный compatibility warning в
+doctor, worker fingerprint, `giga harness inspect --json`, `/api/harnesses` и
+cockpit. Для Gemini wrapper можно задать безопасный TOML-массив argv в
+`~/.gpt2giga/harness/config.toml`; элементы передаются напрямую без `shell=True`.
+Парсеры допускают неизвестные добавочные поля из versioned fixtures, но поток
+без единого распознанного обязательного event contract завершается ошибкой.
+
 Для новых управляемых native-запусков Harness сохраняет неизменяемый безопасный
 execution snapshot: route `v1|v2`, model, managed home, workspace, project id,
 permission mode и hash управляемой tool-конфигурации. Этот snapshot переносится

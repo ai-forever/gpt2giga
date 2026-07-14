@@ -1002,6 +1002,13 @@ External CLI executables are resolved from the fixed user-owned config
 "gemini-cli" = "C:\\Users\\me\\bin\\gemini.cmd"
 ```
 
+Wrapper argv is also allowed; every element is passed directly without a shell:
+
+```toml
+[executables]
+"gemini-cli" = ["/custom/bin/gemini-wrapper", "--profile", "gpt2giga"]
+```
+
 Configured paths must be absolute. Keep executable overrides out of the
 project-owned `.giga/harness.toml`: repositories cannot select programs for the
 user to execute. Manage the user config and inspect the effective resolution
@@ -1013,6 +1020,16 @@ giga config set executables.codex-cli /custom/bin/codex
 giga config unset executables.codex-cli
 giga harness inspect codex-cli --json
 ```
+
+Harness runs bounded `--version` and `--help` probes in a temporary isolated
+home before reporting Codex CLI, Claude Code, or Gemini CLI as available. The
+probe reads no user history/config and stores no environment or secret values.
+Its result is cached by command argv and version and can distinguish a present
+but incompatible binary from a proven adapter contract. Doctor, worker
+fingerprints, `giga harness inspect --json`, `/api/harnesses`, and the cockpit
+expose the redaction-safe version, event/history schema, proven flags, and any
+compatibility warning. Structured parsers ignore unknown additive fields, but a
+stream with no recognized required event contract fails explicitly.
 
 Inspect one harness:
 

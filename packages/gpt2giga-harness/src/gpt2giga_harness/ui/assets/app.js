@@ -1587,8 +1587,9 @@
         const arenaTitle = document.createElement("strong");
         arenaTitle.textContent = spec.title || spec.id;
         const availability = item.availability || {};
+        const compatibility = item.compatibility || {};
         const arenaMeta = document.createElement("small");
-        arenaMeta.textContent = `${spec.id} · ${availability.status || "unknown"}`;
+        arenaMeta.textContent = `${spec.id} · ${availability.status || "unknown"}${compatibility.version ? ` · ${compatibility.version}` : ""}`;
         arenaCopy.append(arenaTitle, arenaMeta);
         arenaOption.append(arenaCheckbox, arenaCopy);
         arenaOptions.appendChild(arenaOption);
@@ -1605,6 +1606,7 @@
       for (const item of state.harnesses) {
         const spec = item.spec || {};
         const availability = item.availability || {};
+        const compatibility = item.compatibility || {};
         const validation = item.validation || {};
         const plugin = spec.plugin_metadata || {};
         const capabilities = Array.isArray(spec.capabilities) ? spec.capabilities.slice(0, 3) : [];
@@ -1624,6 +1626,7 @@
             <span>${escapeHtml(spec.id || "")}</span>
             <span>${escapeHtml(spec.kind || "")}</span>
             <span>${escapeHtml(availability.status || "unknown")}</span>
+            ${compatibility.status ? `<span class="badge ${compatibility.compatible ? "ok" : "warn"}">${escapeHtml(compatibility.version || compatibility.status)}</span>` : ""}
             ${recommended ? '<span class="badge ok">Recommended</span>' : ''}
           </div>
           <div class="session-meta">
@@ -1883,7 +1886,10 @@
       if (nativeTab) nativeTab.hidden = structuredWorkChat;
       updateBuiltinToolControls();
       const availability = state.selectedHarness && state.selectedHarness.availability ? state.selectedHarness.availability : {};
-      const warning = availability.status === "missing" || availability.status === "error" ? availability.reason || availability.status : "";
+      const compatibility = state.selectedHarness && state.selectedHarness.compatibility ? state.selectedHarness.compatibility : {};
+      const warning = availability.status === "missing" || availability.status === "error"
+        ? compatibility.warning || availability.reason || availability.status
+        : compatibility.warning || "";
       setText("harness-warning", warning);
       const continuingNative = Boolean(activeNativeConversation());
       byId("run-button").textContent = structuredWorkChat

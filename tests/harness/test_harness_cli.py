@@ -151,6 +151,7 @@ def test_cli_harness_inspect_json_shows_native_support(capsys):
     assert payload["spec"]["supports_native_sessions"] is True
     assert payload["spec"]["supports_external_history"] is True
     assert payload["spec"]["default_invocation_mode"] == "native"
+    assert payload["compatibility"]["event_schema"] == "claude-stream-json-v1"
     assert payload["validation"]["ok"] is True
 
 

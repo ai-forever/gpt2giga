@@ -6,6 +6,11 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from gpt2giga_harness.cli_capabilities import (
+    CliCapabilitySnapshot,
+    cli_probe_availability,
+    probe_cli_capabilities,
+)
 from gpt2giga_harness.harnesses.agent_cli import (
     StreamTerminalOutcome,
     build_safe_env,
@@ -83,20 +88,17 @@ class CodexCliHarness(BaseHarness):
         )
 
     def availability(self) -> Availability:
-        resolution = self.executable_resolution()
-        if resolution.error is not None:
-            return Availability.error(resolution.error)
-        if resolution.executable is None:
-            return Availability.missing(
-                "codex executable not found",
-                (
-                    "Install OpenAI Codex CLI on PATH or configure "
-                    "executables.codex-cli in ~/.gpt2giga/harness/config.toml."
-                ),
-            )
-        return Availability.available(
-            f"codex executable found via {resolution.source}: {resolution.executable}"
+        return cli_probe_availability(
+            self.capability_probe(),
+            install_hint=(
+                "Install OpenAI Codex CLI on PATH or configure "
+                "executables.codex-cli in ~/.gpt2giga/harness/config.toml."
+            ),
         )
+
+    def capability_probe(self) -> CliCapabilitySnapshot:
+        """Return cached, version-aware Codex adapter evidence."""
+        return probe_cli_capabilities(self.executable_resolution(), self.spec().id)
 
     def executable_resolution(self) -> ExecutableResolution:
         """Return the configured or PATH-discovered Codex executable."""
@@ -109,7 +111,7 @@ class CodexCliHarness(BaseHarness):
     ) -> tuple[str, ...]:
         """Build the Codex command without executing it."""
         resolution = self.executable_resolution()
-        executable = resolution.executable or resolution.configured or "codex"
+        executable_argv = resolution.command or ("codex",)
         sandbox = MODE_TO_SANDBOX.get(request.mode, MODE_TO_SANDBOX["plan"])
         model = request.model or context.default_model or "GigaChat"
         prompt = _structured_chat_prompt(request)
@@ -117,7 +119,7 @@ class CodexCliHarness(BaseHarness):
         prompt_separator = ("--",) if attachment_args and prompt else ()
         stream_args = ("--json",) if request.stream else ()
         return (
-            executable,
+            *executable_argv,
             "--ask-for-approval",
             "on-request",
             "exec",
@@ -274,10 +276,23 @@ class _CodexStreamParser:
     def __init__(self) -> None:
         self._item_text: dict[str, str] = {}
         self.terminal_outcome: StreamTerminalOutcome | None = None
+        self.recognized_payloads = 0
 
     def __call__(self, payload: Mapping[str, Any]) -> tuple[HarnessEvent, ...]:
         events: list[HarnessEvent] = []
         event_type = str(payload.get("type") or "")
+        if event_type in {
+            "thread.started",
+            "turn.started",
+            "turn.completed",
+            "turn.failed",
+            "item.started",
+            "item.updated",
+            "item.completed",
+            "item.failed",
+            "error",
+        }:
+            self.recognized_payloads += 1
         item = _mapping(payload.get("item"))
         item_type = str(item.get("type") or "")
         item_id = str(item.get("id") or payload.get("item_id") or item_type or "item")

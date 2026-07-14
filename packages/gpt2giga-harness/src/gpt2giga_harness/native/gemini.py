@@ -163,7 +163,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         native_home.mkdir(parents=True, exist_ok=True)
         tool_config_hash = _write_gemini_settings(native_home)
         model = request.model or context.default_model
-        executable = self._executable()
+        executable_argv = self._executable_argv()
         approval_mode = MODE_TO_APPROVAL.get(
             request.mode,
             MODE_TO_APPROVAL["plan"],
@@ -174,7 +174,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
             cli_value=approval_mode,
             read_only=approval_mode == "plan",
         )
-        command = [executable, "--approval-mode", approval_mode]
+        command = [*executable_argv, "--approval-mode", approval_mode]
         if model:
             command.extend(["-m", model])
         prompt = prompt_with_attachments(request)
@@ -199,7 +199,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         display_command: list[str] = []
         if prompt:
             if not self._supports_prompt_interactive(
-                executable=executable,
+                executable_argv=executable_argv,
                 env=env,
                 cwd=request.workspace,
             ):
@@ -280,7 +280,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         )
         return NativeCommandPlan(
             command=(
-                self._executable(),
+                *self._executable_argv(),
                 "--approval-mode",
                 approval_mode,
                 "--resume",
@@ -314,7 +314,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
     def _supports_prompt_interactive(
         self,
         *,
-        executable: str,
+        executable_argv: tuple[str, ...],
         env: Mapping[str, str],
         cwd: str | None,
     ) -> bool:
@@ -323,7 +323,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
             return self._prompt_interactive_supported
         try:
             completed = self.capability_probe_runner(
-                (executable, "--help"),
+                (*executable_argv, "--help"),
                 env,
                 cwd,
             )
@@ -341,13 +341,13 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         workspace: str | None,
         project_id: str,
     ) -> tuple[NativeSessionRef, ...]:
-        executable = self._available_executable()
-        if executable is None:
+        executable_argv = self._available_executable_argv()
+        if not executable_argv:
             return ()
         env = build_safe_env(HarnessContext(proxy_url=""))
         try:
             completed = self.list_sessions_runner(
-                (executable, "--list-sessions"),
+                (*executable_argv, "--list-sessions"),
                 env,
                 workspace,
             )
@@ -393,16 +393,16 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         refs.reverse()
         return tuple(refs)
 
-    def _executable(self) -> str:
+    def _executable_argv(self) -> tuple[str, ...]:
         if self.executable is not None:
-            return self.executable
+            return (self.executable,)
         resolution = self.executable_resolver.resolve(self.harness_id, "gemini")
-        return resolution.executable or resolution.configured or "gemini"
+        return resolution.command or ("gemini",)
 
-    def _available_executable(self) -> str | None:
+    def _available_executable_argv(self) -> tuple[str, ...]:
         if self.executable is not None:
-            return self.executable
-        return self.executable_resolver.resolve(self.harness_id, "gemini").executable
+            return (self.executable,)
+        return self.executable_resolver.resolve(self.harness_id, "gemini").command
 
 
 def _refs_from_list_output(

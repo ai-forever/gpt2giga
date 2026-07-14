@@ -1415,6 +1415,9 @@
     .session-meta span:nth-child(n + 3) {
       display: none;
     }
+    #harness-list .session-meta span {
+      display: inline-flex;
+    }
     @media (hover: none) {
       .session-row-actions {
         opacity: 1;
