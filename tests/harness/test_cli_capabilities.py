@@ -11,6 +11,7 @@ from gpt2giga_harness.cli_capabilities import (
 )
 from gpt2giga_harness.executables import ExecutableResolution
 from gpt2giga_harness.harnesses.agent_cli import run_streaming_command
+from gpt2giga_harness.harnesses.agent_cli import normalize_usage
 from gpt2giga_harness.harnesses.claude_code import _ClaudeStreamParser
 from gpt2giga_harness.harnesses.codex_cli import _CodexStreamParser
 from gpt2giga_harness.harnesses.gemini_cli import _GeminiStreamParser
@@ -104,11 +105,33 @@ def test_probe_proves_required_contract_and_caches_by_command_version(
     assert first.compatible is True
     assert first.parsed_version is not None
     assert first.event_schema == expected_schema
+    assert first.native_event_schema == "raw-terminal-v1"
+    assert first.native_structured_events is False
     assert calls[0][0:3] == ("/tmp/wrapper", "--profile", "safe")
     assert len(calls) == expected_calls  # cached call only refreshes the version key
     if harness_id == "codex-cli":
         assert first.capabilities["app-server"] is True
     assert cli_capability_snapshot_to_dict(first)["warning"] is None
+
+
+def test_usage_normalization_preserves_proven_token_details():
+    assert normalize_usage(
+        {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "prompt_tokens_details": {"cached_tokens": 4},
+            "completion_tokens_details": {"reasoning_tokens": 3},
+            "tool_tokens": 2,
+            "authorization": "secret",
+        }
+    ) == {
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "total_tokens": 15,
+        "cached_input_tokens": 4,
+        "reasoning_output_tokens": 3,
+        "tool_tokens": 2,
+    }
 
 
 def test_probe_rejects_present_binary_without_required_contract(monkeypatch):

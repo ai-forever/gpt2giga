@@ -118,6 +118,8 @@ def test_ui_harnesses_endpoint_returns_specs():
     codex = next(item for item in harnesses if item["spec"]["id"] == "codex-cli")
     assert codex["compatibility"]["event_schema"] == "codex-exec-jsonl-v1"
     assert codex["compatibility"]["history_schema"] == "codex-session-jsonl-v1"
+    assert codex["compatibility"]["native_event_schema"] == "raw-terminal-v1"
+    assert codex["compatibility"]["native_structured_events"] is False
 
 
 def test_ui_harnesses_endpoint_includes_discovery_errors():

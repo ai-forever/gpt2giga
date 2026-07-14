@@ -3,6 +3,7 @@ from pathlib import Path
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.evals import (
     FilesystemHarnessEvalStore,
+    adapter_compatibility_matrix,
     compare_eval_run_to_baseline,
     discover_eval_specs,
     eval_compatibility_matrix,
@@ -196,7 +197,19 @@ def test_eval_baseline_records_git_and_config_identity(tmp_path):
 
     assert baseline["eval_run_id"] == eval_run.id
     assert len(baseline["config_hash"]) == 64
+    assert baseline["api_mode"] == "v2"
+    assert baseline["adapter_dimensions"] == [
+        {
+            "harness_id": "echo",
+            "api_mode": "v2",
+            "binary_version": None,
+            "event_schema": None,
+            "native_event_schema": None,
+            "native_structured_events": False,
+        }
+    ]
     assert comparison["score_delta"] == 0.0
+    assert comparison["dimensions_match"] is True
     assert store.get_baseline(project, "smoke")["eval_run_id"] == eval_run.id
 
 
@@ -218,6 +231,45 @@ def test_protocol_conformance_matrix_uses_declared_harness_capabilities():
     assert openai_v2["runnable"] is True
     assert "echo" in openai_v2["compatible_harness_ids"]
     assert responses_v2["runnable"] is False
+
+
+def test_adapter_compatibility_matrix_is_route_and_evidence_aware():
+    cells = adapter_compatibility_matrix(
+        create_default_registry(include_entry_points=False)
+    )
+
+    codex_stream = next(
+        item
+        for item in cells
+        if item["harness_id"] == "codex-cli"
+        and item["api_mode"] == "v1"
+        and item["check"] == "stream"
+    )
+    claude_resume = next(
+        item
+        for item in cells
+        if item["harness_id"] == "claude-code"
+        and item["api_mode"] == "v2"
+        and item["check"] == "resume"
+    )
+    assert codex_stream == {
+        "harness_id": "codex-cli",
+        "api_mode": "v1",
+        "check": "stream",
+        "supported": True,
+        "evidence": "structured_adapter",
+    }
+    assert claude_resume["supported"] is True
+    assert {item["check"] for item in cells} == {
+        "start",
+        "stream",
+        "tool_lifecycle",
+        "failure",
+        "cancel",
+        "resume",
+        "attachments",
+        "managed_config",
+    }
 
 
 def _write_eval(tmp_path, text: str, *, filename: str = "smoke.yaml") -> Path:

@@ -1391,6 +1391,7 @@ def _usage_from_event(event: HarnessEvent) -> dict[str, Any] | None:
             "reasoning_tokens",
             "thoughts_tokens",
         ),
+        "tool_tokens": ("tool_tokens",),
     }
     usage: dict[str, Any] = {}
     for target, keys in aliases.items():

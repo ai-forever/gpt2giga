@@ -3054,6 +3054,41 @@ def _require_native_cli_compatibility(
     )
 
 
+def _plan_with_native_telemetry(
+    plan: NativeCommandPlan,
+    snapshot: CliCapabilitySnapshot,
+    *,
+    api_mode: GigaChatApiMode,
+) -> NativeCommandPlan:
+    """Bind truthful native observability evidence to the durable process plan."""
+    return replace(
+        plan,
+        metadata={
+            **dict(plan.metadata),
+            "telemetry": {
+                "api_mode": api_mode.value,
+                "binary_version": snapshot.parsed_version or snapshot.version,
+                "event_schema": snapshot.native_event_schema,
+                "structured_events": snapshot.native_structured_events,
+                "transport": (
+                    "structured"
+                    if snapshot.native_structured_events
+                    else "raw_terminal"
+                ),
+                "observability_limits": (
+                    []
+                    if snapshot.native_structured_events
+                    else [
+                        "tool_lifecycle_opaque",
+                        "usage_unavailable",
+                        "artifacts_unclassified",
+                    ]
+                ),
+            },
+        },
+    )
+
+
 def _native_process_policy_gate(
     *,
     payload: Mapping[str, Any],
@@ -3331,6 +3366,12 @@ def _native_process_new_options(
         )
     try:
         plan = connector.build_start_command(request, context)
+        if cli_capabilities is not None:
+            plan = _plan_with_native_telemetry(
+                plan,
+                cli_capabilities,
+                api_mode=api_mode,
+            )
         if route_preflight is not None:
             plan = replace(
                 plan,
@@ -3397,7 +3438,7 @@ def _native_process_resume_options(
             detail=ref.resume_reason or "Native session cannot be resumed",
         )
     connector = _native_connector_or_404(native_registry, ref.harness_id)
-    _require_native_cli_compatibility(registry, ref.harness_id)
+    cli_capabilities = _require_native_cli_compatibility(registry, ref.harness_id)
     ref = _native_ref_with_reviewed_resume_snapshot(
         ref=ref,
         payload=payload,
@@ -3435,6 +3476,12 @@ def _native_process_resume_options(
         )
     try:
         plan = connector.build_resume_command(ref, context)
+        if cli_capabilities is not None:
+            plan = _plan_with_native_telemetry(
+                plan,
+                cli_capabilities,
+                api_mode=api_mode,
+            )
     except (OSError, ValueError):
         if route_preflight is not None:
             proxy.stop_owned_sidecar(route_preflight.startup)
@@ -3510,6 +3557,10 @@ def _native_process_run_metadata(
         metadata["execution_snapshot"] = execution_snapshot_to_dict(
             plan.execution_snapshot
         )
+    if isinstance(plan, NativeCommandPlan):
+        telemetry = plan.metadata.get("telemetry")
+        if isinstance(telemetry, Mapping):
+            metadata["telemetry"] = dict(telemetry)
     if isinstance(plan, NativeCommandPlan) and plan.prompt_delivery is not None:
         process_delivery = (
             process_ref.metadata.get("prompt_delivery")

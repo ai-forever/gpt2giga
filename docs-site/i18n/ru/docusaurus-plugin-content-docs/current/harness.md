@@ -337,6 +337,24 @@ cockpit. Для Gemini wrapper можно задать безопасный TOML
 Парсеры допускают неизвестные добавочные поля из versioned fixtures, но поток
 без единого распознанного обязательного event contract завершается ошибкой.
 
+Headless-потоки и Codex app-server публикуют стабильные tool, command, file,
+usage, failure и lifecycle events только из capability-probed structured schema.
+Usage сохраняет доступные cached-input, reasoning-output и tool token details.
+Нативные TUI Codex, Claude и Gemini остаются редактированным потоком
+`raw-terminal-v1` с явными ограничениями `tool_lifecycle_opaque`,
+`usage_unavailable` и `artifacts_unclassified`: Harness не угадывает структуру
+по тексту терминала.
+
+Baseline eval фиксирует не только Git SHA и config hash, но и точную версию CLI,
+event schema и маршрут `/v1|/v2`. Без совпадения этих dimensions сравнение явно
+помечается несовместимым. Без запуска model task установленную матрицу можно
+проверить opt-in командой:
+
+```bash
+GPT2GIGA_RUN_CLI_COMPAT_MATRIX=1 GPT2GIGA_COMPAT_API_MODE=v2 \
+  uv run pytest -q tests/live/test_adapter_compatibility_matrix.py
+```
+
 Для Codex main chat Harness дополнительно проверяет контракт
 `codex app-server --help`. Если доступен reviewed stdio JSON-RPC v2, первая
 реплика создаёт `thread/start` и `turn/start`, а следующие реплики используют

@@ -31,6 +31,8 @@ class CliProbeContract:
     optional_tokens: tuple[str, ...] = ()
     event_schema: str = "unknown"
     history_schema: str = "unknown"
+    native_event_schema: str = "raw-terminal-v1"
+    native_structured_events: bool = False
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,8 @@ class CliCapabilitySnapshot:
     capabilities: Mapping[str, bool]
     event_schema: str
     history_schema: str
+    native_event_schema: str = "raw-terminal-v1"
+    native_structured_events: bool = False
     warning: str | None = None
     evidence: str | None = None
 
@@ -205,6 +209,8 @@ def cli_capability_snapshot_to_dict(
         "capabilities": dict(snapshot.capabilities),
         "event_schema": snapshot.event_schema,
         "history_schema": snapshot.history_schema,
+        "native_event_schema": snapshot.native_event_schema,
+        "native_structured_events": snapshot.native_structured_events,
         "warning": snapshot.warning,
         "evidence": snapshot.evidence,
     }
@@ -251,6 +257,8 @@ def _snapshot(
         capabilities=dict(capabilities or {}),
         event_schema=contract.event_schema,
         history_schema=contract.history_schema,
+        native_event_schema=contract.native_event_schema,
+        native_structured_events=contract.native_structured_events,
         warning=str(redact_secrets(warning)) if warning else None,
         evidence=evidence,
     )

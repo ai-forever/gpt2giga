@@ -49,6 +49,12 @@ def _common_contract() -> dict[str, AdapterCapabilitySupport]:
             "Provides authenticated cursor-based streaming, reconnect, bounded polling "
             "fallback, terminal resize, stdin, and stop for owned native processes.",
         ),
+        "native_telemetry": _claim(
+            AdapterSupportLevel.DELEGATED,
+            "Interactive TUI output remains a redacted raw-terminal stream because "
+            "no reviewed native structured-event capability is proven; structured "
+            "artifacts are emitted only by version-probed headless or app-server paths.",
+        ),
         "managed_mcp_native": _claim(
             AdapterSupportLevel.SUPPORTED,
             "Reviewed managed MCP configuration can be applied to the project native home.",

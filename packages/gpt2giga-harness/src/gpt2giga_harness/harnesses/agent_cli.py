@@ -480,6 +480,37 @@ def normalize_usage(value: Any) -> dict[str, int] | None:
         "candidates",
     )
     total_tokens = _first_token_count(source, "total_tokens", "total")
+    prompt_details = _first_mapping(
+        source,
+        "input_tokens_details",
+        "prompt_tokens_details",
+    )
+    completion_details = _first_mapping(
+        source,
+        "output_tokens_details",
+        "completion_tokens_details",
+    )
+    cached_input_tokens = _first_token_count(
+        source,
+        "cached_input_tokens",
+        "cached_tokens",
+        "cache_read_input_tokens",
+    )
+    if cached_input_tokens is None:
+        cached_input_tokens = _first_token_count(prompt_details, "cached_tokens")
+    reasoning_output_tokens = _first_token_count(
+        source,
+        "reasoning_output_tokens",
+        "reasoning_tokens",
+        "thoughts_tokens",
+    )
+    if reasoning_output_tokens is None:
+        reasoning_output_tokens = _first_token_count(
+            completion_details,
+            "reasoning_tokens",
+            "thoughts_tokens",
+        )
+    tool_tokens = _first_token_count(source, "tool_tokens")
     if total_tokens is None and input_tokens is not None and output_tokens is not None:
         total_tokens = input_tokens + output_tokens
     if input_tokens is None and output_tokens is None and total_tokens is None:
@@ -490,6 +521,9 @@ def normalize_usage(value: Any) -> dict[str, int] | None:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_tokens": total_tokens,
+            "cached_input_tokens": cached_input_tokens,
+            "reasoning_output_tokens": reasoning_output_tokens,
+            "tool_tokens": tool_tokens,
         }.items()
         if item is not None
     }
@@ -843,7 +877,14 @@ def _record_stream_event(
         if isinstance(delta, str):
             message_parts.append(delta)
     elif safe_event.type == "usage":
-        for key in ("input_tokens", "output_tokens", "total_tokens"):
+        for key in (
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "cached_input_tokens",
+            "reasoning_output_tokens",
+            "tool_tokens",
+        ):
             value = payload.get(key)
             if isinstance(value, int) and not isinstance(value, bool):
                 usage[key] = value
@@ -943,6 +984,14 @@ def _first_token_count(value: Mapping[str, Any], *keys: str) -> int | None:
         if isinstance(item, int) and not isinstance(item, bool):
             return item
     return None
+
+
+def _first_mapping(value: Mapping[str, Any], *keys: str) -> Mapping[str, Any]:
+    for key in keys:
+        item = value.get(key)
+        if isinstance(item, Mapping):
+            return item
+    return {}
 
 
 def _stream_terminal_outcome(

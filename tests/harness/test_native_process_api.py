@@ -1490,6 +1490,18 @@ def test_builtin_native_preflight_passes_only_local_proxy_key(
         "detail": "route ready",
         "error": None,
     }
+    assert body["run"]["metadata"]["telemetry"] == {
+        "api_mode": api_mode,
+        "binary_version": "1.0.0",
+        "event_schema": "raw-terminal-v1",
+        "structured_events": False,
+        "transport": "raw_terminal",
+        "observability_limits": [
+            "tool_lifecycle_opaque",
+            "usage_unavailable",
+            "artifacts_unclassified",
+        ],
+    }
 
 
 def test_gemini_native_api_delivers_prompt_once_and_persists_outcome(

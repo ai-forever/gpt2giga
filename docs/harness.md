@@ -845,9 +845,27 @@ Completed cells normalize latency, available token counts, retry count, changed
 files, patch size, and recorded test status. Repeated pass/fail disagreement is
 reported as a flake. A completed scorecard can be pinned as the spec baseline;
 the immutable snapshot records the project Git SHA when available and a config
-hash, then later runs show pass-rate and metric deltas. Deterministic checks are
+hash plus the exact adapter binary version, event schemas, and `/v1|/v2` route,
+then later runs show pass-rate and metric deltas only with an explicit dimension
+match. Deterministic checks are
 the default gate. Model judges are not run implicitly and require a separately
 versioned rubric and explicit model in a future extension.
+
+Installed adapter probes and the route-aware compatibility matrix are opt-in and
+do not submit a model task:
+
+```bash
+GPT2GIGA_RUN_CLI_COMPAT_MATRIX=1 GPT2GIGA_COMPAT_API_MODE=v2 \
+  uv run pytest -q tests/live/test_adapter_compatibility_matrix.py
+```
+
+Headless and Codex app-server streams emit stable tool, command, file, usage,
+failure, and lifecycle evidence only from capability-probed structured schemas.
+Usage retains available cached-input, reasoning-output, and tool token details.
+Native Codex, Claude, and Gemini TUI sessions remain redacted `raw-terminal-v1`
+streams with explicit `tool_lifecycle_opaque`, `usage_unavailable`, and
+`artifacts_unclassified` limits; Harness does not infer structured activity from
+terminal text.
 
 The matching API surface is:
 

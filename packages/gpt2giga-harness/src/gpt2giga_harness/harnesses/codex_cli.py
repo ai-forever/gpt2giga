@@ -425,6 +425,9 @@ class _CodexStreamParser:
             tool_event = _codex_tool_event(event_type, item, item_id)
             if tool_event is not None:
                 events.append(tool_event)
+            artifact_event = _codex_artifact_event(event_type, item, item_id)
+            if artifact_event is not None:
+                events.append(artifact_event)
 
         normalized_usage = usage_event(payload.get("usage"))
         if normalized_usage is not None:
@@ -492,6 +495,7 @@ def _is_codex_tool_item(item_type: str) -> bool:
         "todo_list",
         "web_search",
         "dynamic_tool_call",
+        "test_result",
     } or item_type.endswith("_tool_call")
 
 
@@ -568,6 +572,58 @@ def _codex_tool_result(item: Mapping[str, Any], *, failed: bool) -> Any:
     if exit_code is not None:
         return f"Command exited with code {exit_code} and produced no output."
     return "Codex marked this tool call as failed without an error message."
+
+
+def _codex_artifact_event(
+    event_type: str,
+    item: Mapping[str, Any],
+    item_id: str,
+) -> HarnessEvent | None:
+    """Emit stable artifacts only for explicit structured Codex item kinds."""
+    if event_type not in {"item.completed", "item.failed"}:
+        return None
+    item_type = str(item.get("type") or "")
+    status = str(
+        item.get("status") or ("failed" if event_type == "item.failed" else "completed")
+    )
+    if item_type == "command_execution":
+        payload = {
+            "artifact_id": item_id,
+            "artifact_type": "command",
+            "command": item.get("command"),
+            "exit_code": item.get("exit_code"),
+            "status": status,
+        }
+        return HarnessEvent(
+            type="command_completed",
+            message="Command execution completed.",
+            payload={key: value for key, value in payload.items() if value is not None},
+        )
+    if item_type == "file_change":
+        payload = {
+            "artifact_id": item_id,
+            "artifact_type": "file_change",
+            "changes": item.get("changes"),
+            "status": status,
+        }
+        return HarnessEvent(
+            type="file_changed",
+            message="File change completed.",
+            payload={key: value for key, value in payload.items() if value is not None},
+        )
+    if item_type == "test_result":
+        payload = {
+            "artifact_id": item_id,
+            "artifact_type": "test",
+            "name": item.get("name"),
+            "status": status,
+        }
+        return HarnessEvent(
+            type="test_completed",
+            message="Test execution completed.",
+            payload={key: value for key, value in payload.items() if value is not None},
+        )
+    return None
 
 
 def _codex_tool_name(item_type: str, item: Mapping[str, Any]) -> str:
