@@ -1,11 +1,14 @@
 import pytest
 
+from gpt2giga_harness.cli_capabilities import CliCapabilitySnapshot
 from gpt2giga_harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga_harness.harnesses.codex_cli import CodexCliHarness
 from gpt2giga_harness.harnesses.direct_chat import DirectChatHarness
 from gpt2giga_harness.harnesses.echo import EchoHarness
 from gpt2giga_harness.harnesses.gemini_cli import GeminiCliHarness
+from gpt2giga_harness.harnesses.attachment_plan import attachment_capability_error
 from gpt2giga_harness.types import (
+    Availability,
     HarnessChatMessage,
     HarnessContext,
     HarnessRequest,
@@ -151,3 +154,88 @@ def test_codex_cli_dry_run_passes_image_separately_from_prompt():
     assert result.command[-2] == "--"
     assert result.command[-1] == "Describe this"
     assert "/tmp/screenshot.png" not in result.command[-1]
+
+
+def test_attachment_transport_requires_proven_capability_and_surface():
+    request = HarnessRequest(
+        prompt="Describe this",
+        attachment_render_plan={
+            "metadata": {
+                "deliveries": [
+                    {
+                        "transport": "cli_image_flag",
+                        "rich": True,
+                        "required_cli_capabilities": ["--image"],
+                        "surfaces": ["headless_one_shot", "native"],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert (
+        attachment_capability_error(
+            request,
+            {"--image": True},
+            surface="headless_one_shot",
+        )
+        is None
+    )
+    assert "--image" in (
+        attachment_capability_error(
+            request,
+            {"--image": False},
+            surface="headless_one_shot",
+        )
+        or ""
+    )
+    assert "structured_thread" in (
+        attachment_capability_error(
+            request,
+            {"--image": True},
+            surface="structured_thread",
+        )
+        or ""
+    )
+
+
+def test_codex_headless_rejects_image_before_proxy_when_flag_is_unproven(
+    monkeypatch,
+):
+    harness = CodexCliHarness()
+    snapshot = CliCapabilitySnapshot(
+        harness_id="codex-cli",
+        status="supported",
+        version="fixture 1.0",
+        parsed_version="1.0",
+        command=("/tmp/codex-fixture",),
+        capabilities={"--image": False},
+        event_schema="fixture",
+        history_schema="fixture",
+    )
+    monkeypatch.setattr(harness, "availability", lambda: Availability.available())
+    monkeypatch.setattr(harness, "capability_probe", lambda: snapshot)
+
+    result = harness.run(
+        HarnessRequest(
+            prompt="Describe",
+            attachment_render_plan={
+                "cli_args": ["--image", "/tmp/screen.png"],
+                "metadata": {
+                    "deliveries": [
+                        {
+                            "transport": "cli_image_flag",
+                            "rich": True,
+                            "required_cli_capabilities": ["--image"],
+                            "surfaces": ["headless_one_shot", "native"],
+                        }
+                    ]
+                },
+            },
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key"),
+    )
+
+    assert result.ok is False
+    assert "--image" in (result.error or "")
+    assert result.raw["attachment_render_plan"]["metadata"]["deliveries"]

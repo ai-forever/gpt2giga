@@ -131,6 +131,8 @@ can be visible to other processes.
 | `GPT2GIGA_PASS_MODEL` | `True` | Pass the `model` from the request to GigaChat. Set `False` to always use the configured GigaChat model. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Parse the client `Authorization` as GigaChat credentials for per-request upstream authorization. |
 | `GPT2GIGA_EMBEDDINGS` | `EmbeddingsGigaR` | Default embeddings model when the model from the request is not used. |
+| `GPT2GIGA_ENABLE_IMAGES` | `True` | Accept and translate supported image inputs. Disable when the deployment must reject image processing. |
+| `GPT2GIGA_DEFAULT_MAX_TOKENS` | empty | Add this positive `max_tokens` value only when the client did not provide `max_tokens`, `max_completion_tokens`, or `max_output_tokens`. Empty means no injected limit. |
 | `GPT2GIGA_MAX_REQUEST_BODY_BYTES` | `10485760` | Maximum HTTP request body size. |
 | `GPT2GIGA_LOG_LEVEL` | `INFO` | Runtime log level. Avoid `DEBUG` in production. |
 | `GPT2GIGA_LOG_FILENAME` | `gpt2giga.log` | Runtime log file. |
@@ -299,12 +301,14 @@ routing or do not enable stitching.
 ```dotenv
 GIGACHAT_MAX_CONNECTIONS=7
 GPT2GIGA_MODEL_MAX_CONNECTIONS='{"GigaChat-2-Max":5}'
+GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT=1
 GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=30
 ```
 
 Semantics:
 
-- an empty `GPT2GIGA_MODEL_MAX_CONNECTIONS` and an empty default disable the limiter;
+- an empty `GPT2GIGA_MODEL_MAX_CONNECTIONS` and an empty
+  `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` disable the limiter;
 - an explicit model limit takes precedence over the default;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=0` immediately returns a local `429`;
 - streaming calls hold a slot until the stream completes or the client disconnects;
@@ -469,10 +473,15 @@ OpenTelemetry/OpenInference observability is disabled by default:
 ```dotenv
 GPT2GIGA_OBSERVABILITY_ENABLED=False
 GPT2GIGA_OBSERVABILITY_BACKEND=phoenix
-PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
-PHOENIX_PROJECT_NAME=gpt2giga
-PHOENIX_API_KEY=
+GPT2GIGA_PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
+GPT2GIGA_PHOENIX_PROJECT_NAME=gpt2giga
+GPT2GIGA_PHOENIX_API_KEY=
 ```
+
+The unprefixed `PHOENIX_COLLECTOR_ENDPOINT`, `PHOENIX_PROJECT_NAME`, and
+`PHOENIX_API_KEY` names remain supported as fallbacks for compatibility with
+Phoenix tooling. Prefer the `GPT2GIGA_PHOENIX_*` names in gateway-specific
+configuration so ownership is explicit.
 
 The capture flags are independent and disabled by default:
 

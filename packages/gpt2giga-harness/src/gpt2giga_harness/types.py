@@ -51,19 +51,64 @@ class AvailabilityStatus(str, Enum):
     ERROR = "error"
 
 
+class AdapterSupportLevel(str, Enum):
+    """Describe how honestly an adapter provides one execution capability."""
+
+    SUPPORTED = "supported"
+    PARTIAL = "partial"
+    DELEGATED = "delegated"
+    UNSUPPORTED = "unsupported"
+
+
+class HeadlessContinuationStrategy(str, Enum):
+    """Describe how a headless adapter carries context between turns."""
+
+    STRUCTURED_THREAD = "structured_thread"
+    STRUCTURED_REPLAY = "structured_replay"
+    NATIVE_CLI_RESUME = "native_cli_resume"
+    DEGRADED_REPLAY = "degraded_replay"
+    ONE_SHOT = "one_shot"
+    UNSUPPORTED = "unsupported"
+
+
+@dataclass(frozen=True)
+class AdapterCapabilitySupport:
+    """One redaction-safe adapter capability claim exposed to clients."""
+
+    status: AdapterSupportLevel
+    detail: str
+
+
+@dataclass(frozen=True)
+class AttachmentTransportSupport:
+    """Describe attachment delivery for one kind without overstating richness."""
+
+    headless: tuple[str, ...] = field(default_factory=tuple)
+    native: tuple[str, ...] = field(default_factory=tuple)
+    rich: bool = False
+    required_cli_capabilities: tuple[str, ...] = field(default_factory=tuple)
+    detail: str = ""
+
+
 class HarnessEventType(str, Enum):
     """Stable event names stored and streamed for harness runs."""
 
     RUN_STARTED = "run_started"
+    EXTERNAL_THREAD_STARTED = "external_thread_started"
+    EXTERNAL_THREAD_STATUS = "external_thread_status"
+    EXTERNAL_TURN_STARTED = "external_turn_started"
+    EXTERNAL_TURN_COMPLETED = "external_turn_completed"
     MESSAGE_DELTA = "message_delta"
     STDOUT_DELTA = "stdout_delta"
     STDERR_DELTA = "stderr_delta"
     TOOL_CALL_STARTED = "tool_call_started"
     TOOL_CALL_DELTA = "tool_call_delta"
     TOOL_CALL_FINISHED = "tool_call_finished"
+    COMMAND_COMPLETED = "command_completed"
     GENERATED_FILE = "generated_file"
     USAGE = "usage"
     FILE_CHANGED = "file_changed"
+    TEST_COMPLETED = "test_completed"
     RAW_REQUEST = "raw_request"
     RAW_RESPONSE = "raw_response"
     WARNING = "warning"
@@ -118,6 +163,9 @@ class HarnessSpec:
     supports_attachments: bool = False
     accepted_attachment_kinds: tuple[str, ...] = field(default_factory=tuple)
     attachment_transport: tuple[str, ...] = field(default_factory=tuple)
+    attachment_capabilities: Mapping[str, AttachmentTransportSupport] = field(
+        default_factory=dict
+    )
     supports_native_sessions: bool = False
     supports_external_history: bool = False
     supported_builtin_tools: tuple[GigaChatBuiltinTool, ...] = field(
@@ -128,6 +176,13 @@ class HarnessSpec:
     tags: tuple[str, ...] = field(default_factory=tuple)
     config_schema: Mapping[str, Any] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    protocol_capability_scope: str = "harness_surface"
+    headless_continuation: HeadlessContinuationStrategy = (
+        HeadlessContinuationStrategy.ONE_SHOT
+    )
+    adapter_capabilities: Mapping[str, AdapterCapabilitySupport] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -256,6 +311,7 @@ SECRET_ENV_NAMES = (
     "GPT2GIGA_API_KEY",
     "GPT2GIGA_HARNESS_API_KEY",
     "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
     "OPENAI_API_KEY",
@@ -387,6 +443,9 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         getattr(spec, "accepted_attachment_kinds", ())
     )
     attachment_transport = _string_values(getattr(spec, "attachment_transport", ()))
+    attachment_capabilities = _attachment_capabilities_to_dict(
+        getattr(spec, "attachment_capabilities", {})
+    )
     supported_builtin_tools = [
         tool.value if isinstance(tool, GigaChatBuiltinTool) else str(tool)
         for tool in getattr(spec, "supported_builtin_tools", ())
@@ -400,6 +459,17 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         GigaChatApiMode.V2.value,
     )
     tags = _string_values(getattr(spec, "tags", ()))
+    protocol_capability_scope = (
+        _optional_text(getattr(spec, "protocol_capability_scope", None))
+        or "harness_surface"
+    )
+    headless_continuation = _enum_text(
+        getattr(spec, "headless_continuation", None),
+        HeadlessContinuationStrategy.ONE_SHOT.value,
+    )
+    adapter_capabilities = _adapter_capabilities_to_dict(
+        getattr(spec, "adapter_capabilities", {})
+    )
     return {
         "id": _optional_text(spec.id) or "",
         "title": _optional_text(spec.title) or "",
@@ -416,11 +486,15 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         "supports_attachments": spec.supports_attachments,
         "accepted_attachment_kinds": accepted_attachment_kinds,
         "attachment_transport": attachment_transport,
+        "attachment_capabilities": attachment_capabilities,
         "supports_native_sessions": spec.supports_native_sessions,
         "supports_external_history": spec.supports_external_history,
         "supported_builtin_tools": supported_builtin_tools,
         "default_invocation_mode": default_invocation_mode,
         "default_api_mode": default_api_mode,
+        "protocol_capability_scope": protocol_capability_scope,
+        "headless_continuation": headless_continuation,
+        "adapter_capabilities": adapter_capabilities,
         "tags": tags,
         "config_schema": config_schema,
         "metadata": metadata,
@@ -448,8 +522,12 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
                 "supported": spec.supports_attachments,
                 "accepted_kinds": accepted_attachment_kinds,
                 "transport": attachment_transport,
+                "capabilities": attachment_capabilities,
             },
             "builtin_tools": supported_builtin_tools,
+            "protocol_capability_scope": protocol_capability_scope,
+            "headless_continuation": headless_continuation,
+            "adapter_capabilities": adapter_capabilities,
             "config_schema": config_schema,
             "metadata": metadata,
         },
@@ -481,6 +559,68 @@ def _safe_mapping(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         return {}
     return dict(redact_secrets(dict(value)))
+
+
+def _adapter_capabilities_to_dict(value: Any) -> dict[str, dict[str, str]]:
+    if not isinstance(value, Mapping):
+        return {}
+    serialized: dict[str, dict[str, str]] = {}
+    for raw_name, raw_support in value.items():
+        name = _optional_text(raw_name)
+        if name is None:
+            continue
+        if isinstance(raw_support, AdapterCapabilitySupport):
+            status = raw_support.status
+            detail = raw_support.detail
+        elif isinstance(raw_support, Mapping):
+            try:
+                status = AdapterSupportLevel(str(raw_support.get("status") or ""))
+            except ValueError:
+                continue
+            detail = str(raw_support.get("detail") or "")
+        else:
+            try:
+                status = AdapterSupportLevel(str(raw_support))
+            except ValueError:
+                continue
+            detail = ""
+        serialized[name] = {
+            "status": status.value,
+            "detail": str(redact_secrets(detail)),
+        }
+    return serialized
+
+
+def _attachment_capabilities_to_dict(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        return {}
+    serialized: dict[str, dict[str, Any]] = {}
+    for raw_kind, raw_support in value.items():
+        kind = _optional_text(raw_kind)
+        if kind is None:
+            continue
+        if isinstance(raw_support, AttachmentTransportSupport):
+            headless = raw_support.headless
+            native = raw_support.native
+            rich = raw_support.rich
+            required = raw_support.required_cli_capabilities
+            detail = raw_support.detail
+        elif isinstance(raw_support, Mapping):
+            headless = raw_support.get("headless", ())
+            native = raw_support.get("native", ())
+            rich = bool(raw_support.get("rich", False))
+            required = raw_support.get("required_cli_capabilities", ())
+            detail = str(raw_support.get("detail") or "")
+        else:
+            continue
+        serialized[kind] = {
+            "headless": _string_values(headless),
+            "native": _string_values(native),
+            "rich": bool(rich),
+            "required_cli_capabilities": _string_values(required),
+            "detail": str(redact_secrets(detail)),
+        }
+    return serialized
 
 
 def _string_values(value: Any) -> list[str]:

@@ -54,3 +54,19 @@ The public site includes:
 - Do not publish secrets, local `.env`, credentials, keys, or raw traffic payloads.
 - When deployment behavior changes, update `docs/deployment.md`, `deploy/README.md`, and the relevant Compose manifests together.
 - When compatibility behavior changes, update `docs/api-compatibility.md` and `docs/client-parameter-compatibility.md`.
+
+Ignored `docs/internal/**` and `docs/codex/**` are local coordination state, not
+public documentation sources. Update the English source and its Russian locale
+in one change set, preserving code blocks, warnings, and behavior limitations.
+
+## Pre-PR validation
+
+```sh
+python3 scripts/check_docs.py
+make docs-build
+git diff --check
+```
+
+After the build, inspect changed pages in a browser at desktop and narrow
+widths. Check navigation, search, the locale switcher, code copy, and the
+browser console.

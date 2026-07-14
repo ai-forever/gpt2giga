@@ -5,15 +5,20 @@ import pytest
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.managed_mcp import (
+    HEADLESS_SNAPSHOT_MARKER,
     MANAGED_MARKER,
+    HeadlessManagedMCPSnapshotStore,
     ManagedConfigConflictError,
     ManagedConfigOwnershipError,
     ManagedMCPConfigService,
     compose_managed_config,
     compose_startup_config,
+    materialize_headless_mcp_snapshot,
+    write_startup_config,
 )
 from gpt2giga_harness.mcp import descriptor_from_profile
 from gpt2giga_harness.project import ProjectToolProfile
+from gpt2giga_harness.tools import EnvironmentSecretResolver
 from gpt2giga_harness.ui.app import create_app
 
 
@@ -51,6 +56,25 @@ def test_composer_preserves_startup_settings_and_never_copies_secret_refs():
     )
     restarted = compose_startup_config("codex-cli", codex, 'model = "GigaChat-2-Max"\n')
     claude, _ = compose_managed_config("claude-code", "{}", (descriptor,))
+    claude = compose_startup_config(
+        "claude-code",
+        json.dumps(
+            {
+                **json.loads(claude),
+                "projects": {
+                    "/repo": {
+                        "allowedTools": ["Read"],
+                        "hasTrustDialogAccepted": False,
+                    },
+                    "/other": {"hasTrustDialogAccepted": True},
+                },
+            }
+        ),
+        {
+            "hasCompletedOnboarding": True,
+            "projects": {"/repo": {"hasTrustDialogAccepted": True}},
+        },
+    )
     gemini = compose_startup_config(
         "gemini-cli",
         json.dumps({"mcpServers": {"issues": {"command": "issue-mcp"}}}),
@@ -65,6 +89,14 @@ def test_composer_preserves_startup_settings_and_never_copies_secret_refs():
         "issues: secret reference TOKEN was not copied; use an explicit secret flow",
     )
     assert json.loads(claude)["mcpServers"]["issues"]["env"] == {"MODE": "read"}
+    assert json.loads(claude)["hasCompletedOnboarding"] is True
+    assert json.loads(claude)["projects"] == {
+        "/other": {"hasTrustDialogAccepted": True},
+        "/repo": {
+            "allowedTools": ["Read"],
+            "hasTrustDialogAccepted": True,
+        },
+    }
     assert json.loads(gemini)["mcpServers"]["issues"]["command"] == "issue-mcp"
 
 
@@ -163,3 +195,96 @@ trusted = true
     assert applied.json()["provenance"]["server_ids"] == ["issues"]
     assert rolled_back.status_code == 200
     assert rolled_back.json()["provenance"]["rolled_back"] is True
+
+
+@pytest.mark.parametrize("harness_id", ["codex-cli", "claude-code", "gemini-cli"])
+def test_headless_snapshot_is_immutable_and_resolves_secrets_only_in_temp_home(
+    tmp_path,
+    harness_id,
+):
+    data_dir = tmp_path / "data"
+    store = HeadlessManagedMCPSnapshotStore(data_dir)
+    snapshot = store.create(
+        project_id="proj_abc123",
+        harness_id=harness_id,
+        descriptors=(_stdio_descriptor(harnesses=(harness_id,)),),
+        server_ids=("issues",),
+    )
+    snapshot_path = store.root / f"{snapshot.snapshot_id}.json"
+    stored = snapshot_path.read_text(encoding="utf-8")
+
+    assert snapshot.public_ref()["marker"] == HEADLESS_SNAPSHOT_MARKER
+    assert "runtime-secret" not in stored
+    assert "ISSUE_TOKEN" in stored
+    assert "descriptors" not in snapshot.public_ref()
+
+    home = tmp_path / "temporary-home"
+    if harness_id == "codex-cli":
+        startup = 'model = "GigaChat"\n'
+    elif harness_id == "claude-code":
+        startup = {"hasCompletedOnboarding": True}
+    else:
+        startup = {"security": {"auth": {"selectedType": "gemini-api-key"}}}
+    write_startup_config(harness_id, home, startup)
+    binding = materialize_headless_mcp_snapshot(
+        harness_id,
+        home,
+        snapshot.public_ref(),
+        data_dir=data_dir,
+        resolver=EnvironmentSecretResolver({"ISSUE_TOKEN": "runtime-secret"}),
+    )
+    config_path = {
+        "codex-cli": home / "config.toml",
+        "claude-code": home / ".claude.json",
+        "gemini-cli": home / ".gemini" / "settings.json",
+    }[harness_id]
+    active = config_path.read_text(encoding="utf-8")
+
+    assert binding is not None
+    assert binding["snapshot_id"] == snapshot.snapshot_id
+    assert binding["active_home"] == "temporary"
+    assert "runtime-secret" in active
+    assert "issue-mcp" in active
+    assert "runtime-secret" not in json.dumps(binding)
+    if harness_id == "codex-cli":
+        assert 'model = "GigaChat"' in active
+    elif harness_id == "claude-code":
+        assert json.loads(active)["hasCompletedOnboarding"] is True
+    else:
+        assert json.loads(active)["security"]["auth"]["selectedType"] == (
+            "gemini-api-key"
+        )
+
+
+def test_headless_snapshot_rejects_untrusted_incompatible_and_tampered_records(
+    tmp_path,
+):
+    store = HeadlessManagedMCPSnapshotStore(tmp_path / "data")
+    with pytest.raises(ValueError, match="not trusted"):
+        store.create(
+            project_id="proj_abc123",
+            harness_id="codex-cli",
+            descriptors=(_stdio_descriptor(trusted=False),),
+            server_ids=("issues",),
+        )
+    with pytest.raises(ValueError, match="incompatible"):
+        store.create(
+            project_id="proj_abc123",
+            harness_id="codex-cli",
+            descriptors=(_stdio_descriptor(harnesses=("claude-code",)),),
+            server_ids=("issues",),
+        )
+
+    snapshot = store.create(
+        project_id="proj_abc123",
+        harness_id="codex-cli",
+        descriptors=(_stdio_descriptor(harnesses=("codex-cli",)),),
+        server_ids=("issues",),
+    )
+    path = store.root / f"{snapshot.snapshot_id}.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["descriptors"][0]["command"] = "changed-after-preview"
+    path.write_text(json.dumps(record), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="integrity check failed"):
+        store.load(snapshot.public_ref())

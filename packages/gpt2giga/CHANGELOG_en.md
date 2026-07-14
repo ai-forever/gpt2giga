@@ -5,6 +5,11 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3a2] - 2026-07-14
+
+### Fixed
+- **Claude Code model pinning**: trusted Claude CLI requests from Harness now preserve the selected upstream GigaChat model for Anthropic Messages and `count_tokens` in GigaChat v1/v2 modes and concurrency accounting without changing the model in the public Anthropic response.
+
 ## [0.2.3a1] - 2026-07-13
 
 ### Added
@@ -480,6 +485,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.2.3a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a1...v0.2.3a2
 [0.2.3a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.2a1...v0.2.3a1
 [0.2.2a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.1a1...v0.2.2a1
 [0.2.1a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a2...v0.2.1a1

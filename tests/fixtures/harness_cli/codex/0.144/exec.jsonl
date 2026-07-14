@@ -1,0 +1,3 @@
+{"type":"thread.started","thread_id":"thread-1","future_field":"ignored"}
+{"type":"item.completed","item":{"id":"message-1","type":"agent_message","text":"Codex fixture"}}
+{"type":"turn.completed","usage":{"input_tokens":3,"output_tokens":2}}

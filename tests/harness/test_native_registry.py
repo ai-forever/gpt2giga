@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from gpt2giga_harness.native.base import (
@@ -107,6 +109,29 @@ def test_native_history_registry_unknown_discovery_returns_error():
     assert len(result.errors) == 1
     assert result.errors[0].harness_id == "missing"
     assert result.errors[0].code == "unknown_connector"
+
+
+def test_native_history_registry_paginates_discovery_with_cursor():
+    first = _ref("native_1")
+    second = replace(first, id="native_2", native_session_id="session-2")
+    third = replace(first, id="native_3", native_session_id="session-3")
+    registry = NativeHistoryConnectorRegistry()
+    registry.register(FakeConnector("codex-cli", refs=(first, second, third)))
+
+    page_one = registry.discover(harness_id="codex-cli", limit=2)
+    page_two = registry.discover(
+        harness_id="codex-cli",
+        cursor=page_one.next_cursor,
+        limit=2,
+    )
+
+    assert page_one.sessions == (first, second)
+    assert page_one.next_cursor == "2"
+    assert page_one.scanned_count == 3
+    assert page_two.sessions == (third,)
+    assert page_two.next_cursor is None
+    with pytest.raises(ValueError, match="non-negative integer"):
+        registry.discover(cursor="bad", limit=2)
 
 
 def test_native_command_plan_serialization_redacts_secrets(monkeypatch):

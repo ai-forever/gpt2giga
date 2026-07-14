@@ -205,6 +205,15 @@ def test_code_workflows_skip_documentation_only_changes():
     )
 
 
+def test_pr_labeler_tracks_harness_owned_paths():
+    labeler = (REPO_ROOT / ".github/labeler.yml").read_text(encoding="utf-8")
+
+    assert "harness:" in labeler
+    assert "- 'packages/gpt2giga-harness/**'" in labeler
+    assert "- 'tests/harness/**'" in labeler
+    assert "- 'docs/harness.md'" in labeler
+
+
 def test_release_workflow_routes_and_publishes_both_workspace_members():
     if not HARNESS_MEMBER.exists():
         return
@@ -224,6 +233,7 @@ def test_release_workflow_routes_and_publishes_both_workspace_members():
     assert 'elif ref_name == f"gpt2giga-harness-v{harness_version}":' in workflow
     assert "gateway_release:" in workflow
     assert "harness_release:" in workflow
+    assert "environment: pypi-harness" in workflow
     assert "uv build --package gpt2giga --wheel --sdist --no-sources" in workflow
     assert (
         "uv build --package gpt2giga-harness --wheel --sdist --no-sources" in workflow
@@ -236,7 +246,10 @@ def test_release_workflow_routes_and_publishes_both_workspace_members():
     assert '-name "gpt2giga-${GATEWAY_VERSION}.tar.gz"' in workflow
     assert '-name "gpt2giga_harness-${HARNESS_VERSION}*.whl"' in workflow
     assert '-name "gpt2giga_harness-${HARNESS_VERSION}.tar.gz"' in workflow
-    assert '"gpt2giga==${GATEWAY_VERSION}"' in workflow
+    assert (
+        "uv pip install --prerelease allow --python "
+        '.venv-release-check/bin/python "gpt2giga==${GATEWAY_VERSION}"' in workflow
+    )
     assert gateway_version not in workflow
     assert harness_version not in workflow
 
@@ -247,8 +260,9 @@ def test_release_workflow_routes_and_publishes_both_workspace_members():
     ]
     assert publish_commands == [
         'uv publish --token "${PYPI_TOKEN}" dist/gpt2giga/*',
-        'uv publish --token "${PYPI_TOKEN}" dist/gpt2giga-harness/*',
+        "uv publish --trusted-publishing always dist/gpt2giga-harness/*",
     ]
+    assert workflow.count("secrets.PYPI_API_KEY") == 1
 
 
 def test_split_install_and_namespace_migration_are_documented():

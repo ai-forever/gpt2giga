@@ -5,6 +5,27 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.0.1a2] - 2026-07-14
+
+### Добавлено
+- **Безопасный запуск native CLI**: перед стартом или возобновлением Codex, Claude и Gemini выполняются проверки executable capabilities, workspace, proxy route и process-spawn policy; требующие доверия действия получают явное подтверждение.
+- **Durable native terminals**: состояние и ownership PTY-процессов сохраняются в coordination store с crash reconciliation и контролируемым завершением process group; терминал поддерживает SSE с replay через `Last-Event-ID`, cursor polling fallback и изменение размера PTY из браузера.
+- **Очередь интерактивных сообщений**: активный Harness-run можно прервать, а следующие turns — поставить в durable-очередь и видеть рядом с composer до последовательной отправки.
+- **Attachment transports**: адаптеры объявляют поддержку конкретных типов вложений и способ доставки; Harness строит проверяемый render plan для prompt references, CLI flags, staged paths и metadata-only inputs.
+- **Compatibility evidence**: добавлены version-aware probes Codex, Claude и Gemini CLI, adapter parity contracts, live compatibility telemetry и матрицы Eval Lab на основе структурированных capability-событий.
+
+### Изменено
+- **Headless adapter profiles**: model, reasoning effort, permission/workspace policy, бюджеты и разрешённые/запрещённые tools теперь применяются как capability-checked immutable snapshot; доверенные managed MCP profiles материализуются в изолированные CLI homes без изменения native-конфигурации пользователя.
+- **Продолжение внешних CLI-сессий**: Codex использует supervised app-server threads для многоходового headless continuity с interrupt; Harness сохраняет opaque runtime links и явно сообщает ограничения continuation для адаптеров без безопасного resume-контракта.
+- **Release contract**: Harness теперь точно зависит от `gpt2giga==0.2.3a2`, а публикация `gpt2giga-harness` использует PyPI Trusted Publishing.
+- **Документация**: добавлено отдельное описание архитектуры, границ безопасности, потоков headless/native исполнения и полного control-plane API на русском и английском.
+
+### Исправлено
+- **Native session continuity**: resume snapshots теперь сохраняют модель, API route, permission mode и workspace; discovery и reconciliation восстанавливают историю Codex, Claude и Gemini без изменения vendor-owned homes и без дублирования turns.
+- **Gemini CLI**: исправлены доставка initial prompt, закрепление выбранной модели, синхронизация live-ответов, отображение startup/runtime ошибок и стабильность многоходовых native-разговоров.
+- **Claude Code**: исправлены запуск с managed MCP-конфигурацией и закрепление выбранной GigaChat-модели для headless/native запросов.
+- **Tool activity**: native streams теперь показывают tool calls/results Claude и Gemini, включая активность Claude subagents, не смешивая её с обычным текстом ассистента.
+
 ## [0.0.1a1] - 2026-07-13
 
 Первый отдельный alpha-релиз локального agentic control plane. API, форматы
@@ -25,4 +46,5 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
+[0.0.1a2]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a1...gpt2giga-harness-v0.0.1a2
 [0.0.1a1]: https://github.com/ai-forever/gpt2giga/releases/tag/gpt2giga-harness-v0.0.1a1

@@ -1415,6 +1415,9 @@
     .session-meta span:nth-child(n + 3) {
       display: none;
     }
+    #harness-list .session-meta span {
+      display: inline-flex;
+    }
     @media (hover: none) {
       .session-row-actions {
         opacity: 1;
@@ -2095,13 +2098,35 @@
     .tool-status-dot.failed {
       background: var(--red);
     }
-    .tool-call-name {
+    .tool-call-title {
       min-width: 0;
       flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      overflow: hidden;
+    }
+    .tool-call-name {
+      min-width: 0;
       overflow: hidden;
       color: #dce6f1;
       font-size: 12px;
       font-weight: 760;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tool-call-origin {
+      flex: 0 0 auto;
+      max-width: 180px;
+      overflow: hidden;
+      border: 1px solid #31566a;
+      border-radius: 999px;
+      background: #102431;
+      color: #79d9d2;
+      padding: 2px 6px;
+      font-size: 9px;
+      font-weight: 750;
+      letter-spacing: 0.03em;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
@@ -2377,6 +2402,7 @@
       font-size: 10px;
     }
     .composer {
+      position: relative;
       width: min(960px, calc(100% - 48px));
       margin: 0 auto 22px;
       gap: 10px;
@@ -2419,6 +2445,64 @@
       flex-wrap: wrap;
       align-items: center;
       gap: 8px;
+    }
+    .composer-queue {
+      position: absolute;
+      z-index: 18;
+      right: 14px;
+      bottom: 72px;
+      display: grid;
+      width: min(360px, calc(100% - 28px));
+      max-height: 236px;
+      gap: 7px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+    .composer-queue[hidden] {
+      display: none;
+    }
+    .composer-queue-card {
+      display: grid;
+      min-width: 0;
+      gap: 5px;
+      border: 1px solid #4a4842;
+      border-radius: 13px;
+      background: rgb(35 34 31 / 0.97);
+      box-shadow: 0 12px 32px rgb(0 0 0 / 0.34);
+      padding: 10px 12px;
+    }
+    .composer-queue-heading {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .composer-queue-heading strong {
+      overflow: hidden;
+      color: #f5f7fa;
+      font-size: 13px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .composer-queue-position {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: #3d3b36;
+      color: #d5d1c7;
+      padding: 2px 7px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .composer-queue-card small {
+      overflow: hidden;
+      color: #b8b3aa;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .composer-more {
       position: relative;
@@ -2463,6 +2547,10 @@
     }
     #run-button {
       min-width: 92px;
+    }
+    #interrupt-run-button,
+    #cancel-run-button {
+      min-width: 86px;
     }
     .utility-action {
       min-height: 34px;
@@ -2746,6 +2834,7 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         max-height: calc(100vh - 96px);
         overflow: auto;
+        backdrop-filter: none;
       }
       .quick-config > label,
       .quick-config > fieldset,
@@ -2772,6 +2861,17 @@
         grid-template-columns: 1fr;
         max-height: none;
         align-content: start;
+        padding-top: 58px;
+      }
+      .quick-config.advanced-open .advanced-settings-button {
+        position: fixed;
+        z-index: 81;
+        top: 72px;
+        right: 16px;
+        min-height: 36px;
+        border: 1px solid var(--border) !important;
+        border-radius: 8px;
+        background: #172533;
       }
       .advanced-panel .span-2,
       .advanced-panel .span-4,
@@ -2794,15 +2894,27 @@
       }
       .composer-footer {
         display: grid;
+        justify-content: stretch;
         gap: 10px;
+      }
+      .composer-queue {
+        position: static;
+        width: 100%;
+        max-height: 180px;
       }
       .composer-actions {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr);
+        grid-template-columns: minmax(0, 1fr);
+        width: 100%;
         order: -1;
       }
+      .composer-actions.headless-running {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
       #compare-button,
-      #run-button {
+      #run-button,
+      #interrupt-run-button,
+      #cancel-run-button {
         width: 100%;
         min-height: 44px;
       }

@@ -47,8 +47,11 @@
 }
 
 .theme-doc-markdown table {
-  display: table;
+  display: block;
   width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .theme-code-block {

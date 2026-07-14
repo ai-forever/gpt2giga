@@ -3,6 +3,12 @@
     const NATIVE_ACTIVE_POLL_MS = 750;
     const NATIVE_IDLE_POLL_MS = 5000;
     const NATIVE_POLL_BURST_MS = 12000;
+    const NATIVE_STREAM_FAILURE_LIMIT = 3;
+    const NATIVE_RESIZE_DELAY_MS = 150;
+    const NATIVE_MIN_ROWS = 2;
+    const NATIVE_MAX_ROWS = 200;
+    const NATIVE_MIN_COLUMNS = 20;
+    const NATIVE_MAX_COLUMNS = 500;
     const NATIVE_TRUST_STORAGE_KEY = "gpt2giga.nativeTrustResolved.v1";
     const RUNS_CENTER_PAGE_SIZE = 25;
     const RUNS_TRACE_DOM_LIMIT = 200;
@@ -55,10 +61,19 @@
       selectedNativeRefId: null,
       nativePreview: null,
       activeNativeProcess: null,
+      pendingNativeApproval: null,
       nativeOutputCursor: 0,
       nativeTerminalText: "",
+      nativeStreamingActive: false,
+      nativeStreamingText: "",
       nativePollTimer: null,
       nativePollBurstUntil: 0,
+      nativeEventSource: null,
+      nativeEventSourceProcessId: null,
+      nativeStreamFailures: 0,
+      nativeResizeObserver: null,
+      nativeResizeTimer: null,
+      nativeTerminalSize: null,
       nativeTrustPromptProcessId: null,
       nativeTrustResolvedProcessIds: readNativeTrustResolvedProcessIds(),
       attachments: [],
@@ -90,6 +105,7 @@
       notifiedAttentionIds: new Set(),
       desktopNotificationsEnabled: false,
       liveRuns: new Map(),
+      toolCallExpansion: new Map(),
       renderedSessionId: null,
       routeRecommendation: null,
       routeRecommendationTimer: null,
@@ -556,9 +572,20 @@
       }
       state.agents = Array.isArray(result.data.agents) ? result.data.agents : [];
       state.agentErrors = Array.isArray(result.data.errors) ? result.data.errors : [];
-      setText("agents-center-status", `${state.agents.length} reusable profiles · immutable snapshots on runs`);
+      const executable = state.agents.filter((agent) => agent.execution_plan && agent.execution_plan.queueable).length;
+      setText("agents-center-status", `${state.agents.length} reusable profiles · ${executable} executable with current adapter options`);
       renderAgentsCenter();
       return true;
+    }
+
+    function agentPlanSummary(agent) {
+      const plan = agent && agent.execution_plan ? agent.execution_plan : {};
+      const options = plan.options && typeof plan.options === "object" ? Object.values(plan.options) : [];
+      const counts = { effective: 0, delegated: 0, unsupported: 0 };
+      for (const option of options) {
+        if (option && Object.prototype.hasOwnProperty.call(counts, option.status)) counts[option.status] += 1;
+      }
+      return { plan, counts };
     }
 
     function renderAgentsCenter() {
@@ -573,11 +600,12 @@
         errors.appendChild(row);
       }
       for (const agent of state.agents) {
+        const { plan, counts } = agentPlanSummary(agent);
         const card = document.createElement("button");
         card.type = "button";
         card.className = "agent-card";
         card.classList.toggle("active", state.selectedAgent && state.selectedAgent.id === agent.id);
-        card.innerHTML = `<span><strong>${escapeHtml(agent.title)}</strong><small>${escapeHtml(agent.description || agent.instructions)}</small></span><span class="badge info">${escapeHtml(agent.mode)}</span><span class="runs-center-item-meta">${escapeHtml(agent.harness_id)} · ${escapeHtml(agent.workspace_policy)} · ${escapeHtml(agent.permission_profile)}</span>`;
+        card.innerHTML = `<span><strong>${escapeHtml(agent.title)}</strong><small>${escapeHtml(agent.description || agent.instructions)}</small></span><span class="badge ${plan.queueable ? "info" : "warning"}">${plan.queueable ? "executable" : "review options"}</span><span class="runs-center-item-meta">${escapeHtml(agent.harness_id)} · ${counts.effective} effective · ${counts.delegated} delegated · ${counts.unsupported} unsupported</span>`;
         card.addEventListener("click", () => selectAgent(agent.id));
         list.appendChild(card);
       }
@@ -596,17 +624,20 @@
         return;
       }
       state.selectedAgent = result.data.profile;
+      const { plan, counts } = agentPlanSummary(state.selectedAgent);
       state.agentDraft = null;
       byId("agent-source-input").value = result.data.source || "";
       byId("agent-source-input").disabled = false;
       byId("agent-run-prompt").disabled = false;
       byId("validate-agent-button").disabled = false;
       byId("duplicate-agent-button").disabled = false;
-      byId("run-agent-button").disabled = false;
+      byId("run-agent-button").disabled = !plan.queueable;
       byId("apply-agent-button").disabled = true;
       byId("agent-diff-panel").hidden = true;
       setText("agent-editor-title", state.selectedAgent.title);
-      setText("agent-editor-meta", `${state.selectedAgent.id} · ${state.selectedAgent.harness_id} · source ${String(state.selectedAgent.source_hash || "").slice(0, 12)}`);
+      setText("agent-editor-meta", `${state.selectedAgent.id} · ${state.selectedAgent.harness_id} · ${counts.effective} effective · ${counts.delegated} delegated · ${counts.unsupported} unsupported · source ${String(state.selectedAgent.source_hash || "").slice(0, 12)}`);
+      const planMessages = [...(plan.errors || []), ...(plan.warnings || [])];
+      setText("agents-center-status", planMessages.length ? planMessages.join(" · ") : "All requested profile options have an explicit execution outcome.");
       renderAgentsCenter();
     }
 
@@ -1571,8 +1602,9 @@
         const arenaTitle = document.createElement("strong");
         arenaTitle.textContent = spec.title || spec.id;
         const availability = item.availability || {};
+        const compatibility = item.compatibility || {};
         const arenaMeta = document.createElement("small");
-        arenaMeta.textContent = `${spec.id} · ${availability.status || "unknown"}`;
+        arenaMeta.textContent = `${spec.id} · ${availability.status || "unknown"}${compatibility.version ? ` · ${compatibility.version}` : ""}`;
         arenaCopy.append(arenaTitle, arenaMeta);
         arenaOption.append(arenaCheckbox, arenaCopy);
         arenaOptions.appendChild(arenaOption);
@@ -1589,6 +1621,7 @@
       for (const item of state.harnesses) {
         const spec = item.spec || {};
         const availability = item.availability || {};
+        const compatibility = item.compatibility || {};
         const validation = item.validation || {};
         const plugin = spec.plugin_metadata || {};
         const capabilities = Array.isArray(spec.capabilities) ? spec.capabilities.slice(0, 3) : [];
@@ -1608,6 +1641,7 @@
             <span>${escapeHtml(spec.id || "")}</span>
             <span>${escapeHtml(spec.kind || "")}</span>
             <span>${escapeHtml(availability.status || "unknown")}</span>
+            ${compatibility.status ? `<span class="badge ${compatibility.compatible ? "ok" : "warn"}">${escapeHtml(compatibility.version || compatibility.status)}</span>` : ""}
             ${recommended ? '<span class="badge ok">Recommended</span>' : ''}
           </div>
           <div class="session-meta">
@@ -1867,7 +1901,10 @@
       if (nativeTab) nativeTab.hidden = structuredWorkChat;
       updateBuiltinToolControls();
       const availability = state.selectedHarness && state.selectedHarness.availability ? state.selectedHarness.availability : {};
-      const warning = availability.status === "missing" || availability.status === "error" ? availability.reason || availability.status : "";
+      const compatibility = state.selectedHarness && state.selectedHarness.compatibility ? state.selectedHarness.compatibility : {};
+      const warning = availability.status === "missing" || availability.status === "error"
+        ? compatibility.warning || availability.reason || availability.status
+        : compatibility.warning || "";
       setText("harness-warning", warning);
       const continuingNative = Boolean(activeNativeConversation());
       byId("run-button").textContent = structuredWorkChat
@@ -2538,12 +2575,14 @@
     function attachmentWarning(attachment) {
       const harnessId = currentHarnessId();
       const supported = attachment.supported_by || {};
+      const transport = (attachment.transport_by || {})[harnessId] || null;
+      const warning = (attachment.warnings || []).find((item) => String(item).startsWith(`${harnessId} `));
       if (Object.prototype.hasOwnProperty.call(supported, harnessId) && !supported[harnessId]) {
-        const warning = (attachment.warnings || []).find((item) => String(item).startsWith(`${harnessId} `));
         return warning || `${harnessId} does not accept this attachment`;
       }
-      if (attachment.kind === "image" && harnessId === "gemini-cli") {
-        return "path reference only";
+      if (warning) return warning;
+      if (transport && !transport.rich && ["image", "document"].includes(attachment.kind)) {
+        return `${harnessId} reference-only transport`;
       }
       return "";
     }
@@ -3376,7 +3415,7 @@
       return "";
     }
 
-    async function runHarness() {
+    async function runHarness(delivery = "queue") {
       const payload = buildPayload();
       if (!payload.prompt.trim()) return;
       if (!(await confirmRunPreflight(payload))) return;
@@ -3384,6 +3423,10 @@
       if (!(await retireLegacyNativeProcessForStructuredChat())) return;
       if (activeNativeConversation()) {
         await continueNativeConversation(payload);
+        return;
+      }
+      if (state.activeHeadlessRun && state.activeHeadlessRun.id) {
+        await queueHeadlessMessage(payload, { interrupt: delivery === "interrupt" });
         return;
       }
       if (payload.invocation_mode === "native" && currentHarnessSupportsNative()) {
@@ -3497,6 +3540,8 @@
           applyRunDefaults(payload);
           persistProjectState({ last_selected_session: state.currentSessionId });
         }
+        clearAcceptedComposer();
+        setHeadlessRunning(true);
         const initialEvents = Array.isArray(body.events) ? body.events : [];
         for (const event of [...eventsForRun(body.run.id), ...initialEvents]) consumeLiveEvent(event);
         renderLiveDraft(body.run.id);
@@ -3513,6 +3558,56 @@
         setText("run-panel", "Stream start failed.");
         setHeadlessRunning(false);
       }
+    }
+
+    function clearAcceptedComposer() {
+      byId("prompt-input").value = "";
+      state.attachments = [];
+      renderAttachments();
+      scheduleRouteRecommendation();
+    }
+
+    async function queueHeadlessMessage(payload, options = {}) {
+      const activeRun = state.activeHeadlessRun || {};
+      if (!state.currentSessionId || !activeRun.id) return;
+      const interrupt = options.interrupt === true;
+      byId("run-button").disabled = true;
+      byId("interrupt-run-button").disabled = true;
+      if (interrupt) {
+        setText("run-panel", "Requesting stop before queueing the next message...");
+        const stopped = await getJson(`/api/runs/${encodeURIComponent(activeRun.id)}/cancel`, {
+          method: "POST"
+        });
+        if (!stopped.ok) {
+          setText("run-panel", stopped.data.detail || "Interrupt failed.");
+          setHeadlessRunning(true);
+          return;
+        }
+      } else {
+        setText("run-panel", "Queueing the next message...");
+      }
+      const result = await getJson(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/run/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const body = result.data || {};
+      if (!result.ok || !body.run) {
+        setText("run-panel", body.detail || `Queue failed with HTTP ${result.status}`);
+        setHeadlessRunning(true);
+        return;
+      }
+      state.lastPayload = payload;
+      await loadSession(state.currentSessionId, { syncRoute: false });
+      clearAcceptedComposer();
+      setText(
+        "run-panel",
+        interrupt
+          ? "Interrupt requested. The message will run after the current operation stops."
+          : "Message queued. It will run after earlier turns finish."
+      );
+      if (body.job && body.job.status === "waiting_approval") await loadApprovals();
+      setHeadlessRunning(Boolean(state.activeHeadlessRun));
     }
 
     function openHeadlessEventStream(runId) {
@@ -3571,18 +3666,18 @@
 
     async function finishHeadlessStream(runId) {
       if (!runId || !state.activeHeadlessRun || state.activeHeadlessRun.id !== runId) return;
+      const draft = state.liveRuns.get(runId);
       closeHeadlessEventSource();
+      state.activeHeadlessRun = null;
       setHeadlessRunning(false);
       if (state.currentSessionId) {
         await loadSession(state.currentSessionId);
         await loadSessions();
       }
-      const draft = state.liveRuns.get(runId);
-      if (persistedMessageForRun(runId) && !preserveTerminalPartialDraft(draft)) state.liveRuns.delete(runId);
-      state.activeHeadlessRun = null;
-      byId("prompt-input").value = "";
-      state.attachments = [];
-      renderAttachments();
+      if (!preserveTerminalPartialDraft(draft)) {
+        state.liveRuns.delete(runId);
+        renderMessages();
+      }
     }
 
     function closeHeadlessEventSource() {
@@ -3594,11 +3689,16 @@
     }
 
     function setHeadlessRunning(running) {
-      byId("run-button").disabled = running;
-      if (running) byId("run-button").textContent = "Running...";
+      const active = running && Boolean(state.activeHeadlessRun && state.activeHeadlessRun.id);
+      byId("run-button").parentElement.classList.toggle("headless-running", active);
+      byId("run-button").disabled = running && !active;
+      if (active) byId("run-button").textContent = "Queue";
+      else if (running) byId("run-button").textContent = "Starting...";
       else updateHarnessDrivenControls();
-      byId("cancel-run-button").hidden = !running;
-      byId("cancel-run-button").disabled = !running;
+      byId("interrupt-run-button").hidden = !active;
+      byId("interrupt-run-button").disabled = !active;
+      byId("cancel-run-button").hidden = !active;
+      byId("cancel-run-button").disabled = !active;
     }
 
     async function cancelHeadlessRun() {
@@ -3617,6 +3717,7 @@
         byId("cancel-run-button").disabled = false;
         return;
       }
+      setText("run-panel", "Stop requested. The current operation may finish; no next step will start.");
     }
 
     async function startNativeProcess(payload) {
@@ -3628,6 +3729,15 @@
       setNativeSummary("Starting native process...");
       byId("run-button").disabled = true;
       byId("run-button").textContent = "Starting...";
+      const pendingApproval = state.pendingNativeApproval;
+      const reusePendingApproval = pendingApproval
+        && pendingApproval.prompt === payload.prompt
+        && pendingApproval.harnessId === payload.harness_id;
+      const promptIdempotencyKey = reusePendingApproval
+        ? pendingApproval.idempotencyKey
+        : window.crypto && typeof window.crypto.randomUUID === "function"
+          ? `native_prompt_${window.crypto.randomUUID()}`
+          : `native_prompt_${Date.now()}_${Math.random().toString(16).slice(2)}`;
       try {
         const result = await getJson("/api/native/processes/start", {
           method: "POST",
@@ -3635,11 +3745,14 @@
           body: JSON.stringify({
             session_id: state.currentSessionId,
             action: "start",
+            idempotency_key: promptIdempotencyKey,
             harness_id: payload.harness_id,
             prompt: payload.prompt,
             model: payload.model,
             api_mode: payload.api_mode,
             mode: payload.mode,
+            workspace_policy: payload.workspace_policy || "auto",
+            permission_profile: payload.permission_profile || "interactive",
             workspace: payload.workspace,
             attachment_ids: payload.attachment_ids || []
           })
@@ -3648,6 +3761,18 @@
           setNativeSummary(result.data.detail || `Native start failed with HTTP ${result.status}`);
           return;
         }
+        if (result.data.approval_required) {
+          const approval = result.data.approval || {};
+          state.pendingNativeApproval = {
+            idempotencyKey: promptIdempotencyKey,
+            prompt: payload.prompt,
+            harnessId: payload.harness_id
+          };
+          setNativeSummary(`Native start is waiting for Approval Center (${approval.id || "pending"}). Approve it, then submit the same prompt again.`);
+          await loadApprovals();
+          return;
+        }
+        state.pendingNativeApproval = null;
         setActiveNativeProcess(result.data.process || null, result.data);
         state.attachments = [];
         byId("prompt-input").value = "";
@@ -3699,12 +3824,13 @@
       byId("run-button").textContent = "Sending...";
       state.nativePollBurstUntil = Date.now() + NATIVE_POLL_BURST_MS;
       try {
-        const result = await sendNativeProcessInput(`${prompt}\r`, prompt);
+        const result = await sendNativeProcessInput(prompt, prompt, true);
         if (!result.ok) {
           setStatus(result.data.detail || "Native input failed.", "error");
           return;
         }
         if (result.data.process) state.activeNativeProcess = result.data.process;
+        beginNativeResponseStream();
         if (result.data.message && state.currentBundle) {
           const messages = Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
           if (!messages.some((message) => message.id === result.data.message.id)) {
@@ -3775,11 +3901,94 @@
       return events.filter((event) => event.run_id === runId || (!event.run_id && state.activeHeadlessRun && state.activeHeadlessRun.id === runId));
     }
 
+    function eventTimestamp(value) {
+      const timestamp = Date.parse(value || "");
+      return Number.isFinite(timestamp) ? timestamp : null;
+    }
+
+    function executionMessagesForRun(runId, messages) {
+      return messages
+        .filter((message) => message.run_id === runId && ["assistant", "error"].includes(message.role))
+        .sort((left, right) => (eventTimestamp(left.created_at) || 0) - (eventTimestamp(right.created_at) || 0));
+    }
+
+    function eventsForMessage(message, messages) {
+      const events = message.run_id ? eventsForRun(message.run_id) : [];
+      if (!message.run_id || !["assistant", "error"].includes(message.role)) return [];
+      const executionMessages = executionMessagesForRun(message.run_id, messages);
+      if (executionMessages.length <= 1) return events;
+      const index = executionMessages.findIndex((item) => item.id === message.id);
+      if (index === -1) return [];
+      const upperBound = eventTimestamp(message.created_at);
+      const lowerBound = index > 0 ? eventTimestamp(executionMessages[index - 1].created_at) : null;
+      return events.filter((event) => {
+        const timestamp = eventTimestamp(event.created_at);
+        if (timestamp == null || upperBound == null) return index === executionMessages.length - 1;
+        return timestamp <= upperBound && (lowerBound == null || timestamp > lowerBound);
+      });
+    }
+
+    function eventsAfterLatestMessage(runId, messages) {
+      const executionMessages = executionMessagesForRun(runId, messages);
+      const latest = executionMessages.length ? executionMessages[executionMessages.length - 1] : null;
+      const lowerBound = latest ? eventTimestamp(latest.created_at) : null;
+      return eventsForRun(runId).filter((event) => {
+        const timestamp = eventTimestamp(event.created_at);
+        return lowerBound == null || timestamp == null || timestamp > lowerBound;
+      });
+    }
+
     function activeHeadlessRunFromBundle(bundle = state.currentBundle) {
       const runs = bundle && Array.isArray(bundle.runs) ? bundle.runs : [];
-      return [...runs].reverse().find((run) =>
-        ["queued", "running"].includes(run.status) && run.invocation_mode !== "native"
-      ) || null;
+      const headless = runs.filter((run) => run.invocation_mode !== "native");
+      return headless.find((run) => run.status === "running")
+        || headless.find((run) => run.status === "queued")
+        || null;
+    }
+
+    function queuedHeadlessTurns(bundle = state.currentBundle) {
+      const runs = bundle && Array.isArray(bundle.runs) ? bundle.runs : [];
+      const messages = bundle && Array.isArray(bundle.messages) ? bundle.messages : [];
+      const prompts = new Map();
+      for (const message of messages) {
+        if (message.role === "user" && message.run_id && !prompts.has(message.run_id)) {
+          prompts.set(message.run_id, message.content || "Queued message");
+        }
+      }
+      return runs
+        .filter((run) => run.invocation_mode !== "native" && run.status === "queued")
+        .map((run) => ({ run, prompt: prompts.get(run.id) || "Queued message" }));
+    }
+
+    function renderComposerQueue() {
+      const queue = byId("composer-queue");
+      const turns = queuedHeadlessTurns();
+      const runs = state.currentBundle && Array.isArray(state.currentBundle.runs) ? state.currentBundle.runs : [];
+      const hasRunningTurn = runs.some((run) => run.invocation_mode !== "native" && run.status === "running");
+      queue.replaceChildren();
+      queue.hidden = turns.length === 0;
+      for (const [index, turn] of turns.entries()) {
+        const card = document.createElement("article");
+        card.className = "composer-queue-card";
+        card.dataset.runId = turn.run.id;
+
+        const heading = document.createElement("div");
+        heading.className = "composer-queue-heading";
+        const prompt = document.createElement("strong");
+        prompt.textContent = String(turn.prompt).replace(/\s+/g, " ").trim();
+        prompt.title = turn.prompt;
+        const position = document.createElement("span");
+        position.className = "composer-queue-position";
+        position.textContent = turns.length === 1 ? "Queued" : `${index + 1} of ${turns.length}`;
+        heading.append(prompt, position);
+
+        const status = document.createElement("small");
+        status.textContent = index === 0
+          ? hasRunningTurn ? "Waiting for the current turn to finish" : "Waiting to start"
+          : "Waiting behind earlier queued messages";
+        card.append(heading, status);
+        queue.appendChild(card);
+      }
     }
 
     function latestEventIdForRun(runId) {
@@ -3814,7 +4023,10 @@
         if (!["failed", "canceled"].includes(run.status)) continue;
         const events = eventsForRun(run.id);
         const hasPartialText = events.some((event) => event.type === "message_delta" && liveDelta(event));
-        if (!hasPartialText) continue;
+        if (!hasPartialText) {
+          state.liveRuns.delete(run.id);
+          continue;
+        }
         const draft = ensureLiveRun(run.id, run);
         for (const event of events) consumeLiveEvent(event);
         draft.status = run.status;
@@ -4332,11 +4544,21 @@
         arguments: "",
         output: "",
         duration_ms: null,
-        seconds_left: null
+        seconds_left: null,
+        parentToolCallId: "",
+        subagentId: "",
+        subagentType: "",
+        subagentDescription: "",
+        subagentDepth: null
       };
       const functionPayload = payload.function && typeof payload.function === "object" ? payload.function : {};
       const name = payload.name || functionPayload.name;
       if (name) current.name = String(name);
+      if (payload.parent_tool_call_id != null) current.parentToolCallId = String(payload.parent_tool_call_id);
+      if (payload.subagent_id != null) current.subagentId = String(payload.subagent_id);
+      if (payload.subagent_type != null) current.subagentType = String(payload.subagent_type);
+      if (payload.subagent_description != null) current.subagentDescription = String(payload.subagent_description);
+      if (payload.subagent_depth != null) current.subagentDepth = finiteToken(payload.subagent_depth);
       const completeArguments = payload.arguments != null ? payload.arguments : payload.input != null ? payload.input : functionPayload.arguments;
       const argumentDelta = payload.arguments_delta != null ? payload.arguments_delta : payload.input_delta;
       if (event.type === "tool_call_delta" && argumentDelta != null) {
@@ -4475,17 +4697,34 @@
       details.appendChild(body);
     }
 
-    function toolCard(tool) {
+    function toolCard(tool, messageKey) {
       const plan = planPayloadFromTool(tool);
       const details = document.createElement("details");
-      details.className = `tool-call-card${plan ? " plan-card" : ""}`;
-      details.open = Boolean(plan) || tool.status === "running" || tool.status === "failed" || tool.status === "requested";
+      details.className = `tool-call-card${plan ? " plan-card" : ""}${tool.subagentId ? " subagent-tool" : ""}`;
+      const expansionKey = `${messageKey || "run"}:${tool.id}`;
+      const rememberedOpen = state.toolCallExpansion.get(expansionKey);
+      details.open = rememberedOpen == null
+        ? Boolean(plan) || tool.status === "running" || tool.status === "failed" || tool.status === "requested"
+        : rememberedOpen;
+      details.addEventListener("toggle", () => {
+        state.toolCallExpansion.set(expansionKey, details.open);
+      });
       const summary = document.createElement("summary");
       const dot = document.createElement("span");
       dot.className = `tool-status-dot ${tool.status || "running"}`;
+      const title = document.createElement("span");
+      title.className = "tool-call-title";
       const name = document.createElement("span");
       name.className = "tool-call-name";
       name.textContent = plan ? "Plan" : tool.name || "tool";
+      title.appendChild(name);
+      if (tool.subagentType) {
+        const origin = document.createElement("span");
+        origin.className = "tool-call-origin";
+        origin.textContent = `${tool.subagentType} subagent`;
+        if (tool.subagentDescription) origin.title = tool.subagentDescription;
+        title.appendChild(origin);
+      }
       const status = document.createElement("span");
       status.className = "tool-call-status";
       status.textContent = plan
@@ -4495,7 +4734,7 @@
           : tool.duration_ms != null
             ? `${tool.status} · ${tool.duration_ms} ms`
             : tool.status || "running";
-      summary.append(dot, name, status);
+      summary.append(dot, title, status);
       details.appendChild(summary);
       if (plan) {
         appendPlanBody(details, plan, tool);
@@ -4556,7 +4795,7 @@
       panel.appendChild(details);
     }
 
-    function appendToolCards(parent, tools) {
+    function appendToolCards(parent, tools, messageKey) {
       if (!tools || !tools.size) return;
       const stack = document.createElement("div");
       stack.className = "tool-call-stack";
@@ -4564,7 +4803,7 @@
       label.className = "execution-rail-label";
       label.textContent = `Tool calls · ${tools.size}`;
       stack.appendChild(label);
-      for (const tool of tools.values()) stack.appendChild(toolCard(tool));
+      for (const tool of tools.values()) stack.appendChild(toolCard(tool, messageKey));
       parent.appendChild(stack);
     }
 
@@ -4630,7 +4869,7 @@
         const status = document.createElement("span");
         const terminal = ["succeeded", "failed", "canceled"].includes(liveStatus);
         status.className = `live-status${liveStatus === "failed" || liveStatus === "canceled" ? " failed" : terminal ? " complete" : ""}`;
-        status.textContent = liveStatus === "succeeded" ? "Complete" : liveStatus === "canceled" ? "Canceled" : liveStatus === "failed" ? "Failed" : "Streaming";
+        status.textContent = liveStatus === "succeeded" ? "Complete" : liveStatus === "canceled" ? "Canceled" : liveStatus === "failed" ? "Failed" : liveStatus === "queued" ? "Queued" : "Streaming";
         header.appendChild(status);
       }
       return header;
@@ -4676,7 +4915,7 @@
         else content.appendChild(cursor);
       }
       item.appendChild(content);
-      appendToolCards(item, options.tools || new Map());
+      appendToolCards(item, options.tools || new Map(), message.id || message.run_id);
       appendGeneratedFiles(item, options.generatedFiles || new Map());
       appendExecutionOutput(item, options.draft || null);
       appendUsageChips(item, options.usage || null);
@@ -4821,24 +5060,32 @@
       const shouldStick = sessionChanged || panel.scrollHeight === 0 || isChatNearBottom();
       list.replaceChildren();
       const messages = state.currentBundle && Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
+      const latestMessageIdsByRun = new Map();
+      for (const message of messages) {
+        if (message.run_id && ["assistant", "error"].includes(message.role)) {
+          latestMessageIdsByRun.set(message.run_id, message.id);
+        }
+      }
       const persistedRunIds = new Set();
       const renderedPartialDrafts = new Set();
       for (const message of messages) {
         const run = message.run_id ? runForId(message.run_id) : null;
-        const events = message.run_id ? eventsForRun(message.run_id) : [];
+        const events = eventsForMessage(message, messages);
         const executionMessage = ["assistant", "error"].includes(message.role);
-        const tools = message.run_id && executionMessage ? toolsFromEvents(events) : new Map();
-        const generatedFiles = message.run_id && executionMessage ? generatedFilesFromEvents(events) : new Map();
+        const latestExecutionMessage = executionMessage && latestMessageIdsByRun.get(message.run_id) === message.id;
+        const tools = executionMessage ? toolsFromEvents(events) : new Map();
+        const generatedFiles = executionMessage ? generatedFilesFromEvents(events) : new Map();
         const usage = executionMessage ? usageForMessage(message, run, events) : null;
         if (message.run_id && executionMessage) {
           persistedRunIds.add(message.run_id);
           const draft = state.liveRuns.get(message.run_id);
-          if (preserveTerminalPartialDraft(draft)) {
+          if (latestExecutionMessage && preserveTerminalPartialDraft(draft)) {
             list.appendChild(liveMessageNode(draft));
             renderedPartialDrafts.add(message.run_id);
           }
         }
-        list.appendChild(buildMessageNode(message, { tools, generatedFiles, usage }));
+        const queuedStatus = message.role === "user" && run && run.status === "queued" ? "queued" : null;
+        list.appendChild(buildMessageNode(message, { tools, generatedFiles, usage, liveStatus: queuedStatus }));
       }
       for (const [runId, draft] of [...state.liveRuns.entries()]) {
         if (renderedPartialDrafts.has(runId)) continue;
@@ -4848,6 +5095,8 @@
         }
         if (draft.sessionId === (session && session.id)) list.appendChild(liveMessageNode(draft));
       }
+      appendNativeStreamingMessage(list, messages);
+      orderMessagesByRun(list);
       const hasVisibleMessages = list.childElementCount > 0;
       document.body.classList.toggle("new-session", !hasVisibleMessages);
       if (!hasVisibleMessages) {
@@ -4857,8 +5106,24 @@
         list.appendChild(empty);
       }
       state.renderedSessionId = session && session.id;
+      renderComposerQueue();
       renderCurrentPlan();
       if (shouldStick) scrollChatToBottom();
+    }
+
+    function orderMessagesByRun(list) {
+      const runs = state.currentBundle && Array.isArray(state.currentBundle.runs) ? state.currentBundle.runs : [];
+      const order = new Map(runs.map((run, index) => [run.id, index]));
+      const nodes = [...list.children];
+      const originalOrder = new Map(nodes.map((node, index) => [node, index]));
+      nodes.sort((left, right) => {
+        const leftRun = left.dataset.runId;
+        const rightRun = right.dataset.runId;
+        const leftIndex = leftRun && order.has(leftRun) ? order.get(leftRun) : -1;
+        const rightIndex = rightRun && order.has(rightRun) ? order.get(rightRun) : -1;
+        return leftIndex - rightIndex || originalOrder.get(left) - originalOrder.get(right);
+      });
+      for (const node of nodes) list.appendChild(node);
     }
 
     function runStatusBadgeClass(status) {
@@ -5556,10 +5821,11 @@
         return;
       }
       if (state.activeNativeProcess && state.activeNativeProcess.session_id !== state.currentSessionId) {
-        stopNativePolling();
+        stopNativeOutputTransport();
         state.activeNativeProcess = null;
         state.nativeOutputCursor = 0;
         state.nativeTerminalText = "";
+        finishNativeResponseStream();
         resetNativeTrustPrompt();
         renderNativeTerminalStatus("idle");
         setNativeSummary(nativeInspectorText(state.currentBundle));
@@ -5580,17 +5846,25 @@
     }
 
     function setActiveNativeProcess(process, payload) {
-      stopNativePolling();
+      stopNativeOutputTransport();
       resetNativeTrustPrompt();
       state.activeNativeProcess = process;
       state.nativeOutputCursor = 0;
       state.nativeTerminalText = "";
+      state.nativeStreamingActive = Boolean(
+        process
+        && ["claude-code", "gemini-cli"].includes(process.harness_id)
+        && !(payload && payload.reconnected)
+      );
+      state.nativeStreamingText = "";
       state.nativePollBurstUntil = Date.now() + NATIVE_POLL_BURST_MS;
       setNativeSummary(pretty(payload || process || {}));
       setText("native-terminal-output", "Terminal output will appear here.");
       renderNativeTerminalStatus();
+      renderNativeStreamingDraft();
       if (process && process.id) {
-        pollNativeOutput();
+        startNativeOutputTransport();
+        startNativeResizeObserver();
       }
     }
 
@@ -5616,24 +5890,139 @@
         : runs.map((item, itemIndex) => itemIndex === index ? run : item);
     }
 
-    async function pollNativeOutput() {
+    function syncNativeMessagesInBundle(messages) {
+      if (!state.currentBundle || !Array.isArray(messages) || !messages.length) return false;
+      const current = Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
+      const byMessageId = new Map(current.map((message) => [message.id, message]));
+      let changed = false;
+      for (const message of messages) {
+        if (!message || !message.id) continue;
+        const previous = byMessageId.get(message.id);
+        if (!previous || JSON.stringify(previous) !== JSON.stringify(message)) changed = true;
+        byMessageId.set(message.id, message);
+      }
+      if (!changed) return false;
+      state.currentBundle.messages = [...byMessageId.values()];
+      return true;
+    }
+
+    function syncNativeEventsInBundle(events) {
+      if (!state.currentBundle || !Array.isArray(events) || !events.length) return false;
+      const current = Array.isArray(state.currentBundle.events) ? state.currentBundle.events : [];
+      const byEventId = new Map(current.map((event) => [event.id, event]));
+      let changed = false;
+      for (const event of events) {
+        if (!event || !event.id) continue;
+        const previous = byEventId.get(event.id);
+        if (!previous || JSON.stringify(previous) !== JSON.stringify(event)) changed = true;
+        byEventId.set(event.id, event);
+      }
+      if (!changed) return false;
+      state.currentBundle.events = [...byEventId.values()];
+      return true;
+    }
+
+    function nativeStreamingMessageNode(messages) {
       const process = state.activeNativeProcess || {};
-      if (!process.id) {
-        renderNativeTerminalStatus("idle");
-        return;
+      if (
+        !state.nativeStreamingActive
+        || !["claude-code", "gemini-cli"].includes(process.harness_id)
+        || !process.run_id
+      ) return null;
+      const events = eventsAfterLatestMessage(process.run_id, messages);
+      const node = buildMessageNode(
+        {
+          id: `native-stream:${process.id}`,
+          role: "assistant",
+          run_id: process.run_id,
+          content: state.nativeStreamingText,
+          harness_id: process.harness_id,
+          api_mode: process.api_mode || currentApiMode(),
+          metadata: {}
+        },
+        {
+          live: true,
+          liveStatus: "running",
+          tools: toolsFromEvents(events)
+        }
+      );
+      node.dataset.nativeStreamingProcessId = process.id;
+      return node;
+    }
+
+    function appendNativeStreamingMessage(list, messages) {
+      const node = nativeStreamingMessageNode(messages);
+      if (node) list.appendChild(node);
+    }
+
+    function renderNativeStreamingDraft() {
+      const list = byId("message-list");
+      if (!list) return;
+      const existing = list.querySelector("[data-native-streaming-process-id]");
+      const messages = state.currentBundle && Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
+      const replacement = nativeStreamingMessageNode(messages);
+      if (existing && replacement) existing.replaceWith(replacement);
+      else if (existing) existing.remove();
+      else if (replacement) list.appendChild(replacement);
+      if (replacement && isChatNearBottom()) scrollChatToBottom();
+    }
+
+    function beginNativeResponseStream() {
+      const process = state.activeNativeProcess || {};
+      if (!["claude-code", "gemini-cli"].includes(process.harness_id)) return;
+      state.nativeTerminalText = "";
+      state.nativeStreamingActive = true;
+      state.nativeStreamingText = "";
+      renderNativeStreamingDraft();
+    }
+
+    function finishNativeResponseStream() {
+      state.nativeStreamingActive = false;
+      state.nativeStreamingText = "";
+    }
+
+    function geminiStreamingTextFromTerminal(value) {
+      const lines = String(value || "").replace(/\r/g, "").split("\n");
+      let promptIndex = -1;
+      for (let index = 0; index < lines.length; index += 1) {
+        if (/^\s*>\s+\S/.test(lines[index])) promptIndex = index;
       }
-      const result = await getJson(`/api/native/processes/${encodeURIComponent(process.id)}/output?cursor=${state.nativeOutputCursor}`);
-      if (!result.ok) {
-        appendNativeTerminalLine(result.data.detail || "Native output polling failed.");
-        stopNativePolling();
-        renderNativeTerminalStatus("error");
-        return;
+      if (promptIndex === -1) return "";
+      let responseIndex = -1;
+      for (let index = promptIndex + 1; index < lines.length; index += 1) {
+        if (/^\s*✦(?:\s|$)/.test(lines[index])) {
+          responseIndex = index;
+          break;
+        }
       }
-      const body = result.data || {};
+      if (responseIndex === -1) return "";
+      const response = [];
+      for (let index = responseIndex; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (index > responseIndex && /^\s*>\s*$/.test(line)) break;
+        response.push(index === responseIndex ? line.replace(/^\s*✦\s?/, "") : line.replace(/^ {2}/, ""));
+      }
+      return response.join("\n").trim();
+    }
+
+    function updateNativeStreamingFromTerminal() {
+      const process = state.activeNativeProcess || {};
+      if (!state.nativeStreamingActive || process.harness_id !== "gemini-cli") return false;
+      const candidate = geminiStreamingTextFromTerminal(state.nativeTerminalText);
+      if (!candidate || candidate === state.nativeStreamingText) return false;
+      if (state.nativeStreamingText && candidate.length < state.nativeStreamingText.length) return false;
+      state.nativeStreamingText = candidate;
+      return true;
+    }
+
+    async function consumeNativeOutputPayload(body, processId) {
+      const process = state.activeNativeProcess || {};
+      if (!process.id || (processId && process.id !== processId)) return;
       state.nativeOutputCursor = body.cursor || state.nativeOutputCursor;
       const outputs = Array.isArray(body.outputs) ? body.outputs : [];
+      let nativeStreamChanged = false;
       for (const output of outputs) {
-        appendNativeTerminal(output.text || "");
+        nativeStreamChanged = appendNativeTerminal(output.text || "") || nativeStreamChanged;
       }
       if (outputs.length) state.nativePollBurstUntil = Date.now() + NATIVE_POLL_BURST_MS;
       const status = body.status || (body.run && body.run.status) || "running";
@@ -5642,11 +6031,34 @@
         syncNativeRunInBundle(body.run);
         renderInspector();
       }
+      const nativeMessages = Array.isArray(body.messages) ? body.messages : [];
+      const nativeEvents = Array.isArray(body.events) ? body.events : [];
+      const currentMessageIds = new Set(
+        state.currentBundle && Array.isArray(state.currentBundle.messages)
+          ? state.currentBundle.messages.map((message) => message.id)
+          : []
+      );
+      const hasNewAssistantMessage = nativeMessages.some(
+        (message) => message && ["assistant", "error"].includes(message.role) && !currentMessageIds.has(message.id)
+      );
+      const messagesChanged = syncNativeMessagesInBundle(nativeMessages);
+      const eventsChanged = syncNativeEventsInBundle(nativeEvents);
+      if (hasNewAssistantMessage) {
+        finishNativeResponseStream();
+      }
+      if (messagesChanged || eventsChanged) {
+        renderMessages();
+      } else if (nativeStreamChanged) {
+        renderNativeStreamingDraft();
+      }
       renderNativeTerminalStatus(status);
       if (status !== "running") {
-        stopNativePolling();
+        const hadNativeStream = state.nativeStreamingActive;
+        finishNativeResponseStream();
+        if (hadNativeStream && !messagesChanged && !eventsChanged) renderNativeStreamingDraft();
+        stopNativeOutputTransport();
         resetNativeTrustPrompt();
-      } else {
+      } else if (!state.nativeEventSource) {
         scheduleNativePoll(Date.now() < state.nativePollBurstUntil ? NATIVE_ACTIVE_POLL_MS : NATIVE_IDLE_POLL_MS);
       }
       if (body.run) setNativeSummary(pretty({ process: state.activeNativeProcess, run: body.run }));
@@ -5661,6 +6073,73 @@
           syncRoute: false
         });
       }
+    }
+
+    async function pollNativeOutput() {
+      const process = state.activeNativeProcess || {};
+      if (!process.id) {
+        renderNativeTerminalStatus("idle");
+        return;
+      }
+      const result = await getJson(`/api/native/processes/${encodeURIComponent(process.id)}/output?cursor=${state.nativeOutputCursor}`);
+      if (!result.ok) {
+        appendNativeTerminalLine(result.data.detail || "Native output polling failed.");
+        stopNativePolling();
+        renderNativeTerminalStatus("error");
+        return;
+      }
+      await consumeNativeOutputPayload(result.data || {}, process.id);
+    }
+
+    function startNativeOutputTransport() {
+      const process = state.activeNativeProcess || {};
+      if (!process.id) return;
+      stopNativePolling();
+      if (!window.EventSource) {
+        scheduleNativePoll(0);
+        return;
+      }
+      openNativeOutputStream(process.id);
+    }
+
+    function openNativeOutputStream(processId) {
+      closeNativeOutputStream();
+      const query = `?cursor=${encodeURIComponent(state.nativeOutputCursor)}`;
+      const source = new EventSource(`/api/native/processes/${encodeURIComponent(processId)}/output/stream${query}`);
+      state.nativeEventSource = source;
+      state.nativeEventSourceProcessId = processId;
+      state.nativeStreamFailures = 0;
+      source.onmessage = async (event) => {
+        if (state.nativeEventSource !== source || state.nativeEventSourceProcessId !== processId) return;
+        state.nativeStreamFailures = 0;
+        let payload = {};
+        try {
+          payload = JSON.parse(event.data || "{}");
+        } catch (error) {
+          appendNativeTerminalLine("Native output stream returned an invalid event.");
+          return;
+        }
+        await consumeNativeOutputPayload(payload, processId);
+      };
+      source.onerror = () => {
+        if (state.nativeEventSource !== source || state.nativeEventSourceProcessId !== processId) return;
+        const process = state.activeNativeProcess || {};
+        if (process.id !== processId || process.status !== "running") {
+          closeNativeOutputStream();
+          return;
+        }
+        state.nativeStreamFailures += 1;
+        if (state.nativeStreamFailures < NATIVE_STREAM_FAILURE_LIMIT) return;
+        closeNativeOutputStream();
+        scheduleNativePoll(NATIVE_ACTIVE_POLL_MS);
+      };
+    }
+
+    function closeNativeOutputStream() {
+      if (state.nativeEventSource) state.nativeEventSource.close();
+      state.nativeEventSource = null;
+      state.nativeEventSourceProcessId = null;
+      state.nativeStreamFailures = 0;
     }
 
     function maybeShowNativeTrustPrompt() {
@@ -5709,13 +6188,16 @@
       await pollNativeOutput();
     }
 
-    async function sendNativeProcessInput(data, message = null) {
+    async function sendNativeProcessInput(data, message = null, submit = false) {
       const process = state.activeNativeProcess || {};
       if (!process.id) return { ok: false, data: { detail: "Native process is unavailable." } };
+      const body = { data };
+      if (message) body.message = message;
+      if (submit) body.submit = true;
       return getJson(`/api/native/processes/${encodeURIComponent(process.id)}/input`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(message ? { data, message } : { data })
+        body: JSON.stringify(body)
       });
     }
 
@@ -5747,19 +6229,96 @@
       }, delay);
     }
 
+    function stopNativeOutputTransport() {
+      closeNativeOutputStream();
+      stopNativePolling();
+      stopNativeResizeObserver();
+    }
+
+    function nativeTerminalDimensions() {
+      const terminal = byId("native-terminal-output");
+      if (!terminal || terminal.clientWidth <= 0 || terminal.clientHeight <= 0) {
+        return { rows: 24, columns: 80 };
+      }
+      const style = window.getComputedStyle(terminal);
+      const fontSize = Number.parseFloat(style.fontSize) || 12;
+      const lineHeight = Number.parseFloat(style.lineHeight) || fontSize * 1.4;
+      const horizontalPadding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+      const verticalPadding = (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0);
+      const rows = Math.max(NATIVE_MIN_ROWS, Math.min(NATIVE_MAX_ROWS, Math.floor((terminal.clientHeight - verticalPadding) / lineHeight)));
+      const columns = Math.max(NATIVE_MIN_COLUMNS, Math.min(NATIVE_MAX_COLUMNS, Math.floor((terminal.clientWidth - horizontalPadding) / (fontSize * 0.62))));
+      return { rows, columns };
+    }
+
+    async function resizeNativeTerminal() {
+      const process = state.activeNativeProcess || {};
+      if (!process.id || process.status !== "running" || process.transport === "pipes") return;
+      const size = nativeTerminalDimensions();
+      if (
+        state.nativeTerminalSize
+        && state.nativeTerminalSize.rows === size.rows
+        && state.nativeTerminalSize.columns === size.columns
+      ) return;
+      const result = await getJson(`/api/native/processes/${encodeURIComponent(process.id)}/resize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(size)
+      });
+      if (!result.ok) {
+        stopNativeResizeObserver();
+        return;
+      }
+      state.nativeTerminalSize = size;
+    }
+
+    function scheduleNativeResize() {
+      if (state.nativeResizeTimer) window.clearTimeout(state.nativeResizeTimer);
+      state.nativeResizeTimer = window.setTimeout(() => {
+        state.nativeResizeTimer = null;
+        resizeNativeTerminal();
+      }, NATIVE_RESIZE_DELAY_MS);
+    }
+
+    function startNativeResizeObserver() {
+      stopNativeResizeObserver();
+      const process = state.activeNativeProcess || {};
+      if (!process.id || process.status !== "running" || process.transport === "pipes") return;
+      state.nativeTerminalSize = null;
+      if (window.ResizeObserver) {
+        state.nativeResizeObserver = new ResizeObserver(scheduleNativeResize);
+        state.nativeResizeObserver.observe(byId("native-terminal-output"));
+      }
+      scheduleNativeResize();
+    }
+
+    function stopNativeResizeObserver() {
+      if (state.nativeResizeTimer) window.clearTimeout(state.nativeResizeTimer);
+      state.nativeResizeTimer = null;
+      if (state.nativeResizeObserver) state.nativeResizeObserver.disconnect();
+      state.nativeResizeObserver = null;
+      state.nativeTerminalSize = null;
+    }
+
     function clearNativeTerminal() {
       state.nativeTerminalText = "";
+      finishNativeResponseStream();
+      renderNativeStreamingDraft();
       setText("native-terminal-output", "Terminal output will appear here.");
       resetNativeTrustPrompt();
     }
 
     function appendNativeTerminal(text) {
-      const clean = stripAnsi(text);
+      const raw = String(text || "");
+      if (raw.includes("\x1B[2J") || raw.includes("\x1B[3J")) {
+        state.nativeTerminalText = "";
+      }
+      const clean = stripAnsi(raw);
       state.nativeTerminalText += clean;
       if (state.nativeTerminalText.length > NATIVE_TERMINAL_CHAR_LIMIT) {
         state.nativeTerminalText = state.nativeTerminalText.slice(-NATIVE_TERMINAL_CHAR_LIMIT);
       }
       setText("native-terminal-output", state.nativeTerminalText || "Terminal output will appear here.");
+      return updateNativeStreamingFromTerminal();
     }
 
     function appendNativeTerminalLine(text) {
@@ -5815,6 +6374,12 @@
         lines.push("Render plan");
         const metadata = renderPlan.metadata || {};
         if (metadata.transport) lines.push(`transport: ${metadata.transport}`);
+        if (Array.isArray(metadata.deliveries) && metadata.deliveries.length) {
+          lines.push("deliveries:");
+          for (const delivery of metadata.deliveries) {
+            lines.push(`- ${delivery.kind || "attachment"}: ${delivery.transport || "unknown"} · ${delivery.rich ? "rich" : "reference-only"}`);
+          }
+        }
         if (Array.isArray(renderPlan.warnings) && renderPlan.warnings.length) {
           lines.push("warnings:");
           for (const warning of renderPlan.warnings) lines.push(`- ${warning}`);
@@ -6450,7 +7015,11 @@
       byId("continue-preflight-button").addEventListener("click", () => closePreflightModal(true));
       byId("auth-form").addEventListener("submit", authenticateBrowser);
       window.addEventListener("popstate", () => applyCurrentRoute());
-      window.addEventListener("resize", syncNavigation);
+      window.addEventListener("resize", () => {
+        syncNavigation();
+        scheduleNativeResize();
+      });
+      window.addEventListener("beforeunload", stopNativeOutputTransport);
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && state.nativeModalOpen) closeNativeHistory();
         if (event.key === "Escape" && state.preflightModalOpen) closePreflightModal(false);
@@ -6459,6 +7028,7 @@
       });
       byId("native-all-workspaces-checkbox").addEventListener("change", () => loadNativeSessions(false, { resetVisible: true }));
       byId("poll-native-output-button").addEventListener("click", pollNativeOutput);
+      byId("native-terminal-diagnostics").addEventListener("toggle", scheduleNativeResize);
       byId("native-trust-yes-button").addEventListener("click", () => respondToNativeTrust(true));
       byId("native-trust-no-button").addEventListener("click", () => respondToNativeTrust(false));
       byId("stop-native-process-button").addEventListener("click", stopNativeProcess);
@@ -6502,6 +7072,7 @@
       });
       byId("run-button").addEventListener("click", runHarness);
       byId("arena-compare-button").addEventListener("click", runArena);
+      byId("interrupt-run-button").addEventListener("click", () => runHarness("interrupt"));
       byId("cancel-run-button").addEventListener("click", cancelHeadlessRun);
       byId("apply-route-recommendation-button").addEventListener("click", applyRouteRecommendation);
       byId("apply-run-diff-button").addEventListener("click", applyRunDiff);

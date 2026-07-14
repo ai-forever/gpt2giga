@@ -5,11 +5,16 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import quote
 
+from gpt2giga_harness.cli_capabilities import (
+    CliCapabilitySnapshot,
+    cli_probe_availability,
+    probe_cli_capabilities,
+)
 from gpt2giga_harness.harnesses.agent_cli import (
     StreamTerminalOutcome,
     build_safe_env,
-    executable_availability,
     message_delta_event,
     prepare_proxy_for_agent,
     run_command,
@@ -18,23 +23,31 @@ from gpt2giga_harness.harnesses.agent_cli import (
     tool_call_event,
     usage_event,
     with_events,
+    with_raw_metadata,
     workspace_error,
 )
 from gpt2giga_harness.harnesses.attachment_plan import (
+    attachment_capability_error,
     attachment_raw_metadata,
     attachment_warning_events,
     cli_args_from_attachments,
     prompt_with_attachments,
 )
+from gpt2giga_harness.harnesses.adapter_parity import claude_adapter_capabilities
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.native import HarnessInvocationMode
-from gpt2giga_harness.managed_mcp import write_startup_config
+from gpt2giga_harness.managed_mcp import (
+    materialize_headless_mcp_snapshot,
+    write_startup_config,
+)
 from gpt2giga_harness.types import (
+    AttachmentTransportSupport,
     Availability,
     HarnessCapability,
     HarnessContext,
     HarnessEvent,
+    HeadlessContinuationStrategy,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -46,6 +59,25 @@ MODE_TO_PERMISSION = {
     "read": "plan",
     "edit": "default",
 }
+HARNESS_MODEL_HEADER = "X-GPT2GIGA-Harness-Model"
+PASS_MODEL_HEADER = "X-GPT2GIGA-Pass-Model"
+
+
+def claude_code_custom_headers(
+    context: HarnessContext,
+    model: str,
+) -> str:
+    """Pin all Claude Code requests to the Harness-selected model."""
+    harness_headers = "\n".join(
+        (
+            f"{HARNESS_MODEL_HEADER}:{quote(model, safe='')}",
+            f"{PASS_MODEL_HEADER}:false",
+        )
+    )
+    existing_headers = context.extra_env.get("ANTHROPIC_CUSTOM_HEADERS")
+    if existing_headers:
+        return f"{existing_headers.rstrip()}\n{harness_headers}"
+    return harness_headers
 
 
 class ClaudeCodeHarness(BaseHarness):
@@ -80,26 +112,37 @@ class ClaudeCodeHarness(BaseHarness):
                 "document",
             ),
             attachment_transport=("prompt_path_reference", "at_file_reference"),
+            attachment_capabilities={
+                kind: AttachmentTransportSupport(
+                    headless=("prompt_path_reference", "at_file_reference"),
+                    native=("prompt_path_reference", "at_file_reference"),
+                    detail=(
+                        "Claude Code receives a contained path reference; rich image "
+                        "or document transport is not claimed without CLI evidence."
+                    ),
+                )
+                for kind in ("image", "text", "workspace_file", "document")
+            },
             supports_native_sessions=True,
             supports_external_history=True,
             default_invocation_mode=HarnessInvocationMode.NATIVE,
+            headless_continuation=HeadlessContinuationStrategy.UNSUPPORTED,
             tags=("claude", "agent"),
+            adapter_capabilities=claude_adapter_capabilities(),
         )
 
     def availability(self) -> Availability:
-        resolution = self.executable_resolution()
-        if resolution.error is not None:
-            return Availability.error(resolution.error)
-        return executable_availability(
-            executable=resolution.executable,
-            executable_name="claude",
+        return cli_probe_availability(
+            self.capability_probe(),
             install_hint=(
                 "Install Claude Code on PATH or configure executables.claude-code "
                 "in ~/.gpt2giga/harness/config.toml."
             ),
-            version_args=None,
-            source=resolution.source,
         )
+
+    def capability_probe(self) -> CliCapabilitySnapshot:
+        """Return cached, version-aware Claude adapter evidence."""
+        return probe_cli_capabilities(self.executable_resolution(), self.spec().id)
 
     def executable_resolution(self) -> ExecutableResolution:
         """Return the configured or PATH-discovered Claude executable."""
@@ -112,7 +155,7 @@ class ClaudeCodeHarness(BaseHarness):
     ) -> tuple[str, ...]:
         """Build the Claude Code command without executing it."""
         resolution = self.executable_resolution()
-        executable = resolution.executable or resolution.configured or "claude"
+        executable_argv = resolution.command or ("claude",)
         model = request.model or context.default_model or "GigaChat"
         permission_mode = MODE_TO_PERMISSION.get(
             request.mode, MODE_TO_PERMISSION["plan"]
@@ -122,8 +165,9 @@ class ClaudeCodeHarness(BaseHarness):
         stream_args = (
             ("--include-partial-messages", "--verbose") if request.stream else ()
         )
+        profile_args = _agent_profile_args(request)
         return (
-            executable,
+            *executable_argv,
             "--bare",
             "--safe-mode",
             "-p",
@@ -135,6 +179,7 @@ class ClaudeCodeHarness(BaseHarness):
             "--no-session-persistence",
             "--permission-mode",
             permission_mode,
+            *profile_args,
             *cli_args_from_attachments(request),
             prompt,
         )
@@ -147,12 +192,17 @@ class ClaudeCodeHarness(BaseHarness):
         home: str | None = None,
     ) -> dict[str, str]:
         """Build a sanitized environment for Claude Code."""
+        model = request.model or context.default_model or "GigaChat"
         return build_safe_env(
             context,
             home=home,
             extra={
                 "ANTHROPIC_BASE_URL": context.api_base_url(request.api_mode),
                 "ANTHROPIC_API_KEY": context.api_key or "0",
+                "ANTHROPIC_CUSTOM_HEADERS": claude_code_custom_headers(
+                    context,
+                    model,
+                ),
                 "GPT2GIGA_HARNESS_PROXY_URL": context.proxy_url,
                 "GPT2GIGA_HARNESS_API_MODE": request.api_mode.value,
             },
@@ -196,6 +246,19 @@ class ClaudeCodeHarness(BaseHarness):
                 command=command,
                 error=availability.reason,
             )
+        attachment_error = attachment_capability_error(
+            request,
+            self.capability_probe().capabilities,
+            surface="headless_one_shot",
+        )
+        if attachment_error is not None:
+            return HarnessResult(
+                ok=False,
+                text="",
+                raw=attachment_raw_metadata(request),
+                command=command,
+                error=attachment_error,
+            )
         prepared_context, proxy_events, proxy_error = prepare_proxy_for_agent(
             request,
             context,
@@ -205,6 +268,12 @@ class ClaudeCodeHarness(BaseHarness):
             return proxy_error
         with tempfile.TemporaryDirectory(prefix="gpt2giga-claude-") as temp_dir:
             _write_claude_settings(Path(temp_dir))
+            managed_mcp = materialize_headless_mcp_snapshot(
+                "claude-code",
+                temp_dir,
+                _managed_mcp_reference(request),
+                data_dir=context.data_dir,
+            )
             prepared_env = self.build_env(request, prepared_context, home=temp_dir)
             if request.stream:
                 result = run_streaming_command(
@@ -224,14 +293,52 @@ class ClaudeCodeHarness(BaseHarness):
                     cwd=request.workspace,
                     timeout_seconds=context.timeout_seconds,
                 )
-            return with_events(
-                result,
-                (*attachment_warning_events(request), *proxy_events),
+            return with_raw_metadata(
+                with_events(
+                    result,
+                    (*attachment_warning_events(request), *proxy_events),
+                ),
+                {"managed_mcp_snapshot": managed_mcp} if managed_mcp else None,
             )
 
 
 def _write_claude_settings(home: Path) -> None:
     write_startup_config("claude-code", home, {})
+
+
+def _managed_mcp_reference(request: HarnessRequest) -> Mapping[str, Any] | None:
+    value = request.extra.get("managed_mcp_snapshot")
+    return dict(value) if isinstance(value, Mapping) else None
+
+
+def _agent_profile_args(request: HarnessRequest) -> tuple[str, ...]:
+    """Return only fixed, validated AgentProfile CLI options."""
+    options = request.extra.get("agent_adapter_options")
+    if not isinstance(options, Mapping):
+        return ()
+    args: list[str] = []
+    effort = options.get("reasoning_effort")
+    if effort in {"low", "medium", "high"}:
+        args.extend(("--effort", str(effort)))
+    for name, flag in (
+        ("allowed_tools", "--allowedTools"),
+        ("disallowed_tools", "--disallowedTools"),
+    ):
+        values = options.get(name)
+        if not isinstance(values, list):
+            continue
+        safe_values = [
+            value
+            for value in values
+            if isinstance(value, str)
+            and value
+            and len(value) <= 200
+            and not value.startswith("-")
+            and not any(character in value for character in ("\x00", "\n", "\r"))
+        ]
+        if safe_values and len(safe_values) == len(values):
+            args.extend((flag, ",".join(safe_values)))
+    return tuple(args)
 
 
 class _ClaudeStreamParser:
@@ -242,9 +349,12 @@ class _ClaudeStreamParser:
         self._blocks: dict[int, dict[str, Any]] = {}
         self._started_tools: set[str] = set()
         self.terminal_outcome: StreamTerminalOutcome | None = None
+        self.recognized_payloads = 0
 
     def __call__(self, payload: Mapping[str, Any]) -> tuple[HarnessEvent, ...]:
         event_type = str(payload.get("type") or "")
+        if event_type in {"stream_event", "assistant", "user", "result", "error"}:
+            self.recognized_payloads += 1
         events: list[HarnessEvent] = []
         if event_type == "stream_event":
             events.extend(self._stream_events(_mapping(payload.get("event"))))

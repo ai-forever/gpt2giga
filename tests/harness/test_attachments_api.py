@@ -44,6 +44,15 @@ def test_attachments_api_upload_list_fetch_metadata_and_delete(tmp_path):
     assert attachment["url"] == f"/api/attachments/{attachment_id}"
     assert attachment["supported_by"]["direct-chat"] is True
     assert attachment["supported_by"]["echo"] is True
+    assert attachment["transport_by"]["codex-cli"]["rich"] is True
+    assert attachment["transport_by"]["codex-cli"]["required_cli_capabilities"] == [
+        "--image"
+    ]
+    assert attachment["transport_by"]["claude-code"]["rich"] is False
+    assert (
+        "claude-code uses path or metadata reference only for image attachments."
+        in attachment["warnings"]
+    )
     assert "storage_path" not in attachment
 
     listed = client.get(f"/api/sessions/{session_id}/attachments")

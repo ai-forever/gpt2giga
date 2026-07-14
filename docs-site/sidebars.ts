@@ -40,6 +40,7 @@ const sidebars: SidebarsConfig = {
       label: 'Architecture',
       collapsible: false,
       items: [
+        'architecture/harness',
         'architecture/normalized-messages',
         'architecture/logging-and-observability',
         'architecture/how-to-add-provider',

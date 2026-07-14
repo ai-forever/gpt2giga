@@ -4,14 +4,27 @@ on:
   push:
     branches: [ main ]
     paths:
+      - '**/*.md'
       - 'docs/**'
       - 'docs-site/**'
+      - '.env.example'
+      - 'packages/*/pyproject.toml'
+      - 'packages/gpt2giga/src/gpt2giga/models/config.py'
+      - 'scripts/check_docs.py'
+      - 'tests/test_scripts/test_check_docs.py'
       - '.github/workflows/docs-pages.yaml'
   pull_request:
     branches: [ main ]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - '**/*.md'
       - 'docs/**'
       - 'docs-site/**'
+      - '.env.example'
+      - 'packages/*/pyproject.toml'
+      - 'packages/gpt2giga/src/gpt2giga/models/config.py'
+      - 'scripts/check_docs.py'
+      - 'tests/test_scripts/test_check_docs.py'
       - '.github/workflows/docs-pages.yaml'
   workflow_dispatch:
 
@@ -26,6 +39,7 @@ jobs:
   build:
     name: Build docs
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
 
     steps:
       - name: Checkout repository
@@ -37,6 +51,9 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: docs-site/package-lock.json
+
+      - name: Validate documentation contracts
+        run: python3 scripts/check_docs.py
 
       - name: Install docs dependencies
         working-directory: docs-site

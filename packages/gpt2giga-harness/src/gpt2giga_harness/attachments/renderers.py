@@ -67,6 +67,10 @@ def render_for_echo(
         metadata={
             "transport": "metadata_only",
             "attachments": [_summary(attachment) for attachment in attachment_list],
+            "deliveries": [
+                _delivery(attachment, transport="metadata_only")
+                for attachment in attachment_list
+            ],
         }
     )
 
@@ -85,6 +89,7 @@ def render_for_direct_chat(
         content_parts.append({"type": "text", "text": prompt})
     prompt_blocks: list[str] = []
     warnings: list[str] = []
+    deliveries: list[dict[str, Any]] = []
     for attachment in attachment_list:
         kind = _effective_kind(attachment)
         if kind == AttachmentKind.IMAGE.value and attachment.storage_path:
@@ -98,6 +103,14 @@ def render_for_direct_chat(
                     },
                 }
             )
+            deliveries.append(
+                _delivery(
+                    attachment,
+                    transport="openai_content_parts",
+                    rich=True,
+                    surfaces=("headless",),
+                )
+            )
             continue
         if kind == AttachmentKind.TEXT.value:
             block, warning = _inline_text_block(
@@ -109,15 +122,36 @@ def render_for_direct_chat(
                 prompt_blocks.append(block)
             if warning:
                 warnings.append(warning)
+            deliveries.append(
+                _delivery(
+                    attachment,
+                    transport="inline_text",
+                    surfaces=("headless",),
+                )
+            )
             continue
         if attachment.kind == AttachmentKind.WORKSPACE_FILE.value:
             prompt_blocks.append(_workspace_reference(attachment))
             warnings.append(
                 f"{attachment.filename} is referenced by workspace path only."
             )
+            deliveries.append(
+                _delivery(
+                    attachment,
+                    transport="prompt_path_reference",
+                    surfaces=("headless",),
+                )
+            )
             continue
         warnings.append(
             f"{attachment.filename} is {kind}; direct-chat will use metadata only."
+        )
+        deliveries.append(
+            _delivery(
+                attachment,
+                transport="metadata_only",
+                surfaces=("headless",),
+            )
         )
     return _plan(
         prompt_prefix="\n\n".join(prompt_blocks),
@@ -127,6 +161,7 @@ def render_for_direct_chat(
             "transport": "openai_content_parts",
             "attachments": [_summary(attachment) for attachment in attachment_list],
             "content_part_count": len(content_parts),
+            "deliveries": deliveries,
         },
     )
 
@@ -144,15 +179,27 @@ def render_for_codex_cli(
     referenced_files: list[HarnessAttachment] = []
     image_paths: list[str] = []
     warnings: list[str] = []
+    deliveries: list[dict[str, Any]] = []
     for attachment in attachment_list:
         if _effective_kind(attachment) != AttachmentKind.IMAGE.value:
             referenced_files.append(attachment)
+            deliveries.append(_path_delivery(attachment))
             continue
         image_path = _attachment_path(attachment)
         if image_path:
             image_paths.append(image_path)
+            deliveries.append(
+                _delivery(
+                    attachment,
+                    transport="cli_image_flag",
+                    rich=True,
+                    required_cli_capabilities=("--image",),
+                    surfaces=("headless_one_shot", "native"),
+                )
+            )
             continue
         referenced_files.append(attachment)
+        deliveries.append(_path_delivery(attachment))
         warnings.append(
             f"{attachment.filename} has no readable path for the Codex CLI image flag."
         )
@@ -161,6 +208,9 @@ def render_for_codex_cli(
         workspace_prefix="@",
         uploaded_label="Local attachment path",
         image_warning="Codex CLI will receive this image as a path reference only.",
+        document_warning=(
+            "Codex CLI will receive this document as a path reference only."
+        ),
     )
     warnings.extend(reference_warnings)
     cli_args = tuple(
@@ -180,6 +230,8 @@ def render_for_codex_cli(
             "transport": transport,
             "attachments": [_summary(attachment) for attachment in attachment_list],
             "image_count": len(image_paths),
+            "deliveries": deliveries,
+            "required_cli_capabilities": ["--image"] if image_paths else [],
         },
     )
 
@@ -199,6 +251,9 @@ def render_for_claude_code(
         workspace_prefix="@",
         uploaded_label="Local attachment path",
         image_warning="Claude Code will receive this attachment as a path reference.",
+        document_warning=(
+            "Claude Code will receive this document as a path reference only."
+        ),
     )
     return _plan(
         prompt_prefix=prefix,
@@ -206,6 +261,9 @@ def render_for_claude_code(
         metadata={
             "transport": "at_file_reference",
             "attachments": [_summary(attachment) for attachment in attachment_list],
+            "deliveries": [
+                _path_delivery(attachment) for attachment in attachment_list
+            ],
         },
     )
 
@@ -225,6 +283,9 @@ def render_for_gemini_cli(
         workspace_prefix="@",
         uploaded_label="Local attachment path",
         image_warning="Gemini CLI will receive this image as a path reference only.",
+        document_warning=(
+            "Gemini CLI will receive this document as a path reference only."
+        ),
     )
     return _plan(
         prompt_prefix=prefix,
@@ -232,6 +293,9 @@ def render_for_gemini_cli(
         metadata={
             "transport": "at_file_reference",
             "attachments": [_summary(attachment) for attachment in attachment_list],
+            "deliveries": [
+                _path_delivery(attachment) for attachment in attachment_list
+            ],
         },
     )
 
@@ -242,6 +306,7 @@ def _agent_reference_prefix(
     workspace_prefix: str,
     uploaded_label: str,
     image_warning: str,
+    document_warning: str,
 ) -> tuple[str, list[str]]:
     lines: list[str] = []
     warnings: list[str] = []
@@ -261,6 +326,8 @@ def _agent_reference_prefix(
         )
         if _effective_kind(attachment) == AttachmentKind.IMAGE.value:
             warnings.append(image_warning)
+        elif _effective_kind(attachment) == AttachmentKind.DOCUMENT.value:
+            warnings.append(document_warning)
     return "\n".join(lines), warnings
 
 
@@ -335,6 +402,37 @@ def _effective_kind(attachment: HarnessAttachment) -> str:
         if isinstance(detected, str) and detected:
             return detected
     return attachment.kind
+
+
+def _path_delivery(attachment: HarnessAttachment) -> dict[str, Any]:
+    transport = (
+        "at_file_reference"
+        if attachment.kind == AttachmentKind.WORKSPACE_FILE.value
+        else "prompt_path_reference"
+    )
+    return _delivery(
+        attachment,
+        transport=transport,
+        surfaces=("headless", "headless_one_shot", "structured_thread", "native"),
+    )
+
+
+def _delivery(
+    attachment: HarnessAttachment,
+    *,
+    transport: str,
+    rich: bool = False,
+    required_cli_capabilities: tuple[str, ...] = (),
+    surfaces: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    return {
+        "attachment_id": attachment.id,
+        "kind": _effective_kind(attachment),
+        "transport": transport,
+        "rich": rich,
+        "required_cli_capabilities": list(required_cli_capabilities),
+        "surfaces": list(surfaces),
+    }
 
 
 def _summary(attachment: HarnessAttachment) -> dict[str, Any]:

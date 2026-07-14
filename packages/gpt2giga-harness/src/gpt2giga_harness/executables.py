@@ -11,6 +11,8 @@ import shutil
 import tempfile
 from typing import Any, Mapping
 
+from gpt2giga_harness.types import redact_secrets
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback.
@@ -36,12 +38,23 @@ class ExecutableResolution:
     executable: str | None
     source: str
     configured: str | None = None
+    argv: tuple[str, ...] = ()
+    configured_argv: tuple[str, ...] = ()
     error: str | None = None
 
     @property
     def available(self) -> bool:
         """Return whether an executable is ready to launch."""
         return self.executable is not None and self.error is None
+
+    @property
+    def command(self) -> tuple[str, ...]:
+        """Return the safe argv prefix used to launch the executable."""
+        if self.argv:
+            return self.argv
+        if self.executable:
+            return (self.executable,)
+        return ()
 
 
 class ExecutableResolver:
@@ -98,6 +111,7 @@ class ExecutableResolver:
             command_name=command_name,
             executable=executable,
             source="path" if executable is not None else "missing",
+            argv=(executable,) if executable is not None else (),
         )
 
     def _resolve_configured(
@@ -106,6 +120,8 @@ class ExecutableResolver:
         command_name: str,
         value: Any,
     ) -> ExecutableResolution:
+        if isinstance(value, (list, tuple)):
+            return self._resolve_configured_argv(harness_id, command_name, value)
         if not isinstance(value, str) or not value.strip():
             return self._configured_error(
                 harness_id,
@@ -136,6 +152,55 @@ class ExecutableResolver:
             executable=executable,
             source="user_config",
             configured=configured,
+            argv=(executable,),
+            configured_argv=(configured,),
+        )
+
+    def _resolve_configured_argv(
+        self,
+        harness_id: str,
+        command_name: str,
+        value: list[Any] | tuple[Any, ...],
+    ) -> ExecutableResolution:
+        if not value or any(
+            not isinstance(item, str)
+            or not item.strip()
+            or "\x00" in item
+            or len(item) > 4096
+            for item in value
+        ):
+            return self._configured_error(
+                harness_id,
+                command_name,
+                None,
+                "argv must contain non-empty bounded strings",
+            )
+        configured_argv = tuple(item.strip() for item in value)
+        expanded = Path(configured_argv[0]).expanduser()
+        if not expanded.is_absolute():
+            return self._configured_error(
+                harness_id,
+                command_name,
+                configured_argv[0],
+                "argv executable must be an absolute path",
+            )
+        executable = shutil.which(str(expanded))
+        if executable is None:
+            return self._configured_error(
+                harness_id,
+                command_name,
+                configured_argv[0],
+                "argv executable does not exist or is not executable",
+            )
+        argv = (executable, *configured_argv[1:])
+        return ExecutableResolution(
+            harness_id=harness_id,
+            command_name=command_name,
+            executable=executable,
+            source="user_config",
+            configured=configured_argv[0],
+            argv=argv,
+            configured_argv=configured_argv,
         )
 
     def _configured_error(
@@ -232,8 +297,15 @@ def executable_resolution_to_dict(
         "executable": resolution.executable,
         "executable_source": resolution.source,
         "configured_executable": resolution.configured,
+        "executable_argv": list(_redacted_command(resolution.command)),
         "executable_error": resolution.error,
     }
+
+
+def _redacted_command(command: tuple[str, ...]) -> tuple[str, ...]:
+    if not command:
+        return ()
+    return (str(redact_secrets(command[0])), *("<arg>" for _ in command[1:]))
 
 
 def _validate_harness_id(harness_id: str) -> None:

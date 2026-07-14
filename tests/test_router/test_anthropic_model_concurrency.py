@@ -35,6 +35,7 @@ class GateAnthropicGigachat:
         self.chat_call_count = 0
         self.token_call_count = 0
         self.chat_payloads = []
+        self.token_models = []
         self.release = asyncio.Event()
 
     async def achat(self, chat):
@@ -68,6 +69,7 @@ class GateAnthropicGigachat:
 
     async def atokens_count(self, input_, model=None):
         self.token_call_count += 1
+        self.token_models.append(model)
         self.active[model] = self.active.get(model, 0) + 1
         try:
             await self.release.wait()
@@ -251,6 +253,69 @@ async def test_anthropic_messages_uses_effective_model_but_preserves_display_mod
             "messages": [{"role": "user", "content": "hello world"}],
         }
     ]
+
+
+async def test_claude_cli_harness_model_stays_pinned_for_messages_and_tokens() -> None:
+    limiter = ModelConcurrencyLimiter({"GigaChat-Selected": 1})
+    gigachat = GateAnthropicGigachat()
+    gigachat.release.set()
+    app = _make_app(
+        limiter=limiter,
+        gigachat=gigachat,
+        transformer=RecordingTransformer(upstream_model="configured-fallback"),
+    )
+    headers = {
+        "user-agent": "claude-cli/2.1.197 (external, sdk-cli)",
+        "x-gpt2giga-harness-model": "GigaChat-Selected",
+        "x-gpt2giga-pass-model": "false",
+    }
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        message = await client.post(
+            "/messages",
+            json=_message_payload("claude-haiku-4-5-20251001"),
+            headers=headers,
+        )
+        tokens = await client.post(
+            "/messages/count_tokens",
+            json=_message_payload("claude-haiku-4-5-20251001"),
+            headers=headers,
+        )
+
+    assert message.status_code == 200
+    assert message.json()["model"] == "claude-haiku-4-5-20251001"
+    assert tokens.status_code == 200
+    assert gigachat.chat_payloads[0]["model"] == "GigaChat-Selected"
+    assert gigachat.token_models[-1] == "GigaChat-Selected"
+
+
+async def test_non_claude_cli_cannot_activate_harness_model_pin() -> None:
+    limiter = ModelConcurrencyLimiter({"configured-fallback": 1})
+    gigachat = GateAnthropicGigachat()
+    gigachat.release.set()
+    app = _make_app(
+        limiter=limiter,
+        gigachat=gigachat,
+        transformer=RecordingTransformer(upstream_model="configured-fallback"),
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.post(
+            "/messages",
+            json=_message_payload("claude-haiku-4-5-20251001"),
+            headers={
+                "user-agent": "anthropic-sdk-python/1.0",
+                "x-gpt2giga-harness-model": "GigaChat-Selected",
+                "x-gpt2giga-pass-model": "false",
+            },
+        )
+
+    assert response.status_code == 200
+    assert gigachat.chat_payloads[0]["model"] == "configured-fallback"
 
 
 async def test_stream_anthropic_holds_slot_until_generator_closes() -> None:

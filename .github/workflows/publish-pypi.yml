@@ -133,6 +133,7 @@ jobs:
     needs: release_metadata
     if: ${{ needs.release_metadata.outputs.release_target == 'harness' || needs.release_metadata.outputs.release_target == 'manual' }}
     runs-on: ubuntu-latest
+    environment: pypi-harness
     permissions:
       attestations: write
       contents: read
@@ -191,8 +192,6 @@ jobs:
       - name: Publish Harness to PyPI
         if: ${{ needs.release_metadata.outputs.release_target == 'harness' }}
         shell: bash
-        env:
-          PYPI_TOKEN: ${{ secrets.PYPI_API_KEY }}
         run: |
           set -euo pipefail
-          uv publish --token "${PYPI_TOKEN}" dist/gpt2giga-harness/*
+          uv publish --trusted-publishing always dist/gpt2giga-harness/*

@@ -242,6 +242,8 @@ class FilesystemHarnessEvalStore:
             "pinned_at": utc_now(),
             "git_sha": _git_sha(project.root),
             "config_hash": _eval_config_hash(eval_run),
+            "api_mode": eval_run.api_mode.value,
+            "adapter_dimensions": list(eval_run.metadata.get("adapter_dimensions", ())),
             "summary": dict(eval_run.summary),
             "results": [eval_case_result_to_dict(item) for item in eval_run.results],
         }
@@ -331,6 +333,11 @@ def run_eval(
     effective_api_mode = parse_api_mode(api_mode or spec.api_mode)
     effective_mode = mode or spec.mode
     effective_workspace_policy = workspace_policy or spec.workspace_policy
+    adapter_dimensions = _adapter_eval_dimensions(
+        runner.registry,
+        selected_harnesses,
+        effective_api_mode,
+    )
     session = runner.create_session(
         title=f"Eval: {spec.name}",
         workspace=project.root,
@@ -359,7 +366,14 @@ def run_eval(
         metadata={
             "dry_run": dry_run,
             "repetitions": repetitions,
-            "config_hash": _spec_config_hash(spec, selected_harnesses, repetitions),
+            "adapter_dimensions": adapter_dimensions,
+            "config_hash": _spec_config_hash(
+                spec,
+                selected_harnesses,
+                repetitions,
+                api_mode=effective_api_mode,
+                adapter_dimensions=adapter_dimensions,
+            ),
         },
     )
     eval_store.save(project, eval_run)
@@ -436,6 +450,11 @@ def queue_eval(
     effective_workspace_policy = workspace_policy or spec.workspace_policy
     if origin == "scheduled":
         effective_workspace_policy = "worktree"
+    adapter_dimensions = _adapter_eval_dimensions(
+        runner.registry,
+        selected_harnesses,
+        effective_api_mode,
+    )
     session = runner.create_session(
         title=f"Eval: {spec.name}",
         workspace=project.root,
@@ -465,7 +484,14 @@ def queue_eval(
             "dry_run": dry_run,
             "durable": True,
             "repetitions": repetitions,
-            "config_hash": _spec_config_hash(spec, selected_harnesses, repetitions),
+            "adapter_dimensions": adapter_dimensions,
+            "config_hash": _spec_config_hash(
+                spec,
+                selected_harnesses,
+                repetitions,
+                api_mode=effective_api_mode,
+                adapter_dimensions=adapter_dimensions,
+            ),
         },
     )
     eval_store.save(project, eval_run)
@@ -1099,6 +1125,13 @@ def compare_eval_run_to_baseline(
         "baseline_eval_run_id": baseline.get("eval_run_id"),
         "git_sha": baseline.get("git_sha"),
         "config_hash": baseline.get("config_hash"),
+        "api_mode": baseline.get("api_mode"),
+        "adapter_dimensions": baseline.get("adapter_dimensions", []),
+        "dimensions_match": (
+            baseline.get("api_mode") == eval_run.api_mode.value
+            and list(baseline.get("adapter_dimensions", ()))
+            == list(eval_run.metadata.get("adapter_dimensions", ()))
+        ),
         "score_delta": round(
             float(eval_run.summary.get("score") or 0.0)
             - float(baseline_summary.get("score") or 0.0),
@@ -1145,6 +1178,70 @@ def eval_compatibility_matrix(
     return cells
 
 
+ADAPTER_COMPATIBILITY_CHECKS = (
+    "start",
+    "stream",
+    "tool_lifecycle",
+    "failure",
+    "cancel",
+    "resume",
+    "attachments",
+    "managed_config",
+)
+
+
+def adapter_compatibility_matrix(
+    registry: Any,
+    *,
+    api_modes: tuple[GigaChatApiMode, ...] = (
+        GigaChatApiMode.V1,
+        GigaChatApiMode.V2,
+    ),
+) -> list[dict[str, Any]]:
+    """Describe truthful adapter quality cells without executing external CLIs."""
+    cells: list[dict[str, Any]] = []
+    for harness in registry.list():
+        spec = harness.spec()
+        if HarnessCapability.AGENT_CLI not in spec.capabilities:
+            continue
+        claims = spec.adapter_capabilities
+        native_resume = claims.get("native_resume")
+        managed_config = claims.get("managed_mcp_headless")
+        support = {
+            "start": True,
+            "stream": spec.supports_streaming and spec.supports_structured_events,
+            "tool_lifecycle": spec.supports_structured_events,
+            "failure": spec.supports_structured_events,
+            "cancel": spec.supports_cancellation,
+            "resume": (
+                native_resume is not None
+                and native_resume.status.value != "unsupported"
+            ),
+            "attachments": spec.supports_attachments,
+            "managed_config": (
+                managed_config is not None
+                and managed_config.status.value == "supported"
+            ),
+        }
+        for api_mode in api_modes:
+            for check in ADAPTER_COMPATIBILITY_CHECKS:
+                cells.append(
+                    {
+                        "harness_id": spec.id,
+                        "api_mode": api_mode.value,
+                        "check": check,
+                        "supported": bool(support[check]),
+                        "evidence": (
+                            "structured_adapter"
+                            if check in {"stream", "tool_lifecycle", "failure"}
+                            and support[check]
+                            else "declared_adapter_contract"
+                        ),
+                    }
+                )
+    return cells
+
+
 PROTOCOL_CONFORMANCE_FIXTURES: tuple[tuple[str, HarnessCapability], ...] = (
     ("openai-chat", HarnessCapability.CHAT_COMPLETIONS),
     ("openai-responses", HarnessCapability.RESPONSES),
@@ -1180,7 +1277,14 @@ def _run_metrics(run: HarnessRun) -> dict[str, Any]:
     usage = _mapping(metadata.get("usage"))
     execution = _mapping(metadata.get("workspace_execution"))
     metrics: dict[str, Any] = {}
-    for key in ("input_tokens", "output_tokens", "total_tokens"):
+    for key in (
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "cached_input_tokens",
+        "reasoning_output_tokens",
+        "tool_tokens",
+    ):
         value = usage.get(key)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             metrics[key] = value
@@ -1248,16 +1352,56 @@ def _positive_int(value: Any, default: int) -> int:
 
 
 def _spec_config_hash(
-    spec: HarnessEvalSpec, harness_ids: tuple[str, ...], repetitions: int
+    spec: HarnessEvalSpec,
+    harness_ids: tuple[str, ...],
+    repetitions: int,
+    *,
+    api_mode: GigaChatApiMode | None = None,
+    adapter_dimensions: list[dict[str, Any]] | None = None,
 ) -> str:
     payload = {
         "spec": eval_spec_to_dict(spec),
         "harness_ids": harness_ids,
         "repetitions": repetitions,
+        "api_mode": (api_mode or spec.api_mode).value,
+        "adapter_dimensions": adapter_dimensions or [],
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _adapter_eval_dimensions(
+    registry: Any,
+    harness_ids: tuple[str, ...],
+    api_mode: GigaChatApiMode,
+) -> list[dict[str, Any]]:
+    dimensions: list[dict[str, Any]] = []
+    for harness_id in harness_ids:
+        harness = registry.get(harness_id)
+        capability_probe = getattr(harness, "capability_probe", None)
+        snapshot = capability_probe() if callable(capability_probe) else None
+        dimensions.append(
+            {
+                "harness_id": harness_id,
+                "api_mode": api_mode.value,
+                "binary_version": (
+                    snapshot.parsed_version or snapshot.version
+                    if snapshot is not None
+                    else None
+                ),
+                "event_schema": (
+                    snapshot.event_schema if snapshot is not None else None
+                ),
+                "native_event_schema": (
+                    snapshot.native_event_schema if snapshot is not None else None
+                ),
+                "native_structured_events": (
+                    snapshot.native_structured_events if snapshot is not None else False
+                ),
+            }
+        )
+    return dimensions
 
 
 def _eval_config_hash(eval_run: HarnessEvalRun) -> str:

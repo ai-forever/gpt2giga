@@ -76,6 +76,52 @@ def attachment_warning_events(request: HarnessRequest) -> tuple[HarnessEvent, ..
     )
 
 
+def attachment_capability_error(
+    request: HarnessRequest,
+    capabilities: Mapping[str, bool],
+    *,
+    surface: str,
+) -> str | None:
+    """Return a truthful error when a planned transport is not proven."""
+    plan = request_render_plan(request)
+    metadata = plan.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return None
+    deliveries = metadata.get("deliveries")
+    if not isinstance(deliveries, list | tuple):
+        return None
+    for raw_delivery in deliveries:
+        if not isinstance(raw_delivery, Mapping):
+            continue
+        transport = str(raw_delivery.get("transport") or "attachment transport")
+        surfaces = raw_delivery.get("surfaces", ())
+        supported_surfaces = {
+            str(item) for item in surfaces if isinstance(item, str) and item
+        }
+        if supported_surfaces and surface not in supported_surfaces:
+            return str(
+                redact_secrets(
+                    f"{transport} is not supported for the {surface} execution surface"
+                )
+            )
+        required = raw_delivery.get("required_cli_capabilities", ())
+        if not isinstance(required, list | tuple):
+            continue
+        missing = [
+            str(item)
+            for item in required
+            if isinstance(item, str) and item and not capabilities.get(item, False)
+        ]
+        if missing:
+            return str(
+                redact_secrets(
+                    f"Installed CLI does not provide the attachment transport "
+                    f"required by {transport}: {', '.join(missing)}"
+                )
+            )
+    return None
+
+
 def _join_text(*parts: str) -> str:
     return "\n\n".join(part for part in parts if part)
 

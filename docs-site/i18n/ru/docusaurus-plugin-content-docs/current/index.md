@@ -17,6 +17,7 @@ http://localhost:8090
 | Поведение `extra_headers`, `extra_query`, `extra_body` и необязательных полей | [Параметры клиентов](client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и их сопоставление с OpenAI/Anthropic/Gemini | [Встроенные инструменты](builtin-tools.md) |
 | Альфа-превью локального cockpit для запусков, сравнений, approvals и workflows | [Unified Harness](harness.md) |
+| Компоненты Unified Harness, поток выполнения, хранение и API управляющего слоя | [Архитектура Harness](architecture/harness.md) |
 | Переменные окружения, аутентификация, лимиты, метрики, наблюдаемость | [Конфигурация](configuration.md) |
 | Профили Compose, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развёртывание](deployment.md) |
 | Журналы выполнения, журналы трафика, admin API, отладочная трансляция | [Операции](operations.md) |
@@ -53,6 +54,7 @@ OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подг
 
 ## Для разработчиков
 
+- [Архитектура Harness](architecture/harness.md) описывает локальный управляющий слой, durable runtime, границы хранения и назначение каждого семейства API.
 - [Нормализованные сообщения](architecture/normalized-messages.md) описывают экспериментальный слой моделей, не зависящих от протокола.
 - [Логирование и наблюдаемость](architecture/logging-and-observability.md) фиксирует границы между журналами выполнения, журналами трафика, метриками и трейсами.
 - [Добавление провайдера или протокола](architecture/how-to-add-provider.md) даёт чек-лист для расширения набора публичных протоколов и вышестоящих провайдеров.

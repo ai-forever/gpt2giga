@@ -30,6 +30,10 @@ def test_ui_assets_load_from_package_resources():
     assert load_asset("index.html").startswith(b"<!doctype html>")
     assert load_asset("favicon.ico").startswith(b"\x00\x00\x01\x00")
     assert "function boot()" in APP_JS
+    assert "function agentPlanSummary(agent)" in APP_JS
+    assert "executable with current adapter options" in APP_JS
+    assert "transport_by" in APP_JS
+    assert 'delivery.rich ? "rich" : "reference-only"' in APP_JS
     assert ".app {" in APP_CSS
     with pytest.raises(UIAssetNotFoundError):
         load_asset("missing.js")
@@ -53,13 +57,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.24">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.35">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.24"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.39"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -107,9 +111,15 @@ def test_ui_harnesses_endpoint_returns_specs():
     response = client.get("/api/harnesses")
 
     assert response.status_code == 200
-    ids = {item["spec"]["id"] for item in response.json()["harnesses"]}
+    harnesses = response.json()["harnesses"]
+    ids = {item["spec"]["id"] for item in harnesses}
     assert "direct-chat" in ids
     assert "echo" in ids
+    codex = next(item for item in harnesses if item["spec"]["id"] == "codex-cli")
+    assert codex["compatibility"]["event_schema"] == "codex-exec-jsonl-v1"
+    assert codex["compatibility"]["history_schema"] == "codex-session-jsonl-v1"
+    assert codex["compatibility"]["native_event_schema"] == "raw-terminal-v1"
+    assert codex["compatibility"]["native_structured_events"] is False
 
 
 def test_ui_harnesses_endpoint_includes_discovery_errors():
@@ -274,8 +284,9 @@ def test_ui_static_resumes_active_stream_after_session_reload():
 
     assert "resumeActiveHeadlessRun();" in load_session_source
     for fragment in (
-        '["queued", "running"].includes(run.status)',
-        'run.invocation_mode !== "native"',
+        'runs.filter((run) => run.invocation_mode !== "native")',
+        'headless.find((run) => run.status === "running")',
+        'headless.find((run) => run.status === "queued")',
         "state.activeHeadlessRun = run",
         "ensureLiveRun(run.id, run)",
         "for (const event of eventsForRun(run.id)) consumeLiveEvent(event)",
@@ -296,6 +307,8 @@ def test_ui_static_resumes_active_stream_after_session_reload():
         "if (!runId || !state.activeHeadlessRun || "
         "state.activeHeadlessRun.id !== runId) return;"
     ) in UI_SOURCE
+    assert "state.liveRuns.delete(run.id);" in resume_source
+    assert "if (!preserveTerminalPartialDraft(draft))" in UI_SOURCE
 
 
 def test_ui_static_surfaces_codex_native_trust_and_reconnects_process():
@@ -389,6 +402,61 @@ def test_ui_static_handles_terminal_stream_edge_cases():
     assert "renderedPartialDrafts" in UI_SOURCE
 
 
+def test_ui_native_terminal_streams_with_poll_fallback_and_resizes():
+    transport_source = APP_JS[
+        APP_JS.index("async function consumeNativeOutputPayload") : APP_JS.index(
+            "function maybeShowNativeTrustPrompt"
+        )
+    ]
+    lifecycle_source = APP_JS[
+        APP_JS.index("function stopNativePolling") : APP_JS.index(
+            "function clearNativeTerminal"
+        )
+    ]
+
+    for fragment in (
+        "nativeEventSource: null",
+        "nativeEventSourceProcessId: null",
+        "nativeResizeObserver: null",
+        "nativeResizeTimer: null",
+        "nativeTerminalSize: null",
+    ):
+        assert fragment in APP_JS
+    for fragment in (
+        "function startNativeOutputTransport()",
+        "function openNativeOutputStream(processId)",
+        "/output/stream${query}",
+        "state.nativeOutputCursor",
+        "NATIVE_STREAM_FAILURE_LIMIT",
+        "scheduleNativePoll(NATIVE_ACTIVE_POLL_MS)",
+        "await consumeNativeOutputPayload(payload, processId)",
+        "stopNativeOutputTransport();",
+    ):
+        assert fragment in transport_source
+    for fragment in (
+        "function stopNativeOutputTransport()",
+        "closeNativeOutputStream();",
+        "stopNativePolling();",
+        "stopNativeResizeObserver();",
+        "function nativeTerminalDimensions()",
+        "NATIVE_MIN_ROWS",
+        "NATIVE_MAX_COLUMNS",
+        "/resize`, {",
+        "new ResizeObserver(scheduleNativeResize)",
+        "state.nativeResizeObserver.disconnect();",
+    ):
+        assert fragment in lifecycle_source
+    assert (
+        'window.addEventListener("beforeunload", stopNativeOutputTransport);' in APP_JS
+    )
+    assert (
+        'byId("native-terminal-diagnostics").addEventListener("toggle", scheduleNativeResize);'
+        in APP_JS
+    )
+    assert 'id="native-terminal-diagnostics"' in INDEX_HTML
+    assert "polling remains available as a fallback" in INDEX_HTML
+
+
 def test_ui_static_refreshes_native_run_after_process_exit():
     terminal_source = UI_SOURCE[
         UI_SOURCE.index("function renderNativeTerminalStatus") : UI_SOURCE.index(
@@ -400,6 +468,14 @@ def test_ui_static_refreshes_native_run_after_process_exit():
         'effectiveStatus === "running" ? "active" : effectiveStatus',
         "function syncNativeRunInBundle(run)",
         "syncNativeRunInBundle(body.run);",
+        "function syncNativeMessagesInBundle(messages)",
+        "function syncNativeEventsInBundle(events)",
+        "const nativeMessages = Array.isArray(body.messages) ? body.messages : [];",
+        "const nativeEvents = Array.isArray(body.events) ? body.events : [];",
+        "const messagesChanged = syncNativeMessagesInBundle(nativeMessages);",
+        "const eventsChanged = syncNativeEventsInBundle(nativeEvents);",
+        "if (messagesChanged || eventsChanged)",
+        "renderMessages();",
         "renderInspector();",
         'status !== "running"',
         "await loadSession(state.currentSessionId",
@@ -417,6 +493,109 @@ def test_ui_static_refreshes_native_run_after_process_exit():
     assert '? "active"' in run_summary_source
     assert 'displayStatus === "active" ? "active"' in run_summary_source
     assert "Native CLIs stay active between turns." in INDEX_HTML
+
+
+def test_ui_native_continuation_requests_a_separate_submit_key():
+    continuation_source = APP_JS[
+        APP_JS.index("async function continueNativeConversation") : APP_JS.index(
+            "async function ensureSessionForNative"
+        )
+    ]
+    input_source = APP_JS[
+        APP_JS.index("async function sendNativeProcessInput") : APP_JS.index(
+            "async function stopNativeProcess"
+        )
+    ]
+
+    assert "sendNativeProcessInput(prompt, prompt, true)" in continuation_source
+    assert "if (submit) body.submit = true;" in input_source
+    assert "body: JSON.stringify(body)" in input_source
+
+
+def test_ui_native_tools_render_once_stream_live_and_keep_expansion_state():
+    render_source = APP_JS[
+        APP_JS.index("function renderMessages") : APP_JS.index(
+            "function runStatusBadgeClass"
+        )
+    ]
+    tool_source = APP_JS[
+        APP_JS.index("function toolCard") : APP_JS.index(
+            "function appendGeneratedFiles"
+        )
+    ]
+    poll_source = APP_JS[
+        APP_JS.index("async function consumeNativeOutputPayload") : APP_JS.index(
+            "function maybeShowNativeTrustPrompt"
+        )
+    ]
+    native_stream_source = APP_JS[
+        APP_JS.index("function setActiveNativeProcess") : APP_JS.index(
+            "async function pollNativeOutput"
+        )
+    ]
+
+    for fragment in (
+        "const latestMessageIdsByRun = new Map();",
+        "latestMessageIdsByRun.set(message.run_id, message.id);",
+        "const events = eventsForMessage(message, messages);",
+        "const tools = executionMessage ? toolsFromEvents(events) : new Map();",
+        "if (latestExecutionMessage && preserveTerminalPartialDraft(draft))",
+    ):
+        assert fragment in render_source
+    for fragment in (
+        "toolCallExpansion: new Map()",
+        "state.toolCallExpansion.get(expansionKey)",
+        "state.toolCallExpansion.set(expansionKey, details.open)",
+        "toolCard(tool, messageKey)",
+        "message.id || message.run_id",
+        "subagentType",
+        "tool-call-origin",
+        "`${tool.subagentType} subagent`",
+    ):
+        source = (
+            APP_JS
+            if fragment
+            in {"toolCallExpansion: new Map()", "message.id || message.run_id"}
+            else tool_source
+        )
+        assert fragment in source
+    for fragment in (
+        "let nativeStreamChanged = false;",
+        "nativeStreamChanged = appendNativeTerminal",
+        "const messagesChanged = syncNativeMessagesInBundle(nativeMessages);",
+        "const eventsChanged = syncNativeEventsInBundle(nativeEvents);",
+        "if (hasNewAssistantMessage)",
+        "if (messagesChanged || eventsChanged)",
+        "else if (nativeStreamChanged)",
+    ):
+        assert fragment in poll_source
+    assert (
+        native_stream_source.count(
+            '["claude-code", "gemini-cli"].includes(process.harness_id)'
+        )
+        == 3
+    )
+    assert "consumeLiveEvent(event)" not in poll_source
+
+
+def test_ui_native_gemini_streaming_handles_terminal_screen_redraws():
+    parser_source = APP_JS[
+        APP_JS.index("function geminiStreamingTextFromTerminal") : APP_JS.index(
+            "function maybeShowNativeTrustPrompt"
+        )
+    ]
+
+    for fragment in (
+        "if (/^\\s*>\\s+\\S/.test(lines[index])) promptIndex = index;",
+        "if (/^\\s*✦(?:\\s|$)/.test(lines[index])) {",
+    ):
+        assert fragment in parser_source
+    for fragment in (
+        'raw.includes("\\x1B[2J")',
+        'raw.includes("\\x1B[3J")',
+        "return updateNativeStreamingFromTerminal();",
+    ):
+        assert fragment in APP_JS
 
 
 def test_ui_static_routes_codex_work_through_structured_chat():
@@ -567,6 +746,25 @@ def test_ui_static_preserves_selected_defaults_while_stream_starts():
     assert start_source.index(
         "await loadSession(state.currentSessionId);"
     ) < start_source.index("applyRunDefaults(payload);")
+
+
+def test_ui_static_renders_fifo_queue_beside_composer():
+    queue_source = UI_SOURCE[
+        UI_SOURCE.index("function queuedHeadlessTurns") : UI_SOURCE.index(
+            "function latestEventIdForRun"
+        )
+    ]
+    mobile_rule = APP_CSS.split("@media (max-width: 720px)", 1)[1]
+
+    assert 'run.status === "queued"' in queue_source
+    assert 'message.role === "user"' in queue_source
+    assert 'position.textContent = turns.length === 1 ? "Queued"' in queue_source
+    assert "Waiting for the current turn to finish" in queue_source
+    assert "Waiting behind earlier queued messages" in queue_source
+    assert 'byId("composer-queue")' in queue_source
+    assert ".composer-queue {" in APP_CSS
+    assert "position: absolute;" in APP_CSS
+    assert ".composer-queue {\n        position: static;" in mobile_rule
 
 
 def test_ui_static_command_previews_describe_streaming_honestly():
@@ -975,6 +1173,7 @@ def test_ui_index_contains_control_panel_elements():
         "dry-run-checkbox",
         "stream-checkbox",
         "composer",
+        "composer-queue",
         "prompt-input",
         "attachment-file-input",
         "attach-file-button",
@@ -1012,6 +1211,7 @@ def test_ui_index_contains_control_panel_elements():
         "stop-native-process-button",
         "clear-native-terminal-button",
         "run-button",
+        "interrupt-run-button",
         "arena-nav-link",
         "arena-center",
         "arena-prompt-input",
@@ -1133,6 +1333,9 @@ def test_ui_index_contains_control_panel_elements():
         "session-drawer-button",
     ):
         assert element_id in source
+    assert ">Stop</button>" in html
+    assert ">Interrupt</button>" in html
+    assert 'byId("run-button").textContent = "Queue"' in source
     for text in (
         "+ New session",
         "/api/project",
@@ -1259,6 +1462,24 @@ def test_ui_index_contains_control_panel_elements():
         "persistProjectState",
     ):
         assert text in source
+
+
+def test_ui_native_submit_sends_a_per_submission_prompt_idempotency_key():
+    assert "const promptIdempotencyKey" in APP_JS
+    assert "native_prompt_${window.crypto.randomUUID()}" in APP_JS
+    assert "idempotency_key: promptIdempotencyKey" in APP_JS
+    assert "workspace_policy: payload.workspace_policy" in APP_JS
+    assert "permission_profile: payload.permission_profile" in APP_JS
+    assert "pendingNativeApproval" in APP_JS
+
+
+def test_ui_mobile_advanced_panel_uses_viewport_containing_block():
+    mobile_rule = APP_CSS.split("@media (max-width: 720px)", 1)[1]
+
+    assert ".quick-config.advanced-open" in mobile_rule
+    assert "backdrop-filter: none;" in mobile_rule
+    assert "z-index: 81;" in mobile_rule
+    assert "position: fixed;" in mobile_rule
 
 
 def test_ui_rejects_remote_bind_without_allow_remote():

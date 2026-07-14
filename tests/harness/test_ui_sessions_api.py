@@ -154,6 +154,35 @@ def test_sessions_api_start_run_returns_stream_urls_and_sse_replay():
     assert "run_finished" in text
 
 
+def test_sessions_api_marks_durable_ui_turns_interactive(tmp_path):
+    data_dir = tmp_path / "data"
+    config = HarnessConfig(data_dir=str(data_dir))
+    store = FilesystemHarnessSessionStore(data_dir)
+    runtime = RuntimeCoordinationStore(data_dir)
+    client = TestClient(
+        create_app(
+            config,
+            registry=create_default_registry(include_entry_points=False),
+            store=store,
+            runtime_store=runtime,
+        )
+    )
+    session = client.post(
+        "/api/sessions",
+        json={"title": "Queued chat", "harness_id": "echo"},
+    ).json()["session"]
+
+    started = client.post(
+        f"/api/sessions/{session['id']}/run/start",
+        json={"harness_id": "echo", "prompt": "first"},
+    )
+
+    assert started.status_code == 200
+    job = runtime.find_job_for_run(started.json()["run"]["id"])
+    assert job is not None
+    assert job.origin == "interactive"
+
+
 def test_run_event_stream_synthesizes_terminal_event_for_legacy_run():
     store = InMemoryHarnessSessionStore()
     session = store.create_session(title="Legacy terminal run")

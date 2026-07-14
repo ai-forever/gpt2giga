@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import subprocess
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
@@ -17,11 +18,29 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     attachment_raw_metadata,
     prompt_with_attachments,
 )
-from gpt2giga_harness.native.base import NativeCommandPlan, NativeHistoryConnector
+from gpt2giga_harness.harnesses.gemini_cli import gemini_cli_custom_headers
+from gpt2giga_harness.native.base import (
+    NativeCommandPlan,
+    NativeHistoryConnector,
+    NativePromptDelivery,
+    native_permission_metadata,
+    native_source_workspace,
+    native_workspace_policy,
+)
+from gpt2giga_harness.native.discovery import (
+    canonicalize_native_refs,
+    native_workspace_metadata,
+    normalize_native_workspace,
+)
 from gpt2giga_harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
+    create_execution_snapshot,
+)
+from gpt2giga_harness.native.snapshots import (
+    NativeExecutionSnapshotStore,
+    validate_resume_snapshot,
 )
 from gpt2giga_harness.managed_mcp import write_startup_config
 from gpt2giga_harness.project import project_id_for_root
@@ -29,13 +48,20 @@ from gpt2giga_harness.types import GigaChatApiMode, HarnessContext, HarnessReque
 
 GEMINI_HARNESS_ID = "gemini-cli"
 LIST_SESSIONS_TIMEOUT_SECONDS = 5.0
+CAPABILITY_PROBE_TIMEOUT_SECONDS = 5.0
 _SESSION_ID_RE = re.compile(r"(?P<id>[A-Za-z0-9][A-Za-z0-9_.:-]{3,})")
+MODE_TO_APPROVAL = {
+    "plan": "plan",
+    "read": "plan",
+    "edit": "default",
+}
 
 
 class GeminiNativeHistoryConnector(NativeHistoryConnector):
     """Discover Gemini CLI native sessions and plan native commands."""
 
     harness_id = GEMINI_HARNESS_ID
+    requires_proxy_preflight = True
 
     def __init__(
         self,
@@ -45,6 +71,11 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         executable: str | None = None,
         executable_resolver: ExecutableResolver | None = None,
         list_sessions_runner: Callable[
+            [tuple[str, ...], Mapping[str, str], str | None],
+            subprocess.CompletedProcess[str],
+        ]
+        | None = None,
+        capability_probe_runner: Callable[
             [tuple[str, ...], Mapping[str, str], str | None],
             subprocess.CompletedProcess[str],
         ]
@@ -59,6 +90,9 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         self.executable = executable
         self.executable_resolver = executable_resolver or ExecutableResolver.path_only()
         self.list_sessions_runner = list_sessions_runner or _run_list_sessions
+        self.capability_probe_runner = capability_probe_runner or _run_capability_probe
+        self.snapshot_store = NativeExecutionSnapshotStore(self.data_dir)
+        self._prompt_interactive_supported: bool | None = None
 
     def discover(
         self,
@@ -74,13 +108,17 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
                 workspace=workspace,
                 project_id=project_id,
             )
-        managed = self._discover_source(
-            gemini_home=self.managed_home(project_id),
-            workspace=workspace,
-            project_id=project_id,
-            status=NativeSessionStatus.MANAGED_NATIVE,
-            source_kind="managed",
-            can_resume=True,
+        managed = self.snapshot_store.reconcile(
+            self._discover_source(
+                gemini_home=self.managed_home(project_id),
+                workspace=workspace,
+                project_id=project_id,
+                status=NativeSessionStatus.MANAGED_NATIVE,
+                source_kind="managed",
+                can_resume=True,
+                scan_all=True,
+            ),
+            harness_id=self.harness_id,
         )
         external: tuple[NativeSessionRef, ...] = ()
         if include_external:
@@ -92,7 +130,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
                 source_kind="external",
                 can_resume=False,
             )
-        return (*listed, *managed, *external)
+        return canonicalize_native_refs((*listed, *managed, *external))
 
     def preview(
         self,
@@ -122,38 +160,95 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         context: HarnessContext,
     ) -> NativeCommandPlan:
         """Plan a native interactive `gemini` command."""
-        project_id = _project_id(request.workspace)
+        source_workspace = native_source_workspace(request)
+        project_id = _project_id(source_workspace)
         native_home = self.managed_home(project_id)
+        known_sources = tuple(
+            str(path) for path in _checkpoint_files(native_home, request.workspace)
+        )
         native_home.mkdir(parents=True, exist_ok=True)
-        _write_gemini_settings(native_home)
+        tool_config_hash = _write_gemini_settings(native_home)
         model = request.model or context.default_model
-        command = [self._executable()]
+        executable_argv = self._executable_argv()
+        approval_mode = MODE_TO_APPROVAL.get(
+            request.mode,
+            MODE_TO_APPROVAL["plan"],
+        )
+        permission = native_permission_metadata(
+            requested_mode=request.mode,
+            cli_control="--approval-mode",
+            cli_value=approval_mode,
+            read_only=approval_mode == "plan",
+        )
+        command = [*executable_argv, "--approval-mode", approval_mode]
         if model:
             command.extend(["-m", model])
-        prompt = prompt_with_attachments(request).strip()
+        prompt = prompt_with_attachments(request)
         metadata: dict[str, Any] = {
             "harness_id": self.harness_id,
             "project_id": project_id,
             "api_mode": request.api_mode.value,
             "managed": True,
-            "initial_prompt_present": bool(prompt),
             "chat_commands": ("/chat save <tag>", "/chat resume <tag>"),
+            "source_workspace": source_workspace,
+            "effective_workspace": request.workspace,
+            "permission_enforcement": permission,
             **attachment_raw_metadata(request),
         }
-        if prompt:
-            metadata["initial_prompt"] = prompt
         env = _gemini_env(
             context,
             api_mode=request.api_mode,
             native_home=native_home,
             model=model,
         )
+        prompt_delivery = None
+        display_command: list[str] = []
+        if prompt:
+            if not self._supports_prompt_interactive(
+                executable_argv=executable_argv,
+                env=env,
+                cwd=request.workspace,
+            ):
+                raise ValueError(
+                    "Installed Gemini CLI does not support safe native initial "
+                    "prompt delivery via --prompt-interactive"
+                )
+            command.extend(["--prompt-interactive", prompt])
+            display_command = [*command[:-1], "<initial-prompt>"]
+            prompt_delivery = NativePromptDelivery(
+                idempotency_key=_prompt_delivery_key(request),
+                mechanism="gemini_prompt_interactive",
+                prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                byte_count=len(prompt.encode("utf-8")),
+            )
+            metadata["prompt_delivery_capability"] = {
+                "supported": True,
+                "mechanism": "--prompt-interactive",
+                "evidence": "gemini --help",
+            }
+        snapshot = create_execution_snapshot(
+            harness_id=self.harness_id,
+            api_mode=request.api_mode.value,
+            model=model,
+            native_home=str(native_home),
+            workspace=source_workspace,
+            project_id=project_id,
+            permission_mode=request.mode,
+            tool_config_hash=tool_config_hash,
+            source_workspace=source_workspace,
+            effective_workspace=request.workspace,
+            workspace_policy=native_workspace_policy(request),
+        )
         return NativeCommandPlan(
             command=tuple(command),
+            display_command=tuple(display_command),
             env=env,
             cwd=request.workspace,
             native_home=str(native_home),
             metadata=metadata,
+            execution_snapshot=snapshot,
+            snapshot_known_sources=known_sources,
+            prompt_delivery=prompt_delivery,
         )
 
     def build_resume_command(
@@ -166,34 +261,85 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
             raise ValueError("Only managed Gemini native sessions can be resumed")
         if not ref.native_session_id:
             raise ValueError("Gemini native session id is required for resume")
-        native_home = _native_home_from_ref(ref)
-        if native_home is None:
-            native_home = self.managed_home(_project_id(ref.workspace))
-        api_mode = _api_mode_from_ref(ref)
+        snapshot = validate_resume_snapshot(ref, harness_id=self.harness_id)
+        if not snapshot.native_home:
+            raise ValueError("Native resume snapshot is missing its managed home")
+        native_home = Path(snapshot.native_home).expanduser()
+        api_mode = GigaChatApiMode(snapshot.api_mode)
         native_home.mkdir(parents=True, exist_ok=True)
         _write_gemini_settings(native_home)
         env = _gemini_env(
             context,
             api_mode=api_mode,
             native_home=native_home,
-            model=_model_from_ref(ref) or context.default_model,
+            model=snapshot.model or context.default_model,
+        )
+        approval_mode = MODE_TO_APPROVAL.get(
+            snapshot.permission_mode,
+            MODE_TO_APPROVAL["plan"],
+        )
+        permission = native_permission_metadata(
+            requested_mode=snapshot.permission_mode,
+            cli_control="--approval-mode",
+            cli_value=approval_mode,
+            read_only=approval_mode == "plan",
         )
         return NativeCommandPlan(
-            command=(self._executable(), "--resume", ref.native_session_id),
+            command=(
+                *self._executable_argv(),
+                "--approval-mode",
+                approval_mode,
+                "--resume",
+                ref.native_session_id,
+            ),
             env=env,
-            cwd=ref.workspace,
+            cwd=snapshot.effective_workspace or ref.workspace,
             native_home=str(native_home),
             metadata={
                 "harness_id": self.harness_id,
                 "native_ref_id": ref.id,
                 "api_mode": api_mode.value,
                 "managed": True,
+                "route_unknown": not snapshot.route_known,
+                "resume_warnings": list(snapshot.warnings),
+                "source_workspace": ref.metadata.get("source_workspace"),
+                "effective_workspace": snapshot.effective_workspace or ref.workspace,
+                "permission_enforcement": permission,
             },
+            execution_snapshot=snapshot,
         )
+
+    def record_start_snapshot(self, plan: NativeCommandPlan) -> None:
+        """Persist a successful Gemini native start for later discovery."""
+        self.snapshot_store.record_start(plan)
 
     def managed_home(self, project_id: str) -> Path:
         """Return the managed HOME used for one project's Gemini CLI sessions."""
         return self.data_dir / "native" / "gemini" / "homes" / project_id
+
+    def _supports_prompt_interactive(
+        self,
+        *,
+        executable_argv: tuple[str, ...],
+        env: Mapping[str, str],
+        cwd: str | None,
+    ) -> bool:
+        """Probe whether this Gemini CLI accepts an interactive initial prompt."""
+        if self._prompt_interactive_supported is not None:
+            return self._prompt_interactive_supported
+        try:
+            completed = self.capability_probe_runner(
+                (*executable_argv, "--help"),
+                env,
+                cwd,
+            )
+        except (OSError, subprocess.SubprocessError):
+            supported = False
+        else:
+            output = f"{completed.stdout}\n{completed.stderr}"
+            supported = completed.returncode == 0 and "--prompt-interactive" in output
+        self._prompt_interactive_supported = supported
+        return supported
 
     def _discover_from_cli_list(
         self,
@@ -201,13 +347,13 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         workspace: str | None,
         project_id: str,
     ) -> tuple[NativeSessionRef, ...]:
-        executable = self._available_executable()
-        if executable is None:
+        executable_argv = self._available_executable_argv()
+        if not executable_argv:
             return ()
         env = build_safe_env(HarnessContext(proxy_url=""))
         try:
             completed = self.list_sessions_runner(
-                (executable, "--list-sessions"),
+                (*executable_argv, "--list-sessions"),
                 env,
                 workspace,
             )
@@ -230,10 +376,14 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         status: NativeSessionStatus,
         source_kind: str,
         can_resume: bool,
+        scan_all: bool = False,
     ) -> tuple[NativeSessionRef, ...]:
         refs = [
             ref
-            for path in _checkpoint_files(gemini_home, workspace)
+            for path in _checkpoint_files(
+                gemini_home,
+                None if scan_all else workspace,
+            )
             if (
                 ref := _ref_from_file(
                     path,
@@ -253,16 +403,16 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         refs.reverse()
         return tuple(refs)
 
-    def _executable(self) -> str:
+    def _executable_argv(self) -> tuple[str, ...]:
         if self.executable is not None:
-            return self.executable
+            return (self.executable,)
         resolution = self.executable_resolver.resolve(self.harness_id, "gemini")
-        return resolution.executable or resolution.configured or "gemini"
+        return resolution.command or ("gemini",)
 
-    def _available_executable(self) -> str | None:
+    def _available_executable_argv(self) -> tuple[str, ...]:
         if self.executable is not None:
-            return self.executable
-        return self.executable_resolver.resolve(self.harness_id, "gemini").executable
+            return (self.executable,)
+        return self.executable_resolver.resolve(self.harness_id, "gemini").command
 
 
 def _refs_from_list_output(
@@ -360,9 +510,11 @@ def _listed_ref(
     message_count: int | None = None,
 ) -> NativeSessionRef:
     metadata = {
-        "project_id": project_id,
         "source_kind": "cli_list",
+        **native_workspace_metadata(workspace, evidence="gemini_cli_cwd"),
     }
+    if workspace is not None and "project_id" not in metadata:
+        metadata["project_id"] = project_id
     return NativeSessionRef(
         id=_ref_id(Path("gemini-list-sessions"), session_id, "cli_list"),
         harness_id=GEMINI_HARNESS_ID,
@@ -399,11 +551,24 @@ def _ref_from_file(
     native_session_id = summary.native_session_id or path.stem
     if summary.message_count == 0 and not summary.native_session_id:
         return None
+    discovered_workspace = summary.workspace
+    effective_workspace = discovered_workspace or normalize_native_workspace(workspace)
     metadata = {
         "path": str(path),
-        "project_id": project_id,
         "source_kind": source_kind,
+        **native_workspace_metadata(
+            effective_workspace,
+            evidence=(
+                summary.workspace_evidence
+                if discovered_workspace is not None
+                else "gemini_project_storage"
+                if effective_workspace is not None
+                else None
+            ),
+        ),
     }
+    if status is NativeSessionStatus.MANAGED_NATIVE:
+        metadata["project_id"] = project_id
     if native_home is not None:
         metadata["native_home"] = native_home
     if summary.model is not None:
@@ -415,7 +580,7 @@ def _ref_from_file(
         harness_id=GEMINI_HARNESS_ID,
         native_session_id=native_session_id,
         title=summary.title or native_session_id,
-        workspace=workspace,
+        workspace=effective_workspace,
         source=str(path),
         status=status,
         created_at=summary.created_at,
@@ -451,8 +616,44 @@ def _checkpoint_files(gemini_home: Path, workspace: str | None) -> tuple[Path, .
 def _checkpoint_roots(gemini_home: Path, workspace: str | None) -> tuple[Path, ...]:
     tmp_root = gemini_home / ".gemini" / "tmp"
     if workspace is not None:
-        return (tmp_root / project_hash_for_workspace(workspace),)
+        roots: list[Path] = []
+        storage_key = _project_storage_key(gemini_home, workspace)
+        if storage_key is not None:
+            roots.append(tmp_root / storage_key)
+        roots.append(tmp_root / project_hash_for_workspace(workspace))
+        return tuple(dict.fromkeys(roots))
     return (tmp_root,)
+
+
+def _project_storage_key(gemini_home: Path, workspace: str) -> str | None:
+    projects_path = gemini_home / ".gemini" / "projects.json"
+    try:
+        decoded = json.loads(projects_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    projects = decoded.get("projects") if isinstance(decoded, Mapping) else None
+    if not isinstance(projects, Mapping):
+        return None
+    normalized_workspace = str(Path(workspace).expanduser().resolve())
+    value = projects.get(normalized_workspace)
+    if value is None:
+        for candidate_workspace, candidate_value in projects.items():
+            try:
+                candidate = str(Path(str(candidate_workspace)).expanduser().resolve())
+            except (OSError, ValueError):
+                continue
+            if candidate == normalized_workspace:
+                value = candidate_value
+                break
+    if value is None or not str(value).strip():
+        return None
+    storage_key = str(value).strip()
+    tmp_root = (gemini_home / ".gemini" / "tmp").resolve()
+    try:
+        (tmp_root / storage_key).resolve().relative_to(tmp_root)
+    except (OSError, ValueError):
+        return None
+    return storage_key
 
 
 def _iter_events(path: Path) -> Iterable[Mapping[str, Any]]:
@@ -522,14 +723,26 @@ def _iter_messages(
 
 def _message_from_event(event: Mapping[str, Any]) -> NativeTranscriptMessage | None:
     role = _role_from_event(event)
-    content = _content_from_event(event)
-    if role is None or content is None:
+    content = _content_from_event(event) or ""
+    tool_calls, tool_results = _tool_records_from_event(event)
+    if role is None or (not content and not tool_calls and not tool_results):
         return None
+    metadata: dict[str, Any] = {"source": "gemini"}
+    if event.get("id") is not None:
+        metadata["native_message_id"] = str(event["id"])
+    if event.get("model") is not None:
+        metadata["model"] = str(event["model"])
+    if tool_calls:
+        metadata["tool_calls"] = tool_calls
+    if tool_results:
+        metadata["tool_results"] = tool_results
+        if role == "user" and not content:
+            role = "tool"
     return NativeTranscriptMessage(
         role=role,
         content=content,
         created_at=_timestamp_from_event(event),
-        metadata={"source": "gemini"},
+        metadata=metadata,
     )
 
 
@@ -544,7 +757,7 @@ def _role_from_event(event: Mapping[str, Any]) -> str | None:
         if candidate is None:
             continue
         role = str(candidate).strip().lower()
-        if role == "model":
+        if role in {"model", "gemini"}:
             return "assistant"
         if role == "function":
             return "tool"
@@ -554,7 +767,15 @@ def _role_from_event(event: Mapping[str, Any]) -> str | None:
 
 
 def _content_from_event(event: Mapping[str, Any]) -> str | None:
-    candidates = (
+    for candidate in _content_candidates(event):
+        text = _content_text(candidate)
+        if text:
+            return text
+    return None
+
+
+def _content_candidates(event: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (
         event.get("content"),
         event.get("text"),
         event.get("parts"),
@@ -562,11 +783,6 @@ def _content_from_event(event: Mapping[str, Any]) -> str | None:
         _nested(event, "message", "text"),
         _nested(event, "message", "parts"),
     )
-    for candidate in candidates:
-        text = _content_text(candidate)
-        if text:
-            return text
-    return None
 
 
 def _content_text(value: Any) -> str | None:
@@ -574,6 +790,10 @@ def _content_text(value: Any) -> str | None:
         text = value.strip()
         return text or None
     if isinstance(value, Mapping):
+        if _tool_call_from_block(value, fallback_id=None) is not None:
+            return None
+        if _tool_result_from_block(value, fallback_id=None) is not None:
+            return None
         for key in ("text", "content", "value", "parts"):
             text = _content_text(value.get(key))
             if text:
@@ -586,8 +806,106 @@ def _content_text(value: Any) -> str | None:
     return None
 
 
+def _tool_records_from_event(
+    event: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    content = next(
+        (
+            candidate
+            for candidate in _content_candidates(event)
+            if candidate is not None
+        ),
+        None,
+    )
+    blocks = content if isinstance(content, list) else [content]
+    fallback_id = _optional_tool_id(event.get("tools_state_id"))
+    calls: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+    for index, block in enumerate(blocks):
+        if not isinstance(block, Mapping):
+            continue
+        block_fallback_id = fallback_id
+        if fallback_id is not None and len(blocks) > 1:
+            block_fallback_id = f"{fallback_id}:{index}"
+        call = _tool_call_from_block(block, fallback_id=block_fallback_id)
+        if call is not None:
+            calls.append(call)
+        result = _tool_result_from_block(block, fallback_id=block_fallback_id)
+        if result is not None:
+            results.append(result)
+    return calls, results
+
+
+def _tool_call_from_block(
+    block: Mapping[str, Any],
+    *,
+    fallback_id: str | None,
+) -> dict[str, Any] | None:
+    function_call = block.get("functionCall")
+    if not isinstance(function_call, Mapping):
+        function_call = block.get("function_call")
+    if not isinstance(function_call, Mapping):
+        return None
+    tool_call_id = (
+        _optional_tool_id(function_call.get("id"))
+        or _optional_tool_id(block.get("id"))
+        or fallback_id
+        or "tool-call"
+    )
+    arguments = function_call.get("args")
+    if arguments is None:
+        arguments = function_call.get("arguments")
+    return {
+        "tool_call_id": tool_call_id,
+        "name": str(function_call.get("name") or "tool"),
+        "arguments": arguments,
+        "status": "running",
+    }
+
+
+def _tool_result_from_block(
+    block: Mapping[str, Any],
+    *,
+    fallback_id: str | None,
+) -> dict[str, Any] | None:
+    function_result = block.get("functionResponse")
+    result_key = "response"
+    if not isinstance(function_result, Mapping):
+        function_result = block.get("function_result")
+        result_key = "result"
+    if not isinstance(function_result, Mapping):
+        return None
+    tool_call_id = (
+        _optional_tool_id(function_result.get("id"))
+        or _optional_tool_id(block.get("id"))
+        or fallback_id
+        or "tool-call"
+    )
+    result = function_result.get(result_key)
+    failed = isinstance(result, Mapping) and bool(result.get("error"))
+    return {
+        "tool_call_id": tool_call_id,
+        "name": str(function_result.get("name") or "tool"),
+        "result": result,
+        "status": "failed" if failed else "completed",
+    }
+
+
+def _optional_tool_id(value: Any) -> str | None:
+    if value is None or not str(value).strip():
+        return None
+    return str(value).strip()
+
+
 def _timestamp_from_event(event: Mapping[str, Any]) -> str | None:
-    for key in ("timestamp", "created_at", "createdAt", "time", "updated_at"):
+    for key in (
+        "timestamp",
+        "created_at",
+        "createdAt",
+        "startTime",
+        "time",
+        "updated_at",
+    ):
         value = event.get(key)
         if value is not None and str(value).strip():
             return str(value).strip()
@@ -635,6 +953,8 @@ class _SessionSummary:
         self.model: str | None = None
         self.message_count = 0
         self.roles: set[str] = set()
+        self.workspace: str | None = None
+        self.workspace_evidence: str | None = None
         try:
             self.updated_at = _mtime_timestamp(path)
         except OSError:
@@ -643,6 +963,10 @@ class _SessionSummary:
     def observe_event(self, event: Mapping[str, Any]) -> None:
         if self.native_session_id is None:
             self.native_session_id = _session_id_from_event(event)
+        if self.workspace is None:
+            workspace, evidence = _workspace_from_event(event)
+            self.workspace = workspace
+            self.workspace_evidence = evidence
         if self.title is None:
             self.title = _title_from_event(event)
         if self.model is None:
@@ -677,10 +1001,27 @@ def _title_from_content(content: str) -> str:
 
 
 def _ref_id(path: Path, native_session_id: str, source_kind: str) -> str:
+    del path, source_kind
     digest = hashlib.sha256(
-        f"{source_kind}:{path}:{native_session_id}".encode("utf-8")
+        f"{GEMINI_HARNESS_ID}:{native_session_id}".encode("utf-8")
     ).hexdigest()
     return f"native_gemini_{digest[:16]}"
+
+
+def _workspace_from_event(event: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    candidates = (
+        (event.get("cwd"), "history.cwd"),
+        (event.get("workspace"), "history.workspace"),
+        (event.get("projectPath"), "history.projectPath"),
+        (event.get("project_path"), "history.project_path"),
+        (_nested(event, "project", "path"), "history.project.path"),
+        (_nested(event, "context", "cwd"), "history.context.cwd"),
+    )
+    for value, evidence in candidates:
+        workspace = normalize_native_workspace(value)
+        if workspace is not None:
+            return workspace, evidence
+    return None, None
 
 
 def _path_from_ref(ref: NativeSessionRef) -> Path | None:
@@ -689,30 +1030,6 @@ def _path_from_ref(ref: NativeSessionRef) -> Path | None:
         return None
     path = Path(str(path_value)).expanduser()
     return path if path.exists() and path.is_file() else None
-
-
-def _native_home_from_ref(ref: NativeSessionRef) -> Path | None:
-    value = ref.metadata.get("native_home")
-    if value is None:
-        return None
-    return Path(str(value)).expanduser()
-
-
-def _api_mode_from_ref(ref: NativeSessionRef) -> GigaChatApiMode:
-    value = ref.metadata.get("api_mode")
-    if isinstance(value, GigaChatApiMode):
-        return value
-    try:
-        return GigaChatApiMode(str(value))
-    except ValueError:
-        return GigaChatApiMode.V2
-
-
-def _model_from_ref(ref: NativeSessionRef) -> str | None:
-    value = ref.metadata.get("model")
-    if value is None or not str(value).strip():
-        return None
-    return str(value).strip()
 
 
 def _text_from_keys(data: Mapping[str, Any], *keys: str) -> str | None:
@@ -734,6 +1051,13 @@ def _optional_int(value: Any) -> int | None:
 
 def _project_id(workspace: str | None) -> str:
     return project_id_for_root(workspace or Path.cwd())
+
+
+def _prompt_delivery_key(request: HarnessRequest) -> str:
+    value = request.extra.get("native_prompt_idempotency_key")
+    if value is not None and str(value).strip():
+        return str(value).strip()
+    return f"nprompt_{uuid.uuid4().hex}"
 
 
 def project_hash_for_workspace(workspace: str | Path) -> str:
@@ -758,11 +1082,15 @@ def _gemini_env(
     }
     if model is not None:
         extra["GEMINI_MODEL"] = model
+        extra["GEMINI_CLI_CUSTOM_HEADERS"] = gemini_cli_custom_headers(
+            context,
+            model,
+        )
     return build_safe_env(context, home=str(native_home), extra=extra)
 
 
-def _write_gemini_settings(home: Path) -> None:
-    write_startup_config(
+def _write_gemini_settings(home: Path) -> str:
+    return write_startup_config(
         "gemini-cli",
         home,
         {"security": {"auth": {"selectedType": "gemini-api-key"}}},
@@ -781,6 +1109,22 @@ def _run_list_sessions(
         capture_output=True,
         text=True,
         timeout=LIST_SESSIONS_TIMEOUT_SECONDS,
+        check=False,
+    )
+
+
+def _run_capability_probe(
+    command: tuple[str, ...],
+    env: Mapping[str, str],
+    cwd: str | None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        env=dict(env),
+        capture_output=True,
+        text=True,
+        timeout=CAPABILITY_PROBE_TIMEOUT_SECONDS,
         check=False,
     )
 
