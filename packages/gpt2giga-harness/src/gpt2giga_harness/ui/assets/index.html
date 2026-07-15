@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
   <link rel="icon" href="/assets/favicon.ico" sizes="any">
-  <link rel="stylesheet" href="/assets/app.css?v=38.40">
+  <link rel="stylesheet" href="/assets/app.css?v=38.41">
 </head>
 <body>
   <div class="app">
@@ -599,6 +599,13 @@
                 <button id="runs-inspect-artifact-button" class="secondary" type="button" disabled>Inspect artifact</button>
               </div>
             </div>
+            <section id="runs-ownership-panel" class="runs-ownership-panel" aria-label="Activity ownership" hidden>
+              <div class="agent-team-heading">
+                <strong>Activity &amp; ownership</strong>
+                <span id="runs-ownership-summary" class="status-line"></span>
+              </div>
+              <dl id="runs-ownership-grid" class="runs-ownership-grid"></dl>
+            </section>
             <section id="runs-team-panel" class="agent-team-panel" hidden>
               <div class="agent-team-heading">
                 <strong id="runs-team-title">Agent team</strong>
@@ -836,6 +843,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=38.45"></script>
+  <script src="/assets/app.js?v=38.46"></script>
 </body>
 </html>

@@ -1977,6 +1977,37 @@ class RuntimeCoordinationStore:
                 ).fetchall()
         return tuple(_approval_request_from_row(row) for row in rows)
 
+    def list_run_approval_requests(
+        self,
+        *,
+        run_id: str,
+        job_id: str | None = None,
+        limit: int = 100,
+    ) -> tuple[ApprovalRequest, ...]:
+        """List approval records linked to one run or its durable job."""
+        page_size = max(1, min(int(limit), 200))
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            _expire_approvals(connection, now)
+            if job_id:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM approval_requests
+                    WHERE run_id = ? OR job_id = ?
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    """,
+                    (run_id, job_id, page_size),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM approval_requests WHERE run_id = ?
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    """,
+                    (run_id, page_size),
+                ).fetchall()
+        return tuple(_approval_request_from_row(row) for row in rows)
+
     def attention_read_ids(self, item_ids: tuple[str, ...]) -> frozenset[str]:
         """Return the subset of derived attention item ids marked as read."""
         if not item_ids:

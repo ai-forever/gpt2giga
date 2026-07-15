@@ -3322,6 +3322,42 @@
     .runs-trace-list {
       align-content: start;
     }
+    .runs-ownership-panel {
+      display: grid;
+      gap: 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #121922;
+      padding: 12px;
+    }
+    .runs-ownership-panel[hidden] {
+      display: none;
+    }
+    .runs-ownership-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin: 0;
+    }
+    .runs-ownership-grid > div {
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+    }
+    .runs-ownership-grid dt {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .runs-ownership-grid dd {
+      margin: 4px 0 0;
+      overflow-wrap: anywhere;
+      color: var(--text);
+      font-size: 11px;
+    }
     .runs-trace-node {
       display: grid;
       gap: 5px;
@@ -3661,6 +3697,9 @@
       }
       .runs-trace-node[data-depth="2"] {
         margin-left: 24px;
+      }
+      .runs-ownership-grid {
+        grid-template-columns: minmax(0, 1fr);
       }
       .approvals-list {
         grid-template-columns: minmax(0, 1fr);

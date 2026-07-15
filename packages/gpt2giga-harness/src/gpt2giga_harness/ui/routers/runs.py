@@ -17,6 +17,7 @@ from gpt2giga_harness.runtime.models import (
     attempt_to_dict,
     job_to_dict,
 )
+from gpt2giga_harness.runtime.policy import approval_request_to_dict
 from gpt2giga_harness.runtime.store import (
     InvalidStateTransitionError,
     RuntimeCoordinationStore,
@@ -280,6 +281,10 @@ def _job_summary(
     run_payload = _lightweight_run_summary(run) if run is not None else None
     artifacts = _artifact_summary(run)
     workflow = _workflow_team_summary(runtime_store, job)
+    approvals = runtime_store.list_run_approval_requests(
+        run_id=run_id,
+        job_id=job.id,
+    )
     return {
         "job": job_to_dict(job),
         "run": run_payload,
@@ -298,6 +303,9 @@ def _job_summary(
         ),
         "metrics": _selected_metrics(run),
         "artifacts": artifacts,
+        "artifact_inventory": _artifact_inventory(artifacts, workflow),
+        "ownership": _ownership_summary(job, attempt),
+        "approvals": [_approval_summary(item) for item in approvals],
         "workflow": workflow,
         "actions": {
             "open_task": f"/work/{job.session_id}",
@@ -432,6 +440,64 @@ def _artifact_summary(run: HarnessRun | None) -> dict[str, bool]:
         "worktree": bool(execution.get("worktree_path")),
         "diff": bool(execution.get("patch") or metadata.get("diff")),
         "pr": isinstance(pr_artifact, Mapping),
+    }
+
+
+def _artifact_inventory(
+    artifacts: Mapping[str, bool], workflow: Mapping[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Return artifact presence and lineage without paths or captured content."""
+    inventory = [
+        {"type": artifact_type, "source": "run"}
+        for artifact_type in ("worktree", "diff", "pr")
+        if artifacts.get(artifact_type)
+    ]
+    if workflow:
+        for step in workflow.get("steps", ()):
+            if not isinstance(step, Mapping):
+                continue
+            for artifact_type in step.get("artifact_types", ()):
+                item = {
+                    "type": str(artifact_type),
+                    "source": "workflow_step",
+                    "step_id": str(step.get("id") or ""),
+                }
+                if item not in inventory:
+                    inventory.append(item)
+    return inventory
+
+
+def _ownership_summary(job: RuntimeJob, attempt: JobAttempt | None) -> dict[str, Any]:
+    """Project the current durable owner without process or task payloads."""
+    return {
+        "job_id": job.id,
+        "job_status": job.status.value,
+        "attempt_id": attempt.id if attempt else None,
+        "attempt_number": attempt.attempt_number if attempt else None,
+        "attempt_status": attempt.status.value if attempt else None,
+        "worker_id": attempt.lease_owner if attempt else None,
+        "heartbeat_at": attempt.heartbeat_at if attempt else None,
+        "leased_until": attempt.leased_until if attempt else None,
+    }
+
+
+def _approval_summary(approval: Any) -> dict[str, Any]:
+    """Return approval identity and state without its contextual preview."""
+    payload = approval_request_to_dict(approval)
+    return {
+        key: payload[key]
+        for key in (
+            "id",
+            "action",
+            "status",
+            "enforcement",
+            "policy_source",
+            "enforcement_owner",
+            "decision",
+            "expires_at",
+            "decided_at",
+            "created_at",
+        )
     }
 
 

@@ -1065,6 +1065,7 @@
       byId("runs-retry-button").disabled = !actions.retry;
       byId("runs-open-worktree-button").disabled = !actions.open_worktree;
       byId("runs-inspect-artifact-button").disabled = !actions.inspect_artifact;
+      renderRunsOwnership(item);
       renderAgentTeam(byId("runs-team-tree"), item && item.workflow, {
         panel: byId("runs-team-panel"),
         title: byId("runs-team-title"),
@@ -1073,6 +1074,43 @@
       if (!item) {
         byId("runs-trace-list").textContent = "";
         byId("runs-payload-panel").hidden = true;
+      }
+    }
+
+    function renderRunsOwnership(item) {
+      const panel = byId("runs-ownership-panel");
+      const grid = byId("runs-ownership-grid");
+      grid.textContent = "";
+      panel.hidden = !item;
+      if (!item) return;
+      const ownership = item.ownership || {};
+      const approvals = Array.isArray(item.approvals) ? item.approvals : [];
+      const artifacts = Array.isArray(item.artifact_inventory) ? item.artifact_inventory : [];
+      const workflow = item.workflow || null;
+      const pendingApprovals = approvals.filter((approval) => approval.status === "pending").length;
+      setText(
+        "runs-ownership-summary",
+        `${pendingApprovals} pending approvals · ${artifacts.length} retained artifacts`
+      );
+      const latestApproval = approvals[0] || null;
+      const workflowProgress = workflow
+        ? `${workflow.completed_steps || 0}/${workflow.total_steps || 0} steps · ${workflow.status || "pending"}`
+        : "No workflow children";
+      for (const [label, value] of [
+        ["Job", [ownership.job_status, ownership.job_id].filter(Boolean).join(" · ")],
+        ["Attempt", ownership.attempt_id ? [`#${ownership.attempt_number || 1}`, ownership.attempt_status, ownership.attempt_id].filter(Boolean).join(" · ") : "Not claimed"],
+        ["Lease", ownership.worker_id ? [ownership.worker_id, ownership.leased_until ? `until ${ownership.leased_until}` : null, ownership.heartbeat_at ? `heartbeat ${ownership.heartbeat_at}` : null].filter(Boolean).join(" · ") : "Unowned"],
+        ["Approvals", latestApproval ? [`${approvals.length} linked`, latestApproval.status, latestApproval.action].filter(Boolean).join(" · ") : "None linked"],
+        ["Artifacts", artifacts.length ? artifacts.map((artifact) => artifact.type).join(", ") : "None retained"],
+        ["Workflow", workflowProgress]
+      ]) {
+        const cell = document.createElement("div");
+        const term = document.createElement("dt");
+        const description = document.createElement("dd");
+        term.textContent = label;
+        description.textContent = value || "Unavailable";
+        cell.append(term, description);
+        grid.appendChild(cell);
       }
     }
 

@@ -2,6 +2,12 @@ from fastapi.testclient import TestClient
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.runtime.policy import (
+    EnforcementLevel,
+    PermissionAction,
+    PolicyContext,
+    PolicyResolution,
+)
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.sessions.models import HarnessStoredEvent
@@ -9,6 +15,7 @@ from gpt2giga_harness.sessions.store import new_id, utc_now
 from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
 from gpt2giga_harness.ui.app import create_app
 from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
+from gpt2giga_harness.tools.policy import PolicyDecision
 
 
 def test_runs_center_lists_filters_and_resolves_lightweight_summary(tmp_path):
@@ -26,6 +33,22 @@ def test_runs_center_lists_filters_and_resolves_lightweight_summary(tmp_path):
     assert body["runs"][0]["actions"]["retry"].endswith("/retry")
     assert body["runs"][0]["actions"]["open_worktree"].endswith("/open-worktree")
     assert body["runs"][0]["actions"]["inspect_artifact"].endswith("/pr")
+    ownership = body["runs"][0]["ownership"]
+    assert ownership["job_id"] == job_id
+    assert ownership["job_status"] == "failed"
+    assert ownership["attempt_number"] == 1
+    assert ownership["attempt_status"] == "failed"
+    assert ownership["worker_id"] == "worker_review"
+    assert ownership["leased_until"] is None
+    assert body["runs"][0]["approvals"][0]["action"] == "workspace.write"
+    assert body["runs"][0]["approvals"][0]["status"] == "pending"
+    assert "preview" not in body["runs"][0]["approvals"][0]
+    assert "/tmp/private-worktree" not in response.text
+    assert body["runs"][0]["artifact_inventory"] == [
+        {"type": "worktree", "source": "run"},
+        {"type": "diff", "source": "run"},
+        {"type": "pr", "source": "run"},
+    ]
     assert "prompt" not in body["runs"][0]["job"]
     assert "prompt" not in body["runs"][0]["run"]
     assert "metadata" not in body["runs"][0]["run"]
@@ -33,6 +56,51 @@ def test_runs_center_lists_filters_and_resolves_lightweight_summary(tmp_path):
     assert summary.json()["run"]["run_id"] == run_id
     assert client.get("/api/runs?status=unknown").status_code == 400
     assert runtime.get_job(job_id).status.value == "failed"
+
+
+def test_runs_center_projects_active_attempt_lease_without_process_details(tmp_path):
+    sessions = FilesystemHarnessSessionStore(tmp_path)
+    runtime = RuntimeCoordinationStore(tmp_path)
+    session = sessions.create_session(title="Owned run")
+    run = sessions.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="inspect ownership",
+        model=None,
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=None,
+    )
+    job = runtime.submit_job(
+        session_id=session.id,
+        user_message_id="msg_owned",
+        initial_run_id=run.id,
+        idempotency_key="owned",
+        required_harness_id="echo",
+    ).job
+    attempt = runtime.create_attempt(
+        job.id,
+        run_id=run.id,
+        status="running",
+        lease_owner="worker_active",
+        leased_until="2099-01-01T00:00:00+00:00",
+    )
+    app = create_app(
+        HarnessConfig(data_dir=str(tmp_path)),
+        registry=create_default_registry(include_entry_points=False),
+        store=sessions,
+        runtime_store=runtime,
+    )
+
+    ownership = (
+        TestClient(app).get(f"/api/runs/{run.id}/summary").json()["run"]["ownership"]
+    )
+
+    assert ownership["attempt_id"] == attempt.id
+    assert ownership["worker_id"] == "worker_active"
+    assert ownership["leased_until"] == "2099-01-01T00:00:00+00:00"
+    assert "process_id" not in ownership
 
 
 def test_runs_center_trace_is_bounded_lazy_and_hides_reasoning(tmp_path):
@@ -108,6 +176,8 @@ def test_runs_center_assets_expose_bounded_live_routable_surface():
         'id="runs-trace-list"',
         'id="runs-retry-button"',
         'id="runs-inspect-artifact-button"',
+        'id="runs-ownership-panel"',
+        'id="runs-ownership-grid"',
         'id="runs-team-tree"',
         'data-tab="team"',
     ):
@@ -118,6 +188,7 @@ def test_runs_center_assets_expose_bounded_live_routable_surface():
         "function loadRunsTrace",
         "function appendRunsLiveEvent",
         "function openRunsCenterEventStream",
+        "function renderRunsOwnership",
         "function renderAgentTeam",
         "function loadWorkAgentTeam",
         "/events/stream",
@@ -165,6 +236,21 @@ def _failed_run(tmp_path):
     )
     runtime.set_attempt_idempotency_class(attempt.id, "read_only")
     runtime.finish_attempt(attempt.id, "failed", error_summary="expected failure")
+    runtime.create_approval_request(
+        PolicyResolution(
+            action=PermissionAction.WORKSPACE_WRITE,
+            decision=PolicyDecision.ASK,
+            enforcement=EnforcementLevel.ENFORCED_BY_HARNESS,
+            policy_source="test-policy",
+        ),
+        PolicyContext(
+            session_id=session.id,
+            run_id=run.id,
+            job_id=submission.job.id,
+            reason="Review the retained change",
+            preview={"path": "/tmp/private-worktree"},
+        ),
+    )
     sessions.append_event(
         HarnessStoredEvent(
             id=new_id("evt"),
