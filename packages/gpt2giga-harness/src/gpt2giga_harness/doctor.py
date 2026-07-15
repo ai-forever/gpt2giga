@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import json
 import os
+from pathlib import Path
 import platform
+import sqlite3
+from typing import Any, Mapping
 
 from gpt2giga_harness import proxy
 from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
@@ -12,14 +17,25 @@ from gpt2giga_harness.config import (
     HarnessConfig,
     pass_model_env_note,
 )
+from gpt2giga_harness.managed_mcp import HeadlessManagedMCPSnapshotStore
+from gpt2giga_harness.project import load_project_config, resolve_project
 from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
+from gpt2giga_harness.runtime.store import RUNTIME_DB_NAME
+from gpt2giga_harness.types import AvailabilityStatus, redact_secrets
+
+DOCTOR_SCHEMA_VERSION = 1
+_WORKER_STALE_AFTER_SECONDS = 30.0
+_MAX_SNAPSHOT_VALIDATIONS = 100
+_MAX_SNAPSHOT_BYTES = 1_000_000
 
 
-def run_doctor(
+def build_doctor_report(
     config: HarnessConfig,
     registry: HarnessRegistry | None = None,
-) -> str:
-    """Build a human-readable diagnostic report without printing secrets."""
+    *,
+    workspace: str | Path | None = None,
+) -> dict[str, Any]:
+    """Build a redaction-safe, machine-readable first-run readiness report."""
     registry = registry or create_default_registry()
     health = proxy.health_check(config)
     sidecar = proxy.sidecar_preflight(config.to_context())
@@ -29,62 +45,593 @@ def run_doctor(
         if health.ok
         else {}
     )
+    checks: list[dict[str, Any]] = []
+    checks.append(
+        _check(
+            "runtime",
+            "runtime",
+            "ready",
+            f"Runtime / Python: {platform.python_version()}; package import: OK",
+            evidence={"python": platform.python_version(), "package_import": True},
+        )
+    )
+    checks.extend(_proxy_checks(config, health, sidecar, models, route_probes))
+    checks.append(_gigachat_check(config, health))
+    checks.extend(_harness_checks(registry))
+    checks.extend(_workspace_checks(config, workspace))
+    checks.append(_worker_check(config))
+    checks.append(_managed_homes_check(config))
+    checks.append(_managed_mcp_check(config))
+    if registry.discovery_errors:
+        checks.append(
+            _check(
+                "plugin-discovery",
+                "harnesses",
+                "degraded",
+                f"Harness plugins: {len(registry.discovery_errors)} discovery error(s)",
+                evidence={"errors": list(registry.discovery_errors)},
+                remediation=(
+                    _remedy(
+                        "Inspect or remove the failing Harness plugin.",
+                        "giga harness list --json",
+                    ),
+                ),
+            )
+        )
+    summary = {
+        status: sum(check["status"] == status for check in checks)
+        for status in ("ready", "degraded", "blocked")
+    }
+    report = {
+        "schema_version": DOCTOR_SCHEMA_VERSION,
+        "ok": summary["blocked"] == 0,
+        "summary": summary,
+        "checks": checks,
+    }
+    return dict(_sanitize_report(report))
+
+
+def run_doctor(
+    config: HarnessConfig,
+    registry: HarnessRegistry | None = None,
+    *,
+    workspace: str | Path | None = None,
+) -> str:
+    """Build a human-readable diagnostic report without printing secrets."""
+    return format_doctor_report(
+        build_doctor_report(config, registry, workspace=workspace)
+    )
+
+
+def format_doctor_report(report: Mapping[str, Any]) -> str:
+    """Format one structured doctor report for terminal users."""
+    summary = report.get("summary") or {}
     lines = [
         "gpt2giga Unified Harness doctor",
-        "",
-        "Runtime:",
-        f"  Python: {platform.python_version()}",
-        "  Package import: OK",
-        "",
-        "Proxy:",
-        f"  URL: {config.proxy_url}",
-        f"  Health: {_health_text(health)}",
-        f"  API key: {'configured (redacted)' if config.api_key else 'not configured'}",
-        f"  Auto-start: {_sidecar_text(sidecar)}",
-        "",
-        "GigaChat:",
-        f"  Credentials: {_credentials_text()}",
-        f"  Default model: {config.default_model or 'not configured'}",
-        f"  API mode env: {os.getenv('GPT2GIGA_GIGACHAT_API_MODE') or 'not set'}",
-        f"  PASS_MODEL: {pass_model_env_note() or 'not set'}",
-        "",
-        "Routes:",
-        f"  /v1/chat/completions: {_route_probe_text(route_probes.get('/v1/chat/completions'))}",
-        f"  /v2/chat/completions: {_route_probe_text(route_probes.get('/v2/chat/completions'))}",
-        (f"  model discovery: {len(models.models)} candidate(s) from {models.source}"),
-        "",
-        "Harnesses:",
+        (
+            "Summary: "
+            f"{summary.get('ready', 0)} ready, "
+            f"{summary.get('degraded', 0)} degraded, "
+            f"{summary.get('blocked', 0)} blocked"
+        ),
     ]
+    for raw_check in report.get("checks") or ():
+        if not isinstance(raw_check, Mapping):
+            continue
+        status = str(raw_check.get("status") or "unknown").upper()
+        lines.extend(["", f"[{status}] {raw_check.get('summary') or 'Unknown check'}"])
+        for remediation in raw_check.get("remediation") or ():
+            if not isinstance(remediation, Mapping):
+                continue
+            message = remediation.get("message")
+            command = remediation.get("command")
+            if message:
+                lines.append(f"  Remedy: {message}")
+            if command:
+                lines.append(f"  Command: {command}")
+    return "\n".join(lines)
+
+
+def _proxy_checks(
+    config: HarnessConfig,
+    health: proxy.ProxyHealth,
+    sidecar: proxy.SidecarPreflight,
+    models: proxy.ModelDiscovery,
+    route_probes: Mapping[str, proxy.RouteProbe],
+) -> list[dict[str, Any]]:
+    if health.ok:
+        proxy_status = "ready"
+        proxy_remediation: tuple[dict[str, str], ...] = ()
+    elif sidecar.ok:
+        proxy_status = "degraded"
+        proxy_remediation = (_remedy("Start the configured local proxy.", "gpt2giga"),)
+    else:
+        proxy_status = "blocked"
+        proxy_remediation = (
+            _remedy(
+                "Configure proxy access or fix local auto-start prerequisites.",
+                "giga doctor --json",
+            ),
+        )
+    sidecar_ready = sidecar.ok or health.ok
+    sidecar_text = (
+        _sidecar_text(sidecar)
+        if sidecar.ok or not health.ok
+        else "not needed; proxy already reachable"
+    )
+    checks = [
+        _check(
+            "proxy-health",
+            "proxy",
+            proxy_status,
+            f"Proxy / Health: {_health_text(health)}",
+            evidence={
+                "configured_url": config.proxy_url,
+                "reachable": health.ok,
+                "health_path": health.path,
+                "status_code": health.status_code,
+                "error": health.error,
+            },
+            remediation=proxy_remediation,
+        ),
+        _check(
+            "proxy-autostart",
+            "proxy",
+            "ready" if sidecar_ready else "degraded",
+            f"Proxy / Auto-start: {sidecar_text}",
+            evidence={"ready": sidecar.ok, "reason": sidecar.reason},
+            remediation=(
+                ()
+                if sidecar_ready
+                else (
+                    _remedy(
+                        "Configure local GigaChat access or use an existing proxy.",
+                        "giga doctor --no-start-proxy --json",
+                    ),
+                )
+            ),
+        ),
+    ]
+    for path in ("/v1/chat/completions", "/v2/chat/completions"):
+        route = route_probes.get(path)
+        selected_path = f"/{config.default_api_mode.value}/chat/completions"
+        status = (
+            "ready"
+            if route is not None and route.ok
+            else "degraded"
+            if route is None and sidecar.ok
+            else "blocked"
+            if path == selected_path
+            else "degraded"
+        )
+        checks.append(
+            _check(
+                f"route-{path.split('/')[1]}",
+                "routes",
+                status,
+                f"{path}: {_route_probe_text(route)}",
+                evidence=(
+                    {"reachable": False, "status_code": None}
+                    if route is None
+                    else {
+                        "reachable": route.ok,
+                        "status_code": route.status_code,
+                        "detail": route.detail,
+                    }
+                ),
+                remediation=(
+                    ()
+                    if status == "ready"
+                    else (
+                        _remedy(
+                            "Start a compatible gateway and verify the selected route.",
+                            "giga doctor --json",
+                        ),
+                    )
+                ),
+            )
+        )
+    model_status = "ready" if models.models or config.default_model else "degraded"
+    checks.append(
+        _check(
+            "model-discovery",
+            "routes",
+            model_status,
+            f"Models: {len(models.models)} candidate(s) from {models.source}",
+            evidence={
+                "count": len(models.models),
+                "source": models.source,
+                "default_configured": bool(config.default_model),
+            },
+            remediation=(
+                ()
+                if model_status == "ready"
+                else (
+                    _remedy(
+                        "Set a default model or fix proxy model discovery.",
+                        "export GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max",
+                    ),
+                )
+            ),
+        )
+    )
+    return checks
+
+
+def _gigachat_check(
+    config: HarnessConfig,
+    health: proxy.ProxyHealth,
+) -> dict[str, Any]:
+    source = _credentials_source()
+    configured = source is not None
+    status = "ready" if configured or health.ok else "degraded"
+    model = config.default_model or "not configured"
+    api_mode_env = os.getenv("GPT2GIGA_GIGACHAT_API_MODE") or "not set"
+    pass_model = pass_model_env_note() or "not set"
+    summary = (
+        "GigaChat / Upstream access: "
+        f"{'configured (redacted)' if configured else 'not configured'}; "
+        f"default model: {model}"
+    )
+    return _check(
+        "gigachat-upstream",
+        "gigachat",
+        status,
+        summary,
+        evidence={
+            "configured": configured,
+            "source_env": source,
+            "api_mode_env": api_mode_env,
+            "pass_model": pass_model,
+            "running_proxy_reachable": health.ok,
+        },
+        remediation=(
+            ()
+            if status == "ready"
+            else (
+                _remedy(
+                    "Configure GigaChat credentials for local proxy auto-start.",
+                    "giga doctor --json",
+                ),
+            )
+        ),
+    )
+
+
+def _harness_checks(registry: HarnessRegistry) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
     for harness in registry.list():
         spec = harness.spec()
         availability = harness.availability()
-        suffix = f" - {availability.reason}" if availability.reason else ""
-        lines.append(f"  {spec.id}: {availability.status.value}{suffix}")
+        status = (
+            "ready"
+            if availability.status is AvailabilityStatus.AVAILABLE
+            else "degraded"
+        )
+        evidence: dict[str, Any] = {
+            "availability": availability.status.value,
+            "reason": availability.reason,
+        }
         probe_method = getattr(harness, "capability_probe", None)
         if callable(probe_method):
-            probe = cli_capability_snapshot_to_dict(probe_method())
-            lines.append(
-                "    compatibility: "
-                f"{probe['status']} ({probe['version'] or 'version unknown'}; "
-                f"events={probe['event_schema']}; history={probe['history_schema']})"
+            compatibility = cli_capability_snapshot_to_dict(probe_method())
+            compatibility.pop("command", None)
+            evidence["compatibility"] = compatibility
+        suffix = f" - {availability.reason}" if availability.reason else ""
+        checks.append(
+            _check(
+                f"harness-{spec.id}",
+                "harnesses",
+                status,
+                f"Harness / {spec.id}: {availability.status.value}{suffix}",
+                evidence=evidence,
+                remediation=(
+                    ()
+                    if status == "ready"
+                    else (
+                        _remedy(
+                            "Install or configure the adapter executable, then inspect it.",
+                            f"giga harness inspect {spec.id} --json",
+                        ),
+                    )
+                ),
             )
-            if probe["warning"]:
-                lines.append(f"    warning: {probe['warning']}")
-    if registry.discovery_errors:
-        lines.extend(["", "Plugin discovery errors:"])
-        lines.extend(f"  {error}" for error in registry.discovery_errors)
-    lines.extend(
-        [
-            "",
-            "UI:",
-            f"  Default bind: {config.ui_host}:{config.ui_port}",
-            (
-                "  Remote bind requires --allow-remote, TLS, and "
-                "GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN"
-            ),
+        )
+    return checks
+
+
+def _workspace_checks(
+    config: HarnessConfig,
+    workspace: str | Path | None,
+) -> list[dict[str, Any]]:
+    requested = Path.cwd() if workspace is None else Path(workspace).expanduser()
+    if not requested.exists() or not requested.is_dir():
+        return [
+            _check(
+                "workspace",
+                "workspace",
+                "blocked",
+                "Workspace: directory is missing or unreadable",
+                evidence={"exists": requested.exists(), "is_directory": False},
+                remediation=(
+                    _remedy("Choose an existing project directory.", "giga doctor ."),
+                ),
+            )
         ]
+    try:
+        project = resolve_project(
+            requested,
+            data_dir=config.data_dir,
+            load_config_name=False,
+        )
+        project_config = load_project_config(project.root)
+    except (OSError, ValueError) as exc:
+        return [
+            _check(
+                "workspace",
+                "workspace",
+                "blocked",
+                "Workspace: Harness project configuration is invalid",
+                evidence={"error": str(exc)},
+                remediation=(
+                    _remedy(
+                        "Fix the redacted project configuration error.", "giga init"
+                    ),
+                ),
+            )
+        ]
+    dirty = dict(project.dirty_summary)
+    git_status = "ready" if project.is_git_repo else "degraded"
+    config_status = "ready" if project_config.exists else "degraded"
+    return [
+        _check(
+            "workspace",
+            "workspace",
+            "ready",
+            f"Workspace: ready ({project.name})",
+            evidence={
+                "exists": True,
+                "project_id": project.id,
+                "project_name": project.name,
+            },
+        ),
+        _check(
+            "git-readiness",
+            "workspace",
+            git_status,
+            (
+                "Git: repository ready"
+                if project.is_git_repo
+                else "Git: current workspace is not a repository"
+            ),
+            evidence={
+                "is_repository": project.is_git_repo,
+                "branch_present": bool(project.git_branch),
+                "dirty_counts": dirty,
+            },
+            remediation=(
+                ()
+                if git_status == "ready"
+                else (
+                    _remedy("Initialize Git for reviewed worktree flows.", "git init"),
+                )
+            ),
+        ),
+        _check(
+            "project-config",
+            "workspace",
+            config_status,
+            (
+                "Project config: .giga/harness.toml is ready"
+                if project_config.exists
+                else "Project config: not initialized"
+            ),
+            evidence={"configured": project_config.exists},
+            remediation=(
+                ()
+                if config_status == "ready"
+                else (
+                    _remedy(
+                        "Create safe starter project configuration.",
+                        "giga init",
+                    ),
+                )
+            ),
+        ),
+    ]
+
+
+def _worker_check(config: HarnessConfig) -> dict[str, Any]:
+    state = _read_worker_state(config.data_dir)
+    readable = state.get("readable", True)
+    status = "ready" if state["online"] else "degraded" if readable else "blocked"
+    return _check(
+        "durable-worker",
+        "worker",
+        status,
+        f"Durable worker: {state['online']} online; {state['total']} recorded",
+        evidence=state,
+        remediation=(
+            ()
+            if status == "ready"
+            else (
+                _remedy(
+                    (
+                        "Start a durable Harness worker."
+                        if readable
+                        else "Inspect the unreadable runtime coordination store."
+                    ),
+                    "giga worker start" if readable else "giga runtime inspect --json",
+                ),
+            )
+        ),
     )
-    return "\n".join(lines)
+
+
+def _managed_homes_check(config: HarnessConfig) -> dict[str, Any]:
+    data_dir = Path(config.data_dir).expanduser()
+    writable = _path_can_be_created(data_dir)
+    homes_root = data_dir / "native"
+    home_count = (
+        sum(1 for path in homes_root.glob("*/homes/*") if path.is_dir())
+        if homes_root.exists()
+        else 0
+    )
+    status = "ready" if writable else "blocked"
+    return _check(
+        "managed-homes",
+        "managed-state",
+        status,
+        f"Managed homes: storage {'ready' if writable else 'not writable'}; {home_count} home(s)",
+        evidence={
+            "storage_initialized": data_dir.exists(),
+            "storage_writable": writable,
+            "home_count": home_count,
+        },
+        remediation=(
+            ()
+            if status == "ready"
+            else (
+                _remedy(
+                    "Choose a writable Harness data directory.",
+                    "export GPT2GIGA_HARNESS_DATA_DIR=/path/to/writable/state",
+                ),
+            )
+        ),
+    )
+
+
+def _managed_mcp_check(config: HarnessConfig) -> dict[str, Any]:
+    data_dir = Path(config.data_dir).expanduser()
+    root = data_dir / "tools" / "headless_mcp_snapshots"
+    paths = sorted(root.glob("*.json")) if root.exists() else []
+    invalid = 0
+    checked = 0
+    store = HeadlessManagedMCPSnapshotStore(data_dir)
+    for path in paths[:_MAX_SNAPSHOT_VALIDATIONS]:
+        checked += 1
+        try:
+            if path.stat().st_size > _MAX_SNAPSHOT_BYTES:
+                raise ValueError("snapshot is too large")
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(record, Mapping):
+                raise ValueError("snapshot must be an object")
+            store.load(
+                {
+                    "snapshot_id": record.get("snapshot_id"),
+                    "snapshot_hash": record.get("snapshot_hash"),
+                    "project_id": record.get("project_id"),
+                    "harness_id": record.get("harness_id"),
+                }
+            )
+        except (OSError, ValueError, json.JSONDecodeError):
+            invalid += 1
+    skipped = max(0, len(paths) - checked)
+    status = "ready" if invalid == 0 and skipped == 0 else "degraded"
+    return _check(
+        "managed-mcp-snapshots",
+        "managed-state",
+        status,
+        f"Managed MCP snapshots: {len(paths)} stored; {invalid} invalid; {skipped} unchecked",
+        evidence={
+            "stored": len(paths),
+            "validated": checked,
+            "invalid": invalid,
+            "unchecked": skipped,
+        },
+        remediation=(
+            ()
+            if status == "ready"
+            else (
+                _remedy(
+                    "Inspect configured MCP profiles and recreate invalid snapshots.",
+                    "giga doctor --json",
+                ),
+            )
+        ),
+    )
+
+
+def _read_worker_state(data_dir: str | Path) -> dict[str, Any]:
+    path = Path(data_dir).expanduser() / RUNTIME_DB_NAME
+    if not path.is_file():
+        return {"initialized": False, "online": 0, "offline": 0, "total": 0}
+    try:
+        with sqlite3.connect(
+            f"{path.resolve().as_uri()}?mode=ro", uri=True
+        ) as connection:
+            rows = connection.execute(
+                "SELECT status, heartbeat_at FROM workers"
+            ).fetchall()
+    except (OSError, sqlite3.Error):
+        return {
+            "initialized": True,
+            "online": 0,
+            "offline": 0,
+            "total": 0,
+            "readable": False,
+        }
+    now = datetime.now(timezone.utc).timestamp()
+    online = 0
+    for status, heartbeat_at in rows:
+        try:
+            heartbeat = datetime.fromisoformat(str(heartbeat_at)).timestamp()
+        except ValueError:
+            heartbeat = 0.0
+        if status == "online" and now - heartbeat <= _WORKER_STALE_AFTER_SECONDS:
+            online += 1
+    return {
+        "initialized": True,
+        "readable": True,
+        "online": online,
+        "offline": len(rows) - online,
+        "total": len(rows),
+    }
+
+
+def _path_can_be_created(path: Path) -> bool:
+    candidate = path
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return candidate.is_dir() and os.access(candidate, os.W_OK | os.X_OK)
+
+
+def _check(
+    check_id: str,
+    category: str,
+    status: str,
+    summary: str,
+    *,
+    evidence: Mapping[str, Any] | None = None,
+    remediation: tuple[dict[str, str], ...] = (),
+) -> dict[str, Any]:
+    return {
+        "id": check_id,
+        "category": category,
+        "status": status,
+        "summary": summary,
+        "evidence": dict(evidence or {}),
+        "remediation": list(remediation),
+    }
+
+
+def _remedy(message: str, command: str) -> dict[str, str]:
+    return {"message": message, "command": command}
+
+
+def _sanitize_report(value: Any) -> Any:
+    """Redact secrets and collapse the operator home in diagnostic strings."""
+    value = redact_secrets(value)
+    if isinstance(value, Mapping):
+        return {str(key): _sanitize_report(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_sanitize_report(item) for item in value)
+    if isinstance(value, list):
+        return [_sanitize_report(item) for item in value]
+    if isinstance(value, str):
+        home = str(Path.home())
+        return value.replace(home, "~") if home else value
+    return value
 
 
 def _health_text(health: proxy.ProxyHealth) -> str:
@@ -132,7 +679,7 @@ def _route_probe_text(route: proxy.RouteProbe | None) -> str:
     return f"unreachable ({status}{detail})"
 
 
-def _credentials_text() -> str:
+def _credentials_source() -> str | None:
     for name in (
         "GIGACHAT_CREDENTIALS",
         "GIGACHAT_ACCESS_TOKEN",
@@ -140,5 +687,5 @@ def _credentials_text() -> str:
     ):
         value = os.getenv(name)
         if value:
-            return f"present via {name} (redacted)"
-    return "not configured"
+            return name
+    return None

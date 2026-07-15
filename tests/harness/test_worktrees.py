@@ -13,6 +13,7 @@ from gpt2giga_harness.worktrees import (
     detect_overlapping_run_diffs,
     prepare_run_diff_merge,
     prepare_workspace_execution,
+    review_run_diff,
     run_diff_response,
 )
 
@@ -52,9 +53,12 @@ def test_worktree_execution_captures_and_applies_patch(tmp_path):
     metadata = {
         "workspace_execution": {**execution.to_metadata(), **diff.to_metadata()}
     }
-    applied = apply_run_diff(metadata)
+    review = review_run_diff(metadata)
+    applied = apply_run_diff(metadata, review=review)
 
     assert applied["applied_at"]
+    assert applied["reviewed_source_sha"] == review.source_sha
+    assert applied["applied_patch_sha256"] == review.patch_sha256
     assert (repo / "app.txt").read_text(encoding="utf-8") == "changed\n"
     assert (repo / "new.txt").read_text(encoding="utf-8") == "new\n"
 
@@ -147,7 +151,53 @@ def test_truncated_patch_cannot_be_applied(tmp_path, monkeypatch):
 
     assert run_diff_response(metadata)["can_apply"] is False
     with pytest.raises(WorktreeError, match="truncated"):
-        apply_run_diff(metadata)
+        review_run_diff(metadata)
+
+
+def test_reviewed_patch_rejects_stale_source_and_changed_patch(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    execution = prepare_workspace_execution(
+        requested_policy="worktree",
+        harness_kind="agent-cli",
+        mode="edit",
+        workspace=str(repo),
+        data_dir=tmp_path / "data",
+        session_id="sess_review",
+        run_id="run_review",
+    )
+    Path(execution.request_workspace or "", "app.txt").write_text(
+        "reviewed\n", encoding="utf-8"
+    )
+    diff = capture_workspace_diff(execution)
+    assert diff is not None
+    metadata = {
+        "workspace_execution": {**execution.to_metadata(), **diff.to_metadata()}
+    }
+    review = review_run_diff(metadata, branch_name="codex/reviewed")
+
+    assert review.source_sha == _git_output(repo, "rev-parse", "HEAD")
+    assert len(review.patch_sha256) == 64
+    assert review.to_preview()["branch_name"] == "codex/reviewed"
+
+    (repo / "source.txt").write_text("advanced\n", encoding="utf-8")
+    _git(repo, "add", "source.txt")
+    _git(repo, "commit", "-m", "advance source")
+    with pytest.raises(WorktreeConflictError, match="base commit"):
+        apply_run_diff(metadata, review=review, branch_name="codex/reviewed")
+
+    _git(repo, "reset", "--hard", review.source_sha)
+    changed_metadata = {
+        "workspace_execution": {
+            **metadata["workspace_execution"],
+            "patch": diff.patch.replace("+reviewed", "+changed after review"),
+        }
+    }
+    with pytest.raises(WorktreeConflictError, match="identity changed"):
+        apply_run_diff(
+            changed_metadata,
+            review=review,
+            branch_name="codex/reviewed",
+        )
 
 
 def test_merge_queue_detects_overlaps_and_combines_disjoint_patches(tmp_path):
@@ -204,6 +254,13 @@ def test_merge_queue_detects_overlaps_and_combines_disjoint_patches(tmp_path):
             merge_id="workflow_conflict",
         )
 
+    merged_metadata = {"workspace_execution": repeated}
+    review = review_run_diff(merged_metadata)
+    applied = apply_run_diff(merged_metadata, review=review)
+    assert applied["applied_patch_sha256"] == review.patch_sha256
+    assert (repo / "app.txt").read_text(encoding="utf-8") == "changed by run_a\n"
+    assert (repo / "second.txt").read_text(encoding="utf-8") == "changed by run_b\n"
+
 
 def _git_repo(path: Path) -> Path:
     path.mkdir()
@@ -223,3 +280,12 @@ def _git(cwd: Path, *args: str) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def _git_output(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ("git", "-C", str(cwd), *args),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()

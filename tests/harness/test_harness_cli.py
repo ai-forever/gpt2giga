@@ -15,6 +15,15 @@ from gpt2giga_harness.native.models import (
     NativeTranscriptMessage,
 )
 from gpt2giga_harness.native.registry import NativeHistoryConnectorRegistry
+from gpt2giga_harness.runtime.policy import (
+    ApprovalDecision,
+    PermissionAction,
+    PolicyContext,
+    PolicyEngine,
+    REVIEWED_PROMOTION_APPLY_OWNER,
+    permission_profile,
+)
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.types import (
     Availability,
@@ -130,6 +139,28 @@ def test_cli_harness_list_outputs_direct_chat(capsys):
     assert "direct-chat" in output
 
 
+def test_cli_doctor_json_passes_explicit_workspace(capsys, monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_report(config, *, workspace):
+        captured["workspace"] = workspace
+        return {
+            "schema_version": 1,
+            "ok": True,
+            "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+            "checks": [],
+        }
+
+    monkeypatch.setattr(cli, "build_doctor_report", fake_report)
+
+    assert cli.main(["doctor", str(tmp_path), "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert captured["workspace"] == str(tmp_path)
+    assert payload["schema_version"] == 1
+    assert payload["ok"] is True
+
+
 def test_cli_harness_list_json_shows_native_metadata(capsys):
     exit_code = cli.main(["harness", "list", "--json"])
 
@@ -140,6 +171,20 @@ def test_cli_harness_list_json_shows_native_metadata(capsys):
     assert by_id["codex-cli"]["native"] is True
     assert by_id["codex-cli"]["default_invocation_mode"] == "headless"
     assert by_id["direct-chat"]["native"] is False
+
+
+def test_cli_harness_capabilities_outputs_generated_matrix(capsys):
+    assert cli.main(["harness", "capabilities", "--json"]) == 0
+
+    matrix = json.loads(capsys.readouterr().out)
+    assert matrix["generated_from"] == "HarnessSpec.adapter_capabilities"
+    assert {item["id"] for item in matrix["adapters"]} == {
+        "codex-cli",
+        "claude-code",
+        "gemini-cli",
+    }
+    assert cli.main(["harness", "capabilities"]) == 0
+    assert "# Harness adapter capability matrix" in capsys.readouterr().out
 
 
 def test_cli_harness_inspect_json_shows_native_support(capsys):
@@ -583,6 +628,27 @@ def test_cli_run_provenance_and_replay(capsys, tmp_path, monkeypatch):
         workspace=None,
         status="succeeded",
     )
+    runtime = RuntimeCoordinationStore(tmp_path / "data")
+    context = PolicyContext(
+        run_id=run.id,
+        reason="Apply reviewed patch.",
+        preview={"source_sha": "a" * 40, "patch_sha256": "b" * 64},
+        approval_binding="cli-reviewed-binding",
+        enforcement_owner=REVIEWED_PROMOTION_APPLY_OWNER,
+    )
+    engine = PolicyEngine(runtime)
+    resolution = engine.resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=context,
+    )
+    approval = runtime.create_approval_request(resolution, context)
+    runtime.decide_approval_request(approval.id, ApprovalDecision.ALLOW_ONCE)
+    engine.resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=context,
+    )
 
     provenance_code = cli.main(["run", "provenance", run.id, "--json"])
     provenance = json.loads(capsys.readouterr().out)
@@ -590,6 +656,9 @@ def test_cli_run_provenance_and_replay(capsys, tmp_path, monkeypatch):
     assert provenance_code == 0
     assert provenance["provenance"]["run_id"] == run.id
     assert provenance["provenance"]["replay_request"]["prompt"] == "hello replay"
+    reviewed = provenance["provenance"]["reviewed_evidence"]
+    assert reviewed["source_run_id"] == run.id
+    assert reviewed["operations"][0]["operation_id"] == approval.id
 
     replay_code = cli.main(["run", "replay", run.id, "--json"])
     replay = json.loads(capsys.readouterr().out)
@@ -597,6 +666,10 @@ def test_cli_run_provenance_and_replay(capsys, tmp_path, monkeypatch):
     assert replay_code == 0
     assert replay["source_run"]["id"] == run.id
     assert replay["result"]["text"] == "hello replay"
+    assert (
+        replay["replay_request"]["extra"]["source_reviewed_evidence"]["manifest_sha256"]
+        == reviewed["manifest_sha256"]
+    )
     assert replay["run"]["metadata"]["provenance"]["request"]["prompt"] == (
         "hello replay"
     )

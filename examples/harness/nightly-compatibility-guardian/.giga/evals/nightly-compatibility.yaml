@@ -1,0 +1,43 @@
+name: nightly-compatibility
+description: Run a pinned adapter, model, route, and task contract every night.
+harnesses: [codex-cli, claude-code, gemini-cli]
+model: GigaChat-2-Max
+api_mode: v2
+mode: read
+workspace_policy: current
+metadata:
+  example: nightly-compatibility-guardian
+  baseline_policy: exact_adapter_dimensions
+  meaningful_regression: failed_check_after_exact_schedule_test
+  failure_taxonomy:
+    product: Harness orchestration or compatibility contract violated.
+    adapter: Native CLI version, event schema, or normalized adapter semantics drifted.
+    model: The run completed truthfully but the model missed the deterministic task contract.
+    environment: Proxy, credentials, executable, network, or worker prevented a valid run.
+cases:
+  - id: route_and_model_identity
+    prompt: >-
+      Read COMPATIBILITY_TASK.md. Report the pinned route as v2 and the pinned
+      model as GigaChat-2-Max, then return the marker COMPAT_ROUTE_MODEL_OK.
+      Do not edit files or use public network tools.
+    required_capability: agent_cli
+    checks:
+      - name: route_model_marker
+        type: contains
+        value: COMPAT_ROUTE_MODEL_OK
+      - name: no_failure_claim
+        type: not_contains_regex
+        value: "(?i)(compatibility failed|unable to verify|traceback)"
+  - id: failure_taxonomy_contract
+    prompt: >-
+      Read COMPATIBILITY_TASK.md. Confirm that compatibility failures are
+      classified as exactly product, adapter, model, or environment, then
+      return the marker COMPAT_TAXONOMY_OK. Do not edit files.
+    required_capability: agent_cli
+    checks:
+      - name: taxonomy_marker
+        type: contains
+        value: COMPAT_TAXONOMY_OK
+      - name: no_unclassified_failure
+        type: not_contains_regex
+        value: "(?i)unclassified failure"

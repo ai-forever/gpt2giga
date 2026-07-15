@@ -1198,7 +1198,7 @@ def adapter_compatibility_matrix(
         GigaChatApiMode.V2,
     ),
 ) -> list[dict[str, Any]]:
-    """Describe truthful adapter quality cells without executing external CLIs."""
+    """Describe declared adapter quality cells without claiming live evidence."""
     cells: list[dict[str, Any]] = []
     for harness in registry.list():
         spec = harness.spec()
@@ -1231,11 +1231,19 @@ def adapter_compatibility_matrix(
                         "api_mode": api_mode.value,
                         "check": check,
                         "supported": bool(support[check]),
-                        "evidence": (
-                            "structured_adapter"
-                            if check in {"stream", "tool_lifecycle", "failure"}
-                            and support[check]
-                            else "declared_adapter_contract"
+                        "measured": False,
+                        "evidence": "declared_adapter_contract",
+                        "measurement": (
+                            "run_provenance.gigachat_compatibility"
+                            if check
+                            in {
+                                "start",
+                                "stream",
+                                "tool_lifecycle",
+                                "failure",
+                                "cancel",
+                            }
+                            else None
                         ),
                     }
                 )

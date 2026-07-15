@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "affected_function": "reserve_stock",
+  "boundary_condition": "requested equals available",
+  "minimum_evidence_locations": [
+    "src/inventory.py",
+    "tests/test_inventory.py"
+  ],
+  "required_regression_property": "a reservation equal to available stock is accepted and leaves zero"
+}

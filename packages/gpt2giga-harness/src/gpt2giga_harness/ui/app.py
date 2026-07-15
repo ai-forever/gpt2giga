@@ -144,6 +144,7 @@ from gpt2giga_harness.provenance import (
     build_run_provenance,
     run_provenance_to_dict,
 )
+from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
 from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga_harness.routing import (
     recommend_harness_route,
@@ -158,6 +159,8 @@ from gpt2giga_harness.runtime.policy import (
     PolicyContext,
     PolicyDecision,
     PolicyEngine,
+    REVIEWED_PROMOTION_APPLY_OWNER,
+    REVIEWED_PROMOTION_BRANCH_OWNER,
     approval_request_to_dict,
     permission_profile,
 )
@@ -229,6 +232,7 @@ from gpt2giga_harness.worktrees import (
     discard_run_worktree,
     open_worktree_response,
     prepare_workspace_execution,
+    review_run_diff,
     run_diff_response,
 )
 from gpt2giga_harness.workspace import (
@@ -335,6 +339,8 @@ def create_app(
         *,
         reason: str,
         preview: Mapping[str, Any],
+        approval_binding: str | None = None,
+        enforcement_owner: str | None = None,
     ) -> JSONResponse | None:
         if runtime_store is None:
             raise HTTPException(
@@ -360,6 +366,8 @@ def create_app(
             job_id=job_id,
             reason=reason,
             preview=preview,
+            approval_binding=approval_binding,
+            enforcement_owner=enforcement_owner,
         )
         resolution = policy_engine.resolve(
             action,
@@ -1453,6 +1461,7 @@ def create_app(
                 registry=registry,
                 config=config,
                 run=run,
+                runtime_store=runtime_store,
             )
             run = store.update_run(
                 run.id,
@@ -1938,6 +1947,7 @@ def create_app(
             registry=registry,
             config=config,
             run=run,
+            runtime_store=runtime_store,
         )
         return {
             "run": run_to_dict(run),
@@ -2223,7 +2233,11 @@ def create_app(
         try:
             run = store.get_run(run_id)
             raw_request = _latest_raw_request_for_run(store, run)
-            replay_payload = build_replay_request(run, raw_request=raw_request)
+            replay_payload = build_replay_request(
+                run,
+                raw_request=raw_request,
+                reviewed_evidence=_reviewed_evidence_for_run(runtime_store, run.id),
+            )
             if "stream" in payload:
                 replay_payload["stream"] = bool(payload.get("stream"))
             result = runner.run_in_session(run.session_id, replay_payload)
@@ -2272,22 +2286,22 @@ def create_app(
     ) -> dict[str, Any] | JSONResponse:
         try:
             run = store.get_run(run_id)
+            branch_name = _optional_text(payload.get("branch_name"))
+            review = review_run_diff(run.metadata, branch_name=branch_name)
             approval_response = _approval_gate(
                 PermissionAction.GIT_APPLY,
                 run,
                 reason="Apply an isolated worktree diff to the source checkout.",
-                preview={
-                    "branch_name": _optional_text(payload.get("branch_name")),
-                    "changed_files": run_diff_response(run.metadata).get(
-                        "changed_files", []
-                    ),
-                },
+                preview=review.to_preview(),
+                approval_binding=review.approval_binding,
+                enforcement_owner=REVIEWED_PROMOTION_APPLY_OWNER,
             )
             if approval_response is not None:
                 return approval_response
             workspace_execution = apply_run_diff(
                 run.metadata,
-                branch_name=_optional_text(payload.get("branch_name")),
+                review=review,
+                branch_name=branch_name,
             )
             metadata = {
                 **dict(run.metadata),
@@ -2304,6 +2318,8 @@ def create_app(
                     payload={
                         "changed_files": workspace_execution.get("changed_files", []),
                         "applied_branch": workspace_execution.get("applied_branch"),
+                        "source_sha": review.source_sha,
+                        "patch_sha256": review.patch_sha256,
                     },
                     created_at=utc_now(),
                 )
@@ -2327,22 +2343,25 @@ def create_app(
     ) -> dict[str, Any] | JSONResponse:
         try:
             run = store.get_run(run_id)
+            branch_name = (
+                _optional_text(payload.get("branch_name"))
+                or build_pr_artifact(run).branch_name_suggestion
+            )
+            review = review_run_diff(run.metadata, branch_name=branch_name)
             approval_response = _approval_gate(
                 PermissionAction.GIT_BRANCH_CREATE,
                 run,
                 reason="Create a local branch from the isolated run patch.",
-                preview={
-                    "branch_name": _optional_text(payload.get("branch_name")),
-                    "changed_files": run_diff_response(run.metadata).get(
-                        "changed_files", []
-                    ),
-                },
+                preview=review.to_preview(),
+                approval_binding=review.approval_binding,
+                enforcement_owner=REVIEWED_PROMOTION_BRANCH_OWNER,
             )
             if approval_response is not None:
                 return approval_response
             branch = create_pr_branch(
                 run,
-                branch_name=_optional_text(payload.get("branch_name")),
+                review=review,
+                branch_name=branch_name,
             )
             metadata = {
                 **dict(run.metadata),
@@ -2362,7 +2381,11 @@ def create_app(
                     run_id=run.id,
                     type="pr_branch_created",
                     message="Created local branch from run patch.",
-                    payload={"branch_name": branch["branch_name"]},
+                    payload={
+                        "branch_name": branch["branch_name"],
+                        "source_sha": review.source_sha,
+                        "patch_sha256": review.patch_sha256,
+                    },
                     created_at=utc_now(),
                 )
             )
@@ -2656,6 +2679,7 @@ def _build_current_run_provenance(
     registry: HarnessRegistry,
     config: HarnessConfig,
     run: HarnessRun,
+    runtime_store: RuntimeCoordinationStore | None = None,
 ):
     session = store.get_session(run.session_id)
     try:
@@ -2669,7 +2693,24 @@ def _build_current_run_provenance(
         raw_requests=store.list_raw_requests(run.session_id),
         raw_responses=store.list_raw_responses(run.session_id),
         events=store.list_events(run.session_id, run_id=run.id),
+        policy_audit_events=(
+            runtime_store.list_policy_audit_events(run_id=run.id)
+            if runtime_store is not None
+            else ()
+        ),
         data_dir=config.data_dir,
+    )
+
+
+def _reviewed_evidence_for_run(
+    runtime_store: RuntimeCoordinationStore | None,
+    run_id: str,
+) -> dict[str, Any] | None:
+    if runtime_store is None:
+        return None
+    return reviewed_evidence_manifest(
+        run_id,
+        runtime_store.list_policy_audit_events(run_id=run_id),
     )
 
 

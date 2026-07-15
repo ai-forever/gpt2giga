@@ -36,7 +36,7 @@ giga doctor
 giga ui
 ```
 
-The current `gpt2giga-harness==0.0.1a2` metadata depends exactly on
+The current `gpt2giga-harness==0.0.1a3` metadata depends exactly on
 `gpt2giga==0.2.3a2`. Installing only `gpt2giga` never adds Harness commands or
 the `gpt2giga_harness` namespace.
 
@@ -46,14 +46,56 @@ From a disposable project directory:
 
 ```sh
 giga init
-giga doctor
+giga doctor .
+giga doctor . --json
 giga ui
 ```
+
+The doctor reports `ready`, `degraded`, and `blocked` checks for the local
+proxy and routes, configured models, adapter CLI versions, workspace and Git,
+the durable worker, Harness-managed homes, and managed MCP snapshots. JSON
+evidence is redacted and omits absolute workspace paths; every degraded or
+blocked first-run prerequisite includes a safe remediation command. Runtime
+worker state is inspected read-only.
+
+For a credential-free tour, copy the
+[first-run demo](../../examples/harness/first-run-demo/README.md). It keeps
+runtime state inside the disposable copy and verifies `giga init`, the local
+Echo read path, and the generated smoke eval without starting a proxy or an
+external agent CLI.
+
+For the first model-backed north-star flow, copy the
+[issue-to-reviewed-patch example](../../examples/harness/issue-to-reviewed-patch/README.md).
+It packages reviewed agent profiles, a durable isolated-worktree workflow, and
+a post-apply eval while keeping apply, commit, push, and hosted writes explicit.
+
+For unattended compatibility evidence, copy the
+[nightly compatibility guardian](../../examples/harness/nightly-compatibility-guardian/README.md).
+It packages a pinned Codex/Claude/Gemini eval, exact baseline dimensions, a
+read-only triage workflow, and a durable schedule that runs without the UI and
+raises Attention only after a tested contract regresses.
+
+For parallel evidence-backed review, copy the
+[cross-harness review team](../../examples/harness/cross-harness-review-team/README.md).
+It fans out read-only explorer, security, tests, and maintainability roles
+across Codex, Claude, and Gemini, then synthesizes retained child artifacts
+without introducing a shared writable workspace.
 
 Open `http://127.0.0.1:8091/`. `giga ui` starts a durable local worker when
 needed; pass `--no-start-worker` when another supervisor owns that lifecycle.
 The default loopback binding is intentional. Remote binding requires explicit
 authentication and remote-access opt-in.
+
+After the first run starts, Work reveals a compact Run → Evidence → Approval /
+worktree → Reuse / automation path. Once
+the run reaches a terminal state, **Open evidence** deep-links to that exact
+run's retained trace in Runs Center; prompts, responses, and workspace paths
+are not copied into the transition summary. For a retained isolated patch,
+**Review worktree** opens that run's Diff inspector, where apply and approval
+remain separate explicit operator actions. A successful run with no pending
+worktree review enables **Reuse run**, which opens the exact run's existing
+provenance/promotion inspector. Promotion preview/apply and later scheduling
+remain separate explicit actions.
 
 Useful orientation commands:
 

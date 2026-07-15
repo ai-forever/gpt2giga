@@ -1,0 +1,10 @@
+[project]
+name = "gpt2giga-harness-p0-fixture"
+version = "1.0.0"
+description = "Hermetic inventory fixture for the Harness P0 comparison"
+requires-python = ">=3.12,<3.15"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

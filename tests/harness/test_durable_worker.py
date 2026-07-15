@@ -1,4 +1,5 @@
 import concurrent.futures
+import json
 import threading
 import time
 
@@ -9,10 +10,19 @@ from gpt2giga_harness.arena import FilesystemHarnessArenaStore, queue_arena
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
-from gpt2giga_harness.runtime.models import JobAttemptStatus, JobStatus
+from gpt2giga_harness.runtime.models import (
+    JobAttemptStatus,
+    JobStatus,
+    SideEffectStatus,
+)
 from gpt2giga_harness.runtime.payloads import DurableJobPayloadStore
+from gpt2giga_harness.runtime.side_effects import HarnessSideEffectExecutor
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
-from gpt2giga_harness.runtime.worker import DurableJobDispatcher, DurableJobWorker
+from gpt2giga_harness.runtime.worker import (
+    RECOVERY_MARKER_IDENTITY_FIELD,
+    DurableJobDispatcher,
+    DurableJobWorker,
+)
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.types import (
@@ -327,6 +337,168 @@ def test_safe_retry_creates_new_attempt_and_run_without_new_user_message(
     assert flaky.request_message_counts == [1, 1]
 
 
+def test_worker_records_supplied_side_effect_once_after_owner_loss(
+    tmp_path, monkeypatch
+):
+    class SimulatedOwnerLoss(BaseException):
+        pass
+
+    config = HarnessConfig(data_dir=str(tmp_path))
+    registry = HarnessRegistry()
+    registry.register(_NamedEchoHarness("recovery-echo"))
+    sessions = FilesystemHarnessSessionStore(tmp_path)
+    runtime = RuntimeCoordinationStore(tmp_path)
+    payloads = DurableJobPayloadStore(tmp_path)
+    runner = HarnessSessionRunner(registry=registry, config=config, store=sessions)
+    dispatcher = DurableJobDispatcher(
+        runtime_store=runtime,
+        payload_store=payloads,
+        runner=runner,
+    )
+    session = runner.create_session(title="owner loss")
+    token = "opaque-owner-loss-token"
+    submitted = dispatcher.submit(
+        session.id,
+        {
+            "harness_id": "recovery-echo",
+            "prompt": "recover once",
+            "mode": "read",
+            "max_attempts": 2,
+            "side_effect_token": token,
+        },
+        idempotency_key="owner-loss",
+    )
+    original = HarnessSideEffectExecutor.record_recovery_marker_once
+    owner_lost = False
+
+    def record_then_lose_owner(self, **kwargs):
+        nonlocal owner_lost
+        marker = original(self, **kwargs)
+        if not owner_lost:
+            owner_lost = True
+            raise SimulatedOwnerLoss
+        return marker
+
+    monkeypatch.setattr(
+        HarnessSideEffectExecutor,
+        "record_recovery_marker_once",
+        record_then_lose_owner,
+    )
+    first_worker = DurableJobWorker(
+        config,
+        registry=registry,
+        worker_id="worker_lost",
+        lease_seconds=1,
+    )
+
+    try:
+        first_worker.run_once()
+    except SimulatedOwnerLoss:
+        pass
+    else:  # pragma: no cover - documents the failure injection contract
+        raise AssertionError("the first durable owner was not interrupted")
+
+    time.sleep(1.05)
+    recovered = runtime.recover_expired_attempts(retry_delay_seconds=0)
+    assert [attempt.id for attempt in recovered] == [
+        runtime.list_attempts(submitted.job.id)[0].id
+    ]
+    second_worker = DurableJobWorker(
+        config,
+        registry=registry,
+        worker_id="worker_recovered",
+        lease_seconds=1,
+    )
+    assert second_worker.run_once() is True
+
+    job = runtime.get_job(submitted.job.id)
+    attempts = runtime.list_attempts(job.id)
+    side_effects = runtime.list_side_effects(job.id)
+    events = sessions.list_events(session.id)
+    stored_payload = payloads.load(job.id)
+    serialized = json.dumps(
+        {
+            "payload": stored_payload,
+            "runtime": runtime.export(),
+            "events": [event.payload for event in events],
+        }
+    )
+
+    assert job.status is JobStatus.SUCCEEDED
+    assert [attempt.status for attempt in attempts] == [
+        JobAttemptStatus.INTERRUPTED,
+        JobAttemptStatus.SUCCEEDED,
+    ]
+    assert len(side_effects) == 1
+    assert side_effects[0].status is SideEffectStatus.COMPLETED
+    assert side_effects[0].owner_attempt_id == attempts[0].id
+    assert [event.type for event in events].count("durable_side_effect_recorded") == 1
+    assert runtime.pending_outbox() == ()
+    assert stored_payload[RECOVERY_MARKER_IDENTITY_FIELD] != token
+    assert token not in serialized
+
+
+def test_worker_blocks_ambiguous_recovery_marker_without_retry(tmp_path):
+    config = HarnessConfig(data_dir=str(tmp_path))
+    registry = HarnessRegistry()
+    registry.register(_NamedEchoHarness("blocked-recovery-echo"))
+    sessions = FilesystemHarnessSessionStore(tmp_path)
+    runtime = RuntimeCoordinationStore(tmp_path)
+    payloads = DurableJobPayloadStore(tmp_path)
+    runner = HarnessSessionRunner(registry=registry, config=config, store=sessions)
+    dispatcher = DurableJobDispatcher(
+        runtime_store=runtime,
+        payload_store=payloads,
+        runner=runner,
+    )
+    session = runner.create_session(title="blocked marker")
+    submitted = dispatcher.submit(
+        session.id,
+        {
+            "harness_id": "blocked-recovery-echo",
+            "prompt": "must stay blocked",
+            "mode": "read",
+            "max_attempts": 3,
+            "side_effect_token": "ambiguous-production-token",
+        },
+        idempotency_key="blocked-production-marker",
+    )
+    first_attempt = runtime.create_attempt(
+        submitted.job.id,
+        run_id=submitted.queued.run.id,
+        idempotency_class="read_only",
+    )
+    runtime.transition_attempt(first_attempt.id, JobAttemptStatus.RUNNING)
+    identity = payloads.load(submitted.job.id)[RECOVERY_MARKER_IDENTITY_FIELD]
+    reserved = runtime.reserve_side_effect(
+        job_id=submitted.job.id,
+        attempt_id=first_attempt.id,
+        token=identity,
+        operation=HarnessSideEffectExecutor.EVENT_OPERATION,
+        intent=HarnessSideEffectExecutor.recovery_marker_intent(submitted.job.id),
+    )
+    runtime.finish_attempt(
+        first_attempt.id,
+        JobAttemptStatus.INTERRUPTED,
+        retry_delay_seconds=0,
+        sync_terminal_run=False,
+    )
+
+    assert DurableJobWorker(config, registry=registry).run_once() is True
+
+    job = runtime.get_job(submitted.job.id)
+    attempts = runtime.list_attempts(job.id)
+    assert job.status is JobStatus.FAILED
+    assert [attempt.status for attempt in attempts] == [
+        JobAttemptStatus.INTERRUPTED,
+        JobAttemptStatus.FAILED,
+    ]
+    assert (
+        runtime.get_side_effect(reserved.record.id).status is SideEffectStatus.RESERVED
+    )
+    assert runtime.pending_outbox() == ()
+
+
 def test_worker_timeout_fails_job_and_records_process_metadata(tmp_path):
     config = HarnessConfig(data_dir=str(tmp_path))
     registry = HarnessRegistry()
@@ -482,6 +654,7 @@ def test_filesystem_ui_submits_idempotent_durable_run_and_worker_completes(tmp_p
         "prompt": "queued hello",
         "mode": "read",
         "idempotency_key": "stable-ui-key",
+        "side_effect_token": "stable-ui-side-effect",
     }
 
     first = client.post(f"/api/sessions/{session_id}/run/start", json=request)
@@ -505,6 +678,9 @@ def test_filesystem_ui_submits_idempotent_durable_run_and_worker_completes(tmp_p
         "user",
         "assistant",
     ]
+    side_effects = RuntimeCoordinationStore(config.data_dir).list_side_effects()
+    assert len(side_effects) == 1
+    assert side_effects[0].status is SideEffectStatus.COMPLETED
 
 
 def test_filesystem_ui_cancels_queued_job_before_worker_claim(tmp_path):

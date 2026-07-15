@@ -2401,6 +2401,92 @@
       color: #718096;
       font-size: 10px;
     }
+    .run-evidence-transition {
+      display: grid;
+      width: min(960px, calc(100% - 48px));
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 18px;
+      margin: 0 auto 12px;
+      border: 1px solid #2b4654;
+      border-radius: 13px;
+      background: linear-gradient(115deg, rgb(17 32 40 / 0.96), rgb(13 22 31 / 0.96));
+      box-shadow: 0 12px 32px rgb(0 0 0 / 0.16);
+      padding: 11px 13px;
+    }
+    .run-evidence-transition[hidden] {
+      display: none;
+    }
+    .run-evidence-transition-copy {
+      display: grid;
+      min-width: 0;
+      gap: 5px;
+    }
+    .run-evidence-kicker {
+      color: #7d91a7;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+    .run-evidence-progress {
+      display: flex;
+      max-width: 560px;
+      align-items: center;
+      gap: 8px;
+    }
+    .run-evidence-step {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #75869a;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .run-evidence-step b {
+      display: inline-grid;
+      width: 21px;
+      height: 21px;
+      place-items: center;
+      border: 1px solid #385064;
+      border-radius: 50%;
+      font-size: 10px;
+    }
+    .run-evidence-step.active,
+    .run-evidence-step.complete {
+      color: #dff8f5;
+    }
+    .run-evidence-step.active b {
+      border-color: var(--accent);
+      background: rgb(43 185 189 / 0.14);
+      color: #75e4e5;
+    }
+    .run-evidence-step.complete b {
+      border-color: #3c7c65;
+      background: #16372f;
+      color: var(--green);
+    }
+    .run-evidence-connector {
+      width: 28px;
+      height: 1px;
+      background: #31465a;
+    }
+    #run-evidence-summary {
+      overflow: hidden;
+      margin: 0;
+      color: #91a2b5;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .run-evidence-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .run-evidence-actions button {
+      min-width: 116px;
+    }
     .composer {
       position: relative;
       width: min(960px, calc(100% - 48px));
@@ -2809,6 +2895,7 @@
       }
       .config-section,
       .message-list,
+      .run-evidence-transition,
       .composer {
         width: calc(100% - 28px);
       }
@@ -2880,6 +2967,29 @@
       }
       .chat-scroll {
         padding: 0;
+      }
+      .run-evidence-transition {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .run-evidence-progress {
+        max-width: 100%;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+      .run-evidence-step {
+        flex: 0 0 auto;
+      }
+      .run-evidence-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .run-evidence-actions button {
+        width: 100%;
+      }
+      #run-evidence-summary {
+        white-space: normal;
       }
       .composer {
         margin-bottom: 12px;

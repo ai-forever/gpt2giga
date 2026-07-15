@@ -1,6 +1,10 @@
+import json
+
 from gpt2giga_harness import proxy
 from gpt2giga_harness.config import HarnessConfig
-from gpt2giga_harness.doctor import run_doctor
+from gpt2giga_harness.doctor import build_doctor_report, run_doctor
+from gpt2giga_harness.registry import HarnessRegistry
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 
 
 def test_probe_json_route_treats_validation_error_as_reachable(monkeypatch):
@@ -114,3 +118,135 @@ def test_doctor_reports_live_route_probes(monkeypatch):
     assert "/v1/chat/completions: reachable (HTTP 422" in output
     assert "/v2/chat/completions: reachable (HTTP 422" in output
     assert captured_models == ["DiscoveredModel", "DiscoveredModel"]
+
+
+def test_doctor_report_is_redacted_actionable_and_workspace_scoped(
+    monkeypatch,
+    tmp_path,
+):
+    secret = "doctor-secret-value"
+    monkeypatch.setenv("GIGACHAT_CREDENTIALS", secret)
+    monkeypatch.setattr(
+        proxy,
+        "health_check",
+        lambda config: proxy.ProxyHealth(
+            ok=False,
+            url=config.proxy_url,
+            error=f"upstream password={secret}",
+        ),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "sidecar_preflight",
+        lambda _context: proxy.SidecarPreflight(
+            ok=False,
+            reason=f"authorization: {secret}",
+        ),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "discover_models",
+        lambda config, api_mode: proxy.ModelDiscovery(
+            ok=False,
+            models=(),
+            source="fallback hints",
+            error="proxy unavailable",
+        ),
+    )
+    registry = HarnessRegistry()
+    registry.discovery_errors.append(f"plugin token={secret}")
+
+    report = build_doctor_report(
+        HarnessConfig(
+            proxy_url=f"http://operator:{secret}@127.0.0.1:8090",
+            data_dir=str(tmp_path / "state"),
+        ),
+        registry,
+        workspace=tmp_path,
+    )
+
+    serialized = json.dumps(report)
+    by_id = {check["id"]: check for check in report["checks"]}
+    assert report["schema_version"] == 1
+    assert report["ok"] is False
+    assert secret not in serialized
+    assert str(tmp_path) not in serialized
+    assert by_id["workspace"]["status"] == "ready"
+    assert by_id["git-readiness"]["status"] == "degraded"
+    assert by_id["git-readiness"]["remediation"][0]["command"] == "git init"
+    assert by_id["durable-worker"]["remediation"][0]["command"] == "giga worker start"
+    assert by_id["managed-homes"]["evidence"]["storage_writable"] is True
+    assert by_id["managed-mcp-snapshots"]["evidence"]["stored"] == 0
+
+
+def test_doctor_reads_worker_status_without_rewriting_runtime_state(
+    monkeypatch,
+    tmp_path,
+):
+    store = RuntimeCoordinationStore(tmp_path)
+    store.register_worker(
+        worker_id="worker-test",
+        process_id=123,
+        hostname="test-host",
+        capability_fingerprint={},
+    )
+    runtime_path = tmp_path / "runtime.sqlite3"
+    before = runtime_path.stat().st_mtime_ns
+    monkeypatch.setattr(
+        proxy,
+        "health_check",
+        lambda config: proxy.ProxyHealth(
+            ok=True,
+            url=config.proxy_url,
+            path="/health",
+            status_code=200,
+        ),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "sidecar_preflight",
+        lambda _context: proxy.SidecarPreflight(
+            ok=False, reason="local credentials are not configured"
+        ),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "discover_models",
+        lambda config, api_mode: proxy.ModelDiscovery(
+            ok=True,
+            models=("GigaChat",),
+            source="/v2/models",
+        ),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "probe_json_route",
+        lambda config, path, **kwargs: proxy.RouteProbe(
+            ok=path.startswith("/v2"),
+            path=path,
+            method="POST",
+            status_code=422 if path.startswith("/v2") else 404,
+        ),
+    )
+
+    report = build_doctor_report(
+        HarnessConfig(data_dir=str(tmp_path)),
+        HarnessRegistry(),
+        workspace=tmp_path,
+    )
+
+    by_id = {check["id"]: check for check in report["checks"]}
+    worker = by_id["durable-worker"]
+    assert report["ok"] is True
+    assert by_id["proxy-autostart"]["status"] == "ready"
+    assert by_id["route-v1"]["status"] == "degraded"
+    assert by_id["route-v2"]["status"] == "ready"
+    assert worker["status"] == "ready"
+    assert worker["evidence"] == {
+        "initialized": True,
+        "readable": True,
+        "online": 1,
+        "offline": 0,
+        "total": 1,
+    }
+    assert runtime_path.stat().st_mtime_ns == before

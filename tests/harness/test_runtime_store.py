@@ -14,13 +14,18 @@ from gpt2giga_harness.runtime.models import (
     JobAttemptStatus,
     JobStatus,
     RunStatus,
+    SideEffectStatus,
 )
 from gpt2giga_harness.runtime.reconcile import RuntimeReconciler
+from gpt2giga_harness.runtime.side_effects import HarnessSideEffectExecutor
 from gpt2giga_harness.runtime.store import (
     RUNTIME_SCHEMA_VERSION,
     ConcurrentUpdateError,
     IdempotencyConflictError,
+    InvalidStateTransitionError,
     RuntimeCoordinationStore,
+    SideEffectBlockedError,
+    SideEffectConflictError,
     _MIGRATIONS,
 )
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
@@ -85,6 +90,228 @@ def test_runtime_store_rejects_idempotency_key_rebinding(tmp_path):
             user_message_id="msg_2",
             idempotency_key="same-key",
         )
+
+
+def test_runtime_store_reserves_one_side_effect_and_freezes_completion_evidence(
+    tmp_path,
+):
+    store = RuntimeCoordinationStore(tmp_path)
+    job = store.submit_job(
+        session_id="sess_1",
+        user_message_id="msg_1",
+        idempotency_key="side-effect-job",
+    ).job
+    attempt = store.create_attempt(job.id, run_id=job.initial_run_id)
+    token = "opaque-recovery-token"
+    intent = {"kind": "fixture-ledger", "path": ".benchmark-side-effects"}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        reservations = list(
+            executor.map(
+                lambda _: store.reserve_side_effect(
+                    job_id=job.id,
+                    attempt_id=attempt.id,
+                    token=token,
+                    operation="fixture.record",
+                    intent=intent,
+                ),
+                range(8),
+            )
+        )
+
+    assert sum(item.created for item in reservations) == 1
+    assert len({item.record.id for item in reservations}) == 1
+    reserved = reservations[0].record
+    assert reserved.status is SideEffectStatus.RESERVED
+    assert reserved.token_hash != token
+    assert len(reserved.token_hash) == 64
+
+    completed = store.complete_side_effect(
+        reserved.id,
+        attempt_id=attempt.id,
+        evidence={
+            "artifact_sha256": "a" * 64,
+            "result": "recorded",
+            "api_key": "must-not-survive",
+        },
+    )
+    repeated = store.complete_side_effect(
+        reserved.id,
+        attempt_id=attempt.id,
+        evidence={
+            "result": "recorded",
+            "api_key": "different-secret-is-redacted",
+            "artifact_sha256": "a" * 64,
+        },
+    )
+
+    assert completed.status is SideEffectStatus.COMPLETED
+    assert repeated == completed
+    assert completed.completion_evidence_hash is not None
+    assert completed.completed_at is not None
+    exported = store.export()["side_effects"]
+    assert exported[0]["completion_evidence"] == completed.completion_evidence
+    assert token not in json.dumps(exported)
+    assert "must-not-survive" not in json.dumps(exported)
+    assert store.inspect()["counts"]["harness_side_effects"] == 1
+
+    with pytest.raises(SideEffectConflictError):
+        store.reserve_side_effect(
+            job_id=job.id,
+            attempt_id=attempt.id,
+            token=token,
+            operation="fixture.record-different",
+            intent=intent,
+        )
+    with pytest.raises(SideEffectConflictError):
+        store.complete_side_effect(
+            reserved.id,
+            attempt_id=attempt.id,
+            evidence={"artifact_sha256": "b" * 64, "result": "recorded"},
+        )
+
+
+def test_incomplete_side_effect_keeps_expired_edit_attempt_fail_closed(tmp_path):
+    store = RuntimeCoordinationStore(tmp_path)
+    job = store.submit_job(
+        session_id="sess_edit",
+        user_message_id="msg_edit",
+        idempotency_key="edit-owner-loss",
+        max_attempts=2,
+    ).job
+    attempt = store.create_attempt(
+        job.id,
+        run_id=job.initial_run_id,
+        leased_until="2000-01-01T00:00:00+00:00",
+        idempotency_class="external_write",
+    )
+    reservation = store.reserve_side_effect(
+        job_id=job.id,
+        attempt_id=attempt.id,
+        token="edit-recovery-token",
+        operation="fixture.record",
+        intent={"path": ".benchmark-side-effects"},
+    )
+
+    recovered = store.recover_expired_attempts(retry_delay_seconds=0)
+
+    assert [item.id for item in recovered] == [attempt.id]
+    assert store.get_job(job.id).status is JobStatus.FAILED
+    assert (
+        store.get_side_effect(reservation.record.id).status is SideEffectStatus.RESERVED
+    )
+    with pytest.raises(InvalidStateTransitionError, match="not safe to retry"):
+        store.retry_safe_job(job.id)
+
+
+def test_harness_owned_event_side_effect_is_delivered_once_and_reused(tmp_path):
+    sessions = FilesystemHarnessSessionStore(tmp_path)
+    session = sessions.create_session(title="side effect")
+    run = _create_run(sessions, session.id, status=RunStatus.RUNNING)
+    runtime = RuntimeCoordinationStore(tmp_path)
+    job = runtime.submit_job(
+        session_id=session.id,
+        user_message_id="msg_effect",
+        idempotency_key="event-effect-job",
+        max_attempts=2,
+    ).job
+    attempt = runtime.create_attempt(
+        job.id, run_id=run.id, idempotency_class="deterministic"
+    )
+    runtime.transition_attempt(attempt.id, JobAttemptStatus.RUNNING)
+    executor = HarnessSideEffectExecutor(runtime)
+
+    first = executor.record_event_once(
+        job_id=job.id,
+        attempt_id=attempt.id,
+        token="opaque-event-token",
+        event_type="fixture_recorded",
+        message="Recorded one bounded fixture marker.",
+        payload={"result": "recorded", "api_key": "must-not-survive"},
+    )
+    runtime.finish_attempt(
+        attempt.id,
+        JobAttemptStatus.INTERRUPTED,
+        retry_delay_seconds=0,
+        sync_terminal_run=False,
+    )
+    retry_attempt = runtime.create_attempt(job.id, run_id="run_effect_retry")
+    runtime.transition_attempt(retry_attempt.id, JobAttemptStatus.RUNNING)
+    repeated = executor.record_event_once(
+        job_id=job.id,
+        attempt_id=retry_attempt.id,
+        token="opaque-event-token",
+        event_type="fixture_recorded",
+        message="Recorded one bounded fixture marker.",
+        payload={"result": "recorded", "api_key": "different-secret"},
+    )
+
+    assert first.created is True
+    assert repeated.created is False
+    assert repeated.record == first.record
+    assert first.record.status is SideEffectStatus.COMPLETED
+    assert len(runtime.pending_outbox()) == 1
+
+    first_reconcile = RuntimeReconciler(runtime, sessions).reconcile()
+    second_reconcile = RuntimeReconciler(runtime, sessions).reconcile()
+
+    assert first_reconcile.outbox_processed == 1
+    assert second_reconcile.outbox_processed == 0
+    events = sessions.list_events(session.id, run_id=run.id)
+    assert [event.type for event in events] == ["fixture_recorded"]
+    assert events[0].payload["result"] == "recorded"
+    serialized = json.dumps(runtime.export()) + json.dumps(
+        [event_to_dict(event) for event in events]
+    )
+    assert "opaque-event-token" not in serialized
+    assert "must-not-survive" not in serialized
+    assert "different-secret" not in serialized
+
+
+def test_harness_owned_event_side_effect_blocks_ambiguous_reserved_replay(tmp_path):
+    runtime = RuntimeCoordinationStore(tmp_path)
+    job = runtime.submit_job(
+        session_id="sess_effect",
+        user_message_id="msg_effect",
+        idempotency_key="blocked-event-effect",
+        max_attempts=2,
+    ).job
+    first_attempt = runtime.create_attempt(
+        job.id,
+        run_id="run_effect_1",
+        leased_until="2000-01-01T00:00:00+00:00",
+        idempotency_class="read_only",
+    )
+    reserved = runtime.reserve_side_effect(
+        job_id=job.id,
+        attempt_id=first_attempt.id,
+        token="ambiguous-event-token",
+        operation=HarnessSideEffectExecutor.EVENT_OPERATION,
+        intent={
+            "event_type": "fixture_recorded",
+            "message": "Record one marker.",
+            "payload": {"result": "recorded"},
+        },
+    )
+    runtime.recover_expired_attempts(retry_delay_seconds=0)
+    second_attempt = runtime.create_attempt(job.id, run_id="run_effect_2")
+
+    with pytest.raises(
+        SideEffectBlockedError, match="remains reserved by an earlier attempt"
+    ):
+        HarnessSideEffectExecutor(runtime).record_event_once(
+            job_id=job.id,
+            attempt_id=second_attempt.id,
+            token="ambiguous-event-token",
+            event_type="fixture_recorded",
+            message="Record one marker.",
+            payload={"result": "recorded"},
+        )
+
+    assert (
+        runtime.get_side_effect(reserved.record.id).status is SideEffectStatus.RESERVED
+    )
+    assert runtime.pending_outbox() == ()
 
 
 def test_runtime_store_allocates_attempt_and_trace_identity_concurrently(tmp_path):
@@ -241,10 +468,28 @@ def test_runtime_store_migrates_existing_v1_database(tmp_path):
         columns = {
             row[1] for row in reopened.execute("PRAGMA table_info(jobs)").fetchall()
         }
+        side_effect_tables = reopened.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name = 'harness_side_effects'
+            """
+        ).fetchall()
+        policy_audit_tables = reopened.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name = 'policy_audit_events'
+            """
+        ).fetchall()
+        approval_columns = {
+            row[1] for row in reopened.execute("PRAGMA table_info(approval_requests)")
+        }
         versions = {
             row[0] for row in reopened.execute("SELECT version FROM schema_migrations")
         }
     assert "workflow_version" in columns
+    assert side_effect_tables == [("harness_side_effects",)]
+    assert policy_audit_tables == [("policy_audit_events",)]
+    assert "enforcement_owner" in approval_columns
     assert versions == set(range(1, RUNTIME_SCHEMA_VERSION + 1))
 
 

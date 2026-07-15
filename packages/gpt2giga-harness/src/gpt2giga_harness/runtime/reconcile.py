@@ -125,6 +125,9 @@ class RuntimeReconciler:
         event_type: str,
         payload: dict[str, object],
     ) -> None:
+        if event_type == "side_effect_event":
+            self._append_side_effect_event(entry_id, payload)
+            return
         if event_type != "job_terminal":
             raise ValueError(f"unsupported runtime outbox event: {event_type}")
         job_id = str(payload["job_id"])
@@ -151,6 +154,42 @@ class RuntimeReconciler:
                 error_summary=run.error,
             )
         self._append_recovery_event(entry_id, job_id, attempt, run.session_id, run.id)
+
+    def _append_side_effect_event(
+        self, entry_id: str, payload: dict[str, object]
+    ) -> None:
+        side_effect = self.runtime_store.get_side_effect(str(payload["side_effect_id"]))
+        if side_effect.status.value != "completed":
+            raise ValueError(f"side effect {side_effect.id} is not completed")
+        session_id = str(payload["session_id"])
+        run_id = str(payload["run_id"])
+        event_id = f"evt_{entry_id}"
+        existing = self.session_store.list_events(session_id, run_id=run_id)
+        if any(event.id == event_id for event in existing):
+            return
+        event_payload = payload.get("event_payload")
+        self.session_store.append_event(
+            HarnessStoredEvent(
+                id=event_id,
+                session_id=session_id,
+                run_id=run_id,
+                type=str(payload["event_type"]),
+                message=str(payload["message"]),
+                payload=(
+                    dict(event_payload) if isinstance(event_payload, dict) else {}
+                ),
+                created_at=utc_now(),
+                trace_id=f"trace_{payload['job_id']}",
+                span_id=f"span_{side_effect.id}",
+                sequence=self.runtime_store.next_trace_sequence(
+                    f"trace_{payload['job_id']}"
+                ),
+                job_id=str(payload["job_id"]),
+                attempt_id=str(payload["attempt_id"]),
+                span_kind="side_effect",
+                span_status="completed",
+            )
+        )
 
     def _attempt_for_payload(
         self,

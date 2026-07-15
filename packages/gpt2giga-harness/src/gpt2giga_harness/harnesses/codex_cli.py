@@ -259,6 +259,7 @@ class CodexCliHarness(BaseHarness):
         prepared_context, proxy_events, proxy_error = prepare_proxy_for_agent(
             request,
             context,
+            harness_id="codex-cli",
             command=command,
         )
         if proxy_error is not None:

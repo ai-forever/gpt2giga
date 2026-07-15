@@ -117,9 +117,19 @@ executable должен быть в `PATH` или задан явным override
 
 ```bash
 cd /path/to/project
-giga doctor
+giga doctor .
+giga doctor . --json
 giga init
 ```
+
+`giga doctor [workspace]` показывает готовность первого запуска до старта
+агента. Структурированный вариант `--json` проверяет proxy и routes, model
+discovery, версии внешних CLI, готовность workspace и Git, durable worker,
+Harness-managed homes и managed MCP snapshots. Проверки получают статус
+`ready`, `degraded` или `blocked`; для degraded и blocked prerequisites отчёт
+предлагает remediation-команду. Secret values редактируются, абсолютный путь
+workspace не публикуется, а существующий runtime worker state читается без
+перезаписи.
 
 `giga init` создаёт в `.giga/` non-secret конфигурацию, стартовые agent profiles,
 prompts, smoke eval и review workflow. Существующие файлы не заменяются без
@@ -132,6 +142,35 @@ giga harness run echo \
   --workspace . \
   --prompt "Кратко опиши выбранную задачу"
 ```
+
+Для полностью локального знакомства используйте
+[демо-репозиторий первого запуска](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/first-run-demo).
+Он содержит только вымышленные inventory-данные. Инструкция копирует их во
+временный Git-репозиторий, изолирует Harness runtime state внутри этой копии,
+запускает `giga init` и `giga doctor .`, затем проверяет read-only Echo run и
+два сгенерированных smoke-eval cases. Credentials, proxy, внешний agent CLI и
+доступ в публичную сеть не требуются.
+
+Model-backed
+[пример issue-to-reviewed-patch](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/issue-to-reviewed-patch)
+содержит три reviewed agent profiles, durable workflow с сохранением изменений
+в Harness-owned worktree и post-apply eval. До approval source checkout остаётся
+неизменным, а apply, commit, push и hosted writes выполняются только по явному
+решению оператора.
+
+Model-backed
+[nightly compatibility guardian](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/nightly-compatibility-guardian)
+содержит pinned Codex/Claude/Gemini eval, точные baseline dimensions,
+read-only triage workflow и durable nightly schedule. Он работает при закрытом
+UI и отправляет в Attention только failed-контракт, ранее прошедший test-now,
+для классификации product/adapter/model/environment.
+
+Model-backed
+[cross-harness review team](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/cross-harness-review-team)
+параллельно запускает read-only роли explorer, security, tests и maintainability
+через Codex, Claude и Gemini. Единственный synthesis-шаг цитирует сохранённые
+child artifacts; сбой одного child остаётся видимым, а частичные evidence не
+могут быть молча представлены как успешный review.
 
 Затем посмотрите план внешнего агента, не запуская его:
 
@@ -471,6 +510,18 @@ timeline. Smart Router объясняет выбор adapter/model и не ск�
 capabilities. Arena создаёт независимые child jobs и workspaces, чтобы один
 участник не менял контекст другого.
 
+После начала первого run Work постепенно показывает компактный путь Run →
+Evidence → Approval/worktree → Reuse/automation. Пока run активен, evidence остаётся pending.
+После success, failure или cancellation кнопка **Open evidence** открывает
+trace именно этого run в Runs Center и показывает только сохранённые counts
+событий/tools и duration, не повторяя prompt, response или workspace content.
+Если run сохранил изолированный patch, **Review worktree** открывает его точный
+Diff inspector; apply patch и выдача approval остаются отдельными явными
+действиями оператора. Для успешного run без ожидающего review кнопка **Reuse
+run** открывает существующий provenance/promotion inspector именно этого run;
+preview/apply кандидата agent/workflow/eval и его последующее добавление в
+schedule остаются отдельными явными действиями оператора.
+
 Attachments сначала копируются или связываются по безопасному project policy,
 затем преобразуются в adapter-specific render plan. UI различает rich
 transport, CLI flag, staged path, prompt reference и metadata-only delivery;
@@ -583,6 +634,20 @@ giga harness inspect codex-cli --json
 Отдельное поле `headless_continuation` сообщает фактическую стратегию:
 `structured_thread`, `structured_replay`, `native_cli_resume`,
 `degraded_replay`, `one_shot` или `unsupported`.
+
+Единую проверяемую матрицу для всех встроенных внешних CLI можно сгенерировать
+непосредственно из этих runtime-контрактов:
+
+```bash
+giga harness capabilities
+giga harness capabilities --json
+```
+
+Markdown и версионированный JSON детерминированы, не запускают probes
+установленных бинарных файлов и не читают native CLI homes. Необъявленная
+ячейка остаётся `null`/`undeclared`: генератор не превращает отсутствие claim в
+поддержку. Evidence для установленной версии по-прежнему доступно отдельно
+через `giga harness inspect <id> --json`.
 
 Перед тем как считать Codex CLI, Claude Code или Gemini CLI доступным, Harness
 выполняет ограниченные `--version` и `--help` probes во временном изолированном
@@ -909,7 +974,8 @@ giga doctor
 
 ## Ручной QA checklist
 
-- `giga doctor` не показывает неожиданных secret values или user-home content;
+- `giga doctor . --json` не показывает неожиданных secret values, абсолютного
+  workspace path или user-home content;
 - `giga harness run echo` завершается без сети и credentials;
 - `giga ui` слушает loopback, а remote bind без opt-in и token блокируется;
 - run переживает reload UI, а SSE reconnect не дублирует события;
