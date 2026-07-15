@@ -17,12 +17,14 @@ from gpt2giga_harness.runtime.models import (
     SideEffectStatus,
 )
 from gpt2giga_harness.runtime.reconcile import RuntimeReconciler
+from gpt2giga_harness.runtime.side_effects import HarnessSideEffectExecutor
 from gpt2giga_harness.runtime.store import (
     RUNTIME_SCHEMA_VERSION,
     ConcurrentUpdateError,
     IdempotencyConflictError,
     InvalidStateTransitionError,
     RuntimeCoordinationStore,
+    SideEffectBlockedError,
     SideEffectConflictError,
     _MIGRATIONS,
 )
@@ -200,6 +202,116 @@ def test_incomplete_side_effect_keeps_expired_edit_attempt_fail_closed(tmp_path)
     )
     with pytest.raises(InvalidStateTransitionError, match="not safe to retry"):
         store.retry_safe_job(job.id)
+
+
+def test_harness_owned_event_side_effect_is_delivered_once_and_reused(tmp_path):
+    sessions = FilesystemHarnessSessionStore(tmp_path)
+    session = sessions.create_session(title="side effect")
+    run = _create_run(sessions, session.id, status=RunStatus.RUNNING)
+    runtime = RuntimeCoordinationStore(tmp_path)
+    job = runtime.submit_job(
+        session_id=session.id,
+        user_message_id="msg_effect",
+        idempotency_key="event-effect-job",
+        max_attempts=2,
+    ).job
+    attempt = runtime.create_attempt(
+        job.id, run_id=run.id, idempotency_class="deterministic"
+    )
+    runtime.transition_attempt(attempt.id, JobAttemptStatus.RUNNING)
+    executor = HarnessSideEffectExecutor(runtime)
+
+    first = executor.record_event_once(
+        job_id=job.id,
+        attempt_id=attempt.id,
+        token="opaque-event-token",
+        event_type="fixture_recorded",
+        message="Recorded one bounded fixture marker.",
+        payload={"result": "recorded", "api_key": "must-not-survive"},
+    )
+    runtime.finish_attempt(
+        attempt.id,
+        JobAttemptStatus.INTERRUPTED,
+        retry_delay_seconds=0,
+        sync_terminal_run=False,
+    )
+    retry_attempt = runtime.create_attempt(job.id, run_id="run_effect_retry")
+    runtime.transition_attempt(retry_attempt.id, JobAttemptStatus.RUNNING)
+    repeated = executor.record_event_once(
+        job_id=job.id,
+        attempt_id=retry_attempt.id,
+        token="opaque-event-token",
+        event_type="fixture_recorded",
+        message="Recorded one bounded fixture marker.",
+        payload={"result": "recorded", "api_key": "different-secret"},
+    )
+
+    assert first.created is True
+    assert repeated.created is False
+    assert repeated.record == first.record
+    assert first.record.status is SideEffectStatus.COMPLETED
+    assert len(runtime.pending_outbox()) == 1
+
+    first_reconcile = RuntimeReconciler(runtime, sessions).reconcile()
+    second_reconcile = RuntimeReconciler(runtime, sessions).reconcile()
+
+    assert first_reconcile.outbox_processed == 1
+    assert second_reconcile.outbox_processed == 0
+    events = sessions.list_events(session.id, run_id=run.id)
+    assert [event.type for event in events] == ["fixture_recorded"]
+    assert events[0].payload["result"] == "recorded"
+    serialized = json.dumps(runtime.export()) + json.dumps(
+        [event_to_dict(event) for event in events]
+    )
+    assert "opaque-event-token" not in serialized
+    assert "must-not-survive" not in serialized
+    assert "different-secret" not in serialized
+
+
+def test_harness_owned_event_side_effect_blocks_ambiguous_reserved_replay(tmp_path):
+    runtime = RuntimeCoordinationStore(tmp_path)
+    job = runtime.submit_job(
+        session_id="sess_effect",
+        user_message_id="msg_effect",
+        idempotency_key="blocked-event-effect",
+        max_attempts=2,
+    ).job
+    first_attempt = runtime.create_attempt(
+        job.id,
+        run_id="run_effect_1",
+        leased_until="2000-01-01T00:00:00+00:00",
+        idempotency_class="read_only",
+    )
+    reserved = runtime.reserve_side_effect(
+        job_id=job.id,
+        attempt_id=first_attempt.id,
+        token="ambiguous-event-token",
+        operation=HarnessSideEffectExecutor.EVENT_OPERATION,
+        intent={
+            "event_type": "fixture_recorded",
+            "message": "Record one marker.",
+            "payload": {"result": "recorded"},
+        },
+    )
+    runtime.recover_expired_attempts(retry_delay_seconds=0)
+    second_attempt = runtime.create_attempt(job.id, run_id="run_effect_2")
+
+    with pytest.raises(
+        SideEffectBlockedError, match="remains reserved by an earlier attempt"
+    ):
+        HarnessSideEffectExecutor(runtime).record_event_once(
+            job_id=job.id,
+            attempt_id=second_attempt.id,
+            token="ambiguous-event-token",
+            event_type="fixture_recorded",
+            message="Record one marker.",
+            payload={"result": "recorded"},
+        )
+
+    assert (
+        runtime.get_side_effect(reserved.record.id).status is SideEffectStatus.RESERVED
+    )
+    assert runtime.pending_outbox() == ()
 
 
 def test_runtime_store_allocates_attempt_and_trace_identity_concurrently(tmp_path):

@@ -80,6 +80,10 @@ class SideEffectConflictError(RuntimeStoreError):
     """Raised when a side-effect token or completion is rebound."""
 
 
+class SideEffectBlockedError(RuntimeStoreError):
+    """Raised when an incomplete side effect cannot be safely replayed."""
+
+
 class SideEffectNotFoundError(RuntimeStoreError):
     """Raised when a durable side-effect record does not exist."""
 
@@ -1209,6 +1213,132 @@ class RuntimeCoordinationStore:
                 "SELECT * FROM harness_side_effects WHERE id = ?", (record_id,)
             ).fetchone()
         return _side_effect_from_row(updated)
+
+    def enqueue_side_effect_event(
+        self,
+        *,
+        job_id: str,
+        attempt_id: str,
+        token: str,
+        event_type: str,
+        message: str,
+        payload: Mapping[str, Any],
+    ) -> SideEffectReservation:
+        """Atomically enqueue one idempotent Harness-owned runtime event."""
+        operation = "runtime.event.enqueue"
+        safe_event_type = _required_text(event_type, "event_type")
+        safe_message = str(redact_for_storage(_required_text(message, "message")))
+        safe_payload = _safe_mapping(payload, "event payload")
+        intent = {
+            "event_type": safe_event_type,
+            "message": safe_message,
+            "payload": safe_payload,
+        }
+        token_hash = _opaque_token_hash(token)
+        intent_hash = _mapping_hash(intent, "intent")
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            attempt_row = connection.execute(
+                "SELECT * FROM job_attempts WHERE id = ?", (attempt_id,)
+            ).fetchone()
+            if attempt_row is None:
+                raise AttemptNotFoundError(attempt_id)
+            attempt = _attempt_from_row(attempt_row)
+            if attempt.job_id != job_id:
+                raise SideEffectConflictError(
+                    "side-effect attempt does not belong to the logical job"
+                )
+            if attempt.status in TERMINAL_ATTEMPT_STATUSES:
+                raise InvalidStateTransitionError(
+                    "terminal attempts cannot execute side effects"
+                )
+            existing_row = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE token_hash = ?",
+                (token_hash,),
+            ).fetchone()
+            if existing_row is not None:
+                existing = _side_effect_from_row(existing_row)
+                if (
+                    existing.job_id != job_id
+                    or existing.operation != operation
+                    or existing.intent_hash != intent_hash
+                ):
+                    raise SideEffectConflictError(
+                        "side-effect token is already bound to different intent"
+                    )
+                if existing.status is SideEffectStatus.COMPLETED:
+                    return SideEffectReservation(record=existing, created=False)
+                raise SideEffectBlockedError(
+                    "side effect remains reserved by an earlier attempt; "
+                    "automatic replay is blocked"
+                )
+
+            record_id = _new_id("effect")
+            outbox_id = _new_id("outbox")
+            completion_evidence = {
+                "delivery": "runtime_outbox",
+                "event_id": f"evt_{outbox_id}",
+                "outbox_id": outbox_id,
+            }
+            evidence_hash = _mapping_hash(completion_evidence, "completion evidence")
+            connection.execute(
+                """
+                INSERT INTO harness_side_effects (
+                    id, job_id, token_hash, operation, intent_hash, status,
+                    owner_attempt_id, completion_evidence_json,
+                    completion_evidence_hash, created_at, updated_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record_id,
+                    job_id,
+                    token_hash,
+                    operation,
+                    intent_hash,
+                    SideEffectStatus.COMPLETED.value,
+                    attempt_id,
+                    _canonical_json(completion_evidence, "completion evidence"),
+                    evidence_hash,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            job_row = connection.execute(
+                "SELECT * FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            job = _job_from_row(job_row)
+            outbox_payload = {
+                "side_effect_id": record_id,
+                "session_id": job.session_id,
+                "run_id": attempt.run_id,
+                "job_id": job.id,
+                "attempt_id": attempt.id,
+                "event_type": safe_event_type,
+                "message": safe_message,
+                "event_payload": safe_payload,
+            }
+            connection.execute(
+                """
+                INSERT INTO runtime_outbox (
+                    id, aggregate_type, aggregate_id, event_type, dedupe_key,
+                    payload_json, created_at
+                ) VALUES (?, 'side_effect', ?, 'side_effect_event', ?, ?, ?)
+                """,
+                (
+                    outbox_id,
+                    record_id,
+                    f"side-effect:{record_id}:event",
+                    _canonical_json(outbox_payload, "side-effect outbox payload"),
+                    now,
+                ),
+            )
+            completed_row = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE id = ?", (record_id,)
+            ).fetchone()
+        return SideEffectReservation(
+            record=_side_effect_from_row(completed_row), created=True
+        )
 
     def get_side_effect(self, record_id: str) -> SideEffectRecord:
         """Return one durable side-effect record by public identity."""
