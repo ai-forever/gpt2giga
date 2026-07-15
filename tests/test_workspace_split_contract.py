@@ -311,3 +311,4 @@ def test_production_docker_build_remains_gateway_only():
     assert "packages/gpt2giga-harness" not in dockerfile
     assert "gpt2giga_harness" not in dockerfile
     assert "packages/gpt2giga-harness" not in docker_workflows
+    assert "- 'uv.lock'" not in docker_workflows

@@ -10,7 +10,6 @@ on:
       - 'packages/gpt2giga/**'
       - '!packages/gpt2giga/**/*.md'
       - 'pyproject.toml'
-      - 'uv.lock'
       - '.github/workflows/docker-smoke.yaml'
   workflow_dispatch:
 
