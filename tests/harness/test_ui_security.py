@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.registry import create_default_registry
@@ -44,6 +45,28 @@ def test_local_arena_deep_link_issues_browser_session_cookie():
     )
 
     response = client.get("/arena")
+
+    assert response.status_code == 200
+    assert "gpt2giga_harness_session=" in response.headers["set-cookie"]
+    assert client.get("/api/defaults").status_code == 200
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/cockpit-v2/work", "/cockpit-v2/runs/run_123", "/legacy/runs/run_123"],
+)
+def test_local_selectable_shell_deep_links_issue_browser_session_cookie(path):
+    app = create_app(
+        HarnessConfig(),
+        registry=create_default_registry(include_entry_points=False),
+    )
+    client = TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    )
+
+    response = client.get(path)
 
     assert response.status_code == 200
     assert "gpt2giga_harness_session=" in response.headers["set-cookie"]

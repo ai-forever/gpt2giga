@@ -1,0 +1,1 @@
+import{i as e,r as t}from"./index-CVA_vR8g.js";import{t as n}from"./InspectorFrame-DGybP2f3.js";var r=e();function i({locale:e}){return(0,r.jsx)(n,{locale:e,title:t(e,`terminal`),children:t(e,`terminalDescription`)})}export{i as TerminalInspector};

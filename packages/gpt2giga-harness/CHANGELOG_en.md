@@ -5,6 +5,11 @@ All notable changes to gpt2giga-harness are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Packaged Cockpit V2 shell**: added a pinned React/TypeScript/Vite frontend with five route-split product surfaces, lazy inspector boundaries, a deterministic content-hashed manifest, integrity-bound Brotli/gzip assets, CSP-safe same-origin loading, and Node-free wheel smoke coverage; the legacy cockpit remains the default and explicit recovery route.
+
 ## [0.0.1a4] - 2026-07-15
 
 ### Added
@@ -78,6 +83,7 @@ considered stable.
 
 ---
 
+[Unreleased]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a4...HEAD
 [0.0.1a4]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.0.1a4
 [0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3
 [0.0.1a2]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a1...gpt2giga-harness-v0.0.1a2

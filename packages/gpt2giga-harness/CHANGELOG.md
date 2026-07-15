@@ -5,6 +5,11 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [Unreleased]
+
+### Добавлено
+- **Пакетный shell Cockpit V2**: добавлен закреплённый React/TypeScript/Vite frontend с пятью route-split поверхностями, ленивыми inspector-модулями, детерминированным content-hashed manifest, integrity-bound Brotli/gzip assets, CSP-safe same-origin загрузкой и wheel smoke без Node; legacy cockpit остаётся интерфейсом по умолчанию и явным recovery route.
+
 ## [0.0.1a4] - 2026-07-15
 
 ### Добавлено
@@ -77,6 +82,7 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
+[Unreleased]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a4...HEAD
 [0.0.1a4]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.0.1a4
 [0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3
 [0.0.1a2]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a1...gpt2giga-harness-v0.0.1a2

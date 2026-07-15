@@ -1,0 +1,1 @@
+import{i as e}from"./index-CVA_vR8g.js";import{t}from"./SurfaceScaffold-C4raeWiT.js";var n=e();function r(){return(0,n.jsx)(t,{detailKey:`evaluationDetail`,eyebrowKey:`evaluationEyebrow`,titleKey:`evaluation`})}export{r as EvaluationSurface};

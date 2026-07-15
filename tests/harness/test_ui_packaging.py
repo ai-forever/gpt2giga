@@ -52,6 +52,7 @@ from pathlib import Path
 import gpt2giga
 import gpt2giga_harness
 from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
+from gpt2giga_harness.ui.cockpit_v2 import load_cockpit_v2_manifest, load_cockpit_v2_shell
 
 installed_root = Path(__import__("sys").argv[1]).resolve()
 assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
@@ -60,6 +61,11 @@ assert '<link rel="stylesheet" href="/assets/app.css?v=38.44">' in INDEX_HTML
 assert '<script src="/assets/app.js?v=38.53"></script>' in INDEX_HTML
 assert "function boot()" in load_text_asset("app.js")
 assert ".app {" in load_text_asset("app.css")
+manifest = load_cockpit_v2_manifest()
+assert manifest.entry == "index.html"
+assert any(name.startswith("assets/workbench-") for name in manifest.assets)
+assert any(name.startswith("assets/raw-evidence-") for name in manifest.assets)
+assert "gpt2giga Harness — Cockpit V2" in load_cockpit_v2_shell()
 """
     env = os.environ.copy()
     env["PYTHONPATH"] = str(installed_root)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Header, HTTPException, Response
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 
 from gpt2giga_harness.ui.routers.schemas import (
@@ -13,10 +13,65 @@ from gpt2giga_harness.ui.routers.schemas import (
 )
 from gpt2giga_harness.ui.security import HarnessUISecurity
 from gpt2giga_harness.ui.static import INDEX_HTML, UIAssetNotFoundError, load_asset
+from gpt2giga_harness.ui.cockpit_v2 import (
+    CockpitV2AssetNotFoundError,
+    CockpitV2UnavailableError,
+    load_cockpit_v2_asset,
+    load_cockpit_v2_shell,
+)
 
 _SPA_PATH = re.compile(
     r"(?:(?:work|runs|workflows|scheduled)(?:/[^/]+)?|arena|agents|approvals|tools|evaluate)/?"
 )
+_COCKPIT_V2_PATH = re.compile(
+    r"(?:work(?:/[^/]+)?|runs(?:/[^/]+)?|automation|evaluation|integrations|settings)/?"
+)
+_COCKPIT_V2_SHELL_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Content-Security-Policy": (
+        "default-src 'none'; script-src 'self'; style-src 'self'; "
+        "img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; "
+        "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; "
+        "object-src 'none'; worker-src 'none'"
+    ),
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+}
+
+
+def _accepted_encoding(value: str | None) -> str:
+    """Select a supported precompressed variant, honoring explicit q=0."""
+    qualities: dict[str, float] = {}
+    for item in (value or "").split(","):
+        token, *parameters = item.strip().lower().split(";")
+        if not token:
+            continue
+        quality = 1.0
+        for parameter in parameters:
+            key, separator, raw_value = parameter.strip().partition("=")
+            if separator and key == "q":
+                try:
+                    quality = min(1.0, max(0.0, float(raw_value)))
+                except ValueError:
+                    quality = 0.0
+        qualities[token] = quality
+    brotli_quality = qualities.get("br", qualities.get("*", 0.0))
+    gzip_quality = qualities.get("gzip", qualities.get("*", 0.0))
+    if brotli_quality > 0 and brotli_quality >= gzip_quality:
+        return "br"
+    if gzip_quality > 0:
+        return "gzip"
+    return "identity"
+
+
+def _cockpit_unavailable(exc: CockpitV2UnavailableError) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail=(
+            "Cockpit V2 packaged assets are unavailable; use /legacy while the "
+            "installation is repaired"
+        ),
+    )
 
 
 def create_shell_router(security: HarnessUISecurity) -> APIRouter:
@@ -61,6 +116,66 @@ def create_shell_router(security: HarnessUISecurity) -> APIRouter:
             media_type=media_type,
             headers={"Cache-Control": "public, max-age=3600"},
         )
+
+    @router.get("/cockpit-v2/assets/{asset_name:path}", include_in_schema=False)
+    async def cockpit_v2_asset(asset_name: str, request: Request) -> Response:
+        encoding = _accepted_encoding(request.headers.get("accept-encoding"))
+        try:
+            content, asset = load_cockpit_v2_asset(asset_name, encoding=encoding)
+        except CockpitV2AssetNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="Cockpit V2 asset not found"
+            ) from exc
+        except CockpitV2UnavailableError as exc:
+            raise _cockpit_unavailable(exc) from exc
+        headers = {
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Vary": "Accept-Encoding",
+            "X-Content-Type-Options": "nosniff",
+        }
+        if encoding != "identity":
+            headers["Content-Encoding"] = encoding
+        return Response(
+            content=content,
+            media_type=asset.media_type,
+            headers=headers,
+        )
+
+    @router.get(
+        "/cockpit-v2",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    @router.get(
+        "/cockpit-v2/{spa_path:path}",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def cockpit_v2_shell(spa_path: str = "") -> HTMLResponse:
+        normalized = spa_path.strip("/")
+        if normalized and _COCKPIT_V2_PATH.fullmatch(normalized) is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        try:
+            content = load_cockpit_v2_shell()
+        except CockpitV2UnavailableError as exc:
+            raise _cockpit_unavailable(exc) from exc
+        return HTMLResponse(content, headers=_COCKPIT_V2_SHELL_HEADERS)
+
+    @router.get(
+        "/legacy",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    @router.get(
+        "/legacy/{spa_path:path}",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def legacy_shell(spa_path: str = "") -> HTMLResponse:
+        normalized = spa_path.strip("/")
+        if normalized and _SPA_PATH.fullmatch(normalized) is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        return HTMLResponse(INDEX_HTML, headers={"Cache-Control": "no-cache"})
 
     @router.get(
         "/{spa_path:path}", response_class=HTMLResponse, include_in_schema=False

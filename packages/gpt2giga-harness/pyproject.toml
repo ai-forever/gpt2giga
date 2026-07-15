@@ -34,7 +34,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
-artifacts = ["src/gpt2giga_harness/ui/assets/**"]
+artifacts = [
+    "src/gpt2giga_harness/ui/assets/**",
+    "src/gpt2giga_harness/ui/cockpit_v2/assets/**",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gpt2giga_harness"]
