@@ -671,6 +671,15 @@ messages, and selected attachments for private-key material, token-looking
 values, credential assignments, `.env`-style files, deny-listed paths,
 git-ignored workspace files, and large attachments.
 
+The same report now contains a machine-readable `readiness` projection for the
+selected execution plan: harness availability, invocation mode, exact API
+route/model, required workspace/Git policy, managed state, and synchronous or
+durable delivery. Only relevant checks are selected. A missing proxy or agent
+CLI cannot block Echo, while a missing selected executable or Git repository
+required for an isolated edit blocks before process or worktree creation. Every
+non-ready check carries a redaction-safe remediation message and command shared
+with `giga doctor`.
+
 Hard-block findings stop the run before `HarnessRun`, messages, raw requests,
 or external CLI processes are written. Warning findings are saved in
 `run.metadata.preflight`, included in the redacted raw request, and emitted as a
@@ -680,9 +689,10 @@ warning event when a run continues. The browser UI calls the same check through:
 POST /api/preflight/run
 ```
 
-The response includes `hard_block`, a list of findings with safe remediation
-actions, and a context budget estimate covering prompt length, enabled memory,
-attached files, image count/size, previous chat turns, and truncation warnings.
+The response includes `hard_block`, the selected-plan `readiness` report, a list
+of content findings with safe remediation actions, and a context budget estimate
+covering prompt length, enabled memory, attached files, image count/size,
+previous chat turns, and truncation warnings.
 For attachment findings, the UI can remove the file from the current composer
 selection or send only an `@path` reference. `Continue anyway` is shown only for
 warning-level findings, not hard blocks.

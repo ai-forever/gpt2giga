@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -104,6 +105,7 @@ from gpt2giga_harness.provenance import (
     build_run_provenance,
     run_provenance_to_dict,
 )
+from gpt2giga_harness.readiness import build_execution_readiness
 from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
 from gpt2giga_harness.registry import UnknownHarnessError, create_default_registry
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
@@ -150,6 +152,7 @@ from gpt2giga_harness.types import (
     spec_capability_values,
     spec_to_dict,
 )
+from gpt2giga_harness.worktrees import parse_workspace_policy
 from gpt2giga_harness.ui.app import create_app, validate_ui_bind
 from gpt2giga_harness.ui.security import is_loopback_host
 from gpt2giga_harness.workspace import resolve_workspace
@@ -1978,6 +1981,19 @@ def _run_harness(
         prompt=request.prompt,
         workspace=request.workspace,
         data_dir=config.data_dir,
+        readiness=build_execution_readiness(
+            config,
+            registry,
+            harness_id=harness_id,
+            invocation_mode=invocation_mode,
+            api_mode=request.api_mode,
+            model=request.model or config.default_model,
+            mode=request.mode,
+            workspace=request.workspace,
+            workspace_policy=parse_workspace_policy(workspace_policy),
+            durable=False,
+            dry_run=dry_run,
+        ),
     )
     if preflight.hard_block:
         return HarnessResult(
@@ -1988,35 +2004,47 @@ def _run_harness(
         )
     if native:
         if not spec.supports_native_sessions:
-            return HarnessResult(
-                ok=False,
-                text="",
-                error=f"Harness does not support native sessions: {harness_id}",
+            return _result_with_preflight(
+                HarnessResult(
+                    ok=False,
+                    text="",
+                    error=f"Harness does not support native sessions: {harness_id}",
+                ),
+                preflight,
             )
         if not dry_run:
-            return HarnessResult(
-                ok=False,
-                text="",
-                error="Native CLI runs currently require --dry-run",
+            return _result_with_preflight(
+                HarnessResult(
+                    ok=False,
+                    text="",
+                    error="Native CLI runs currently require --dry-run",
+                ),
+                preflight,
             )
         try:
             connector = create_default_native_registry(data_dir=config.data_dir).get(
                 harness_id
             )
         except UnknownNativeHistoryConnectorError:
-            return HarnessResult(
-                ok=False,
-                text="",
-                error=f"Native connector is not registered: {harness_id}",
+            return _result_with_preflight(
+                HarnessResult(
+                    ok=False,
+                    text="",
+                    error=f"Native connector is not registered: {harness_id}",
+                ),
+                preflight,
             )
         plan = connector.build_start_command(request, config.to_context())
-        return HarnessResult(
-            ok=True,
-            text="native dry run",
-            raw={"native_command_plan": native_command_plan_to_dict(plan)},
-            command=plan.command,
+        return _result_with_preflight(
+            HarnessResult(
+                ok=True,
+                text="native dry run",
+                raw={"native_command_plan": native_command_plan_to_dict(plan)},
+                command=plan.command,
+            ),
+            preflight,
         )
-    return harness.run(request, config.to_context())
+    return _result_with_preflight(harness.run(request, config.to_context()), preflight)
 
 
 def _config_from_args(args: argparse.Namespace) -> HarnessConfig:
@@ -2032,10 +2060,43 @@ def _print_result(result, *, as_json: bool) -> None:
     if as_json:
         _print_json(payload)
         return
+    _print_readiness_remediation(payload)
     if result.ok:
         print(result.text)
     else:
         print(result.error or "harness failed", file=sys.stderr)
+
+
+def _result_with_preflight(result: HarnessResult, preflight) -> HarnessResult:
+    return replace(
+        result,
+        raw={
+            **dict(result.raw),
+            "preflight": preflight_report_to_dict(preflight),
+        },
+    )
+
+
+def _print_readiness_remediation(payload: Mapping[str, Any]) -> None:
+    raw = payload.get("raw")
+    preflight = raw.get("preflight") if isinstance(raw, Mapping) else None
+    readiness = preflight.get("readiness") if isinstance(preflight, Mapping) else None
+    findings = readiness.get("findings") if isinstance(readiness, Mapping) else None
+    for finding in findings or ():
+        if not isinstance(finding, Mapping) or finding.get("status") == "ready":
+            continue
+        status = str(finding.get("status") or "degraded").upper()
+        summary = str(finding.get("summary") or finding.get("id") or "readiness")
+        print(f"Readiness [{status}]: {summary}", file=sys.stderr)
+        for remedy in finding.get("remediation") or ():
+            if not isinstance(remedy, Mapping):
+                continue
+            message = remedy.get("message")
+            command = remedy.get("command")
+            if message:
+                print(f"  Remedy: {message}", file=sys.stderr)
+            if command:
+                print(f"  Command: {command}", file=sys.stderr)
 
 
 def _print_json(value: Any) -> None:

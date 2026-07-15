@@ -57,13 +57,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.38">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.40">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.43"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.45"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -1308,6 +1308,7 @@ def test_ui_index_contains_control_panel_elements():
         "close-native-history-button",
         "preflight-modal",
         "preflight-status",
+        "preflight-readiness",
         "preflight-finding-list",
         "preflight-budget",
         "preflight-footer-status",
@@ -1535,6 +1536,8 @@ def test_ui_index_contains_control_panel_elements():
         "Preflight",
         "Continue anyway",
         "Checking run context",
+        "Selected execution plan",
+        "preflightReadinessText",
         "/api/preflight/run",
         "confirmRunPreflight",
         "Exclude file",

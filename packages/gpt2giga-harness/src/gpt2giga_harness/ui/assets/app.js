@@ -3294,7 +3294,11 @@
       const report = body.preflight;
       state.pendingPreflight = report;
       state.pendingPreflightPayload = payload;
-      if (!Array.isArray(report.findings) || !report.findings.length) return true;
+      const readinessFindings = report.readiness && Array.isArray(report.readiness.findings)
+        ? report.readiness.findings
+        : [];
+      const needsReadinessReview = readinessFindings.some((finding) => finding.status !== "ready");
+      if ((!Array.isArray(report.findings) || !report.findings.length) && !needsReadinessReview) return true;
       return openPreflightModal(report, payload);
     }
 
@@ -3317,11 +3321,19 @@
 
     function renderPreflightModal(report, payload) {
       const findings = Array.isArray(report.findings) ? report.findings : [];
-      const hardBlock = report.hard_block === true || findings.some((finding) => finding.severity === "block");
-      setText("preflight-status", hardBlock ? "Hard block: remove blocked context first" : `${findings.length} warning${findings.length === 1 ? "" : "s"}`);
-      setText("preflight-footer-status", hardBlock ? "Blocked findings cannot be continued." : "Only warning-level findings can continue.");
+      const readiness = report.readiness || {};
+      const readinessFindings = Array.isArray(readiness.findings) ? readiness.findings : [];
+      const nonReady = readinessFindings.filter((finding) => finding.status !== "ready");
+      const hardBlock = report.hard_block === true
+        || readiness.blocked === true
+        || findings.some((finding) => finding.severity === "block")
+        || readinessFindings.some((finding) => finding.status === "blocked");
+      const reviewCount = findings.length + nonReady.length;
+      setText("preflight-status", hardBlock ? "Hard block: resolve required readiness or context" : `${reviewCount} item${reviewCount === 1 ? "" : "s"} to review`);
+      setText("preflight-footer-status", hardBlock ? "Blocked requirements cannot be continued." : "Degraded readiness and warning-level context can continue.");
       byId("continue-preflight-button").hidden = hardBlock;
       byId("continue-preflight-button").disabled = hardBlock;
+      setText("preflight-readiness", preflightReadinessText(readiness));
       setText("preflight-budget", preflightBudgetText(report.context_budget || {}));
       const list = byId("preflight-finding-list");
       list.textContent = "";
@@ -3331,10 +3343,34 @@
       if (!findings.length) {
         const empty = document.createElement("div");
         empty.className = "status-line";
-        empty.textContent = "No preflight findings.";
+        empty.textContent = "No content-safety findings.";
         list.appendChild(empty);
       }
       setText("raw-request-panel", pretty({ ...payload, preflight: report }));
+    }
+
+    function preflightReadinessText(readiness) {
+      const plan = readiness.plan || {};
+      const summary = readiness.summary || {};
+      const lines = [
+        "Selected execution plan",
+        `Harness: ${plan.harness_id || "-"} · ${plan.invocation_mode || "-"}`,
+        `Route/model: /${plan.api_mode || "-"} · ${plan.model || "default"}`,
+        `Workspace: ${plan.workspace_policy || "auto"} · ${plan.mode || "plan"}`,
+        `Delivery: ${plan.delivery || "synchronous"}`,
+        `Readiness: ${summary.ready || 0} ready, ${summary.degraded || 0} degraded, ${summary.blocked || 0} blocked`
+      ];
+      const findings = Array.isArray(readiness.findings) ? readiness.findings : [];
+      for (const finding of findings.filter((item) => item.status !== "ready")) {
+        lines.push("");
+        lines.push(`[${String(finding.status || "degraded").toUpperCase()}] ${finding.summary || finding.id || "Readiness"}`);
+        const remedies = Array.isArray(finding.remediation) ? finding.remediation : [];
+        for (const remedy of remedies) {
+          if (remedy.message) lines.push(`Remedy: ${remedy.message}`);
+          if (remedy.command) lines.push(`Command: ${remedy.command}`);
+        }
+      }
+      return lines.join("\n");
     }
 
     function preflightFindingCard(finding) {
@@ -3402,7 +3438,7 @@
         lines.push("Truncation warnings:");
         for (const warning of warnings) lines.push(`- ${warning}`);
       }
-      return lines.join("\\n");
+      return lines.join("\n");
     }
 
     function currentLastDiff() {

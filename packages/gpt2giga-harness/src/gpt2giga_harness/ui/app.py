@@ -969,6 +969,10 @@ def create_app(
             report = runner.preflight(
                 payload,
                 session_id=_optional_text(payload.get("session_id")),
+                durable=bool(
+                    durable_dispatcher is not None
+                    and str(payload.get("invocation_mode") or "headless") != "native"
+                ),
             )
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc

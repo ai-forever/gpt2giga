@@ -3,7 +3,7 @@ import signal
 
 import pytest
 
-from gpt2giga_harness import cli
+from gpt2giga_harness import cli, proxy
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga_harness.harnesses.codex_cli import CodexCliHarness
@@ -61,6 +61,15 @@ class _FakeWorkerProcess:
 
     def wait(self, timeout):
         return self.return_code
+
+
+def _ready_execution_readiness(*_args, **_kwargs):
+    return {
+        "ok": True,
+        "blocked": False,
+        "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+        "findings": [],
+    }
 
 
 def test_cli_ui_starts_and_stops_worker_when_none_is_online(
@@ -137,6 +146,31 @@ def test_cli_harness_list_outputs_direct_chat(capsys):
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "direct-chat" in output
+
+
+def test_cli_harness_run_json_includes_selected_execution_readiness(capsys):
+    exit_code = cli.main(["harness", "run", "echo", "--prompt", "hello", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    readiness = payload["raw"]["preflight"]["readiness"]
+    assert exit_code == 0
+    assert readiness["ok"] is True
+    assert readiness["plan"] == {
+        "harness_id": "echo",
+        "invocation_mode": "headless",
+        "api_mode": "v2",
+        "model": None,
+        "mode": "plan",
+        "workspace_configured": False,
+        "workspace_policy": "auto",
+        "delivery": "synchronous",
+        "dry_run": False,
+    }
+    assert {finding["id"] for finding in readiness["findings"]} == {
+        "harness-echo",
+        "invocation-mode",
+        "delivery",
+    }
 
 
 def test_cli_doctor_json_passes_explicit_workspace(capsys, monkeypatch, tmp_path):
@@ -684,6 +718,31 @@ def test_cli_chat_passes_api_mode_and_model(monkeypatch, capsys):
         return HarnessResult(ok=True, text="ok")
 
     monkeypatch.setattr(DirectChatHarness, "run", fake_run)
+    monkeypatch.setattr(
+        proxy,
+        "health_check",
+        lambda config: proxy.ProxyHealth(
+            ok=True,
+            url=config.proxy_url,
+            path="/health",
+            status_code=200,
+        ),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "sidecar_preflight",
+        lambda _context: proxy.SidecarPreflight(ok=True, reason="ready"),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "probe_json_route",
+        lambda _config, path, **_kwargs: proxy.RouteProbe(
+            ok=True,
+            path=path,
+            method="POST",
+            status_code=422,
+        ),
+    )
 
     exit_code = cli.main(
         [
@@ -712,6 +771,11 @@ def test_cli_no_start_proxy_override(monkeypatch, capsys):
         return HarnessResult(ok=True, text="ok")
 
     monkeypatch.setattr(DirectChatHarness, "run", fake_run)
+    monkeypatch.setattr(
+        cli,
+        "build_execution_readiness",
+        _ready_execution_readiness,
+    )
 
     exit_code = cli.main(["chat", "--no-start-proxy", "hello"])
 
@@ -730,6 +794,7 @@ def test_cli_agent_alias_passes_workspace(monkeypatch, capsys, tmp_path):
         return HarnessResult(ok=True, text="ok")
 
     monkeypatch.setattr(CodexCliHarness, "run", fake_run)
+    monkeypatch.setattr(cli, "build_execution_readiness", _ready_execution_readiness)
 
     exit_code = cli.main(
         [
@@ -760,6 +825,7 @@ def test_cli_agent_aliases_include_claude_and_gemini(monkeypatch, capsys):
 
     monkeypatch.setattr(ClaudeCodeHarness, "run", fake_run)
     monkeypatch.setattr(GeminiCliHarness, "run", fake_run)
+    monkeypatch.setattr(cli, "build_execution_readiness", _ready_execution_readiness)
 
     assert cli.main(["run", "--agent", "claude", "inspect"]) == 0
     assert cli.main(["run", "--agent", "gemini", "inspect"]) == 0

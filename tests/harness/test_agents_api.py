@@ -58,7 +58,20 @@ def test_agent_api_detects_etag_conflict_and_rejects_bad_profile(tmp_path):
     assert invalid.status_code == 400
 
 
-def test_agent_api_duplicates_as_preview_and_runs_with_snapshot(tmp_path):
+def test_agent_api_duplicates_as_preview_and_runs_with_snapshot(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.HarnessSessionRunner._execution_readiness",
+        lambda _self, _options, *, durable: {
+            "ok": True,
+            "blocked": False,
+            "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+            "plan": {"delivery": "durable" if durable else "synchronous"},
+            "findings": [],
+        },
+    )
     client, workspace = _client(tmp_path)
     duplicate = client.post(
         "/api/agents/reviewer/duplicate",

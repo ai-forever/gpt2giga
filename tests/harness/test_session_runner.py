@@ -470,7 +470,7 @@ def test_session_runner_edit_fails_closed_for_non_git_workspace(tmp_path):
     harness = _WorkspaceEditHarness()
     runner = _runner(harness, data_dir=tmp_path / "data")
 
-    with pytest.raises(ValueError, match="requires a Git repository"):
+    with pytest.raises(PreflightBlockedError, match="git-readiness"):
         runner.create_and_run(
             {
                 "harness_id": "edit-workspace",

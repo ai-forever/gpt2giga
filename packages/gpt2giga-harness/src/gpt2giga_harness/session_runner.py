@@ -39,6 +39,7 @@ from gpt2giga_harness.provenance import (
     build_run_provenance,
     run_provenance_to_dict,
 )
+from gpt2giga_harness.readiness import build_execution_readiness
 from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.sessions.models import (
     HarnessMessage,
@@ -143,6 +144,7 @@ class HarnessSessionRunner:
         payload: Mapping[str, Any],
         *,
         session_id: str | None = None,
+        durable: bool = False,
     ):
         """Build a pre-run safety report without invoking a harness."""
         session = self.store.get_session(session_id) if session_id is not None else None
@@ -169,6 +171,7 @@ class HarnessSessionRunner:
             project_memory=project_memory,
             data_dir=self.config.data_dir,
             max_history_messages=MAX_HISTORY_MESSAGES,
+            readiness=self._execution_readiness(options, durable=durable),
         )
 
     def create_session(
@@ -229,7 +232,7 @@ class HarnessSessionRunner:
         options = self._run_options(payload, session=session)
         if options["invocation_mode"].value != "headless":
             raise ValueError("durable jobs currently support headless runs only")
-        report = self.preflight(payload, session_id=session_id)
+        report = self.preflight(payload, session_id=session_id, durable=True)
         if report.hard_block:
             raise PreflightBlockedError(report)
         managed_mcp_snapshot = self._prepare_managed_mcp_snapshot(options)
@@ -300,6 +303,7 @@ class HarnessSessionRunner:
         excluded_history_run_ids: tuple[str, ...] = (),
         runtime_metadata: Mapping[str, Any] | None = None,
         process_sink: Any | None = None,
+        durable: bool = False,
     ) -> HarnessSessionRunResult:
         """Run one prompt inside an existing session."""
         session = self.store.get_session(session_id)
@@ -350,6 +354,7 @@ class HarnessSessionRunner:
             project_memory=project_memory,
             data_dir=self.config.data_dir,
             max_history_messages=MAX_HISTORY_MESSAGES,
+            readiness=self._execution_readiness(options, durable=durable),
         )
         if preflight.hard_block:
             raise PreflightBlockedError(preflight)
@@ -920,6 +925,26 @@ class HarnessSessionRunner:
         ]
         history.append(HarnessChatMessage(role="user", content=prompt))
         return tuple(history[-MAX_HISTORY_MESSAGES:])
+
+    def _execution_readiness(
+        self,
+        options: Mapping[str, Any],
+        *,
+        durable: bool,
+    ) -> dict[str, Any]:
+        return build_execution_readiness(
+            self.config,
+            self.registry,
+            harness_id=str(options["harness_id"]),
+            invocation_mode=options["invocation_mode"],
+            api_mode=options["api_mode"],
+            model=options["model"],
+            mode=str(options["mode"]),
+            workspace=options["workspace"],
+            workspace_policy=options["workspace_policy"],
+            durable=durable,
+            dry_run=bool(_mapping(options["extra"]).get("dry_run")),
+        )
 
     def _load_attachments(
         self,

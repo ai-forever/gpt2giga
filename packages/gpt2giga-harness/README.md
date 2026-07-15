@@ -58,6 +58,14 @@ evidence is redacted and omits absolute workspace paths; every degraded or
 blocked first-run prerequisite includes a safe remediation command. Runtime
 worker state is inspected read-only.
 
+Every CLI/UI run preflight also projects those checks onto the selected
+execution plan before process spawn. Its redacted `readiness` section covers
+only the chosen harness, invocation mode, API route/model, workspace policy,
+and synchronous or durable delivery path. Missing required capabilities block;
+degraded capabilities include the same bounded remediation commands as doctor.
+Unrelated proxy, external-CLI, or worker failures do not block the independent
+local Echo path.
+
 For a credential-free tour, copy the
 [first-run demo](../../examples/harness/first-run-demo/README.md). It keeps
 runtime state inside the disposable copy and verifies `giga init`, the local

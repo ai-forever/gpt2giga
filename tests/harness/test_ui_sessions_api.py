@@ -246,6 +246,22 @@ def test_preflight_api_reports_large_attachment_warning(tmp_path):
     assert response.status_code == 200
     preflight = response.json()["preflight"]
     assert preflight["hard_block"] is False
+    assert preflight["readiness"]["plan"]["harness_id"] == "echo"
+    assert preflight["readiness"]["plan"]["delivery"] == "durable"
+    assert {item["id"] for item in preflight["readiness"]["findings"]} == {
+        "harness-echo",
+        "invocation-mode",
+        "delivery",
+        "durable-worker",
+    }
+    assert preflight["readiness"]["summary"]["blocked"] == 0
+    assert preflight["readiness"]["summary"]["degraded"] == 1
+    worker_finding = next(
+        item
+        for item in preflight["readiness"]["findings"]
+        if item["id"] == "durable-worker"
+    )
+    assert worker_finding["remediation"][0]["command"] == "giga worker start"
     assert preflight["context_budget"]["attached_file_bytes"] == 1_000_001
     finding = next(
         item for item in preflight["findings"] if item["code"] == "large_attachment"

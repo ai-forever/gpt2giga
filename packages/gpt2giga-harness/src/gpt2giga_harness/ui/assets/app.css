@@ -635,7 +635,6 @@
     .native-history-dialog,
     .preflight-dialog {
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto;
       width: min(760px, calc(100vw - 32px));
       max-height: min(760px, calc(100vh - 48px));
       border: 1px solid var(--border);
@@ -643,6 +642,12 @@
       background: var(--panel);
       box-shadow: 0 24px 80px rgb(0 0 0 / 0.55);
       overflow: hidden;
+    }
+    .native-history-dialog {
+      grid-template-rows: auto minmax(0, 1fr) auto;
+    }
+    .preflight-dialog {
+      grid-template-rows: auto auto minmax(0, 1fr) auto auto;
     }
     .native-history-header,
     .native-history-footer,
@@ -687,6 +692,11 @@
       max-height: 160px;
       min-height: 120px;
       margin: 0 12px 12px;
+    }
+    .preflight-readiness {
+      max-height: 180px;
+      min-height: 100px;
+      margin: 12px 12px 0;
     }
     .native-session-list .native-session-row {
       min-width: 0;
@@ -968,6 +978,9 @@
       .preflight-dialog {
         width: 100%;
         max-height: calc(100vh - 24px);
+      }
+      .preflight-readiness {
+        max-height: 230px;
       }
       .native-session-list .inline-actions {
         grid-template-columns: repeat(2, minmax(0, 1fr));

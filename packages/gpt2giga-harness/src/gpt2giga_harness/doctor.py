@@ -138,6 +138,10 @@ def _proxy_checks(
     sidecar: proxy.SidecarPreflight,
     models: proxy.ModelDiscovery,
     route_probes: Mapping[str, proxy.RouteProbe],
+    *,
+    selected_api_mode: str | None = None,
+    route_paths: tuple[str, ...] = ("/v1/chat/completions", "/v2/chat/completions"),
+    selected_model: str | None = None,
 ) -> list[dict[str, Any]]:
     if health.ok:
         proxy_status = "ready"
@@ -192,9 +196,11 @@ def _proxy_checks(
             ),
         ),
     ]
-    for path in ("/v1/chat/completions", "/v2/chat/completions"):
+    selected_path = (
+        f"/{selected_api_mode or config.default_api_mode.value}/chat/completions"
+    )
+    for path in route_paths:
         route = route_probes.get(path)
-        selected_path = f"/{config.default_api_mode.value}/chat/completions"
         status = (
             "ready"
             if route is not None and route.ok
@@ -231,7 +237,11 @@ def _proxy_checks(
                 ),
             )
         )
-    model_status = "ready" if models.models or config.default_model else "degraded"
+    model_status = (
+        "ready"
+        if models.models or selected_model or config.default_model
+        else "degraded"
+    )
     checks.append(
         _check(
             "model-discovery",
@@ -241,7 +251,7 @@ def _proxy_checks(
             evidence={
                 "count": len(models.models),
                 "source": models.source,
-                "default_configured": bool(config.default_model),
+                "default_configured": bool(selected_model or config.default_model),
             },
             remediation=(
                 ()
@@ -298,10 +308,17 @@ def _gigachat_check(
     )
 
 
-def _harness_checks(registry: HarnessRegistry) -> list[dict[str, Any]]:
+def _harness_checks(
+    registry: HarnessRegistry,
+    *,
+    harness_ids: tuple[str, ...] | None = None,
+    include_compatibility: bool = True,
+) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     for harness in registry.list():
         spec = harness.spec()
+        if harness_ids is not None and spec.id not in harness_ids:
+            continue
         availability = harness.availability()
         status = (
             "ready"
@@ -313,7 +330,7 @@ def _harness_checks(registry: HarnessRegistry) -> list[dict[str, Any]]:
             "reason": availability.reason,
         }
         probe_method = getattr(harness, "capability_probe", None)
-        if callable(probe_method):
+        if include_compatibility and callable(probe_method):
             compatibility = cli_capability_snapshot_to_dict(probe_method())
             compatibility.pop("command", None)
             evidence["compatibility"] = compatibility

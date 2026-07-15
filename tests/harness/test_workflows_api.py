@@ -5,7 +5,20 @@ from gpt2giga_harness.project import init_project_config
 from gpt2giga_harness.ui.app import create_app
 
 
-def test_workflow_api_lists_validates_runs_status_and_cancels(tmp_path) -> None:
+def test_workflow_api_lists_validates_runs_status_and_cancels(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.HarnessSessionRunner._execution_readiness",
+        lambda _self, _options, *, durable: {
+            "ok": True,
+            "blocked": False,
+            "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+            "plan": {"delivery": "durable" if durable else "synchronous"},
+            "findings": [],
+        },
+    )
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     init_project_config(workspace)

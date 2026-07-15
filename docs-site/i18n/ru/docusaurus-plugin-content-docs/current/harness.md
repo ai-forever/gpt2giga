@@ -398,6 +398,13 @@ giga harness inspect codex-cli --json
 giga doctor
 ```
 
+Machine-readable секция `readiness` проецирует doctor checks только на
+выбранный execution plan: harness, invocation mode, точный API route/model,
+workspace/Git policy и synchronous или durable delivery. Отсутствующие
+обязательные capabilities блокируют запуск, а degraded checks показывают
+redaction-safe remediation message и command. Нерелевантные сбои proxy,
+внешнего CLI или worker не блокируют независимый локальный Echo path.
+
 Ошибка preflight не должна оставлять process, worktree или временный managed
 home. Existing external proxy никогда не останавливается Harness; созданный им
 loopback sidecar имеет явный ownership и очищается при failed startup.
