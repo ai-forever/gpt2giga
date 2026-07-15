@@ -664,9 +664,15 @@ class WorkflowCoordinator:
                 )
             failed = [item for item in attempts if item.status == "failed"]
             pending = [item for item in attempts if item.status == "pending"]
-            if failed and not any(
-                _step_from_snapshot(item.snapshot).condition in {"on_failure", "always"}
-                for item in pending
+            active_statuses = {"queued", "running", "waiting_approval"}
+            if (
+                failed
+                and statuses.isdisjoint(active_statuses)
+                and not any(
+                    _step_from_snapshot(item.snapshot).condition
+                    in {"on_failure", "always"}
+                    for item in pending
+                )
             ):
                 return self.repository.update_run(
                     run_id,

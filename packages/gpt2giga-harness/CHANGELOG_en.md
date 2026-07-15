@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.1a3] - Unreleased
 
 ### Added
+- **Cross-harness review team**: a reviewed example now fans out read-only explorer, security, tests, and maintainability roles across Codex, Claude, and Gemini, preserves per-child durable evidence through partial failure, and synthesizes cited artifacts without a shared writable workspace.
 - **Nightly compatibility guardian**: a reviewed example now packages a pinned Codex/Claude/Gemini eval, exact adapter-dimension baselines, read-only regression triage, and a durable nightly schedule that runs without the UI.
 - **Reviewed-patch example**: a disposable issue fixture now packages reviewed planner, isolated implementer, and read-only reviewer profiles with a durable workflow and post-apply eval; source mutation, apply, commit, push, and hosted writes remain explicit operator decisions.
 - **Offline first-run demo**: a disposable fictional inventory repository now verifies `giga init`, redaction-safe diagnostics, a local Echo read run, and the generated smoke eval while keeping runtime state inside the copied demo and requiring no credentials, proxy, external agent CLI, or public network.

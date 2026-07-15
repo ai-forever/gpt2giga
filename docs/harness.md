@@ -166,6 +166,13 @@ read-only triage workflow, and a durable nightly schedule. It runs while the UI
 is closed and moves only a failed, previously tested schedule contract into
 Attention for product/adapter/model/environment classification.
 
+The model-backed
+[cross-harness review team](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/cross-harness-review-team)
+fans out read-only explorer, security, tests, and maintainability roles across
+Codex, Claude, and Gemini. One synthesis step cites retained child artifacts;
+a failed child remains visible and the workflow cannot silently report partial
+evidence as success.
+
 Preview an external agent command without launching it:
 
 ```bash

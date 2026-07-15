@@ -1,0 +1,25 @@
+id: test-reviewer
+title: Test Reviewer
+description: Finds behavioral coverage gaps and proposes focused verification.
+schema_version: 1
+harness_id: gemini-cli
+instructions: >-
+  Review REVIEW_TASK.md and the named tests. Identify missing positive,
+  negative, boundary, and failure-path coverage. Cite exact test locations and
+  propose focused commands, but do not edit files or create new tests.
+api_mode: v2
+invocation_mode: headless
+mode: read
+workspace_policy: current
+permission_profile: unattended
+tool_ids: []
+allowed_tools: []
+disallowed_tools: []
+budgets:
+  timeout_seconds: 300
+  max_attempts: 1
+  max_concurrency: 1
+expected_artifact: test_report
+provenance:
+  example: cross-harness-review-team
+  role: tests

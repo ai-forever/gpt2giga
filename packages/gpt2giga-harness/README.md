@@ -75,6 +75,12 @@ It packages a pinned Codex/Claude/Gemini eval, exact baseline dimensions, a
 read-only triage workflow, and a durable schedule that runs without the UI and
 raises Attention only after a tested contract regresses.
 
+For parallel evidence-backed review, copy the
+[cross-harness review team](../../examples/harness/cross-harness-review-team/README.md).
+It fans out read-only explorer, security, tests, and maintainability roles
+across Codex, Claude, and Gemini, then synthesizes retained child artifacts
+without introducing a shared writable workspace.
+
 Open `http://127.0.0.1:8091/`. `giga ui` starts a durable local worker when
 needed; pass `--no-start-worker` when another supervisor owns that lifecycle.
 The default loopback binding is intentional. Remote binding requires explicit

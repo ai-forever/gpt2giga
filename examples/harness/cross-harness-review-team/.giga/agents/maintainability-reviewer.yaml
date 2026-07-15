@@ -1,0 +1,26 @@
+id: maintainability-reviewer
+title: Maintainability Reviewer
+description: Reviews coupling, ownership clarity, and change risk without writing.
+schema_version: 1
+harness_id: codex-cli
+instructions: >-
+  Review the bounded target from REVIEW_TASK.md for unclear ownership,
+  unnecessary coupling, fragile interfaces, and operational complexity. Cite
+  concrete paths and separate required fixes from optional cleanup. Do not edit
+  files, reformat code, or perform hosted writes.
+api_mode: v2
+invocation_mode: headless
+mode: read
+workspace_policy: current
+permission_profile: unattended
+tool_ids: []
+allowed_tools: []
+disallowed_tools: []
+budgets:
+  timeout_seconds: 300
+  max_attempts: 1
+  max_concurrency: 1
+expected_artifact: review_findings
+provenance:
+  example: cross-harness-review-team
+  role: maintainability

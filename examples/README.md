@@ -34,6 +34,9 @@ client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 - Unified Harness, nightly compatibility guardian с pinned matrix, baseline и
   durable schedule:
   [`examples/harness/nightly-compatibility-guardian/README.md`](harness/nightly-compatibility-guardian/README.md)
+- Unified Harness, cross-harness review team с read-only fan-out, retained
+  child evidence и одним synthesis-шагом:
+  [`examples/harness/cross-harness-review-team/README.md`](harness/cross-harness-review-team/README.md)
 - OpenAI Python SDK:
   - Chat Completions API: [`examples/openai/chat_completions/README.md`](openai/chat_completions/README.md)
   - Responses API: [`examples/openai/responses/README.md`](openai/responses/README.md)
