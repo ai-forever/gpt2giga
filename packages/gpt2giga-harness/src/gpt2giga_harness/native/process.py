@@ -662,6 +662,16 @@ class NativeProcessManager:
         exit_code = record.process.poll()
         if exit_code is None:
             return
+        if (
+            terminal_status is None
+            and record.ref.status is NativeProcessStatus.RUNNING
+            and any(thread.is_alive() for thread in record.reader_threads)
+        ):
+            # A process can exit before its reader threads have appended the
+            # final stdout/stderr chunks. Keep the public lifecycle running
+            # until those readers drain so terminal status never races ahead
+            # of terminal output.
+            return
         if terminal_status is not None:
             status = terminal_status
         elif record.ref.status in {

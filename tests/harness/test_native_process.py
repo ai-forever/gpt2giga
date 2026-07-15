@@ -1,6 +1,7 @@
 import os
 import struct
 import sys
+import threading
 import time
 
 import pytest
@@ -136,6 +137,49 @@ def test_native_process_manager_marks_argv_prompt_delivered_without_exposing_it(
     assert ref.metadata["prompt_delivery"]["status"] == "delivered"
     assert prompt not in str(events)
     assert "<initial-prompt>" in str(events)
+
+
+def test_native_process_manager_drains_output_before_reporting_exit(
+    tmp_path,
+    monkeypatch,
+):
+    script = tmp_path / "exit_after_output.py"
+    script.write_text("print('final output', flush=True)\n", encoding="utf-8")
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Native output drain")
+    manager = NativeProcessManager(session_store=store, use_pty=False)
+    reader_started = threading.Event()
+    release_reader = threading.Event()
+    original_read_pipe = manager._read_pipe
+
+    def delayed_read_pipe(process_id, pipe, stream):
+        reader_started.set()
+        release_reader.wait(timeout=3.0)
+        original_read_pipe(process_id, pipe, stream)
+
+    monkeypatch.setattr(manager, "_read_pipe", delayed_read_pipe)
+    ref = manager.start(
+        NativeCommandPlan(
+            command=(sys.executable, str(script)),
+            env=_python_env(),
+            cwd=str(tmp_path),
+            metadata={"harness_id": "fake-cli"},
+        ),
+        session_id=session.id,
+    )
+
+    try:
+        assert reader_started.wait(timeout=3.0)
+        manager._records[ref.id].process.wait(timeout=3.0)
+
+        assert manager.status(ref.id).status is NativeProcessStatus.RUNNING
+    finally:
+        release_reader.set()
+
+    _wait_for_status(manager, ref.id, NativeProcessStatus.EXITED)
+    output = "".join(item.text for item in manager.read_since(ref.id, 0).outputs)
+
+    assert "final output" in output
 
 
 def test_native_process_manager_cleanup_marks_exited_process(tmp_path):
