@@ -1,0 +1,24 @@
+name: reviewed-patch-verification
+description: Verify the equality-boundary fix after the reviewed patch is applied.
+harnesses: [codex-cli]
+api_mode: v2
+mode: read
+workspace_policy: current
+metadata:
+  example: issue-to-reviewed-patch
+  stage: post_apply
+cases:
+  - id: equality_boundary_and_tests
+    prompt: >-
+      Read ISSUE.md and inventory.py, then run
+      `python -m unittest discover -s tests -v`. Return the marker
+      REVIEWED_PATCH_VERIFIED only if the equality boundary is fixed, all
+      focused tests pass, and no unrelated source change is required.
+    required_capability: agent_cli
+    checks:
+      - name: verified_marker
+        type: contains
+        value: REVIEWED_PATCH_VERIFIED
+      - name: no_failure_claim
+        type: not_contains_regex
+        value: "(?i)(traceback|tests? failed|verification failed)"

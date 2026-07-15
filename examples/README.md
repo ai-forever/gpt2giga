@@ -28,6 +28,9 @@ client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
 - Unified Harness, полностью локальный first-run без credentials и proxy:
   [`examples/harness/first-run-demo/README.md`](harness/first-run-demo/README.md)
+- Unified Harness, issue-to-reviewed-patch с изолированным worktree, review и
+  post-apply eval:
+  [`examples/harness/issue-to-reviewed-patch/README.md`](harness/issue-to-reviewed-patch/README.md)
 - OpenAI Python SDK:
   - Chat Completions API: [`examples/openai/chat_completions/README.md`](openai/chat_completions/README.md)
   - Responses API: [`examples/openai/responses/README.md`](openai/responses/README.md)

@@ -64,6 +64,11 @@ runtime state inside the disposable copy and verifies `giga init`, the local
 Echo read path, and the generated smoke eval without starting a proxy or an
 external agent CLI.
 
+For the first model-backed north-star flow, copy the
+[issue-to-reviewed-patch example](../../examples/harness/issue-to-reviewed-patch/README.md).
+It packages reviewed agent profiles, a durable isolated-worktree workflow, and
+a post-apply eval while keeping apply, commit, push, and hosted writes explicit.
+
 Open `http://127.0.0.1:8091/`. `giga ui` starts a durable local worker when
 needed; pass `--no-start-worker` when another supervisor owns that lifecycle.
 The default loopback binding is intentional. Remote binding requires explicit

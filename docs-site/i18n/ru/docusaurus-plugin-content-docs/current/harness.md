@@ -151,6 +151,13 @@ giga harness run echo \
 два сгенерированных smoke-eval cases. Credentials, proxy, внешний agent CLI и
 доступ в публичную сеть не требуются.
 
+Model-backed
+[пример issue-to-reviewed-patch](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/issue-to-reviewed-patch)
+содержит три reviewed agent profiles, durable workflow с сохранением изменений
+в Harness-owned worktree и post-apply eval. До approval source checkout остаётся
+неизменным, а apply, commit, push и hosted writes выполняются только по явному
+решению оператора.
+
 Затем посмотрите план внешнего агента, не запуская его:
 
 ```bash

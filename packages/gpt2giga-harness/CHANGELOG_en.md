@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.1a3] - Unreleased
 
 ### Added
+- **Reviewed-patch example**: a disposable issue fixture now packages reviewed planner, isolated implementer, and read-only reviewer profiles with a durable workflow and post-apply eval; source mutation, apply, commit, push, and hosted writes remain explicit operator decisions.
 - **Offline first-run demo**: a disposable fictional inventory repository now verifies `giga init`, redaction-safe diagnostics, a local Echo read run, and the generated smoke eval while keeping runtime state inside the copied demo and requiring no credentials, proxy, external agent CLI, or public network.
 - **First-run doctor**: `giga doctor [workspace] --json` now emits a redaction-safe readiness report for the proxy, routes, models, adapter CLI versions, workspace and Git state, durable worker, managed homes, and MCP snapshots, with actionable remediation commands and read-only runtime inspection.
 - **Capability matrix**: `giga harness capabilities` generates reviewable Markdown and JSON views directly from the built-in CLI adapters' runtime parity contracts.

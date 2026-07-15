@@ -152,6 +152,13 @@ temporary Git repository, isolates Harness runtime state under that copy, runs
 generated smoke-eval cases. It needs no credentials, proxy, external agent CLI,
 or public-network access.
 
+The model-backed
+[issue-to-reviewed-patch example](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/issue-to-reviewed-patch)
+packages three reviewed agent profiles, a durable workflow that retains edits
+in a Harness-owned worktree, and a post-apply eval. Its walkthrough keeps the
+source checkout unchanged before approval and leaves apply, commit, push, and
+hosted writes as explicit operator decisions.
+
 Preview an external agent command without launching it:
 
 ```bash
