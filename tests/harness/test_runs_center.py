@@ -49,9 +49,27 @@ def test_runs_center_lists_filters_and_resolves_lightweight_summary(tmp_path):
         {"type": "diff", "source": "run"},
         {"type": "pr", "source": "run"},
     ]
+    explanations = {item["key"]: item for item in body["runs"][0]["explanations"]}
+    assert list(explanations) == [
+        "policy",
+        "worktree",
+        "provenance",
+        "recovery",
+        "promotion",
+    ]
+    assert explanations["policy"]["status"] == "attention"
+    assert "awaits an operator decision" in explanations["policy"]["summary"]
+    assert explanations["worktree"]["status"] == "attention"
+    assert "awaits explicit review" in explanations["worktree"]["summary"]
+    assert explanations["provenance"]["status"] == "attention"
+    assert explanations["recovery"]["status"] == "ready"
+    assert "Safe retry is available" in explanations["recovery"]["summary"]
+    assert explanations["promotion"]["status"] == "blocked"
+    assert "failed run" in explanations["promotion"]["summary"]
     assert "prompt" not in body["runs"][0]["job"]
     assert "prompt" not in body["runs"][0]["run"]
     assert "metadata" not in body["runs"][0]["run"]
+    assert "/tmp/demo-worktree" not in response.text
     assert summary.status_code == 200
     assert summary.json()["run"]["run_id"] == run_id
     assert client.get("/api/runs?status=unknown").status_code == 400
@@ -101,6 +119,73 @@ def test_runs_center_projects_active_attempt_lease_without_process_details(tmp_p
     assert ownership["worker_id"] == "worker_active"
     assert ownership["leased_until"] == "2099-01-01T00:00:00+00:00"
     assert "process_id" not in ownership
+
+
+def test_runs_center_explains_complete_provenance_and_promotion_eligibility(tmp_path):
+    sessions = FilesystemHarnessSessionStore(tmp_path)
+    runtime = RuntimeCoordinationStore(tmp_path)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    session = sessions.create_session(title="Reusable run", workspace=str(workspace))
+    run = sessions.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="summarize the project",
+        model=None,
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=str(workspace),
+        status="succeeded",
+    )
+    run = sessions.update_run(
+        run.id,
+        metadata={
+            "workspace_execution": {"policy": "current"},
+            "provenance": {
+                key: {}
+                for key in (
+                    "project",
+                    "git",
+                    "harness",
+                    "request",
+                    "execution",
+                    "records",
+                    "replay_request",
+                )
+            },
+        },
+    )
+    job = runtime.submit_job(
+        session_id=session.id,
+        user_message_id="msg_reuse",
+        initial_run_id=run.id,
+        idempotency_key="reuse",
+        required_harness_id="echo",
+    ).job
+    attempt = runtime.create_attempt(job.id, run_id=run.id, status="running")
+    runtime.finish_attempt(attempt.id, "succeeded")
+    app = create_app(
+        HarnessConfig(data_dir=str(tmp_path)),
+        registry=create_default_registry(include_entry_points=False),
+        store=sessions,
+        runtime_store=runtime,
+    )
+
+    response = TestClient(app).get(f"/api/runs/{run.id}/summary")
+
+    assert response.status_code == 200
+    explanations = {
+        item["key"]: item for item in response.json()["run"]["explanations"]
+    }
+    assert explanations["policy"]["status"] == "neutral"
+    assert explanations["worktree"]["status"] == "neutral"
+    assert explanations["provenance"]["status"] == "ready"
+    assert "7 of 7" in explanations["provenance"]["summary"]
+    assert explanations["recovery"]["status"] == "ready"
+    assert explanations["promotion"]["status"] == "ready"
+    assert "reviewed promotion preview" in explanations["promotion"]["summary"]
+    assert str(workspace) not in str(explanations)
 
 
 def test_runs_center_trace_is_bounded_lazy_and_hides_reasoning(tmp_path):
@@ -178,6 +263,8 @@ def test_runs_center_assets_expose_bounded_live_routable_surface():
         'id="runs-inspect-artifact-button"',
         'id="runs-ownership-panel"',
         'id="runs-ownership-grid"',
+        'id="runs-explanations-panel"',
+        'id="runs-explanations-grid"',
         'id="runs-team-tree"',
         'data-tab="team"',
     ):
@@ -189,6 +276,7 @@ def test_runs_center_assets_expose_bounded_live_routable_surface():
         "function appendRunsLiveEvent",
         "function openRunsCenterEventStream",
         "function renderRunsOwnership",
+        "function renderRunsExplanations",
         "function renderAgentTeam",
         "function loadWorkAgentTeam",
         "/events/stream",

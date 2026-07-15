@@ -17,7 +17,7 @@ from gpt2giga_harness.runtime.models import (
     attempt_to_dict,
     job_to_dict,
 )
-from gpt2giga_harness.runtime.policy import approval_request_to_dict
+from gpt2giga_harness.runtime.policy import ApprovalRequest, approval_request_to_dict
 from gpt2giga_harness.runtime.store import (
     InvalidStateTransitionError,
     RuntimeCoordinationStore,
@@ -306,6 +306,7 @@ def _job_summary(
         "artifact_inventory": _artifact_inventory(artifacts, workflow),
         "ownership": _ownership_summary(job, attempt),
         "approvals": [_approval_summary(item) for item in approvals],
+        "explanations": _run_explanations(job, attempts, run, approvals),
         "workflow": workflow,
         "actions": {
             "open_task": f"/work/{job.session_id}",
@@ -499,6 +500,372 @@ def _approval_summary(approval: Any) -> dict[str, Any]:
             "created_at",
         )
     }
+
+
+def _run_explanations(
+    job: RuntimeJob,
+    attempts: tuple[JobAttempt, ...],
+    run: HarnessRun | None,
+    approvals: tuple[ApprovalRequest, ...],
+) -> list[dict[str, Any]]:
+    """Explain retained run state without exposing paths or captured content."""
+    return [
+        _policy_explanation(approvals),
+        _worktree_explanation(run),
+        _provenance_explanation(run),
+        _recovery_explanation(job, attempts),
+        _promotion_explanation(run),
+    ]
+
+
+def _policy_explanation(approvals: tuple[ApprovalRequest, ...]) -> dict[str, Any]:
+    if not approvals:
+        return _explanation(
+            "policy",
+            "Policy decisions",
+            "neutral",
+            "No approval-gated policy decision is linked to this run.",
+            (
+                "Read-only or pre-approved work can complete without an approval record.",
+            ),
+        )
+    counts = {
+        status: sum(item.status.value == status for item in approvals)
+        for status in ("pending", "approved", "denied", "expired", "canceled")
+    }
+    if counts["pending"]:
+        status = "attention"
+        summary = _counted(
+            counts["pending"],
+            "policy decision awaits an operator decision",
+            "policy decisions await an operator decision",
+        )
+    elif counts["denied"]:
+        status = "blocked"
+        summary = _counted(
+            counts["denied"],
+            "guarded action was denied and was not enforced",
+            "guarded actions were denied and were not enforced",
+        )
+    elif counts["approved"]:
+        status = "ready"
+        summary = _counted(
+            counts["approved"],
+            "approval decision is retained for this run",
+            "approval decisions are retained for this run",
+        )
+    else:
+        status = "neutral"
+        summary = "Linked policy decisions are closed and no action is pending."
+    details = tuple(
+        f"{item.action.value.replace('.', ' ').capitalize()}: "
+        f"{item.status.value.replace('_', ' ')}; "
+        f"{item.enforcement.value.replace('_', ' ')}."
+        for item in approvals[:3]
+    )
+    if len(approvals) > len(details):
+        details += (f"{len(approvals) - len(details)} more linked decisions retained.",)
+    return _explanation("policy", "Policy decisions", status, summary, details)
+
+
+def _worktree_explanation(run: HarnessRun | None) -> dict[str, Any]:
+    if run is None:
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "attention",
+            "Run history is unavailable, so worktree state cannot be verified.",
+        )
+    execution = _workspace_execution(run)
+    patch = bool(execution.get("patch") or run.metadata.get("diff"))
+    retained = bool(execution.get("worktree_path"))
+    if not execution:
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "neutral",
+            "This run did not retain an isolated edit worktree.",
+            ("No worktree mutation is available from Runs Center.",),
+        )
+    if not retained and execution.get("policy") not in {"worktree", None}:
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "neutral",
+            "This run used its selected workspace policy without an isolated worktree.",
+            ("No retained worktree is available for reviewed apply.",),
+        )
+    if execution.get("discarded_at"):
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "neutral",
+            "The isolated worktree was discarded without applying its patch.",
+            ("Discarded work cannot be reviewed, applied, or promoted.",),
+        )
+    if execution.get("truncated"):
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "blocked",
+            "The captured patch is truncated, so reviewed apply stays blocked.",
+            ("Run again with a bounded patch before requesting approval.",),
+        )
+    if execution.get("applied_at"):
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "ready",
+            "The reviewed patch was applied through the explicit approval flow.",
+            ("The retained review identity remains linked to the run.",),
+        )
+    if retained and patch:
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "attention",
+            "An isolated patch is retained and awaits explicit review before apply.",
+            ("The source checkout remains unchanged until approval and apply.",),
+        )
+    if retained:
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "neutral",
+            "The isolated worktree is retained, but no patch was captured.",
+        )
+    return _explanation(
+        "worktree",
+        "Worktree state",
+        "blocked",
+        "Worktree execution was requested, but no retained checkout is available.",
+        ("Reviewed apply remains unavailable.",),
+    )
+
+
+def _provenance_explanation(run: HarnessRun | None) -> dict[str, Any]:
+    provenance = _provenance(run)
+    present, total = _provenance_completeness(provenance)
+    reviewed = isinstance(provenance.get("reviewed_evidence"), Mapping)
+    if not provenance:
+        return _explanation(
+            "provenance",
+            "Provenance completeness",
+            "attention",
+            "No stored provenance snapshot is attached to this run.",
+            ("Reconstruct provenance from the exact run records before reuse.",),
+        )
+    status = "ready" if present == total else "attention"
+    summary = f"{present} of {total} core provenance sections are retained."
+    details = (
+        "Reviewed mutation evidence is linked."
+        if reviewed
+        else "No reviewed mutation evidence is linked; this is expected until a governed mutation is enforced.",
+    )
+    return _explanation(
+        "provenance",
+        "Provenance completeness",
+        status,
+        summary,
+        details,
+    )
+
+
+def _recovery_explanation(
+    job: RuntimeJob, attempts: tuple[JobAttempt, ...]
+) -> dict[str, Any]:
+    if not attempts:
+        return _explanation(
+            "recovery",
+            "Retry & recovery",
+            "pending",
+            "No worker attempt has claimed this job yet.",
+            ("A retry decision is not available before the first attempt.",),
+        )
+    latest = attempts[-1]
+    retry_markers = sum(bool(item.retry_reason) for item in attempts)
+    details = [
+        f"{len(attempts)} durable attempt{'s' if len(attempts) != 1 else ''} retained.",
+        f"Latest attempt is classified as {latest.idempotency_class.replace('_', ' ')}.",
+    ]
+    if retry_markers:
+        details.append(
+            f"{retry_markers} attempt{'s' if retry_markers != 1 else ''} carry a retry or recovery marker."
+        )
+    safe_retry = latest.idempotency_class in _SAFE_RETRY_CLASSES
+    if job.status is JobStatus.FAILED and safe_retry:
+        return _explanation(
+            "recovery",
+            "Retry & recovery",
+            "ready",
+            "Safe retry is available as a new durable attempt.",
+            tuple(details),
+        )
+    if job.status is JobStatus.FAILED:
+        return _explanation(
+            "recovery",
+            "Retry & recovery",
+            "blocked",
+            "Retry is blocked because the latest attempt is not retry-safe.",
+            tuple(details),
+        )
+    if job.status in {JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.RETRY_WAIT}:
+        return _explanation(
+            "recovery",
+            "Retry & recovery",
+            "pending",
+            "The durable job is active; recovery remains owned by its lease state.",
+            tuple(details),
+        )
+    if job.status is JobStatus.SUCCEEDED:
+        summary = (
+            "The job succeeded after a retained retry or recovery sequence."
+            if len(attempts) > 1 or retry_markers
+            else "The job succeeded without a retry or recovery attempt."
+        )
+        return _explanation(
+            "recovery", "Retry & recovery", "ready", summary, tuple(details)
+        )
+    return _explanation(
+        "recovery",
+        "Retry & recovery",
+        "neutral",
+        f"The job finished {job.status.value}; no retry action is available.",
+        tuple(details),
+    )
+
+
+def _promotion_explanation(run: HarnessRun | None) -> dict[str, Any]:
+    if run is None:
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            "Promotion is unavailable because the source run cannot be loaded.",
+        )
+    if run.status.value in {"queued", "running"}:
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "pending",
+            "Promotion remains pending until the run succeeds.",
+        )
+    if run.status.value != "succeeded":
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            f"A {run.status.value} run is not eligible for reusable promotion.",
+        )
+    if not run.workspace:
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            "Promotion requires a project workspace for the reviewed YAML draft.",
+        )
+    if not run.prompt.strip():
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            "Promotion requires a non-empty redacted source instruction.",
+        )
+    execution = _workspace_execution(run)
+    patch = bool(execution.get("patch") or run.metadata.get("diff"))
+    isolated = bool(
+        execution.get("worktree_path") or execution.get("policy") == "worktree"
+    )
+    if execution.get("discarded_at"):
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            "A discarded worktree cannot be promoted into reusable project state.",
+        )
+    if execution.get("truncated"):
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            "Promotion is blocked because the retained patch is incomplete.",
+        )
+    if isolated and patch and not execution.get("applied_at"):
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "attention",
+            "Review and apply the isolated patch before promoting this run.",
+            (
+                "Approval, promotion preview, promotion apply, and scheduling remain separate actions.",
+            ),
+        )
+    present, total = _provenance_completeness(_provenance(run))
+    if present < total:
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "attention",
+            "Promotion preview is available, but provenance should be refreshed before apply.",
+            (
+                f"{present} of {total} core provenance sections are retained.",
+                "Preview and apply remain separate explicit actions.",
+            ),
+        )
+    return _explanation(
+        "promotion",
+        "Promotion eligibility",
+        "ready",
+        "This run is eligible for a reviewed promotion preview.",
+        ("Preview, apply, and scheduling remain separate explicit actions.",),
+    )
+
+
+def _workspace_execution(run: HarnessRun) -> Mapping[str, Any]:
+    value = run.metadata.get("workspace_execution")
+    return value if isinstance(value, Mapping) else {}
+
+
+def _provenance(run: HarnessRun | None) -> Mapping[str, Any]:
+    if run is None:
+        return {}
+    value = run.metadata.get("provenance")
+    return value if isinstance(value, Mapping) else {}
+
+
+def _provenance_completeness(provenance: Mapping[str, Any]) -> tuple[int, int]:
+    required = (
+        "project",
+        "git",
+        "harness",
+        "request",
+        "execution",
+        "records",
+        "replay_request",
+    )
+    return sum(isinstance(provenance.get(key), Mapping) for key in required), len(
+        required
+    )
+
+
+def _explanation(
+    key: str,
+    title: str,
+    status: str,
+    summary: str,
+    details: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    return {
+        "key": key,
+        "title": title,
+        "status": status,
+        "summary": summary,
+        "details": list(details),
+    }
+
+
+def _counted(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}."
 
 
 def _lightweight_run_summary(run: HarnessRun) -> dict[str, Any]:

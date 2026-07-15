@@ -1066,6 +1066,7 @@
       byId("runs-open-worktree-button").disabled = !actions.open_worktree;
       byId("runs-inspect-artifact-button").disabled = !actions.inspect_artifact;
       renderRunsOwnership(item);
+      renderRunsExplanations(item);
       renderAgentTeam(byId("runs-team-tree"), item && item.workflow, {
         panel: byId("runs-team-panel"),
         title: byId("runs-team-title"),
@@ -1111,6 +1112,52 @@
         description.textContent = value || "Unavailable";
         cell.append(term, description);
         grid.appendChild(cell);
+      }
+    }
+
+    function renderRunsExplanations(item) {
+      const panel = byId("runs-explanations-panel");
+      const grid = byId("runs-explanations-grid");
+      const explanations = item && Array.isArray(item.explanations) ? item.explanations : [];
+      grid.textContent = "";
+      panel.hidden = !item;
+      if (!item) return;
+      const actionable = explanations.filter((entry) => ["attention", "blocked"].includes(entry.status)).length;
+      const ready = explanations.filter((entry) => entry.status === "ready").length;
+      setText("runs-explanations-summary", `${ready} ready · ${actionable} need attention`);
+      if (!explanations.length) {
+        const empty = document.createElement("p");
+        empty.className = "status-line";
+        empty.textContent = "No operational explanation is available for this retained run.";
+        grid.appendChild(empty);
+        return;
+      }
+      for (const entry of explanations) {
+        const card = document.createElement("article");
+        card.className = "runs-explanation-card";
+        card.dataset.status = entry.status || "neutral";
+        const heading = document.createElement("div");
+        heading.className = "runs-explanation-heading";
+        const title = document.createElement("strong");
+        title.textContent = entry.title || entry.key || "Run state";
+        const badge = document.createElement("span");
+        badge.className = `runs-status ${entry.status || "neutral"}`;
+        badge.textContent = String(entry.status || "neutral").replace(/_/g, " ");
+        heading.append(title, badge);
+        const summary = document.createElement("p");
+        summary.textContent = entry.summary || "No explanation retained.";
+        card.append(heading, summary);
+        const details = Array.isArray(entry.details) ? entry.details.filter(Boolean) : [];
+        if (details.length) {
+          const list = document.createElement("ul");
+          for (const detail of details) {
+            const row = document.createElement("li");
+            row.textContent = detail;
+            list.appendChild(row);
+          }
+          card.appendChild(list);
+        }
+        grid.appendChild(card);
       }
     }
 
