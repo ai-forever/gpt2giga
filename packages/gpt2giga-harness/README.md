@@ -69,6 +69,12 @@ For the first model-backed north-star flow, copy the
 It packages reviewed agent profiles, a durable isolated-worktree workflow, and
 a post-apply eval while keeping apply, commit, push, and hosted writes explicit.
 
+For unattended compatibility evidence, copy the
+[nightly compatibility guardian](../../examples/harness/nightly-compatibility-guardian/README.md).
+It packages a pinned Codex/Claude/Gemini eval, exact baseline dimensions, a
+read-only triage workflow, and a durable schedule that runs without the UI and
+raises Attention only after a tested contract regresses.
+
 Open `http://127.0.0.1:8091/`. `giga ui` starts a durable local worker when
 needed; pass `--no-start-worker` when another supervisor owns that lifecycle.
 The default loopback binding is intentional. Remote binding requires explicit

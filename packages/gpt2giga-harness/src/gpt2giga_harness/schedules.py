@@ -769,6 +769,7 @@ class ScheduleService:
         for row in rows:
             status = None
             error = None
+            scheduled_eval_regression = False
             if row["job_id"]:
                 job = self.runtime_store.get_job(str(row["job_id"]))
                 if job.status in TERMINAL_JOB_STATUSES:
@@ -790,6 +791,15 @@ class ScheduleService:
                     elif definition.target_kind == "eval":
                         current_eval = self.eval_store.get_any(str(row["run_id"]))
                         status = current_eval.status
+                        if status == "failed" and row["trigger"] != "test":
+                            summary = current_eval.summary
+                            error = (
+                                "scheduled eval regression: "
+                                f"{summary.get('failed', 0)} failed, "
+                                f"{summary.get('errors', 0)} errors across "
+                                f"{summary.get('total', 0)} cells"
+                            )
+                            scheduled_eval_regression = True
                 except (KeyError, ScheduleError):
                     continue
             if status in {"succeeded", "failed", "canceled", "passed"}:
@@ -799,6 +809,10 @@ class ScheduleService:
                     terminal_status,
                     error=error,
                 )
+                if scheduled_eval_regression:
+                    self._mark_attention(
+                        str(row["schedule_key"]), error or "eval failed"
+                    )
                 if row["trigger"] == "test" and terminal_status == "succeeded":
                     now = _utc_now()
                     with self.runtime_store._connect() as connection:  # noqa: SLF001

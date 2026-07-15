@@ -8,6 +8,7 @@
 ## [0.0.1a3] - Unreleased
 
 ### Добавлено
+- **Nightly compatibility guardian**: reviewed-пример содержит pinned Codex/Claude/Gemini eval, baseline с точными adapter dimensions, read-only triage регрессий и durable nightly schedule, работающий без UI.
 - **Пример reviewed patch**: disposable issue fixture содержит reviewed-профили planner, изолированного implementer и read-only reviewer, durable workflow и post-apply eval; mutation исходного checkout, apply, commit, push и hosted writes остаются явными решениями оператора.
 - **Офлайн-демо первого запуска**: disposable-репозиторий с вымышленными inventory-данными проверяет `giga init`, redaction-safe диагностику, локальный Echo read run и сгенерированный smoke eval, хранит runtime state внутри копии демо и не требует credentials, proxy, внешнего agent CLI или публичной сети.
 - **Диагностика первого запуска**: `giga doctor [workspace] --json` теперь формирует redaction-safe отчёт о готовности proxy, routes, models, версий CLI-адаптеров, workspace и Git, durable worker, managed homes и MCP snapshots, добавляет исполнимые remediation-команды и читает runtime state без записи.
@@ -20,6 +21,7 @@
 - **Доказательства GigaChat-совместимости**: завершённые headless-запуски Codex, Claude и Gemini теперь публикуют content-addressed provenance для наблюдаемого маршрута `gpt2giga`, запрошенных model/API mode и нормализованных stream, tool, usage, error и cancellation semantics без сохранения prompt или response content.
 
 ### Исправлено
+- **Attention для scheduled eval**: после успешного `test-now` точного schedule hash следующий failed eval приостанавливает schedule и создаёт один retained Attention item с кратким scorecard.
 - **Durable scheduled evals**: повторная доставка одного schedule occurrence теперь использует исходный target run вместо создания второго eval/job, а scorecard, запущенный worker-ом, сохраняется в state directory разрешённого Harness-проекта.
 - **Reviewed promotion**: подтверждение `git.apply` теперь одноразово связано с точными source commit, SHA-256 сохранённого patch и branch intent; устаревший source, изменённый patch и повторное связывание approval завершаются отказом до изменения checkout.
 

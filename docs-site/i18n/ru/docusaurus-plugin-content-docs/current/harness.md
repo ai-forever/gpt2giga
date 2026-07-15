@@ -158,6 +158,13 @@ Model-backed
 неизменным, а apply, commit, push и hosted writes выполняются только по явному
 решению оператора.
 
+Model-backed
+[nightly compatibility guardian](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/nightly-compatibility-guardian)
+содержит pinned Codex/Claude/Gemini eval, точные baseline dimensions,
+read-only triage workflow и durable nightly schedule. Он работает при закрытом
+UI и отправляет в Attention только failed-контракт, ранее прошедший test-now,
+для классификации product/adapter/model/environment.
+
 Затем посмотрите план внешнего агента, не запуская его:
 
 ```bash

@@ -159,6 +159,13 @@ in a Harness-owned worktree, and a post-apply eval. Its walkthrough keeps the
 source checkout unchanged before approval and leaves apply, commit, push, and
 hosted writes as explicit operator decisions.
 
+The model-backed
+[nightly compatibility guardian](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/nightly-compatibility-guardian)
+packages a pinned Codex/Claude/Gemini eval, exact baseline dimensions, a
+read-only triage workflow, and a durable nightly schedule. It runs while the UI
+is closed and moves only a failed, previously tested schedule contract into
+Attention for product/adapter/model/environment classification.
+
 Preview an external agent command without launching it:
 
 ```bash

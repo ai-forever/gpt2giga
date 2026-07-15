@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.1a3] - Unreleased
 
 ### Added
+- **Nightly compatibility guardian**: a reviewed example now packages a pinned Codex/Claude/Gemini eval, exact adapter-dimension baselines, read-only regression triage, and a durable nightly schedule that runs without the UI.
 - **Reviewed-patch example**: a disposable issue fixture now packages reviewed planner, isolated implementer, and read-only reviewer profiles with a durable workflow and post-apply eval; source mutation, apply, commit, push, and hosted writes remain explicit operator decisions.
 - **Offline first-run demo**: a disposable fictional inventory repository now verifies `giga init`, redaction-safe diagnostics, a local Echo read run, and the generated smoke eval while keeping runtime state inside the copied demo and requiring no credentials, proxy, external agent CLI, or public network.
 - **First-run doctor**: `giga doctor [workspace] --json` now emits a redaction-safe readiness report for the proxy, routes, models, adapter CLI versions, workspace and Git state, durable worker, managed homes, and MCP snapshots, with actionable remediation commands and read-only runtime inspection.
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **GigaChat compatibility evidence**: completed headless Codex, Claude, and Gemini runs now expose content-addressed provenance for the observed `gpt2giga` route, requested model/API mode, and normalized stream, tool, usage, error, and cancellation semantics without retaining prompt or response content.
 
 ### Fixed
+- **Scheduled eval attention**: after an exact schedule hash passes `test-now`, a later failed eval now pauses the schedule and creates one retained Attention item with the scorecard summary.
 - **Durable scheduled evals**: duplicate delivery of one schedule occurrence now reuses the original target run instead of creating a second eval/job, and worker-triggered scorecards are retained under the resolved Harness project state directory.
 - **Reviewed promotion**: `git.apply` approval is now bound once to the exact source commit, captured patch SHA-256, and branch intent; stale source, changed patch, and approval rebinding fail closed before the checkout is modified.
 
