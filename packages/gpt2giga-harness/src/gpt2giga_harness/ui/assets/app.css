@@ -3669,6 +3669,38 @@
       background: var(--panel);
       font-size: 12px;
     }
+    .workflow-run-panel {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel-soft);
+      min-width: 0;
+    }
+    .workflow-run-panel textarea { min-height: 76px; }
+    .workflow-run-inputs { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .workflow-run-inspection {
+      display: grid;
+      grid-template-columns: minmax(190px, .7fr) minmax(0, 1.3fr);
+      gap: 12px;
+      min-width: 0;
+    }
+    .workflow-runs-list { display: grid; gap: 8px; }
+    .workflow-run-card {
+      display: grid;
+      gap: 4px;
+      width: 100%;
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      color: var(--text);
+      text-align: left;
+    }
+    .workflow-run-card.active { border-color: var(--accent); }
+    .workflow-run-card small { color: var(--muted); overflow-wrap: anywhere; }
     @media (max-width: 900px) {
       .workflow-catalog-grid { grid-template-columns: 1fr; }
       .workflow-step-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -3700,6 +3732,7 @@
       .workflows-center .runs-center-header > .inline-actions select { width: 100%; min-width: 0; }
       .workflow-form-grid,
       .workflow-step-row { grid-template-columns: minmax(0, 1fr); }
+      .workflow-run-inspection { grid-template-columns: minmax(0, 1fr); }
       .workflow-editor .agent-editor-header { align-items: flex-start; }
     }
     body.agents-area .shell { grid-template-columns: minmax(0, 1fr); }

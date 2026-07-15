@@ -57,13 +57,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.42">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.43">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.48"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.49"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -1434,6 +1434,11 @@ def test_ui_index_contains_control_panel_elements():
         "apply-agent-button",
         "duplicate-agent-button",
         "run-agent-button",
+        "run-workflow-button",
+        "workflow-run-prompt",
+        "workflow-run-inputs",
+        "workflow-runs-list",
+        "workflow-run-detail",
         "evals-panel",
         "evals-status",
         "refresh-evals-button",
@@ -1517,6 +1522,9 @@ def test_ui_index_contains_control_panel_elements():
         "/api/evals",
         "evalSpecs",
         "runSelectedEval",
+        "runSelectedWorkflow",
+        "/api/workflows/${encodeURIComponent(workflow.id)}/run",
+        "/api/workflow-runs/${encodeURIComponent(runId)}",
         "eval-scorecard",
         "Eval Lab",
         "Protocol conformance",

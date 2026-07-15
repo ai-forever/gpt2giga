@@ -57,7 +57,7 @@ gpt2giga
 ```
 
 ```bash
-giga ui --workspace .
+giga ui
 ```
 
 Then start the workflow from a third terminal:
@@ -69,11 +69,30 @@ giga workflow run issue-to-reviewed-patch \
   --json
 ```
 
+The loopback API submits the same immutable workflow definition and returns the
+same durable run schema. Omitting `prompt` keeps the reviewed default from the
+workflow definition:
+
+```bash
+curl --fail-with-body \
+  --json "{\"workspace\":\"$PWD\",\"inputs\":{}}" \
+  http://127.0.0.1:8091/api/workflows/issue-to-reviewed-patch/run
+```
+
+In the cockpit, open **Workflows**, select **Issue to Reviewed Patch**, review
+the prompt and input overrides, then choose **Run workflow**. The Durable runs
+list exposes the same workflow run id, definition hash, status, and step state
+returned by CLI and API without rendering prompt or artifact content.
+
 Save the returned workflow run id and inspect progress with:
 
 ```bash
 giga workflow status <workflow_run_id> --json
 ```
+
+The same status transition is available at
+`GET /api/workflow-runs/<workflow_run_id>` and by selecting the run in the
+cockpit.
 
 Before approval, `git status --short` in this source checkout must remain
 empty. In the cockpit's Workflows run detail, inspect the retained implementer

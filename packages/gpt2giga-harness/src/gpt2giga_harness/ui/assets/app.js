@@ -37,6 +37,7 @@
       workflowTemplates: [],
       promotionDraft: null,
       selectedWorkflow: null,
+      selectedWorkflowRunId: null,
       toolSyncPreview: null,
       toolError: null,
       evalSpecs: [],
@@ -449,21 +450,122 @@
         return;
       }
       state.selectedWorkflow = result.data;
+      state.selectedWorkflowRunId = null;
       const workflow = result.data.workflow;
       byId("workflow-title-input").value = workflow.title || "";
       byId("workflow-version-input").value = workflow.version || "";
       byId("workflow-description-input").value = workflow.description || "";
       byId("workflow-source-input").value = result.data.source || "";
-      for (const id of ["workflow-title-input", "workflow-version-input", "workflow-description-input", "workflow-source-input", "validate-workflow-button", "save-workflow-button", "duplicate-workflow-button", "add-workflow-step-button"]) byId(id).disabled = false;
+      byId("workflow-run-prompt").value = workflow.inputs && workflow.inputs.prompt ? String(workflow.inputs.prompt) : "";
+      byId("workflow-run-inputs").value = "{}";
+      for (const id of ["workflow-title-input", "workflow-version-input", "workflow-description-input", "workflow-source-input", "validate-workflow-button", "save-workflow-button", "duplicate-workflow-button", "add-workflow-step-button", "workflow-run-prompt", "workflow-run-inputs", "run-workflow-button"]) byId(id).disabled = false;
       byId("export-workflow-link").href = `/api/workflows/${encodeURIComponent(workflow.id)}/export?workspace=${encodeURIComponent(state.project.root)}`;
       byId("export-workflow-link").setAttribute("aria-disabled", "false");
       setText("workflow-editor-title", workflow.title);
       setText("workflow-editor-meta", `${workflow.id} · ${workflow.source_path} · ${String(workflow.source_hash || "").slice(0, 12)}`);
+      setText("workflow-run-status", "Ready to create one immutable durable run from this exact workflow revision.");
+      byId("workflow-run-detail").textContent = "Select a durable run to inspect its content-free state.";
       renderWorkflowSteps(workflow.steps || []);
       renderWorkflowDag(result.data.plan || {});
+      renderWorkflowRuns(result.data.runs || []);
       renderWorkflowHistory(result.data.history || []);
       renderWorkflowCatalog();
       if (syncRoute) syncBrowserRoute("workflows", workflow.id);
+    }
+
+    function workflowRunProjection(run) {
+      return {
+        id: run.id,
+        workflow_id: run.workflow_id,
+        definition_hash: run.definition_hash,
+        schema_version: run.schema_version,
+        status: run.status,
+        project_id: run.project_id,
+        session_id: run.session_id,
+        max_concurrency: run.max_concurrency,
+        cancel_requested_at: run.cancel_requested_at,
+        error_summary_present: Boolean(run.error_summary),
+        created_at: run.created_at,
+        updated_at: run.updated_at,
+        finished_at: run.finished_at,
+        steps: (run.steps || []).map((step) => ({
+          step_id: step.step_id,
+          attempt_number: step.attempt_number,
+          kind: step.kind,
+          status: step.status,
+          job_id: step.job_id,
+          child_run_id: step.outputs && step.outputs.run_id ? step.outputs.run_id : null,
+          eval_run_id: step.outputs && step.outputs.eval_run_id ? step.outputs.eval_run_id : null,
+          arena_id: step.outputs && step.outputs.arena_id ? step.outputs.arena_id : null,
+          artifact_types: (step.artifact_refs || []).map((item) => item.type).filter(Boolean),
+          error_summary_present: Boolean(step.error_summary)
+        }))
+      };
+    }
+
+    function renderWorkflowRuns(runs) {
+      const list = byId("workflow-runs-list");
+      list.textContent = "";
+      for (const run of runs) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "workflow-run-card";
+        button.classList.toggle("active", state.selectedWorkflowRunId === run.id);
+        button.innerHTML = `<strong>${escapeHtml(run.status || "unknown")}</strong><small>${escapeHtml(run.id || "")}</small><small>${escapeHtml(String(run.definition_hash || "").slice(0, 12))} · ${escapeHtml(run.updated_at || "")}</small>`;
+        button.addEventListener("click", () => inspectWorkflowRun(run.id));
+        list.appendChild(button);
+      }
+      if (!runs.length) {
+        const empty = document.createElement("div");
+        empty.className = "status-line";
+        empty.textContent = "No durable runs for this workflow yet.";
+        list.appendChild(empty);
+      }
+    }
+
+    function renderWorkflowRunDetail(run) {
+      state.selectedWorkflowRunId = run.id;
+      byId("workflow-run-detail").textContent = pretty(workflowRunProjection(run));
+      renderWorkflowRuns((state.selectedWorkflow && state.selectedWorkflow.runs) || []);
+    }
+
+    async function inspectWorkflowRun(runId) {
+      setText("workflow-run-status", `Refreshing durable run ${runId}...`);
+      const result = await getJson(`/api/workflow-runs/${encodeURIComponent(runId)}`);
+      if (!result.ok) return setText("workflow-run-status", result.data.detail || "Workflow run could not be inspected.");
+      const run = result.data.run;
+      const runs = (state.selectedWorkflow && state.selectedWorkflow.runs) || [];
+      state.selectedWorkflow.runs = [run, ...runs.filter((item) => item.id !== run.id)];
+      renderWorkflowRunDetail(run);
+      setText("workflow-run-status", `Durable run ${run.id} is ${run.status}; CLI and API expose the same run id.`);
+    }
+
+    async function runSelectedWorkflow() {
+      if (!state.selectedWorkflow || !state.project) return;
+      let inputs;
+      try {
+        inputs = JSON.parse(byId("workflow-run-inputs").value || "{}");
+      } catch (_error) {
+        return setText("workflow-run-status", "Input overrides must be a valid JSON object.");
+      }
+      if (!inputs || Array.isArray(inputs) || typeof inputs !== "object") {
+        return setText("workflow-run-status", "Input overrides must be a JSON object.");
+      }
+      const workflow = state.selectedWorkflow.workflow;
+      const prompt = byId("workflow-run-prompt").value.trim();
+      byId("run-workflow-button").disabled = true;
+      setText("workflow-run-status", `Starting ${workflow.id} from its immutable definition snapshot...`);
+      const result = await getJson(`/api/workflows/${encodeURIComponent(workflow.id)}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, prompt: prompt || null, inputs })
+      });
+      byId("run-workflow-button").disabled = false;
+      if (!result.ok) return setText("workflow-run-status", result.data.detail || "Workflow could not start.");
+      const run = result.data.run;
+      state.selectedWorkflow.runs = [run, ...((state.selectedWorkflow.runs || []).filter((item) => item.id !== run.id))];
+      renderWorkflowRunDetail(run);
+      setText("workflow-run-status", `Started durable run ${run.id}; inspect the same id with giga workflow status or the REST API.`);
     }
 
     function renderWorkflowSteps(steps) {
@@ -7227,6 +7329,7 @@
       byId("save-workflow-button").addEventListener("click", saveSelectedWorkflow);
       byId("duplicate-workflow-button").addEventListener("click", duplicateSelectedWorkflow);
       byId("add-workflow-step-button").addEventListener("click", () => addWorkflowStepRow());
+      byId("run-workflow-button").addEventListener("click", runSelectedWorkflow);
       byId("run-eval-button").addEventListener("click", runSelectedEval);
       byId("harness-select").addEventListener("change", (event) => {
         selectHarness(event.target.value);

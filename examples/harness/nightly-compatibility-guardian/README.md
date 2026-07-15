@@ -69,7 +69,7 @@ giga eval run nightly-compatibility \
   --model GigaChat-2-Max \
   --api-mode v2 \
   --json
-giga ui --workspace .
+giga ui
 ```
 
 In Eval Lab, inspect the six cells, confirm the adapter dimensions, and pin the
@@ -125,6 +125,20 @@ giga workflow run nightly-compatibility-guardian \
   --prompt "Triage the retained nightly regression evidence." \
   --json
 ```
+
+The loopback API and cockpit use the same immutable workflow submission. With
+`giga ui` running from the example workspace, the equivalent API call is:
+
+```bash
+curl --fail-with-body \
+  --json "{\"workspace\":\"$PWD\",\"inputs\":{}}" \
+  http://127.0.0.1:8091/api/workflows/nightly-compatibility-guardian/run
+```
+
+Or open **Workflows**, select **Nightly Compatibility Guardian**, and choose
+**Run workflow**. CLI, API, and UI retain one workflow run id, definition hash,
+matrix step state, and triage/evidence lineage; the UI inspector intentionally
+omits prompt, error, and artifact bodies.
 
 The triager is read-only and must cite retained evidence. Updating the pinned
 baseline, changing the matrix, or dismissing Attention remains a separate
