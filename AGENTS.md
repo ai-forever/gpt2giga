@@ -88,7 +88,7 @@ Repository quality gate:
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest tests/ -n 4 --cov=. --cov-report=term --cov-fail-under=80
+uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 ```
 
 Independent package builds:
@@ -104,9 +104,10 @@ Documentation build:
 npm --prefix docs-site run build
 ```
 
-Use focused pytest node IDs during iteration. Use `pytest -n 4` by default for
-directory, multi-file, and full-suite runs because sequential test execution is
-slow; focused single-node runs may omit xdist. Run the full quality gate for
+Use focused pytest node IDs during iteration. Local pytest defaults to `-n auto`
+for directory, multi-file, and full-suite runs; GitHub Actions explicitly pins
+`-n 4`. Pass `-n 0` for a focused single-node run when worker startup would cost
+more than the test. Run the full quality gate for
 cross-package changes, broad refactors, public compatibility changes, release
 work, or whenever the user asks for full verification. Run both package builds
 after metadata, dependency, entry-point, package-data, Docker, or release

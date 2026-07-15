@@ -202,6 +202,6 @@ From the repository root:
 
 ```sh
 uv sync --all-packages --all-extras --dev
-uv run pytest tests/harness -n 4 -q
+uv run pytest tests/harness -q
 uv build --package gpt2giga-harness --no-sources
 ```

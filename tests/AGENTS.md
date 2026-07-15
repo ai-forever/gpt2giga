@@ -39,18 +39,20 @@ packaging contracts. Do not infer coverage from an old directory inventory.
 ## Validation
 
 During iteration, run the narrowest relevant pytest node with
-`uv run pytest ... -q`.
+`uv run pytest ... -q -n 0` when xdist worker startup would dominate the test.
+Directory and full-suite runs inherit local `-n auto`; GitHub Actions overrides
+it with the workflow's explicit `-n 4`.
 
 Harness-focused gate:
 
 ```bash
-uv run pytest tests/harness -n 4 -q
+uv run pytest tests/harness -q
 ```
 
 Full pytest/coverage gate:
 
 ```bash
-uv run pytest tests/ -n 4 --cov=. --cov-report=term --cov-fail-under=80
+uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 ```
 
 Run the full gate after shared fixtures/config, app composition, public protocol,
