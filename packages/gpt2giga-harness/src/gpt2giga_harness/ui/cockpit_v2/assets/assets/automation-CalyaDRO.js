@@ -1,1 +1,0 @@
-import{o as e}from"./index-BFg4IIKo.js";import{t}from"./SurfaceScaffold-DuMwbhmd.js";var n=e();function r(){return(0,n.jsx)(t,{detailKey:`automationDetail`,eyebrowKey:`automationEyebrow`,titleKey:`automation`})}export{r as AutomationSurface};

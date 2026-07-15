@@ -90,6 +90,9 @@ h2 { margin: 0; font-size: 20px; letter-spacing: -0.015em; }
 .read-model-state { display: block; margin-top: 8px; color: var(--muted); font-weight: 600; }
 .read-model-state.ready { color: var(--success); }
 .read-model-state.error { color: var(--danger); }
+.stream-state { display: block; margin-top: 6px; color: var(--muted); font-weight: 600; }
+.stream-state.live { color: var(--success); }
+.stream-state.resnapshot_required { color: var(--danger); }
 .boundary-panel { min-height: 480px; display: flex; flex-direction: column; gap: 22px; }
 .boundary-panel p { color: var(--muted); line-height: 1.5; }
 .inspector-actions { display: flex; flex-wrap: wrap; gap: 7px; }

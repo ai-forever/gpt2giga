@@ -1,1 +1,0 @@
-import{t as e}from"./read-model-Dx_iDOQ2.js";import{i as t,o as n}from"./index-BFg4IIKo.js";import{t as r}from"./SurfaceScaffold-DuMwbhmd.js";var i=n();function a(){let n=t({strict:!1});return(0,i.jsx)(r,{detailKey:`runsDetail`,eyebrowKey:`runsEyebrow`,readModelState:e(`runId`in n&&typeof n.runId==`string`?n.runId:void 0),titleKey:`runs`})}export{a as RunsSurface};

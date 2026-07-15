@@ -185,6 +185,12 @@ from gpt2giga_harness.sessions import (
     RunNotFoundError,
     SessionNotFoundError,
 )
+from gpt2giga_harness.sessions.event_stream import (
+    EventCursorPosition,
+    RunEventBroker,
+    StreamCapacityError,
+    StreamSignal,
+)
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.models import (
     HarnessMessage,
@@ -256,6 +262,7 @@ from gpt2giga_harness.workspace import (
 
 
 NATIVE_SUBMIT_KEY_DELAY_SECONDS = 0.05
+RUN_EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
 
 
 @dataclass
@@ -318,6 +325,7 @@ def create_app(
     policy_engine = PolicyEngine(runtime_store)
     active_headless_runs: dict[str, _ActiveHeadlessRun] = {}
     async_diagnostics = AsyncExecutionDiagnostics()
+    run_event_broker = getattr(store, "event_broker", RunEventBroker())
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -369,6 +377,7 @@ def create_app(
     app.state.harness_native_index_store = native_index_store
     app.state.harness_native_process_manager = native_process_manager
     app.state.harness_async_diagnostics = async_diagnostics
+    app.state.harness_run_event_broker = run_event_broker
 
     def _approval_gate(
         action: PermissionAction,
@@ -1002,6 +1011,7 @@ def create_app(
             "status_code": status.status_code,
             "error": status.error,
             "async_data_plane": async_diagnostics.snapshot(),
+            "event_streams": run_event_broker.snapshot(),
         }
 
     @app.post("/api/preflight/run")
@@ -2055,48 +2065,66 @@ def create_app(
     async def run_events_stream(
         run_id: str,
         after_id: str | None = Query(default=None),
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
     ) -> StreamingResponse:
         try:
-            await run_stream_offload(store.get_run, run_id)
+            initial_run = await run_stream_offload(store.get_run, run_id)
         except RunNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Run not found") from exc
+        try:
+            subscription = run_event_broker.subscribe(run_id)
+        except StreamCapacityError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        try:
+            cursor_position = await run_stream_offload(
+                _resolve_run_stream_cursor,
+                store,
+                initial_run,
+                _optional_text(last_event_id) or _optional_text(after_id),
+            )
+        except ValueError as exc:
+            subscription.close()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
         async def stream_events():
-            last_id = _optional_text(after_id)
-            terminal_event_seen = False
-
-            def poll_stream(cursor_value: str | None, terminal_seen: bool):
-                current_run = store.get_run(run_id)
-                events = store.list_events(
-                    current_run.session_id,
-                    run_id=run_id,
-                    after_id=cursor_value,
-                )
-                if _run_status_is_terminal(current_run.status) and not events:
-                    terminal_seen = terminal_seen or any(
-                        event.type == HarnessEventType.RUN_FINISHED.value
-                        for event in store.list_events(
-                            current_run.session_id,
-                            run_id=run_id,
+            current_offset = cursor_position.offset
+            terminal_event_seen = cursor_position.terminal_seen
+            try:
+                while True:
+                    try:
+                        current_run, page = await run_stream_offload(
+                            _read_run_event_tail,
+                            store,
+                            run_id,
+                            current_offset,
                         )
-                    )
-                return current_run, events, terminal_seen
-
-            while True:
-                try:
-                    current_run, events, terminal_event_seen = await run_stream_offload(
-                        poll_stream, last_id, terminal_event_seen
-                    )
-                except (RunNotFoundError, SessionNotFoundError):
-                    break
-                for event in events:
-                    last_id = event.id
-                    if event.type == HarnessEventType.RUN_FINISHED.value:
+                    except (RunNotFoundError, SessionNotFoundError, ValueError):
+                        break
+                    for item in page.items:
+                        current_offset = item.next_offset
+                        event = item.event
+                        if event.type == HarnessEventType.RUN_FINISHED.value:
+                            terminal_event_seen = True
+                        cursor = _encode_run_stream_cursor(
+                            current_run,
+                            current_offset,
+                            terminal_event_seen=terminal_event_seen,
+                        )
+                        yield _run_sse_event(event, cursor)
+                    if page.next_offset > current_offset:
+                        current_offset = page.next_offset
+                    if page.has_more:
+                        continue
+                    if _run_status_is_terminal(current_run.status):
+                        if terminal_event_seen:
+                            break
                         terminal_event_seen = True
-                    yield _sse_event(event)
-                if _run_status_is_terminal(current_run.status) and not events:
-                    if not terminal_event_seen:
-                        yield _sse_event(
+                        cursor = _encode_run_stream_cursor(
+                            current_run,
+                            current_offset,
+                            terminal_event_seen=True,
+                        )
+                        yield _run_sse_event(
                             HarnessStoredEvent(
                                 id=f"evt_terminal_{current_run.id}",
                                 session_id=current_run.session_id,
@@ -2112,10 +2140,22 @@ def create_app(
                                     or current_run.updated_at
                                     or current_run.created_at
                                 ),
-                            )
+                            ),
+                            cursor,
                         )
-                    break
-                await asyncio.sleep(0.25)
+                        break
+                    signal = await subscription.wait(RUN_EVENT_STREAM_HEARTBEAT_SECONDS)
+                    cursor = _encode_run_stream_cursor(
+                        current_run,
+                        current_offset,
+                        terminal_event_seen=terminal_event_seen,
+                    )
+                    if signal is StreamSignal.RESNAPSHOT_REQUIRED:
+                        yield _run_resnapshot_sse(current_run, cursor)
+                    elif signal is None:
+                        yield ": heartbeat\n\n"
+            finally:
+                subscription.close()
 
         return StreamingResponse(
             stream_events(),
@@ -2939,10 +2979,108 @@ def _text_tuple(value: Any) -> tuple[str, ...]:
     return tuple(items)
 
 
-def _sse_event(event: HarnessStoredEvent) -> str:
+def _run_sse_event(event: HarnessStoredEvent, cursor: str) -> str:
     payload = _event_response(event)
     data = json.dumps(payload, ensure_ascii=False)
-    return f"id: {event.id}\ndata: {data}\n\n"
+    return f"id: {cursor}\ndata: {data}\n\n"
+
+
+def _run_resnapshot_sse(run: HarnessRun, cursor: str) -> str:
+    payload = {
+        "type": "resnapshot_required",
+        "reason": "slow_consumer",
+        "cursor": cursor,
+        "snapshot_url": f"/api/cockpit/sessions/{run.session_id}/events",
+        "stream_url": f"/api/runs/{run.id}/events/stream",
+    }
+    data = json.dumps(payload, ensure_ascii=False)
+    return f"event: resnapshot\nid: {cursor}\ndata: {data}\n\n"
+
+
+def _read_run_event_tail(
+    store: HarnessSessionStore,
+    run_id: str,
+    offset: int,
+):
+    run = store.get_run(run_id)
+    reader = getattr(store, "list_event_tail_page", None)
+    if not callable(reader):
+        raise ValueError("session store does not support durable event tails")
+    page = reader(
+        run.session_id,
+        run_id=run.id,
+        offset=offset,
+        limit=100,
+        max_bytes=1024 * 1024,
+    )
+    return run, page
+
+
+def _resolve_run_stream_cursor(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+    value: str | None,
+) -> EventCursorPosition:
+    if value is None:
+        return EventCursorPosition(offset=0, terminal_seen=False)
+    if value.startswith("hc1."):
+        return _decode_run_stream_cursor(value, run)
+    resolver = getattr(store, "resolve_event_cursor", None)
+    if not callable(resolver):
+        raise ValueError("session store does not support durable event cursors")
+    position = resolver(run.session_id, run_id=run.id, event_id=value)
+    if position is None:
+        raise ValueError("event cursor is stale; fetch a bounded snapshot")
+    return position
+
+
+def _encode_run_stream_cursor(
+    run: HarnessRun,
+    offset: int,
+    *,
+    terminal_event_seen: bool,
+) -> str:
+    scope = hashlib.sha256(f"{run.session_id}\0{run.id}".encode()).hexdigest()[:16]
+    payload = json.dumps(
+        {
+            "v": 1,
+            "scope": scope,
+            "offset": max(offset, 0),
+            "terminal": terminal_event_seen,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return "hc1." + base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_run_stream_cursor(value: str, run: HarnessRun) -> EventCursorPosition:
+    try:
+        encoded = value.removeprefix("hc1.")
+        padding = "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(encoded + padding))
+        scope = hashlib.sha256(f"{run.session_id}\0{run.id}".encode()).hexdigest()[:16]
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("v") != 1
+            or payload.get("scope") != scope
+        ):
+            raise ValueError
+        offset = int(payload["offset"])
+        if offset < 0:
+            raise ValueError
+    except (
+        binascii.Error,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ValueError("invalid or cross-run event cursor") from exc
+    return EventCursorPosition(
+        offset=offset,
+        terminal_seen=bool(payload.get("terminal")),
+    )
 
 
 def _native_sse_cursor(last_event_id: str | None) -> int:

@@ -1,0 +1,1 @@
+import{o as e}from"./index-xHmhMENB.js";import{t}from"./SurfaceScaffold-_VGcpanN.js";var n=e();function r(){return(0,n.jsx)(t,{detailKey:`evaluationDetail`,eyebrowKey:`evaluationEyebrow`,titleKey:`evaluation`})}export{r as EvaluationSurface};

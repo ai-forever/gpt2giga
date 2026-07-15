@@ -4,6 +4,7 @@ import { LazyInspector, type InspectorKind } from "../inspectors/LazyInspector";
 import { message, type MessageKey } from "../messages";
 import { usePreferences } from "../preferences-context";
 import type { ReadModelState } from "../read-model";
+import type { RunStreamStatus } from "../stream-store";
 
 const inspectorLabels: ReadonlyArray<[InspectorKind, MessageKey]> = [
   ["markdown", "markdown"],
@@ -17,11 +18,13 @@ export function SurfaceScaffold({
   detailKey,
   eyebrowKey,
   readModelState,
+  streamState,
   titleKey,
 }: {
   detailKey: MessageKey;
   eyebrowKey: MessageKey;
   readModelState?: ReadModelState;
+  streamState?: RunStreamStatus;
   titleKey: MessageKey;
 }) {
   const [inspector, setInspector] = useState<InspectorKind | null>(null);
@@ -38,6 +41,11 @@ export function SurfaceScaffold({
           {readModelState === undefined ? null : (
             <span className={`read-model-state ${readModelState}`}>
               {message(locale, readModelMessageKey(readModelState))}
+            </span>
+          )}
+          {streamState === undefined ? null : (
+            <span className={`stream-state ${streamState}`}>
+              {message(locale, streamMessageKey(streamState))}
             </span>
           )}
         </div>
@@ -68,6 +76,15 @@ export function SurfaceScaffold({
       </section>
     </div>
   );
+}
+
+function streamMessageKey(state: RunStreamStatus): MessageKey {
+  if (state === "connecting") return "streamConnecting";
+  if (state === "live") return "streamLive";
+  if (state === "reconnecting") return "streamReconnecting";
+  if (state === "resnapshot_required") return "streamResnapshot";
+  if (state === "closed") return "streamClosed";
+  return "streamIdle";
 }
 
 function readModelMessageKey(state: ReadModelState): MessageKey {

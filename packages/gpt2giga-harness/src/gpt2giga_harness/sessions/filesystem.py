@@ -35,6 +35,13 @@ from gpt2giga_harness.sessions.models import (
     session_to_dict,
 )
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
+from gpt2giga_harness.sessions.event_stream import (
+    EventCursorPosition,
+    EventTailItem,
+    EventTailPage,
+    RunEventBroker,
+    event_stream_size,
+)
 from gpt2giga_harness.sessions.redaction import (
     redact_event_payload,
     redact_for_storage,
@@ -91,6 +98,7 @@ class FilesystemHarnessSessionStore:
         self._read_index: SessionReadIndex | None = (
             SessionReadIndex(read_index_path) if read_index_path.exists() else None
         )
+        self.event_broker = RunEventBroker()
 
     def create_session(
         self,
@@ -400,7 +408,96 @@ class FilesystemHarnessSessionStore:
             self._session_dir(event.session_id) / EVENTS_FILE,
             event_to_dict(stored),
         )
+        self.event_broker.publish(stored)
         return stored
+
+    def list_event_tail_page(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        offset: int = 0,
+        limit: int = 100,
+        max_bytes: int = 1024 * 1024,
+    ) -> EventTailPage:
+        """Read a bounded run tail from a durable byte offset."""
+        self.get_session(session_id)
+        path = self._session_dir(session_id) / EVENTS_FILE
+        if not path.exists():
+            if offset != 0:
+                raise ValueError("event cursor offset is outside the retained tail")
+            return EventTailPage((), 0, False, 0)
+        file_size = path.stat().st_size
+        if offset < 0 or offset > file_size:
+            raise ValueError("event cursor offset is outside the retained tail")
+        bounded_limit = min(max(limit, 1), 100)
+        bounded_bytes = min(max(max_bytes, 1024), 1024 * 1024)
+        max_scan_bytes = bounded_bytes * 4
+        items: list[EventTailItem] = []
+        byte_count = 0
+        scan_start = offset
+        position = offset
+        with path.open("rb") as handle:
+            handle.seek(offset)
+            while len(items) < bounded_limit and handle.tell() < file_size:
+                if handle.tell() - scan_start >= max_scan_bytes:
+                    break
+                line_start = handle.tell()
+                line = handle.readline((bounded_bytes * 4) + 1)
+                if not line.endswith(b"\n") and handle.tell() < file_size:
+                    raise ValueError("stored event exceeds the bounded scan limit")
+                position = handle.tell()
+                text = line.strip()
+                if not text:
+                    continue
+                decoded = json.loads(text)
+                if not isinstance(decoded, Mapping):
+                    continue
+                event = event_from_dict(decoded)
+                if event.run_id != run_id:
+                    continue
+                size = event_stream_size(event)
+                if items and byte_count + size > bounded_bytes:
+                    position = line_start
+                    break
+                if size > bounded_bytes:
+                    raise ValueError("stored event exceeds the stream byte limit")
+                items.append(EventTailItem(event=event, next_offset=position))
+                byte_count += size
+        return EventTailPage(
+            items=tuple(items),
+            next_offset=position,
+            has_more=position < file_size,
+            byte_count=byte_count,
+        )
+
+    def resolve_event_cursor(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        event_id: str,
+    ) -> EventCursorPosition | None:
+        """Resolve a legacy event id once; opaque reconnects stay offset-based."""
+        self.get_session(session_id)
+        path = self._session_dir(session_id) / EVENTS_FILE
+        if not path.exists():
+            return None
+        with path.open("rb") as handle:
+            for line in handle:
+                text = line.strip()
+                if not text:
+                    continue
+                decoded = json.loads(text)
+                if not isinstance(decoded, Mapping):
+                    continue
+                event = event_from_dict(decoded)
+                if event.run_id == run_id and event.id == event_id:
+                    return EventCursorPosition(
+                        offset=handle.tell(),
+                        terminal_seen=event.type == "run_finished",
+                    )
+        return None
 
     def list_events(
         self,

@@ -20,6 +20,13 @@ from gpt2giga_harness.sessions.models import (
     native_link_from_dict,
     native_link_to_dict,
 )
+from gpt2giga_harness.sessions.event_stream import (
+    EventCursorPosition,
+    EventTailItem,
+    EventTailPage,
+    RunEventBroker,
+    event_stream_size,
+)
 from gpt2giga_harness.sessions.redaction import (
     redact_event_payload,
     redact_for_storage,
@@ -182,6 +189,7 @@ class InMemoryHarnessSessionStore:
         self._raw_requests: dict[str, list[HarnessRawRecord]] = {}
         self._raw_responses: dict[str, list[HarnessRawRecord]] = {}
         self._native_links: dict[str, list[HarnessNativeLink]] = {}
+        self.event_broker = RunEventBroker()
 
     def create_session(
         self,
@@ -342,7 +350,65 @@ class InMemoryHarnessSessionStore:
             payload=redact_event_payload(event.payload),
         )
         self._events.setdefault(event.session_id, []).append(stored)
+        self.event_broker.publish(stored)
         return stored
+
+    def list_event_tail_page(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        offset: int = 0,
+        limit: int = 100,
+        max_bytes: int = 1024 * 1024,
+    ) -> EventTailPage:
+        """Return a bounded run-filtered page without replaying prior positions."""
+        self.get_session(session_id)
+        events = self._events.get(session_id, ())
+        if offset < 0 or offset > len(events):
+            raise ValueError("event cursor offset is outside the retained tail")
+        bounded_limit = min(max(limit, 1), 100)
+        bounded_bytes = min(max(max_bytes, 1024), 1024 * 1024)
+        items: list[EventTailItem] = []
+        byte_count = 0
+        position = offset
+        scan_limit = min(len(events), offset + (bounded_limit * 16))
+        while position < scan_limit and len(items) < bounded_limit:
+            event = events[position]
+            position += 1
+            if event.run_id != run_id:
+                continue
+            size = event_stream_size(event)
+            if items and byte_count + size > bounded_bytes:
+                position -= 1
+                break
+            if size > bounded_bytes:
+                raise ValueError("stored event exceeds the stream byte limit")
+            items.append(EventTailItem(event=event, next_offset=position))
+            byte_count += size
+        return EventTailPage(
+            items=tuple(items),
+            next_offset=position,
+            has_more=position < len(events),
+            byte_count=byte_count,
+        )
+
+    def resolve_event_cursor(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        event_id: str,
+    ) -> EventCursorPosition | None:
+        """Resolve one legacy event id to its append-order tail offset."""
+        self.get_session(session_id)
+        for position, event in enumerate(self._events.get(session_id, ()), start=1):
+            if event.run_id == run_id and event.id == event_id:
+                return EventCursorPosition(
+                    offset=position,
+                    terminal_seen=event.type == "run_finished",
+                )
+        return None
 
     def list_events(
         self,

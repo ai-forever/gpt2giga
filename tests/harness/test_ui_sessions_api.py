@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import subprocess
 import time
 from pathlib import Path
@@ -16,6 +17,8 @@ from gpt2giga_harness.sessions import (
     FilesystemHarnessSessionStore,
     InMemoryHarnessSessionStore,
 )
+from gpt2giga_harness.sessions.models import HarnessStoredEvent
+from gpt2giga_harness.sessions.store import utc_now
 from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
@@ -23,8 +26,30 @@ from gpt2giga_harness.types import (
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
+    HarnessEventType,
 )
 from gpt2giga_harness.ui.app import create_app
+
+
+def _sse_frames(text: str) -> list[dict[str, object]]:
+    frames: list[dict[str, object]] = []
+    for block in text.split("\n\n"):
+        lines = block.splitlines()
+        event_id = next(
+            (line.removeprefix("id: ") for line in lines if line.startswith("id: ")),
+            None,
+        )
+        data = next(
+            (
+                json.loads(line.removeprefix("data: "))
+                for line in lines
+                if line.startswith("data: ")
+            ),
+            None,
+        )
+        if event_id is not None and isinstance(data, dict):
+            frames.append({"id": event_id, "data": data})
+    return frames
 
 
 def test_sessions_api_create_list_get_update_delete():
@@ -207,6 +232,111 @@ def test_run_event_stream_synthesizes_terminal_event_for_legacy_run():
     assert '"type": "run_finished"' in text
     assert '"status": "succeeded"' in text
     assert '"synthetic": true' in text
+
+
+def test_run_event_stream_reconnects_from_opaque_cursor_without_gap_or_duplicate():
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Reconnect")
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="hello",
+        model=None,
+        api_mode=session.default_api_mode,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=None,
+        status="running",
+    )
+    for event_id, event_type in (
+        ("evt-one", HarnessEventType.RUN_STARTED.value),
+        ("evt-two", HarnessEventType.MESSAGE_COMPLETED.value),
+        ("evt-three", HarnessEventType.RUN_FINISHED.value),
+    ):
+        store.append_event(
+            HarnessStoredEvent(
+                id=event_id,
+                session_id=session.id,
+                run_id=run.id,
+                type=event_type,
+                message=event_id,
+                payload={"status": "succeeded"},
+                created_at=utc_now(),
+            )
+        )
+    store.update_run(run.id, status="succeeded")
+    client = _client(store=store)
+
+    with client.stream("GET", f"/api/runs/{run.id}/events/stream") as response:
+        first_text = "".join(response.iter_text())
+
+    first_frames = _sse_frames(first_text)
+    assert [frame["data"]["id"] for frame in first_frames] == [
+        "evt-one",
+        "evt-two",
+        "evt-three",
+    ]
+    assert all(frame["id"].startswith("hc1.") for frame in first_frames)
+
+    with client.stream(
+        "GET",
+        f"/api/runs/{run.id}/events/stream",
+        headers={"Last-Event-ID": first_frames[0]["id"]},
+    ) as response:
+        replay_text = "".join(response.iter_text())
+
+    assert [frame["data"]["id"] for frame in _sse_frames(replay_text)] == [
+        "evt-two",
+        "evt-three",
+    ]
+
+
+def test_run_event_stream_accepts_legacy_event_id_and_rejects_cross_run_cursor():
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Legacy cursor")
+    runs = [
+        store.create_run(
+            session_id=session.id,
+            harness_id="echo",
+            prompt=f"run {index}",
+            model=None,
+            api_mode=session.default_api_mode,
+            capability=HarnessCapability.CHAT_COMPLETIONS,
+            mode="plan",
+            workspace=None,
+            status="succeeded",
+        )
+        for index in range(2)
+    ]
+    for index, run in enumerate(runs):
+        store.append_event(
+            HarnessStoredEvent(
+                id=f"evt-{index}",
+                session_id=session.id,
+                run_id=run.id,
+                type=HarnessEventType.RUN_FINISHED.value,
+                message="finished",
+                payload={"status": "succeeded"},
+                created_at=utc_now(),
+            )
+        )
+    client = _client(store=store)
+
+    with client.stream(
+        "GET",
+        f"/api/runs/{runs[0].id}/events/stream?after_id=evt-0",
+    ) as response:
+        assert response.status_code == 200
+        assert "".join(response.iter_text()) == ""
+    with client.stream("GET", f"/api/runs/{runs[0].id}/events/stream") as response:
+        cursor = _sse_frames("".join(response.iter_text()))[0]["id"]
+
+    rejected = client.get(
+        f"/api/runs/{runs[1].id}/events/stream",
+        headers={"Last-Event-ID": cursor},
+    )
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"] == "invalid or cross-run event cursor"
 
 
 def test_preflight_api_reports_large_attachment_warning(tmp_path):
