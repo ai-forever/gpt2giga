@@ -10,6 +10,9 @@
 ### Добавлено
 - **Capability matrix**: команда `giga harness capabilities` генерирует проверяемые Markdown и JSON представления непосредственно из runtime parity contracts встроенных CLI-адаптеров.
 
+### Исправлено
+- **Durable scheduled evals**: повторная доставка одного schedule occurrence теперь использует исходный target run вместо создания второго eval/job, а scorecard, запущенный worker-ом, сохраняется в state directory разрешённого Harness-проекта.
+
 ## [0.0.1a2] - 2026-07-14
 
 ### Добавлено

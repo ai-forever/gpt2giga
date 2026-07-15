@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -11,6 +12,7 @@ from gpt2giga_harness.runtime.worker import DurableJobWorker
 from gpt2giga_harness.schedules import (
     ScheduleDefinition,
     build_schedule_definition,
+    load_schedule,
     next_occurrences,
 )
 from gpt2giga_harness.ui.app import create_app
@@ -225,6 +227,73 @@ def test_worker_executes_run_now_without_an_open_browser(tmp_path):
     assert job.schedule_id == "daily-echo"
 
 
+def test_scheduled_eval_redelivery_reuses_one_occurrence_and_eval_run(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_eval_project(workspace)
+    config = HarnessConfig(data_dir=str(tmp_path / "data"), auto_start_proxy=False)
+    service = create_app(config).state.harness_schedule_service
+    project = resolve_project(workspace, data_dir=config.data_dir)
+    service.upsert(project, _eval_payload(workspace))
+    definition = load_schedule(project.root, "scheduled-eval")
+    occurrence = service._create_occurrence(  # noqa: SLF001
+        definition,
+        schedule_key=service.detail(project, definition.id)["state"]["schedule_key"],
+        trigger="schedule",
+        scheduled_for="2026-07-15T08:00:00+00:00",
+    )
+    duplicate = service._create_occurrence(  # noqa: SLF001
+        definition,
+        schedule_key=service.detail(project, definition.id)["state"]["schedule_key"],
+        trigger="schedule",
+        scheduled_for="2026-07-15T08:00:00+00:00",
+    )
+
+    first = service._execute(  # noqa: SLF001
+        project, definition, occurrence, dry_run=False
+    )
+    second = service._execute(  # noqa: SLF001
+        project, definition, occurrence, dry_run=False
+    )
+
+    current = service._get_occurrence(occurrence.id)  # noqa: SLF001
+    assert duplicate.id == occurrence.id
+    assert first["occurrence"]["run_id"] == current.run_id
+    assert second["occurrence"]["run_id"] == current.run_id
+    assert current.status == "queued"
+    assert len(service.eval_store.list_runs(project)) == 1
+    assert len(RuntimeCoordinationStore(config.data_dir).list_jobs()) == 1
+
+
+def test_worker_tick_persists_scheduled_eval_under_project_state(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_eval_project(workspace)
+    data_dir = tmp_path / "data"
+    config = HarnessConfig(data_dir=str(data_dir), auto_start_proxy=False)
+    service = create_app(config).state.harness_schedule_service
+    project = resolve_project(workspace, data_dir=config.data_dir)
+    service.upsert(project, _eval_payload(workspace))
+    due_at = "2026-07-15T08:00:00+00:00"
+    with service.runtime_store._connect() as connection:  # noqa: SLF001
+        connection.execute(
+            "UPDATE schedule_states SET enabled = 1, status = 'active', "
+            "next_run_at = ? WHERE project_id = ? AND schedule_id = ?",
+            (due_at, project.id, "scheduled-eval"),
+        )
+    worker_cwd = tmp_path / "worker-cwd"
+    worker_cwd.mkdir()
+    monkeypatch.chdir(worker_cwd)
+
+    assert service.tick() == 1
+
+    runs = service.eval_store.list_runs(project)
+    assert len(runs) == 1
+    assert runs[0].project_id == project.id
+    assert Path(project.state_dir, "eval-runs", f"{runs[0].id}.json").is_file()
+    assert not (worker_cwd / "eval-runs").exists()
+
+
 def test_schedule_ids_are_scoped_per_project(tmp_path):
     config = HarnessConfig(data_dir=str(tmp_path / "data"), auto_start_proxy=False)
     service = create_app(config).state.harness_schedule_service
@@ -353,6 +422,32 @@ prompt = "scheduled hello"
     )
 
 
+def _write_eval_project(workspace):
+    directory = workspace / ".giga"
+    evals = directory / "evals"
+    evals.mkdir(parents=True)
+    (directory / "harness.toml").write_text(
+        '[project]\nname = "scheduled-eval-project"\n',
+        encoding="utf-8",
+    )
+    (evals / "scheduled-smoke.yaml").write_text(
+        """
+name: scheduled-smoke
+harnesses: [echo]
+api_mode: v2
+mode: read
+workspace_policy: current
+cases:
+  - id: echo
+    prompt: scheduled hello
+    checks:
+      - type: equals
+        value: scheduled hello
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+
 def _payload(workspace):
     return {
         "id": "daily-echo",
@@ -366,5 +461,22 @@ def _payload(workspace):
             "interval_seconds": 3600,
         },
         "prompt": "scheduled hello",
+        "workspace_policy": "worktree",
+    }
+
+
+def _eval_payload(workspace):
+    return {
+        "id": "scheduled-eval",
+        "title": "Scheduled eval",
+        "workspace": str(workspace),
+        "target": {"kind": "eval", "id": "scheduled-smoke"},
+        "cadence": {
+            "kind": "interval",
+            "timezone": "Europe/Moscow",
+            "start_at": "2026-07-15T11:00:00",
+            "interval_seconds": 3600,
+        },
+        "misfire_policy": "run_once",
         "workspace_policy": "worktree",
     }

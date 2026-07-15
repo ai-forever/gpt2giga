@@ -28,6 +28,7 @@ from gpt2giga_harness.project import (
     HarnessProject,
     load_project_config,
     project_preset_to_dict,
+    resolve_project,
 )
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.runtime.worker import DurableJobDispatcher
@@ -42,7 +43,7 @@ from gpt2giga_harness.workflows import (
 )
 
 SCHEDULE_DIRECTORY = Path(".giga") / "schedules"
-ACTIVE_OCCURRENCE_STATUSES = ("claimed", "queued", "running")
+ACTIVE_OCCURRENCE_STATUSES = ("claimed", "dispatching", "queued", "running")
 DEFAULT_PREVIEW_COUNT = 5
 
 
@@ -514,18 +515,15 @@ class ScheduleService:
             ).fetchall()
         dispatched = 0
         for state in rows:
-            project = HarnessProject(
-                id=str(state["project_id"]),
-                root=str(state["project_root"]),
-                name=Path(str(state["project_root"])).name,
-                git_root=None,
-                git_branch=None,
-                is_git_repo=False,
-                dirty_summary={},
-                config_path=None,
-                state_dir="",
-            )
             try:
+                project = resolve_project(
+                    str(state["project_root"]),
+                    data_dir=self.eval_store.data_dir,
+                )
+                if project.id != str(state["project_id"]):
+                    raise ScheduleError(
+                        "scheduled project identity changed; refusing dispatch"
+                    )
                 definition = load_schedule(project.root, str(state["schedule_id"]))
                 scheduled_for = str(state["next_run_at"])
                 future = next_occurrences(
@@ -569,8 +567,9 @@ class ScheduleService:
                         trigger="schedule",
                         scheduled_for=scheduled_for,
                     )
-                    self._execute(project, definition, occurrence, dry_run=False)
-                    dispatched += 1
+                    if occurrence.status == "claimed":
+                        self._execute(project, definition, occurrence, dry_run=False)
+                        dispatched += 1
                 with self.runtime_store._connect() as connection:  # noqa: SLF001
                     connection.execute(
                         "UPDATE schedule_states SET next_run_at = ?, last_run_at = ?, updated_at = ? WHERE schedule_key = ?",
@@ -612,14 +611,24 @@ class ScheduleService:
         )
         with self.runtime_store._connect() as connection:  # noqa: SLF001
             connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT * FROM schedule_occurrences
+                WHERE schedule_key = ? AND scheduled_for = ? AND trigger = ?
+                """,
+                (schedule_key, scheduled_for, trigger),
+            ).fetchone()
+            if existing is not None:
+                connection.commit()
+                return _occurrence_from_row(existing)
             active = connection.execute(
-                "SELECT COUNT(*) FROM schedule_occurrences WHERE schedule_key = ? AND trigger != 'test' AND status IN ('claimed','queued','running')",
+                "SELECT COUNT(*) FROM schedule_occurrences WHERE schedule_key = ? AND trigger != 'test' AND status IN ('claimed','dispatching','queued','running')",
                 (schedule_key,),
             ).fetchone()[0]
             serialized = 0
             if session_id:
                 serialized = connection.execute(
-                    "SELECT COUNT(*) FROM schedule_occurrences WHERE destination_session_id = ? AND status IN ('claimed','queued','running')",
+                    "SELECT COUNT(*) FROM schedule_occurrences WHERE destination_session_id = ? AND status IN ('claimed','dispatching','queued','running')",
                     (session_id,),
                 ).fetchone()[0]
             if status == "claimed" and (
@@ -687,8 +696,9 @@ class ScheduleService:
         *,
         dry_run: bool,
     ) -> dict[str, Any]:
-        if occurrence.status != "claimed":
-            return occurrence_to_dict(occurrence)
+        occurrence, dispatch_claimed = self._claim_dispatch(occurrence.id)
+        if not dispatch_claimed:
+            return {"occurrence": occurrence_to_dict(occurrence), "result": None}
         try:
             result, job_id, run_id, session_id = self._dispatch_target(
                 project, definition, occurrence, dry_run=dry_run
@@ -709,6 +719,38 @@ class ScheduleService:
             "occurrence": occurrence_to_dict(self._get_occurrence(occurrence.id)),
             "result": result,
         }
+
+    def _claim_dispatch(self, occurrence_id: str) -> tuple[ScheduleOccurrence, bool]:
+        """Atomically grant one delivery the right to create target state."""
+        now = _utc_now()
+        with self.runtime_store._connect() as connection:  # noqa: SLF001
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                UPDATE schedule_occurrences
+                SET status = 'dispatching', started_at = COALESCE(started_at, ?)
+                WHERE id = ? AND status = 'claimed'
+                """,
+                (now, occurrence_id),
+            )
+            claimed = connection.execute("SELECT changes()").fetchone()[0] == 1
+            row = connection.execute(
+                "SELECT * FROM schedule_occurrences WHERE id = ?", (occurrence_id,)
+            ).fetchone()
+            if row is None:
+                connection.rollback()
+                raise KeyError(occurrence_id)
+            if claimed:
+                connection.execute(
+                    """
+                    UPDATE schedule_states
+                    SET last_status = 'dispatching', last_error = NULL, updated_at = ?
+                    WHERE schedule_key = ?
+                    """,
+                    (now, str(row["schedule_key"])),
+                )
+            connection.commit()
+        return _occurrence_from_row(row), claimed
 
     def _sync_occurrences(self) -> None:
         """Project terminal job, workflow, and eval state into occurrence history."""
