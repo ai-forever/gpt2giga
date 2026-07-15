@@ -36,7 +36,7 @@ giga doctor
 giga ui
 ```
 
-The current `gpt2giga-harness==0.0.1a2` metadata depends exactly on
+The current `gpt2giga-harness==0.0.1a3` metadata depends exactly on
 `gpt2giga==0.2.3a2`. Installing only `gpt2giga` never adds Harness commands or
 the `gpt2giga_harness` namespace.
 
