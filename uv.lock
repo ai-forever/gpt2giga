@@ -1124,6 +1124,7 @@ name = "gpt2giga-harness"
 version = "0.0.1a4"
 source = { editable = "packages/gpt2giga-harness" }
 dependencies = [
+    { name = "anyio" },
     { name = "fastapi" },
     { name = "gigachat" },
     { name = "gpt2giga" },
@@ -1137,6 +1138,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4.10,<5" },
     { name = "fastapi", specifier = ">=0.133.0,<1" },
     { name = "gigachat", specifier = ">=0.2.2a1,<0.3.0" },
     { name = "gpt2giga", editable = "packages/gpt2giga" },

@@ -30,6 +30,7 @@ def _project_version(member: Path) -> str:
 GATEWAY_VERSION = _project_version(GATEWAY_MEMBER)
 HARNESS_VERSION = _project_version(HARNESS_MEMBER)
 IMPORT_DISTRIBUTIONS = {
+    "anyio": "anyio",
     "dateutil": "python-dateutil",
     "fastapi": "fastapi",
     "gigachat": "gigachat",

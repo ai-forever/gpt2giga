@@ -8,9 +8,11 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+from time import perf_counter
 from typing import Any, Iterator, Mapping
 from uuid import uuid4
 
+from gpt2giga_harness.instrumentation import record_duration
 from gpt2giga_harness.runtime.models import (
     ApprovalStatus,
     ClaimedJob,
@@ -2955,7 +2957,9 @@ def _project_schedule_key(project_id: str, schedule_id: str) -> str:
 
 @contextmanager
 def _transaction(connection: sqlite3.Connection) -> Iterator[None]:
+    started_at = perf_counter()
     connection.execute("BEGIN IMMEDIATE")
+    record_duration("db_wait_ms", (perf_counter() - started_at) * 1000)
     try:
         yield
     except BaseException:

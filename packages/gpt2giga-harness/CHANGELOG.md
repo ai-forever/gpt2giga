@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Добавлено
+- **Асинхронный UI data plane**: все FastAPI routes теперь имеют исчерпывающие контракты workload, storage/execution owner, deadline, cancellation, idempotency, payload, cursor и latency; filesystem, SQLite, network, subprocess, durable-job и SSE работа проходит через workload-bounded offload, а content-free диагностика показывает event-loop lag, queue/DB/storage/handler/serialization timing, response bytes и счётчики cancellation.
 - **Пакетный shell Cockpit V2**: добавлен закреплённый React/TypeScript/Vite frontend с пятью route-split поверхностями, ленивыми inspector-модулями, детерминированным content-hashed manifest, integrity-bound Brotli/gzip assets, CSP-safe same-origin загрузкой и wheel smoke без Node; legacy cockpit остаётся интерфейсом по умолчанию и явным recovery route.
 
 ## [0.0.1a4] - 2026-07-15

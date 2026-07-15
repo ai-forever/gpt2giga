@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
-from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 
 from gpt2giga_harness.project import resolve_project
+from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.runtime.policy import (
     EnforcementLevel,
     INTERACTIVE_PROFILE,
@@ -27,28 +27,26 @@ from gpt2giga_harness.schedules import (
     schedule_definition_to_dict,
 )
 
-router = APIRouter()
+router = APIRouter(route_class=ConformantAPIRoute)
 
 
 @router.get("/api/schedules")
-async def schedule_list(
+def schedule_list(
     request: Request, workspace: str | None = Query(default=None)
 ) -> dict[str, Any]:
     """List project definitions with mutable state and recent history."""
     project = _project(request, workspace)
-    return {"schedules": list(await run_in_threadpool(_service(request).list, project))}
+    return {"schedules": list(_service(request).list(project))}
 
 
 @router.post("/api/schedules/preview")
-async def schedule_preview(
+def schedule_preview(
     request: Request, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
     """Validate a draft and preview upcoming UTC instants without writing."""
     project = _project(request, payload.get("workspace"))
     try:
-        definition = await run_in_threadpool(
-            build_schedule_definition, project, payload
-        )
+        definition = build_schedule_definition(project, payload)
     except (KeyError, ScheduleError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -59,11 +57,11 @@ async def schedule_preview(
 
 
 @router.post("/api/schedules", status_code=201)
-async def schedule_create(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
+def schedule_create(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
     """Create or replace one disabled definition and invalidate its test grant."""
     project = _project(request, payload.get("workspace"))
     try:
-        draft = await run_in_threadpool(build_schedule_definition, project, payload)
+        draft = build_schedule_definition(project, payload)
         gated = _authorize(
             request,
             PermissionAction.SCHEDULE_CREATE,
@@ -77,22 +75,20 @@ async def schedule_create(request: Request, payload: dict[str, Any] = Body(...))
         )
         if gated is not None:
             return gated
-        return await run_in_threadpool(_service(request).upsert, project, payload)
+        return _service(request).upsert(project, payload)
     except (KeyError, ScheduleError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/api/schedules/{schedule_id}")
-async def schedule_detail(
+def schedule_detail(
     schedule_id: str,
     request: Request,
     workspace: str | None = Query(default=None),
 ) -> dict[str, Any]:
     """Return one definition, state, preview, and bounded occurrence history."""
     try:
-        return await run_in_threadpool(
-            _service(request).detail, _project(request, workspace), schedule_id
-        )
+        return _service(request).detail(_project(request, workspace), schedule_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Schedule not found") from exc
     except ScheduleError as exc:
@@ -100,7 +96,7 @@ async def schedule_detail(
 
 
 @router.put("/api/schedules/{schedule_id}")
-async def schedule_update(
+def schedule_update(
     schedule_id: str, request: Request, payload: dict[str, Any] = Body(...)
 ) -> Any:
     """Materially edit a definition, pausing it and invalidating Test now."""
@@ -109,9 +105,7 @@ async def schedule_update(
     project = _project(request, payload.get("workspace"))
     try:
         draft_payload = {**payload, "id": schedule_id}
-        draft = await run_in_threadpool(
-            build_schedule_definition, project, draft_payload
-        )
+        draft = build_schedule_definition(project, draft_payload)
         gated = _authorize(
             request,
             PermissionAction.SCHEDULE_CREATE,
@@ -125,13 +119,13 @@ async def schedule_update(
         )
         if gated is not None:
             return gated
-        return await run_in_threadpool(_service(request).upsert, project, draft_payload)
+        return _service(request).upsert(project, draft_payload)
     except (KeyError, ScheduleError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/api/schedules/{schedule_id}")
-async def schedule_delete(
+def schedule_delete(
     schedule_id: str,
     request: Request,
     workspace: str | None = Query(default=None),
@@ -140,62 +134,62 @@ async def schedule_delete(
     project = _project(request, workspace)
     service = _service(request)
     try:
-        return await run_in_threadpool(service.archive, project, schedule_id)
+        return service.archive(project, schedule_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Schedule not found") from exc
 
 
 @router.post("/api/schedules/{schedule_id}/test-now")
-async def schedule_test_now(
+def schedule_test_now(
     schedule_id: str,
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     """Run the exact target through a safe backend dry run and grant its hash."""
-    return await _action(request, schedule_id, payload, "test_now")
+    return _action(request, schedule_id, payload, "test_now")
 
 
 @router.post("/api/schedules/{schedule_id}/enable")
-async def schedule_enable(
+def schedule_enable(
     schedule_id: str,
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     """Enable only an exactly tested hash while a local worker is online."""
-    return await _action(request, schedule_id, payload, "enable")
+    return _action(request, schedule_id, payload, "enable")
 
 
 @router.post("/api/schedules/{schedule_id}/pause")
-async def schedule_pause(
+def schedule_pause(
     schedule_id: str,
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     """Pause future triggers without deleting history."""
-    return await _action(request, schedule_id, payload, "pause")
+    return _action(request, schedule_id, payload, "pause")
 
 
 @router.post("/api/schedules/{schedule_id}/resume")
-async def schedule_resume(
+def schedule_resume(
     schedule_id: str,
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     """Resume through the same worker and tested-hash gate as enable."""
-    return await _action(request, schedule_id, payload, "enable")
+    return _action(request, schedule_id, payload, "enable")
 
 
 @router.post("/api/schedules/{schedule_id}/run-now")
-async def schedule_run_now(
+def schedule_run_now(
     schedule_id: str,
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     """Queue one explicit occurrence through normal unattended policy."""
-    return await _action(request, schedule_id, payload, "run_now")
+    return _action(request, schedule_id, payload, "run_now")
 
 
-async def _action(
+def _action(
     request: Request, schedule_id: str, payload: dict[str, Any], method: str
 ) -> Any:
     try:
@@ -205,9 +199,7 @@ async def _action(
             "run_now": PermissionAction.SCHEDULE_RUN_NOW,
         }.get(method)
         if action is not None:
-            detail = await run_in_threadpool(
-                _service(request).detail, project, schedule_id
-            )
+            detail = _service(request).detail(project, schedule_id)
             definition = detail["definition"]
             state = detail.get("state") or {}
             if state.get("tested_hash") != definition["source_hash"]:
@@ -233,11 +225,7 @@ async def _action(
             )
             if gated is not None:
                 return gated
-        return await run_in_threadpool(
-            getattr(_service(request), method),
-            project,
-            schedule_id,
-        )
+        return getattr(_service(request), method)(project, schedule_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Schedule not found") from exc
     except ScheduleError as exc:

@@ -7,9 +7,9 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import JSONResponse, Response
-from starlette.concurrency import run_in_threadpool
 
 from gpt2giga_harness.project import project_to_dict, resolve_project
+from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
 from gpt2giga_harness.promotions import (
     apply_run_promotion,
@@ -55,7 +55,7 @@ from gpt2giga_harness.workflows import (
 )
 
 
-router = APIRouter()
+router = APIRouter(route_class=ConformantAPIRoute)
 
 
 class WorkflowValidateRequest(BaseModel):
@@ -140,7 +140,7 @@ class RunPromotionApplyRequest(RunPromotionPreviewRequest):
 
 
 @router.post("/api/runs/{run_id}/promotions/preview")
-async def run_promotion_preview(
+def run_promotion_preview(
     run_id: str,
     request: Request,
     payload: RunPromotionPreviewRequest = Body(...),
@@ -156,8 +156,7 @@ async def run_promotion_preview(
             if runtime is not None
             else None
         )
-        draft = await run_in_threadpool(
-            preview_run_promotion,
+        draft = preview_run_promotion(
             request.app.state.harness_session_store,
             run_id,
             kind=payload.kind,
@@ -172,15 +171,14 @@ async def run_promotion_preview(
 
 
 @router.post("/api/runs/{run_id}/promotions/apply")
-async def run_promotion_apply(
+def run_promotion_apply(
     run_id: str,
     request: Request,
     payload: RunPromotionApplyRequest = Body(...),
 ) -> dict[str, Any]:
     """Write an explicitly reviewed candidate after token and ETag checks."""
     try:
-        new_hash, draft = await run_in_threadpool(
-            apply_run_promotion,
+        new_hash, draft = apply_run_promotion(
             request.app.state.harness_session_store,
             run_id,
             kind=payload.kind,
@@ -205,7 +203,7 @@ async def run_promotion_apply(
 
 
 @router.get("/api/workflows")
-async def workflow_list(
+def workflow_list(
     request: Request, workspace: str | None = Query(default=None)
 ) -> dict[str, Any]:
     """List valid definitions and independent validation failures."""
@@ -225,7 +223,7 @@ async def workflow_list(
 
 
 @router.post("/api/workflows/import", status_code=201)
-async def workflow_import(
+def workflow_import(
     request: Request, payload: WorkflowImportRequest = Body(...)
 ) -> dict[str, Any]:
     """Import validated YAML or instantiate a built-in template."""
@@ -236,7 +234,7 @@ async def workflow_import(
         )
     try:
         content = payload.content or template_source(payload.template_id or "")
-        definition = await run_in_threadpool(save_workflow, project.root, content)
+        definition = save_workflow(project.root, content)
     except KeyError as exc:
         raise HTTPException(
             status_code=404, detail="Workflow template not found"
@@ -247,7 +245,7 @@ async def workflow_import(
 
 
 @router.post("/api/workflows/validate")
-async def workflow_validate(
+def workflow_validate(
     payload: WorkflowValidateRequest = Body(...),
 ) -> dict[str, Any]:
     """Validate workflow YAML and return the canonical dry-run plan."""
@@ -263,7 +261,7 @@ async def workflow_validate(
 
 
 @router.get("/api/workflows/{workflow_id}")
-async def workflow_detail(
+def workflow_detail(
     workflow_id: str,
     request: Request,
     workspace: str | None = Query(default=None),
@@ -286,7 +284,7 @@ async def workflow_detail(
 
 
 @router.put("/api/workflows/{workflow_id}")
-async def workflow_save(
+def workflow_save(
     workflow_id: str,
     request: Request,
     payload: WorkflowSaveRequest = Body(...),
@@ -295,8 +293,7 @@ async def workflow_save(
     project = _project(request, payload.workspace)
     try:
         workflow_source(project.root, workflow_id)
-        definition = await run_in_threadpool(
-            save_workflow,
+        definition = save_workflow(
             project.root,
             payload.content,
             expected_hash=payload.expected_hash,
@@ -311,7 +308,7 @@ async def workflow_save(
 
 
 @router.post("/api/workflows/{workflow_id}/duplicate", status_code=201)
-async def workflow_duplicate(
+def workflow_duplicate(
     workflow_id: str,
     request: Request,
     payload: WorkflowDuplicateRequest = Body(...),
@@ -319,9 +316,7 @@ async def workflow_duplicate(
     """Duplicate one definition into an independent editable entry."""
     project = _project(request, payload.workspace)
     try:
-        definition = await run_in_threadpool(
-            duplicate_workflow, project.root, workflow_id, payload.new_id
-        )
+        definition = duplicate_workflow(project.root, workflow_id, payload.new_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow not found") from exc
     except ValueError as exc:
@@ -330,7 +325,7 @@ async def workflow_duplicate(
 
 
 @router.get("/api/workflows/{workflow_id}/export")
-async def workflow_export(
+def workflow_export(
     workflow_id: str,
     request: Request,
     workspace: str | None = Query(default=None),
@@ -352,7 +347,7 @@ async def workflow_export(
 
 
 @router.post("/api/workflows/{workflow_id}/run")
-async def workflow_run(
+def workflow_run(
     workflow_id: str,
     request: Request,
     payload: WorkflowRunRequest = Body(...),
@@ -362,8 +357,7 @@ async def workflow_run(
     try:
         definition = load_workflow(project.root, workflow_id)
         coordinator = _coordinator(request, project)
-        run = await run_in_threadpool(
-            coordinator.start,
+        run = coordinator.start(
             definition,
             inputs=dict(payload.inputs),
             prompt=_optional_text(payload.prompt),
@@ -377,7 +371,7 @@ async def workflow_run(
 
 
 @router.get("/api/workflow-runs/{run_id}")
-async def workflow_run_status(run_id: str, request: Request) -> dict[str, Any]:
+def workflow_run_status(run_id: str, request: Request) -> dict[str, Any]:
     """Advance and return one durable workflow run."""
     repository = WorkflowRepository(_runtime_store(request))
     try:
@@ -387,14 +381,14 @@ async def workflow_run_status(run_id: str, request: Request) -> dict[str, Any]:
             data_dir=request.app.state.harness_config.data_dir,
         )
         coordinator = _coordinator(request, project)
-        run = await run_in_threadpool(coordinator.advance, run_id)
+        run = coordinator.advance(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow run not found") from exc
     return {"run": workflow_run_to_dict(run, coordinator.repository.list_steps(run_id))}
 
 
 @router.post("/api/workflow-runs/{run_id}/cancel")
-async def workflow_run_cancel(run_id: str, request: Request) -> dict[str, Any]:
+def workflow_run_cancel(run_id: str, request: Request) -> dict[str, Any]:
     """Cancel a workflow and propagate cancellation to active children."""
     repository = WorkflowRepository(_runtime_store(request))
     try:
@@ -404,14 +398,14 @@ async def workflow_run_cancel(run_id: str, request: Request) -> dict[str, Any]:
             data_dir=request.app.state.harness_config.data_dir,
         )
         coordinator = _coordinator(request, project)
-        run = await run_in_threadpool(coordinator.cancel, run_id)
+        run = coordinator.cancel(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow run not found") from exc
     return {"run": workflow_run_to_dict(run, coordinator.repository.list_steps(run_id))}
 
 
 @router.get("/api/workflow-runs/{run_id}/handoffs")
-async def workflow_handoff_status(run_id: str, request: Request) -> dict[str, Any]:
+def workflow_handoff_status(run_id: str, request: Request) -> dict[str, Any]:
     """Return typed edit candidates, selections, and overlap conflicts."""
     try:
         return _handoffs(request, run_id).status(run_id)
@@ -420,7 +414,7 @@ async def workflow_handoff_status(run_id: str, request: Request) -> dict[str, An
 
 
 @router.post("/api/workflow-runs/{run_id}/handoffs/{step_id}/choose")
-async def workflow_handoff_choose(
+def workflow_handoff_choose(
     run_id: str,
     step_id: str,
     request: Request,
@@ -430,8 +424,7 @@ async def workflow_handoff_choose(
 ) -> dict[str, Any]:
     """Explicitly choose or unchoose one isolated child patch."""
     try:
-        return await run_in_threadpool(
-            _handoffs(request, run_id).choose,
+        return _handoffs(request, run_id).choose(
             run_id,
             step_id,
             selected=payload.selected,
@@ -443,14 +436,12 @@ async def workflow_handoff_choose(
 
 
 @router.post("/api/workflow-runs/{run_id}/handoffs/{step_id}/discard")
-async def workflow_handoff_discard(
+def workflow_handoff_discard(
     run_id: str, step_id: str, request: Request
 ) -> dict[str, Any]:
     """Discard one retained child worktree without applying it."""
     try:
-        return await run_in_threadpool(
-            _handoffs(request, run_id).discard, run_id, step_id
-        )
+        return _handoffs(request, run_id).discard(run_id, step_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow run not found") from exc
     except WorktreeError as exc:
@@ -458,10 +449,10 @@ async def workflow_handoff_discard(
 
 
 @router.post("/api/workflow-runs/{run_id}/merge-queue")
-async def workflow_merge_prepare(run_id: str, request: Request) -> dict[str, Any]:
+def workflow_merge_prepare(run_id: str, request: Request) -> dict[str, Any]:
     """Prepare a non-overlapping combined patch in another isolated worktree."""
     try:
-        return await run_in_threadpool(_handoffs(request, run_id).prepare_merge, run_id)
+        return _handoffs(request, run_id).prepare_merge(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow run not found") from exc
     except WorktreeConflictError as exc:
@@ -471,7 +462,7 @@ async def workflow_merge_prepare(run_id: str, request: Request) -> dict[str, Any
 
 
 @router.post("/api/workflow-runs/{run_id}/merge-queue/apply", response_model=None)
-async def workflow_merge_apply(
+def workflow_merge_apply(
     run_id: str,
     request: Request,
     payload: WorkflowMergeApplyRequest = Body(
@@ -538,7 +529,7 @@ async def workflow_merge_apply(
         )
         if not consumed:
             raise WorktreeError("The reviewed git.apply approval is unavailable.")
-        return await run_in_threadpool(manager.apply_merge, run_id, review=review)
+        return manager.apply_merge(run_id, review=review)
     except KeyError as exc:
         raise HTTPException(
             status_code=404, detail="Workflow run or approval not found"

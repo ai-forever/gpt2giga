@@ -11,6 +11,7 @@ from typing import Any, Mapping
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
+from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.runtime.models import (
     JobAttempt,
     JobAttemptStatus,
@@ -38,7 +39,7 @@ from gpt2giga_harness.support_bundle import build_run_support_bundle
 from gpt2giga_harness.ui.routers.schemas import RunBundleResponse
 
 
-router = APIRouter()
+router = APIRouter(route_class=ConformantAPIRoute)
 
 _STATUS_GROUPS: dict[str, tuple[JobStatus, ...]] = {
     "queued": (JobStatus.QUEUED, JobStatus.RETRY_WAIT),
@@ -56,7 +57,7 @@ _SAFE_RETRY_CLASSES = {"read_only", "safe_retry", "deterministic"}
 
 
 @router.get("/api/runs")
-async def list_runs_center(
+def list_runs_center(
     request: Request,
     status: str | None = Query(default=None),
     project_id: str | None = Query(default=None),
@@ -93,7 +94,7 @@ async def list_runs_center(
 
 
 @router.get("/api/runs/{run_id}/trace")
-async def run_trace(
+def run_trace(
     run_id: str,
     request: Request,
     cursor: str | None = Query(default=None),
@@ -154,7 +155,7 @@ async def run_trace(
 
 
 @router.get("/api/runs/{run_id}/summary")
-async def run_center_summary(run_id: str, request: Request) -> dict[str, Any]:
+def run_center_summary(run_id: str, request: Request) -> dict[str, Any]:
     """Resolve one durable run to its lightweight Runs Center summary."""
     session_store = _session_store(request)
     runtime_store = _runtime_store(request)
@@ -169,7 +170,7 @@ async def run_center_summary(run_id: str, request: Request) -> dict[str, Any]:
 
 
 @router.get("/api/runs/{run_id}/support-bundle")
-async def run_support_bundle(run_id: str, request: Request) -> Response:
+def run_support_bundle(run_id: str, request: Request) -> Response:
     """Download a redaction-safe, content-free support bundle for one run."""
     session_store = _session_store(request)
     runtime_store = _runtime_store(request)
@@ -218,7 +219,7 @@ async def run_support_bundle(run_id: str, request: Request) -> Response:
 
 
 @router.get("/api/runs/{run_id}/events/{event_id}")
-async def run_event_payload(
+def run_event_payload(
     run_id: str,
     event_id: str,
     request: Request,
@@ -252,7 +253,7 @@ async def run_event_payload(
 
 
 @router.post("/api/runs/{run_id}/retry")
-async def retry_run(run_id: str, request: Request) -> dict[str, Any]:
+def retry_run(run_id: str, request: Request) -> dict[str, Any]:
     """Requeue the owning logical job when its latest attempt is retry-safe."""
     runtime_store = _runtime_store(request)
     if runtime_store is None:
@@ -272,7 +273,7 @@ async def retry_run(run_id: str, request: Request) -> dict[str, Any]:
 
 
 @router.get("/api/runs/{run_id}", response_model=RunBundleResponse)
-async def run_bundle(run_id: str, request: Request) -> dict[str, Any]:
+def run_bundle(run_id: str, request: Request) -> dict[str, Any]:
     """Resolve one run id to its complete persisted session bundle."""
     store = _session_store(request)
     try:

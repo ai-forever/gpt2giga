@@ -1002,9 +1002,9 @@ def test_ui_route_recommendation_endpoint_returns_safe_response():
     assert "secret-token-screen.png" not in response.text
 
 
-def test_ui_can_run_echo_harness():
+def test_ui_can_run_echo_harness(tmp_path):
     app = create_app(
-        HarnessConfig(),
+        HarnessConfig(data_dir=str(tmp_path)),
         registry=create_default_registry(include_entry_points=False),
     )
     client = TestClient(app)

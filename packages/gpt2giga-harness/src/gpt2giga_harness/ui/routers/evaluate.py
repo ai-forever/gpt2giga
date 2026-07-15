@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
+from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.agents import discover_agent_profiles
 from gpt2giga_harness.evals import (
     EvalRunNotFoundError,
@@ -23,11 +24,11 @@ from gpt2giga_harness.types import spec_capability_values
 from gpt2giga_harness.workflows import discover_workflows
 
 
-router = APIRouter()
+router = APIRouter(route_class=ConformantAPIRoute)
 
 
 @router.get("/api/evaluate")
-async def evaluate_inventory(
+def evaluate_inventory(
     request: Request, workspace: str | None = Query(default=None)
 ) -> dict[str, Any]:
     """Return separate protocol and quality lab projections."""
@@ -76,7 +77,7 @@ async def evaluate_inventory(
 
 
 @router.get("/api/evaluate/{eval_name}/matrix")
-async def evaluate_matrix(
+def evaluate_matrix(
     eval_name: str,
     request: Request,
     workspace: str | None = Query(default=None),
@@ -92,7 +93,7 @@ async def evaluate_matrix(
 
 
 @router.post("/api/evaluate/runs/{eval_run_id}/baseline")
-async def pin_eval_baseline(
+def pin_eval_baseline(
     eval_run_id: str,
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
@@ -112,7 +113,7 @@ async def pin_eval_baseline(
 
 
 @router.post("/api/evaluate/runs/{eval_run_id}/cancel")
-async def cancel_eval_run(
+def cancel_eval_run(
     eval_run_id: str,
     request: Request,
 ) -> dict[str, Any]:

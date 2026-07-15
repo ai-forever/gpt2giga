@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
-from starlette.concurrency import run_in_threadpool
 import yaml
 
 from gpt2giga_harness.agents import (
@@ -19,17 +18,18 @@ from gpt2giga_harness.agents import (
     load_agent_profile,
     parse_agent_profile,
 )
+from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.authoring import AuthoringConflictError, ProjectAuthoringService
 from gpt2giga_harness.project import project_to_dict, resolve_project
 from gpt2giga_harness.sessions.models import run_to_dict
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt
 
 
-router = APIRouter()
+router = APIRouter(route_class=ConformantAPIRoute)
 
 
 @router.get("/api/agents")
-async def agent_list(
+def agent_list(
     request: Request,
     workspace: str | None = Query(default=None),
 ) -> dict[str, Any]:
@@ -44,7 +44,7 @@ async def agent_list(
 
 
 @router.get("/api/agents/{agent_id}")
-async def agent_detail(
+def agent_detail(
     agent_id: str,
     request: Request,
     workspace: str | None = Query(default=None),
@@ -70,7 +70,7 @@ async def agent_detail(
 
 
 @router.post("/api/agents/validate")
-async def agent_validate(
+def agent_validate(
     request: Request,
     payload: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
@@ -83,7 +83,7 @@ async def agent_validate(
 
 
 @router.post("/api/agents/{agent_id}/draft")
-async def agent_draft(
+def agent_draft(
     agent_id: str,
     request: Request,
     payload: dict[str, Any] = Body(...),
@@ -110,7 +110,7 @@ async def agent_draft(
 
 
 @router.post("/api/agents/{agent_id}/apply")
-async def agent_apply(
+def agent_apply(
     agent_id: str,
     request: Request,
     payload: dict[str, Any] = Body(...),
@@ -137,7 +137,7 @@ async def agent_apply(
 
 
 @router.post("/api/agents/{agent_id}/duplicate")
-async def agent_duplicate(
+def agent_duplicate(
     agent_id: str,
     request: Request,
     payload: dict[str, Any] = Body(...),
@@ -171,7 +171,7 @@ async def agent_duplicate(
 
 
 @router.post("/api/agents/{agent_id}/run")
-async def agent_run(
+def agent_run(
     agent_id: str,
     request: Request,
     payload: dict[str, Any] = Body(...),
@@ -204,8 +204,7 @@ async def agent_run(
         dispatcher = request.app.state.harness_job_dispatcher
         if dispatcher is None:
             raise RuntimeError("Durable runtime is required for agent runs")
-        submission = await run_in_threadpool(
-            dispatcher.submit,
+        submission = dispatcher.submit(
             session.id,
             run_payload,
             idempotency_key=str(
