@@ -43,17 +43,21 @@ from gpt2giga_harness.runtime.policy import (
     ApprovalRequest,
     EnforcementLevel,
     PermissionAction,
+    PolicyAuditEvent,
+    PolicyAuditPhase,
     PolicyContext,
+    PolicyDecision,
     PolicyResolution,
     approval_binding_digest,
     approval_grant_to_dict,
     approval_request_to_dict,
+    policy_audit_event_to_dict,
     redacted_policy_preview,
 )
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 
 RUNTIME_DB_NAME = "runtime.sqlite3"
-RUNTIME_SCHEMA_VERSION = 10
+RUNTIME_SCHEMA_VERSION = 11
 SQLITE_TIMEOUT_SECONDS = 10.0
 
 
@@ -447,6 +451,56 @@ _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             """,
             "CREATE INDEX harness_side_effects_job_idx ON harness_side_effects(job_id, created_at)",
             "CREATE INDEX harness_side_effects_status_idx ON harness_side_effects(status, updated_at)",
+        ),
+    ),
+    (
+        11,
+        "immutable per-operation policy audit evidence",
+        (
+            "ALTER TABLE approval_requests ADD COLUMN enforcement_owner TEXT",
+            """
+            CREATE TABLE policy_audit_events (
+                id TEXT PRIMARY KEY,
+                operation_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL CHECK (sequence > 0),
+                action TEXT NOT NULL,
+                phase TEXT NOT NULL CHECK (
+                    phase IN ('resolution', 'decision', 'enforcement')
+                ),
+                decision TEXT NOT NULL,
+                enforcement TEXT NOT NULL,
+                enforcement_owner TEXT NOT NULL,
+                policy_source TEXT NOT NULL,
+                approval_request_id TEXT NOT NULL,
+                approval_grant_id TEXT,
+                approval_binding_sha256 TEXT,
+                project_id TEXT,
+                session_id TEXT,
+                run_id TEXT,
+                job_id TEXT,
+                evidence_json TEXT NOT NULL DEFAULT '{}',
+                previous_event_sha256 TEXT,
+                event_sha256 TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                UNIQUE (operation_id, sequence)
+            )
+            """,
+            "CREATE INDEX policy_audit_operation_idx ON policy_audit_events(operation_id, sequence)",
+            "CREATE INDEX policy_audit_scope_idx ON policy_audit_events(project_id, run_id, created_at)",
+            """
+            CREATE TRIGGER policy_audit_events_no_update
+            BEFORE UPDATE ON policy_audit_events
+            BEGIN
+                SELECT RAISE(ABORT, 'policy audit events are immutable');
+            END
+            """,
+            """
+            CREATE TRIGGER policy_audit_events_no_delete
+            BEFORE DELETE ON policy_audit_events
+            BEGIN
+                SELECT RAISE(ABORT, 'policy audit events are immutable');
+            END
+            """,
         ),
     ),
 )
@@ -1794,6 +1848,7 @@ class RuntimeCoordinationStore:
                 context.run_id or "",
                 context.job_id or "",
                 context.approval_binding or "",
+                context.enforcement_owner or "",
             )
         )
         dedupe_key = hashlib.sha256(scope_identity.encode("utf-8")).hexdigest()
@@ -1808,6 +1863,7 @@ class RuntimeCoordinationStore:
             ApprovalStatus.PENDING.value,
             resolution.enforcement.value,
             resolution.policy_source,
+            _optional_text(context.enforcement_owner),
             _required_text(context.reason, "approval reason"),
             json.dumps(
                 preview,
@@ -1828,10 +1884,11 @@ class RuntimeCoordinationStore:
                 connection.execute(
                     """
                     INSERT INTO approval_requests (
-                        id, action, status, enforcement, policy_source, reason,
-                        preview_json, project_id, session_id, run_id, job_id,
-                        dedupe_key, expires_at, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        id, action, status, enforcement, policy_source,
+                        enforcement_owner, reason, preview_json, project_id,
+                        session_id, run_id, job_id, dedupe_key, expires_at,
+                        created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     values,
                 )
@@ -1853,6 +1910,27 @@ class RuntimeCoordinationStore:
                         version = version + 1 WHERE id = ?
                     """,
                     (request_id, now, context.job_id),
+                )
+            if context.enforcement_owner:
+                _append_policy_audit_event(
+                    connection,
+                    operation_id=request_id,
+                    action=resolution.action,
+                    phase=PolicyAuditPhase.RESOLUTION,
+                    decision=resolution.decision.value,
+                    enforcement=resolution.enforcement,
+                    enforcement_owner=context.enforcement_owner,
+                    policy_source=resolution.policy_source,
+                    approval_request_id=request_id,
+                    approval_binding_sha256=_approval_preview_binding(preview),
+                    project_id=context.project_id,
+                    session_id=context.session_id,
+                    run_id=context.run_id,
+                    job_id=context.job_id,
+                    evidence={
+                        "preview_sha256": _mapping_hash(preview, "policy preview")
+                    },
+                    created_at=now,
                 )
             row = connection.execute(
                 "SELECT * FROM approval_requests WHERE id = ?", (request_id,)
@@ -2007,8 +2085,10 @@ class RuntimeCoordinationStore:
                 raise ConcurrentUpdateError(
                     f"approval {request_id} changed concurrently"
                 )
+            grant_id: str | None = None
             if grant is not None:
                 scope_type, scope_id, uses_remaining, expires_at = grant
+                grant_id = _new_id("grant")
                 connection.execute(
                     """
                     INSERT INTO approval_grants (
@@ -2017,7 +2097,7 @@ class RuntimeCoordinationStore:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        _new_id("grant"),
+                        grant_id,
                         request_id,
                         request.action.value,
                         scope_type,
@@ -2026,6 +2106,26 @@ class RuntimeCoordinationStore:
                         expires_at,
                         now,
                     ),
+                )
+            if request.enforcement_owner:
+                _append_policy_audit_event(
+                    connection,
+                    operation_id=request.id,
+                    action=request.action,
+                    phase=PolicyAuditPhase.DECISION,
+                    decision=parsed_decision.value,
+                    enforcement=request.enforcement,
+                    enforcement_owner=request.enforcement_owner,
+                    policy_source=request.policy_source,
+                    approval_request_id=request.id,
+                    approval_grant_id=grant_id,
+                    approval_binding_sha256=_approval_preview_binding(request.preview),
+                    project_id=request.project_id,
+                    session_id=request.session_id,
+                    run_id=request.run_id,
+                    job_id=request.job_id,
+                    evidence={"approval_status": status.value},
+                    created_at=now,
                 )
             if request.job_id:
                 job_row = connection.execute(
@@ -2082,6 +2182,7 @@ class RuntimeCoordinationStore:
         run_id: str | None,
         job_id: str | None,
         approval_binding: str | None = None,
+        enforcement_owner: str | None = None,
     ) -> bool:
         """Consume a matching allow-once grant or observe a scoped grant."""
         parsed_action = PermissionAction(action)
@@ -2105,7 +2206,15 @@ class RuntimeCoordinationStore:
         with self._connect() as connection, _transaction(connection):
             rows = connection.execute(
                 f"""
-                SELECT approval_grants.*, approval_requests.preview_json
+                SELECT approval_grants.*,
+                       approval_requests.preview_json,
+                       approval_requests.policy_source AS request_policy_source,
+                       approval_requests.enforcement AS request_enforcement,
+                       approval_requests.enforcement_owner AS request_enforcement_owner,
+                       approval_requests.project_id AS request_project_id,
+                       approval_requests.session_id AS request_session_id,
+                       approval_requests.run_id AS request_run_id,
+                       approval_requests.job_id AS request_job_id
                 FROM approval_grants
                 JOIN approval_requests
                   ON approval_requests.id = approval_grants.request_id
@@ -2124,6 +2233,8 @@ class RuntimeCoordinationStore:
                     for candidate in rows
                     if _approval_preview_binding_json(candidate["preview_json"])
                     == binding_hash
+                    and _optional_text(candidate["request_enforcement_owner"])
+                    == _optional_text(enforcement_owner)
                 ),
                 None,
             )
@@ -2139,6 +2250,29 @@ class RuntimeCoordinationStore:
                 )
                 if connection.execute("SELECT changes()").fetchone()[0] != 1:
                     return False
+            if enforcement_owner:
+                _append_policy_audit_event(
+                    connection,
+                    operation_id=str(row["request_id"]),
+                    action=parsed_action,
+                    phase=PolicyAuditPhase.ENFORCEMENT,
+                    decision=PolicyDecision.ALLOW.value,
+                    enforcement=EnforcementLevel(str(row["request_enforcement"])),
+                    enforcement_owner=enforcement_owner,
+                    policy_source=str(row["request_policy_source"]),
+                    approval_request_id=str(row["request_id"]),
+                    approval_grant_id=str(row["id"]),
+                    approval_binding_sha256=binding_hash,
+                    project_id=_optional_text(row["request_project_id"]),
+                    session_id=_optional_text(row["request_session_id"]),
+                    run_id=_optional_text(row["request_run_id"]),
+                    job_id=_optional_text(row["request_job_id"]),
+                    evidence={
+                        "scope_type": str(row["scope_type"]),
+                        "scope_id": str(row["scope_id"]),
+                    },
+                    created_at=now,
+                )
         return True
 
     def list_approval_grants(self) -> tuple[ApprovalGrant, ...]:
@@ -2148,6 +2282,33 @@ class RuntimeCoordinationStore:
                 "SELECT * FROM approval_grants ORDER BY created_at, id"
             ).fetchall()
         return tuple(_approval_grant_from_row(row) for row in rows)
+
+    def list_policy_audit_events(
+        self,
+        *,
+        operation_id: str | None = None,
+        limit: int = 500,
+    ) -> tuple[PolicyAuditEvent, ...]:
+        """List immutable policy evidence in operation order."""
+        page_size = max(1, min(int(limit), 1000))
+        with self._connect() as connection:
+            if operation_id is None:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM policy_audit_events
+                    ORDER BY created_at, operation_id, sequence LIMIT ?
+                    """,
+                    (page_size,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM policy_audit_events
+                    WHERE operation_id = ? ORDER BY sequence LIMIT ?
+                    """,
+                    (_required_text(operation_id, "operation_id"), page_size),
+                ).fetchall()
+        return tuple(_policy_audit_event_from_row(row) for row in rows)
 
     def transition_attempt(
         self,
@@ -2419,6 +2580,7 @@ class RuntimeCoordinationStore:
                     "workers",
                     "approval_requests",
                     "approval_grants",
+                    "policy_audit_events",
                     "workflow_runs",
                     "workflow_step_attempts",
                     "schedule_states",
@@ -2502,6 +2664,10 @@ class RuntimeCoordinationStore:
             ],
             "approval_grants": [
                 approval_grant_to_dict(item) for item in self.list_approval_grants()
+            ],
+            "policy_audit_events": [
+                policy_audit_event_to_dict(item)
+                for item in self.list_policy_audit_events(limit=1000)
             ],
             "attention_reads": [dict(row) for row in attention_rows],
             "outbox": [
@@ -2925,6 +3091,7 @@ def _approval_request_from_row(row: sqlite3.Row) -> ApprovalRequest:
         status=ApprovalStatus(str(row["status"])),
         enforcement=EnforcementLevel(str(row["enforcement"])),
         policy_source=str(row["policy_source"]),
+        enforcement_owner=_optional_text(row["enforcement_owner"]),
         reason=str(row["reason"]),
         preview=dict(preview) if isinstance(preview, Mapping) else {},
         project_id=_optional_text(row["project_id"]),
@@ -2953,6 +3120,32 @@ def _approval_grant_from_row(row: sqlite3.Row) -> ApprovalGrant:
             int(row["uses_remaining"]) if row["uses_remaining"] is not None else None
         ),
         expires_at=_optional_text(row["expires_at"]),
+        created_at=str(row["created_at"]),
+    )
+
+
+def _policy_audit_event_from_row(row: sqlite3.Row) -> PolicyAuditEvent:
+    evidence = _json_mapping(row["evidence_json"])
+    return PolicyAuditEvent(
+        id=str(row["id"]),
+        operation_id=str(row["operation_id"]),
+        sequence=int(row["sequence"]),
+        action=PermissionAction(str(row["action"])),
+        phase=PolicyAuditPhase(str(row["phase"])),
+        decision=str(row["decision"]),
+        enforcement=EnforcementLevel(str(row["enforcement"])),
+        enforcement_owner=str(row["enforcement_owner"]),
+        policy_source=str(row["policy_source"]),
+        approval_request_id=str(row["approval_request_id"]),
+        approval_grant_id=_optional_text(row["approval_grant_id"]),
+        approval_binding_sha256=_optional_text(row["approval_binding_sha256"]),
+        project_id=_optional_text(row["project_id"]),
+        session_id=_optional_text(row["session_id"]),
+        run_id=_optional_text(row["run_id"]),
+        job_id=_optional_text(row["job_id"]),
+        evidence=evidence,
+        previous_event_sha256=_optional_text(row["previous_event_sha256"]),
+        event_sha256=str(row["event_sha256"]),
         created_at=str(row["created_at"]),
     )
 
@@ -3002,6 +3195,100 @@ def _approval_preview_binding_json(value: Any) -> str | None:
     if not isinstance(preview, Mapping):
         return None
     return _approval_preview_binding(preview)
+
+
+def _append_policy_audit_event(
+    connection: sqlite3.Connection,
+    *,
+    operation_id: str,
+    action: PermissionAction,
+    phase: PolicyAuditPhase,
+    decision: str,
+    enforcement: EnforcementLevel,
+    enforcement_owner: str,
+    policy_source: str,
+    approval_request_id: str,
+    approval_grant_id: str | None = None,
+    approval_binding_sha256: str | None = None,
+    project_id: str | None = None,
+    session_id: str | None = None,
+    run_id: str | None = None,
+    job_id: str | None = None,
+    evidence: Mapping[str, Any] | None = None,
+    created_at: str,
+) -> None:
+    """Append one immutable, hash-chained policy operation event."""
+    operation = _required_text(operation_id, "policy operation_id")
+    previous = connection.execute(
+        """
+        SELECT sequence, event_sha256 FROM policy_audit_events
+        WHERE operation_id = ? ORDER BY sequence DESC LIMIT 1
+        """,
+        (operation,),
+    ).fetchone()
+    sequence = int(previous["sequence"]) + 1 if previous is not None else 1
+    previous_hash = str(previous["event_sha256"]) if previous is not None else None
+    event_id = _new_id("policy_audit")
+    safe_evidence = _safe_mapping(evidence or {}, "policy audit evidence")
+    payload = {
+        "action": action.value,
+        "approval_binding_sha256": _optional_text(approval_binding_sha256),
+        "approval_grant_id": _optional_text(approval_grant_id),
+        "approval_request_id": _required_text(
+            approval_request_id, "approval_request_id"
+        ),
+        "created_at": created_at,
+        "decision": _required_text(decision, "policy decision"),
+        "enforcement": enforcement.value,
+        "enforcement_owner": _required_text(enforcement_owner, "enforcement_owner"),
+        "evidence": safe_evidence,
+        "id": event_id,
+        "job_id": _optional_text(job_id),
+        "operation_id": operation,
+        "phase": phase.value,
+        "policy_source": _required_text(policy_source, "policy_source"),
+        "previous_event_sha256": previous_hash,
+        "project_id": _optional_text(project_id),
+        "run_id": _optional_text(run_id),
+        "sequence": sequence,
+        "session_id": _optional_text(session_id),
+    }
+    event_hash = hashlib.sha256(
+        _canonical_json(payload, "policy audit event").encode("utf-8")
+    ).hexdigest()
+    connection.execute(
+        """
+        INSERT INTO policy_audit_events (
+            id, operation_id, sequence, action, phase, decision, enforcement,
+            enforcement_owner, policy_source, approval_request_id,
+            approval_grant_id, approval_binding_sha256, project_id, session_id,
+            run_id, job_id, evidence_json, previous_event_sha256, event_sha256,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event_id,
+            operation,
+            sequence,
+            action.value,
+            phase.value,
+            payload["decision"],
+            enforcement.value,
+            payload["enforcement_owner"],
+            payload["policy_source"],
+            payload["approval_request_id"],
+            payload["approval_grant_id"],
+            payload["approval_binding_sha256"],
+            payload["project_id"],
+            payload["session_id"],
+            payload["run_id"],
+            payload["job_id"],
+            _canonical_json(safe_evidence, "policy audit evidence"),
+            previous_hash,
+            event_hash,
+            created_at,
+        ),
+    )
 
 
 def _canonical_json(value: Mapping[str, Any], name: str) -> str:

@@ -1,4 +1,5 @@
 from dataclasses import replace
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +14,7 @@ from gpt2giga_harness.runtime.policy import (
     PolicyContext,
     PolicyDecision,
     PolicyEngine,
+    REVIEWED_PROMOTION_APPLY_OWNER,
     REVIEW_EVERY_ACTION_PROFILE,
     approval_binding_digest,
     approval_request_to_dict,
@@ -238,6 +240,111 @@ def test_hash_bound_approval_cannot_be_broadened_or_rebound(tmp_path):
         job_id=None,
         approval_binding=binding,
     )
+
+
+def test_reviewed_promotion_records_immutable_hash_chained_policy_audit(tmp_path):
+    store = RuntimeCoordinationStore(tmp_path)
+    binding = "raw-reviewed-source-and-patch-binding"
+    context = PolicyContext(
+        project_id="project_audit",
+        session_id="sess_audit",
+        run_id="run_audit",
+        reason="Apply the reviewed patch.",
+        preview={
+            "source_sha": "a" * 40,
+            "patch_sha256": "b" * 64,
+            "api_key": "secret-value",
+        },
+        approval_binding=binding,
+        enforcement_owner=REVIEWED_PROMOTION_APPLY_OWNER,
+    )
+    engine = PolicyEngine(store)
+    resolution = engine.resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=context,
+    )
+    approval = store.create_approval_request(resolution, context)
+    store.decide_approval_request(approval.id, ApprovalDecision.ALLOW_ONCE)
+
+    wrong_owner = engine.resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=replace(context, enforcement_owner="reviewed_promotion.other"),
+    )
+    wrong_binding = engine.resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=replace(context, approval_binding="different-reviewed-binding"),
+    )
+    assert store.list_policy_audit_events(operation_id=approval.id)[-1].phase.value == (
+        "decision"
+    )
+    authorized = engine.resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=context,
+    )
+
+    assert wrong_owner.decision is PolicyDecision.ASK
+    assert wrong_binding.decision is PolicyDecision.ASK
+    assert authorized.decision is PolicyDecision.ALLOW
+    events = store.list_policy_audit_events(operation_id=approval.id)
+    assert [event.phase.value for event in events] == [
+        "resolution",
+        "decision",
+        "enforcement",
+    ]
+    assert [event.decision for event in events] == ["ask", "allow_once", "allow"]
+    assert {event.enforcement_owner for event in events} == {
+        REVIEWED_PROMOTION_APPLY_OWNER
+    }
+    assert all(
+        event.approval_binding_sha256 == approval_binding_digest(binding)
+        for event in events
+    )
+    assert events[0].previous_event_sha256 is None
+    assert events[1].previous_event_sha256 == events[0].event_sha256
+    assert events[2].previous_event_sha256 == events[1].event_sha256
+    exported = store.export()["policy_audit_events"]
+    assert binding not in str(exported)
+    assert "secret-value" not in str(exported)
+
+    with sqlite3.connect(store.path) as connection:
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            connection.execute(
+                "UPDATE policy_audit_events SET decision = 'deny' WHERE id = ?",
+                (events[0].id,),
+            )
+    with sqlite3.connect(store.path) as connection:
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            connection.execute(
+                "DELETE FROM policy_audit_events WHERE id = ?", (events[0].id,)
+            )
+
+
+def test_reviewed_promotion_denial_has_no_enforcement_event(tmp_path):
+    store = RuntimeCoordinationStore(tmp_path)
+    context = PolicyContext(
+        project_id="project_denied_audit",
+        run_id="run_denied_audit",
+        reason="Apply the reviewed patch.",
+        preview={"source_sha": "a" * 40, "patch_sha256": "b" * 64},
+        approval_binding="denied-binding",
+        enforcement_owner=REVIEWED_PROMOTION_APPLY_OWNER,
+    )
+    resolution = PolicyEngine(store).resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=context,
+    )
+    approval = store.create_approval_request(resolution, context)
+
+    store.decide_approval_request(approval.id, ApprovalDecision.DENY)
+
+    events = store.list_policy_audit_events(operation_id=approval.id)
+    assert [event.phase.value for event in events] == ["resolution", "decision"]
+    assert events[-1].decision == "deny"
 
 
 def test_approval_center_requeues_strict_profile_job_for_worker(tmp_path):

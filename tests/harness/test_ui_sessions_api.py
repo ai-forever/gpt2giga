@@ -590,10 +590,11 @@ def test_runs_api_diff_apply_and_open_worktree(tmp_path):
         default_model="ConfiguredModel",
         data_dir=str(tmp_path / "data"),
     )
+    runtime = RuntimeCoordinationStore(config.data_dir)
     client = _client(
         config=config,
         registry=registry,
-        runtime_store=RuntimeCoordinationStore(config.data_dir),
+        runtime_store=runtime,
     )
 
     response = client.post(
@@ -654,6 +655,15 @@ def test_runs_api_diff_apply_and_open_worktree(tmp_path):
         == approval["preview"]["approval_binding_sha256"]
     )
     assert (repo / "app.txt").read_text(encoding="utf-8") == "changed\n"
+    audit = runtime.list_policy_audit_events(operation_id=approval_id)
+    assert [event.phase.value for event in audit] == [
+        "resolution",
+        "decision",
+        "enforcement",
+    ]
+    assert {event.enforcement_owner for event in audit} == {
+        "reviewed_promotion.run_apply"
+    }
 
 
 def test_runs_api_discard_removes_worktree_without_touching_repo(tmp_path):
@@ -693,10 +703,11 @@ def test_runs_api_pr_artifact_patch_and_branch_creation(tmp_path):
     registry = HarnessRegistry()
     registry.register(_FileEditHarness())
     config = HarnessConfig(data_dir=str(tmp_path / "data"))
+    runtime = RuntimeCoordinationStore(config.data_dir)
     client = _client(
         config=config,
         registry=registry,
-        runtime_store=RuntimeCoordinationStore(config.data_dir),
+        runtime_store=runtime,
     )
     response = client.post(
         "/api/sessions/run",
@@ -745,6 +756,15 @@ def test_runs_api_pr_artifact_patch_and_branch_creation(tmp_path):
     assert branched.json()["pr_artifact"]["applied_branch"] == "codex/pr-artifact-test"
     assert _git_output(repo, "branch", "--show-current") == "codex/pr-artifact-test"
     assert (repo / "app.txt").read_text(encoding="utf-8") == "changed\n"
+    audit = runtime.list_policy_audit_events(operation_id=approval_id)
+    assert [event.phase.value for event in audit] == [
+        "resolution",
+        "decision",
+        "enforcement",
+    ]
+    assert {event.enforcement_owner for event in audit} == {
+        "reviewed_promotion.branch_create"
+    }
 
 
 def test_runs_api_provenance_replay_and_fork():

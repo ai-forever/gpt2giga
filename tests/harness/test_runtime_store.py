@@ -474,11 +474,22 @@ def test_runtime_store_migrates_existing_v1_database(tmp_path):
             WHERE type = 'table' AND name = 'harness_side_effects'
             """
         ).fetchall()
+        policy_audit_tables = reopened.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name = 'policy_audit_events'
+            """
+        ).fetchall()
+        approval_columns = {
+            row[1] for row in reopened.execute("PRAGMA table_info(approval_requests)")
+        }
         versions = {
             row[0] for row in reopened.execute("SELECT version FROM schema_migrations")
         }
     assert "workflow_version" in columns
     assert side_effect_tables == [("harness_side_effects",)]
+    assert policy_audit_tables == [("policy_audit_events",)]
+    assert "enforcement_owner" in approval_columns
     assert versions == set(range(1, RUNTIME_SCHEMA_VERSION + 1))
 
 

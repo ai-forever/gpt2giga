@@ -158,6 +158,8 @@ from gpt2giga_harness.runtime.policy import (
     PolicyContext,
     PolicyDecision,
     PolicyEngine,
+    REVIEWED_PROMOTION_APPLY_OWNER,
+    REVIEWED_PROMOTION_BRANCH_OWNER,
     approval_request_to_dict,
     permission_profile,
 )
@@ -337,6 +339,7 @@ def create_app(
         reason: str,
         preview: Mapping[str, Any],
         approval_binding: str | None = None,
+        enforcement_owner: str | None = None,
     ) -> JSONResponse | None:
         if runtime_store is None:
             raise HTTPException(
@@ -363,6 +366,7 @@ def create_app(
             reason=reason,
             preview=preview,
             approval_binding=approval_binding,
+            enforcement_owner=enforcement_owner,
         )
         resolution = policy_engine.resolve(
             action,
@@ -2283,6 +2287,7 @@ def create_app(
                 reason="Apply an isolated worktree diff to the source checkout.",
                 preview=review.to_preview(),
                 approval_binding=review.approval_binding,
+                enforcement_owner=REVIEWED_PROMOTION_APPLY_OWNER,
             )
             if approval_response is not None:
                 return approval_response
@@ -2342,6 +2347,7 @@ def create_app(
                 reason="Create a local branch from the isolated run patch.",
                 preview=review.to_preview(),
                 approval_binding=review.approval_binding,
+                enforcement_owner=REVIEWED_PROMOTION_BRANCH_OWNER,
             )
             if approval_response is not None:
                 return approval_response

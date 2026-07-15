@@ -24,6 +24,7 @@ from gpt2giga_harness.runtime.policy import (
     PolicyContext,
     PolicyDecision,
     PolicyResolution,
+    REVIEWED_PROMOTION_MERGE_OWNER,
     approval_binding_digest,
     approval_request_to_dict,
 )
@@ -497,6 +498,7 @@ async def workflow_merge_apply(
                         "source_run_ids": list(queue.get("source_run_ids") or ()),
                     },
                     approval_binding=review.approval_binding,
+                    enforcement_owner=REVIEWED_PROMOTION_MERGE_OWNER,
                 ),
             )
             return JSONResponse(
@@ -521,6 +523,7 @@ async def workflow_merge_apply(
             run_id=run.id,
             job_id=None,
             approval_binding=review.approval_binding,
+            enforcement_owner=REVIEWED_PROMOTION_MERGE_OWNER,
         )
         if not consumed:
             raise WorktreeError("The reviewed git.apply approval is unavailable.")
