@@ -28,7 +28,7 @@ from gpt2giga_harness.capability_matrix import (
 )
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
-from gpt2giga_harness.doctor import run_doctor
+from gpt2giga_harness.doctor import build_doctor_report, run_doctor
 from gpt2giga_harness.editor import (
     build_open_diff_plan,
     build_open_file_plan,
@@ -222,6 +222,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     doctor = subparsers.add_parser("doctor", parents=[common])
+    doctor.add_argument("workspace", nargs="?", default=None)
+    doctor.add_argument("--json", action="store_true")
     doctor.set_defaults(handler=_handle_doctor)
 
     config_parser = subparsers.add_parser("config")
@@ -617,7 +619,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _handle_doctor(args: argparse.Namespace, config: HarnessConfig) -> int:
-    print(run_doctor(config))
+    if args.json:
+        _print_json(build_doctor_report(config, workspace=args.workspace))
+    else:
+        print(run_doctor(config, workspace=args.workspace))
     return 0
 
 

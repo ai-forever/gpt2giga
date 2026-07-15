@@ -117,9 +117,19 @@ executable должен быть в `PATH` или задан явным override
 
 ```bash
 cd /path/to/project
-giga doctor
+giga doctor .
+giga doctor . --json
 giga init
 ```
+
+`giga doctor [workspace]` показывает готовность первого запуска до старта
+агента. Структурированный вариант `--json` проверяет proxy и routes, model
+discovery, версии внешних CLI, готовность workspace и Git, durable worker,
+Harness-managed homes и managed MCP snapshots. Проверки получают статус
+`ready`, `degraded` или `blocked`; для degraded и blocked prerequisites отчёт
+предлагает remediation-команду. Secret values редактируются, абсолютный путь
+workspace не публикуется, а существующий runtime worker state читается без
+перезаписи.
 
 `giga init` создаёт в `.giga/` non-secret конфигурацию, стартовые agent profiles,
 prompts, smoke eval и review workflow. Существующие файлы не заменяются без
@@ -923,7 +933,8 @@ giga doctor
 
 ## Ручной QA checklist
 
-- `giga doctor` не показывает неожиданных secret values или user-home content;
+- `giga doctor . --json` не показывает неожиданных secret values, абсолютного
+  workspace path или user-home content;
 - `giga harness run echo` завершается без сети и credentials;
 - `giga ui` слушает loopback, а remote bind без opt-in и token блокируется;
 - run переживает reload UI, а SSE reconnect не дублирует события;

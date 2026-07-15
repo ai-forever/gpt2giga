@@ -117,9 +117,19 @@ are safe to inspect:
 
 ```bash
 cd /path/to/project
-giga doctor
+giga doctor .
+giga doctor . --json
 giga init
 ```
+
+`giga doctor [workspace]` gives the first-run readiness verdict before any
+agent is spawned. Its structured `--json` form covers proxy and route health,
+model discovery, external CLI versions, workspace and Git readiness, the
+durable worker, Harness-managed homes, and managed MCP snapshots. Checks are
+classified as `ready`, `degraded`, or `blocked`; degraded and blocked
+prerequisites include a remediation command. The report redacts secret values,
+does not publish an absolute workspace path, and reads existing runtime worker
+state without rewriting it.
 
 `giga init` creates non-secret starter configuration, agent profiles, prompts,
 an eval, and a review workflow under `.giga/`. Existing files are not replaced
@@ -2030,7 +2040,8 @@ place. Do not delete them as part of uninstall/reinstall.
 Start with:
 
 ```bash
-giga doctor
+giga doctor .
+giga doctor . --json
 ```
 
 Common checks:

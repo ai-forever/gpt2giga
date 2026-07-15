@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.1a3] - Unreleased
 
 ### Added
+- **First-run doctor**: `giga doctor [workspace] --json` now emits a redaction-safe readiness report for the proxy, routes, models, adapter CLI versions, workspace and Git state, durable worker, managed homes, and MCP snapshots, with actionable remediation commands and read-only runtime inspection.
 - **Capability matrix**: `giga harness capabilities` generates reviewable Markdown and JSON views directly from the built-in CLI adapters' runtime parity contracts.
 - **Idempotent side-effect evidence**: the durable runtime can atomically reserve opaque Harness-owned side-effect tokens and retain immutable redacted completion evidence without making arbitrary edit attempts retry-safe.
 - **Bounded side-effect executor**: Harness-owned runtime events now bind token reservation, durable outbox delivery, and immutable completion evidence in one transaction; duplicate delivery reuses completed evidence while ambiguous reservations remain blocked.

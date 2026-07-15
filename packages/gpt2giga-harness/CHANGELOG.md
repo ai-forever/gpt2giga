@@ -8,6 +8,7 @@
 ## [0.0.1a3] - Unreleased
 
 ### Добавлено
+- **Диагностика первого запуска**: `giga doctor [workspace] --json` теперь формирует redaction-safe отчёт о готовности proxy, routes, models, версий CLI-адаптеров, workspace и Git, durable worker, managed homes и MCP snapshots, добавляет исполнимые remediation-команды и читает runtime state без записи.
 - **Capability matrix**: команда `giga harness capabilities` генерирует проверяемые Markdown и JSON представления непосредственно из runtime parity contracts встроенных CLI-адаптеров.
 - **Доказательства идемпотентных side effects**: durable runtime умеет атомарно резервировать непрозрачные токены Harness-owned side effects и сохранять неизменяемые редактированные completion evidence, не разрешая автоматический retry произвольных edit-attempts.
 - **Ограниченный side-effect executor**: Harness-owned runtime events теперь связывают резервирование токена, durable outbox delivery и неизменяемое completion evidence в одной транзакции; повторная доставка переиспользует готовое evidence, а неоднозначные reservations остаются заблокированными.

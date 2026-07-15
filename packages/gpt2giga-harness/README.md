@@ -46,9 +46,17 @@ From a disposable project directory:
 
 ```sh
 giga init
-giga doctor
+giga doctor .
+giga doctor . --json
 giga ui
 ```
+
+The doctor reports `ready`, `degraded`, and `blocked` checks for the local
+proxy and routes, configured models, adapter CLI versions, workspace and Git,
+the durable worker, Harness-managed homes, and managed MCP snapshots. JSON
+evidence is redacted and omits absolute workspace paths; every degraded or
+blocked first-run prerequisite includes a safe remediation command. Runtime
+worker state is inspected read-only.
 
 Open `http://127.0.0.1:8091/`. `giga ui` starts a durable local worker when
 needed; pass `--no-start-worker` when another supervisor owns that lifecycle.

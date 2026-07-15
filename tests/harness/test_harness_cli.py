@@ -139,6 +139,28 @@ def test_cli_harness_list_outputs_direct_chat(capsys):
     assert "direct-chat" in output
 
 
+def test_cli_doctor_json_passes_explicit_workspace(capsys, monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_report(config, *, workspace):
+        captured["workspace"] = workspace
+        return {
+            "schema_version": 1,
+            "ok": True,
+            "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+            "checks": [],
+        }
+
+    monkeypatch.setattr(cli, "build_doctor_report", fake_report)
+
+    assert cli.main(["doctor", str(tmp_path), "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert captured["workspace"] == str(tmp_path)
+    assert payload["schema_version"] == 1
+    assert payload["ok"] is True
+
+
 def test_cli_harness_list_json_shows_native_metadata(capsys):
     exit_code = cli.main(["harness", "list", "--json"])
 
