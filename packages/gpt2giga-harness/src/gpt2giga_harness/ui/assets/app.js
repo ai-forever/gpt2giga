@@ -3866,6 +3866,7 @@
 
     function renderAll() {
       renderMessages();
+      renderRunEvidenceTransition();
       renderInspector();
       renderSessions();
       renderMemoryPanel();
@@ -5048,6 +5049,7 @@
       if (existing) existing.replaceWith(replacement);
       else byId("message-list").appendChild(replacement);
       renderCurrentPlan();
+      renderRunEvidenceTransition();
       document.body.classList.remove("new-session");
       if (shouldStick) scrollChatToBottom();
     }
@@ -5131,6 +5133,49 @@
       if (["failed", "canceled"].includes(status)) return "badge error";
       if (["running", "queued"].includes(status)) return "badge warn";
       return "badge info";
+    }
+
+    function renderRunEvidenceTransition() {
+      const rail = byId("run-evidence-transition");
+      const run = currentRun();
+      if (!run || !run.id) {
+        rail.hidden = true;
+        return;
+      }
+      const draft = state.liveRuns.get(run.id) || null;
+      const status = draft ? draft.status : run.status || "queued";
+      const terminal = new Set(["succeeded", "failed", "canceled"]).has(status);
+      const events = eventsForRun(run.id);
+      const toolCount = toolsFromEvents(events).size;
+      const button = byId("open-run-evidence-button");
+      const runStep = byId("run-evidence-run-step");
+      const evidenceStep = byId("run-evidence-evidence-step");
+
+      rail.hidden = false;
+      rail.dataset.status = status;
+      runStep.classList.toggle("active", !terminal);
+      runStep.classList.toggle("complete", terminal);
+      evidenceStep.classList.toggle("active", terminal);
+      button.disabled = !terminal;
+      button.dataset.runId = terminal ? run.id : "";
+      button.textContent = terminal ? "Open evidence" : "Evidence pending";
+
+      if (!terminal) {
+        setText("run-evidence-summary", `${String(status).replace(/_/g, " ")} · evidence is retained as the run executes`);
+        return;
+      }
+      const outcome = status === "succeeded" ? "Run complete" : status === "failed" ? "Run failed" : "Run canceled";
+      setText(
+        "run-evidence-summary",
+        `${outcome} · ${events.length} events · ${toolCount} tool calls · ${runDuration(run)}`
+      );
+    }
+
+    function openRunEvidence() {
+      const runId = byId("open-run-evidence-button").dataset.runId;
+      if (!runId) return;
+      syncBrowserRoute("runs", runId);
+      void applyCurrentRoute();
     }
 
     function runDuration(run) {
@@ -7071,6 +7116,7 @@
         if (!byId("model-picker").contains(event.target)) closeModelList();
       });
       byId("run-button").addEventListener("click", runHarness);
+      byId("open-run-evidence-button").addEventListener("click", openRunEvidence);
       byId("arena-compare-button").addEventListener("click", runArena);
       byId("interrupt-run-button").addEventListener("click", () => runHarness("interrupt"));
       byId("cancel-run-button").addEventListener("click", cancelHeadlessRun);

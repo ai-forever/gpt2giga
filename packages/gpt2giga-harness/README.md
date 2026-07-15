@@ -86,6 +86,11 @@ needed; pass `--no-start-worker` when another supervisor owns that lifecycle.
 The default loopback binding is intentional. Remote binding requires explicit
 authentication and remote-access opt-in.
 
+After the first run starts, Work reveals a compact Run → Evidence path. Once
+the run reaches a terminal state, **Open evidence** deep-links to that exact
+run's retained trace in Runs Center; prompts, responses, and workspace paths
+are not copied into the transition summary.
+
 Useful orientation commands:
 
 ```sh

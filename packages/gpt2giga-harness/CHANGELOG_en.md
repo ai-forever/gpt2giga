@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.1a3] - Unreleased
 
 ### Added
+- **Run-to-evidence onboarding**: Work now reveals a compact Run → Evidence path after the first run starts and enables a deep link to that exact retained Runs Center trace only after terminal completion.
 - **Cross-harness review team**: a reviewed example now fans out read-only explorer, security, tests, and maintainability roles across Codex, Claude, and Gemini, preserves per-child durable evidence through partial failure, and synthesizes cited artifacts without a shared writable workspace.
 - **Nightly compatibility guardian**: a reviewed example now packages a pinned Codex/Claude/Gemini eval, exact adapter-dimension baselines, read-only regression triage, and a durable nightly schedule that runs without the UI.
 - **Reviewed-patch example**: a disposable issue fixture now packages reviewed planner, isolated implementer, and read-only reviewer profiles with a durable workflow and post-apply eval; source mutation, apply, commit, push, and hosted writes remain explicit operator decisions.

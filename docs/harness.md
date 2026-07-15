@@ -1391,6 +1391,12 @@ the prompt and the four common run choices stay in the main canvas, and
 specialized controls move into `Advanced` and the off-canvas `Run details`
 drawer. On narrow screens, session history also becomes a drawer.
 
+After a first run starts, Work progressively reveals a compact Run → Evidence
+path. Evidence remains pending while the run is active. On success, failure, or
+cancellation, **Open evidence** deep-links to that exact run in Runs Center and
+summarizes only retained event/tool counts and duration; it does not repeat
+prompt, response, or workspace content.
+
 It includes:
 
 - persistent session sidebar with search; workspace/harness filters and native
@@ -1411,6 +1417,7 @@ It includes:
   Markdown rendering for assistant output;
 - live assistant text, tool activity, and actual input/output token usage for
   headless harnesses that expose structured streaming events;
+- terminal run-to-evidence deep links into the selected Runs Center trace;
 - multi-harness arena comparison for running the same prompt against several
   headless harnesses;
 - run, arena, events, raw request, raw response, command, diff, PR,

@@ -8,6 +8,7 @@
 ## [0.0.1a3] - Unreleased
 
 ### Добавлено
+- **Переход от запуска к evidence**: Work показывает компактный путь Run → Evidence после начала первого запуска и включает deep link на сохранённый trace именно этого run в Runs Center только после terminal completion.
 - **Cross-harness review team**: reviewed-пример параллельно запускает read-only роли explorer, security, tests и maintainability через Codex, Claude и Gemini, сохраняет durable evidence каждого child при частичном сбое и синтезирует цитируемые artifacts без общего writable workspace.
 - **Nightly compatibility guardian**: reviewed-пример содержит pinned Codex/Claude/Gemini eval, baseline с точными adapter dimensions, read-only triage регрессий и durable nightly schedule, работающий без UI.
 - **Пример reviewed patch**: disposable issue fixture содержит reviewed-профили planner, изолированного implementer и read-only reviewer, durable workflow и post-apply eval; mutation исходного checkout, apply, commit, push и hosted writes остаются явными решениями оператора.
