@@ -3,6 +3,7 @@ import { useState } from "react";
 import { LazyInspector, type InspectorKind } from "../inspectors/LazyInspector";
 import { message, type MessageKey } from "../messages";
 import { usePreferences } from "../preferences-context";
+import type { ReadModelState } from "../read-model";
 
 const inspectorLabels: ReadonlyArray<[InspectorKind, MessageKey]> = [
   ["markdown", "markdown"],
@@ -15,10 +16,12 @@ const inspectorLabels: ReadonlyArray<[InspectorKind, MessageKey]> = [
 export function SurfaceScaffold({
   detailKey,
   eyebrowKey,
+  readModelState,
   titleKey,
 }: {
   detailKey: MessageKey;
   eyebrowKey: MessageKey;
+  readModelState?: ReadModelState;
   titleKey: MessageKey;
 }) {
   const [inspector, setInspector] = useState<InspectorKind | null>(null);
@@ -32,6 +35,11 @@ export function SurfaceScaffold({
         <p className="surface-detail">{message(locale, detailKey)}</p>
         <div className="migration-note" role="status">
           {message(locale, "migrationNote")}
+          {readModelState === undefined ? null : (
+            <span className={`read-model-state ${readModelState}`}>
+              {message(locale, readModelMessageKey(readModelState))}
+            </span>
+          )}
         </div>
       </section>
       <section className="boundary-panel" aria-label="Lazy module boundaries">
@@ -60,4 +68,11 @@ export function SurfaceScaffold({
       </section>
     </div>
   );
+}
+
+function readModelMessageKey(state: ReadModelState): MessageKey {
+  if (state === "loading") return "readModelLoading";
+  if (state === "ready") return "readModelReady";
+  if (state === "error") return "readModelError";
+  return "readModelIdle";
 }

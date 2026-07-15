@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Bounded Cockpit read model**: additive indexed session/run lookups, byte- and cursor-bounded message/run/event/artifact pages, ETag-bound snapshots, and lazy raw/diff/report projections replace full-bundle Cockpit V2 startup reads; the client cancels stale scopes, de-duplicates concurrent requests, isolates out-of-order responses, and updates targeted cache entries.
 - **Asynchronous UI data plane**: all FastAPI routes now carry exhaustive workload, storage/execution owner, deadline, cancellation, idempotency, payload, cursor, and latency contracts; filesystem, SQLite, network, subprocess, durable-job, and SSE work uses workload-bounded offload, while content-free diagnostics expose event-loop lag, queue/DB/storage/handler/serialization timing, response bytes, and cancellation counts.
 - **Packaged Cockpit V2 shell**: added a pinned React/TypeScript/Vite frontend with five route-split product surfaces, lazy inspector boundaries, a deterministic content-hashed manifest, integrity-bound Brotli/gzip assets, CSP-safe same-origin loading, and Node-free wheel smoke coverage; the legacy cockpit remains the default and explicit recovery route.
 

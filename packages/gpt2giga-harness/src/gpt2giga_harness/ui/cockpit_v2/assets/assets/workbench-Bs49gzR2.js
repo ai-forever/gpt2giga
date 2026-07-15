@@ -1,1 +1,0 @@
-import{i as e}from"./index-CVA_vR8g.js";import{t}from"./SurfaceScaffold-C4raeWiT.js";var n=e();function r(){return(0,n.jsx)(t,{detailKey:`workbenchDetail`,eyebrowKey:`workbenchEyebrow`,titleKey:`workbench`})}export{r as WorkbenchSurface};

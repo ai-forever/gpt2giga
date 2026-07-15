@@ -14,6 +14,7 @@
   --rail-muted: #9aa5b1;
   --rail-text: #f7f9fb;
   --success: #26845b;
+  --danger: #b42318;
   background: var(--canvas);
   color: var(--text);
 }
@@ -32,6 +33,7 @@
   --rail-muted: #8e9aa8;
   --rail-text: #f7f9fb;
   --success: #58c493;
+  --danger: #ff8a80;
 }
 
 :root[data-theme="light"] { color-scheme: light; }
@@ -85,6 +87,9 @@ h1 { margin: 0; font-size: clamp(30px, 4vw, 48px); line-height: 1.05; letter-spa
 h2 { margin: 0; font-size: 20px; letter-spacing: -0.015em; }
 .surface-detail { max-width: 640px; margin: 20px 0; color: var(--muted); font-size: 17px; line-height: 1.6; }
 .migration-note { margin-top: 110px; border-top: 1px solid var(--border); padding-top: 18px; color: var(--success); font-size: 12px; font-weight: 700; }
+.read-model-state { display: block; margin-top: 8px; color: var(--muted); font-weight: 600; }
+.read-model-state.ready { color: var(--success); }
+.read-model-state.error { color: var(--danger); }
 .boundary-panel { min-height: 480px; display: flex; flex-direction: column; gap: 22px; }
 .boundary-panel p { color: var(--muted); line-height: 1.5; }
 .inspector-actions { display: flex; flex-wrap: wrap; gap: 7px; }

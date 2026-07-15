@@ -89,6 +89,16 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/attachments/{attachment_id}/metadata"),
         ("GET", "/api/attention"),
         ("GET", "/api/automation"),
+        ("GET", "/api/cockpit/runs/{run_id}"),
+        ("GET", "/api/cockpit/runs/{run_id}/diff"),
+        ("GET", "/api/cockpit/runs/{run_id}/raw"),
+        ("GET", "/api/cockpit/runs/{run_id}/report"),
+        ("GET", "/api/cockpit/sessions"),
+        ("GET", "/api/cockpit/sessions/{session_id}"),
+        ("GET", "/api/cockpit/sessions/{session_id}/artifacts"),
+        ("GET", "/api/cockpit/sessions/{session_id}/events"),
+        ("GET", "/api/cockpit/sessions/{session_id}/messages"),
+        ("GET", "/api/cockpit/sessions/{session_id}/runs"),
         ("GET", "/api/defaults"),
         ("GET", "/api/evals"),
         ("GET", "/api/evals/runs/{eval_run_id}"),
@@ -241,6 +251,18 @@ _EXPLICIT_BOUNDED_ASYNC = frozenset(
     }
 )
 
+_OPAQUE_CURSOR_IDENTITIES = frozenset(
+    {
+        ("GET", "/api/runs"),
+        ("GET", "/api/runs/{run_id}/trace"),
+        ("GET", "/api/cockpit/sessions"),
+        ("GET", "/api/cockpit/sessions/{session_id}/artifacts"),
+        ("GET", "/api/cockpit/sessions/{session_id}/events"),
+        ("GET", "/api/cockpit/sessions/{session_id}/messages"),
+        ("GET", "/api/cockpit/sessions/{session_id}/runs"),
+    }
+)
+
 
 def _workload(identity: tuple[str, str]) -> WorkloadClass:
     if identity in _STREAMS:
@@ -355,7 +377,7 @@ def _build_contracts() -> tuple[RouteExecutionContract, ...]:
                     "Last-Event-ID"
                     if is_stream
                     else "opaque"
-                    if identity[1] in {"/api/runs", "/api/runs/{run_id}/trace"}
+                    if identity in _OPAQUE_CURSOR_IDENTITIES
                     else None
                 ),
                 latency_p95_ms=(1500 if not identity[1].startswith("/api/") else 500),

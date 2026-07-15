@@ -44,6 +44,10 @@ const catalogs = {
     project: "Harness workspace",
     rawEvidence: "Raw evidence",
     rawEvidenceDescription: "Raw evidence code loads only when opened.",
+    readModelError: "Bounded read model unavailable",
+    readModelIdle: "Bounded read model idle",
+    readModelLoading: "Loading bounded visible data…",
+    readModelReady: "Bounded visible data ready",
     runs: "Runs",
     runsDetail:
       "Durable ownership, trace, artifacts, review, replay, and promotion stay on their current APIs until the vertical migration gate.",
@@ -105,6 +109,10 @@ const catalogs = {
     project: "Рабочая область Harness",
     rawEvidence: "Исходные evidence",
     rawEvidenceDescription: "Код исходных evidence загружается только при открытии.",
+    readModelError: "Ограниченная read model недоступна",
+    readModelIdle: "Ограниченная read model ожидает",
+    readModelLoading: "Загрузка ограниченных видимых данных…",
+    readModelReady: "Ограниченные видимые данные готовы",
     runs: "Запуски",
     runsDetail:
       "Durable ownership, trace, artifacts, review, replay и promotion остаются на текущих API до vertical migration gate.",
