@@ -13,6 +13,7 @@
 - **Ограниченный side-effect executor**: Harness-owned runtime events теперь связывают резервирование токена, durable outbox delivery и неизменяемое completion evidence в одной транзакции; повторная доставка переиспользует готовое evidence, а неоднозначные reservations остаются заблокированными.
 - **Policy audit evidence**: reviewed promotion теперь сохраняет append-only hash chain для policy resolution, решения пользователя, точного enforcement owner, approval grant и source/patch binding; audit rows запрещают изменение и удаление.
 - **Lineage reviewed evidence**: успешно выполненные reviewed operations теперь публикуют проверенный content-addressed evidence manifest через runtime export, provenance запуска, replay requests и promotion запуска в agent/workflow/eval без раскрытия raw approval bindings или captured content.
+- **Доказательства GigaChat-совместимости**: завершённые headless-запуски Codex, Claude и Gemini теперь публикуют content-addressed provenance для наблюдаемого маршрута `gpt2giga`, запрошенных model/API mode и нормализованных stream, tool, usage, error и cancellation semantics без сохранения prompt или response content.
 
 ### Исправлено
 - **Durable scheduled evals**: повторная доставка одного schedule occurrence теперь использует исходный target run вместо создания второго eval/job, а scorecard, запущенный worker-ом, сохраняется в state directory разрешённого Harness-проекта.

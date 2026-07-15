@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import IO, Any, Callable, Mapping
 
 from gpt2giga_harness import proxy
+from gpt2giga_harness.gigachat_compatibility import (
+    gigachat_gateway_ready_event,
+)
 from gpt2giga_harness.types import (
     REDACTED,
     Availability,
@@ -102,6 +105,7 @@ def prepare_proxy_for_agent(
     request: HarnessRequest,
     context: HarnessContext,
     *,
+    harness_id: str,
     command: tuple[str, ...],
 ) -> tuple[HarnessContext, tuple[HarnessEvent, ...], HarnessResult | None]:
     """Ensure the local proxy is ready before launching an external agent CLI."""
@@ -136,6 +140,14 @@ def prepare_proxy_for_agent(
                 },
             ),
         )
+    events = (
+        *events,
+        gigachat_gateway_ready_event(
+            request,
+            harness_id=harness_id,
+            sidecar_started=startup.started,
+        ),
+    )
     return prepared_context, events, None
 
 

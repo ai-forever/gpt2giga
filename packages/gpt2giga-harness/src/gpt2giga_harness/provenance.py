@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from gpt2giga_harness.gigachat_compatibility import (
+    gigachat_compatibility_evidence,
+)
 from gpt2giga_harness.project import project_to_dict, resolve_project
 from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
 from gpt2giga_harness.runtime.policy import PolicyAuditEvent
@@ -36,6 +39,7 @@ class RunProvenance:
     request: Mapping[str, Any]
     execution: Mapping[str, Any]
     records: Mapping[str, Any]
+    gigachat_compatibility: Mapping[str, Any] | None
     reviewed_evidence: Mapping[str, Any] | None
     replay_request: Mapping[str, Any]
 
@@ -67,6 +71,7 @@ def build_run_provenance(
         events=run_events,
     )
     reviewed_evidence = reviewed_evidence_manifest(run.id, policy_audit_events)
+    compatibility_evidence = gigachat_compatibility_evidence(run, run_events)
     return RunProvenance(
         run_id=run.id,
         session_id=run.session_id,
@@ -78,6 +83,7 @@ def build_run_provenance(
         request=request,
         execution=execution,
         records=records,
+        gigachat_compatibility=compatibility_evidence,
         reviewed_evidence=reviewed_evidence,
         replay_request=build_replay_request(
             run,
@@ -100,6 +106,11 @@ def run_provenance_to_dict(provenance: RunProvenance) -> dict[str, Any]:
         "request": dict(provenance.request),
         "execution": dict(provenance.execution),
         "records": dict(provenance.records),
+        "gigachat_compatibility": (
+            dict(provenance.gigachat_compatibility)
+            if provenance.gigachat_compatibility is not None
+            else None
+        ),
         "reviewed_evidence": (
             dict(provenance.reviewed_evidence)
             if provenance.reviewed_evidence is not None

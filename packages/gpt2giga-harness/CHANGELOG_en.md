@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bounded side-effect executor**: Harness-owned runtime events now bind token reservation, durable outbox delivery, and immutable completion evidence in one transaction; duplicate delivery reuses completed evidence while ambiguous reservations remain blocked.
 - **Policy audit evidence**: reviewed promotion now retains an append-only, hash-chained record of policy resolution, user decision, exact enforcement owner, approval grant, and source/patch binding; audit rows reject update and deletion.
 - **Reviewed evidence lineage**: successful reviewed operations now expose a validated, content-addressed evidence manifest through runtime export, run provenance, replay requests, and run-to-agent/workflow/eval promotion without exposing raw approval bindings or captured content.
+- **GigaChat compatibility evidence**: completed headless Codex, Claude, and Gemini runs now expose content-addressed provenance for the observed `gpt2giga` route, requested model/API mode, and normalized stream, tool, usage, error, and cancellation semantics without retaining prompt or response content.
 
 ### Fixed
 - **Durable scheduled evals**: duplicate delivery of one schedule occurrence now reuses the original target run instead of creating a second eval/job, and worker-triggered scorecards are retained under the resolved Harness project state directory.

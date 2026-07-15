@@ -257,7 +257,9 @@ def test_adapter_compatibility_matrix_is_route_and_evidence_aware():
         "api_mode": "v1",
         "check": "stream",
         "supported": True,
-        "evidence": "structured_adapter",
+        "measured": False,
+        "evidence": "declared_adapter_contract",
+        "measurement": "run_provenance.gigachat_compatibility",
     }
     assert claude_resume["supported"] is True
     assert {item["check"] for item in cells} == {
