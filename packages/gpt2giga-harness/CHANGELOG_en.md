@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.1a4] - 2026-07-15
 
 ### Added
+- **Cockpit performance budgets**: the packaged shell now publishes and enforces machine-readable budgets for critical asset weight, first-ready timing, large trace DOM size/rendering, cursor reconnect, and bounded diff/report previews; full retained report, copy, open, and apply actions remain explicit.
 - **Selected-run readiness**: CLI/API/UI preflight now reports redaction-safe `ready`/`degraded`/`blocked` checks and remediation before spawn only for the selected harness, invocation mode, route/model, workspace policy, and durable/synchronous path; unrelated failures do not block local Echo.
 
 ## [0.0.1a3] - 2026-07-15

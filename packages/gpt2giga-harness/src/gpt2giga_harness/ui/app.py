@@ -210,6 +210,7 @@ from gpt2giga_harness.tool_profiles import (
     build_tool_profile_statuses,
     tool_profile_status_to_dict,
 )
+from gpt2giga_harness.ui.performance import ui_performance_budgets
 from gpt2giga_harness.ui.routers.runs import router as runs_router
 from gpt2giga_harness.ui.routers.schedules import router as schedules_router
 from gpt2giga_harness.ui.routers.agents import router as agents_router
@@ -448,6 +449,7 @@ def create_app(
             "auto_start_proxy": config.auto_start_proxy,
             "proxy_start_timeout_seconds": config.proxy_start_timeout_seconds,
             "note": pass_model_env_note(),
+            "performance_budgets": ui_performance_budgets(),
         }
 
     @app.get("/api/project")

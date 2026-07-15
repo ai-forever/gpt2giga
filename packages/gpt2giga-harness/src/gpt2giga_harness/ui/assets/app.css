@@ -3934,3 +3934,20 @@
       .arena-grid { grid-template-columns: minmax(0, 1fr); }
       .arena-card-header .badge-row { width: 100%; justify-content: space-between; }
     }
+    .large-preview-notice {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--muted);
+      background: var(--panel-2);
+      font-size: 12px;
+    }
+    @media (max-width: 520px) {
+      .large-preview-notice { align-items: stretch; flex-direction: column; }
+      .large-preview-notice button { width: 100%; }
+    }

@@ -8,6 +8,7 @@
 ## [0.0.1a4] - 2026-07-15
 
 ### Добавлено
+- **Бюджеты производительности Cockpit**: packaged shell публикует и проверяет machine-readable бюджеты для веса critical assets, времени first-ready, размера/rendering большого trace DOM, cursor reconnect и ограниченных diff/report preview; полный retained report и явные copy, open и apply остаются доступны отдельно.
 - **Readiness выбранного запуска**: CLI/API/UI preflight до spawn показывает redaction-safe `ready`/`degraded`/`blocked` checks и remediation только для выбранных harness, invocation mode, route/model, workspace policy и durable/synchronous path; нерелевантные сбои не блокируют локальный Echo.
 
 ## [0.0.1a3] - 2026-07-15

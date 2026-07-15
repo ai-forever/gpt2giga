@@ -12,6 +12,23 @@
     const NATIVE_TRUST_STORAGE_KEY = "gpt2giga.nativeTrustResolved.v1";
     const RUNS_CENTER_PAGE_SIZE = 25;
     const RUNS_TRACE_DOM_LIMIT = 200;
+    const LARGE_PREVIEW_CHAR_LIMIT = 100000;
+    const UI_BOOT_STARTED_AT = window.performance && typeof window.performance.now === "function"
+      ? window.performance.now()
+      : Date.now();
+    const uiPerformance = {
+      budgets: {
+        critical_asset_bytes: 575000,
+        initial_page_ready_ms: 3500,
+        large_trace_nodes: RUNS_TRACE_DOM_LIMIT,
+        large_trace_render_ms: 100,
+        cursor_reconnect_ms: 1000,
+        large_preview_chars: LARGE_PREVIEW_CHAR_LIMIT,
+        large_preview_render_ms: 100
+      },
+      measurements: {}
+    };
+    window.__gpt2gigaPerformance = uiPerformance;
     const state = {
       defaults: {},
       harnesses: [],
@@ -124,6 +141,40 @@
       if (node) node.textContent = value == null ? "" : String(value);
     };
 
+    function uiPerformanceNow() {
+      return window.performance && typeof window.performance.now === "function"
+        ? window.performance.now()
+        : Date.now();
+    }
+
+    function recordUiPerformance(name, startedAt, budgetMs) {
+      const durationMs = Math.max(0, uiPerformanceNow() - startedAt);
+      const measurement = {
+        duration_ms: Number(durationMs.toFixed(2)),
+        budget_ms: budgetMs,
+        within_budget: durationMs <= budgetMs
+      };
+      uiPerformance.measurements[name] = measurement;
+      const attribute = `data-performance-${name.replace(/_/g, "-")}`;
+      document.documentElement.setAttribute(`${attribute}-ms`, String(measurement.duration_ms));
+      document.documentElement.setAttribute(`${attribute}-budget-ms`, String(budgetMs));
+      document.documentElement.setAttribute(`${attribute}-within-budget`, String(measurement.within_budget));
+      return measurement;
+    }
+
+    function boundedPreviewText(value, label) {
+      const text = value == null ? "" : String(value);
+      if (text.length <= LARGE_PREVIEW_CHAR_LIMIT) return text;
+      let visibleChars = LARGE_PREVIEW_CHAR_LIMIT;
+      let suffix = "";
+      for (let pass = 0; pass < 3; pass += 1) {
+        const omitted = text.length - visibleChars;
+        suffix = `\n\n[${label} preview capped at ${LARGE_PREVIEW_CHAR_LIMIT.toLocaleString()} characters; ${omitted.toLocaleString()} omitted. Use the copy/open action for the full retained content.]`;
+        visibleChars = Math.max(0, LARGE_PREVIEW_CHAR_LIMIT - suffix.length);
+      }
+      return `${text.slice(0, visibleChars)}${suffix}`;
+    }
+
     function readNativeTrustResolvedProcessIds() {
       try {
         const values = JSON.parse(window.sessionStorage.getItem(NATIVE_TRUST_STORAGE_KEY) || "[]");
@@ -158,6 +209,9 @@
       const result = await getJson("/api/defaults");
       if (!result.ok) return result;
       state.defaults = result.data;
+      if (result.data.performance_budgets && typeof result.data.performance_budgets === "object") {
+        uiPerformance.budgets = { ...uiPerformance.budgets, ...result.data.performance_budgets };
+      }
       byId("model-input").value = result.data.default_model || "GigaChat-2-Max";
       byId("arena-model-input").value = result.data.default_model || "GigaChat-2-Max";
       const mode = result.data.default_api_mode || "v2";
@@ -1402,30 +1456,32 @@
         return;
       }
       const nodes = Array.isArray(result.data.nodes) ? result.data.nodes : [];
-      if (older) {
-        const existing = new Set(state.runsTraceNodes.map((node) => node.id));
-        state.runsTraceNodes = [...nodes.filter((node) => !existing.has(node.id)), ...state.runsTraceNodes];
-      } else {
-        state.runsTraceNodes = nodes.slice(-RUNS_TRACE_DOM_LIMIT);
-      }
+      state.runsTraceNodes = nodes.slice(-RUNS_TRACE_DOM_LIMIT);
       state.runsTraceCursor = result.data.next_cursor || null;
       byId("load-older-trace-button").hidden = !state.runsTraceCursor;
       renderRunsTrace();
     }
 
     function renderRunsTrace() {
+      const startedAt = uiPerformanceNow();
       const list = byId("runs-trace-list");
-      list.textContent = "";
       if (!state.runsTraceNodes.length) {
         const empty = document.createElement("li");
         empty.className = "status-line";
         empty.textContent = "No trace spans recorded yet.";
-        list.appendChild(empty);
+        list.replaceChildren(empty);
         return;
       }
+      const fragment = document.createDocumentFragment();
       for (const node of state.runsTraceNodes.slice(-RUNS_TRACE_DOM_LIMIT)) {
-        list.appendChild(createRunsTraceNode(node));
+        fragment.appendChild(createRunsTraceNode(node));
       }
+      list.replaceChildren(fragment);
+      recordUiPerformance(
+        "large_trace_render",
+        startedAt,
+        uiPerformance.budgets.large_trace_render_ms
+      );
     }
 
     function createRunsTraceNode(node) {
@@ -1493,9 +1549,18 @@
       if (!item || !["queued", "running", "blocked", "approval-needed"].includes(item.status_group) || !window.EventSource) return;
       const latest = [...state.runsTraceNodes].reverse().find((node) => node.event_id);
       const query = latest ? `?after_id=${encodeURIComponent(latest.event_id)}` : "";
+      const reconnectStartedAt = uiPerformanceNow();
       const source = new EventSource(`/api/runs/${encodeURIComponent(item.run_id)}/events/stream${query}`);
       state.runsEventSource = source;
       state.runsEventSourceRunId = item.run_id;
+      source.onopen = () => {
+        if (state.runsEventSource !== source) return;
+        recordUiPerformance(
+          "runs_cursor_reconnect",
+          reconnectStartedAt,
+          uiPerformance.budgets.cursor_reconnect_ms
+        );
+      };
       source.onmessage = (message) => {
         if (!state.runsCenterSelected || state.runsCenterSelected.run_id !== item.run_id) return;
         try {
@@ -4731,6 +4796,32 @@
       node.replaceChildren(fragment);
     }
 
+    function renderReportPreviewInto(node, value) {
+      const text = value == null ? "" : String(value);
+      const startedAt = uiPerformanceNow();
+      if (text.length <= LARGE_PREVIEW_CHAR_LIMIT) {
+        renderMarkdownInto(node, text);
+        return;
+      }
+      renderMarkdownInto(node, text.slice(0, LARGE_PREVIEW_CHAR_LIMIT));
+      const notice = document.createElement("div");
+      notice.className = "large-preview-notice";
+      const summary = document.createElement("span");
+      summary.textContent = `Report preview capped at ${LARGE_PREVIEW_CHAR_LIMIT.toLocaleString()} characters.`;
+      const expand = document.createElement("button");
+      expand.type = "button";
+      expand.className = "secondary";
+      expand.textContent = "Render full report";
+      expand.addEventListener("click", () => renderMarkdownInto(node, text));
+      notice.append(summary, expand);
+      node.appendChild(notice);
+      recordUiPerformance(
+        "large_report_preview",
+        startedAt,
+        uiPerformance.budgets.large_preview_render_ms
+      );
+    }
+
     function eventToolPayload(event) {
       const payload = event && event.payload && typeof event.payload === "object" ? event.payload : {};
       const toolCall = payload.tool_call && typeof payload.tool_call === "object" ? payload.tool_call : {};
@@ -5128,7 +5219,7 @@
       content.className = "message-content markdown-body";
       const liveNonterminal = options.live && !["succeeded", "failed", "canceled"].includes(options.liveStatus);
       if (message.content) {
-        renderMarkdownInto(content, message.content);
+        renderReportPreviewInto(content, message.content);
       } else if (liveNonterminal) {
         const waiting = document.createElement("p");
         waiting.className = "hint";
@@ -5664,7 +5755,16 @@
       if (changedFiles.length) lines.push(`Changed files: ${changedFiles.join(", ")}`);
       if (untrackedFiles.length) lines.push(`Untracked files: ${untrackedFiles.join(", ")}`);
       const summary = lines.length ? lines.join("\\n") : "No run selected.";
-      setText("diff-text", `${summary}\\n\\n${patch || "No diff captured."}`);
+      const previewStartedAt = uiPerformanceNow();
+      const diffText = `${summary}\\n\\n${patch || "No diff captured."}`;
+      setText("diff-text", boundedPreviewText(diffText, "Diff"));
+      if (diffText.length > LARGE_PREVIEW_CHAR_LIMIT) {
+        recordUiPerformance(
+          "large_diff_preview",
+          previewStartedAt,
+          uiPerformance.budgets.large_preview_render_ms
+        );
+      }
       const canApply = Boolean(run && run.id && execution.policy === "worktree" && patch && patch !== "No diff captured." && !execution.truncated && !execution.applied_at && !execution.discarded_at);
       const canDiscard = Boolean(run && run.id && execution.policy === "worktree" && !execution.discarded_at);
       byId("apply-run-diff-button").disabled = !canApply;
@@ -5698,7 +5798,16 @@
         `Changed files:\\n${(artifact.changed_files || []).join("\\n") || "None"}`,
         `Patch:\\n${artifact.patch || "No patch captured."}`
       ];
-      setText("pr-text", lines.join("\\n\\n"));
+      const previewStartedAt = uiPerformanceNow();
+      const reportText = lines.join("\\n\\n");
+      setText("pr-text", boundedPreviewText(reportText, "PR report"));
+      if (reportText.length > LARGE_PREVIEW_CHAR_LIMIT) {
+        recordUiPerformance(
+          "large_pr_report_preview",
+          previewStartedAt,
+          uiPerformance.budgets.large_preview_render_ms
+        );
+      }
       byId("pr-branch-input").disabled = !canCreateBranch;
       byId("copy-pr-title-button").disabled = !(artifact.title || "").trim();
       byId("copy-pr-body-button").disabled = !(artifact.body || "").trim();
@@ -6448,10 +6557,19 @@
     function openNativeOutputStream(processId) {
       closeNativeOutputStream();
       const query = `?cursor=${encodeURIComponent(state.nativeOutputCursor)}`;
+      const reconnectStartedAt = uiPerformanceNow();
       const source = new EventSource(`/api/native/processes/${encodeURIComponent(processId)}/output/stream${query}`);
       state.nativeEventSource = source;
       state.nativeEventSourceProcessId = processId;
       state.nativeStreamFailures = 0;
+      source.onopen = () => {
+        if (state.nativeEventSource !== source) return;
+        recordUiPerformance(
+          "native_cursor_reconnect",
+          reconnectStartedAt,
+          uiPerformance.budgets.cursor_reconnect_ms
+        );
+      };
       source.onmessage = async (event) => {
         if (state.nativeEventSource !== source || state.nativeEventSourceProcessId !== processId) return;
         state.nativeStreamFailures = 0;
@@ -7675,6 +7793,13 @@
         await loadSession(state.projectState.last_selected_session);
       }
       renderAll();
+      const initialMeasurement = recordUiPerformance(
+        "initial_page_ready",
+        UI_BOOT_STARTED_AT,
+        uiPerformance.budgets.initial_page_ready_ms
+      );
+      document.documentElement.dataset.harnessReady = "true";
+      document.documentElement.dataset.initialPageReadyMs = String(initialMeasurement.duration_ms);
       await secondaryLoads;
     }
 
