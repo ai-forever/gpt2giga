@@ -5,6 +5,14 @@ import yaml
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.project import init_project_config
+from gpt2giga_harness.runtime.policy import (
+    ApprovalDecision,
+    PermissionAction,
+    PolicyContext,
+    PolicyEngine,
+    REVIEWED_PROMOTION_APPLY_OWNER,
+    permission_profile,
+)
 from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
 from gpt2giga_harness.ui.app import create_app
 
@@ -118,3 +126,67 @@ def test_run_promotion_rejects_unreviewed_edits_and_stale_target(tmp_path) -> No
             },
         )
         assert stale.status_code == 409
+
+
+def test_reviewed_evidence_links_provenance_replay_and_promotion(tmp_path) -> None:
+    app, _, run = _app_with_run(tmp_path)
+    runtime = app.state.harness_runtime_store
+    binding = "raw-source-and-patch-binding"
+    context = PolicyContext(
+        project_id="project_reviewed",
+        session_id=run.session_id,
+        run_id=run.id,
+        reason="Apply the reviewed patch.",
+        preview={
+            "source_sha": "a" * 40,
+            "patch_sha256": "b" * 64,
+            "api_key": "secret-value",
+        },
+        approval_binding=binding,
+        enforcement_owner=REVIEWED_PROMOTION_APPLY_OWNER,
+    )
+    engine = PolicyEngine(runtime)
+    resolution = engine.resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=context,
+    )
+    approval = runtime.create_approval_request(resolution, context)
+    runtime.decide_approval_request(approval.id, ApprovalDecision.ALLOW_ONCE)
+    engine.resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=context,
+    )
+
+    with TestClient(app) as client:
+        provenance = client.get(f"/api/runs/{run.id}/provenance").json()["provenance"]
+        reviewed = provenance["reviewed_evidence"]
+        assert reviewed["source_run_id"] == run.id
+        assert reviewed["operations"][0]["operation_id"] == approval.id
+        assert binding not in str(reviewed)
+        assert "secret-value" not in str(reviewed)
+
+        replay = client.post(f"/api/runs/{run.id}/replay")
+        assert replay.status_code == 200
+        replay_evidence = replay.json()["replay_request"]["extra"][
+            "source_reviewed_evidence"
+        ]
+        assert replay_evidence["manifest_sha256"] == reviewed["manifest_sha256"]
+
+        preview = client.post(
+            f"/api/runs/{run.id}/promotions/preview",
+            json={"kind": "workflow", "target_id": "evidence-workflow"},
+        )
+        assert preview.status_code == 200
+        candidate = preview.json()["promotion"]
+        promoted = candidate["provenance"]["reviewed_evidence"]
+        assert promoted["manifest_sha256"] == reviewed["manifest_sha256"]
+        assert (
+            yaml.safe_load(candidate["content"])["provenance"]["reviewed_evidence"][
+                "manifest_sha256"
+            ]
+            == reviewed["manifest_sha256"]
+        )
+        assert binding not in candidate["content"]
+        assert "secret-value" not in candidate["content"]

@@ -5,6 +5,30 @@ All notable changes to gpt2giga-harness are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.1a3] - 2026-07-15
+
+### Added
+- **Review-to-reuse onboarding**: the Work rail now guides an eligible successful run to its exact provenance/promotion inspector, while promotion preview/apply and scheduling remain separate explicit operator actions.
+- **Evidence-to-review onboarding**: the Work rail now continues from terminal evidence to the exact retained worktree Diff when an isolated patch exists, while apply and approval remain separate explicit operator actions.
+- **Run-to-evidence onboarding**: Work now reveals a compact Run → Evidence path after the first run starts and enables a deep link to that exact retained Runs Center trace only after terminal completion.
+- **Cross-harness review team**: a reviewed example now fans out read-only explorer, security, tests, and maintainability roles across Codex, Claude, and Gemini, preserves per-child durable evidence through partial failure, and synthesizes cited artifacts without a shared writable workspace.
+- **Nightly compatibility guardian**: a reviewed example now packages a pinned Codex/Claude/Gemini eval, exact adapter-dimension baselines, read-only regression triage, and a durable nightly schedule that runs without the UI.
+- **Reviewed-patch example**: a disposable issue fixture now packages reviewed planner, isolated implementer, and read-only reviewer profiles with a durable workflow and post-apply eval; source mutation, apply, commit, push, and hosted writes remain explicit operator decisions.
+- **Offline first-run demo**: a disposable fictional inventory repository now verifies `giga init`, redaction-safe diagnostics, a local Echo read run, and the generated smoke eval while keeping runtime state inside the copied demo and requiring no credentials, proxy, external agent CLI, or public network.
+- **First-run doctor**: `giga doctor [workspace] --json` now emits a redaction-safe readiness report for the proxy, routes, models, adapter CLI versions, workspace and Git state, durable worker, managed homes, and MCP snapshots, with actionable remediation commands and read-only runtime inspection.
+- **Capability matrix**: `giga harness capabilities` generates reviewable Markdown and JSON views directly from the built-in CLI adapters' runtime parity contracts.
+- **Idempotent side-effect evidence**: the durable runtime can atomically reserve opaque Harness-owned side-effect tokens and retain immutable redacted completion evidence without making arbitrary edit attempts retry-safe.
+- **Bounded side-effect executor**: Harness-owned runtime events now bind token reservation, durable outbox delivery, and immutable completion evidence in one transaction; duplicate delivery reuses completed evidence while ambiguous reservations remain blocked.
+- **Durable recovery marker**: an opt-in durable job can hash a supplied opaque side-effect token before persistence and record one fixed Harness-owned marker through the atomic executor; owner-loss retries reuse completed evidence while ambiguous reservations fail closed.
+- **Policy audit evidence**: reviewed promotion now retains an append-only, hash-chained record of policy resolution, user decision, exact enforcement owner, approval grant, and source/patch binding; audit rows reject update and deletion.
+- **Reviewed evidence lineage**: successful reviewed operations now expose a validated, content-addressed evidence manifest through runtime export, run provenance, replay requests, and run-to-agent/workflow/eval promotion without exposing raw approval bindings or captured content.
+- **GigaChat compatibility evidence**: completed headless Codex, Claude, and Gemini runs now expose content-addressed provenance for the observed `gpt2giga` route, requested model/API mode, and normalized stream, tool, usage, error, and cancellation semantics without retaining prompt or response content.
+
+### Fixed
+- **Scheduled eval attention**: after an exact schedule hash passes `test-now`, a later failed eval now pauses the schedule and creates one retained Attention item with the scorecard summary.
+- **Durable scheduled evals**: duplicate delivery of one schedule occurrence now reuses the original target run instead of creating a second eval/job, and worker-triggered scorecards are retained under the resolved Harness project state directory.
+- **Reviewed promotion**: `git.apply` approval is now bound once to the exact source commit, captured patch SHA-256, and branch intent; stale source, changed patch, and approval rebinding fail closed before the checkout is modified.
+
 ## [0.0.1a2] - 2026-07-14
 
 ### Added
@@ -47,5 +71,6 @@ considered stable.
 
 ---
 
+[0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3
 [0.0.1a2]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a1...gpt2giga-harness-v0.0.1a2
 [0.0.1a1]: https://github.com/ai-forever/gpt2giga/releases/tag/gpt2giga-harness-v0.0.1a1

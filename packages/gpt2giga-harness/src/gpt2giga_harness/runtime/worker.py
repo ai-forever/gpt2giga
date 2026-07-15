@@ -31,7 +31,12 @@ from gpt2giga_harness.runtime.policy import (
     permission_profile,
 )
 from gpt2giga_harness.runtime.reconcile import RuntimeReconciler
-from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga_harness.runtime.side_effects import HarnessSideEffectExecutor
+from gpt2giga_harness.runtime.store import (
+    RuntimeCoordinationStore,
+    SideEffectBlockedError,
+    SideEffectConflictError,
+)
 from gpt2giga_harness.session_runner import HarnessSessionRunner, QueuedHarnessRun
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
@@ -43,6 +48,8 @@ DEFAULT_LEASE_SECONDS = 15.0
 DEFAULT_HEARTBEAT_SECONDS = 2.0
 DEFAULT_POLL_SECONDS = 0.25
 DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
+RECOVERY_MARKER_IDENTITY_FIELD = "_runtime_recovery_marker_sha256"
+MAX_SIDE_EFFECT_TOKEN_CHARS = 4096
 
 
 @dataclass(frozen=True)
@@ -79,6 +86,7 @@ class DurableJobDispatcher:
         origin: str = "manual",
     ) -> DurableSubmission:
         """Submit a durable job through the selected permission profile."""
+        payload = _prepare_durable_payload(payload)
         selected_profile = permission_profile(
             payload.get("permission_profile"), origin=origin
         )
@@ -334,6 +342,7 @@ class DurableJobWorker:
         cancel_event = threading.Event()
         finished = threading.Event()
         timed_out = threading.Event()
+        retry_blocked = False
         monitor = threading.Thread(
             target=self._monitor_attempt,
             args=(job, attempt.id, cancel_event, finished, timed_out),
@@ -342,6 +351,24 @@ class DurableJobWorker:
         )
         monitor.start()
         try:
+            recovery_marker_identity = payload.get(RECOVERY_MARKER_IDENTITY_FIELD)
+            if recovery_marker_identity:
+                marker = HarnessSideEffectExecutor(
+                    self.runtime_store
+                ).record_recovery_marker_once(
+                    job_id=job.id,
+                    attempt_id=attempt.id,
+                    identity=str(recovery_marker_identity),
+                )
+                self.payload_store.append_attempt_log(
+                    attempt.id,
+                    {
+                        "at": utc_now(),
+                        "type": "durable_side_effect_recorded",
+                        "side_effect_id": marker.record.id,
+                        "reused": not marker.created,
+                    },
+                )
             result = self.runner.run_in_session(
                 job.session_id,
                 execution_payload,
@@ -364,6 +391,9 @@ class DurableJobWorker:
             )
         except Exception as exc:
             error = str(exc)
+            retry_blocked = isinstance(
+                exc, (SideEffectBlockedError, SideEffectConflictError)
+            )
             final_run = self._ensure_failed_run(job, attempt.run_id, payload, error)
             terminal = JobAttemptStatus.FAILED
             result_text = ""
@@ -393,6 +423,7 @@ class DurableJobWorker:
             DEFAULT_RETRY_BACKOFF_SECONDS * (2 ** (attempt.attempt_number - 1))
             if final_run is not None
             and terminal in {JobAttemptStatus.FAILED, JobAttemptStatus.INTERRUPTED}
+            and not retry_blocked
             else None
         )
         _, updated_job = self.runtime_store.finish_attempt(
@@ -649,6 +680,28 @@ def worker_status(
 def _idempotency_class(payload: Mapping[str, Any]) -> str:
     mode = str(payload.get("mode") or "plan")
     return "read_only" if mode in {"plan", "read"} else "external_write"
+
+
+def _prepare_durable_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Replace an optional opaque side-effect token with a persisted digest."""
+    prepared = dict(payload)
+    prepared.pop(RECOVERY_MARKER_IDENTITY_FIELD, None)
+    supplied = prepared.pop("side_effect_token", None)
+    if supplied is None:
+        return prepared
+    if not isinstance(supplied, str):
+        raise ValueError("side_effect_token must be a string")
+    token = supplied.strip()
+    if not token:
+        raise ValueError("side_effect_token must not be empty")
+    if len(token) > MAX_SIDE_EFFECT_TOKEN_CHARS:
+        raise ValueError(
+            f"side_effect_token must be at most {MAX_SIDE_EFFECT_TOKEN_CHARS} characters"
+        )
+    prepared[RECOVERY_MARKER_IDENTITY_FIELD] = hashlib.sha256(
+        token.encode("utf-8")
+    ).hexdigest()
+    return prepared
 
 
 def _positive_float(value: Any, default: float) -> float:

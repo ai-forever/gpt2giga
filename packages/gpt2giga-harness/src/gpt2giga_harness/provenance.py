@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from gpt2giga_harness.gigachat_compatibility import (
+    gigachat_compatibility_evidence,
+)
 from gpt2giga_harness.project import project_to_dict, resolve_project
+from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
+from gpt2giga_harness.runtime.policy import PolicyAuditEvent
 from gpt2giga_harness.sessions.models import (
     HarnessRawRecord,
     HarnessRun,
@@ -34,6 +39,8 @@ class RunProvenance:
     request: Mapping[str, Any]
     execution: Mapping[str, Any]
     records: Mapping[str, Any]
+    gigachat_compatibility: Mapping[str, Any] | None
+    reviewed_evidence: Mapping[str, Any] | None
     replay_request: Mapping[str, Any]
 
 
@@ -45,6 +52,7 @@ def build_run_provenance(
     raw_requests: tuple[HarnessRawRecord, ...] = (),
     raw_responses: tuple[HarnessRawRecord, ...] = (),
     events: tuple[HarnessStoredEvent, ...] = (),
+    policy_audit_events: tuple[PolicyAuditEvent, ...] = (),
     data_dir: str | Path | None = None,
 ) -> RunProvenance:
     """Build a redacted provenance snapshot for a run."""
@@ -62,6 +70,8 @@ def build_run_provenance(
         raw_responses=run_raw_responses,
         events=run_events,
     )
+    reviewed_evidence = reviewed_evidence_manifest(run.id, policy_audit_events)
+    compatibility_evidence = gigachat_compatibility_evidence(run, run_events)
     return RunProvenance(
         run_id=run.id,
         session_id=run.session_id,
@@ -73,7 +83,13 @@ def build_run_provenance(
         request=request,
         execution=execution,
         records=records,
-        replay_request=build_replay_request(run, raw_request=raw_request),
+        gigachat_compatibility=compatibility_evidence,
+        reviewed_evidence=reviewed_evidence,
+        replay_request=build_replay_request(
+            run,
+            raw_request=raw_request,
+            reviewed_evidence=reviewed_evidence,
+        ),
     )
 
 
@@ -90,6 +106,16 @@ def run_provenance_to_dict(provenance: RunProvenance) -> dict[str, Any]:
         "request": dict(provenance.request),
         "execution": dict(provenance.execution),
         "records": dict(provenance.records),
+        "gigachat_compatibility": (
+            dict(provenance.gigachat_compatibility)
+            if provenance.gigachat_compatibility is not None
+            else None
+        ),
+        "reviewed_evidence": (
+            dict(provenance.reviewed_evidence)
+            if provenance.reviewed_evidence is not None
+            else None
+        ),
         "replay_request": dict(provenance.replay_request),
     }
 
@@ -98,6 +124,7 @@ def build_replay_request(
     run: HarnessRun,
     *,
     raw_request: HarnessRawRecord | None = None,
+    reviewed_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Reconstruct a safe request payload for replaying one run."""
     payload = _mapping(raw_request.payload if raw_request else None)
@@ -106,6 +133,8 @@ def build_replay_request(
     extra = _safe_extra(_mapping(payload.get("extra")))
     extra["isolated_history"] = True
     extra["replay_of_run_id"] = run.id
+    if reviewed_evidence is not None:
+        extra["source_reviewed_evidence"] = dict(reviewed_evidence)
     replay = {
         "harness_id": run.harness_id,
         "prompt": prompt,

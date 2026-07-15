@@ -1,0 +1,19 @@
+id: nightly-compatibility-guardian
+title: Nightly Compatibility Guardian
+target:
+  kind: eval
+  id: nightly-compatibility
+cadence:
+  kind: rrule
+  timezone: Europe/Moscow
+  start_at: "2026-01-01T02:00:00"
+  rrule: FREQ=DAILY
+workspace_policy: worktree
+timeout_seconds: 3600
+max_attempts: 1
+overlap_policy: skip
+max_concurrency: 1
+misfire_policy: run_once
+misfire_grace_seconds: 900
+notifications:
+  desktop: true

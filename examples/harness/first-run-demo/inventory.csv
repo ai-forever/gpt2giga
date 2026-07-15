@@ -1,0 +1,4 @@
+sku,item,on_hand,reorder_at
+DEMO-100,Desk lamp,12,5
+DEMO-200,Notebook,4,10
+DEMO-300,USB cable,8,8

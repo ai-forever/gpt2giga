@@ -1,0 +1,26 @@
+id: patch-implementer
+title: Patch Implementer
+description: Implements and tests the issue in a Harness-owned worktree.
+schema_version: 1
+harness_id: codex-cli
+instructions: >-
+  Implement only the issue described in ISSUE.md. Work in the isolated
+  Harness-provided checkout, run `python -m unittest discover -s tests -v`,
+  and report the exact command and result. Do not apply, commit, push, or make
+  hosted writes; leave the patch retained for operator review.
+api_mode: v2
+invocation_mode: headless
+mode: edit
+workspace_policy: worktree
+permission_profile: interactive
+tool_ids: []
+allowed_tools: []
+disallowed_tools: []
+budgets:
+  timeout_seconds: 900
+  max_attempts: 1
+  max_concurrency: 1
+expected_artifact: patch
+provenance:
+  example: issue-to-reviewed-patch
+  role: implementer

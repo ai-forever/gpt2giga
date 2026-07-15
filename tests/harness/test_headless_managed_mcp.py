@@ -90,7 +90,7 @@ def test_builtin_headless_adapter_reads_snapshot_from_its_active_temporary_home(
     monkeypatch.setattr(
         module,
         "prepare_proxy_for_agent",
-        lambda request, context, command: (context, (), None),
+        lambda request, context, harness_id, command: (context, (), None),
     )
     harness = harness_cls()
     monkeypatch.setattr(harness, "availability", lambda: Availability.available())

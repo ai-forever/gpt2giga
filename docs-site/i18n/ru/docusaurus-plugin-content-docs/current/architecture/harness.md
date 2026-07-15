@@ -190,6 +190,14 @@ JSON-схема FastAPI доступна по `/openapi.json`; Swagger и ReDoc 
 | `GET /api/attachments/{attachment_id}/metadata`<br />`GET /api/attachments/{attachment_id}`<br />`DELETE /api/attachments/{attachment_id}` | Разделяют дешёвое metadata-чтение, ограниченную выдачу blob и удаление данных Harness. |
 | `GET /api/files/preview`<br />`GET /api/files/generated/{run_key}/{filename}` | Отдают разрешённые local previews и generated artifacts без раскрытия произвольных путей. |
 
+Асинхронные run-start endpoints принимают необязательный `side_effect_token`
+для ограниченного recovery checkpoint. До сохранения durable payload Harness
+заменяет его на SHA-256 identity, записывает одно фиксированное Harness-owned
+событие через transactional outbox и после потери owner переиспользует то же
+completion evidence. Незавершённая reservation завершается безопасным отказом;
+этот контракт не разрешает retry произвольных edit, shell, filesystem или
+network effects.
+
 ### Runs, durable runtime, streaming и review artifacts
 
 | Маршруты | Зачем нужны |

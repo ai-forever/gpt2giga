@@ -188,6 +188,13 @@ are intentionally disabled.
 | `GET /api/attachments/{attachment_id}/metadata`<br />`GET /api/attachments/{attachment_id}`<br />`DELETE /api/attachments/{attachment_id}` | Separates cheap metadata, bounded blob download, and deletion of Harness-owned attachment data. |
 | `GET /api/files/preview`<br />`GET /api/files/generated/{run_key}/{filename}` | Serves allow-listed local previews and generated artifacts without exposing arbitrary paths. |
 
+The asynchronous run-start routes accept an optional `side_effect_token` for a
+bounded recovery checkpoint. Harness replaces it with a SHA-256 identity before
+persisting the durable payload, records one fixed Harness-owned event through
+the transactional outbox, and reuses the same completion evidence after owner
+loss. An incomplete reservation fails closed, and this contract does not make
+arbitrary edit, shell, filesystem, or network effects retry-safe.
+
 ### Runs, durable runtime, streaming, and review artifacts
 
 | Routes | Why they exist |

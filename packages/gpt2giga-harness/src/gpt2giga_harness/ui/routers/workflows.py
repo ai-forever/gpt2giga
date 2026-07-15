@@ -10,6 +10,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from gpt2giga_harness.project import project_to_dict, resolve_project
+from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
 from gpt2giga_harness.promotions import (
     apply_run_promotion,
     preview_run_promotion,
@@ -24,9 +25,15 @@ from gpt2giga_harness.runtime.policy import (
     PolicyContext,
     PolicyDecision,
     PolicyResolution,
+    REVIEWED_PROMOTION_MERGE_OWNER,
+    approval_binding_digest,
     approval_request_to_dict,
 )
-from gpt2giga_harness.worktrees import WorktreeConflictError, WorktreeError
+from gpt2giga_harness.worktrees import (
+    WorktreeConflictError,
+    WorktreeError,
+    review_run_diff,
+)
 from gpt2giga_harness.workflow_catalog import (
     duplicate_workflow,
     save_workflow,
@@ -140,12 +147,22 @@ async def run_promotion_preview(
 ) -> dict[str, Any]:
     """Infer and validate a portable candidate without writing project YAML."""
     try:
+        runtime = request.app.state.harness_runtime_store
+        reviewed_evidence = (
+            reviewed_evidence_manifest(
+                run_id,
+                runtime.list_policy_audit_events(run_id=run_id),
+            )
+            if runtime is not None
+            else None
+        )
         draft = await run_in_threadpool(
             preview_run_promotion,
             request.app.state.harness_session_store,
             run_id,
             kind=payload.kind,
             target_id=payload.target_id,
+            reviewed_evidence=reviewed_evidence,
         )
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Run not found") from exc
@@ -466,8 +483,13 @@ async def workflow_merge_apply(
     runtime = _runtime_store(request)
     try:
         run = manager.repository.get_run(run_id)
-        if _merge_queue(run).get("status") != "prepared":
+        queue = _merge_queue(run)
+        if queue.get("status") != "prepared":
             raise WorktreeError("Merge queue is not prepared.")
+        execution = queue.get("workspace_execution")
+        if not isinstance(execution, dict):
+            raise WorktreeError("Merge queue has no reviewed workspace execution.")
+        review = review_run_diff({"workspace_execution": execution})
         if not payload.approval_id:
             approval = runtime.create_approval_request(
                 PolicyResolution(
@@ -482,14 +504,12 @@ async def workflow_merge_apply(
                     run_id=run.id,
                     reason="Apply the reviewed workflow merge queue to the source checkout.",
                     preview={
+                        **review.to_preview(),
                         "workflow_run_id": run.id,
-                        "source_run_ids": list(
-                            _merge_queue(run).get("source_run_ids") or ()
-                        ),
-                        "changed_files": list(
-                            _merge_queue(run).get("changed_files") or ()
-                        ),
+                        "source_run_ids": list(queue.get("source_run_ids") or ()),
                     },
+                    approval_binding=review.approval_binding,
+                    enforcement_owner=REVIEWED_PROMOTION_MERGE_OWNER,
                 ),
             )
             return JSONResponse(
@@ -504,9 +524,21 @@ async def workflow_merge_apply(
             approval.status is not ApprovalStatus.APPROVED
             or approval.action is not PermissionAction.GIT_APPLY
             or approval.run_id != run.id
+            or approval.preview.get("approval_binding_sha256")
+            != approval_binding_digest(review.approval_binding)
         ):
             raise WorktreeError("A matching approved git.apply request is required.")
-        return await run_in_threadpool(manager.apply_merge, run_id)
+        consumed = runtime.consume_matching_approval_grant(
+            action=PermissionAction.GIT_APPLY,
+            project_id=run.project_id,
+            run_id=run.id,
+            job_id=None,
+            approval_binding=review.approval_binding,
+            enforcement_owner=REVIEWED_PROMOTION_MERGE_OWNER,
+        )
+        if not consumed:
+            raise WorktreeError("The reviewed git.apply approval is unavailable.")
+        return await run_in_threadpool(manager.apply_merge, run_id, review=review)
     except KeyError as exc:
         raise HTTPException(
             status_code=404, detail="Workflow run or approval not found"

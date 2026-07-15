@@ -22,9 +22,13 @@ from gpt2giga_harness.agents import (
     load_agent_profile,
     parse_agent_profile,
 )
+from gpt2giga_harness.capability_matrix import (
+    build_adapter_capability_matrix,
+    render_adapter_capability_matrix_markdown,
+)
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
-from gpt2giga_harness.doctor import run_doctor
+from gpt2giga_harness.doctor import build_doctor_report, run_doctor
 from gpt2giga_harness.editor import (
     build_open_diff_plan,
     build_open_file_plan,
@@ -100,6 +104,7 @@ from gpt2giga_harness.provenance import (
     build_run_provenance,
     run_provenance_to_dict,
 )
+from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
 from gpt2giga_harness.registry import UnknownHarnessError, create_default_registry
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.runtime.payloads import DurableJobPayloadStore
@@ -217,6 +222,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     doctor = subparsers.add_parser("doctor", parents=[common])
+    doctor.add_argument("workspace", nargs="?", default=None)
+    doctor.add_argument("--json", action="store_true")
     doctor.set_defaults(handler=_handle_doctor)
 
     config_parser = subparsers.add_parser("config")
@@ -573,6 +580,10 @@ def build_parser() -> argparse.ArgumentParser:
     harness_list.add_argument("--json", action="store_true")
     harness_list.set_defaults(handler=_handle_harness_list)
 
+    harness_capabilities = harness_subparsers.add_parser("capabilities")
+    harness_capabilities.add_argument("--json", action="store_true")
+    harness_capabilities.set_defaults(handler=_handle_harness_capabilities)
+
     harness_inspect = harness_subparsers.add_parser("inspect", parents=[common])
     harness_inspect.add_argument("harness_id")
     harness_inspect.add_argument("--json", action="store_true")
@@ -608,7 +619,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _handle_doctor(args: argparse.Namespace, config: HarnessConfig) -> int:
-    print(run_doctor(config))
+    if args.json:
+        _print_json(build_doctor_report(config, workspace=args.workspace))
+    else:
+        print(run_doctor(config, workspace=args.workspace))
     return 0
 
 
@@ -689,6 +703,19 @@ def _handle_harness_list(args: argparse.Namespace, config: HarnessConfig) -> int
         _print_json(rows)
     else:
         _print_table(rows)
+    return 0
+
+
+def _handle_harness_capabilities(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    registry = create_default_registry(include_entry_points=False)
+    matrix = build_adapter_capability_matrix(registry)
+    if args.json:
+        _print_json(matrix)
+    else:
+        print(render_adapter_capability_matrix_markdown(matrix), end="")
     return 0
 
 
@@ -852,7 +879,15 @@ def _handle_run_artifact(args: argparse.Namespace, config: HarnessConfig) -> int
     if action == "replay":
         registry = create_default_registry()
         raw_request = _latest_raw_request_for_run(store, run)
-        replay_payload = build_replay_request(run, raw_request=raw_request)
+        runtime = RuntimeCoordinationStore(config.data_dir)
+        replay_payload = build_replay_request(
+            run,
+            raw_request=raw_request,
+            reviewed_evidence=reviewed_evidence_manifest(
+                run.id,
+                runtime.list_policy_audit_events(run_id=run.id),
+            ),
+        )
         runner = HarnessSessionRunner(registry=registry, config=config, store=store)
         result = runner.run_in_session(run.session_id, replay_payload)
         if args.json:
@@ -865,6 +900,7 @@ def _handle_run_artifact(args: argparse.Namespace, config: HarnessConfig) -> int
         return 0 if result.result.ok else 1
     if action == "provenance":
         registry = create_default_registry()
+        runtime = RuntimeCoordinationStore(config.data_dir)
         session = store.get_session(run.session_id)
         try:
             spec = registry.get(run.harness_id).spec()
@@ -877,6 +913,7 @@ def _handle_run_artifact(args: argparse.Namespace, config: HarnessConfig) -> int
             raw_requests=store.list_raw_requests(run.session_id),
             raw_responses=store.list_raw_responses(run.session_id),
             events=store.list_events(run.session_id, run_id=run.id),
+            policy_audit_events=runtime.list_policy_audit_events(run_id=run.id),
             data_dir=config.data_dir,
         )
         payload = {

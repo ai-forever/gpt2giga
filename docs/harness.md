@@ -117,9 +117,19 @@ are safe to inspect:
 
 ```bash
 cd /path/to/project
-giga doctor
+giga doctor .
+giga doctor . --json
 giga init
 ```
+
+`giga doctor [workspace]` gives the first-run readiness verdict before any
+agent is spawned. Its structured `--json` form covers proxy and route health,
+model discovery, external CLI versions, workspace and Git readiness, the
+durable worker, Harness-managed homes, and managed MCP snapshots. Checks are
+classified as `ready`, `degraded`, or `blocked`; degraded and blocked
+prerequisites include a remediation command. The report redacts secret values,
+does not publish an absolute workspace path, and reads existing runtime worker
+state without rewriting it.
 
 `giga init` creates non-secret starter configuration, agent profiles, prompts,
 an eval, and a review workflow under `.giga/`. Existing files are not replaced
@@ -133,6 +143,35 @@ giga harness run echo \
   --workspace . \
   --prompt "Summarize the selected task"
 ```
+
+For a complete disposable tour, use the
+[first-run demo repository](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/first-run-demo).
+It contains only fictional inventory inputs. The walkthrough copies them to a
+temporary Git repository, isolates Harness runtime state under that copy, runs
+`giga init` and `giga doctor .`, then verifies a read-only Echo run and the two
+generated smoke-eval cases. It needs no credentials, proxy, external agent CLI,
+or public-network access.
+
+The model-backed
+[issue-to-reviewed-patch example](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/issue-to-reviewed-patch)
+packages three reviewed agent profiles, a durable workflow that retains edits
+in a Harness-owned worktree, and a post-apply eval. Its walkthrough keeps the
+source checkout unchanged before approval and leaves apply, commit, push, and
+hosted writes as explicit operator decisions.
+
+The model-backed
+[nightly compatibility guardian](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/nightly-compatibility-guardian)
+packages a pinned Codex/Claude/Gemini eval, exact baseline dimensions, a
+read-only triage workflow, and a durable nightly schedule. It runs while the UI
+is closed and moves only a failed, previously tested schedule contract into
+Attention for product/adapter/model/environment classification.
+
+The model-backed
+[cross-harness review team](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/cross-harness-review-team)
+fans out read-only explorer, security, tests, and maintainability roles across
+Codex, Claude, and Gemini. One synthesis step cites retained child artifacts;
+a failed child remains visible and the workflow cannot silently report partial
+evidence as success.
 
 Preview an external agent command without launching it:
 
@@ -1118,6 +1157,19 @@ managed-tool limitations without turning them into optimistic booleans.
 `structured_thread`, `structured_replay`, `native_cli_resume`,
 `degraded_replay`, `one_shot`, or `unsupported`.
 
+Generate one reviewable matrix for all built-in external CLI adapters directly
+from those runtime contracts:
+
+```bash
+giga harness capabilities
+giga harness capabilities --json
+```
+
+The Markdown and versioned JSON views are deterministic and do not probe
+installed binaries or read native CLI homes. An undeclared cell stays
+`null`/`undeclared`; the generator never upgrades a missing claim to supported.
+Use `giga harness inspect <id> --json` separately for installed-version evidence.
+
 ## Codex CLI Harness
 
 The Codex harness is intentionally conservative. `plan` and `read` map to a
@@ -1339,6 +1391,18 @@ the prompt and the four common run choices stay in the main canvas, and
 specialized controls move into `Advanced` and the off-canvas `Run details`
 drawer. On narrow screens, session history also becomes a drawer.
 
+After a first run starts, Work progressively reveals a compact Run → Evidence →
+Approval/worktree → Reuse/automation path. Evidence remains pending while the run is active. On
+success, failure, or cancellation, **Open evidence** deep-links to that exact
+run in Runs Center and summarizes only retained event/tool counts and duration;
+it does not repeat prompt, response, or workspace content. When the run retains
+an isolated patch, **Review worktree** opens the exact Diff inspector. Applying
+the patch and granting approval remain separate explicit operator actions.
+A successful run with no pending worktree review enables **Reuse run**. It
+opens that exact run's existing provenance/promotion inspector; generating and
+applying an agent/workflow/eval candidate and scheduling it remain separate
+explicit operator actions.
+
 It includes:
 
 - persistent session sidebar with search; workspace/harness filters and native
@@ -1359,6 +1423,7 @@ It includes:
   Markdown rendering for assistant output;
 - live assistant text, tool activity, and actual input/output token usage for
   headless harnesses that expose structured streaming events;
+- terminal run-to-evidence deep links into the selected Runs Center trace;
 - multi-harness arena comparison for running the same prompt against several
   headless harnesses;
 - run, arena, events, raw request, raw response, command, diff, PR,
@@ -2017,7 +2082,8 @@ place. Do not delete them as part of uninstall/reinstall.
 Start with:
 
 ```bash
-giga doctor
+giga doctor .
+giga doctor . --json
 ```
 
 Common checks:

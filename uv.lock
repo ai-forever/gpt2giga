@@ -1121,7 +1121,7 @@ provides-extras = ["postgres", "opensearch", "phoenix"]
 
 [[package]]
 name = "gpt2giga-harness"
-version = "0.0.1a2"
+version = "0.0.1a3"
 source = { editable = "packages/gpt2giga-harness" }
 dependencies = [
     { name = "fastapi" },

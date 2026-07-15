@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -87,6 +89,30 @@ class WorkspaceDiff:
             "captured": self.captured,
             "truncated": self.truncated,
             "error": self.error,
+        }
+
+
+@dataclass(frozen=True)
+class RunDiffReview:
+    """Immutable identity of one patch promotion reviewed by an operator."""
+
+    source_sha: str
+    patch_sha256: str
+    approval_binding: str
+    approval_binding_sha256: str
+    changed_files: tuple[str, ...] = ()
+    untracked_files: tuple[str, ...] = ()
+    branch_name: str | None = None
+
+    def to_preview(self) -> dict[str, Any]:
+        """Serialize the exact source, patch, and target intent for approval."""
+        return {
+            "source_sha": self.source_sha,
+            "patch_sha256": self.patch_sha256,
+            "approval_binding_sha256": self.approval_binding_sha256,
+            "branch_name": self.branch_name,
+            "changed_files": list(self.changed_files),
+            "untracked_files": list(self.untracked_files),
         }
 
 
@@ -241,12 +267,12 @@ def run_diff_response(run_metadata: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def apply_run_diff(
+def review_run_diff(
     run_metadata: Mapping[str, Any],
     *,
     branch_name: str | None = None,
-) -> dict[str, Any]:
-    """Apply one captured worktree patch back to its source git checkout."""
+) -> RunDiffReview:
+    """Freeze the source, captured patch, and branch intent shown for approval."""
     execution = _workspace_execution_metadata(run_metadata)
     if execution.get("policy") != WorkspacePolicy.WORKTREE.value:
         raise WorktreeError("Run did not use an isolated worktree.")
@@ -277,13 +303,61 @@ def apply_run_diff(
     check = _git_apply(source_root, patch, "--check")
     if check.returncode != 0:
         raise WorktreeConflictError(_stderr(check) or "git apply --check failed")
+    patch_sha256 = hashlib.sha256(patch.encode("utf-8")).hexdigest()
+    source_root_sha256 = hashlib.sha256(
+        str(Path(source_root).resolve()).encode("utf-8")
+    ).hexdigest()
+    binding_payload = json.dumps(
+        {
+            "branch_name": clean_branch,
+            "patch_sha256": patch_sha256,
+            "schema": "gpt2giga.reviewed_patch.v1",
+            "source_root_sha256": source_root_sha256,
+            "source_sha": current_head,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return RunDiffReview(
+        source_sha=current_head,
+        patch_sha256=patch_sha256,
+        approval_binding=binding_payload,
+        approval_binding_sha256=hashlib.sha256(
+            binding_payload.encode("utf-8")
+        ).hexdigest(),
+        changed_files=tuple(_string_list(execution.get("changed_files"))),
+        untracked_files=tuple(_string_list(execution.get("untracked_files"))),
+        branch_name=clean_branch,
+    )
+
+
+def apply_run_diff(
+    run_metadata: Mapping[str, Any],
+    *,
+    review: RunDiffReview,
+    branch_name: str | None = None,
+) -> dict[str, Any]:
+    """Apply one captured worktree patch back to its source git checkout."""
+    execution = _workspace_execution_metadata(run_metadata)
+    current_review = review_run_diff(run_metadata, branch_name=branch_name)
+    if current_review != review:
+        raise WorktreeConflictError(
+            "Reviewed source, patch, or branch identity changed; refusing to apply."
+        )
+    source_root = _required_metadata_text(execution, "source_git_root")
+    patch = _required_metadata_text(execution, "patch")
+    clean_branch = current_review.branch_name
+    check = _git_apply(source_root, patch, "--check")
+    if check.returncode != 0:
+        raise WorktreeConflictError(_stderr(check) or "git apply --check failed")
     if clean_branch:
         created = _git_run(
             source_root,
             "switch",
             "-c",
             clean_branch,
-            base_commit,
+            review.source_sha,
             timeout=20,
         )
         if created.returncode != 0:
@@ -293,6 +367,9 @@ def apply_run_diff(
         raise WorktreeConflictError(_stderr(applied) or "git apply failed")
     updated = dict(execution)
     updated["applied_at"] = utc_now()
+    updated["reviewed_source_sha"] = review.source_sha
+    updated["applied_patch_sha256"] = review.patch_sha256
+    updated["approval_binding_sha256"] = review.approval_binding_sha256
     if clean_branch:
         updated["applied_branch"] = clean_branch
     return updated

@@ -5,6 +5,30 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.0.1a3] - 2026-07-15
+
+### Добавлено
+- **Переход от review к reuse**: rail в Work теперь ведёт подходящий успешный run к его точному provenance/promotion inspector, а preview/apply promotion и scheduling остаются отдельными явными действиями оператора.
+- **Переход от evidence к review**: rail в Work теперь ведёт от terminal evidence к Diff точного сохранённого worktree при наличии изолированного patch, а apply и approval остаются отдельными явными действиями оператора.
+- **Переход от запуска к evidence**: Work показывает компактный путь Run → Evidence после начала первого запуска и включает deep link на сохранённый trace именно этого run в Runs Center только после terminal completion.
+- **Cross-harness review team**: reviewed-пример параллельно запускает read-only роли explorer, security, tests и maintainability через Codex, Claude и Gemini, сохраняет durable evidence каждого child при частичном сбое и синтезирует цитируемые artifacts без общего writable workspace.
+- **Nightly compatibility guardian**: reviewed-пример содержит pinned Codex/Claude/Gemini eval, baseline с точными adapter dimensions, read-only triage регрессий и durable nightly schedule, работающий без UI.
+- **Пример reviewed patch**: disposable issue fixture содержит reviewed-профили planner, изолированного implementer и read-only reviewer, durable workflow и post-apply eval; mutation исходного checkout, apply, commit, push и hosted writes остаются явными решениями оператора.
+- **Офлайн-демо первого запуска**: disposable-репозиторий с вымышленными inventory-данными проверяет `giga init`, redaction-safe диагностику, локальный Echo read run и сгенерированный smoke eval, хранит runtime state внутри копии демо и не требует credentials, proxy, внешнего agent CLI или публичной сети.
+- **Диагностика первого запуска**: `giga doctor [workspace] --json` теперь формирует redaction-safe отчёт о готовности proxy, routes, models, версий CLI-адаптеров, workspace и Git, durable worker, managed homes и MCP snapshots, добавляет исполнимые remediation-команды и читает runtime state без записи.
+- **Capability matrix**: команда `giga harness capabilities` генерирует проверяемые Markdown и JSON представления непосредственно из runtime parity contracts встроенных CLI-адаптеров.
+- **Доказательства идемпотентных side effects**: durable runtime умеет атомарно резервировать непрозрачные токены Harness-owned side effects и сохранять неизменяемые редактированные completion evidence, не разрешая автоматический retry произвольных edit-attempts.
+- **Ограниченный side-effect executor**: Harness-owned runtime events теперь связывают резервирование токена, durable outbox delivery и неизменяемое completion evidence в одной транзакции; повторная доставка переиспользует готовое evidence, а неоднозначные reservations остаются заблокированными.
+- **Durable recovery marker**: opt-in durable job хеширует перед сохранением переданный opaque side-effect token и записывает один фиксированный Harness-owned marker через атомарный executor; retry после потери owner переиспользует completed evidence, а неоднозначная reservation завершается безопасным отказом.
+- **Policy audit evidence**: reviewed promotion теперь сохраняет append-only hash chain для policy resolution, решения пользователя, точного enforcement owner, approval grant и source/patch binding; audit rows запрещают изменение и удаление.
+- **Lineage reviewed evidence**: успешно выполненные reviewed operations теперь публикуют проверенный content-addressed evidence manifest через runtime export, provenance запуска, replay requests и promotion запуска в agent/workflow/eval без раскрытия raw approval bindings или captured content.
+- **Доказательства GigaChat-совместимости**: завершённые headless-запуски Codex, Claude и Gemini теперь публикуют content-addressed provenance для наблюдаемого маршрута `gpt2giga`, запрошенных model/API mode и нормализованных stream, tool, usage, error и cancellation semantics без сохранения prompt или response content.
+
+### Исправлено
+- **Attention для scheduled eval**: после успешного `test-now` точного schedule hash следующий failed eval приостанавливает schedule и создаёт один retained Attention item с кратким scorecard.
+- **Durable scheduled evals**: повторная доставка одного schedule occurrence теперь использует исходный target run вместо создания второго eval/job, а scorecard, запущенный worker-ом, сохраняется в state directory разрешённого Harness-проекта.
+- **Reviewed promotion**: подтверждение `git.apply` теперь одноразово связано с точными source commit, SHA-256 сохранённого patch и branch intent; устаревший source, изменённый patch и повторное связывание approval завершаются отказом до изменения checkout.
+
 ## [0.0.1a2] - 2026-07-14
 
 ### Добавлено
@@ -46,5 +70,6 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
+[0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3
 [0.0.1a2]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a1...gpt2giga-harness-v0.0.1a2
 [0.0.1a1]: https://github.com/ai-forever/gpt2giga/releases/tag/gpt2giga-harness-v0.0.1a1

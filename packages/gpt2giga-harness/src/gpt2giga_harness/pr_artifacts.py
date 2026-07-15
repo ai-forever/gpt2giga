@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 from gpt2giga_harness.sessions.models import HarnessRun
 from gpt2giga_harness.types import redact_secrets
-from gpt2giga_harness.worktrees import apply_run_diff, run_diff_response
+from gpt2giga_harness.worktrees import RunDiffReview, apply_run_diff, run_diff_response
 
 MAX_SUMMARY_CHARS = 1200
 MAX_TEST_OUTPUT_CHARS = 4000
@@ -96,6 +96,7 @@ def pr_artifact_to_dict(artifact: RunPrArtifact) -> dict[str, Any]:
 def create_pr_branch(
     run: HarnessRun,
     *,
+    review: RunDiffReview,
     branch_name: str | None = None,
 ) -> dict[str, Any]:
     """Create a local branch from a worktree-backed run and apply its patch."""
@@ -103,6 +104,7 @@ def create_pr_branch(
     clean_branch_name = _text(branch_name) or artifact.branch_name_suggestion
     workspace_execution = apply_run_diff(
         run.metadata,
+        review=review,
         branch_name=clean_branch_name,
     )
     return {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import hashlib
 from typing import Any, Mapping, Protocol
 
 from gpt2giga_harness.runtime.models import ApprovalStatus
@@ -46,6 +47,19 @@ class ApprovalDecision(str, Enum):
     DENY = "deny"
 
 
+class PolicyAuditPhase(str, Enum):
+    """Immutable lifecycle phase for one governed operation."""
+
+    RESOLUTION = "resolution"
+    DECISION = "decision"
+    ENFORCEMENT = "enforcement"
+
+
+REVIEWED_PROMOTION_APPLY_OWNER = "reviewed_promotion.run_apply"
+REVIEWED_PROMOTION_BRANCH_OWNER = "reviewed_promotion.branch_create"
+REVIEWED_PROMOTION_MERGE_OWNER = "reviewed_promotion.workflow_merge_apply"
+
+
 @dataclass(frozen=True)
 class PermissionProfile:
     """Named immutable rule set selected at submission time."""
@@ -69,6 +83,8 @@ class PolicyContext:
     job_id: str | None = None
     reason: str = ""
     preview: Mapping[str, Any] | None = None
+    approval_binding: str | None = None
+    enforcement_owner: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +106,7 @@ class ApprovalRequest:
     status: ApprovalStatus
     enforcement: EnforcementLevel
     policy_source: str
+    enforcement_owner: str | None
     reason: str
     preview: Mapping[str, Any]
     created_at: str
@@ -116,6 +133,32 @@ class ApprovalGrant:
     uses_remaining: int | None = None
 
 
+@dataclass(frozen=True)
+class PolicyAuditEvent:
+    """One append-only, hash-chained policy operation event."""
+
+    id: str
+    operation_id: str
+    sequence: int
+    action: PermissionAction
+    phase: PolicyAuditPhase
+    decision: str
+    enforcement: EnforcementLevel
+    enforcement_owner: str
+    policy_source: str
+    approval_request_id: str
+    approval_grant_id: str | None
+    approval_binding_sha256: str | None
+    project_id: str | None
+    session_id: str | None
+    run_id: str | None
+    job_id: str | None
+    evidence: Mapping[str, Any]
+    previous_event_sha256: str | None
+    event_sha256: str
+    created_at: str
+
+
 def approval_request_to_dict(request: ApprovalRequest) -> dict[str, Any]:
     """Serialize one approval without secret-bearing values."""
     return {
@@ -124,6 +167,7 @@ def approval_request_to_dict(request: ApprovalRequest) -> dict[str, Any]:
         "status": request.status.value,
         "enforcement": request.enforcement.value,
         "policy_source": request.policy_source,
+        "enforcement_owner": request.enforcement_owner,
         "reason": request.reason,
         "preview": redacted_policy_preview(request.preview),
         "project_id": request.project_id,
@@ -134,6 +178,32 @@ def approval_request_to_dict(request: ApprovalRequest) -> dict[str, Any]:
         "expires_at": request.expires_at,
         "decided_at": request.decided_at,
         "created_at": request.created_at,
+    }
+
+
+def policy_audit_event_to_dict(event: PolicyAuditEvent) -> dict[str, Any]:
+    """Serialize immutable policy evidence without raw bindings or secrets."""
+    return {
+        "id": event.id,
+        "operation_id": event.operation_id,
+        "sequence": event.sequence,
+        "action": event.action.value,
+        "phase": event.phase.value,
+        "decision": event.decision,
+        "enforcement": event.enforcement.value,
+        "enforcement_owner": event.enforcement_owner,
+        "policy_source": event.policy_source,
+        "approval_request_id": event.approval_request_id,
+        "approval_grant_id": event.approval_grant_id,
+        "approval_binding_sha256": event.approval_binding_sha256,
+        "project_id": event.project_id,
+        "session_id": event.session_id,
+        "run_id": event.run_id,
+        "job_id": event.job_id,
+        "evidence": redact_for_storage(dict(event.evidence)),
+        "previous_event_sha256": event.previous_event_sha256,
+        "event_sha256": event.event_sha256,
+        "created_at": event.created_at,
     }
 
 
@@ -161,6 +231,8 @@ class GrantStore(Protocol):
         project_id: str | None,
         run_id: str | None,
         job_id: str | None,
+        approval_binding: str | None = None,
+        enforcement_owner: str | None = None,
     ) -> bool:
         raise NotImplementedError
 
@@ -235,6 +307,14 @@ def redacted_policy_preview(value: Mapping[str, Any] | None) -> dict[str, Any]:
     return {str(key): item for key, item in list(redacted.items())[:40]}
 
 
+def approval_binding_digest(value: str) -> str:
+    """Hash one opaque approval binding before persistence or comparison."""
+    text = str(value).strip()
+    if not text:
+        raise ValueError("approval_binding must not be empty")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 class PolicyEngine:
     """Resolve built-in rules plus persisted one/run/project grants."""
 
@@ -258,6 +338,8 @@ class PolicyEngine:
                 project_id=context.project_id,
                 run_id=context.run_id,
                 job_id=context.job_id,
+                approval_binding=context.approval_binding,
+                enforcement_owner=context.enforcement_owner,
             )
             if granted:
                 return PolicyResolution(

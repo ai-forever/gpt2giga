@@ -23,6 +23,9 @@ from gpt2giga_harness.runtime.models import (
     RuntimeJob,
     RuntimeOutboxEntry,
     RuntimeWorker,
+    SideEffectRecord,
+    SideEffectReservation,
+    SideEffectStatus,
     TERMINAL_ATTEMPT_STATUSES,
     TERMINAL_JOB_STATUSES,
     attempt_to_dict,
@@ -31,6 +34,7 @@ from gpt2giga_harness.runtime.models import (
     outbox_entry_to_dict,
     parse_attempt_status,
     parse_job_status,
+    side_effect_to_dict,
     worker_to_dict,
 )
 from gpt2giga_harness.runtime.policy import (
@@ -39,16 +43,22 @@ from gpt2giga_harness.runtime.policy import (
     ApprovalRequest,
     EnforcementLevel,
     PermissionAction,
+    PolicyAuditEvent,
+    PolicyAuditPhase,
     PolicyContext,
+    PolicyDecision,
     PolicyResolution,
+    approval_binding_digest,
     approval_grant_to_dict,
     approval_request_to_dict,
+    policy_audit_event_to_dict,
     redacted_policy_preview,
 )
+from gpt2giga_harness.reviewed_evidence import reviewed_evidence_index
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 
 RUNTIME_DB_NAME = "runtime.sqlite3"
-RUNTIME_SCHEMA_VERSION = 9
+RUNTIME_SCHEMA_VERSION = 11
 SQLITE_TIMEOUT_SECONDS = 10.0
 
 
@@ -70,6 +80,18 @@ class NativeProcessRecordNotFoundError(RuntimeStoreError):
 
 class IdempotencyConflictError(RuntimeStoreError):
     """Raised when one idempotency key is reused for a different job."""
+
+
+class SideEffectConflictError(RuntimeStoreError):
+    """Raised when a side-effect token or completion is rebound."""
+
+
+class SideEffectBlockedError(RuntimeStoreError):
+    """Raised when an incomplete side effect cannot be safely replayed."""
+
+
+class SideEffectNotFoundError(RuntimeStoreError):
+    """Raised when a durable side-effect record does not exist."""
 
 
 class ConcurrentUpdateError(RuntimeStoreError):
@@ -406,6 +428,80 @@ _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             )
             """,
             "CREATE INDEX native_process_outputs_created_idx ON native_process_outputs(process_id, created_at)",
+        ),
+    ),
+    (
+        10,
+        "Harness-owned idempotent side-effect tokens and completion evidence",
+        (
+            """
+            CREATE TABLE harness_side_effects (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL UNIQUE,
+                operation TEXT NOT NULL,
+                intent_hash TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('reserved', 'completed')),
+                owner_attempt_id TEXT NOT NULL REFERENCES job_attempts(id),
+                completion_evidence_json TEXT NOT NULL DEFAULT '{}',
+                completion_evidence_hash TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            )
+            """,
+            "CREATE INDEX harness_side_effects_job_idx ON harness_side_effects(job_id, created_at)",
+            "CREATE INDEX harness_side_effects_status_idx ON harness_side_effects(status, updated_at)",
+        ),
+    ),
+    (
+        11,
+        "immutable per-operation policy audit evidence",
+        (
+            "ALTER TABLE approval_requests ADD COLUMN enforcement_owner TEXT",
+            """
+            CREATE TABLE policy_audit_events (
+                id TEXT PRIMARY KEY,
+                operation_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL CHECK (sequence > 0),
+                action TEXT NOT NULL,
+                phase TEXT NOT NULL CHECK (
+                    phase IN ('resolution', 'decision', 'enforcement')
+                ),
+                decision TEXT NOT NULL,
+                enforcement TEXT NOT NULL,
+                enforcement_owner TEXT NOT NULL,
+                policy_source TEXT NOT NULL,
+                approval_request_id TEXT NOT NULL,
+                approval_grant_id TEXT,
+                approval_binding_sha256 TEXT,
+                project_id TEXT,
+                session_id TEXT,
+                run_id TEXT,
+                job_id TEXT,
+                evidence_json TEXT NOT NULL DEFAULT '{}',
+                previous_event_sha256 TEXT,
+                event_sha256 TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                UNIQUE (operation_id, sequence)
+            )
+            """,
+            "CREATE INDEX policy_audit_operation_idx ON policy_audit_events(operation_id, sequence)",
+            "CREATE INDEX policy_audit_scope_idx ON policy_audit_events(project_id, run_id, created_at)",
+            """
+            CREATE TRIGGER policy_audit_events_no_update
+            BEFORE UPDATE ON policy_audit_events
+            BEGIN
+                SELECT RAISE(ABORT, 'policy audit events are immutable');
+            END
+            """,
+            """
+            CREATE TRIGGER policy_audit_events_no_delete
+            BEFORE DELETE ON policy_audit_events
+            BEGIN
+                SELECT RAISE(ABORT, 'policy audit events are immutable');
+            END
+            """,
         ),
     ),
 )
@@ -1028,6 +1124,319 @@ class RuntimeCoordinationStore:
             raise JobNotFoundError(job_id)
         return _job_from_row(row)
 
+    def reserve_side_effect(
+        self,
+        *,
+        job_id: str,
+        attempt_id: str,
+        token: str,
+        operation: str,
+        intent: Mapping[str, Any],
+    ) -> SideEffectReservation:
+        """Atomically reserve one opaque token for a Harness-owned side effect."""
+        token_hash = _opaque_token_hash(token)
+        operation = _required_text(operation, "operation")
+        intent_hash = _mapping_hash(intent, "intent")
+        now = _utc_now()
+        record_id = _new_id("effect")
+        with self._connect() as connection, _transaction(connection):
+            attempt_row = connection.execute(
+                "SELECT * FROM job_attempts WHERE id = ?", (attempt_id,)
+            ).fetchone()
+            if attempt_row is None:
+                raise AttemptNotFoundError(attempt_id)
+            attempt = _attempt_from_row(attempt_row)
+            if attempt.job_id != job_id:
+                raise SideEffectConflictError(
+                    "side-effect attempt does not belong to the logical job"
+                )
+            if attempt.status in TERMINAL_ATTEMPT_STATUSES:
+                raise InvalidStateTransitionError(
+                    "terminal attempts cannot reserve side effects"
+                )
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO harness_side_effects (
+                        id, job_id, token_hash, operation, intent_hash, status,
+                        owner_attempt_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record_id,
+                        job_id,
+                        token_hash,
+                        operation,
+                        intent_hash,
+                        SideEffectStatus.RESERVED.value,
+                        attempt_id,
+                        now,
+                        now,
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT * FROM harness_side_effects WHERE id = ?", (record_id,)
+                ).fetchone()
+                return SideEffectReservation(
+                    record=_side_effect_from_row(row), created=True
+                )
+            except sqlite3.IntegrityError:
+                row = connection.execute(
+                    "SELECT * FROM harness_side_effects WHERE token_hash = ?",
+                    (token_hash,),
+                ).fetchone()
+                if row is None:
+                    raise
+                existing = _side_effect_from_row(row)
+                if (
+                    existing.job_id != job_id
+                    or existing.operation != operation
+                    or existing.intent_hash != intent_hash
+                ):
+                    raise SideEffectConflictError(
+                        "side-effect token is already bound to different intent"
+                    ) from None
+                return SideEffectReservation(record=existing, created=False)
+
+    def complete_side_effect(
+        self,
+        record_id: str,
+        *,
+        attempt_id: str,
+        evidence: Mapping[str, Any],
+    ) -> SideEffectRecord:
+        """Complete one owned reservation with immutable redacted evidence."""
+        safe_evidence = _safe_mapping(evidence, "completion evidence")
+        if not safe_evidence:
+            raise ValueError("completion evidence is required")
+        evidence_hash = _mapping_hash(safe_evidence, "completion evidence")
+        evidence_json = _canonical_json(safe_evidence, "completion evidence")
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            row = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE id = ?", (record_id,)
+            ).fetchone()
+            if row is None:
+                raise SideEffectNotFoundError(record_id)
+            record = _side_effect_from_row(row)
+            if record.owner_attempt_id != attempt_id:
+                raise SideEffectConflictError(
+                    "only the reserving attempt can complete a side effect"
+                )
+            attempt_row = connection.execute(
+                "SELECT * FROM job_attempts WHERE id = ?", (attempt_id,)
+            ).fetchone()
+            if attempt_row is None:
+                raise AttemptNotFoundError(attempt_id)
+            attempt = _attempt_from_row(attempt_row)
+            if attempt.job_id != record.job_id:
+                raise SideEffectConflictError(
+                    "side-effect attempt does not belong to the logical job"
+                )
+            if record.status is SideEffectStatus.COMPLETED:
+                if record.completion_evidence_hash != evidence_hash:
+                    raise SideEffectConflictError(
+                        "side effect already has different completion evidence"
+                    )
+                return record
+            if attempt.status in TERMINAL_ATTEMPT_STATUSES:
+                raise InvalidStateTransitionError(
+                    "terminal attempts cannot complete side effects"
+                )
+            connection.execute(
+                """
+                UPDATE harness_side_effects
+                SET status = ?, completion_evidence_json = ?,
+                    completion_evidence_hash = ?, completed_at = ?, updated_at = ?
+                WHERE id = ? AND status = ? AND owner_attempt_id = ?
+                """,
+                (
+                    SideEffectStatus.COMPLETED.value,
+                    evidence_json,
+                    evidence_hash,
+                    now,
+                    now,
+                    record_id,
+                    SideEffectStatus.RESERVED.value,
+                    attempt_id,
+                ),
+            )
+            if connection.execute("SELECT changes()").fetchone()[0] != 1:
+                raise ConcurrentUpdateError(
+                    f"side effect {record_id} changed concurrently"
+                )
+            updated = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE id = ?", (record_id,)
+            ).fetchone()
+        return _side_effect_from_row(updated)
+
+    def enqueue_side_effect_event(
+        self,
+        *,
+        job_id: str,
+        attempt_id: str,
+        token: str,
+        event_type: str,
+        message: str,
+        payload: Mapping[str, Any],
+    ) -> SideEffectReservation:
+        """Atomically enqueue one idempotent Harness-owned runtime event."""
+        operation = "runtime.event.enqueue"
+        safe_event_type = _required_text(event_type, "event_type")
+        safe_message = str(redact_for_storage(_required_text(message, "message")))
+        safe_payload = _safe_mapping(payload, "event payload")
+        intent = {
+            "event_type": safe_event_type,
+            "message": safe_message,
+            "payload": safe_payload,
+        }
+        token_hash = _opaque_token_hash(token)
+        intent_hash = _mapping_hash(intent, "intent")
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            attempt_row = connection.execute(
+                "SELECT * FROM job_attempts WHERE id = ?", (attempt_id,)
+            ).fetchone()
+            if attempt_row is None:
+                raise AttemptNotFoundError(attempt_id)
+            attempt = _attempt_from_row(attempt_row)
+            if attempt.job_id != job_id:
+                raise SideEffectConflictError(
+                    "side-effect attempt does not belong to the logical job"
+                )
+            if attempt.status in TERMINAL_ATTEMPT_STATUSES:
+                raise InvalidStateTransitionError(
+                    "terminal attempts cannot execute side effects"
+                )
+            existing_row = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE token_hash = ?",
+                (token_hash,),
+            ).fetchone()
+            if existing_row is not None:
+                existing = _side_effect_from_row(existing_row)
+                if (
+                    existing.job_id != job_id
+                    or existing.operation != operation
+                    or existing.intent_hash != intent_hash
+                ):
+                    raise SideEffectConflictError(
+                        "side-effect token is already bound to different intent"
+                    )
+                if existing.status is SideEffectStatus.COMPLETED:
+                    return SideEffectReservation(record=existing, created=False)
+                raise SideEffectBlockedError(
+                    "side effect remains reserved by an earlier attempt; "
+                    "automatic replay is blocked"
+                )
+
+            record_id = _new_id("effect")
+            outbox_id = _new_id("outbox")
+            completion_evidence = {
+                "delivery": "runtime_outbox",
+                "event_id": f"evt_{outbox_id}",
+                "outbox_id": outbox_id,
+            }
+            evidence_hash = _mapping_hash(completion_evidence, "completion evidence")
+            connection.execute(
+                """
+                INSERT INTO harness_side_effects (
+                    id, job_id, token_hash, operation, intent_hash, status,
+                    owner_attempt_id, completion_evidence_json,
+                    completion_evidence_hash, created_at, updated_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record_id,
+                    job_id,
+                    token_hash,
+                    operation,
+                    intent_hash,
+                    SideEffectStatus.COMPLETED.value,
+                    attempt_id,
+                    _canonical_json(completion_evidence, "completion evidence"),
+                    evidence_hash,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            job_row = connection.execute(
+                "SELECT * FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            job = _job_from_row(job_row)
+            outbox_payload = {
+                "side_effect_id": record_id,
+                "session_id": job.session_id,
+                "run_id": attempt.run_id,
+                "job_id": job.id,
+                "attempt_id": attempt.id,
+                "event_type": safe_event_type,
+                "message": safe_message,
+                "event_payload": safe_payload,
+            }
+            connection.execute(
+                """
+                INSERT INTO runtime_outbox (
+                    id, aggregate_type, aggregate_id, event_type, dedupe_key,
+                    payload_json, created_at
+                ) VALUES (?, 'side_effect', ?, 'side_effect_event', ?, ?, ?)
+                """,
+                (
+                    outbox_id,
+                    record_id,
+                    f"side-effect:{record_id}:event",
+                    _canonical_json(outbox_payload, "side-effect outbox payload"),
+                    now,
+                ),
+            )
+            completed_row = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE id = ?", (record_id,)
+            ).fetchone()
+        return SideEffectReservation(
+            record=_side_effect_from_row(completed_row), created=True
+        )
+
+    def get_side_effect(self, record_id: str) -> SideEffectRecord:
+        """Return one durable side-effect record by public identity."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE id = ?", (record_id,)
+            ).fetchone()
+        if row is None:
+            raise SideEffectNotFoundError(record_id)
+        return _side_effect_from_row(row)
+
+    def get_side_effect_for_token(self, token: str) -> SideEffectRecord:
+        """Resolve an opaque token without persisting or returning its raw value."""
+        token_hash = _opaque_token_hash(token)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE token_hash = ?",
+                (token_hash,),
+            ).fetchone()
+        if row is None:
+            raise SideEffectNotFoundError(token_hash)
+        return _side_effect_from_row(row)
+
+    def list_side_effects(
+        self, job_id: str | None = None
+    ) -> tuple[SideEffectRecord, ...]:
+        """List durable side effects in stable creation order."""
+        with self._connect() as connection:
+            if job_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM harness_side_effects ORDER BY created_at, id"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM harness_side_effects
+                    WHERE job_id = ? ORDER BY created_at, id
+                    """,
+                    (job_id,),
+                ).fetchall()
+        return tuple(_side_effect_from_row(row) for row in rows)
+
     def retry_safe_job(self, job_id: str) -> RuntimeJob:
         """Requeue one failed job whose latest attempt is explicitly retry-safe."""
         now = _utc_now()
@@ -1439,18 +1848,26 @@ class RuntimeCoordinationStore:
                 context.session_id or "",
                 context.run_id or "",
                 context.job_id or "",
+                context.approval_binding or "",
+                context.enforcement_owner or "",
             )
         )
         dedupe_key = hashlib.sha256(scope_identity.encode("utf-8")).hexdigest()
+        preview = redacted_policy_preview(context.preview)
+        if context.approval_binding:
+            preview["approval_binding_sha256"] = approval_binding_digest(
+                context.approval_binding
+            )
         values = (
             request_id,
             resolution.action.value,
             ApprovalStatus.PENDING.value,
             resolution.enforcement.value,
             resolution.policy_source,
+            _optional_text(context.enforcement_owner),
             _required_text(context.reason, "approval reason"),
             json.dumps(
-                redacted_policy_preview(context.preview),
+                preview,
                 ensure_ascii=False,
                 sort_keys=True,
             ),
@@ -1468,10 +1885,11 @@ class RuntimeCoordinationStore:
                 connection.execute(
                     """
                     INSERT INTO approval_requests (
-                        id, action, status, enforcement, policy_source, reason,
-                        preview_json, project_id, session_id, run_id, job_id,
-                        dedupe_key, expires_at, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        id, action, status, enforcement, policy_source,
+                        enforcement_owner, reason, preview_json, project_id,
+                        session_id, run_id, job_id, dedupe_key, expires_at,
+                        created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     values,
                 )
@@ -1493,6 +1911,27 @@ class RuntimeCoordinationStore:
                         version = version + 1 WHERE id = ?
                     """,
                     (request_id, now, context.job_id),
+                )
+            if context.enforcement_owner:
+                _append_policy_audit_event(
+                    connection,
+                    operation_id=request_id,
+                    action=resolution.action,
+                    phase=PolicyAuditPhase.RESOLUTION,
+                    decision=resolution.decision.value,
+                    enforcement=resolution.enforcement,
+                    enforcement_owner=context.enforcement_owner,
+                    policy_source=resolution.policy_source,
+                    approval_request_id=request_id,
+                    approval_binding_sha256=_approval_preview_binding(preview),
+                    project_id=context.project_id,
+                    session_id=context.session_id,
+                    run_id=context.run_id,
+                    job_id=context.job_id,
+                    evidence={
+                        "preview_sha256": _mapping_hash(preview, "policy preview")
+                    },
+                    created_at=now,
                 )
             row = connection.execute(
                 "SELECT * FROM approval_requests WHERE id = ?", (request_id,)
@@ -1594,6 +2033,15 @@ class RuntimeCoordinationStore:
                 raise InvalidStateTransitionError(
                     f"approval {request_id} is {request.status.value}"
                 )
+            if _approval_preview_binding(
+                request.preview
+            ) is not None and parsed_decision not in {
+                ApprovalDecision.ALLOW_ONCE,
+                ApprovalDecision.DENY,
+            }:
+                raise ValueError(
+                    "Hash-bound approvals can only be allowed once or denied"
+                )
             grant: tuple[str, str, int | None, str | None] | None = None
             if parsed_decision is ApprovalDecision.ALLOW_ONCE:
                 scope_type, scope_id = _approval_once_scope(request)
@@ -1638,8 +2086,10 @@ class RuntimeCoordinationStore:
                 raise ConcurrentUpdateError(
                     f"approval {request_id} changed concurrently"
                 )
+            grant_id: str | None = None
             if grant is not None:
                 scope_type, scope_id, uses_remaining, expires_at = grant
+                grant_id = _new_id("grant")
                 connection.execute(
                     """
                     INSERT INTO approval_grants (
@@ -1648,7 +2098,7 @@ class RuntimeCoordinationStore:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        _new_id("grant"),
+                        grant_id,
                         request_id,
                         request.action.value,
                         scope_type,
@@ -1657,6 +2107,26 @@ class RuntimeCoordinationStore:
                         expires_at,
                         now,
                     ),
+                )
+            if request.enforcement_owner:
+                _append_policy_audit_event(
+                    connection,
+                    operation_id=request.id,
+                    action=request.action,
+                    phase=PolicyAuditPhase.DECISION,
+                    decision=parsed_decision.value,
+                    enforcement=request.enforcement,
+                    enforcement_owner=request.enforcement_owner,
+                    policy_source=request.policy_source,
+                    approval_request_id=request.id,
+                    approval_grant_id=grant_id,
+                    approval_binding_sha256=_approval_preview_binding(request.preview),
+                    project_id=request.project_id,
+                    session_id=request.session_id,
+                    run_id=request.run_id,
+                    job_id=request.job_id,
+                    evidence={"approval_status": status.value},
+                    created_at=now,
                 )
             if request.job_id:
                 job_row = connection.execute(
@@ -1712,6 +2182,8 @@ class RuntimeCoordinationStore:
         project_id: str | None,
         run_id: str | None,
         job_id: str | None,
+        approval_binding: str | None = None,
+        enforcement_owner: str | None = None,
     ) -> bool:
         """Consume a matching allow-once grant or observe a scoped grant."""
         parsed_action = PermissionAction(action)
@@ -1729,18 +2201,44 @@ class RuntimeCoordinationStore:
             params.extend((kind, value))
         now = _utc_now()
         params.extend((now,))
+        binding_hash = (
+            approval_binding_digest(approval_binding) if approval_binding else None
+        )
         with self._connect() as connection, _transaction(connection):
-            row = connection.execute(
+            rows = connection.execute(
                 f"""
-                SELECT * FROM approval_grants
-                WHERE action = ? AND ({clauses})
-                  AND (expires_at IS NULL OR expires_at > ?)
-                  AND (uses_remaining IS NULL OR uses_remaining > 0)
-                ORDER BY CASE scope_type WHEN 'job' THEN 0 WHEN 'run' THEN 1 ELSE 2 END,
-                         created_at DESC LIMIT 1
+                SELECT approval_grants.*,
+                       approval_requests.preview_json,
+                       approval_requests.policy_source AS request_policy_source,
+                       approval_requests.enforcement AS request_enforcement,
+                       approval_requests.enforcement_owner AS request_enforcement_owner,
+                       approval_requests.project_id AS request_project_id,
+                       approval_requests.session_id AS request_session_id,
+                       approval_requests.run_id AS request_run_id,
+                       approval_requests.job_id AS request_job_id
+                FROM approval_grants
+                JOIN approval_requests
+                  ON approval_requests.id = approval_grants.request_id
+                WHERE approval_grants.action = ? AND ({clauses})
+                  AND (approval_grants.expires_at IS NULL OR approval_grants.expires_at > ?)
+                  AND (approval_grants.uses_remaining IS NULL OR approval_grants.uses_remaining > 0)
+                ORDER BY CASE approval_grants.scope_type
+                             WHEN 'job' THEN 0 WHEN 'run' THEN 1 ELSE 2 END,
+                         approval_grants.created_at DESC
                 """,
                 tuple(params),
-            ).fetchone()
+            ).fetchall()
+            row = next(
+                (
+                    candidate
+                    for candidate in rows
+                    if _approval_preview_binding_json(candidate["preview_json"])
+                    == binding_hash
+                    and _optional_text(candidate["request_enforcement_owner"])
+                    == _optional_text(enforcement_owner)
+                ),
+                None,
+            )
             if row is None:
                 return False
             if row["uses_remaining"] is not None:
@@ -1753,6 +2251,29 @@ class RuntimeCoordinationStore:
                 )
                 if connection.execute("SELECT changes()").fetchone()[0] != 1:
                     return False
+            if enforcement_owner:
+                _append_policy_audit_event(
+                    connection,
+                    operation_id=str(row["request_id"]),
+                    action=parsed_action,
+                    phase=PolicyAuditPhase.ENFORCEMENT,
+                    decision=PolicyDecision.ALLOW.value,
+                    enforcement=EnforcementLevel(str(row["request_enforcement"])),
+                    enforcement_owner=enforcement_owner,
+                    policy_source=str(row["request_policy_source"]),
+                    approval_request_id=str(row["request_id"]),
+                    approval_grant_id=str(row["id"]),
+                    approval_binding_sha256=binding_hash,
+                    project_id=_optional_text(row["request_project_id"]),
+                    session_id=_optional_text(row["request_session_id"]),
+                    run_id=_optional_text(row["request_run_id"]),
+                    job_id=_optional_text(row["request_job_id"]),
+                    evidence={
+                        "scope_type": str(row["scope_type"]),
+                        "scope_id": str(row["scope_id"]),
+                    },
+                    created_at=now,
+                )
         return True
 
     def list_approval_grants(self) -> tuple[ApprovalGrant, ...]:
@@ -1762,6 +2283,36 @@ class RuntimeCoordinationStore:
                 "SELECT * FROM approval_grants ORDER BY created_at, id"
             ).fetchall()
         return tuple(_approval_grant_from_row(row) for row in rows)
+
+    def list_policy_audit_events(
+        self,
+        *,
+        operation_id: str | None = None,
+        run_id: str | None = None,
+        limit: int = 500,
+    ) -> tuple[PolicyAuditEvent, ...]:
+        """List immutable policy evidence in operation order."""
+        page_size = max(1, min(int(limit), 1000))
+        filters: list[str] = []
+        values: list[Any] = []
+        if operation_id is not None:
+            filters.append("operation_id = ?")
+            values.append(_required_text(operation_id, "operation_id"))
+        if run_id is not None:
+            filters.append("run_id = ?")
+            values.append(_required_text(run_id, "run_id"))
+        where = f"WHERE {' AND '.join(filters)}" if filters else ""
+        order = (
+            "sequence"
+            if operation_id is not None
+            else "created_at, operation_id, sequence"
+        )
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM policy_audit_events {where} ORDER BY {order} LIMIT ?",
+                (*values, page_size),
+            ).fetchall()
+        return tuple(_policy_audit_event_from_row(row) for row in rows)
 
     def transition_attempt(
         self,
@@ -2033,6 +2584,7 @@ class RuntimeCoordinationStore:
                     "workers",
                     "approval_requests",
                     "approval_grants",
+                    "policy_audit_events",
                     "workflow_runs",
                     "workflow_step_attempts",
                     "schedule_states",
@@ -2040,6 +2592,7 @@ class RuntimeCoordinationStore:
                     "attention_reads",
                     "native_processes",
                     "native_process_outputs",
+                    "harness_side_effects",
                 )
             }
             pending = int(
@@ -2058,6 +2611,7 @@ class RuntimeCoordinationStore:
 
     def export(self) -> dict[str, Any]:
         """Export coordination state as transparent, task-content-free JSON."""
+        policy_audit_events = self.list_policy_audit_events(limit=1000)
         with self._connect() as connection:
             outbox_rows = connection.execute(
                 "SELECT * FROM runtime_outbox ORDER BY created_at, id"
@@ -2091,6 +2645,9 @@ class RuntimeCoordinationStore:
             "exported_at": _utc_now(),
             "jobs": [job_to_dict(job) for job in self.list_jobs()],
             "attempts": [attempt_to_dict(item) for item in self.list_attempts()],
+            "side_effects": [
+                side_effect_to_dict(item) for item in self.list_side_effects()
+            ],
             "workers": [worker_to_dict(item) for item in self.list_workers()],
             "native_processes": [
                 native_process_record_to_dict(item)
@@ -2113,6 +2670,10 @@ class RuntimeCoordinationStore:
             "approval_grants": [
                 approval_grant_to_dict(item) for item in self.list_approval_grants()
             ],
+            "policy_audit_events": [
+                policy_audit_event_to_dict(item) for item in policy_audit_events
+            ],
+            "reviewed_evidence": reviewed_evidence_index(policy_audit_events),
             "attention_reads": [dict(row) for row in attention_rows],
             "outbox": [
                 outbox_entry_to_dict(_outbox_from_row(row)) for row in outbox_rows
@@ -2439,6 +3000,23 @@ def _attempt_from_row(row: sqlite3.Row) -> JobAttempt:
     )
 
 
+def _side_effect_from_row(row: sqlite3.Row) -> SideEffectRecord:
+    return SideEffectRecord(
+        id=str(row["id"]),
+        job_id=str(row["job_id"]),
+        token_hash=str(row["token_hash"]),
+        operation=str(row["operation"]),
+        intent_hash=str(row["intent_hash"]),
+        status=SideEffectStatus(str(row["status"])),
+        owner_attempt_id=str(row["owner_attempt_id"]),
+        completion_evidence=_json_mapping(row["completion_evidence_json"]),
+        completion_evidence_hash=_optional_text(row["completion_evidence_hash"]),
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
+        completed_at=_optional_text(row["completed_at"]),
+    )
+
+
 def _outbox_from_row(row: sqlite3.Row) -> RuntimeOutboxEntry:
     payload = json.loads(str(row["payload_json"]))
     return RuntimeOutboxEntry(
@@ -2518,6 +3096,7 @@ def _approval_request_from_row(row: sqlite3.Row) -> ApprovalRequest:
         status=ApprovalStatus(str(row["status"])),
         enforcement=EnforcementLevel(str(row["enforcement"])),
         policy_source=str(row["policy_source"]),
+        enforcement_owner=_optional_text(row["enforcement_owner"]),
         reason=str(row["reason"]),
         preview=dict(preview) if isinstance(preview, Mapping) else {},
         project_id=_optional_text(row["project_id"]),
@@ -2550,6 +3129,32 @@ def _approval_grant_from_row(row: sqlite3.Row) -> ApprovalGrant:
     )
 
 
+def _policy_audit_event_from_row(row: sqlite3.Row) -> PolicyAuditEvent:
+    evidence = _json_mapping(row["evidence_json"])
+    return PolicyAuditEvent(
+        id=str(row["id"]),
+        operation_id=str(row["operation_id"]),
+        sequence=int(row["sequence"]),
+        action=PermissionAction(str(row["action"])),
+        phase=PolicyAuditPhase(str(row["phase"])),
+        decision=str(row["decision"]),
+        enforcement=EnforcementLevel(str(row["enforcement"])),
+        enforcement_owner=str(row["enforcement_owner"]),
+        policy_source=str(row["policy_source"]),
+        approval_request_id=str(row["approval_request_id"]),
+        approval_grant_id=_optional_text(row["approval_grant_id"]),
+        approval_binding_sha256=_optional_text(row["approval_binding_sha256"]),
+        project_id=_optional_text(row["project_id"]),
+        session_id=_optional_text(row["session_id"]),
+        run_id=_optional_text(row["run_id"]),
+        job_id=_optional_text(row["job_id"]),
+        evidence=evidence,
+        previous_event_sha256=_optional_text(row["previous_event_sha256"]),
+        event_sha256=str(row["event_sha256"]),
+        created_at=str(row["created_at"]),
+    )
+
+
 def _approval_once_scope(request: ApprovalRequest) -> tuple[str, str]:
     if request.job_id:
         return "job", request.job_id
@@ -2573,6 +3178,150 @@ def _expire_approvals(connection: sqlite3.Connection, now: str) -> None:
 def _idempotency_hash(value: str) -> str:
     text = _required_text(value, "idempotency_key")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _opaque_token_hash(value: str) -> str:
+    text = _required_text(value, "side_effect_token")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _approval_preview_binding(preview: Mapping[str, Any]) -> str | None:
+    value = preview.get("approval_binding_sha256")
+    if value is None or not str(value).strip():
+        return None
+    return str(value)
+
+
+def _approval_preview_binding_json(value: Any) -> str | None:
+    try:
+        preview = json.loads(str(value))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(preview, Mapping):
+        return None
+    return _approval_preview_binding(preview)
+
+
+def _append_policy_audit_event(
+    connection: sqlite3.Connection,
+    *,
+    operation_id: str,
+    action: PermissionAction,
+    phase: PolicyAuditPhase,
+    decision: str,
+    enforcement: EnforcementLevel,
+    enforcement_owner: str,
+    policy_source: str,
+    approval_request_id: str,
+    approval_grant_id: str | None = None,
+    approval_binding_sha256: str | None = None,
+    project_id: str | None = None,
+    session_id: str | None = None,
+    run_id: str | None = None,
+    job_id: str | None = None,
+    evidence: Mapping[str, Any] | None = None,
+    created_at: str,
+) -> None:
+    """Append one immutable, hash-chained policy operation event."""
+    operation = _required_text(operation_id, "policy operation_id")
+    previous = connection.execute(
+        """
+        SELECT sequence, event_sha256 FROM policy_audit_events
+        WHERE operation_id = ? ORDER BY sequence DESC LIMIT 1
+        """,
+        (operation,),
+    ).fetchone()
+    sequence = int(previous["sequence"]) + 1 if previous is not None else 1
+    previous_hash = str(previous["event_sha256"]) if previous is not None else None
+    event_id = _new_id("policy_audit")
+    safe_evidence = _safe_mapping(evidence or {}, "policy audit evidence")
+    payload = {
+        "action": action.value,
+        "approval_binding_sha256": _optional_text(approval_binding_sha256),
+        "approval_grant_id": _optional_text(approval_grant_id),
+        "approval_request_id": _required_text(
+            approval_request_id, "approval_request_id"
+        ),
+        "created_at": created_at,
+        "decision": _required_text(decision, "policy decision"),
+        "enforcement": enforcement.value,
+        "enforcement_owner": _required_text(enforcement_owner, "enforcement_owner"),
+        "evidence": safe_evidence,
+        "id": event_id,
+        "job_id": _optional_text(job_id),
+        "operation_id": operation,
+        "phase": phase.value,
+        "policy_source": _required_text(policy_source, "policy_source"),
+        "previous_event_sha256": previous_hash,
+        "project_id": _optional_text(project_id),
+        "run_id": _optional_text(run_id),
+        "sequence": sequence,
+        "session_id": _optional_text(session_id),
+    }
+    event_hash = hashlib.sha256(
+        _canonical_json(payload, "policy audit event").encode("utf-8")
+    ).hexdigest()
+    connection.execute(
+        """
+        INSERT INTO policy_audit_events (
+            id, operation_id, sequence, action, phase, decision, enforcement,
+            enforcement_owner, policy_source, approval_request_id,
+            approval_grant_id, approval_binding_sha256, project_id, session_id,
+            run_id, job_id, evidence_json, previous_event_sha256, event_sha256,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event_id,
+            operation,
+            sequence,
+            action.value,
+            phase.value,
+            payload["decision"],
+            enforcement.value,
+            payload["enforcement_owner"],
+            payload["policy_source"],
+            payload["approval_request_id"],
+            payload["approval_grant_id"],
+            payload["approval_binding_sha256"],
+            payload["project_id"],
+            payload["session_id"],
+            payload["run_id"],
+            payload["job_id"],
+            _canonical_json(safe_evidence, "policy audit evidence"),
+            previous_hash,
+            event_hash,
+            created_at,
+        ),
+    )
+
+
+def _canonical_json(value: Mapping[str, Any], name: str) -> str:
+    try:
+        return json.dumps(
+            dict(value),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be JSON-serializable") from exc
+
+
+def _mapping_hash(value: Mapping[str, Any], name: str) -> str:
+    return hashlib.sha256(_canonical_json(value, name).encode("utf-8")).hexdigest()
+
+
+def _safe_mapping(value: Mapping[str, Any], name: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a mapping")
+    safe = redact_for_storage(dict(value))
+    if not isinstance(safe, Mapping):
+        raise ValueError(f"{name} must be a mapping")
+    result = dict(safe)
+    _canonical_json(result, name)
+    return result
 
 
 def _required_text(value: Any, name: str) -> str:
