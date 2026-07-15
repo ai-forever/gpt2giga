@@ -1,1 +1,0 @@
-import{o as e,r as t}from"./index-xHmhMENB.js";import{t as n}from"./InspectorFrame-DDWv3FBZ.js";var r=e();function i({locale:e}){return(0,r.jsx)(n,{locale:e,title:t(e,`rawEvidence`),children:t(e,`rawEvidenceDescription`)})}export{i as RawEvidenceInspector};

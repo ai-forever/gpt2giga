@@ -231,7 +231,10 @@ export class RunEventStreamStore {
   }
 }
 
-export function useRunEventStream(runId: string | undefined): RunStreamStatus {
+export function useRunEventStream(
+  runId: string | undefined,
+  resetToken = 0,
+): RunStreamSnapshot {
   const storeRef = useRef<RunEventStreamStore | null>(null);
   if (storeRef.current === null) storeRef.current = new RunEventStreamStore();
   const store = storeRef.current;
@@ -241,11 +244,11 @@ export function useRunEventStream(runId: string | undefined): RunStreamStatus {
       return;
     }
     return store.connect(runId);
-  }, [runId, store]);
+  }, [resetToken, runId, store]);
   return useSyncExternalStore(
     store.subscribe,
-    () => store.getSnapshot().status,
-    () => "idle",
+    store.getSnapshot,
+    () => idleSnapshot,
   );
 }
 

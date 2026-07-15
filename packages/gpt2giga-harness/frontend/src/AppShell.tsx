@@ -1,6 +1,8 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
+import { InboxDrawer, type InboxKind } from "./components/InboxDrawer";
 import { message } from "./messages";
 import { primarySurfaces, surfaceForPath } from "./navigation";
 import { PreferencesContext } from "./preferences-context";
@@ -11,6 +13,7 @@ import {
   type LocalePreference,
   type ThemePreference,
 } from "./preferences";
+import { approvalsOptions, attentionOptions } from "./request-graph";
 
 function ApprovalIcon() {
   return (
@@ -34,12 +37,23 @@ export function AppShell() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const activeSurface = surfaceForPath(pathname);
   const [preferences, setPreferences] = useState(loadPreferences);
-  const [inbox, setInbox] = useState<"approvals" | "attention" | null>(null);
+  const [inbox, setInbox] = useState<InboxKind | null>(null);
+  const approvals = useQuery(approvalsOptions());
+  const attention = useQuery(attentionOptions());
 
   useEffect(() => {
     applyTheme(preferences.theme);
     savePreferences(preferences);
   }, [preferences]);
+
+  useEffect(() => {
+    const openInbox = (event: Event) => {
+      const kind = (event as CustomEvent<InboxKind>).detail;
+      if (kind === "approvals" || kind === "attention") setInbox(kind);
+    };
+    globalThis.addEventListener("cockpit:open-inbox", openInbox);
+    return () => globalThis.removeEventListener("cockpit:open-inbox", openInbox);
+  }, []);
 
   const setLocale = (locale: LocalePreference) => {
     setPreferences((current) => ({ ...current, locale }));
@@ -87,6 +101,9 @@ export function AppShell() {
             >
               <ApprovalIcon />
               <span className="action-label">{message(preferences.locale, "approvals")}</span>
+              {(approvals.data?.pending_count ?? 0) > 0 ? (
+                <span className="count-badge">{approvals.data?.pending_count}</span>
+              ) : null}
             </button>
             <button
               aria-label={message(preferences.locale, "attention")}
@@ -95,32 +112,24 @@ export function AppShell() {
             >
               <AttentionIcon />
               <span className="action-label">{message(preferences.locale, "attention")}</span>
+              {(attention.data?.unread ?? 0) > 0 ? (
+                <span className="count-badge attention">{attention.data?.unread}</span>
+              ) : null}
             </button>
             <Link className="settings-link" to="/cockpit-v2/settings">{message(preferences.locale, "settings")}</Link>
           </div>
         </header>
-        <div className="shell-notice">
-          <span>{message(preferences.locale, "shellNotice")}</span>
-          <a href="/legacy">{message(preferences.locale, "legacy")}</a>
-        </div>
-        <main className="surface-shell">
+        {activeSurface === "work" || activeSurface === "runs" ? null : (
+          <div className="shell-notice">
+            <span>{message(preferences.locale, "shellNotice")}</span>
+            <a href="/legacy">{message(preferences.locale, "legacy")}</a>
+          </div>
+        )}
+        <main className={activeSurface === "work" || activeSurface === "runs" ? "surface-shell migrated" : "surface-shell"}>
           <Outlet />
         </main>
       </div>
-      {inbox === null ? null : (
-        <div className="drawer-backdrop" role="presentation" onClick={() => setInbox(null)}>
-          <aside className="inbox-drawer" role="dialog" aria-modal="true" aria-label={message(preferences.locale, inbox)} onClick={(event) => event.stopPropagation()}>
-            <div className="drawer-heading">
-              <div>
-                <p className="eyebrow">Global inbox</p>
-                <h2>{message(preferences.locale, inbox)}</h2>
-              </div>
-              <button type="button" onClick={() => setInbox(null)}>{message(preferences.locale, "close")}</button>
-            </div>
-            <div className="inbox-empty">{message(preferences.locale, "noItems")}</div>
-          </aside>
-        </div>
-      )}
+      {inbox === null ? null : <InboxDrawer kind={inbox} onClose={() => setInbox(null)} />}
       <span className="sr-only" aria-live="polite">{message(preferences.locale, "connection")}</span>
       </div>
     </PreferencesContext.Provider>

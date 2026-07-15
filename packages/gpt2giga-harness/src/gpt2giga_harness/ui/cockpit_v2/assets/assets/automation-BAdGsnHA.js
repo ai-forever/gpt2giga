@@ -1,0 +1,1 @@
+import{A as e}from"./index-n_8XdHdB.js";import{t}from"./SurfaceScaffold-jlq7UJoE.js";var n=e();function r(){return(0,n.jsx)(t,{detailKey:`automationDetail`,eyebrowKey:`automationEyebrow`,titleKey:`automation`})}export{r as AutomationSurface};

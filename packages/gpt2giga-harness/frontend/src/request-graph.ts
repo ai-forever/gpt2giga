@@ -5,11 +5,17 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  type ApprovalInboxResponse,
+  type AttentionInboxResponse,
   fetchCockpit,
+  type RunCenterSummaryResponse,
   type RunOverviewResponse,
+  type RunTraceResponse,
   type RunsCenterResponse,
   type SessionIndexResponse,
+  type SessionMessagesResponse,
   type SessionOverviewResponse,
+  type SessionRunsResponse,
   withQuery,
 } from "./api";
 
@@ -28,9 +34,15 @@ export const requestKeys = {
   sessionProjection: (sessionId: string, projection: SessionProjection) =>
     [...requestKeys.sessionScope(sessionId), projection] as const,
   runsCenter: () => [...rootKey, "runs-center"] as const,
+  approvals: () => [...rootKey, "approvals"] as const,
+  attention: () => [...rootKey, "attention"] as const,
   runScope: (runId: string) => [...rootKey, "run", runId] as const,
   runOverview: (runId: string) =>
     [...requestKeys.runScope(runId), "overview"] as const,
+  runCenterSummary: (runId: string) =>
+    [...requestKeys.runScope(runId), "center-summary"] as const,
+  runTrace: (runId: string) =>
+    [...requestKeys.runScope(runId), "trace"] as const,
   runProjection: (runId: string, projection: RunProjection) =>
     [...requestKeys.runScope(runId), projection] as const,
 };
@@ -77,6 +89,36 @@ export function sessionProjectionOptions(
   });
 }
 
+export function sessionMessagesOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: requestKeys.sessionProjection(sessionId, "messages"),
+    queryFn: ({ signal }) =>
+      fetchCockpit<SessionMessagesResponse>(
+        withQuery(
+          `/api/cockpit/sessions/${encodeURIComponent(sessionId)}/messages`,
+          { limit: 50 },
+        ),
+        signal,
+      ),
+    staleTime: 5_000,
+  });
+}
+
+export function sessionRunsOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: requestKeys.sessionProjection(sessionId, "runs"),
+    queryFn: ({ signal }) =>
+      fetchCockpit<SessionRunsResponse>(
+        withQuery(
+          `/api/cockpit/sessions/${encodeURIComponent(sessionId)}/runs`,
+          { limit: 50 },
+        ),
+        signal,
+      ),
+    staleTime: 5_000,
+  });
+}
+
 export function runsCenterOptions() {
   return queryOptions({
     queryKey: requestKeys.runsCenter(),
@@ -97,6 +139,51 @@ export function runOverviewOptions(runId: string) {
         `/api/cockpit/runs/${encodeURIComponent(runId)}`,
         signal,
       ),
+    staleTime: 5_000,
+  });
+}
+
+export function runCenterSummaryOptions(runId: string) {
+  return queryOptions({
+    queryKey: requestKeys.runCenterSummary(runId),
+    queryFn: ({ signal }) =>
+      fetchCockpit<RunCenterSummaryResponse>(
+        `/api/runs/${encodeURIComponent(runId)}/summary`,
+        signal,
+      ),
+    staleTime: 5_000,
+  });
+}
+
+export function runTraceOptions(runId: string) {
+  return queryOptions({
+    queryKey: requestKeys.runTrace(runId),
+    queryFn: ({ signal }) =>
+      fetchCockpit<RunTraceResponse>(
+        withQuery(`/api/runs/${encodeURIComponent(runId)}/trace`, { limit: 200 }),
+        signal,
+      ),
+    staleTime: 2_000,
+  });
+}
+
+export function approvalsOptions() {
+  return queryOptions({
+    queryKey: requestKeys.approvals(),
+    queryFn: ({ signal }) =>
+      fetchCockpit<ApprovalInboxResponse>(
+        withQuery("/api/approvals", { limit: 100 }),
+        signal,
+      ),
+    staleTime: 5_000,
+  });
+}
+
+export function attentionOptions() {
+  return queryOptions({
+    queryKey: requestKeys.attention(),
+    queryFn: ({ signal }) =>
+      fetchCockpit<AttentionInboxResponse>("/api/attention", signal),
     staleTime: 5_000,
   });
 }
