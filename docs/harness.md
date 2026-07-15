@@ -144,6 +144,14 @@ giga harness run echo \
   --prompt "Summarize the selected task"
 ```
 
+For a complete disposable tour, use the
+[first-run demo repository](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/first-run-demo).
+It contains only fictional inventory inputs. The walkthrough copies them to a
+temporary Git repository, isolates Harness runtime state under that copy, runs
+`giga init` and `giga doctor .`, then verifies a read-only Echo run and the two
+generated smoke-eval cases. It needs no credentials, proxy, external agent CLI,
+or public-network access.
+
 Preview an external agent command without launching it:
 
 ```bash

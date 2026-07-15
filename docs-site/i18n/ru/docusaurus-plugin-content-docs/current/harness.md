@@ -143,6 +143,14 @@ giga harness run echo \
   --prompt "Кратко опиши выбранную задачу"
 ```
 
+Для полностью локального знакомства используйте
+[демо-репозиторий первого запуска](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/first-run-demo).
+Он содержит только вымышленные inventory-данные. Инструкция копирует их во
+временный Git-репозиторий, изолирует Harness runtime state внутри этой копии,
+запускает `giga init` и `giga doctor .`, затем проверяет read-only Echo run и
+два сгенерированных smoke-eval cases. Credentials, proxy, внешний agent CLI и
+доступ в публичную сеть не требуются.
+
 Затем посмотрите план внешнего агента, не запуская его:
 
 ```bash

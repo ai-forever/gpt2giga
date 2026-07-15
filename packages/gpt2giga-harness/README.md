@@ -58,6 +58,12 @@ evidence is redacted and omits absolute workspace paths; every degraded or
 blocked first-run prerequisite includes a safe remediation command. Runtime
 worker state is inspected read-only.
 
+For a credential-free tour, copy the
+[first-run demo](../../examples/harness/first-run-demo/README.md). It keeps
+runtime state inside the disposable copy and verifies `giga init`, the local
+Echo read path, and the generated smoke eval without starting a proxy or an
+external agent CLI.
+
 Open `http://127.0.0.1:8091/`. `giga ui` starts a durable local worker when
 needed; pass `--no-start-worker` when another supervisor owns that lifecycle.
 The default loopback binding is intentional. Remote binding requires explicit

@@ -26,6 +26,8 @@ client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
 ## Быстрые ссылки
 
+- Unified Harness, полностью локальный first-run без credentials и proxy:
+  [`examples/harness/first-run-demo/README.md`](harness/first-run-demo/README.md)
 - OpenAI Python SDK:
   - Chat Completions API: [`examples/openai/chat_completions/README.md`](openai/chat_completions/README.md)
   - Responses API: [`examples/openai/responses/README.md`](openai/responses/README.md)
