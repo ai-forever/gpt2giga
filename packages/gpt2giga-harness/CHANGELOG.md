@@ -14,6 +14,7 @@
 
 ### Исправлено
 - **Durable scheduled evals**: повторная доставка одного schedule occurrence теперь использует исходный target run вместо создания второго eval/job, а scorecard, запущенный worker-ом, сохраняется в state directory разрешённого Harness-проекта.
+- **Reviewed promotion**: подтверждение `git.apply` теперь одноразово связано с точными source commit, SHA-256 сохранённого patch и branch intent; устаревший source, изменённый patch и повторное связывание approval завершаются отказом до изменения checkout.
 
 ## [0.0.1a2] - 2026-07-14
 

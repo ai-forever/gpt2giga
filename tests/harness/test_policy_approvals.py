@@ -1,3 +1,6 @@
+from dataclasses import replace
+
+import pytest
 from fastapi.testclient import TestClient
 
 from gpt2giga_harness.config import HarnessConfig
@@ -11,6 +14,7 @@ from gpt2giga_harness.runtime.policy import (
     PolicyDecision,
     PolicyEngine,
     REVIEW_EVERY_ACTION_PROFILE,
+    approval_binding_digest,
     approval_request_to_dict,
     permission_profile,
 )
@@ -172,6 +176,67 @@ def test_run_and_expiring_project_grants_stay_in_scope(tmp_path):
         project_id="other_project",
         run_id="another_run",
         job_id=None,
+    )
+
+
+def test_hash_bound_approval_cannot_be_broadened_or_rebound(tmp_path):
+    store = RuntimeCoordinationStore(tmp_path)
+    binding = "reviewed-source-and-patch"
+    context = PolicyContext(
+        project_id="project_bound",
+        session_id="sess_bound",
+        run_id="run_bound",
+        reason="Apply the reviewed patch.",
+        preview={"source_sha": "a" * 40, "patch_sha256": "b" * 64},
+        approval_binding=binding,
+    )
+    resolution = PolicyEngine(store).resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=context,
+    )
+    approval = store.create_approval_request(resolution, context)
+    duplicate = store.create_approval_request(resolution, context)
+    rebound_context = replace(
+        context,
+        approval_binding="different-source-or-patch",
+    )
+    rebound_resolution = PolicyEngine(store).resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=rebound_context,
+    )
+    rebound = store.create_approval_request(rebound_resolution, rebound_context)
+
+    assert duplicate.id == approval.id
+    assert rebound.id != approval.id
+    assert approval.preview["approval_binding_sha256"] == approval_binding_digest(
+        binding
+    )
+    with pytest.raises(ValueError, match="only be allowed once"):
+        store.decide_approval_request(approval.id, ApprovalDecision.ALLOW_RUN)
+
+    store.decide_approval_request(approval.id, ApprovalDecision.ALLOW_ONCE)
+    assert not store.consume_matching_approval_grant(
+        action=PermissionAction.GIT_APPLY,
+        project_id="project_bound",
+        run_id="run_bound",
+        job_id=None,
+        approval_binding="different-source-or-patch",
+    )
+    assert store.consume_matching_approval_grant(
+        action=PermissionAction.GIT_APPLY,
+        project_id="project_bound",
+        run_id="run_bound",
+        job_id=None,
+        approval_binding=binding,
+    )
+    assert not store.consume_matching_approval_grant(
+        action=PermissionAction.GIT_APPLY,
+        project_id="project_bound",
+        run_id="run_bound",
+        job_id=None,
+        approval_binding=binding,
     )
 
 

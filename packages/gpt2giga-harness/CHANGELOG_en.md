@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Durable scheduled evals**: duplicate delivery of one schedule occurrence now reuses the original target run instead of creating a second eval/job, and worker-triggered scorecards are retained under the resolved Harness project state directory.
+- **Reviewed promotion**: `git.apply` approval is now bound once to the exact source commit, captured patch SHA-256, and branch intent; stale source, changed patch, and approval rebinding fail closed before the checkout is modified.
 
 ## [0.0.1a2] - 2026-07-14
 

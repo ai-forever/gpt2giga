@@ -43,6 +43,7 @@ from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import title_from_prompt, utc_now
 from gpt2giga_harness.safe_paths import resolve_operator_path, resolve_path_within
 from gpt2giga_harness.worktrees import (
+    RunDiffReview,
     WorktreeError,
     apply_run_diff,
     detect_overlapping_run_diffs,
@@ -1102,14 +1103,17 @@ class WorkflowHandoffManager:
         )
         return self.status(run_id)
 
-    def apply_merge(self, run_id: str) -> dict[str, Any]:
+    def apply_merge(self, run_id: str, *, review: RunDiffReview) -> dict[str, Any]:
         """Apply a previously prepared combined patch to a clean source checkout."""
         run = self.repository.get_run(run_id)
         queue = _mapping(run.outputs.get("_merge_queue"))
         execution = _mapping(queue.get("workspace_execution"))
         if queue.get("status") != "prepared" or not execution:
             raise WorktreeError("Merge queue is not prepared.")
-        applied = apply_run_diff({"workspace_execution": execution})
+        applied = apply_run_diff(
+            {"workspace_execution": execution},
+            review=review,
+        )
         state = {**dict(queue), "status": "applied", "workspace_execution": applied}
         self.repository.update_run(
             run.id,

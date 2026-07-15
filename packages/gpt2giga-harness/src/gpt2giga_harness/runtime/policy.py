@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import hashlib
 from typing import Any, Mapping, Protocol
 
 from gpt2giga_harness.runtime.models import ApprovalStatus
@@ -69,6 +70,7 @@ class PolicyContext:
     job_id: str | None = None
     reason: str = ""
     preview: Mapping[str, Any] | None = None
+    approval_binding: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +163,7 @@ class GrantStore(Protocol):
         project_id: str | None,
         run_id: str | None,
         job_id: str | None,
+        approval_binding: str | None = None,
     ) -> bool:
         raise NotImplementedError
 
@@ -235,6 +238,14 @@ def redacted_policy_preview(value: Mapping[str, Any] | None) -> dict[str, Any]:
     return {str(key): item for key, item in list(redacted.items())[:40]}
 
 
+def approval_binding_digest(value: str) -> str:
+    """Hash one opaque approval binding before persistence or comparison."""
+    text = str(value).strip()
+    if not text:
+        raise ValueError("approval_binding must not be empty")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 class PolicyEngine:
     """Resolve built-in rules plus persisted one/run/project grants."""
 
@@ -258,6 +269,7 @@ class PolicyEngine:
                 project_id=context.project_id,
                 run_id=context.run_id,
                 job_id=context.job_id,
+                approval_binding=context.approval_binding,
             )
             if granted:
                 return PolicyResolution(

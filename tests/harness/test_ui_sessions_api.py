@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import subprocess
 import time
 from pathlib import Path
@@ -626,7 +627,19 @@ def test_runs_api_diff_apply_and_open_worktree(tmp_path):
     applied = client.post(f"/api/runs/{run_id}/apply", json={})
 
     assert applied.status_code == 202
-    approval_id = applied.json()["approval"]["id"]
+    approval = applied.json()["approval"]
+    approval_id = approval["id"]
+    assert approval["preview"]["source_sha"] == _git_output(repo, "rev-parse", "HEAD")
+    assert (
+        approval["preview"]["patch_sha256"]
+        == hashlib.sha256(diff_body["patch"].encode("utf-8")).hexdigest()
+    )
+    assert len(approval["preview"]["approval_binding_sha256"]) == 64
+    broadened = client.post(
+        f"/api/approvals/{approval_id}/decision",
+        json={"decision": "allow_run"},
+    )
+    assert broadened.status_code == 409
     decided = client.post(
         f"/api/approvals/{approval_id}/decision",
         json={"decision": "allow_once"},
@@ -636,6 +649,10 @@ def test_runs_api_diff_apply_and_open_worktree(tmp_path):
     assert applied.status_code == 200
     assert applied.json()["applied"] is True
     assert applied.json()["diff"]["can_apply"] is False
+    assert (
+        applied.json()["diff"]["workspace_execution"]["approval_binding_sha256"]
+        == approval["preview"]["approval_binding_sha256"]
+    )
     assert (repo / "app.txt").read_text(encoding="utf-8") == "changed\n"
 
 

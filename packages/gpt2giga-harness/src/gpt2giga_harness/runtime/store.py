@@ -45,6 +45,7 @@ from gpt2giga_harness.runtime.policy import (
     PermissionAction,
     PolicyContext,
     PolicyResolution,
+    approval_binding_digest,
     approval_grant_to_dict,
     approval_request_to_dict,
     redacted_policy_preview,
@@ -1792,9 +1793,15 @@ class RuntimeCoordinationStore:
                 context.session_id or "",
                 context.run_id or "",
                 context.job_id or "",
+                context.approval_binding or "",
             )
         )
         dedupe_key = hashlib.sha256(scope_identity.encode("utf-8")).hexdigest()
+        preview = redacted_policy_preview(context.preview)
+        if context.approval_binding:
+            preview["approval_binding_sha256"] = approval_binding_digest(
+                context.approval_binding
+            )
         values = (
             request_id,
             resolution.action.value,
@@ -1803,7 +1810,7 @@ class RuntimeCoordinationStore:
             resolution.policy_source,
             _required_text(context.reason, "approval reason"),
             json.dumps(
-                redacted_policy_preview(context.preview),
+                preview,
                 ensure_ascii=False,
                 sort_keys=True,
             ),
@@ -1947,6 +1954,15 @@ class RuntimeCoordinationStore:
                 raise InvalidStateTransitionError(
                     f"approval {request_id} is {request.status.value}"
                 )
+            if _approval_preview_binding(
+                request.preview
+            ) is not None and parsed_decision not in {
+                ApprovalDecision.ALLOW_ONCE,
+                ApprovalDecision.DENY,
+            }:
+                raise ValueError(
+                    "Hash-bound approvals can only be allowed once or denied"
+                )
             grant: tuple[str, str, int | None, str | None] | None = None
             if parsed_decision is ApprovalDecision.ALLOW_ONCE:
                 scope_type, scope_id = _approval_once_scope(request)
@@ -2065,6 +2081,7 @@ class RuntimeCoordinationStore:
         project_id: str | None,
         run_id: str | None,
         job_id: str | None,
+        approval_binding: str | None = None,
     ) -> bool:
         """Consume a matching allow-once grant or observe a scoped grant."""
         parsed_action = PermissionAction(action)
@@ -2082,18 +2099,34 @@ class RuntimeCoordinationStore:
             params.extend((kind, value))
         now = _utc_now()
         params.extend((now,))
+        binding_hash = (
+            approval_binding_digest(approval_binding) if approval_binding else None
+        )
         with self._connect() as connection, _transaction(connection):
-            row = connection.execute(
+            rows = connection.execute(
                 f"""
-                SELECT * FROM approval_grants
-                WHERE action = ? AND ({clauses})
-                  AND (expires_at IS NULL OR expires_at > ?)
-                  AND (uses_remaining IS NULL OR uses_remaining > 0)
-                ORDER BY CASE scope_type WHEN 'job' THEN 0 WHEN 'run' THEN 1 ELSE 2 END,
-                         created_at DESC LIMIT 1
+                SELECT approval_grants.*, approval_requests.preview_json
+                FROM approval_grants
+                JOIN approval_requests
+                  ON approval_requests.id = approval_grants.request_id
+                WHERE approval_grants.action = ? AND ({clauses})
+                  AND (approval_grants.expires_at IS NULL OR approval_grants.expires_at > ?)
+                  AND (approval_grants.uses_remaining IS NULL OR approval_grants.uses_remaining > 0)
+                ORDER BY CASE approval_grants.scope_type
+                             WHEN 'job' THEN 0 WHEN 'run' THEN 1 ELSE 2 END,
+                         approval_grants.created_at DESC
                 """,
                 tuple(params),
-            ).fetchone()
+            ).fetchall()
+            row = next(
+                (
+                    candidate
+                    for candidate in rows
+                    if _approval_preview_binding_json(candidate["preview_json"])
+                    == binding_hash
+                ),
+                None,
+            )
             if row is None:
                 return False
             if row["uses_remaining"] is not None:
@@ -2952,6 +2985,23 @@ def _idempotency_hash(value: str) -> str:
 def _opaque_token_hash(value: str) -> str:
     text = _required_text(value, "side_effect_token")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _approval_preview_binding(preview: Mapping[str, Any]) -> str | None:
+    value = preview.get("approval_binding_sha256")
+    if value is None or not str(value).strip():
+        return None
+    return str(value)
+
+
+def _approval_preview_binding_json(value: Any) -> str | None:
+    try:
+        preview = json.loads(str(value))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(preview, Mapping):
+        return None
+    return _approval_preview_binding(preview)
 
 
 def _canonical_json(value: Mapping[str, Any], name: str) -> str:
