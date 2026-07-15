@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
   <link rel="icon" href="/assets/favicon.ico" sizes="any">
-  <link rel="stylesheet" href="/assets/app.css?v=38.37">
+  <link rel="stylesheet" href="/assets/app.css?v=38.38">
 </head>
 <body>
   <div class="app">
@@ -237,12 +237,15 @@
               <span id="run-evidence-evidence-step" class="run-evidence-step"><b>2</b><span>Evidence</span></span>
               <span class="run-evidence-connector" aria-hidden="true"></span>
               <span id="run-evidence-review-step" class="run-evidence-step"><b>3</b><span>Approval / worktree</span></span>
+              <span class="run-evidence-connector" aria-hidden="true"></span>
+              <span id="run-evidence-reuse-step" class="run-evidence-step"><b>4</b><span>Reuse / automation</span></span>
             </div>
             <p id="run-evidence-summary">Evidence appears after the run finishes.</p>
           </div>
           <div class="run-evidence-actions">
             <button id="open-run-evidence-button" class="secondary" type="button" disabled>Evidence pending</button>
             <button id="open-run-review-button" type="button" disabled>No worktree change</button>
+            <button id="open-run-reuse-button" class="secondary" type="button" disabled>Reuse pending</button>
           </div>
         </section>
         <div id="composer" class="composer">
@@ -832,6 +835,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=38.42"></script>
+  <script src="/assets/app.js?v=38.43"></script>
 </body>
 </html>

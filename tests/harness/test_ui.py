@@ -57,13 +57,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.37">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.38">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.42"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.43"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -277,14 +277,18 @@ def test_ui_static_progressively_discloses_run_evidence():
         'id="run-evidence-run-step"',
         'id="run-evidence-evidence-step"',
         'id="run-evidence-review-step"',
+        'id="run-evidence-reuse-step"',
         'id="run-evidence-summary"',
         'id="open-run-evidence-button"',
         'id="open-run-review-button"',
+        'id="open-run-reuse-button"',
         "function renderRunEvidenceTransition",
         "function runWorktreeReviewState",
+        "function runReuseState",
         'new Set(["succeeded", "failed", "canceled"])',
         'button.dataset.runId = terminal ? run.id : ""',
         'reviewButton.dataset.runId = terminal && review.available ? run.id : ""',
+        'reuseButton.dataset.runId = reuse.available ? run.id : ""',
         'syncBrowserRoute("runs", runId)',
         'showTab("diff")',
         "setInspectorOpen(true)",
@@ -298,6 +302,35 @@ def test_ui_static_progressively_discloses_run_evidence():
     assert "workspace" not in render_source.lower()
     assert "prompt" not in render_source.lower()
     assert "response" not in render_source.lower()
+
+
+def test_ui_reuse_transition_opens_exact_run_review_without_automatic_mutation():
+    reuse_source = UI_SOURCE[
+        UI_SOURCE.index("function runReuseState") : UI_SOURCE.index(
+            "function renderRunEvidenceTransition"
+        )
+    ]
+
+    for fragment in (
+        'status !== "succeeded"',
+        "review.available && !review.completed",
+        'label: "Reuse run"',
+        'summary: "promotion preview ready; scheduling remains explicit"',
+    ):
+        assert fragment in reuse_source
+
+    open_reuse_source = UI_SOURCE[
+        UI_SOURCE.index("function openRunReuse") : UI_SOURCE.index(
+            "function runDuration"
+        )
+    ]
+    assert "const run = currentRun();" in open_reuse_source
+    assert "run.id !== runId" in open_reuse_source
+    assert 'showTab("provenance")' in open_reuse_source
+    assert "setInspectorOpen(true)" in open_reuse_source
+    assert "previewRunPromotion" not in open_reuse_source
+    assert "applyRunPromotion" not in open_reuse_source
+    assert "syncBrowserRoute" not in open_reuse_source
 
 
 def test_ui_worktree_review_transition_stays_explicit_and_redaction_safe():
@@ -1334,9 +1367,11 @@ def test_ui_index_contains_control_panel_elements():
         "run-evidence-run-step",
         "run-evidence-evidence-step",
         "run-evidence-review-step",
+        "run-evidence-reuse-step",
         "run-evidence-summary",
         "open-run-evidence-button",
         "open-run-review-button",
+        "open-run-reuse-button",
         "run-panel",
         "arena-panel",
         "events-panel",

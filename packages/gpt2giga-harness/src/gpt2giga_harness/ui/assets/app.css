@@ -2467,7 +2467,7 @@
       color: var(--green);
     }
     .run-evidence-connector {
-      width: 42px;
+      width: 28px;
       height: 1px;
       background: #31465a;
     }
@@ -2485,7 +2485,7 @@
       gap: 8px;
     }
     .run-evidence-actions button {
-      min-width: 126px;
+      min-width: 116px;
     }
     .composer {
       position: relative;

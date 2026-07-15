@@ -1392,12 +1392,16 @@ specialized controls move into `Advanced` and the off-canvas `Run details`
 drawer. On narrow screens, session history also becomes a drawer.
 
 After a first run starts, Work progressively reveals a compact Run → Evidence →
-Approval/worktree path. Evidence remains pending while the run is active. On
+Approval/worktree → Reuse/automation path. Evidence remains pending while the run is active. On
 success, failure, or cancellation, **Open evidence** deep-links to that exact
 run in Runs Center and summarizes only retained event/tool counts and duration;
 it does not repeat prompt, response, or workspace content. When the run retains
 an isolated patch, **Review worktree** opens the exact Diff inspector. Applying
 the patch and granting approval remain separate explicit operator actions.
+A successful run with no pending worktree review enables **Reuse run**. It
+opens that exact run's existing provenance/promotion inspector; generating and
+applying an agent/workflow/eval candidate and scheduling it remain separate
+explicit operator actions.
 
 It includes:
 

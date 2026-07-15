@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.1a3] - Unreleased
 
 ### Added
+- **Review-to-reuse onboarding**: the Work rail now guides an eligible successful run to its exact provenance/promotion inspector, while promotion preview/apply and scheduling remain separate explicit operator actions.
 - **Evidence-to-review onboarding**: the Work rail now continues from terminal evidence to the exact retained worktree Diff when an isolated patch exists, while apply and approval remain separate explicit operator actions.
 - **Run-to-evidence onboarding**: Work now reveals a compact Run → Evidence path after the first run starts and enables a deep link to that exact retained Runs Center trace only after terminal completion.
 - **Cross-harness review team**: a reviewed example now fans out read-only explorer, security, tests, and maintainability roles across Codex, Claude, and Gemini, preserves per-child durable evidence through partial failure, and synthesizes cited artifacts without a shared writable workspace.

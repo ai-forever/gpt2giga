@@ -5157,6 +5157,21 @@
       return { available: true, completed: false, label: "Review worktree", summary: "isolated patch ready; approval remains explicit" };
     }
 
+    function runReuseState(run, status, review) {
+      const metadata = run && run.metadata ? run.metadata : {};
+      const execution = metadata.workspace_execution || {};
+      if (status !== "succeeded") {
+        return { available: false, label: status === "running" || status === "queued" ? "Reuse pending" : "Reuse unavailable", summary: "" };
+      }
+      if (execution.discarded_at) {
+        return { available: false, label: "Reuse unavailable", summary: "discarded worktree is not promoted" };
+      }
+      if (review.available && !review.completed) {
+        return { available: false, label: "Review before reuse", summary: "review the isolated patch before promotion" };
+      }
+      return { available: true, label: "Reuse run", summary: "promotion preview ready; scheduling remains explicit" };
+    }
+
     function renderRunEvidenceTransition() {
       const rail = byId("run-evidence-transition");
       const run = currentRun();
@@ -5171,25 +5186,33 @@
       const toolCount = toolsFromEvents(events).size;
       const button = byId("open-run-evidence-button");
       const reviewButton = byId("open-run-review-button");
+      const reuseButton = byId("open-run-reuse-button");
       const runStep = byId("run-evidence-run-step");
       const evidenceStep = byId("run-evidence-evidence-step");
       const reviewStep = byId("run-evidence-review-step");
+      const reuseStep = byId("run-evidence-reuse-step");
       const review = runWorktreeReviewState(run);
+      const reuse = runReuseState(run, status, review);
 
       rail.hidden = false;
       rail.dataset.status = status;
       runStep.classList.toggle("active", !terminal);
       runStep.classList.toggle("complete", terminal);
-      evidenceStep.classList.toggle("active", terminal && !review.available);
-      evidenceStep.classList.toggle("complete", terminal && review.available);
+      evidenceStep.classList.toggle("active", terminal && !review.available && !reuse.available);
+      evidenceStep.classList.toggle("complete", terminal && (review.available || reuse.available));
       reviewStep.classList.toggle("active", terminal && review.available && !review.completed);
-      reviewStep.classList.toggle("complete", terminal && review.completed);
+      reviewStep.classList.toggle("complete", terminal && (review.completed || (!review.available && reuse.available)));
+      reuseStep.classList.toggle("active", reuse.available);
+      reuseStep.classList.toggle("complete", false);
       button.disabled = !terminal;
       button.dataset.runId = terminal ? run.id : "";
       button.textContent = terminal ? "Open evidence" : "Evidence pending";
       reviewButton.disabled = !(terminal && review.available);
       reviewButton.dataset.runId = terminal && review.available ? run.id : "";
       reviewButton.textContent = terminal ? review.label : "Review pending";
+      reuseButton.disabled = !reuse.available;
+      reuseButton.dataset.runId = reuse.available ? run.id : "";
+      reuseButton.textContent = terminal ? reuse.label : "Reuse pending";
 
       if (!terminal) {
         setText("run-evidence-summary", `${String(status).replace(/_/g, " ")} · evidence is retained as the run executes`);
@@ -5198,7 +5221,7 @@
       const outcome = status === "succeeded" ? "Run complete" : status === "failed" ? "Run failed" : "Run canceled";
       setText(
         "run-evidence-summary",
-        `${outcome} · ${events.length} events · ${toolCount} tool calls · ${runDuration(run)}${review.summary ? ` · ${review.summary}` : ""}`
+        `${outcome} · ${events.length} events · ${toolCount} tool calls · ${runDuration(run)}${review.summary ? ` · ${review.summary}` : ""}${reuse.summary ? ` · ${reuse.summary}` : ""}`
       );
     }
 
@@ -5214,6 +5237,14 @@
       const run = currentRun();
       if (!runId || !run || run.id !== runId) return;
       showTab("diff");
+      setInspectorOpen(true);
+    }
+
+    function openRunReuse() {
+      const runId = byId("open-run-reuse-button").dataset.runId;
+      const run = currentRun();
+      if (!runId || !run || run.id !== runId) return;
+      showTab("provenance");
       setInspectorOpen(true);
     }
 
@@ -7157,6 +7188,7 @@
       byId("run-button").addEventListener("click", runHarness);
       byId("open-run-evidence-button").addEventListener("click", openRunEvidence);
       byId("open-run-review-button").addEventListener("click", openRunWorktreeReview);
+      byId("open-run-reuse-button").addEventListener("click", openRunReuse);
       byId("arena-compare-button").addEventListener("click", runArena);
       byId("interrupt-run-button").addEventListener("click", () => runHarness("interrupt"));
       byId("cancel-run-button").addEventListener("click", cancelHeadlessRun);
