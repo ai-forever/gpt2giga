@@ -1,3 +1,6 @@
+import { useState } from "react";
+
+import { LazyInspector, type InspectorKind } from "../inspectors/LazyInspector";
 import type { LocalePreference, ThemePreference } from "../preferences";
 import { usePreferences } from "../preferences-context";
 import { message } from "../messages";
@@ -27,6 +30,33 @@ export function SettingsSurface() {
           </select>
         </label>
       </div>
+      <SettingsInspectorBoundary />
     </section>
+  );
+}
+
+const inspectorKinds: readonly InspectorKind[] = [
+  "markdown",
+  "diff",
+  "terminal",
+  "editor",
+  "evidence",
+];
+
+function SettingsInspectorBoundary() {
+  const { preferences } = usePreferences();
+  const [kind, setKind] = useState<InspectorKind | null>(null);
+  return (
+    <details className="operational-inspectors">
+      <summary>{message(preferences.locale, "lazyBoundary")}</summary>
+      <div className="inspector-actions">
+        {inspectorKinds.map((item) => (
+          <button key={item} onClick={() => setKind(item)} type="button">
+            {message(preferences.locale, item === "evidence" ? "rawEvidence" : item)}
+          </button>
+        ))}
+      </div>
+      {kind === null ? null : <LazyInspector kind={kind} locale={preferences.locale} />}
+    </details>
   );
 }

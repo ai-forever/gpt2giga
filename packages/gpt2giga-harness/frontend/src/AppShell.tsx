@@ -40,6 +40,7 @@ export function AppShell() {
   const [inbox, setInbox] = useState<InboxKind | null>(null);
   const approvals = useQuery(approvalsOptions());
   const attention = useQuery(attentionOptions());
+  const migratedSurface = activeSurface !== null && activeSurface !== "settings";
 
   useEffect(() => {
     applyTheme(preferences.theme);
@@ -119,13 +120,13 @@ export function AppShell() {
             <Link className="settings-link" to="/cockpit-v2/settings">{message(preferences.locale, "settings")}</Link>
           </div>
         </header>
-        {activeSurface === "work" || activeSurface === "runs" ? null : (
+        {migratedSurface ? null : (
           <div className="shell-notice">
             <span>{message(preferences.locale, "shellNotice")}</span>
             <a href="/legacy">{message(preferences.locale, "legacy")}</a>
           </div>
         )}
-        <main className={activeSurface === "work" || activeSurface === "runs" ? "surface-shell migrated" : "surface-shell"}>
+        <main className={migratedSurface ? "surface-shell migrated" : "surface-shell"}>
           <Outlet />
         </main>
       </div>

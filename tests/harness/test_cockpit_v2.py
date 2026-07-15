@@ -77,6 +77,28 @@ def test_cockpit_v2_routes_are_opt_in_and_legacy_remains_default():
     assert unknown.status_code == 404
 
 
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/cockpit-v2/automation/agents",
+        "/cockpit-v2/automation/workflows",
+        "/cockpit-v2/automation/schedules",
+        "/cockpit-v2/evaluation/arena",
+        "/cockpit-v2/evaluation/evals",
+        "/cockpit-v2/evaluation/baselines",
+        "/cockpit-v2/integrations/harnesses",
+        "/cockpit-v2/integrations/models",
+        "/cockpit-v2/integrations/mcp",
+        "/cockpit-v2/integrations/doctor",
+    ),
+)
+def test_cockpit_v2_remaining_surface_deep_links_are_preserved(path):
+    response = _client().get(path)
+
+    assert response.status_code == 200
+    assert "gpt2giga Harness — Cockpit V2" in response.text
+
+
 def test_cockpit_v2_serves_negotiated_immutable_assets():
     client = _client()
     manifest = load_cockpit_v2_manifest()

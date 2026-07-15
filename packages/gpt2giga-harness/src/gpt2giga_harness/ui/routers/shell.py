@@ -25,7 +25,10 @@ _SPA_PATH = re.compile(
     r"(?:(?:work|runs|workflows|scheduled)(?:/[^/]+)?|arena|agents|approvals|tools|evaluate)/?"
 )
 _COCKPIT_V2_PATH = re.compile(
-    r"(?:work(?:/[^/]+)?|runs(?:/[^/]+)?|automation|evaluation|integrations|settings)/?"
+    r"(?:work(?:/[^/]+)?|runs(?:/[^/]+)?|"
+    r"automation(?:/(?:agents|workflows|schedules))?|"
+    r"evaluation(?:/(?:arena|evals|baselines))?|"
+    r"integrations(?:/(?:harnesses|models|mcp|doctor))?|settings)/?"
 )
 _COCKPIT_V2_SHELL_HEADERS = {
     "Cache-Control": "no-cache",

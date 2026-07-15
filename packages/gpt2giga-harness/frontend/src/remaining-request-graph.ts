@@ -1,0 +1,60 @@
+import { queryOptions } from "@tanstack/react-query";
+
+import { fetchCockpit, withQuery } from "./api";
+import {
+  projectAutomation,
+  projectEvaluation,
+  projectIntegrations,
+} from "./surface-projections";
+
+const rootKey = ["cockpit", "remaining-surfaces"] as const;
+
+export const remainingRequestKeys = {
+  automation: () => [...rootKey, "automation"] as const,
+  evaluation: () => [...rootKey, "evaluation"] as const,
+  integrations: () => [...rootKey, "integrations"] as const,
+};
+
+export function automationSurfaceOptions() {
+  return queryOptions({
+    queryKey: remainingRequestKeys.automation(),
+    queryFn: async ({ signal }) => {
+      const [agents, workflows, schedules] = await Promise.all([
+        fetchCockpit<unknown>("/api/agents", signal),
+        fetchCockpit<unknown>("/api/workflows", signal),
+        fetchCockpit<unknown>("/api/schedules", signal),
+      ]);
+      return projectAutomation(agents, workflows, schedules);
+    },
+    staleTime: 10_000,
+  });
+}
+
+export function evaluationSurfaceOptions() {
+  return queryOptions({
+    queryKey: remainingRequestKeys.evaluation(),
+    queryFn: async ({ signal }) => {
+      const [evaluation, arenas] = await Promise.all([
+        fetchCockpit<unknown>("/api/evaluate", signal),
+        fetchCockpit<unknown>(withQuery("/api/arena/runs", { limit: 50 }), signal),
+      ]);
+      return projectEvaluation(evaluation, arenas);
+    },
+    staleTime: 10_000,
+  });
+}
+
+export function integrationsSurfaceOptions() {
+  return queryOptions({
+    queryKey: remainingRequestKeys.integrations(),
+    queryFn: async ({ signal }) => {
+      const [harnesses, defaults, mcp] = await Promise.all([
+        fetchCockpit<unknown>("/api/harnesses", signal),
+        fetchCockpit<unknown>("/api/defaults", signal),
+        fetchCockpit<unknown>("/api/tool-servers", signal),
+      ]);
+      return projectIntegrations(harnesses, defaults, mcp);
+    },
+    staleTime: 15_000,
+  });
+}

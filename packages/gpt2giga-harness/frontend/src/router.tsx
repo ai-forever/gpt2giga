@@ -23,6 +23,9 @@ const workbenchComponent = lazyRouteComponent(
   "WorkbenchSurface",
 );
 const runsComponent = lazyRouteComponent(() => import("./surfaces/runs"), "RunsSurface");
+const automationComponent = lazyRouteComponent(() => import("./surfaces/automation"), "AutomationSurface");
+const evaluationComponent = lazyRouteComponent(() => import("./surfaces/evaluation"), "EvaluationSurface");
+const integrationsComponent = lazyRouteComponent(() => import("./surfaces/integrations"), "IntegrationsSurface");
 
 const routes = [
   cockpitRoute,
@@ -30,9 +33,19 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/work/$sessionId", component: workbenchComponent }),
   createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/runs", component: runsComponent }),
   createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/runs/$runId", component: runsComponent }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/automation", component: lazyRouteComponent(() => import("./surfaces/automation"), "AutomationSurface") }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation", component: lazyRouteComponent(() => import("./surfaces/evaluation"), "EvaluationSurface") }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations", component: lazyRouteComponent(() => import("./surfaces/integrations"), "IntegrationsSurface") }),
+  createRoute({ beforeLoad: () => { throw redirect({ to: "/cockpit-v2/automation/workflows" }); }, getParentRoute: () => rootRoute, path: "/cockpit-v2/automation" }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/automation/agents", component: automationComponent }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/automation/workflows", component: automationComponent }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/automation/schedules", component: automationComponent }),
+  createRoute({ beforeLoad: () => { throw redirect({ to: "/cockpit-v2/evaluation/evals" }); }, getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation" }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation/arena", component: evaluationComponent }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation/evals", component: evaluationComponent }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation/baselines", component: evaluationComponent }),
+  createRoute({ beforeLoad: () => { throw redirect({ to: "/cockpit-v2/integrations/harnesses" }); }, getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations" }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/harnesses", component: integrationsComponent }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/models", component: integrationsComponent }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/mcp", component: integrationsComponent }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/doctor", component: integrationsComponent }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/cockpit-v2/settings",

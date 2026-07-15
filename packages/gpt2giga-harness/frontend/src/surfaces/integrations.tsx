@@ -1,11 +1,89 @@
-import { SurfaceScaffold } from "./SurfaceScaffold";
+import { useMutation, useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useRouterState } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
+
+import { mutateCockpit } from "../api";
+import {
+  LoadingRows,
+  OperationalSurface,
+  StatusBadge,
+  type OperationalTab,
+} from "../components/OperationalSurface";
+import { message } from "../messages";
+import { usePreferences } from "../preferences-context";
+import { integrationsSurfaceOptions } from "../remaining-request-graph";
+import { projectDoctor, type DoctorProjection, type IntegrationsProjection } from "../surface-projections";
+
+const tabs: readonly OperationalTab[] = [
+  { id: "harnesses", labelKey: "harnesses", href: "/cockpit-v2/integrations/harnesses" },
+  { id: "models", labelKey: "modelsAndRoutes", href: "/cockpit-v2/integrations/models" },
+  { id: "mcp", labelKey: "mcp", href: "/cockpit-v2/integrations/mcp" },
+  { id: "doctor", labelKey: "doctor", href: "/cockpit-v2/integrations/doctor" },
+];
 
 export function IntegrationsSurface() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const search = useRouterState({ select: (state) => state.location.searchStr });
+  const section = pathname.endsWith("/models") ? "models" : pathname.endsWith("/mcp") ? "mcp" : pathname.endsWith("/doctor") ? "doctor" : "harnesses";
+  const selectedId = new URLSearchParams(search).get("selected");
+  const query = useQuery(integrationsSurfaceOptions());
   return (
-    <SurfaceScaffold
-      detailKey="integrationsDetail"
+    <OperationalSurface
+      activeTab={section}
+      aside={<IntegrationDetail section={section} selectedId={selectedId} />}
+      detailKey="integrationsDetailMigrated"
       eyebrowKey="integrationsEyebrow"
+      tabs={tabs}
       titleKey="integrations"
-    />
+    >
+      <IntegrationList section={section} query={query} selectedId={selectedId} />
+    </OperationalSurface>
   );
+}
+
+function IntegrationList({ section, query, selectedId }: {
+  section: "harnesses" | "models" | "mcp" | "doctor";
+  query: UseQueryResult<IntegrationsProjection, Error>;
+  selectedId: string | null;
+}) {
+  const { preferences } = usePreferences();
+  const locale = preferences.locale;
+  if (query.isPending) return <LoadingRows />;
+  if (query.isError || query.data === undefined) return <div className="error-state">{message(locale, "boundedDataUnavailable")}</div>;
+  if (section === "doctor") return <div className="doctor-intro"><span className="section-kicker">{message(locale, "selectedPlanDoctor")}</span><h2>{message(locale, "doctorTitle")}</h2><p>{message(locale, "doctorDescription")}</p></div>;
+  const rows = section === "models" ? query.data.routes : query.data[section];
+  return (
+    <>
+      <div className="operations-toolbar"><div><span className="section-kicker">{message(locale, section === "models" ? "modelsAndRoutes" : section)}</span><strong>{rows.length} {message(locale, "retainedItems")}</strong></div></div>
+      {rows.length === 0 ? <div className="empty-state">{message(locale, "noItems")}</div> : <div className="operations-table" role="table">
+        {section === "harnesses" ? query.data.harnesses.map((item) => <a className={`operations-row ${selectedId === item.id ? "selected" : ""}`} href={`/cockpit-v2/integrations/harnesses?selected=${encodeURIComponent(item.id)}`} key={item.id}><div><strong>{item.title}</strong><span>{item.id}</span></div><span>{item.kind}</span><span>{item.reason}</span><StatusBadge status={item.status} /></a>) : null}
+        {section === "models" ? query.data.routes.map((item) => <a className={`operations-row ${selectedId === item.apiMode ? "selected" : ""}`} href={`/cockpit-v2/integrations/models?selected=${encodeURIComponent(item.apiMode)}`} key={item.apiMode}><div><strong>/{item.apiMode}</strong><span>{message(locale, "apiMode")}</span></div><span>{item.model}</span><span>{message(locale, "backendAuthoritative")}</span><StatusBadge status="selected" /></a>) : null}
+        {section === "mcp" ? query.data.mcp.map((item) => <a className={`operations-row ${selectedId === item.id ? "selected" : ""}`} href={`/cockpit-v2/integrations/mcp?selected=${encodeURIComponent(item.id)}`} key={item.id}><div><strong>{item.title}</strong><span>{item.id}</span></div><span>{item.transport}</span><span>{item.trusted ? message(locale, "trusted") : message(locale, "reviewRequired")}</span><StatusBadge status={item.status} /></a>) : null}
+      </div>}
+    </>
+  );
+}
+
+function IntegrationDetail({ section, selectedId }: { section: "harnesses" | "models" | "mcp" | "doctor"; selectedId: string | null }) {
+  const { preferences } = usePreferences();
+  const locale = preferences.locale;
+  const query = useQuery(integrationsSurfaceOptions());
+  const [doctor, setDoctor] = useState<DoctorProjection | null>(null);
+  const [doctorHarness, setDoctorHarness] = useState("echo");
+  const selected = useMemo(() => {
+    if (section === "harnesses") return query.data?.harnesses.find((item) => item.id === selectedId);
+    if (section === "models") return query.data?.routes.find((item) => item.apiMode === selectedId);
+    if (section === "mcp") return query.data?.mcp.find((item) => item.id === selectedId);
+    return undefined;
+  }, [query.data, section, selectedId]);
+  const doctorMutation = useMutation({
+    mutationFn: () => mutateCockpit<unknown>("/api/preflight/run", { api_mode: query.data?.routes[0]?.apiMode ?? "v2", dry_run: true, harness_id: doctorHarness, invocation_mode: "headless", mode: "plan", prompt: "Readiness check", workspace_policy: "auto" }),
+    onSuccess: (response) => setDoctor(projectDoctor(response)),
+  });
+  const probeMutation = useMutation({
+    mutationFn: () => selected !== undefined && "transport" in selected ? mutateCockpit(`/api/tool-servers/${encodeURIComponent(selected.id)}/probe`, {}) : Promise.reject(new Error("Select an MCP server first")),
+  });
+  if (section === "doctor") return <div className="definition-detail"><span className="section-kicker">{message(locale, "doctor")}</span><h2>{message(locale, "selectedPlanReadiness")}</h2><label className="field-control">{message(locale, "harness")}<select value={doctorHarness} onChange={(event) => setDoctorHarness(event.target.value)}>{query.data?.harnesses.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><button className="primary-button" disabled={doctorMutation.isPending} onClick={() => doctorMutation.mutate()} type="button">{message(locale, "runDoctor")}</button>{doctor === null ? null : <div className="doctor-result" role="status"><StatusBadge status={doctor.status} /><p>{doctor.harnessId}</p>{doctor.findings.filter((item) => item.status !== "ready").map((item) => <div className="doctor-finding" key={item.id}><strong>{item.summary}</strong>{item.remedy ? <span>{item.remedy}</span> : null}{item.command ? <code>{item.command}</code> : null}</div>)}</div>}{doctorMutation.isError ? <p className="mutation-error" role="alert">{doctorMutation.error.message}</p> : null}</div>;
+  if (selected === undefined) return <div className="detail-empty"><span className="section-kicker">{message(locale, "selectedIntegration")}</span><h2>{message(locale, "selectIntegration")}</h2><p>{message(locale, "integrationSelectionHint")}</p></div>;
+  return <div className="definition-detail"><span className="section-kicker">{message(locale, "selectedIntegration")}</span><h2>{"title" in selected ? selected.title : `/${selected.apiMode}`}</h2><dl className="compact-fields">{Object.entries(selected).slice(0, 7).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl>{section === "mcp" ? <button disabled={probeMutation.isPending || !("enabled" in selected) || !selected.enabled} onClick={() => probeMutation.mutate()} type="button">{message(locale, "probeMcp")}</button> : null}{probeMutation.isError ? <p className="mutation-error" role="alert">{probeMutation.error.message}</p> : null}{probeMutation.isSuccess ? <p className="mutation-success" role="status">{message(locale, "operationAccepted")}</p> : null}</div>;
 }
