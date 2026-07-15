@@ -1,3 +1,4 @@
+from contextlib import closing
 from dataclasses import replace
 import sqlite3
 
@@ -331,13 +332,13 @@ def test_reviewed_promotion_records_immutable_hash_chained_policy_audit(tmp_path
             (*events[:-1], replace(events[-1], event_sha256="0" * 64)),
         )
 
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection:
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
             connection.execute(
                 "UPDATE policy_audit_events SET decision = 'deny' WHERE id = ?",
                 (events[0].id,),
             )
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection:
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
             connection.execute(
                 "DELETE FROM policy_audit_events WHERE id = ?", (events[0].id,)

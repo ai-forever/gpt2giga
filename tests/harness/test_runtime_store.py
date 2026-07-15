@@ -1,4 +1,5 @@
 import concurrent.futures
+from contextlib import closing
 import hashlib
 import json
 import sqlite3
@@ -464,7 +465,7 @@ def test_runtime_store_migrates_existing_v1_database(tmp_path):
     store = RuntimeCoordinationStore(tmp_path)
 
     assert store.schema_version == RUNTIME_SCHEMA_VERSION
-    with sqlite3.connect(path) as reopened:
+    with closing(sqlite3.connect(path)) as reopened:
         columns = {
             row[1] for row in reopened.execute("PRAGMA table_info(jobs)").fetchall()
         }
@@ -604,7 +605,7 @@ def test_runtime_store_migrates_legacy_schedule_tables_to_project_keys(tmp_path)
 
     expected_key = hashlib.sha256(b"project-1\0nightly").hexdigest()
     assert store.schema_version == RUNTIME_SCHEMA_VERSION
-    with sqlite3.connect(path) as reopened:
+    with closing(sqlite3.connect(path)) as reopened:
         state = reopened.execute(
             "SELECT schedule_key, definition_json FROM schedule_states"
         ).fetchone()

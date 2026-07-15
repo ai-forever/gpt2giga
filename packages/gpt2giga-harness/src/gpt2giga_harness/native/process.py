@@ -575,25 +575,37 @@ class NativeProcessManager:
         return threads
 
     def _read_fd(self, process_id: str, fd: int, stream: str) -> None:
-        while True:
-            try:
-                data = os.read(fd, 4096)
-            except OSError:
-                return
-            if not data:
-                return
-            self._append_output(process_id, stream, data)
+        try:
+            while True:
+                try:
+                    data = os.read(fd, 4096)
+                except OSError:
+                    return
+                if not data:
+                    return
+                self._append_output(process_id, stream, data)
+        finally:
+            with self._lock:
+                record = self._records.get(process_id)
+                if record is not None and record.master_fd == fd:
+                    record.master_fd = None
+            with suppress(OSError):
+                os.close(fd)
 
     def _read_pipe(self, process_id: str, pipe: IO[bytes], stream: str) -> None:
-        fd = pipe.fileno()
-        while True:
-            try:
-                data = os.read(fd, 4096)
-            except OSError:
-                return
-            if not data:
-                return
-            self._append_output(process_id, stream, data)
+        try:
+            fd = pipe.fileno()
+            while True:
+                try:
+                    data = os.read(fd, 4096)
+                except OSError:
+                    return
+                if not data:
+                    return
+                self._append_output(process_id, stream, data)
+        finally:
+            with suppress(OSError, ValueError):
+                pipe.close()
 
     def _append_output(self, process_id: str, stream: str, data: bytes) -> None:
         text = _decode(data)
@@ -711,17 +723,26 @@ class NativeProcessManager:
                     "recovery_outcome": record.ref.recovery_outcome,
                 },
             )
+        self._close_finished_resources_locked(record)
 
     def _close_finished_resources_locked(self, record: _OwnedNativeProcess) -> None:
         if record.ref.status is NativeProcessStatus.RUNNING or record.resources_closed:
             return
-        if any(thread.is_alive() for thread in record.reader_threads):
-            return
         if record.stdin is not None:
             try:
                 record.stdin.close()
-            except OSError:
+            except (OSError, ValueError):
                 # The native process may already have closed its stdin pipe.
+                pass
+        if any(thread.is_alive() for thread in record.reader_threads):
+            return
+        for pipe in (record.process.stdout, record.process.stderr):
+            if pipe is None:
+                continue
+            try:
+                pipe.close()
+            except (OSError, ValueError):
+                # Reader teardown may have already closed the output pipe.
                 pass
         if record.master_fd is not None:
             try:

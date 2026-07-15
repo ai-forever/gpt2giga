@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import datetime, timezone
 import json
 import os
@@ -574,8 +575,8 @@ def _read_worker_state(data_dir: str | Path) -> dict[str, Any]:
     if not path.is_file():
         return {"initialized": False, "online": 0, "offline": 0, "total": 0}
     try:
-        with sqlite3.connect(
-            f"{path.resolve().as_uri()}?mode=ro", uri=True
+        with closing(
+            sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
         ) as connection:
             rows = connection.execute(
                 "SELECT status, heartbeat_at FROM workers"
