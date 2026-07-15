@@ -15,6 +15,15 @@ from gpt2giga_harness.native.models import (
     NativeTranscriptMessage,
 )
 from gpt2giga_harness.native.registry import NativeHistoryConnectorRegistry
+from gpt2giga_harness.runtime.policy import (
+    ApprovalDecision,
+    PermissionAction,
+    PolicyContext,
+    PolicyEngine,
+    REVIEWED_PROMOTION_APPLY_OWNER,
+    permission_profile,
+)
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.types import (
     Availability,
@@ -597,6 +606,27 @@ def test_cli_run_provenance_and_replay(capsys, tmp_path, monkeypatch):
         workspace=None,
         status="succeeded",
     )
+    runtime = RuntimeCoordinationStore(tmp_path / "data")
+    context = PolicyContext(
+        run_id=run.id,
+        reason="Apply reviewed patch.",
+        preview={"source_sha": "a" * 40, "patch_sha256": "b" * 64},
+        approval_binding="cli-reviewed-binding",
+        enforcement_owner=REVIEWED_PROMOTION_APPLY_OWNER,
+    )
+    engine = PolicyEngine(runtime)
+    resolution = engine.resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=context,
+    )
+    approval = runtime.create_approval_request(resolution, context)
+    runtime.decide_approval_request(approval.id, ApprovalDecision.ALLOW_ONCE)
+    engine.resolve(
+        PermissionAction.GIT_APPLY,
+        profile=permission_profile("interactive"),
+        context=context,
+    )
 
     provenance_code = cli.main(["run", "provenance", run.id, "--json"])
     provenance = json.loads(capsys.readouterr().out)
@@ -604,6 +634,9 @@ def test_cli_run_provenance_and_replay(capsys, tmp_path, monkeypatch):
     assert provenance_code == 0
     assert provenance["provenance"]["run_id"] == run.id
     assert provenance["provenance"]["replay_request"]["prompt"] == "hello replay"
+    reviewed = provenance["provenance"]["reviewed_evidence"]
+    assert reviewed["source_run_id"] == run.id
+    assert reviewed["operations"][0]["operation_id"] == approval.id
 
     replay_code = cli.main(["run", "replay", run.id, "--json"])
     replay = json.loads(capsys.readouterr().out)
@@ -611,6 +644,10 @@ def test_cli_run_provenance_and_replay(capsys, tmp_path, monkeypatch):
     assert replay_code == 0
     assert replay["source_run"]["id"] == run.id
     assert replay["result"]["text"] == "hello replay"
+    assert (
+        replay["replay_request"]["extra"]["source_reviewed_evidence"]["manifest_sha256"]
+        == reviewed["manifest_sha256"]
+    )
     assert replay["run"]["metadata"]["provenance"]["request"]["prompt"] == (
         "hello replay"
     )

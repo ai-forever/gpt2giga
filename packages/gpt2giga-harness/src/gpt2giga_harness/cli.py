@@ -104,6 +104,7 @@ from gpt2giga_harness.provenance import (
     build_run_provenance,
     run_provenance_to_dict,
 )
+from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
 from gpt2giga_harness.registry import UnknownHarnessError, create_default_registry
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.runtime.payloads import DurableJobPayloadStore
@@ -873,7 +874,15 @@ def _handle_run_artifact(args: argparse.Namespace, config: HarnessConfig) -> int
     if action == "replay":
         registry = create_default_registry()
         raw_request = _latest_raw_request_for_run(store, run)
-        replay_payload = build_replay_request(run, raw_request=raw_request)
+        runtime = RuntimeCoordinationStore(config.data_dir)
+        replay_payload = build_replay_request(
+            run,
+            raw_request=raw_request,
+            reviewed_evidence=reviewed_evidence_manifest(
+                run.id,
+                runtime.list_policy_audit_events(run_id=run.id),
+            ),
+        )
         runner = HarnessSessionRunner(registry=registry, config=config, store=store)
         result = runner.run_in_session(run.session_id, replay_payload)
         if args.json:
@@ -886,6 +895,7 @@ def _handle_run_artifact(args: argparse.Namespace, config: HarnessConfig) -> int
         return 0 if result.result.ok else 1
     if action == "provenance":
         registry = create_default_registry()
+        runtime = RuntimeCoordinationStore(config.data_dir)
         session = store.get_session(run.session_id)
         try:
             spec = registry.get(run.harness_id).spec()
@@ -898,6 +908,7 @@ def _handle_run_artifact(args: argparse.Namespace, config: HarnessConfig) -> int
             raw_requests=store.list_raw_requests(run.session_id),
             raw_responses=store.list_raw_responses(run.session_id),
             events=store.list_events(run.session_id, run_id=run.id),
+            policy_audit_events=runtime.list_policy_audit_events(run_id=run.id),
             data_dir=config.data_dir,
         )
         payload = {

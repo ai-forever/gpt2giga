@@ -144,6 +144,7 @@ from gpt2giga_harness.provenance import (
     build_run_provenance,
     run_provenance_to_dict,
 )
+from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
 from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga_harness.routing import (
     recommend_harness_route,
@@ -1460,6 +1461,7 @@ def create_app(
                 registry=registry,
                 config=config,
                 run=run,
+                runtime_store=runtime_store,
             )
             run = store.update_run(
                 run.id,
@@ -1945,6 +1947,7 @@ def create_app(
             registry=registry,
             config=config,
             run=run,
+            runtime_store=runtime_store,
         )
         return {
             "run": run_to_dict(run),
@@ -2230,7 +2233,11 @@ def create_app(
         try:
             run = store.get_run(run_id)
             raw_request = _latest_raw_request_for_run(store, run)
-            replay_payload = build_replay_request(run, raw_request=raw_request)
+            replay_payload = build_replay_request(
+                run,
+                raw_request=raw_request,
+                reviewed_evidence=_reviewed_evidence_for_run(runtime_store, run.id),
+            )
             if "stream" in payload:
                 replay_payload["stream"] = bool(payload.get("stream"))
             result = runner.run_in_session(run.session_id, replay_payload)
@@ -2672,6 +2679,7 @@ def _build_current_run_provenance(
     registry: HarnessRegistry,
     config: HarnessConfig,
     run: HarnessRun,
+    runtime_store: RuntimeCoordinationStore | None = None,
 ):
     session = store.get_session(run.session_id)
     try:
@@ -2685,7 +2693,24 @@ def _build_current_run_provenance(
         raw_requests=store.list_raw_requests(run.session_id),
         raw_responses=store.list_raw_responses(run.session_id),
         events=store.list_events(run.session_id, run_id=run.id),
+        policy_audit_events=(
+            runtime_store.list_policy_audit_events(run_id=run.id)
+            if runtime_store is not None
+            else ()
+        ),
         data_dir=config.data_dir,
+    )
+
+
+def _reviewed_evidence_for_run(
+    runtime_store: RuntimeCoordinationStore | None,
+    run_id: str,
+) -> dict[str, Any] | None:
+    if runtime_store is None:
+        return None
+    return reviewed_evidence_manifest(
+        run_id,
+        runtime_store.list_policy_audit_events(run_id=run_id),
     )
 
 

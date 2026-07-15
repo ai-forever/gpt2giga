@@ -54,6 +54,7 @@ from gpt2giga_harness.runtime.policy import (
     policy_audit_event_to_dict,
     redacted_policy_preview,
 )
+from gpt2giga_harness.reviewed_evidence import reviewed_evidence_index
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 
 RUNTIME_DB_NAME = "runtime.sqlite3"
@@ -2287,27 +2288,30 @@ class RuntimeCoordinationStore:
         self,
         *,
         operation_id: str | None = None,
+        run_id: str | None = None,
         limit: int = 500,
     ) -> tuple[PolicyAuditEvent, ...]:
         """List immutable policy evidence in operation order."""
         page_size = max(1, min(int(limit), 1000))
+        filters: list[str] = []
+        values: list[Any] = []
+        if operation_id is not None:
+            filters.append("operation_id = ?")
+            values.append(_required_text(operation_id, "operation_id"))
+        if run_id is not None:
+            filters.append("run_id = ?")
+            values.append(_required_text(run_id, "run_id"))
+        where = f"WHERE {' AND '.join(filters)}" if filters else ""
+        order = (
+            "sequence"
+            if operation_id is not None
+            else "created_at, operation_id, sequence"
+        )
         with self._connect() as connection:
-            if operation_id is None:
-                rows = connection.execute(
-                    """
-                    SELECT * FROM policy_audit_events
-                    ORDER BY created_at, operation_id, sequence LIMIT ?
-                    """,
-                    (page_size,),
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    """
-                    SELECT * FROM policy_audit_events
-                    WHERE operation_id = ? ORDER BY sequence LIMIT ?
-                    """,
-                    (_required_text(operation_id, "operation_id"), page_size),
-                ).fetchall()
+            rows = connection.execute(
+                f"SELECT * FROM policy_audit_events {where} ORDER BY {order} LIMIT ?",
+                (*values, page_size),
+            ).fetchall()
         return tuple(_policy_audit_event_from_row(row) for row in rows)
 
     def transition_attempt(
@@ -2607,6 +2611,7 @@ class RuntimeCoordinationStore:
 
     def export(self) -> dict[str, Any]:
         """Export coordination state as transparent, task-content-free JSON."""
+        policy_audit_events = self.list_policy_audit_events(limit=1000)
         with self._connect() as connection:
             outbox_rows = connection.execute(
                 "SELECT * FROM runtime_outbox ORDER BY created_at, id"
@@ -2666,9 +2671,9 @@ class RuntimeCoordinationStore:
                 approval_grant_to_dict(item) for item in self.list_approval_grants()
             ],
             "policy_audit_events": [
-                policy_audit_event_to_dict(item)
-                for item in self.list_policy_audit_events(limit=1000)
+                policy_audit_event_to_dict(item) for item in policy_audit_events
             ],
+            "reviewed_evidence": reviewed_evidence_index(policy_audit_events),
             "attention_reads": [dict(row) for row in attention_rows],
             "outbox": [
                 outbox_entry_to_dict(_outbox_from_row(row)) for row in outbox_rows

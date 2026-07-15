@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Idempotent side-effect evidence**: the durable runtime can atomically reserve opaque Harness-owned side-effect tokens and retain immutable redacted completion evidence without making arbitrary edit attempts retry-safe.
 - **Bounded side-effect executor**: Harness-owned runtime events now bind token reservation, durable outbox delivery, and immutable completion evidence in one transaction; duplicate delivery reuses completed evidence while ambiguous reservations remain blocked.
 - **Policy audit evidence**: reviewed promotion now retains an append-only, hash-chained record of policy resolution, user decision, exact enforcement owner, approval grant, and source/patch binding; audit rows reject update and deletion.
+- **Reviewed evidence lineage**: successful reviewed operations now expose a validated, content-addressed evidence manifest through runtime export, run provenance, replay requests, and run-to-agent/workflow/eval promotion without exposing raw approval bindings or captured content.
 
 ### Fixed
 - **Durable scheduled evals**: duplicate delivery of one schedule occurrence now reuses the original target run instead of creating a second eval/job, and worker-triggered scorecards are retained under the resolved Harness project state directory.

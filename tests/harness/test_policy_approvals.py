@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
 from gpt2giga_harness.runtime.models import ApprovalStatus, JobStatus
 from gpt2giga_harness.runtime.policy import (
     ApprovalDecision,
@@ -306,9 +307,29 @@ def test_reviewed_promotion_records_immutable_hash_chained_policy_audit(tmp_path
     assert events[0].previous_event_sha256 is None
     assert events[1].previous_event_sha256 == events[0].event_sha256
     assert events[2].previous_event_sha256 == events[1].event_sha256
-    exported = store.export()["policy_audit_events"]
+    reviewed_evidence = reviewed_evidence_manifest("run_audit", events)
+    assert reviewed_evidence is not None
+    assert reviewed_evidence["source_run_id"] == "run_audit"
+    assert reviewed_evidence["operations"] == [
+        {
+            "operation_id": approval.id,
+            "action": "git.apply",
+            "enforcement_owner": REVIEWED_PROMOTION_APPLY_OWNER,
+            "approval_binding_sha256": approval_binding_digest(binding),
+            "audit_head_sha256": events[-1].event_sha256,
+            "event_count": 3,
+        }
+    ]
+    exported = store.export()
+    assert exported["reviewed_evidence"] == [reviewed_evidence]
     assert binding not in str(exported)
     assert "secret-value" not in str(exported)
+
+    with pytest.raises(ValueError, match="event hash is invalid"):
+        reviewed_evidence_manifest(
+            "run_audit",
+            (*events[:-1], replace(events[-1], event_sha256="0" * 64)),
+        )
 
     with sqlite3.connect(store.path) as connection:
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):

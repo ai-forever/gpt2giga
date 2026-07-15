@@ -42,7 +42,12 @@ class RunPromotionDraft:
 
 
 def preview_run_promotion(
-    store: HarnessSessionStore, run_id: str, *, kind: str, target_id: str
+    store: HarnessSessionStore,
+    run_id: str,
+    *,
+    kind: str,
+    target_id: str,
+    reviewed_evidence: Mapping[str, Any] | None = None,
 ) -> RunPromotionDraft:
     """Build a secret-free candidate and validated project-file diff."""
     _validate_target(kind, target_id)
@@ -66,6 +71,11 @@ def preview_run_promotion(
         "source_trace_id": _optional_text(run.metadata.get("trace_id")),
         "source_harness_id": run.harness_id,
         "generated_by": "gpt2giga.run_promotion.v1",
+        "reviewed_evidence": (
+            dict(redact_for_storage(dict(reviewed_evidence)))
+            if reviewed_evidence is not None
+            else None
+        ),
     }
     content, relative = _candidate(run, kind, target_id, parameters, provenance)
     draft = _project_draft(root, kind, target_id, content)
