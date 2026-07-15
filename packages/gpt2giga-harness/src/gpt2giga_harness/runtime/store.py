@@ -23,6 +23,9 @@ from gpt2giga_harness.runtime.models import (
     RuntimeJob,
     RuntimeOutboxEntry,
     RuntimeWorker,
+    SideEffectRecord,
+    SideEffectReservation,
+    SideEffectStatus,
     TERMINAL_ATTEMPT_STATUSES,
     TERMINAL_JOB_STATUSES,
     attempt_to_dict,
@@ -31,6 +34,7 @@ from gpt2giga_harness.runtime.models import (
     outbox_entry_to_dict,
     parse_attempt_status,
     parse_job_status,
+    side_effect_to_dict,
     worker_to_dict,
 )
 from gpt2giga_harness.runtime.policy import (
@@ -48,7 +52,7 @@ from gpt2giga_harness.runtime.policy import (
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 
 RUNTIME_DB_NAME = "runtime.sqlite3"
-RUNTIME_SCHEMA_VERSION = 9
+RUNTIME_SCHEMA_VERSION = 10
 SQLITE_TIMEOUT_SECONDS = 10.0
 
 
@@ -70,6 +74,14 @@ class NativeProcessRecordNotFoundError(RuntimeStoreError):
 
 class IdempotencyConflictError(RuntimeStoreError):
     """Raised when one idempotency key is reused for a different job."""
+
+
+class SideEffectConflictError(RuntimeStoreError):
+    """Raised when a side-effect token or completion is rebound."""
+
+
+class SideEffectNotFoundError(RuntimeStoreError):
+    """Raised when a durable side-effect record does not exist."""
 
 
 class ConcurrentUpdateError(RuntimeStoreError):
@@ -406,6 +418,30 @@ _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             )
             """,
             "CREATE INDEX native_process_outputs_created_idx ON native_process_outputs(process_id, created_at)",
+        ),
+    ),
+    (
+        10,
+        "Harness-owned idempotent side-effect tokens and completion evidence",
+        (
+            """
+            CREATE TABLE harness_side_effects (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL UNIQUE,
+                operation TEXT NOT NULL,
+                intent_hash TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('reserved', 'completed')),
+                owner_attempt_id TEXT NOT NULL REFERENCES job_attempts(id),
+                completion_evidence_json TEXT NOT NULL DEFAULT '{}',
+                completion_evidence_hash TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            )
+            """,
+            "CREATE INDEX harness_side_effects_job_idx ON harness_side_effects(job_id, created_at)",
+            "CREATE INDEX harness_side_effects_status_idx ON harness_side_effects(status, updated_at)",
         ),
     ),
 )
@@ -1027,6 +1063,193 @@ class RuntimeCoordinationStore:
         if row is None:
             raise JobNotFoundError(job_id)
         return _job_from_row(row)
+
+    def reserve_side_effect(
+        self,
+        *,
+        job_id: str,
+        attempt_id: str,
+        token: str,
+        operation: str,
+        intent: Mapping[str, Any],
+    ) -> SideEffectReservation:
+        """Atomically reserve one opaque token for a Harness-owned side effect."""
+        token_hash = _opaque_token_hash(token)
+        operation = _required_text(operation, "operation")
+        intent_hash = _mapping_hash(intent, "intent")
+        now = _utc_now()
+        record_id = _new_id("effect")
+        with self._connect() as connection, _transaction(connection):
+            attempt_row = connection.execute(
+                "SELECT * FROM job_attempts WHERE id = ?", (attempt_id,)
+            ).fetchone()
+            if attempt_row is None:
+                raise AttemptNotFoundError(attempt_id)
+            attempt = _attempt_from_row(attempt_row)
+            if attempt.job_id != job_id:
+                raise SideEffectConflictError(
+                    "side-effect attempt does not belong to the logical job"
+                )
+            if attempt.status in TERMINAL_ATTEMPT_STATUSES:
+                raise InvalidStateTransitionError(
+                    "terminal attempts cannot reserve side effects"
+                )
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO harness_side_effects (
+                        id, job_id, token_hash, operation, intent_hash, status,
+                        owner_attempt_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record_id,
+                        job_id,
+                        token_hash,
+                        operation,
+                        intent_hash,
+                        SideEffectStatus.RESERVED.value,
+                        attempt_id,
+                        now,
+                        now,
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT * FROM harness_side_effects WHERE id = ?", (record_id,)
+                ).fetchone()
+                return SideEffectReservation(
+                    record=_side_effect_from_row(row), created=True
+                )
+            except sqlite3.IntegrityError:
+                row = connection.execute(
+                    "SELECT * FROM harness_side_effects WHERE token_hash = ?",
+                    (token_hash,),
+                ).fetchone()
+                if row is None:
+                    raise
+                existing = _side_effect_from_row(row)
+                if (
+                    existing.job_id != job_id
+                    or existing.operation != operation
+                    or existing.intent_hash != intent_hash
+                ):
+                    raise SideEffectConflictError(
+                        "side-effect token is already bound to different intent"
+                    ) from None
+                return SideEffectReservation(record=existing, created=False)
+
+    def complete_side_effect(
+        self,
+        record_id: str,
+        *,
+        attempt_id: str,
+        evidence: Mapping[str, Any],
+    ) -> SideEffectRecord:
+        """Complete one owned reservation with immutable redacted evidence."""
+        safe_evidence = _safe_mapping(evidence, "completion evidence")
+        if not safe_evidence:
+            raise ValueError("completion evidence is required")
+        evidence_hash = _mapping_hash(safe_evidence, "completion evidence")
+        evidence_json = _canonical_json(safe_evidence, "completion evidence")
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            row = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE id = ?", (record_id,)
+            ).fetchone()
+            if row is None:
+                raise SideEffectNotFoundError(record_id)
+            record = _side_effect_from_row(row)
+            if record.owner_attempt_id != attempt_id:
+                raise SideEffectConflictError(
+                    "only the reserving attempt can complete a side effect"
+                )
+            attempt_row = connection.execute(
+                "SELECT * FROM job_attempts WHERE id = ?", (attempt_id,)
+            ).fetchone()
+            if attempt_row is None:
+                raise AttemptNotFoundError(attempt_id)
+            attempt = _attempt_from_row(attempt_row)
+            if attempt.job_id != record.job_id:
+                raise SideEffectConflictError(
+                    "side-effect attempt does not belong to the logical job"
+                )
+            if record.status is SideEffectStatus.COMPLETED:
+                if record.completion_evidence_hash != evidence_hash:
+                    raise SideEffectConflictError(
+                        "side effect already has different completion evidence"
+                    )
+                return record
+            if attempt.status in TERMINAL_ATTEMPT_STATUSES:
+                raise InvalidStateTransitionError(
+                    "terminal attempts cannot complete side effects"
+                )
+            connection.execute(
+                """
+                UPDATE harness_side_effects
+                SET status = ?, completion_evidence_json = ?,
+                    completion_evidence_hash = ?, completed_at = ?, updated_at = ?
+                WHERE id = ? AND status = ? AND owner_attempt_id = ?
+                """,
+                (
+                    SideEffectStatus.COMPLETED.value,
+                    evidence_json,
+                    evidence_hash,
+                    now,
+                    now,
+                    record_id,
+                    SideEffectStatus.RESERVED.value,
+                    attempt_id,
+                ),
+            )
+            if connection.execute("SELECT changes()").fetchone()[0] != 1:
+                raise ConcurrentUpdateError(
+                    f"side effect {record_id} changed concurrently"
+                )
+            updated = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE id = ?", (record_id,)
+            ).fetchone()
+        return _side_effect_from_row(updated)
+
+    def get_side_effect(self, record_id: str) -> SideEffectRecord:
+        """Return one durable side-effect record by public identity."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE id = ?", (record_id,)
+            ).fetchone()
+        if row is None:
+            raise SideEffectNotFoundError(record_id)
+        return _side_effect_from_row(row)
+
+    def get_side_effect_for_token(self, token: str) -> SideEffectRecord:
+        """Resolve an opaque token without persisting or returning its raw value."""
+        token_hash = _opaque_token_hash(token)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM harness_side_effects WHERE token_hash = ?",
+                (token_hash,),
+            ).fetchone()
+        if row is None:
+            raise SideEffectNotFoundError(token_hash)
+        return _side_effect_from_row(row)
+
+    def list_side_effects(
+        self, job_id: str | None = None
+    ) -> tuple[SideEffectRecord, ...]:
+        """List durable side effects in stable creation order."""
+        with self._connect() as connection:
+            if job_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM harness_side_effects ORDER BY created_at, id"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM harness_side_effects
+                    WHERE job_id = ? ORDER BY created_at, id
+                    """,
+                    (job_id,),
+                ).fetchall()
+        return tuple(_side_effect_from_row(row) for row in rows)
 
     def retry_safe_job(self, job_id: str) -> RuntimeJob:
         """Requeue one failed job whose latest attempt is explicitly retry-safe."""
@@ -2040,6 +2263,7 @@ class RuntimeCoordinationStore:
                     "attention_reads",
                     "native_processes",
                     "native_process_outputs",
+                    "harness_side_effects",
                 )
             }
             pending = int(
@@ -2091,6 +2315,9 @@ class RuntimeCoordinationStore:
             "exported_at": _utc_now(),
             "jobs": [job_to_dict(job) for job in self.list_jobs()],
             "attempts": [attempt_to_dict(item) for item in self.list_attempts()],
+            "side_effects": [
+                side_effect_to_dict(item) for item in self.list_side_effects()
+            ],
             "workers": [worker_to_dict(item) for item in self.list_workers()],
             "native_processes": [
                 native_process_record_to_dict(item)
@@ -2439,6 +2666,23 @@ def _attempt_from_row(row: sqlite3.Row) -> JobAttempt:
     )
 
 
+def _side_effect_from_row(row: sqlite3.Row) -> SideEffectRecord:
+    return SideEffectRecord(
+        id=str(row["id"]),
+        job_id=str(row["job_id"]),
+        token_hash=str(row["token_hash"]),
+        operation=str(row["operation"]),
+        intent_hash=str(row["intent_hash"]),
+        status=SideEffectStatus(str(row["status"])),
+        owner_attempt_id=str(row["owner_attempt_id"]),
+        completion_evidence=_json_mapping(row["completion_evidence_json"]),
+        completion_evidence_hash=_optional_text(row["completion_evidence_hash"]),
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
+        completed_at=_optional_text(row["completed_at"]),
+    )
+
+
 def _outbox_from_row(row: sqlite3.Row) -> RuntimeOutboxEntry:
     payload = json.loads(str(row["payload_json"]))
     return RuntimeOutboxEntry(
@@ -2573,6 +2817,39 @@ def _expire_approvals(connection: sqlite3.Connection, now: str) -> None:
 def _idempotency_hash(value: str) -> str:
     text = _required_text(value, "idempotency_key")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _opaque_token_hash(value: str) -> str:
+    text = _required_text(value, "side_effect_token")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _canonical_json(value: Mapping[str, Any], name: str) -> str:
+    try:
+        return json.dumps(
+            dict(value),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be JSON-serializable") from exc
+
+
+def _mapping_hash(value: Mapping[str, Any], name: str) -> str:
+    return hashlib.sha256(_canonical_json(value, name).encode("utf-8")).hexdigest()
+
+
+def _safe_mapping(value: Mapping[str, Any], name: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a mapping")
+    safe = redact_for_storage(dict(value))
+    if not isinstance(safe, Mapping):
+        raise ValueError(f"{name} must be a mapping")
+    result = dict(safe)
+    _canonical_json(result, name)
+    return result
 
 
 def _required_text(value: Any, name: str) -> str:

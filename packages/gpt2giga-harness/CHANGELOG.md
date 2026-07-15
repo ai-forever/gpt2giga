@@ -9,6 +9,7 @@
 
 ### Добавлено
 - **Capability matrix**: команда `giga harness capabilities` генерирует проверяемые Markdown и JSON представления непосредственно из runtime parity contracts встроенных CLI-адаптеров.
+- **Доказательства идемпотентных side effects**: durable runtime умеет атомарно резервировать непрозрачные токены Harness-owned side effects и сохранять неизменяемые редактированные completion evidence, не разрешая автоматический retry произвольных edit-attempts.
 
 ### Исправлено
 - **Durable scheduled evals**: повторная доставка одного schedule occurrence теперь использует исходный target run вместо создания второго eval/job, а scorecard, запущенный worker-ом, сохраняется в state directory разрешённого Harness-проекта.

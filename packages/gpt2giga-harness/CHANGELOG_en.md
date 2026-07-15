@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Capability matrix**: `giga harness capabilities` generates reviewable Markdown and JSON views directly from the built-in CLI adapters' runtime parity contracts.
+- **Idempotent side-effect evidence**: the durable runtime can atomically reserve opaque Harness-owned side-effect tokens and retain immutable redacted completion evidence without making arbitrary edit attempts retry-safe.
 
 ### Fixed
 - **Durable scheduled evals**: duplicate delivery of one schedule occurrence now reuses the original target run instead of creating a second eval/job, and worker-triggered scorecards are retained under the resolved Harness project state directory.

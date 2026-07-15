@@ -45,6 +45,13 @@ class JobAttemptStatus(str, Enum):
     INTERRUPTED = "interrupted"
 
 
+class SideEffectStatus(str, Enum):
+    """Durable state of one Harness-owned idempotent side effect."""
+
+    RESERVED = "reserved"
+    COMPLETED = "completed"
+
+
 class WorkflowStatus(str, Enum):
     """Execution status reserved for the versioned workflow runtime."""
 
@@ -172,6 +179,32 @@ class JobAttempt:
     error_summary: str | None = None
     capability_fingerprint: Mapping[str, Any] | None = None
     version: int = 0
+
+
+@dataclass(frozen=True)
+class SideEffectRecord:
+    """Hashed token identity and redacted completion evidence for one effect."""
+
+    id: str
+    job_id: str
+    token_hash: str
+    operation: str
+    intent_hash: str
+    status: SideEffectStatus
+    owner_attempt_id: str
+    completion_evidence: Mapping[str, Any]
+    completion_evidence_hash: str | None
+    created_at: str
+    updated_at: str
+    completed_at: str | None = None
+
+
+@dataclass(frozen=True)
+class SideEffectReservation:
+    """Result of atomically reserving one side-effect token."""
+
+    record: SideEffectRecord
+    created: bool
 
 
 @dataclass(frozen=True)
@@ -313,6 +346,24 @@ def attempt_to_dict(attempt: JobAttempt) -> dict[str, Any]:
         "version": attempt.version,
         "created_at": attempt.created_at,
         "updated_at": attempt.updated_at,
+    }
+
+
+def side_effect_to_dict(record: SideEffectRecord) -> dict[str, Any]:
+    """Serialize a side effect without its raw token or unredacted evidence."""
+    return {
+        "id": record.id,
+        "job_id": record.job_id,
+        "token_hash": record.token_hash,
+        "operation": record.operation,
+        "intent_hash": record.intent_hash,
+        "status": record.status.value,
+        "owner_attempt_id": record.owner_attempt_id,
+        "completion_evidence": dict(record.completion_evidence),
+        "completion_evidence_hash": record.completion_evidence_hash,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "completed_at": record.completed_at,
     }
 
 
