@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
   <link rel="icon" href="/assets/favicon.ico" sizes="any">
-  <link rel="stylesheet" href="/assets/app.css?v=38.36">
+  <link rel="stylesheet" href="/assets/app.css?v=38.37">
 </head>
 <body>
   <div class="app">
@@ -228,17 +228,22 @@
           </div>
           <div id="message-list" class="message-list" aria-live="polite" aria-relevant="additions text"></div>
         </div>
-        <section id="run-evidence-transition" class="run-evidence-transition" aria-label="Run evidence path" aria-live="polite" hidden>
+        <section id="run-evidence-transition" class="run-evidence-transition" aria-label="Run review path" aria-live="polite" hidden>
           <div class="run-evidence-transition-copy">
             <span class="run-evidence-kicker">First-run path</span>
             <div class="run-evidence-progress" aria-label="Run progress">
               <span id="run-evidence-run-step" class="run-evidence-step"><b>1</b><span>Run</span></span>
               <span class="run-evidence-connector" aria-hidden="true"></span>
               <span id="run-evidence-evidence-step" class="run-evidence-step"><b>2</b><span>Evidence</span></span>
+              <span class="run-evidence-connector" aria-hidden="true"></span>
+              <span id="run-evidence-review-step" class="run-evidence-step"><b>3</b><span>Approval / worktree</span></span>
             </div>
             <p id="run-evidence-summary">Evidence appears after the run finishes.</p>
           </div>
-          <button id="open-run-evidence-button" class="secondary" type="button" disabled>Evidence pending</button>
+          <div class="run-evidence-actions">
+            <button id="open-run-evidence-button" class="secondary" type="button" disabled>Evidence pending</button>
+            <button id="open-run-review-button" type="button" disabled>No worktree change</button>
+          </div>
         </section>
         <div id="composer" class="composer">
           <div class="composer-main">
@@ -827,6 +832,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=38.40"></script>
+  <script src="/assets/app.js?v=38.42"></script>
 </body>
 </html>

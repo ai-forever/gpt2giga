@@ -57,13 +57,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.36">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.37">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.40"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.42"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -276,12 +276,18 @@ def test_ui_static_progressively_discloses_run_evidence():
         'id="run-evidence-transition"',
         'id="run-evidence-run-step"',
         'id="run-evidence-evidence-step"',
+        'id="run-evidence-review-step"',
         'id="run-evidence-summary"',
         'id="open-run-evidence-button"',
+        'id="open-run-review-button"',
         "function renderRunEvidenceTransition",
+        "function runWorktreeReviewState",
         'new Set(["succeeded", "failed", "canceled"])',
         'button.dataset.runId = terminal ? run.id : ""',
+        'reviewButton.dataset.runId = terminal && review.available ? run.id : ""',
         'syncBrowserRoute("runs", runId)',
+        'showTab("diff")',
+        "setInspectorOpen(true)",
         "void applyCurrentRoute()",
         "renderRunEvidenceTransition();",
         ".run-evidence-transition",
@@ -294,13 +300,51 @@ def test_ui_static_progressively_discloses_run_evidence():
     assert "response" not in render_source.lower()
 
 
+def test_ui_worktree_review_transition_stays_explicit_and_redaction_safe():
+    review_source = UI_SOURCE[
+        UI_SOURCE.index("function runWorktreeReviewState") : UI_SOURCE.index(
+            "function renderRunEvidenceTransition"
+        )
+    ]
+
+    for fragment in (
+        'execution.policy !== "worktree"',
+        "execution.discarded_at",
+        "execution.worktree_path",
+        "execution.patch || metadata.diff",
+        'label: "Review worktree"',
+        'summary: "isolated patch ready; approval remains explicit"',
+        'label: "No worktree change"',
+        'label: "Worktree discarded"',
+    ):
+        assert fragment in review_source
+
+    assert "innerHTML" not in review_source
+    assert "textContent" not in review_source
+    assert "source_workspace" not in review_source
+    assert "effective_workspace" not in review_source
+
+    open_review_source = UI_SOURCE[
+        UI_SOURCE.index("function openRunWorktreeReview") : UI_SOURCE.index(
+            "function runDuration"
+        )
+    ]
+    assert "const run = currentRun();" in open_review_source
+    assert "run.id !== runId" in open_review_source
+    assert 'showTab("diff")' in open_review_source
+    assert "setInspectorOpen(true)" in open_review_source
+    assert "syncBrowserRoute" not in open_review_source
+
+
 def test_ui_mobile_run_evidence_transition_stacks_without_overflow():
     mobile_rule = APP_CSS.split("@media (max-width: 720px)", 1)[1]
 
     assert ".run-evidence-transition" in mobile_rule
     assert "grid-template-columns: minmax(0, 1fr);" in mobile_rule
-    assert ".run-evidence-transition > button" in mobile_rule
+    assert ".run-evidence-actions button" in mobile_rule
     assert "width: 100%;" in mobile_rule
+    assert ".run-evidence-actions" in mobile_rule
+    assert "grid-template-columns: minmax(0, 1fr);" in mobile_rule
 
 
 def test_ui_static_resumes_active_stream_after_session_reload():
@@ -1289,8 +1333,10 @@ def test_ui_index_contains_control_panel_elements():
         "run-evidence-transition",
         "run-evidence-run-step",
         "run-evidence-evidence-step",
+        "run-evidence-review-step",
         "run-evidence-summary",
         "open-run-evidence-button",
+        "open-run-review-button",
         "run-panel",
         "arena-panel",
         "events-panel",

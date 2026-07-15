@@ -1391,11 +1391,13 @@ the prompt and the four common run choices stay in the main canvas, and
 specialized controls move into `Advanced` and the off-canvas `Run details`
 drawer. On narrow screens, session history also becomes a drawer.
 
-After a first run starts, Work progressively reveals a compact Run → Evidence
-path. Evidence remains pending while the run is active. On success, failure, or
-cancellation, **Open evidence** deep-links to that exact run in Runs Center and
-summarizes only retained event/tool counts and duration; it does not repeat
-prompt, response, or workspace content.
+After a first run starts, Work progressively reveals a compact Run → Evidence →
+Approval/worktree path. Evidence remains pending while the run is active. On
+success, failure, or cancellation, **Open evidence** deep-links to that exact
+run in Runs Center and summarizes only retained event/tool counts and duration;
+it does not repeat prompt, response, or workspace content. When the run retains
+an isolated patch, **Review worktree** opens the exact Diff inspector. Applying
+the patch and granting approval remain separate explicit operator actions.
 
 It includes:
 

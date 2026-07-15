@@ -86,10 +86,13 @@ needed; pass `--no-start-worker` when another supervisor owns that lifecycle.
 The default loopback binding is intentional. Remote binding requires explicit
 authentication and remote-access opt-in.
 
-After the first run starts, Work reveals a compact Run → Evidence path. Once
+After the first run starts, Work reveals a compact Run → Evidence → Approval /
+worktree path. Once
 the run reaches a terminal state, **Open evidence** deep-links to that exact
 run's retained trace in Runs Center; prompts, responses, and workspace paths
-are not copied into the transition summary.
+are not copied into the transition summary. For a retained isolated patch,
+**Review worktree** opens that run's Diff inspector, where apply and approval
+remain separate explicit operator actions.
 
 Useful orientation commands:
 

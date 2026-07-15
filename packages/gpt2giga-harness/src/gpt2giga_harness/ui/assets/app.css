@@ -2431,7 +2431,7 @@
     }
     .run-evidence-progress {
       display: flex;
-      max-width: 330px;
+      max-width: 560px;
       align-items: center;
       gap: 8px;
     }
@@ -2479,7 +2479,12 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .run-evidence-transition > button {
+    .run-evidence-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .run-evidence-actions button {
       min-width: 126px;
     }
     .composer {
@@ -2968,7 +2973,19 @@
         gap: 10px;
         margin-bottom: 10px;
       }
-      .run-evidence-transition > button {
+      .run-evidence-progress {
+        max-width: 100%;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+      .run-evidence-step {
+        flex: 0 0 auto;
+      }
+      .run-evidence-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .run-evidence-actions button {
         width: 100%;
       }
       #run-evidence-summary {

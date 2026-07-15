@@ -510,11 +510,14 @@ timeline. Smart Router объясняет выбор adapter/model и не ск�
 capabilities. Arena создаёт независимые child jobs и workspaces, чтобы один
 участник не менял контекст другого.
 
-После начала первого run Work постепенно показывает компактный путь
-Run → Evidence. Пока run активен, evidence остаётся pending. После success,
-failure или cancellation кнопка **Open evidence** открывает trace именно этого
-run в Runs Center и показывает только сохранённые counts событий/tools и
-duration, не повторяя prompt, response или workspace content.
+После начала первого run Work постепенно показывает компактный путь Run →
+Evidence → Approval/worktree. Пока run активен, evidence остаётся pending.
+После success, failure или cancellation кнопка **Open evidence** открывает
+trace именно этого run в Runs Center и показывает только сохранённые counts
+событий/tools и duration, не повторяя prompt, response или workspace content.
+Если run сохранил изолированный patch, **Review worktree** открывает его точный
+Diff inspector; apply patch и выдача approval остаются отдельными явными
+действиями оператора.
 
 Attachments сначала копируются или связываются по безопасному project policy,
 затем преобразуются в adapter-specific render plan. UI различает rich

@@ -5135,6 +5135,28 @@
       return "badge info";
     }
 
+    function runWorktreeReviewState(run) {
+      const metadata = run && run.metadata ? run.metadata : {};
+      const execution = metadata.workspace_execution || {};
+      if (execution.policy !== "worktree") {
+        return { available: false, completed: false, label: "No worktree change", summary: "" };
+      }
+      if (execution.discarded_at) {
+        return { available: false, completed: false, label: "Worktree discarded", summary: "isolated worktree discarded" };
+      }
+      if (!execution.worktree_path) {
+        return { available: false, completed: false, label: "Worktree unavailable", summary: "isolated worktree unavailable" };
+      }
+      const patch = execution.patch || metadata.diff || "";
+      if (!patch || patch === "No diff captured.") {
+        return { available: false, completed: false, label: "No worktree change", summary: "isolated worktree retained; no patch to review" };
+      }
+      if (execution.applied_at) {
+        return { available: true, completed: true, label: "Open reviewed worktree", summary: "reviewed patch applied through explicit approval" };
+      }
+      return { available: true, completed: false, label: "Review worktree", summary: "isolated patch ready; approval remains explicit" };
+    }
+
     function renderRunEvidenceTransition() {
       const rail = byId("run-evidence-transition");
       const run = currentRun();
@@ -5148,17 +5170,26 @@
       const events = eventsForRun(run.id);
       const toolCount = toolsFromEvents(events).size;
       const button = byId("open-run-evidence-button");
+      const reviewButton = byId("open-run-review-button");
       const runStep = byId("run-evidence-run-step");
       const evidenceStep = byId("run-evidence-evidence-step");
+      const reviewStep = byId("run-evidence-review-step");
+      const review = runWorktreeReviewState(run);
 
       rail.hidden = false;
       rail.dataset.status = status;
       runStep.classList.toggle("active", !terminal);
       runStep.classList.toggle("complete", terminal);
-      evidenceStep.classList.toggle("active", terminal);
+      evidenceStep.classList.toggle("active", terminal && !review.available);
+      evidenceStep.classList.toggle("complete", terminal && review.available);
+      reviewStep.classList.toggle("active", terminal && review.available && !review.completed);
+      reviewStep.classList.toggle("complete", terminal && review.completed);
       button.disabled = !terminal;
       button.dataset.runId = terminal ? run.id : "";
       button.textContent = terminal ? "Open evidence" : "Evidence pending";
+      reviewButton.disabled = !(terminal && review.available);
+      reviewButton.dataset.runId = terminal && review.available ? run.id : "";
+      reviewButton.textContent = terminal ? review.label : "Review pending";
 
       if (!terminal) {
         setText("run-evidence-summary", `${String(status).replace(/_/g, " ")} · evidence is retained as the run executes`);
@@ -5167,7 +5198,7 @@
       const outcome = status === "succeeded" ? "Run complete" : status === "failed" ? "Run failed" : "Run canceled";
       setText(
         "run-evidence-summary",
-        `${outcome} · ${events.length} events · ${toolCount} tool calls · ${runDuration(run)}`
+        `${outcome} · ${events.length} events · ${toolCount} tool calls · ${runDuration(run)}${review.summary ? ` · ${review.summary}` : ""}`
       );
     }
 
@@ -5176,6 +5207,14 @@
       if (!runId) return;
       syncBrowserRoute("runs", runId);
       void applyCurrentRoute();
+    }
+
+    function openRunWorktreeReview() {
+      const runId = byId("open-run-review-button").dataset.runId;
+      const run = currentRun();
+      if (!runId || !run || run.id !== runId) return;
+      showTab("diff");
+      setInspectorOpen(true);
     }
 
     function runDuration(run) {
@@ -7117,6 +7156,7 @@
       });
       byId("run-button").addEventListener("click", runHarness);
       byId("open-run-evidence-button").addEventListener("click", openRunEvidence);
+      byId("open-run-review-button").addEventListener("click", openRunWorktreeReview);
       byId("arena-compare-button").addEventListener("click", runArena);
       byId("interrupt-run-button").addEventListener("click", () => runHarness("interrupt"));
       byId("cancel-run-button").addEventListener("click", cancelHeadlessRun);
