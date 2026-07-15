@@ -5,9 +5,11 @@ from __future__ import annotations
 import base64
 from datetime import datetime
 import json
+import re
 from typing import Any, Mapping
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import Response
 
 from gpt2giga_harness.runtime.models import (
     JobAttempt,
@@ -32,6 +34,7 @@ from gpt2giga_harness.sessions.store import (
     RunNotFoundError,
     SessionNotFoundError,
 )
+from gpt2giga_harness.support_bundle import build_run_support_bundle
 from gpt2giga_harness.ui.routers.schemas import RunBundleResponse
 
 
@@ -163,6 +166,55 @@ async def run_center_summary(run_id: str, request: Request) -> dict[str, Any]:
     if job is None or runtime_store is None:
         raise HTTPException(status_code=404, detail="Durable run not found")
     return {"run": _job_summary(runtime_store, session_store, job)}
+
+
+@router.get("/api/runs/{run_id}/support-bundle")
+async def run_support_bundle(run_id: str, request: Request) -> Response:
+    """Download a redaction-safe, content-free support bundle for one run."""
+    session_store = _session_store(request)
+    runtime_store = _runtime_store(request)
+    try:
+        run = session_store.get_run(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Run not found") from exc
+    job = runtime_store.find_job_for_run(run_id) if runtime_store else None
+    if job is None or runtime_store is None:
+        raise HTTPException(status_code=404, detail="Durable run not found")
+    attempts = runtime_store.list_attempts(job.id)
+    events = _job_events(session_store, run, attempts)
+    approvals = runtime_store.list_run_approval_requests(
+        run_id=run_id,
+        job_id=job.id,
+    )
+    artifacts = _artifact_summary(run)
+    workflow = _workflow_team_summary(runtime_store, job)
+    payload = build_run_support_bundle(
+        run=run,
+        job=job,
+        attempts=attempts,
+        events=events,
+        registry=request.app.state.harness_registry,
+        artifact_inventory=_artifact_inventory(artifacts, workflow),
+        explanations=_run_explanations(job, attempts, run, approvals),
+        approval_states=[_approval_summary(item) for item in approvals],
+    )
+    content = json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ).encode("utf-8")
+    safe_run_id = re.sub(r"[^A-Za-z0-9._-]+", "-", run.id).strip("-") or "run"
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="gpt2giga-support-{safe_run_id}.json"'
+            ),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/api/runs/{run_id}/events/{event_id}")
@@ -322,6 +374,7 @@ def _job_summary(
             "inspect_artifact": f"/api/runs/{run_id}/pr"
             if artifacts["pr"]
             else (f"/api/runs/{run_id}/diff" if artifacts["diff"] else None),
+            "support_bundle": f"/api/runs/{run_id}/support-bundle",
         },
     }
 

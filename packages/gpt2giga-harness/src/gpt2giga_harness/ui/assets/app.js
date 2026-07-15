@@ -1065,6 +1065,7 @@
       byId("runs-retry-button").disabled = !actions.retry;
       byId("runs-open-worktree-button").disabled = !actions.open_worktree;
       byId("runs-inspect-artifact-button").disabled = !actions.inspect_artifact;
+      byId("runs-support-bundle-button").disabled = !actions.support_bundle;
       renderRunsOwnership(item);
       renderRunsExplanations(item);
       renderAgentTeam(byId("runs-team-tree"), item && item.workflow, {
@@ -1425,6 +1426,10 @@
       if (name === "open_task") {
         window.history.pushState({}, "", url);
         await applyCurrentRoute();
+        return;
+      }
+      if (name === "support_bundle") {
+        window.location.assign(url);
         return;
       }
       const result = await getJson(url, {
@@ -7166,6 +7171,7 @@
       byId("runs-retry-button").addEventListener("click", () => runCenterAction("retry"));
       byId("runs-open-worktree-button").addEventListener("click", () => runCenterAction("open_worktree"));
       byId("runs-inspect-artifact-button").addEventListener("click", () => runCenterAction("inspect_artifact"));
+      byId("runs-support-bundle-button").addEventListener("click", () => runCenterAction("support_bundle"));
       for (const filter of document.querySelectorAll("[data-run-status]")) {
         filter.addEventListener("click", async () => {
           state.runsCenterStatus = filter.dataset.runStatus || "";

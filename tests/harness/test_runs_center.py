@@ -188,6 +188,122 @@ def test_runs_center_explains_complete_provenance_and_promotion_eligibility(tmp_
     assert str(workspace) not in str(explanations)
 
 
+def test_runs_center_exports_content_free_redacted_support_bundle(tmp_path):
+    client, _runtime, sessions, run_id, job_id, _event_id = _failed_run(tmp_path)
+    secret = "support-secret-value-123456"
+    run = sessions.get_run(run_id)
+    sessions.update_run(
+        run_id,
+        metadata={
+            **dict(run.metadata),
+            "preflight": {
+                "ok": True,
+                "hard_block": False,
+                "max_severity": "warning",
+                "findings": [
+                    {
+                        "severity": "warning",
+                        "code": "credential-like-content",
+                        "message": f"password={secret}",
+                        "workspace_path": "/tmp/private-source/.env",
+                    }
+                ],
+                "readiness": {
+                    "schema_version": 1,
+                    "ok": True,
+                    "blocked": False,
+                    "summary": {"ready": 2, "degraded": 1, "blocked": 0},
+                    "plan": {
+                        "harness_id": "echo",
+                        "invocation_mode": "headless",
+                        "api_mode": "v2",
+                        "model": None,
+                        "mode": "plan",
+                        "workspace_configured": False,
+                        "workspace_policy": "current",
+                        "delivery": "durable",
+                        "dry_run": False,
+                    },
+                    "findings": [
+                        {
+                            "id": "delivery",
+                            "category": "execution-plan",
+                            "status": "ready",
+                            "required": True,
+                            "summary": (
+                                "Run delivery uses the durable worker path at "
+                                "/var/private-worker/state.json."
+                            ),
+                            "evidence": {"private_path": "/tmp/private-worker"},
+                            "remediation": [],
+                        }
+                    ],
+                },
+            },
+        },
+    )
+
+    response = client.get(f"/api/runs/{run_id}/support-bundle")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["content-disposition"] == (
+        f'attachment; filename="gpt2giga-support-{run_id}.json"'
+    )
+    bundle = response.json()
+    assert bundle["schema_version"] == 1
+    assert bundle["run"]["job_id"] == job_id
+    assert bundle["capability_snapshot"]["harness_id"] == "echo"
+    assert bundle["execution_plan"]["delivery"] == "durable"
+    assert bundle["diagnostics"]["preflight"]["finding_codes"] == [
+        "credential-like-content"
+    ]
+    assert bundle["diagnostics"]["readiness"]["findings"][0]["id"] == "delivery"
+    assert (
+        "<internal-path>"
+        in (bundle["diagnostics"]["readiness"]["findings"][0]["summary"])
+    )
+    assert bundle["artifacts"] == [
+        {"type": "worktree", "source": "run"},
+        {"type": "diff", "source": "run"},
+        {"type": "pr", "source": "run"},
+    ]
+    assert any(
+        transition.get("event_type") == "tool_finished"
+        for transition in bundle["state_transitions"]
+    )
+    assert all(
+        "message" not in item and "payload" not in item
+        for item in bundle["state_transitions"]
+    )
+    assert bundle["safety"] == {
+        "approval_context_included": False,
+        "artifact_content_included": False,
+        "commands_included": False,
+        "content_capture_included": False,
+        "errors_included": False,
+        "event_payloads_included": False,
+        "messages_included": False,
+        "prompt_included": False,
+        "workspace_paths_included": False,
+    }
+    serialized = response.text
+    for forbidden in (
+        secret,
+        "review this",
+        "Tool completed",
+        "visible",
+        "diff --git",
+        "Review the retained change",
+        "/tmp/demo-worktree",
+        "/tmp/private-worktree",
+        "/tmp/private-source",
+        "/tmp/private-worker",
+    ):
+        assert forbidden not in serialized
+
+
 def test_runs_center_trace_is_bounded_lazy_and_hides_reasoning(tmp_path):
     client, _runtime, _sessions, run_id, _job_id, event_id = _failed_run(tmp_path)
 
@@ -261,6 +377,7 @@ def test_runs_center_assets_expose_bounded_live_routable_surface():
         'id="runs-trace-list"',
         'id="runs-retry-button"',
         'id="runs-inspect-artifact-button"',
+        'id="runs-support-bundle-button"',
         'id="runs-ownership-panel"',
         'id="runs-ownership-grid"',
         'id="runs-explanations-panel"',
@@ -277,6 +394,7 @@ def test_runs_center_assets_expose_bounded_live_routable_surface():
         "function openRunsCenterEventStream",
         "function renderRunsOwnership",
         "function renderRunsExplanations",
+        'runCenterAction("support_bundle")',
         "function renderAgentTeam",
         "function loadWorkAgentTeam",
         "/events/stream",

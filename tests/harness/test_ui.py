@@ -63,7 +63,7 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.47"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.48"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
