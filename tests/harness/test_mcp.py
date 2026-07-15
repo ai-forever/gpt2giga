@@ -15,7 +15,7 @@ from gpt2giga_harness.mcp import (
 )
 from gpt2giga_harness.project import ProjectToolProfile
 from gpt2giga_harness.registry import create_default_registry
-from gpt2giga_harness.runtime.policy import ApprovalDecision
+from gpt2giga_harness.runtime.policy import ApprovalDecision, MCP_SERVER_PROBE_OWNER
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.ui.app import create_app
@@ -265,6 +265,7 @@ args = ["-c", {escaped_script}]
     assert gated.status_code == 202
     approval = gated.json()["approval"]
     assert approval["action"] == "mcp.server.start"
+    assert approval["enforcement_owner"] == MCP_SERVER_PROBE_OWNER
 
     runtime.decide_approval_request(
         approval["id"],

@@ -15,6 +15,9 @@ from gpt2giga_harness.runtime.policy import (
     PermissionAction,
     PolicyContext,
     PolicyDecision,
+    SCHEDULE_CREATE_OWNER,
+    SCHEDULE_ENABLE_OWNER,
+    SCHEDULE_RUN_NOW_OWNER,
     approval_request_to_dict,
 )
 from gpt2giga_harness.schedules import (
@@ -256,10 +259,16 @@ def _authorize(
     reason: str,
     preview: dict[str, Any],
 ) -> JSONResponse | None:
+    owner = {
+        PermissionAction.SCHEDULE_CREATE: SCHEDULE_CREATE_OWNER,
+        PermissionAction.SCHEDULE_ENABLE: SCHEDULE_ENABLE_OWNER,
+        PermissionAction.SCHEDULE_RUN_NOW: SCHEDULE_RUN_NOW_OWNER,
+    }[action]
     context = PolicyContext(
         project_id=project_id,
         reason=reason,
         preview=preview,
+        enforcement_owner=owner,
     )
     resolution = request.app.state.harness_policy_engine.resolve(
         action,

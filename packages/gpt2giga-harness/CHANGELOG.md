@@ -8,6 +8,7 @@
 ## [0.0.1a4] - 2026-07-15
 
 ### Добавлено
+- **Policy conformance для mutation-маршрутов**: все unsafe-method маршруты Harness API теперь входят в единый fail-closed semantic inventory с effect class, enforcement control и owner, стабильными permission actions там, где они применимы, и retained evidence для allow/ask/deny/stale/redaction; создание приложения и CI отклоняют неклассифицированные маршруты.
 - **Бюджеты производительности Cockpit**: packaged shell публикует и проверяет machine-readable бюджеты для веса critical assets, времени first-ready, размера/rendering большого trace DOM, cursor reconnect и ограниченных diff/report preview; полный retained report и явные copy, open и apply остаются доступны отдельно.
 - **Readiness выбранного запуска**: CLI/API/UI preflight до spawn показывает redaction-safe `ready`/`degraded`/`blocked` checks и remediation только для выбранных harness, invocation mode, route/model, workspace policy и durable/synchronous path; нерелевантные сбои не блокируют локальный Echo.
 

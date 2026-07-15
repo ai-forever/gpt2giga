@@ -30,6 +30,7 @@ from gpt2giga_harness.project import (
 )
 from gpt2giga_harness.runtime.policy import (
     EnforcementLevel,
+    MCP_SERVER_PROBE_OWNER,
     PermissionAction,
     PolicyContext,
     PolicyDecision,
@@ -141,6 +142,7 @@ async def probe_tool_server(
                 "url": descriptor.url,
                 "operation": "initialize and list capabilities only",
             },
+            enforcement_owner=MCP_SERVER_PROBE_OWNER,
         )
         resolution = request.app.state.harness_policy_engine.resolve(
             action,

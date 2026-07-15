@@ -155,6 +155,7 @@ from gpt2giga_harness.runtime.payloads import DurableJobPayloadStore
 from gpt2giga_harness.runtime.policy import (
     EnforcementLevel,
     INTERACTIVE_PROFILE,
+    NATIVE_PROCESS_SPAWN_OWNER,
     PermissionAction,
     PolicyContext,
     PolicyDecision,
@@ -211,6 +212,7 @@ from gpt2giga_harness.tool_profiles import (
     tool_profile_status_to_dict,
 )
 from gpt2giga_harness.ui.performance import ui_performance_budgets
+from gpt2giga_harness.ui.mutation_contracts import install_mutation_contracts
 from gpt2giga_harness.ui.routers.runs import router as runs_router
 from gpt2giga_harness.ui.routers.schedules import router as schedules_router
 from gpt2giga_harness.ui.routers.agents import router as agents_router
@@ -2667,6 +2669,7 @@ def create_app(
     # The shell catch-all must remain last so unknown API and asset paths never
     # become HTML responses.
     app.include_router(create_shell_router(ui_security))
+    install_mutation_contracts(app)
     return app
 
 
@@ -3157,6 +3160,7 @@ def _native_process_policy_gate(
             "workspace": payload.get("workspace") or session.workspace,
             "workspace_policy": payload.get("workspace_policy") or "auto",
         },
+        enforcement_owner=NATIVE_PROCESS_SPAWN_OWNER,
     )
     resolution = policy_engine.resolve(
         PermissionAction.PROCESS_SPAWN,
