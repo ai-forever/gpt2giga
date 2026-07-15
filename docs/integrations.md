@@ -53,6 +53,7 @@ If `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, use `GPT2GIGA_API_KEY` as the client API
 |---|---|
 | OpenHands | [integrations/openhands/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/openhands/README.md) |
 | OpenAI Codex | [integrations/codex/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/codex/README.md) |
+| Grok Build | [integrations/grok-build/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/grok-build/README.md) |
 | Aider | [integrations/aider/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/aider/README.md) |
 | Claude Code | [integrations/claude-code/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/claude-code/README.md) |
 | Claude Desktop App | [integrations/claude-desktop/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/claude-desktop/README.md) |
@@ -75,10 +76,10 @@ versions. Re-run the guide after a client upgrade and update its record.
 | Gemini CLI | `gemini 0.46.0` | 2026-06-26 | Gemini content API, `/v1` and `/v2` | Verified record |
 | Claude Desktop | `1.12603.1` with Claude Code `2.1.170` | 2026-06-13 | Anthropic Messages through a 3p gateway | Beta record |
 
-The OpenHands, Aider, Cursor, Qwen Code, Xcode, and nginx pages are maintained
-setup guides, but they do not yet contain a current dated verification record.
-Treat them as reproducible recipes and report the client version and tested
-route when confirming or reporting a regression.
+The Grok Build, OpenHands, Aider, Cursor, Qwen Code, Xcode, and nginx pages are
+maintained setup guides, but they do not yet contain a current dated end-to-end
+verification record. Treat them as reproducible recipes and report the client
+version and tested route when confirming or reporting a regression.
 
 ## Compatibility directory
 
@@ -88,7 +89,7 @@ entry in this directory is not a verification claim.
 
 | Category | Projects |
 |---|---|
-| Coding agents and editors | [OpenCode](https://opencode.ai/), [KiloCode](https://kilo.ai/), [OpenHands](https://openhands.dev/), [Zed](https://zed.dev/), [Cline](https://cline.bot/), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Aider](https://aider.chat/), [Claude Code](https://code.claude.com/docs/en/overview), [Cursor](https://cursor.com/), [Qwen Code](https://github.com/QwenLM/qwen-code), [Xcode](https://developer.apple.com/xcode/) |
+| Coding agents and editors | [Grok Build](https://docs.x.ai/build/overview), [OpenCode](https://opencode.ai/), [KiloCode](https://kilo.ai/), [OpenHands](https://openhands.dev/), [Zed](https://zed.dev/), [Cline](https://cline.bot/), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Aider](https://aider.chat/), [Claude Code](https://code.claude.com/docs/en/overview), [Cursor](https://cursor.com/), [Qwen Code](https://github.com/QwenLM/qwen-code), [Xcode](https://developer.apple.com/xcode/) |
 | Agent frameworks | [Langflow](https://github.com/langflow-ai/langflow), [DeepAgents](https://github.com/langchain-ai/deepagents), [CrewAI](https://github.com/crewAIInc/crewAI), [Qwen Agent](https://github.com/QwenLM/Qwen-Agent), [PydanticAI](https://github.com/pydantic/pydantic-ai), [CAMEL](https://github.com/camel-ai/camel), [smolagents](https://github.com/huggingface/smolagents), [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) |
 | SDKs and desktop clients | [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python), [Claude Desktop](https://claude.com/download) |
 
