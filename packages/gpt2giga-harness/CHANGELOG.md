@@ -5,10 +5,14 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
-## [0.0.1a3] - 2026-07-15
+## [0.0.1a4] - 2026-07-15
 
 ### Добавлено
 - **Readiness выбранного запуска**: CLI/API/UI preflight до spawn показывает redaction-safe `ready`/`degraded`/`blocked` checks и remediation только для выбранных harness, invocation mode, route/model, workspace policy и durable/synchronous path; нерелевантные сбои не блокируют локальный Echo.
+
+## [0.0.1a3] - 2026-07-15
+
+### Добавлено
 - **Переход от review к reuse**: rail в Work теперь ведёт подходящий успешный run к его точному provenance/promotion inspector, а preview/apply promotion и scheduling остаются отдельными явными действиями оператора.
 - **Переход от evidence к review**: rail в Work теперь ведёт от terminal evidence к Diff точного сохранённого worktree при наличии изолированного patch, а apply и approval остаются отдельными явными действиями оператора.
 - **Переход от запуска к evidence**: Work показывает компактный путь Run → Evidence после начала первого запуска и включает deep link на сохранённый trace именно этого run в Runs Center только после terminal completion.
@@ -71,6 +75,7 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
+[0.0.1a4]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.0.1a4
 [0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3
 [0.0.1a2]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a1...gpt2giga-harness-v0.0.1a2
 [0.0.1a1]: https://github.com/ai-forever/gpt2giga/releases/tag/gpt2giga-harness-v0.0.1a1
