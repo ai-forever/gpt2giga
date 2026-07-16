@@ -110,6 +110,37 @@ executable должен быть в `PATH` или задан явным override
 настроен и доступен. Для описанного Harness route отдельный vendor login не
 нужен. Отсутствующий CLI будет недоступен, но не сломает остальной cockpit.
 
+#### Базовая установка и опциональные providers
+
+Базовый distribution содержит десять проверенных прямых runtime dependencies,
+включая точную совместимую версию `gpt2giga`. В release CI оба wheel
+устанавливаются в чистые окружения Python 3.10 и 3.14, после чего versioned
+audit завершается ошибкой, если resolved environment превышает 64 distributions
+или содержит packages из следующих семейств опциональных интеграций:
+
+- чтение и запись Office-документов;
+- удалённые messaging channels;
+- внешние client или agent UI frameworks;
+- sandbox и container providers.
+
+Такие возможности подключаются через отдельно установленный provider
+distribution или entry-point plugin Harness. Базовый пакет не устанавливает и
+не включает их неявно. Адаптеры Codex, Claude Code и Gemini остаются
+встроенными, но их отдельно управляемые CLI executables обнаруживаются в
+`PATH`, а не устанавливаются как Python dependencies.
+
+Для проверки release или package запускайте следующую команду только в чистом
+base-install environment. Окружение с намеренно установленным optional provider
+ожидаемо не пройдёт base-only audit:
+
+```bash
+python -I -m gpt2giga_harness.base_install --json
+```
+
+Команда source-checkout `uv sync --all-packages --all-extras --dev`
+устанавливает development tooling и repository integration fixtures, поэтому
+не измеряет footprint базовой установки.
+
 ### 2. Инициализируйте тестовый проект
 
 Начните с репозитория, где безопасно просмотреть созданные файлы и пробные

@@ -40,6 +40,25 @@ The current `gpt2giga-harness==0.0.1a4` metadata depends exactly on
 `gpt2giga==0.2.3a2`. Installing only `gpt2giga` never adds Harness commands or
 the `gpt2giga_harness` namespace.
 
+The base Harness install is intentionally limited to ten reviewed direct
+runtime distributions, including the exact gateway dependency. A clean
+installed-artifact audit fails if the resolved environment grows beyond 64
+distributions or pulls in Office document libraries, remote-channel SDKs,
+external client frameworks, or sandbox-provider SDKs. Those capabilities must
+arrive as separately installed providers or Harness plugins; they are not
+silently enabled by the base package. Release CI runs the same audit on clean
+Python 3.10 and 3.14 environments:
+
+```sh
+python -I -m gpt2giga_harness.base_install --json
+```
+
+Run that command in a clean base-install environment. An environment where you
+deliberately installed an optional provider is expected to report it as
+`present` and fail the base-only policy check. The source-checkout development
+sync above includes repository development extras and is therefore not a base
+footprint measurement.
+
 ## First local run
 
 From a disposable project directory:

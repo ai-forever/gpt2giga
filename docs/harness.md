@@ -110,6 +110,37 @@ executable on `PATH` (or an explicit executable override) plus a configured
 local gateway. They do not require a separate vendor login for the documented
 Harness route. Unavailable CLIs stay disabled rather than breaking the cockpit.
 
+#### Base install and optional providers
+
+The base distribution has ten reviewed direct runtime dependencies, including
+the exact compatible `gpt2giga` version. Release CI installs both wheels into
+clean Python 3.10 and 3.14 environments and runs a versioned audit that fails
+if the resolved environment exceeds 64 distributions or includes packages from
+these optional integration families:
+
+- Office document readers and writers;
+- remote messaging channels;
+- external client or agent UI frameworks;
+- sandbox and container providers.
+
+Add those capabilities through a separately installed provider distribution or
+a Harness entry-point plugin. The base package does not install or silently
+enable them. The Codex, Claude Code, and Gemini adapters remain built in, but
+their separately managed CLI executables are discovered on `PATH` rather than
+installed as Python dependencies.
+
+For release or package debugging, run this only inside a clean base-install
+environment; an environment with an intentionally installed optional provider
+is expected to fail the base-only audit:
+
+```bash
+python -I -m gpt2giga_harness.base_install --json
+```
+
+The source-checkout `uv sync --all-packages --all-extras --dev` command installs
+development tooling and repository integration fixtures, so it is not a base
+footprint measurement.
+
 ### 2. Initialize a disposable or test project
 
 Run the first tour in a repository where generated project files and test edits

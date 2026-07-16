@@ -10,6 +10,8 @@ import tarfile
 
 import pytest
 
+from gpt2giga_harness.base_install import BASE_DIRECT_DISTRIBUTIONS
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
@@ -364,6 +366,9 @@ def test_optional_and_development_dependencies_stay_with_their_owner():
         "postgres",
     }
     assert "optional-dependencies" not in harness_metadata["project"]
+    assert _declared_distribution_names(harness_metadata) == set(
+        BASE_DIRECT_DISTRIBUTIONS
+    )
 
 
 def test_harness_gateway_imports_stay_within_the_reviewed_boundary():

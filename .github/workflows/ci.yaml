@@ -211,6 +211,7 @@ jobs:
           .venv-artifact/bin/gpt2giga --help
           .venv-artifact/bin/giga --help
           .venv-artifact/bin/gpt2giga-harness --help
+          .venv-artifact/bin/python -I -m gpt2giga_harness.base_install --json
 
 
   coverage-badge:
