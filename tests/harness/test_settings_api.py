@@ -31,6 +31,8 @@ def test_settings_read_model_is_bounded_and_never_exposes_secrets(
     assert body["workspace"]["name"] == tmp_path.name
     assert body["routes"]["default_api_mode_source"] == "built_in"
     assert body["routes"]["default_model_source"] == "built_in"
+    assert body["harness_defaults"]["default_model"] == "GigaChat-3.5-432B-A28B"
+    assert body["harness_defaults"]["default_title_model"] == "GigaChat-3-Lightning"
     assert "root" not in body["workspace"]
     assert body["diagnostics"]["content_free"] is True
     serialized = str(body)
@@ -52,6 +54,7 @@ def test_settings_defaults_persist_read_back_and_seed_new_sessions(tmp_path):
             "defaults": {
                 "default_harness_id": "direct-chat",
                 "default_model": "GigaChat",
+                "default_title_model": "GigaChat-3-Lightning",
                 "default_api_mode": "v2",
                 "mode": "act",
                 "invocation_mode": "headless",
@@ -66,6 +69,7 @@ def test_settings_defaults_persist_read_back_and_seed_new_sessions(tmp_path):
     body = saved.json()
     assert body["saved"] is True
     assert body["defaults"]["default_harness_id"] == "direct-chat"
+    assert body["defaults"]["default_title_model"] == "GigaChat-3-Lightning"
     assert body["sources"]["default_harness_id"] == "harness_settings"
     assert body["change_effect"] == "new_runs"
     stored = tmp_path / "data" / "settings" / "defaults.json"
@@ -77,6 +81,9 @@ def test_settings_defaults_persist_read_back_and_seed_new_sessions(tmp_path):
         "review_every_action"
     )
     assert read_back["routes"]["default_model"] == "GigaChat"
+    assert read_back["harness_defaults"]["default_title_model"] == (
+        "GigaChat-3-Lightning"
+    )
 
     created = client.post("/api/sessions", json={})
     assert created.status_code == 200
@@ -103,6 +110,21 @@ def test_settings_reject_invalid_harness_invocation_before_persistence(tmp_path)
     assert response.status_code == 422
     assert response.json()["detail"]["field_errors"] == {
         "invocation_mode": "selected harness does not support native sessions"
+    }
+    assert not (tmp_path / "data" / "settings" / "defaults.json").exists()
+
+
+def test_settings_reject_invalid_title_model_before_persistence(tmp_path):
+    client = _client(tmp_path)
+
+    response = client.patch(
+        "/api/settings/defaults",
+        json={"defaults": {"default_title_model": "invalid\nmodel"}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["field_errors"] == {
+        "default_title_model": "expected a non-empty model name up to 200 characters"
     }
     assert not (tmp_path / "data" / "settings" / "defaults.json").exists()
 

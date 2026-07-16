@@ -309,7 +309,7 @@ def _proxy_checks(
                 else (
                     _remedy(
                         "Set a default model or fix proxy model discovery.",
-                        "export GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max",
+                        "export GPT2GIGA_HARNESS_DEFAULT_MODEL=<model-from-/v2/models>",
                     ),
                 )
             ),

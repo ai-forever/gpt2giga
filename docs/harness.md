@@ -462,6 +462,14 @@ GPT2GIGA_HARNESS_TIMEOUT_SECONDS=3600
 GPT2GIGA_HARNESS_DATA_DIR=~/.gpt2giga/harness
 ```
 
+Cockpit Settings exposes separate defaults for chat requests and generated
+session titles. Use **Discover models** and select both values from the models
+reported by the active API route. The choices are stored in
+`settings/defaults.json` under the Harness data directory and apply to new
+runs; when the title model is cleared, title generation uses the selected chat
+model. `GPT2GIGA_HARNESS_DEFAULT_MODEL` or `GIGACHAT_MODEL` continues to lock
+the chat default when it is environment-owned.
+
 If `GPT2GIGA_HARNESS_API_KEY` is not set, the harness falls back to
 `GPT2GIGA_API_KEY` for calls to the local proxy. It never passes
 `GIGACHAT_CREDENTIALS`, OAuth tokens, certificates, or `.env` contents to

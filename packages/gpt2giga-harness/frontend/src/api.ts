@@ -287,6 +287,7 @@ export interface SettingsResponse {
   harness_defaults: {
     default_harness_id: string;
     default_model: string | null;
+    default_title_model: string | null;
     default_api_mode: string;
     mode: string;
     invocation_mode: string;

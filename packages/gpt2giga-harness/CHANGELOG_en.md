@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Cockpit model settings**: default chat and session-title models can now be selected independently from the discovery list and persist in backend-owned Harness Settings; Workbench and headless runs consume the stored choices without a model ID hardcoded in the client or session runner.
 - **Cockpit V2 rollout**: the packaged React cockpit is now the default local UI, prior top-level deep links redirect to their canonical Workbench, Runs, Automation, Evaluation, or Integrations destinations, and `/legacy/**` remains available as a release-level rollback path without retained-state migration. New Cockpit streams start at the durable live tail while bounded snapshots own retained history, so opening a large completed run does not replay every stored event through the browser. Read-model ETags receive a fresh process namespace so a restart, data-dir switch, or rollback cannot reuse a stale browser snapshot with the same SQLite generation.
 
 ### Added

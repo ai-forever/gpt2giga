@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Изменено
+- **Настройки моделей Cockpit**: модели по умолчанию для чатов и генерации заголовков теперь выбираются независимо из discovery-списка и сохраняются в backend-owned Harness Settings; Workbench и headless run используют сохранённый выбор без model-id, зашитого в клиент или session runner.
 - **Rollout Cockpit V2**: пакетный React cockpit теперь открывается как локальный UI по умолчанию, прежние top-level deep links перенаправляются в канонические Workbench, Runs, Automation, Evaluation или Integrations, а `/legacy/**` остаётся release-level путём отката без миграции retained state. Новые Cockpit streams подключаются к durable live tail, а retained history остаётся в bounded snapshots, поэтому открытие большого завершённого run не прокручивает через браузер все сохранённые events. ETag read model получает новый process namespace, чтобы restart, смена data-dir или rollback не переиспользовали устаревший browser snapshot с тем же SQLite generation.
 
 ### Добавлено

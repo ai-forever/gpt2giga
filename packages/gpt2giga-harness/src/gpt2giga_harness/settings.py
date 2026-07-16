@@ -9,7 +9,11 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
-from gpt2giga_harness.config import DEFAULT_MODEL_HINTS, HarnessConfig
+from gpt2giga_harness.config import (
+    DEFAULT_CHAT_MODEL,
+    DEFAULT_TITLE_MODEL,
+    HarnessConfig,
+)
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
 
 
@@ -19,6 +23,7 @@ SETTINGS_FIELDS = frozenset(
         "default_api_mode",
         "default_harness_id",
         "default_model",
+        "default_title_model",
         "invocation_mode",
         "mode",
         "permission_profile",
@@ -33,7 +38,8 @@ class HarnessDefaults:
     """Effective defaults copied into newly created sessions and runs."""
 
     default_harness_id: str = "codex-cli"
-    default_model: str | None = DEFAULT_MODEL_HINTS[0]
+    default_model: str | None = DEFAULT_CHAT_MODEL
+    default_title_model: str | None = DEFAULT_TITLE_MODEL
     default_api_mode: str = "v2"
     mode: str = "plan"
     invocation_mode: str = "headless"
@@ -66,7 +72,7 @@ class HarnessSettingsStore:
             stored = self._read_unlocked()
         locked = _environment_owned_fields()
         base = HarnessDefaults(
-            default_model=self.config.default_model or DEFAULT_MODEL_HINTS[0],
+            default_model=self.config.default_model or DEFAULT_CHAT_MODEL,
             default_api_mode=self.config.default_api_mode.value,
         )
         values = asdict(base)
@@ -121,7 +127,7 @@ class HarnessSettingsStore:
         stored = self._read_unlocked()
         locked = _environment_owned_fields()
         base = HarnessDefaults(
-            default_model=self.config.default_model or DEFAULT_MODEL_HINTS[0],
+            default_model=self.config.default_model or DEFAULT_CHAT_MODEL,
             default_api_mode=self.config.default_api_mode.value,
         )
         values = asdict(base)

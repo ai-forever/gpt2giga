@@ -60,7 +60,13 @@ def settings_read_model(
         )
     models = list(
         dict.fromkeys(
-            model for model in (defaults.default_model, *DEFAULT_MODEL_HINTS) if model
+            model
+            for model in (
+                defaults.default_model,
+                defaults.default_title_model,
+                *DEFAULT_MODEL_HINTS,
+            )
+            if model
         )
     )[:20]
     return {
@@ -194,14 +200,15 @@ def _validate_defaults(request: Request, values: Mapping[str, Any]) -> dict[str,
     except ValueError:
         errors["default_api_mode"] = "expected v1 or v2"
         api_mode = None
-    model = values.get("default_model")
-    if model is not None and (
-        not isinstance(model, str)
-        or not model.strip()
-        or len(model.strip()) > 200
-        or any(ord(character) < 32 for character in model)
-    ):
-        errors["default_model"] = "expected a non-empty model name up to 200 characters"
+    for field in ("default_model", "default_title_model"):
+        model = values.get(field)
+        if model is not None and (
+            not isinstance(model, str)
+            or not model.strip()
+            or len(model.strip()) > 200
+            or any(ord(character) < 32 for character in model)
+        ):
+            errors[field] = "expected a non-empty model name up to 200 characters"
     invocation = values.get("invocation_mode")
     if invocation not in {"headless", "native"}:
         errors["invocation_mode"] = "expected headless or native"

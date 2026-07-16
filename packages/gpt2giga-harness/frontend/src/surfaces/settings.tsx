@@ -19,6 +19,7 @@ type DefaultsDraft = {
   default_api_mode: string;
   default_harness_id: string;
   default_model: string;
+  default_title_model: string;
   invocation_mode: string;
   mode: string;
   permission_profile: string;
@@ -53,7 +54,11 @@ export function SettingsSurface() {
   const save = useMutation({
     mutationFn: (next: DefaultsDraft) =>
       patchCockpit<SettingsSaveResponse>("/api/settings/defaults", {
-        defaults: { ...next, default_model: next.default_model.trim() || null },
+        defaults: {
+          ...next,
+          default_model: next.default_model.trim() || null,
+          default_title_model: next.default_title_model.trim() || null,
+        },
         expected_revision: settings.data?.revision,
       }),
     onSuccess: () => {
@@ -71,10 +76,16 @@ export function SettingsSurface() {
       ),
   });
 
-  const modelChoices = useMemo(
-    () => modelDiscovery.data?.models ?? settings.data?.routes.models ?? [],
-    [modelDiscovery.data?.models, settings.data?.routes.models],
-  );
+  const modelChoices = useMemo(() => Array.from(new Set([
+    draft?.default_model,
+    draft?.default_title_model,
+    ...(modelDiscovery.data?.models ?? settings.data?.routes.models ?? []),
+  ].filter((model): model is string => Boolean(model)))), [
+    draft?.default_model,
+    draft?.default_title_model,
+    modelDiscovery.data?.models,
+    settings.data?.routes.models,
+  ]);
 
   if (settings.isPending || draft === null) {
     return <div className="settings-loading" aria-busy="true">{message(locale, "loading")}</div>;
@@ -163,9 +174,17 @@ export function SettingsSurface() {
                   <option value="v2">v2</option><option value="v1">v1</option>
                 </select>
               </label>
-              <label>{message(locale, "model")}
-                <input disabled={locked.has("default_model")} list="settings-models" value={draft.default_model} onChange={(event) => setDraft({ ...draft, default_model: event.target.value })} />
-                <datalist id="settings-models">{modelChoices.map((model) => <option key={model} value={model} />)}</datalist>
+              <label>{message(locale, "chatModel")}
+                <select disabled={locked.has("default_model")} value={draft.default_model} onChange={(event) => setDraft({ ...draft, default_model: event.target.value })}>
+                  <option value="">{message(locale, "noDefaultModel")}</option>
+                  {modelChoices.map((model) => <option key={model} value={model}>{model}</option>)}
+                </select>
+              </label>
+              <label>{message(locale, "titleModel")}
+                <select value={draft.default_title_model} onChange={(event) => setDraft({ ...draft, default_title_model: event.target.value })}>
+                  <option value="">{message(locale, "useChatModel")}</option>
+                  {modelChoices.map((model) => <option key={model} value={model}>{model}</option>)}
+                </select>
               </label>
             </div>
             <button disabled={modelDiscovery.isPending} onClick={() => modelDiscovery.mutate()} type="button">
@@ -253,6 +272,7 @@ function toDraft(data: SettingsResponse): DefaultsDraft {
     default_api_mode: current.default_api_mode,
     default_harness_id: current.default_harness_id,
     default_model: current.default_model ?? "",
+    default_title_model: current.default_title_model ?? "",
     invocation_mode: current.invocation_mode,
     mode: current.mode,
     permission_profile: current.permission_profile,

@@ -23,6 +23,9 @@ describe("backend-owned Settings contract", () => {
     }
     expect(source).toContain('<Boundary source="browser" effect="live" />');
     expect(source).toContain('patchCockpit<SettingsSaveResponse>("/api/settings/defaults"');
+    expect(source).toContain("default_title_model");
+    expect(source).toContain('message(locale, "chatModel")');
+    expect(source).toContain('message(locale, "titleModel")');
   });
 
   it("never creates browser fields for credentials, tokens, or certificates", () => {

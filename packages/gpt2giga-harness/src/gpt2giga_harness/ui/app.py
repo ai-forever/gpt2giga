@@ -2030,14 +2030,25 @@ def create_app(
         session_id: str,
         payload: Mapping[str, Any],
     ) -> HarnessRun:
+        effective_payload = dict(payload)
+        extra = _metadata_mapping(payload.get("extra"))
+        if (
+            bool(extra.get("generate_session_title"))
+            and _optional_text(extra.get("session_title_model")) is None
+        ):
+            settings_snapshot = await run_in_threadpool(settings_store.load)
+            title_model = settings_snapshot.defaults.default_title_model
+            if title_model is not None:
+                extra["session_title_model"] = title_model
+        effective_payload["extra"] = extra
         if durable_dispatcher is not None:
             idempotency_key = str(
-                payload.get("idempotency_key") or f"ui_{new_id('submit')}"
+                effective_payload.get("idempotency_key") or f"ui_{new_id('submit')}"
             )
             submission = await run_in_threadpool(
                 durable_dispatcher.submit,
                 session_id,
-                payload,
+                effective_payload,
                 idempotency_key=idempotency_key,
                 origin="interactive",
             )
@@ -2049,7 +2060,7 @@ def create_app(
             run_in_threadpool(
                 runner.run_in_session,
                 session_id,
-                payload,
+                effective_payload,
                 cancel_event=cancel_event,
             )
         )
@@ -2100,7 +2111,11 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
-            harness_id = str(payload.get("harness_id") or "echo")
+            settings_snapshot = await run_in_threadpool(settings_store.load)
+            harness_defaults = settings_snapshot.defaults
+            harness_id = str(
+                payload.get("harness_id") or harness_defaults.default_harness_id
+            )
             registry.get(harness_id)
             session = await run_in_threadpool(
                 runner.create_session,
@@ -2108,9 +2123,15 @@ def create_app(
                 or title_from_prompt(str(payload.get("prompt") or "")),
                 workspace=_optional_text(payload.get("workspace")),
                 default_harness_id=harness_id,
-                default_model=_optional_text(payload.get("model")),
-                default_api_mode=payload.get("api_mode") or config.default_api_mode,
-                default_mode=str(payload.get("mode") or "plan"),
+                default_model=(
+                    _optional_text(payload.get("model"))
+                    if "model" in payload
+                    else harness_defaults.default_model
+                ),
+                default_api_mode=(
+                    payload.get("api_mode") or harness_defaults.default_api_mode
+                ),
+                default_mode=str(payload.get("mode") or harness_defaults.mode),
             )
             run = await _start_headless_run(session.id, payload)
         except KeyError as exc:

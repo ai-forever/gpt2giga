@@ -240,6 +240,48 @@ def test_sessions_api_start_run_returns_stream_urls_and_sse_replay():
     assert "run_finished" in text
 
 
+def test_headless_run_uses_title_model_from_settings(tmp_path, monkeypatch):
+    captured = {}
+    requested = threading.Event()
+
+    def request_json(method, url, *, payload, api_key, timeout):
+        captured["model"] = payload["model"]
+        requested.set()
+        return {"choices": [{"message": {"content": "Generated title"}}]}
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.proxy.request_json",
+        request_json,
+    )
+    client = _client(
+        config=HarnessConfig(
+            default_model="ConfiguredChatModel",
+            data_dir=str(tmp_path / "data"),
+        )
+    )
+    saved = client.patch(
+        "/api/settings/defaults",
+        json={"defaults": {"default_title_model": "SelectedTitleModel"}},
+    )
+    assert saved.status_code == 200
+    session = client.post("/api/sessions", json={"harness_id": "echo"}).json()[
+        "session"
+    ]
+
+    started = client.post(
+        f"/api/sessions/{session['id']}/run/start",
+        json={
+            "harness_id": "echo",
+            "prompt": "Generate a selected title",
+            "extra": {"generate_session_title": True},
+        },
+    )
+
+    assert started.status_code == 200
+    assert requested.wait(timeout=2)
+    assert captured["model"] == "SelectedTitleModel"
+
+
 def test_sessions_api_marks_durable_ui_turns_interactive(tmp_path):
     data_dir = tmp_path / "data"
     config = HarnessConfig(data_dir=str(data_dir))

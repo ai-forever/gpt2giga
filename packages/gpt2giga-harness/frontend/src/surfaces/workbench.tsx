@@ -65,7 +65,6 @@ import {
 
 const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
 const runPreferencesKey = "gpt2giga.cockpit-v2.run-preferences.v1";
-const sessionTitleModel = "GigaChat-3-Lightning";
 const reasoningModel = "GigaChat-2-Reasoning";
 type SessionAction = "archive" | "delete";
 type RunConfig = { apiMode: string; harnessId: string; mode: string; model: string };
@@ -253,9 +252,15 @@ export function WorkbenchSurface() {
     if (runConfig.model || models.isPending) return;
     const selectedModel = models.isSuccess && models.data.models.length > 0
       ? preferredModel(models.data.models)
-      : sessionTitleModel;
+      : settings.data?.harness_defaults.default_model ?? "";
     setRunConfig((current) => current.model ? current : { ...current, model: selectedModel });
-  }, [models.data?.models, models.isPending, models.isSuccess, runConfig.model]);
+  }, [
+    models.data?.models,
+    models.isPending,
+    models.isSuccess,
+    runConfig.model,
+    settings.data?.harness_defaults.default_model,
+  ]);
 
   const createSession = useMutation({
     mutationFn: () =>
@@ -290,7 +295,9 @@ export function WorkbenchSurface() {
         capability: advancedConfig.capability,
         extra: {
           generate_session_title: session.title === "Untitled session",
-          session_title_model: sessionTitleModel,
+          session_title_model:
+            settings.data?.harness_defaults.default_title_model
+            ?? (runConfig.model.trim() || undefined),
           ...(isReasoningModel(runConfig.model)
             ? { agent_adapter_options: { reasoning_effort: reasoningEffort } }
             : {}),
@@ -1209,7 +1216,7 @@ export function WorkbenchSurface() {
                           onClick={() => setModelMenuOpen((open) => !open)}
                           type="button"
                         >
-                          <span>{runConfig.model || sessionTitleModel}</span>
+                          <span>{runConfig.model || message(locale, "noDefaultModel")}</span>
                           <span aria-hidden="true">⌄</span>
                         </button>
                       </div>
@@ -1550,7 +1557,7 @@ function loadRunPreferences(): { config: RunConfig; reasoningEffort: ReasoningEf
 }
 
 function preferredModel(models: readonly string[]): string {
-  return models.find((model) => model !== "GigaChat") ?? models[0] ?? sessionTitleModel;
+  return models.find((model) => model !== "GigaChat") ?? models[0] ?? "";
 }
 
 function isReasoningModel(model: string): boolean {

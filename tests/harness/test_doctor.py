@@ -80,7 +80,7 @@ def test_probe_json_route_uses_model_fallback(monkeypatch):
     result = proxy.probe_json_route(HarnessConfig(), "/v2/chat/completions")
 
     assert result.ok is True
-    assert captured["payload"]["model"] == "GigaChat-2-Max"
+    assert captured["payload"]["model"] == "GigaChat-3.5-432B-A28B"
     assert captured["payload"]["messages"] == [{"role": "user", "content": "ping"}]
 
 

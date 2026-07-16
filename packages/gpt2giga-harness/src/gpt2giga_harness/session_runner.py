@@ -84,7 +84,6 @@ from gpt2giga_harness.workspace import resolve_workspace
 
 MAX_HISTORY_MESSAGES = 20
 MAX_REASONING_CHARACTERS = 32_768
-DEFAULT_SESSION_TITLE_MODEL = "GigaChat-3-Lightning"
 
 
 @dataclass(frozen=True)
@@ -989,7 +988,11 @@ class HarnessSessionRunner:
         ):
             return
         prompt = str(options["prompt"])
-        model = _optional_text(options["extra"].get("session_title_model"))
+        model = (
+            _optional_text(options["extra"].get("session_title_model"))
+            or _optional_text(options.get("model"))
+            or self.config.default_model
+        )
 
         def generate() -> None:
             try:
@@ -1382,9 +1385,10 @@ def _generate_session_title(
 ) -> str:
     """Generate a compact title through the local proxy with a safe fallback."""
     fallback = title_from_prompt(prompt)
-    selected_model = model or DEFAULT_SESSION_TITLE_MODEL
+    if model is None:
+        return fallback
     payload = {
-        "model": selected_model,
+        "model": model,
         "messages": [
             {
                 "role": "system",

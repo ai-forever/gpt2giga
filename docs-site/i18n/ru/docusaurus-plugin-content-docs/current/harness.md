@@ -349,6 +349,14 @@ GPT2GIGA_HARNESS_TIMEOUT_SECONDS=3600
 GPT2GIGA_HARNESS_DATA_DIR=~/.gpt2giga/harness
 ```
 
+В Cockpit Settings модели по умолчанию для чатов и генерации заголовков
+настраиваются независимо. Нажмите **Найти модели** и выберите оба значения из
+списка, который вернул активный API route. Настройки сохраняются в
+`settings/defaults.json` внутри Harness data directory и применяются к новым
+запускам; если модель заголовков очищена, используется выбранная модель чатов.
+`GPT2GIGA_HARNESS_DEFAULT_MODEL` или `GIGACHAT_MODEL` по-прежнему блокирует
+изменение модели чатов, если значение принадлежит окружению.
+
 Если `GPT2GIGA_HARNESS_API_KEY` не задан, Harness использует
 `GPT2GIGA_API_KEY` для локального proxy. GigaChat credentials, OAuth tokens,
 certificates и содержимое `.env` не передаются внешнему agent CLI.
