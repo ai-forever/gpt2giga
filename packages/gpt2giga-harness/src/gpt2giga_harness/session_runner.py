@@ -81,6 +81,7 @@ from gpt2giga_harness.worktrees import (
 from gpt2giga_harness.workspace import resolve_workspace
 
 MAX_HISTORY_MESSAGES = 20
+MAX_REASONING_CHARACTERS = 32_768
 DEFAULT_SESSION_TITLE_MODEL = "GigaChat-3-Lightning"
 
 
@@ -522,6 +523,7 @@ class HarnessSessionRunner:
         request_extra["preflight"] = preflight_payload
         emitted_event_counts: Counter[str] = Counter()
         latest_usage: dict[str, Any] = {}
+        reasoning_parts: dict[str, list[str]] = {"summary": [], "text": [], "model": []}
 
         def event_sink(event: HarnessEvent) -> None:
             self._append_event(
@@ -535,6 +537,7 @@ class HarnessSessionRunner:
             usage = _usage_from_event(event)
             if usage is not None:
                 _merge_usage(latest_usage, usage)
+            _collect_reasoning(reasoning_parts, event)
 
         request = HarnessRequest(
             prompt=effective_prompt,
@@ -688,6 +691,7 @@ class HarnessSessionRunner:
             usage = _usage_from_event(event)
             if usage is not None:
                 _merge_usage(latest_usage, usage)
+            _collect_reasoning(reasoning_parts, event)
 
         if _cancel_requested(cancel_event):
             status = "canceled"
@@ -710,6 +714,12 @@ class HarnessSessionRunner:
             event_type = HarnessEventType.ERROR.value
             event_message = "Harness run failed."
             error = content
+        message_metadata: dict[str, Any] = {}
+        if role == "assistant" and latest_usage:
+            message_metadata["usage"] = dict(latest_usage)
+        reasoning = _final_reasoning(reasoning_parts)
+        if role == "assistant" and reasoning:
+            message_metadata["reasoning"] = reasoning
         self.store.append_message(
             HarnessMessage(
                 id=new_id("msg"),
@@ -721,9 +731,7 @@ class HarnessSessionRunner:
                 harness_id=options["harness_id"],
                 model=options["model"],
                 api_mode=options["api_mode"],
-                metadata={"usage": dict(latest_usage)}
-                if role == "assistant" and latest_usage
-                else {},
+                metadata=message_metadata,
             )
         )
         self._append_event(
@@ -1510,6 +1518,25 @@ def _usage_from_event(event: HarnessEvent) -> dict[str, Any] | None:
 
 def _is_nonnegative_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _collect_reasoning(
+    target: dict[str, list[str]],
+    event: HarnessEvent,
+) -> None:
+    if event.type != HarnessEventType.REASONING_DELTA.value:
+        return
+    payload = event_to_dict(event)["payload"]
+    delta = payload.get("delta")
+    if not isinstance(delta, str) or not delta:
+        return
+    kind = str(payload.get("kind") or "model")
+    target.setdefault(kind, []).append(delta)
+
+
+def _final_reasoning(parts: Mapping[str, list[str]]) -> str:
+    selected = parts.get("summary") or parts.get("model") or parts.get("text") or []
+    return "".join(selected)[:MAX_REASONING_CHARACTERS]
 
 
 def _merge_usage(target: dict[str, Any], update: Mapping[str, Any]) -> None:

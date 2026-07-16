@@ -314,6 +314,67 @@ def test_direct_chat_streams_coalesced_message_tool_and_usage_events(monkeypatch
     assert emitted[4].payload["arguments"] == '{"city":"Moscow"}'
 
 
+def test_direct_chat_streams_v2_message_reasoning_tool_and_usage_events(monkeypatch):
+    emitted = []
+
+    def fake_stream_sse_json(*args, **kwargs):
+        del args, kwargs
+        yield {"messages": [{"role": "reasoning", "content": [{"text": "Think "}]}]}
+        yield {
+            "messages": [
+                {
+                    "role": "reasoning",
+                    "content": [{"tool_execution": {"name": "web_search"}}],
+                }
+            ]
+        }
+        yield {
+            "messages": [
+                {
+                    "role": "reasoning",
+                    "content": [
+                        {
+                            "tool_execution": {
+                                "name": "web_search",
+                                "status": "success",
+                            }
+                        }
+                    ],
+                }
+            ]
+        }
+        yield {"messages": [{"role": "assistant", "content": [{"text": "Answer"}]}]}
+        yield {
+            "finish_reason": "stop",
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 4,
+                "total_tokens": 16,
+            },
+        }
+
+    monkeypatch.setattr(proxy, "stream_sse_json", fake_stream_sse_json)
+
+    result = DirectChatHarness().run(
+        HarnessRequest(prompt="hello", stream=True, event_sink=emitted.append),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert result.ok is True
+    assert result.text == "Answer"
+    assert [event.type for event in emitted] == [
+        "reasoning_delta",
+        "tool_call_started",
+        "tool_call_finished",
+        "message_delta",
+        "usage",
+    ]
+    assert emitted[0].payload["delta"] == "Think "
+    assert emitted[2].payload["status"] == "completed"
+    assert emitted[3].payload["delta"] == "Answer"
+    assert emitted[4].payload["input_tokens"] == 12
+
+
 def test_direct_chat_streams_gigachat_builtin_tool_events(monkeypatch, tmp_path):
     emitted = []
 
@@ -456,6 +517,8 @@ def test_generated_image_download_uses_local_proxy_gigachat_config(monkeypatch):
 def test_direct_chat_flushes_pending_text_during_upstream_pause(monkeypatch):
     emitted = []
     observed = {}
+    clock = iter((0.0, 1.0))
+    monkeypatch.setattr(direct_chat_module.time, "monotonic", lambda: next(clock))
 
     def fake_stream_sse_json(
         method,
@@ -472,7 +535,6 @@ def test_direct_chat_flushes_pending_text_during_upstream_pause(monkeypatch):
             "model": "GigaChat",
             "choices": [{"index": 0, "delta": {"content": "A"}}],
         }
-        idle_callback.__self__._started_at -= 1
         idle_callback()
         observed["event_count_during_pause"] = len(emitted)
 

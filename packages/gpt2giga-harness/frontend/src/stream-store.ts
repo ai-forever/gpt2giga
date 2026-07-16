@@ -59,6 +59,7 @@ const CONTROL_EVENT_TYPES = new Set([
 ]);
 const COALESCIBLE_EVENT_TYPES = new Set([
   "message_delta",
+  "reasoning_delta",
   "stderr_delta",
   "stdout_delta",
   "tool_call_delta",

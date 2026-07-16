@@ -175,6 +175,63 @@ def test_turn_plan_update_is_normalized_for_workbench_rendering():
     }
 
 
+def test_reasoning_usage_and_tool_result_are_normalized_for_workbench():
+    reasoning, _ = _normalize_notification(
+        "item/reasoning/summaryTextDelta",
+        {"delta": "Inspecting files", "itemId": "reason-1"},
+    )
+    usage, _ = _normalize_notification(
+        "thread/tokenUsage/updated",
+        {
+            "tokenUsage": {
+                "last": {
+                    "inputTokens": 21,
+                    "outputTokens": 8,
+                    "totalTokens": 29,
+                    "cachedInputTokens": 3,
+                },
+                "total": {
+                    "inputTokens": 100,
+                    "outputTokens": 50,
+                    "totalTokens": 150,
+                    "cachedInputTokens": 20,
+                },
+            }
+        },
+    )
+    tool, _ = _normalize_notification(
+        "item/completed",
+        {
+            "item": {
+                "id": "tool-1",
+                "type": "commandExecution",
+                "command": "pwd",
+                "cwd": "/workspace",
+                "status": "completed",
+                "aggregatedOutput": "/workspace\n",
+            }
+        },
+    )
+
+    assert reasoning is not None
+    assert reasoning.type == "reasoning_delta"
+    assert reasoning.payload == {
+        "delta": "Inspecting files",
+        "item_id": "reason-1",
+        "kind": "summary",
+    }
+    assert usage is not None
+    assert usage.type == "usage"
+    assert usage.payload == {
+        "input_tokens": 21,
+        "output_tokens": 8,
+        "total_tokens": 29,
+        "cached_input_tokens": 3,
+    }
+    assert tool is not None
+    assert tool.payload["result"] == "/workspace\n"
+
+
 class _ApprovalAppServerClient(_FakeAppServerClient):
     def request(
         self, method: str, params: Mapping[str, Any], *, timeout: float

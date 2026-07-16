@@ -125,4 +125,40 @@ describe("workbench presentation model", () => {
       "Render tools",
     ]);
   });
+
+  it("projects reasoning, usage, and an inspectable tool result", () => {
+    const projection = projectWorkbenchStream(
+      [
+        {
+          id: "reasoning",
+          payload: { delta: "Checking context", kind: "summary" },
+          run_id: "run-one",
+          type: "reasoning_delta",
+        },
+        {
+          id: "tool",
+          payload: {
+            name: "shell",
+            result: "file-one\nfile-two",
+            status: "completed",
+            tool_call_id: "call-shell",
+          },
+          run_id: "run-one",
+          type: "tool_call_finished",
+        },
+        {
+          id: "usage",
+          payload: { input_tokens: 21, output_tokens: 8, source: "ignored" },
+          run_id: "run-one",
+          type: "usage",
+        },
+      ],
+      [],
+      "run-one",
+    );
+
+    expect(projection.reasoningText).toBe("Checking context");
+    expect(projection.usage).toEqual({ input_tokens: 21, output_tokens: 8 });
+    expect(projection.toolActivities[0]?.result).toBe("file-one\nfile-two");
+  });
 });

@@ -252,6 +252,7 @@ def test_session_runner_deduplicates_live_usage_and_merges_partial_metadata():
     }
     assert result.run.metadata["usage"] == expected_usage
     assert result.bundle.messages[-1].metadata["usage"] == expected_usage
+    assert result.bundle.messages[-1].metadata["reasoning"] == "Short summary"
 
 
 def test_session_runner_updates_session_defaults_before_terminal_event():
@@ -724,6 +725,16 @@ class _StreamingHarness(BaseHarness):
         context: HarnessContext,
     ) -> HarnessResult:
         events = (
+            HarnessEvent(
+                type="reasoning_delta",
+                message="Assistant reasoning delta.",
+                payload={"delta": "verbose thought", "kind": "text"},
+            ),
+            HarnessEvent(
+                type="reasoning_delta",
+                message="Assistant reasoning delta.",
+                payload={"delta": "Short summary", "kind": "summary"},
+            ),
             HarnessEvent(
                 type="message_delta",
                 message="Assistant message delta.",

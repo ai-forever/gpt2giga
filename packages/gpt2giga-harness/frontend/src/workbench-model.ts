@@ -1,4 +1,4 @@
-import type { MessageProjection, RunSummary } from "./api";
+import type { MessageProjection, RunSummary, TokenUsageProjection } from "./api";
 import type { RunStreamEvent } from "./stream-store";
 
 const terminalRunStatuses = new Set(["succeeded", "failed", "canceled"]);
@@ -8,8 +8,10 @@ export interface WorkbenchStreamProjection {
   assistantText: string;
   generatedFiles: readonly RunStreamEvent[];
   plan: readonly WorkbenchPlanItem[];
+  reasoningText: string;
   terminalEvent: RunStreamEvent | null;
   toolActivities: readonly WorkbenchToolActivity[];
+  usage: TokenUsageProjection;
 }
 
 export interface WorkbenchPlanItem {
@@ -21,6 +23,7 @@ export interface WorkbenchToolActivity {
   id: string;
   label: string;
   name: string;
+  result?: unknown;
   status: string;
 }
 
@@ -34,8 +37,10 @@ export function projectWorkbenchStream(
       assistantText: "",
       generatedFiles: [],
       plan: [],
+      reasoningText: "",
       terminalEvent: null,
       toolActivities: [],
+      usage: {},
     };
   }
   const hasRetainedResponse = messages.some(
@@ -46,7 +51,9 @@ export function projectWorkbenchStream(
   const toolActivities = new Map<string, WorkbenchToolActivity>();
   let assistantText = "";
   let plan: readonly WorkbenchPlanItem[] = [];
+  const reasoningParts = { model: [] as string[], summary: [] as string[], text: [] as string[] };
   let terminalEvent: RunStreamEvent | null = null;
+  const usage: TokenUsageProjection = {};
 
   for (const event of events) {
     if (event.run_id !== runId) continue;
@@ -63,6 +70,16 @@ export function projectWorkbenchStream(
       const delta = event.payload?.delta;
       if (typeof delta === "string") assistantText += delta;
     }
+    if (!hasRetainedResponse && event.type === "reasoning_delta") {
+      const delta = event.payload?.delta;
+      const kind = typeof event.payload?.kind === "string" ? event.payload.kind : "model";
+      if (typeof delta === "string") {
+        if (kind === "summary") reasoningParts.summary.push(delta);
+        else if (kind === "text") reasoningParts.text.push(delta);
+        else reasoningParts.model.push(delta);
+      }
+    }
+    if (event.type === "usage") mergeUsage(usage, event.payload);
     if (terminalEventTypes.has(event.type)) terminalEvent = event;
   }
 
@@ -70,8 +87,16 @@ export function projectWorkbenchStream(
     assistantText,
     generatedFiles,
     plan,
+    reasoningText: (
+      reasoningParts.summary.length > 0
+        ? reasoningParts.summary
+        : reasoningParts.model.length > 0
+          ? reasoningParts.model
+          : reasoningParts.text
+    ).join(""),
     terminalEvent,
     toolActivities: [...toolActivities.values()],
+    usage,
   };
 }
 
@@ -90,10 +115,32 @@ export function projectToolPayload(
       id,
       label: toolLabel(name, payload.arguments),
       name,
+      ...(payload.result === undefined ? {} : { result: payload.result }),
       status,
     },
     plan: [],
   };
+}
+
+function mergeUsage(
+  target: TokenUsageProjection,
+  payload: Readonly<Record<string, unknown>> | undefined,
+): void {
+  if (payload === undefined) return;
+  const keys = [
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "cached_input_tokens",
+    "reasoning_output_tokens",
+    "tool_tokens",
+  ] as const;
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      target[key] = value;
+    }
+  }
 }
 
 function parsePlan(value: unknown): readonly WorkbenchPlanItem[] {

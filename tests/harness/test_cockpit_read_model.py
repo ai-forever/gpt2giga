@@ -145,6 +145,40 @@ def test_cockpit_record_pages_enforce_item_byte_bounds_and_stale_snapshots(tmp_p
         assert "snapshot is stale" in stale.json()["detail"]
 
 
+def test_cockpit_message_projection_exposes_bounded_reasoning_and_usage(tmp_path):
+    app = _app(tmp_path)
+    store = app.state.harness_session_store
+    session = store.create_session(title="reasoning")
+    run = _run(store, session.id)
+    store.append_message(
+        HarnessMessage(
+            id="msg_reasoning",
+            session_id=session.id,
+            run_id=run.id,
+            role="assistant",
+            content="answer",
+            created_at=utc_now(),
+            metadata={
+                "reasoning": "Inspecting the repository",
+                "usage": {
+                    "input_tokens": 21,
+                    "output_tokens": 8,
+                    "source": "hidden",
+                    "token": "secret",
+                },
+            },
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/cockpit/sessions/{session.id}/messages")
+
+    assert response.status_code == 200
+    projected = response.json()["messages"][0]
+    assert projected["reasoning"]["text"] == "Inspecting the repository"
+    assert projected["usage"] == {"input_tokens": 21, "output_tokens": 8}
+
+
 def test_cockpit_run_artifacts_and_heavy_evidence_are_lazy_and_bounded(tmp_path):
     app = _app(tmp_path)
     store = app.state.harness_session_store

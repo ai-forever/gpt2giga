@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type AttachmentUploadResponse,
@@ -12,6 +12,7 @@ import {
   patchCockpit,
   type RunStartResponse,
   type SessionSummary,
+  type TokenUsageProjection,
 } from "../api";
 import { MessageMarkdown } from "../message-markdown";
 import { generatedImageProjection } from "../generated-image";
@@ -220,7 +221,7 @@ export function WorkbenchSurface() {
           extra: {
             generate_session_title: session.title === "Untitled session",
             session_title_model: sessionTitleModel,
-            ...(runConfig.model === reasoningModel
+            ...(isReasoningModel(runConfig.model)
               ? { agent_adapter_options: { reasoning_effort: reasoningEffort } }
               : {}),
           },
@@ -340,9 +341,7 @@ export function WorkbenchSurface() {
     runConfig.apiMode === "v2" &&
     advancedConfig.invocationMode === "headless" &&
     supportedBuiltinTools.length > 0;
-  const modelSuggestions = (models.data?.models ?? []).filter((model) =>
-    model.toLocaleLowerCase(locale).includes(runConfig.model.trim().toLocaleLowerCase(locale)),
-  );
+  const modelSuggestions = models.data?.models ?? [];
   const streamPresentation = useMemo(
     () => projectWorkbenchStream(
       stream.events,
@@ -551,21 +550,36 @@ export function WorkbenchSurface() {
                 <div className="empty-state">{message(locale, "emptyMessages")}</div>
               ) : null}
               {messages.data?.messages.map((item) => (
-                <article className={`message-entry ${item.role}`} key={item.id}>
-                  <div>
-                    <strong>{item.role}</strong>
-                    <time>{formatTimestamp(item.created_at, locale)}</time>
-                  </div>
-                  <MessageMarkdown source={item.content.text} />
-                  {item.content.truncated ? <span>{message(locale, "boundedPreview")}</span> : null}
-                </article>
+                <Fragment key={item.id}>
+                  {(item.role === "assistant" || item.role === "error") && item.run_id
+                    ? retainedToolEvents
+                        .filter((event) => event.run_id === item.run_id)
+                        .map((event) => (
+                          <RetainedToolActivity event={event} key={event.id} locale={locale} />
+                        ))
+                    : null}
+                  <article className={`message-entry ${item.role}`}>
+                    <div>
+                      <strong>{item.role}</strong>
+                      <span className="message-header-meta">
+                        <TokenUsage usage={item.usage} />
+                        <time>{formatTimestamp(item.created_at, locale)}</time>
+                      </span>
+                    </div>
+                    {item.reasoning?.text ? (
+                      <ReasoningDisclosure text={item.reasoning.text} locale={locale} />
+                    ) : null}
+                    <MessageMarkdown source={item.content.text} />
+                    {item.content.truncated ? <span>{message(locale, "boundedPreview")}</span> : null}
+                  </article>
+                </Fragment>
               ))}
               {retainedGeneratedEvents.map((event) => (
                 <GeneratedFilePreview eventId={event.id} key={event.id} payloadUrl={event.payload_url} />
               ))}
-              {retainedToolEvents.map((event) => (
-                <RetainedToolActivity event={event} key={event.id} locale={locale} />
-              ))}
+              {streamPresentation.reasoningText ? (
+                <ReasoningDisclosure text={streamPresentation.reasoningText} locale={locale} />
+              ) : null}
               {streamPresentation.plan.length > 0 ? (
                 <PlanCard items={streamPresentation.plan} locale={locale} />
               ) : null}
@@ -574,7 +588,10 @@ export function WorkbenchSurface() {
               ))}
               {streamPresentation.assistantText ? (
                 <article className="message-entry assistant" key={`live-${selectedRunId}`}>
-                  <div><strong>assistant</strong></div>
+                  <div>
+                    <strong>assistant</strong>
+                    <TokenUsage usage={streamPresentation.usage} />
+                  </div>
                   <MessageMarkdown source={streamPresentation.assistantText} />
                 </article>
               ) : null}
@@ -650,7 +667,7 @@ export function WorkbenchSurface() {
                   onMouseDown={(event) => event.preventDefault()}
                   role="listbox"
                 >
-                  {modelSuggestions.slice(0, 12).map((model) => (
+                  {modelSuggestions.map((model) => (
                     <button
                       aria-selected={model === runConfig.model}
                       key={model}
@@ -828,26 +845,21 @@ export function WorkbenchSurface() {
                           }
                         }}
                       >
-                        <input
-                          aria-label={message(locale, "model")}
-                          autoComplete="off"
-                          disabled={selectedHarness?.spec.supports_model_selection === false}
-                          onChange={(event) => { setConfig("model", event.target.value); setModelMenuOpen(true); }}
-                          onFocus={() => setModelMenuOpen(true)}
-                          placeholder="GigaChat"
-                          type="text"
-                          value={runConfig.model}
-                        />
                         <button
+                          aria-label={message(locale, "model")}
                           aria-expanded={modelMenuOpen}
-                          aria-label={message(locale, "showModelSuggestions")}
+                          aria-haspopup="listbox"
+                          className="model-select-button"
                           disabled={selectedHarness?.spec.supports_model_selection === false}
                           onClick={() => setModelMenuOpen((open) => !open)}
                           type="button"
-                        >⌄</button>
+                        >
+                          <span>{runConfig.model || sessionTitleModel}</span>
+                          <span aria-hidden="true">⌄</span>
+                        </button>
                       </div>
                     </div>
-                    {runConfig.model === reasoningModel ? (
+                    {isReasoningModel(runConfig.model) ? (
                       <label className="compact-control reasoning-control">
                         <span>{message(locale, "reasoning")}</span>
                         <select
@@ -1005,16 +1017,61 @@ function ToolActivityCard({
   locale: "en" | "ru";
 }) {
   const complete = ["completed", "succeeded", "success"].includes(activity.status.toLowerCase());
+  const result = formatToolResult(activity.result);
   return (
     <article className="tool-activity-card">
-      <span aria-hidden="true">{complete ? "✓" : "◇"}</span>
-      <div>
-        <strong>{activity.label}</strong>
-        <small>{message(locale, "toolActivity")} · {activity.status}</small>
+      <div className="tool-activity-heading">
+        <span aria-hidden="true">{complete ? "✓" : "◇"}</span>
+        <div>
+          <strong>{activity.label}</strong>
+          <small>{message(locale, "toolActivity")} · {activity.status}</small>
+        </div>
       </div>
-      <span aria-hidden="true">›</span>
+      {result === null ? null : (
+        <details>
+          <summary>{message(locale, "toolResult")}</summary>
+          <pre>{result}</pre>
+        </details>
+      )}
     </article>
   );
+}
+
+function ReasoningDisclosure({
+  locale,
+  text,
+}: {
+  locale: "en" | "ru";
+  text: string;
+}) {
+  return (
+    <details className="reasoning-disclosure">
+      <summary>{message(locale, "reasoningTrace")}</summary>
+      <p>{text}</p>
+    </details>
+  );
+}
+
+function TokenUsage({
+  usage,
+}: {
+  usage: TokenUsageProjection | undefined;
+}) {
+  if (usage?.input_tokens === undefined && usage?.output_tokens === undefined) return null;
+  return (
+    <span className="token-usage">
+      {usage.input_tokens === undefined ? null : `input ${usage.input_tokens}`}
+      {usage.input_tokens !== undefined && usage.output_tokens !== undefined ? " · " : null}
+      {usage.output_tokens === undefined ? null : `output ${usage.output_tokens}`}
+    </span>
+  );
+}
+
+function formatToolResult(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  if (!text) return null;
+  return text.length > 16_384 ? `${text.slice(0, 16_384)}\n…` : text;
 }
 
 function PlanCard({ items, locale }: { items: readonly WorkbenchPlanItem[]; locale: "en" | "ru" }) {
@@ -1078,6 +1135,10 @@ function loadRunPreferences(): { config: RunConfig; reasoningEffort: ReasoningEf
 
 function preferredModel(models: readonly string[]): string {
   return models.find((model) => model !== "GigaChat") ?? models[0] ?? sessionTitleModel;
+}
+
+function isReasoningModel(model: string): boolean {
+  return model === reasoningModel || model.startsWith(`${reasoningModel}:`);
 }
 
 function GeneratedImageCard({ payload }: { payload?: Readonly<Record<string, unknown>> }) {

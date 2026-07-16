@@ -68,11 +68,42 @@ class OpenAIChatCompletionStreamAccumulator:
             if isinstance(choice, Mapping):
                 events.extend(self._observe_choice(choice_position, choice))
 
+        if not payload.get("choices"):
+            events.extend(self._observe_gigachat_messages(payload))
+
         usage = openai_usage_to_normalized_usage(payload.get("usage"))
         if usage is not None:
             self.usage = usage
             events.append(self._event("usage", usage=usage))
         return tuple(events)
+
+    def _observe_gigachat_messages(
+        self,
+        payload: Mapping[str, Any],
+    ) -> list[NormalizedStreamEvent]:
+        """Observe GigaChat v2 Responses-shaped message deltas."""
+        events: list[NormalizedStreamEvent] = []
+        for message in payload.get("messages") or ():
+            if not isinstance(message, Mapping):
+                continue
+            role = string_or_none(message.get("role"))
+            for part in message.get("content") or ():
+                if not isinstance(part, Mapping):
+                    continue
+                text = part.get("text")
+                if not isinstance(text, str) or not text:
+                    continue
+                if role == "reasoning":
+                    self.reasoning_parts.append(text)
+                    events.append(self._event("reasoning_delta", reasoning_delta=text))
+                elif role == "assistant":
+                    self.content_parts.append(text)
+                    events.append(self._event("content_delta", content_delta=text))
+        finish_reason = string_or_none(payload.get("finish_reason"))
+        if finish_reason is not None:
+            self.finish_reason = finish_reason
+            events.append(self._event("message_end", finish_reason=finish_reason))
+        return events
 
     def to_normalized_response(self) -> NormalizedResponse:
         """Return the accumulated response in the shared normalized shape."""

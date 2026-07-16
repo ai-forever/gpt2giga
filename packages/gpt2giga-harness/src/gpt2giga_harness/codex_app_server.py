@@ -690,6 +690,31 @@ def _normalize_notification(
             ),
             None,
         )
+    if method == "thread/tokenUsage/updated":
+        token_usage = _mapping(params.get("tokenUsage"))
+        usage = _mapping(token_usage.get("last")) or token_usage
+        aliases = {
+            "input_tokens": "inputTokens",
+            "output_tokens": "outputTokens",
+            "total_tokens": "totalTokens",
+            "cached_input_tokens": "cachedInputTokens",
+            "reasoning_output_tokens": "reasoningOutputTokens",
+        }
+        payload = {
+            target: usage[source]
+            for target, source in aliases.items()
+            if isinstance(usage.get(source), int)
+        }
+        return (
+            HarnessEvent(
+                type=HarnessEventType.USAGE.value,
+                message="Codex app-server updated token usage.",
+                payload=payload,
+            )
+            if payload
+            else None,
+            None,
+        )
     if method == "turn/started":
         turn = _mapping(params.get("turn"))
         return (
@@ -759,6 +784,27 @@ def _normalize_notification(
             else None,
             None,
         )
+    if method in {
+        "item/reasoning/summaryTextDelta",
+        "item/reasoning/textDelta",
+    }:
+        delta = str(params.get("delta") or "")
+        return (
+            HarnessEvent(
+                type=HarnessEventType.REASONING_DELTA.value,
+                message="Codex app-server streamed reasoning text.",
+                payload={
+                    "delta": delta,
+                    "item_id": params.get("itemId"),
+                    "kind": (
+                        "summary" if method.endswith("summaryTextDelta") else "text"
+                    ),
+                },
+            )
+            if delta
+            else None,
+            None,
+        )
     if method not in {"item/started", "item/completed"}:
         return None, None
     item = _mapping(params.get("item"))
@@ -800,6 +846,12 @@ def _normalize_notification(
                 "name": tool_name,
                 "status": item.get("status"),
                 "arguments": _tool_arguments(item),
+                **(
+                    {"result": result}
+                    if method == "item/completed"
+                    and (result := _tool_result(item)) is not None
+                    else {}
+                ),
             },
         ),
         None,
@@ -861,6 +913,20 @@ def _tool_arguments(item: Mapping[str, Any]) -> Any:
     if item_type == "webSearch":
         return {"query": item.get("query")}
     return item.get("arguments") or {}
+
+
+def _tool_result(item: Mapping[str, Any]) -> Any:
+    for key in (
+        "aggregatedOutput",
+        "aggregated_output",
+        "output",
+        "result",
+        "error",
+    ):
+        value = item.get(key)
+        if value not in (None, "", (), [], {}):
+            return value
+    return None
 
 
 def _turn_text(turn: Mapping[str, Any]) -> str:

@@ -479,8 +479,32 @@ def _session_summary(session: HarnessSession) -> dict[str, Any]:
 def _message_projection(message: HarnessMessage) -> dict[str, Any]:
     payload = message_to_dict(message)
     content = str(payload.pop("content") or "")
-    payload.pop("metadata", None)
+    metadata = payload.pop("metadata", {})
     payload["content"] = _text_projection(content, _ITEM_TEXT_BYTES)
+    if isinstance(metadata, Mapping):
+        usage = metadata.get("usage")
+        if isinstance(usage, Mapping):
+            projected_usage = {
+                key: value
+                for key, value in usage.items()
+                if key
+                in {
+                    "input_tokens",
+                    "output_tokens",
+                    "total_tokens",
+                    "cached_input_tokens",
+                    "reasoning_output_tokens",
+                    "tool_tokens",
+                }
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 0
+            }
+            if projected_usage:
+                payload["usage"] = projected_usage
+        reasoning = metadata.get("reasoning")
+        if isinstance(reasoning, str) and reasoning:
+            payload["reasoning"] = _text_projection(reasoning, _ITEM_TEXT_BYTES)
     return payload
 
 

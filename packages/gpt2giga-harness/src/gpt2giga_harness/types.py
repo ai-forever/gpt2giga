@@ -99,6 +99,7 @@ class HarnessEventType(str, Enum):
     EXTERNAL_TURN_STARTED = "external_turn_started"
     EXTERNAL_TURN_COMPLETED = "external_turn_completed"
     MESSAGE_DELTA = "message_delta"
+    REASONING_DELTA = "reasoning_delta"
     STDOUT_DELTA = "stdout_delta"
     STDERR_DELTA = "stderr_delta"
     TOOL_CALL_STARTED = "tool_call_started"

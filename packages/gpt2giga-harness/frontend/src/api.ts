@@ -26,6 +26,17 @@ export interface MessageProjection {
   role: string;
   created_at: string;
   content: TextProjection;
+  reasoning?: TextProjection;
+  usage?: TokenUsageProjection;
+}
+
+export interface TokenUsageProjection {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  cached_input_tokens?: number;
+  reasoning_output_tokens?: number;
+  tool_tokens?: number;
 }
 
 export interface RunSummary {

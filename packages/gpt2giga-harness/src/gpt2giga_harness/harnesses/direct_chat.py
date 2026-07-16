@@ -243,7 +243,25 @@ class DirectChatHarness(BaseHarness):
         accumulator = OpenAIChatCompletionStreamAccumulator()
         builtin_tools_seen: set[str] = set()
         generated_files_seen: set[str] = set()
-        message_deltas = _MessageDeltaCoalescer(request, pending_events)
+        message_deltas = _TextDeltaCoalescer(
+            request,
+            pending_events,
+            event_type=HarnessEventType.MESSAGE_DELTA.value,
+            payload_key="delta",
+            event_message="Assistant message delta.",
+        )
+        reasoning_deltas = _TextDeltaCoalescer(
+            request,
+            pending_events,
+            event_type=HarnessEventType.REASONING_DELTA.value,
+            payload_key="delta",
+            event_message="Assistant reasoning delta.",
+        )
+
+        def flush_due_deltas() -> None:
+            message_deltas.flush_if_due()
+            reasoning_deltas.flush_if_due()
+
         chunk_count = 0
         last_payload: Mapping[str, Any] = {}
         try:
@@ -254,7 +272,7 @@ class DirectChatHarness(BaseHarness):
                 api_key=api_key,
                 timeout=context.timeout_seconds,
                 cancel_event=request.cancel_event,
-                idle_callback=message_deltas.flush_if_due,
+                idle_callback=flush_due_deltas,
             ):
                 chunk_count += 1
                 last_payload = stream_payload
@@ -263,6 +281,7 @@ class DirectChatHarness(BaseHarness):
                     seen=builtin_tools_seen,
                 ):
                     message_deltas.flush()
+                    reasoning_deltas.flush()
                     _emit_or_collect(request, pending_events, event)
                 for event in _generated_file_events(
                     stream_payload,
@@ -271,17 +290,25 @@ class DirectChatHarness(BaseHarness):
                     seen=generated_files_seen,
                 ):
                     message_deltas.flush()
+                    reasoning_deltas.flush()
                     _emit_or_collect(request, pending_events, event)
                 for normalized_event in accumulator.observe_payload(stream_payload):
                     if normalized_event.type == "content_delta":
+                        reasoning_deltas.flush()
                         message_deltas.push(normalized_event)
                         continue
+                    if normalized_event.type == "reasoning_delta":
+                        message_deltas.flush()
+                        reasoning_deltas.push(normalized_event)
+                        continue
                     message_deltas.flush()
+                    reasoning_deltas.flush()
                     event = _normalized_harness_event(normalized_event)
                     if event is not None:
                         _emit_or_collect(request, pending_events, event)
         except proxy.ProxyRequestError as exc:
             message_deltas.flush()
+            reasoning_deltas.flush()
             return HarnessResult(
                 ok=False,
                 text="",
@@ -299,6 +326,7 @@ class DirectChatHarness(BaseHarness):
             )
 
         message_deltas.flush()
+        reasoning_deltas.flush()
         response = accumulator.to_normalized_response()
         for index, raw_tool_call in sorted(accumulator.tool_calls.items()):
             tool_call = stream_tool_call_to_normalized_tool_call(raw_tool_call)
@@ -419,16 +447,23 @@ def _emit_or_collect(
         events.append(event)
 
 
-class _MessageDeltaCoalescer:
-    """Batch tiny token deltas before hitting the persistent session event store."""
+class _TextDeltaCoalescer:
+    """Batch tiny text deltas before hitting the persistent session event store."""
 
     def __init__(
         self,
         request: HarnessRequest,
         events: list[HarnessEvent],
+        *,
+        event_type: str,
+        payload_key: str,
+        event_message: str,
     ) -> None:
         self._request = request
         self._events = events
+        self._event_type = event_type
+        self._payload_key = payload_key
+        self._event_message = event_message
         self._parts: list[str] = []
         self._character_count = 0
         self._started_at: float | None = None
@@ -436,7 +471,11 @@ class _MessageDeltaCoalescer:
 
     def push(self, event: NormalizedStreamEvent) -> None:
         """Add one content delta and flush when the size/time budget is reached."""
-        delta = event.content_delta
+        delta = (
+            event.reasoning_delta
+            if self._event_type == HarnessEventType.REASONING_DELTA.value
+            else event.content_delta
+        )
         if not delta:
             return
         now = time.monotonic()
@@ -459,7 +498,7 @@ class _MessageDeltaCoalescer:
         if not self._parts:
             return
         payload: dict[str, Any] = {
-            "delta": "".join(self._parts),
+            self._payload_key: "".join(self._parts),
             "source": "direct-chat",
         }
         if self._last_sequence is not None:
@@ -468,8 +507,8 @@ class _MessageDeltaCoalescer:
             self._request,
             self._events,
             HarnessEvent(
-                type=HarnessEventType.MESSAGE_DELTA.value,
-                message="Assistant message delta.",
+                type=self._event_type,
+                message=self._event_message,
                 payload=payload,
             ),
         )
@@ -495,6 +534,17 @@ def _normalized_harness_event(event: NormalizedStreamEvent) -> HarnessEvent | No
             message="Assistant message delta.",
             payload={
                 "delta": event.content_delta,
+                "sequence": event.sequence,
+                "source": "direct-chat",
+            },
+        )
+    if event.type == "reasoning_delta" and event.reasoning_delta:
+        return HarnessEvent(
+            type=HarnessEventType.REASONING_DELTA.value,
+            message="Assistant reasoning delta.",
+            payload={
+                "delta": event.reasoning_delta,
+                "kind": "model",
                 "sequence": event.sequence,
                 "source": "direct-chat",
             },
@@ -562,44 +612,57 @@ def _builtin_tool_execution_events(
     """Normalize GigaChat built-in tool metadata into Harness tool events."""
     seen = seen if seen is not None else set()
     events = []
+    messages: list[Mapping[str, Any]] = []
     for choice in payload.get("choices") or ():
-        if not isinstance(choice, Mapping):
-            continue
-        for message_key in ("delta", "message"):
-            message = choice.get(message_key)
-            if not isinstance(message, Mapping):
+        if isinstance(choice, Mapping):
+            messages.extend(
+                message
+                for message_key in ("delta", "message")
+                if isinstance((message := choice.get(message_key)), Mapping)
+            )
+    messages.extend(
+        message
+        for message in payload.get("messages") or ()
+        if isinstance(message, Mapping)
+    )
+    for message in messages:
+        executions = list(message.get("tool_executions") or ())
+        for part in message.get("content") or ():
+            if isinstance(part, Mapping) and isinstance(
+                part.get("tool_execution"), Mapping
+            ):
+                executions.append(part["tool_execution"])
+        for execution in executions:
+            if not isinstance(execution, Mapping):
                 continue
-            for execution in message.get("tool_executions") or ():
-                if not isinstance(execution, Mapping):
-                    continue
-                name = str(execution.get("name") or "").strip()
-                if not name:
-                    continue
-                tool_call_id = f"builtin:{name}"
-                status = _builtin_tool_status(execution.get("status"), final=final)
-                if status in {"completed", "failed"}:
-                    event_type = HarnessEventType.TOOL_CALL_FINISHED.value
-                elif tool_call_id in seen:
-                    event_type = HarnessEventType.TOOL_CALL_DELTA.value
-                else:
-                    event_type = HarnessEventType.TOOL_CALL_STARTED.value
-                seen.add(tool_call_id)
-                event_payload = {
-                    "tool_call_id": tool_call_id,
-                    "name": name,
-                    "type": "builtin",
-                    "status": status,
-                    "source": "direct-chat",
-                }
-                if execution.get("seconds_left") is not None:
-                    event_payload["seconds_left"] = execution["seconds_left"]
-                events.append(
-                    HarnessEvent(
-                        type=event_type,
-                        message=f"Built-in tool {name} {status}.",
-                        payload=event_payload,
-                    )
+            name = str(execution.get("name") or "").strip()
+            if not name:
+                continue
+            tool_call_id = f"builtin:{name}"
+            status = _builtin_tool_status(execution.get("status"), final=final)
+            if status in {"completed", "failed"}:
+                event_type = HarnessEventType.TOOL_CALL_FINISHED.value
+            elif tool_call_id in seen:
+                event_type = HarnessEventType.TOOL_CALL_DELTA.value
+            else:
+                event_type = HarnessEventType.TOOL_CALL_STARTED.value
+            seen.add(tool_call_id)
+            event_payload = {
+                "tool_call_id": tool_call_id,
+                "name": name,
+                "type": "builtin",
+                "status": status,
+                "source": "direct-chat",
+            }
+            if execution.get("seconds_left") is not None:
+                event_payload["seconds_left"] = execution["seconds_left"]
+            events.append(
+                HarnessEvent(
+                    type=event_type,
+                    message=f"Built-in tool {name} {status}.",
+                    payload=event_payload,
                 )
+            )
     return tuple(events)
 
 

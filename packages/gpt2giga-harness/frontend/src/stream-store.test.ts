@@ -80,6 +80,19 @@ describe("run event stream store", () => {
     expect(events.at(1)?.id).toBe("tool");
   });
 
+  it("coalesces reasoning deltas without mixing them into the answer", () => {
+    const events = coalescePresentationDeltas([
+      event("reason-one", "reasoning_delta", "Think "),
+      event("reason-two", "reasoning_delta", "carefully"),
+      event("answer", "message_delta", "Done"),
+    ]);
+
+    expect(events.map((item) => item.payload?.delta)).toEqual([
+      "Think carefully",
+      "Done",
+    ]);
+  });
+
   it("surfaces an explicit slow-consumer resnapshot and cleans up", () => {
     const listeners = new Map<string, (event: { data: string }) => void>();
     const close = vi.fn();
