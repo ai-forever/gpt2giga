@@ -5,6 +5,7 @@ import type { SessionOverviewResponse } from "./api";
 import {
   cancelRequestScope,
   refreshSessionAfterRunStart,
+  refreshSessionRevision,
   requestKeys,
   runProjectionOptions,
   sessionOverviewOptions,
@@ -148,6 +149,21 @@ describe("Cockpit request graph", () => {
     });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: requestKeys.runsCenter(),
+    });
+  });
+
+  it("refreshes the selected title and sidebar from a session revision", async () => {
+    const client = queryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+
+    await refreshSessionRevision(client, "session-one");
+
+    expect(invalidate).toHaveBeenCalledTimes(2);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: requestKeys.sessionOverview("session-one"),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: requestKeys.sessionIndex(),
     });
   });
 

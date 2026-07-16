@@ -283,6 +283,25 @@ class FilesystemHarnessSessionStore:
             self._read_index.upsert_session(updated)
         return updated
 
+    def update_session_if_title(
+        self,
+        session_id: str,
+        expected_title: str,
+        **patch: Any,
+    ) -> HarnessSession | None:
+        """Atomically patch a session unless a user already renamed it."""
+        session_dir = self._session_dir(session_id)
+        path = session_dir / MANIFEST_FILE
+        with exclusive_file_lock(path):
+            session = session_from_dict(_read_json(path))
+            if session.title != expected_title:
+                return None
+            updated = _patch_session(session, patch)
+            _write_json_atomic_unlocked(path, session_to_dict(updated))
+        if self._read_index is not None:
+            self._read_index.upsert_session(updated)
+        return updated
+
     def delete_session(self, session_id: str) -> None:
         session_dir = self._session_dir(session_id)
         if not session_dir.exists():
@@ -292,6 +311,7 @@ class FilesystemHarnessSessionStore:
         self._remove_index_entry(session_id)
         if self._read_index is not None:
             self._read_index.delete_session(session_id)
+        self.event_broker.publish_session(session_id)
 
     def archive_session(
         self,
@@ -421,7 +441,7 @@ class FilesystemHarnessSessionStore:
         self,
         session_id: str,
         *,
-        run_id: str,
+        run_id: str | None,
         offset: int = 0,
         limit: int = 100,
         max_bytes: int = 1024 * 1024,
@@ -460,7 +480,7 @@ class FilesystemHarnessSessionStore:
                 if not isinstance(decoded, Mapping):
                     continue
                 event = event_from_dict(decoded)
-                if event.run_id != run_id:
+                if run_id is not None and event.run_id != run_id:
                     continue
                 size = event_stream_size(event)
                 if items and byte_count + size > bounded_bytes:
@@ -481,7 +501,7 @@ class FilesystemHarnessSessionStore:
         self,
         session_id: str,
         *,
-        run_id: str,
+        run_id: str | None,
         event_id: str,
     ) -> EventCursorPosition | None:
         """Resolve a legacy event id once; opaque reconnects stay offset-based."""
@@ -498,7 +518,7 @@ class FilesystemHarnessSessionStore:
                 if not isinstance(decoded, Mapping):
                     continue
                 event = event_from_dict(decoded)
-                if event.run_id == run_id and event.id == event_id:
+                if (run_id is None or event.run_id == run_id) and event.id == event_id:
                     return EventCursorPosition(
                         offset=handle.tell(),
                         terminal_seen=event.type == "run_finished",

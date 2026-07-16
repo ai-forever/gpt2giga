@@ -6,10 +6,11 @@ import base64
 import hashlib
 import json
 import secrets
+from time import monotonic
 from typing import Any, Callable, Mapping
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from gpt2giga_harness.sessions.filesystem import FilesystemHarnessSessionStore
 from gpt2giga_harness.sessions.models import (
@@ -25,12 +26,19 @@ from gpt2giga_harness.sessions.read_index import (
     SessionIndexCursor,
     StaleReadSnapshotError,
 )
+from gpt2giga_harness.sessions.event_stream import (
+    StreamCapacityError,
+    StreamSignal,
+)
 from gpt2giga_harness.sessions.store import (
     HarnessSessionStore,
     RunNotFoundError,
     SessionNotFoundError,
 )
-from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
+from gpt2giga_harness.ui.async_execution import (
+    ConformantAPIRoute,
+    run_stream_offload,
+)
 from gpt2giga_harness.worktrees import run_diff_response
 
 
@@ -40,6 +48,8 @@ _DEFAULT_PAGE_BYTES = 256 * 1024
 _MAX_PAGE_BYTES = 1024 * 1024
 _ITEM_TEXT_BYTES = 32 * 1024
 _REVISION_NAMESPACE = secrets.token_hex(16)
+_SESSION_STREAM_HEARTBEAT_SECONDS = 10.0
+_SESSION_STREAM_POLL_SECONDS = 0.1
 
 
 @router.get("/api/cockpit/sessions")
@@ -163,6 +173,79 @@ def cockpit_session(session_id: str, request: Request) -> Response:
                 name: f"/api/cockpit/sessions/{session.id}/{name}"
                 for name in ("messages", "runs", "events", "artifacts")
             },
+        },
+    )
+
+
+@router.get("/api/cockpit/sessions/{session_id}/updates/stream")
+async def cockpit_session_updates(
+    session_id: str,
+    request: Request,
+    tail_only: bool = Query(default=True),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    """Stream durable redaction-safe session revisions with bounded reconnect."""
+    store = _store(request)
+    try:
+        await run_stream_offload(store.get_session, session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+    broker = request.app.state.harness_run_event_broker
+    try:
+        subscription = broker.subscribe_session(session_id)
+    except StreamCapacityError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    try:
+        current_offset = await run_stream_offload(
+            _resolve_session_stream_cursor,
+            store,
+            session_id,
+            last_event_id,
+            tail_only=tail_only,
+        )
+        snapshot_session = await run_stream_offload(store.get_session, session_id)
+    except (SessionNotFoundError, ValueError) as exc:
+        subscription.close()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    async def stream_updates():
+        offset = current_offset
+        next_heartbeat_at = monotonic() + _SESSION_STREAM_HEARTBEAT_SECONDS
+        try:
+            yield _session_snapshot_sse(snapshot_session, offset)
+            while True:
+                try:
+                    page = await run_stream_offload(
+                        _read_session_update_tail,
+                        store,
+                        session_id,
+                        offset,
+                    )
+                except (SessionNotFoundError, ValueError):
+                    break
+                for item in page.items:
+                    offset = item.next_offset
+                    if item.event.type == "session.updated":
+                        yield _session_update_sse(item.event, offset)
+                if page.next_offset > offset:
+                    offset = page.next_offset
+                if page.has_more:
+                    continue
+                signal = await subscription.wait(_SESSION_STREAM_POLL_SECONDS)
+                if signal is StreamSignal.RESNAPSHOT_REQUIRED:
+                    yield _session_resnapshot_sse(session_id, offset)
+                elif signal is None and monotonic() >= next_heartbeat_at:
+                    yield ": heartbeat\n\n"
+                    next_heartbeat_at = monotonic() + _SESSION_STREAM_HEARTBEAT_SECONDS
+        finally:
+            subscription.close()
+
+    return StreamingResponse(
+        stream_updates(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
         },
     )
 
@@ -625,6 +708,89 @@ def _bounded_text(value: str, max_bytes: int) -> str:
     if len(encoded) <= max_bytes:
         return value
     return encoded[: max(max_bytes, 0)].decode("utf-8", errors="ignore")
+
+
+def _read_session_update_tail(
+    store: HarnessSessionStore,
+    session_id: str,
+    offset: int,
+):
+    reader = getattr(store, "list_event_tail_page", None)
+    if not callable(reader):
+        raise ValueError("session store does not support durable event tails")
+    return reader(
+        session_id,
+        run_id=None,
+        offset=offset,
+        limit=100,
+        max_bytes=_MAX_PAGE_BYTES,
+    )
+
+
+def _resolve_session_stream_cursor(
+    store: HarnessSessionStore,
+    session_id: str,
+    value: str | None,
+    *,
+    tail_only: bool,
+) -> int:
+    if value is None:
+        return store.event_tail_offset(session_id) if tail_only else 0
+    scope = _scope_hash("session-updates", session_id)
+    try:
+        payload = _decode_cursor(value, "session-updates", scope)
+        offset = int(payload["offset"])
+        if offset < 0:
+            raise ValueError
+        return offset
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("invalid session update cursor") from exc
+
+
+def _session_stream_cursor(session_id: str, offset: int) -> str:
+    return _encode_cursor(
+        "session-updates",
+        _scope_hash("session-updates", session_id),
+        offset=max(offset, 0),
+    )
+
+
+def _session_snapshot_sse(session: HarnessSession, offset: int) -> str:
+    cursor = _session_stream_cursor(session.id, offset)
+    payload = {
+        "id": f"session_snapshot_{session.id}",
+        "session_id": session.id,
+        "type": "session.snapshot",
+        "payload": {
+            "revision": session.updated_at,
+            "session": _session_summary(session),
+        },
+        "created_at": session.updated_at,
+    }
+    return f"id: {cursor}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _session_update_sse(event: HarnessStoredEvent, offset: int) -> str:
+    cursor = _session_stream_cursor(event.session_id, offset)
+    return (
+        f"id: {cursor}\n"
+        f"data: {json.dumps(event_to_dict(event), ensure_ascii=False)}\n\n"
+    )
+
+
+def _session_resnapshot_sse(session_id: str, offset: int) -> str:
+    cursor = _session_stream_cursor(session_id, offset)
+    payload = {
+        "type": "resnapshot_required",
+        "reason": "slow_consumer",
+        "cursor": cursor,
+        "snapshot_url": f"/api/cockpit/sessions/{session_id}",
+        "stream_url": f"/api/cockpit/sessions/{session_id}/updates/stream",
+    }
+    return (
+        f"event: resnapshot\nid: {cursor}\n"
+        f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    )
 
 
 def _scope_hash(*parts: Any) -> str:

@@ -50,11 +50,18 @@ class StreamCapacityError(RuntimeError):
 
 
 class RunEventSubscription:
-    """One loop-owned bounded notification queue for a run stream."""
+    """One loop-owned bounded notification queue for an event stream."""
 
-    def __init__(self, broker: RunEventBroker, run_id: str, queue_size: int) -> None:
+    def __init__(
+        self,
+        broker: RunEventBroker,
+        scope: str,
+        scope_id: str,
+        queue_size: int,
+    ) -> None:
         self._broker = broker
-        self._run_id = run_id
+        self._scope = scope
+        self._scope_id = scope_id
         self._token = uuid4().hex
         self._loop = asyncio.get_running_loop()
         self._queue: asyncio.Queue[StreamSignal] = asyncio.Queue(maxsize=queue_size)
@@ -69,7 +76,17 @@ class RunEventSubscription:
     @property
     def run_id(self) -> str:
         """Return the subscribed durable run identity."""
-        return self._run_id
+        return self._scope_id
+
+    @property
+    def scope(self) -> str:
+        """Return whether this subscription follows a run or a session."""
+        return self._scope
+
+    @property
+    def scope_id(self) -> str:
+        """Return the exact subscribed durable identity."""
+        return self._scope_id
 
     async def wait(self, timeout: float) -> StreamSignal | None:
         """Wait for a change signal, returning ``None`` for a heartbeat timeout."""
@@ -108,7 +125,7 @@ class RunEventSubscription:
 
 
 class RunEventBroker:
-    """Fan out content-free append notifications through bounded run queues."""
+    """Fan out content-free append notifications through bounded event queues."""
 
     def __init__(
         self,
@@ -122,12 +139,13 @@ class RunEventBroker:
         self.max_subscribers_per_run = max(max_subscribers_per_run, 1)
         self._lock = threading.Lock()
         self._subscriptions: dict[str, dict[str, RunEventSubscription]] = {}
+        self._session_subscriptions: dict[str, dict[str, RunEventSubscription]] = {}
 
     def subscribe(self, run_id: str) -> RunEventSubscription:
         """Register one bounded subscriber for an exact run."""
-        subscription = RunEventSubscription(self, run_id, self.queue_size)
+        subscription = RunEventSubscription(self, "run", run_id, self.queue_size)
         with self._lock:
-            total = sum(len(items) for items in self._subscriptions.values())
+            total = self._subscriber_total()
             run_items = self._subscriptions.setdefault(run_id, {})
             if (
                 total >= self.max_subscribers
@@ -139,10 +157,44 @@ class RunEventBroker:
             run_items[subscription.token] = subscription
         return subscription
 
-    def publish(self, event: HarnessStoredEvent) -> None:
-        """Wake only subscribers for the persisted event's exact run."""
+    def subscribe_session(self, session_id: str) -> RunEventSubscription:
+        """Register one bounded subscriber for all events in a session."""
+        subscription = RunEventSubscription(
+            self, "session", session_id, self.queue_size
+        )
         with self._lock:
-            subscriptions = tuple(self._subscriptions.get(event.run_id, {}).values())
+            total = self._subscriber_total()
+            session_items = self._session_subscriptions.setdefault(session_id, {})
+            if (
+                total >= self.max_subscribers
+                or len(session_items) >= self.max_subscribers_per_run
+            ):
+                if not session_items:
+                    self._session_subscriptions.pop(session_id, None)
+                raise StreamCapacityError("live event stream capacity is exhausted")
+            session_items[subscription.token] = subscription
+        return subscription
+
+    def publish(self, event: HarnessStoredEvent) -> None:
+        """Wake subscribers for the persisted event's exact run and session."""
+        with self._lock:
+            subscriptions = (
+                *self._subscriptions.get(event.run_id, {}).values(),
+                *(
+                    self._session_subscriptions.get(event.session_id, {}).values()
+                    if event.type.startswith("session.")
+                    else ()
+                ),
+            )
+        for subscription in subscriptions:
+            subscription.schedule(StreamSignal.CHANGED)
+
+    def publish_session(self, session_id: str) -> None:
+        """Wake session subscribers after a non-event state transition."""
+        with self._lock:
+            subscriptions = tuple(
+                self._session_subscriptions.get(session_id, {}).values()
+            )
         for subscription in subscriptions:
             subscription.schedule(StreamSignal.CHANGED)
 
@@ -151,17 +203,32 @@ class RunEventBroker:
         with self._lock:
             if run_id is not None:
                 return len(self._subscriptions.get(run_id, ()))
-            return sum(len(items) for items in self._subscriptions.values())
+            return self._subscriber_total()
+
+    def session_subscriber_count(self, session_id: str | None = None) -> int:
+        """Return session-stream occupancy for tests and diagnostics."""
+        with self._lock:
+            if session_id is not None:
+                return len(self._session_subscriptions.get(session_id, ()))
+            return sum(len(items) for items in self._session_subscriptions.values())
 
     def snapshot(self) -> dict[str, int | bool]:
         """Return aggregate content-free queue and occupancy diagnostics."""
         with self._lock:
-            subscribers = sum(len(items) for items in self._subscriptions.values())
+            run_subscribers = sum(len(items) for items in self._subscriptions.values())
+            session_subscribers = sum(
+                len(items) for items in self._session_subscriptions.values()
+            )
+            subscribers = run_subscribers + session_subscribers
             active_runs = len(self._subscriptions)
+            active_sessions = len(self._session_subscriptions)
         return {
             "content_free": True,
             "subscribers": subscribers,
+            "run_subscribers": run_subscribers,
+            "session_subscribers": session_subscribers,
             "active_runs": active_runs,
+            "active_sessions": active_sessions,
             "queue_size": self.queue_size,
             "max_subscribers": self.max_subscribers,
             "max_subscribers_per_run": self.max_subscribers_per_run,
@@ -169,12 +236,22 @@ class RunEventBroker:
 
     def _remove(self, subscription: RunEventSubscription) -> None:
         with self._lock:
-            run_items = self._subscriptions.get(subscription.run_id)
-            if run_items is None:
+            subscriptions = (
+                self._subscriptions
+                if subscription.scope == "run"
+                else self._session_subscriptions
+            )
+            scope_items = subscriptions.get(subscription.scope_id)
+            if scope_items is None:
                 return
-            run_items.pop(subscription.token, None)
-            if not run_items:
-                self._subscriptions.pop(subscription.run_id, None)
+            scope_items.pop(subscription.token, None)
+            if not scope_items:
+                subscriptions.pop(subscription.scope_id, None)
+
+    def _subscriber_total(self) -> int:
+        return sum(len(items) for items in self._subscriptions.values()) + sum(
+            len(items) for items in self._session_subscriptions.values()
+        )
 
 
 def event_stream_size(event: HarnessStoredEvent) -> int:

@@ -235,7 +235,6 @@ class HarnessSessionRunner:
         """Prepare one durable headless run without executing its harness."""
         session = self.store.get_session(session_id)
         options = self._run_options(payload, session=session)
-        self._schedule_session_title(session, options)
         if options["invocation_mode"].value != "headless":
             raise ValueError("durable jobs currently support headless runs only")
         report = self.preflight(payload, session_id=session_id, durable=True)
@@ -295,6 +294,7 @@ class HarnessSessionRunner:
                 else session.title
             ),
         )
+        self._schedule_session_title(session, run.id, options)
         return QueuedHarnessRun(
             session=updated_session, run=run, user_message=user_message
         )
@@ -363,8 +363,6 @@ class HarnessSessionRunner:
                     # Durable submission already performed admission checks before
                     # creating this queued run. Reuse that immutable evidence.
                     readiness = dict(queued_readiness)
-        if existing_run_id is None:
-            self._schedule_session_title(session, options)
         if readiness is None:
             readiness = self._execution_readiness(options, durable=durable)
         preflight = build_preflight_report(
@@ -501,6 +499,8 @@ class HarnessSessionRunner:
                 "builtin_tools": [tool.value for tool in options["builtin_tools"]],
             },
         )
+        if existing_run_id is None:
+            self._schedule_session_title(session, run.id, options)
         if workspace_execution.fallback_reason:
             self._append_event(
                 session.id,
@@ -980,6 +980,7 @@ class HarnessSessionRunner:
     def _schedule_session_title(
         self,
         session: HarnessSession,
+        run_id: str,
         options: Mapping[str, Any],
     ) -> None:
         """Generate the first UI title off the run's critical path."""
@@ -993,9 +994,24 @@ class HarnessSessionRunner:
         def generate() -> None:
             try:
                 title = _generate_session_title(self.config, prompt, model=model)
-                current = self.store.get_session(session.id)
-                if current.title == "Untitled session":
-                    self.store.update_session(session.id, title=title)
+                updated = self.store.update_session_if_title(
+                    session.id,
+                    "Untitled session",
+                    title=title,
+                )
+                if updated is None:
+                    return
+                self._append_event(
+                    session.id,
+                    run_id,
+                    HarnessEventType.SESSION_UPDATED.value,
+                    "Session title revision stored.",
+                    {
+                        "session_id": session.id,
+                        "revision": updated.updated_at,
+                        "changed_fields": ["title"],
+                    },
+                )
             except (OSError, SessionNotFoundError, ValueError):
                 return
 

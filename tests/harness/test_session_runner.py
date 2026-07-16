@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 import threading
@@ -419,8 +420,141 @@ def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):
         assert time.monotonic() < deadline
         time.sleep(0.01)
     assert runner.store.get_session(session.id).title == "Починить стрим чата"
+    deadline = time.monotonic() + 2
+    while not any(
+        event.type == "session.updated"
+        for event in runner.store.list_events(session.id)
+    ):
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    title_event = next(
+        event
+        for event in runner.store.list_events(session.id)
+        if event.type == "session.updated"
+    )
+    assert title_event.run_id == result.run.id
+    assert title_event.payload["changed_fields"] == ["title"]
+    assert "Почему чат не показывает поток ответа?" not in json.dumps(
+        {"message": title_event.message, "payload": title_event.payload},
+        ensure_ascii=False,
+    )
     assert captured["payload"]["model"] == "GigaChat-3-Lightning"
     assert captured["url"].endswith("/v2/chat/completions")
+
+
+def test_session_title_proxy_failure_publishes_deterministic_fallback(monkeypatch):
+    runner = _runner(_CaptureHarness())
+    session = runner.create_session(default_harness_id="capture")
+    prompt = "Fallback title when proxy is offline"
+
+    def request_json(*args, **kwargs):
+        raise OSError("proxy offline")
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.proxy.request_json", request_json
+    )
+
+    result = runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "capture",
+            "prompt": prompt,
+            "extra": {"generate_session_title": True},
+        },
+    )
+
+    deadline = time.monotonic() + 2
+    while runner.store.get_session(session.id).title == "Untitled session":
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    assert runner.store.get_session(session.id).title == prompt
+    while not any(
+        event.type == "session.updated" and event.run_id == result.run.id
+        for event in runner.store.list_events(session.id)
+    ):
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+
+
+def test_delayed_session_title_never_overwrites_user_rename(monkeypatch):
+    runner = _runner(_CaptureHarness())
+    session = runner.create_session(default_harness_id="capture")
+    request_started = threading.Event()
+    release_request = threading.Event()
+
+    def request_json(*args, **kwargs):
+        request_started.set()
+        assert release_request.wait(timeout=2)
+        return {"choices": [{"message": {"content": "Generated title"}}]}
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.proxy.request_json", request_json
+    )
+    runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "capture",
+            "prompt": "Generate this later",
+            "extra": {"generate_session_title": True},
+        },
+    )
+
+    assert request_started.wait(timeout=1)
+    runner.store.update_session(session.id, title="User rename")
+    release_request.set()
+    _wait_for_session_title_thread(session.id)
+
+    assert runner.store.get_session(session.id).title == "User rename"
+    assert not any(
+        event.type == "session.updated"
+        for event in runner.store.list_events(session.id)
+    )
+
+
+def test_delayed_session_title_does_not_recreate_deleted_session(monkeypatch):
+    runner = _runner(_CaptureHarness())
+    session = runner.create_session(default_harness_id="capture")
+    request_started = threading.Event()
+    release_request = threading.Event()
+
+    def request_json(*args, **kwargs):
+        request_started.set()
+        assert release_request.wait(timeout=2)
+        return {"choices": [{"message": {"content": "Generated title"}}]}
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.proxy.request_json", request_json
+    )
+    runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "capture",
+            "prompt": "Delete this session",
+            "extra": {"generate_session_title": True},
+        },
+    )
+
+    assert request_started.wait(timeout=1)
+    runner.store.delete_session(session.id)
+    release_request.set()
+    _wait_for_session_title_thread(session.id)
+
+    with pytest.raises(KeyError):
+        runner.store.get_session(session.id)
+
+
+def _wait_for_session_title_thread(session_id: str) -> None:
+    name = f"harness-session-title-{session_id}"
+    deadline = time.monotonic() + 2
+    while True:
+        thread = next(
+            (item for item in threading.enumerate() if item.name == name),
+            None,
+        )
+        if thread is None:
+            return
+        thread.join(timeout=0.05)
+        assert time.monotonic() < deadline
 
 
 def test_session_runner_create_session_records_project_metadata(tmp_path):

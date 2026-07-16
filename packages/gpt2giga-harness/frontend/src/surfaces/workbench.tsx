@@ -21,6 +21,7 @@ import { usePreferences } from "../preferences-context";
 import {
   requestKeys,
   refreshSessionAfterRunStart,
+  refreshSessionRevision,
   harnessesOptions,
   modelsOptions,
   sessionAttachmentsOptions,
@@ -31,6 +32,7 @@ import {
   sessionRunsOptions,
   runsCenterOptions,
 } from "../request-graph";
+import { observeSessionUpdates } from "../session-update-stream";
 import {
   formatTimestamp,
   latestRun,
@@ -160,6 +162,15 @@ export function WorkbenchSurface() {
   const locallyStartedRunSelected =
     sessionId !== undefined && startedRuns[sessionId] === selectedRunId;
   const stream = useRunEventStream(selectedRunId, 0, !locallyStartedRunSelected);
+
+  useEffect(() => {
+    if (sessionId === undefined || typeof globalThis.EventSource !== "function") {
+      return;
+    }
+    return observeSessionUpdates(sessionId, () => {
+      void refreshSessionRevision(queryClient, sessionId);
+    });
+  }, [queryClient, sessionId]);
 
   useEffect(() => {
     localStorage.setItem(

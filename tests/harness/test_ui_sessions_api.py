@@ -161,6 +161,63 @@ def test_sessions_api_events_polling_after_id():
     assert response.json()["events"][0]["id"] != first_event_id
 
 
+def test_session_update_stream_replays_title_revision_and_closes_on_delete():
+    store = _ObservedSessionUpdateStore()
+    session = store.create_session()
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="title",
+        model=None,
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=None,
+    )
+    updated = store.update_session(session.id, title="Generated title")
+    store.append_event(
+        HarnessStoredEvent(
+            id="evt-title",
+            session_id=session.id,
+            run_id=run.id,
+            type="session.updated",
+            message="Session title revision stored.",
+            payload={
+                "session_id": session.id,
+                "revision": updated.updated_at,
+                "changed_fields": ["title"],
+            },
+            created_at=utc_now(),
+        )
+    )
+    client = _client(store=store)
+    result: dict[str, object] = {}
+
+    def consume() -> None:
+        with client.stream(
+            "GET",
+            f"/api/cockpit/sessions/{session.id}/updates/stream?tail_only=false",
+        ) as response:
+            result["status"] = response.status_code
+            result["text"] = "".join(response.iter_text())
+
+    thread = threading.Thread(target=consume)
+    thread.start()
+    assert store.title_revision_read.wait(timeout=2)
+    store.delete_session(session.id)
+    thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert result["status"] == 200
+    frames = _sse_frames(str(result["text"]))
+    assert [frame["data"]["type"] for frame in frames] == [
+        "session.snapshot",
+        "session.updated",
+    ]
+    assert frames[0]["data"]["payload"]["session"]["title"] == "Generated title"
+    assert "title" not in frames[1]["data"]["payload"]
+
+
 def test_sessions_api_start_run_returns_stream_urls_and_sse_replay():
     client = _client()
 
@@ -1076,6 +1133,18 @@ def _client(
         runtime_store=runtime_store,
     )
     return TestClient(app)
+
+
+class _ObservedSessionUpdateStore(InMemoryHarnessSessionStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.title_revision_read = threading.Event()
+
+    def list_event_tail_page(self, session_id: str, **kwargs):
+        page = super().list_event_tail_page(session_id, **kwargs)
+        if any(item.event.type == "session.updated" for item in page.items):
+            self.title_revision_read.set()
+        return page
 
 
 class _FinishDuringCancelLookupStore(InMemoryHarnessSessionStore):

@@ -1,0 +1,1 @@
+import{D as e,H as t}from"./index-BZ1RRBtx.js";var n=t();function r({children:t,locale:r,title:i}){return(0,n.jsxs)(`section`,{className:`lazy-inspector`,"aria-label":i,children:[(0,n.jsx)(`div`,{className:`eyebrow`,children:e(r,`lazyBoundary`)}),(0,n.jsx)(`h2`,{children:i}),(0,n.jsx)(`p`,{children:t})]})}export{r as t};

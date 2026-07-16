@@ -271,6 +271,18 @@ export async function refreshSessionAfterRunStart(
   ]);
 }
 
+export async function refreshSessionRevision(
+  queryClient: QueryClient,
+  sessionId: string,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: requestKeys.sessionOverview(sessionId),
+    }),
+    queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() }),
+  ]);
+}
+
 export function updateSessionOverview(
   queryClient: QueryClient,
   sessionId: string,

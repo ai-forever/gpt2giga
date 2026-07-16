@@ -99,6 +99,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/cockpit/sessions/{session_id}/events"),
         ("GET", "/api/cockpit/sessions/{session_id}/messages"),
         ("GET", "/api/cockpit/sessions/{session_id}/runs"),
+        ("GET", "/api/cockpit/sessions/{session_id}/updates/stream"),
         ("GET", "/api/defaults"),
         ("GET", "/api/evals"),
         ("GET", "/api/evals/runs/{eval_run_id}"),
@@ -163,6 +164,7 @@ READ_ROUTE_IDENTITIES = frozenset(
 _STREAMS = frozenset(
     {
         ("GET", "/api/arena/runs/{arena_id}/events/stream"),
+        ("GET", "/api/cockpit/sessions/{session_id}/updates/stream"),
         ("GET", "/api/native/processes/{process_id}/output/stream"),
         ("GET", "/api/runs/{run_id}/events/stream"),
     }
