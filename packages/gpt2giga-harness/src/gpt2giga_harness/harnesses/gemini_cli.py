@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import deque
+import json
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping
@@ -261,6 +263,7 @@ class GeminiCliHarness(BaseHarness):
             )
             env = self.build_env(request, prepared_context, home=temp_dir)
             if request.stream:
+                parser = _GeminiStreamParser(home=Path(temp_dir))
                 result = run_streaming_command(
                     label="Gemini CLI",
                     command=command,
@@ -268,7 +271,7 @@ class GeminiCliHarness(BaseHarness):
                     cwd=request.workspace,
                     timeout_seconds=context.timeout_seconds,
                     request=request,
-                    parse_payload=_GeminiStreamParser(),
+                    parse_payload=parser,
                 )
             else:
                 result = run_command(
@@ -303,9 +306,11 @@ def _managed_mcp_reference(request: HarnessRequest) -> Mapping[str, Any] | None:
 class _GeminiStreamParser:
     """Normalize Gemini CLI stream-json events."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, home: Path | None = None) -> None:
         self.terminal_outcome: StreamTerminalOutcome | None = None
         self.recognized_payloads = 0
+        self._tool_context: dict[str, dict[str, Any]] = {}
+        self._subagent_trace = _GeminiSubagentTrace(home) if home is not None else None
 
     def __call__(self, payload: Mapping[str, Any]) -> tuple[HarnessEvent, ...]:
         event_type = str(payload.get("type") or "")
@@ -324,16 +329,29 @@ class _GeminiStreamParser:
             if message is not None:
                 events.append(message)
         elif event_type == "tool_use":
+            tool_call_id = str(payload.get("tool_id") or "tool-call")
+            tool_name = str(payload.get("tool_name") or "tool")
+            tool_arguments = payload.get("parameters")
+            self._tool_context[tool_call_id] = {
+                "name": tool_name,
+                "arguments": tool_arguments,
+            }
+            if self._subagent_trace is not None:
+                self._subagent_trace.register_started(tool_call_id, tool_name)
             events.append(
                 tool_call_event(
                     "tool_call_started",
-                    tool_call_id=payload.get("tool_id"),
-                    name=payload.get("tool_name"),
-                    arguments=payload.get("parameters"),
+                    tool_call_id=tool_call_id,
+                    name=tool_name,
+                    arguments=tool_arguments,
                     status="running",
                 )
             )
         elif event_type == "tool_result":
+            tool_call_id = str(payload.get("tool_id") or "tool-call")
+            tool_context = self._tool_context.get(tool_call_id, {})
+            if self._subagent_trace is not None:
+                self._subagent_trace.register_finished(tool_call_id)
             error = _mapping(payload.get("error"))
             result = payload.get("output")
             if result is None and error:
@@ -341,7 +359,9 @@ class _GeminiStreamParser:
             events.append(
                 tool_call_event(
                     "tool_call_finished",
-                    tool_call_id=payload.get("tool_id"),
+                    tool_call_id=tool_call_id,
+                    name=tool_context.get("name"),
+                    arguments=tool_context.get("arguments"),
                     result=result,
                     status=payload.get("status"),
                 )
@@ -367,6 +387,192 @@ class _GeminiStreamParser:
         if usage is not None:
             events.append(usage)
         return tuple(events)
+
+    def poll_events(self) -> tuple[HarnessEvent, ...]:
+        """Read newly persisted tool activity from isolated subagent checkpoints."""
+        if self._subagent_trace is None:
+            return ()
+        return self._subagent_trace.poll_events()
+
+
+class _GeminiSubagentTrace:
+    """Tail Gemini's temporary subagent checkpoints into nested tool events."""
+
+    def __init__(self, home: Path) -> None:
+        self._home = home
+        self._pending_parents: deque[str] = deque()
+        self._active_parents: list[str] = []
+        self._last_parent: str | None = None
+        self._file_parents: dict[Path, str] = {}
+        self._offsets: dict[Path, int] = {}
+        self._started: set[str] = set()
+        self._finished: set[str] = set()
+
+    def register_started(self, tool_call_id: str, name: str) -> None:
+        if name != "invoke_agent" or tool_call_id in self._active_parents:
+            return
+        self._pending_parents.append(tool_call_id)
+        self._active_parents.append(tool_call_id)
+        self._last_parent = tool_call_id
+
+    def register_finished(self, tool_call_id: str) -> None:
+        if tool_call_id in self._active_parents:
+            self._active_parents.remove(tool_call_id)
+        try:
+            self._pending_parents.remove(tool_call_id)
+        except ValueError:
+            pass
+
+    def poll_events(self) -> tuple[HarnessEvent, ...]:
+        events: list[HarnessEvent] = []
+        for path in self._checkpoint_paths():
+            parent_id = self._parent_for(path)
+            if parent_id is None:
+                continue
+            for payload in self._read_appended_payloads(path):
+                tool_calls = payload.get("toolCalls")
+                if not isinstance(tool_calls, list):
+                    continue
+                for tool_call in tool_calls:
+                    if isinstance(tool_call, Mapping):
+                        events.extend(self._tool_events(tool_call, parent_id=parent_id))
+        return tuple(events)
+
+    def _checkpoint_paths(self) -> tuple[Path, ...]:
+        roots = self._home.glob(".gemini/tmp/*/chats")
+        paths = (
+            path for root in roots for path in root.glob("*/*.jsonl") if path.is_file()
+        )
+        return tuple(sorted(paths, key=_checkpoint_sort_key))
+
+    def _parent_for(self, path: Path) -> str | None:
+        parent_id = self._file_parents.get(path)
+        if parent_id is not None:
+            return parent_id
+        if self._pending_parents:
+            parent_id = self._pending_parents.popleft()
+        elif self._active_parents:
+            parent_id = self._active_parents[-1]
+        elif self._last_parent is not None:
+            parent_id = self._last_parent
+        else:
+            return None
+        self._file_parents[path] = parent_id
+        return parent_id
+
+    def _read_appended_payloads(self, path: Path) -> tuple[Mapping[str, Any], ...]:
+        offset = self._offsets.get(path, 0)
+        try:
+            size = path.stat().st_size
+            if size < offset:
+                offset = 0
+            with path.open("rb") as checkpoint:
+                checkpoint.seek(offset)
+                data = checkpoint.read()
+        except OSError:
+            return ()
+        last_newline = data.rfind(b"\n")
+        if last_newline < 0:
+            return ()
+        complete = data[: last_newline + 1]
+        self._offsets[path] = offset + len(complete)
+        payloads: list[Mapping[str, Any]] = []
+        for line in complete.splitlines():
+            try:
+                payload = json.loads(line)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if isinstance(payload, Mapping):
+                payloads.append(payload)
+        return tuple(payloads)
+
+    def _tool_events(
+        self,
+        tool_call: Mapping[str, Any],
+        *,
+        parent_id: str,
+    ) -> tuple[HarnessEvent, ...]:
+        identifier = str(tool_call.get("id") or "").strip()
+        name = str(tool_call.get("name") or "").strip()
+        if not identifier or not name:
+            return ()
+        events: list[HarnessEvent] = []
+        if identifier not in self._started:
+            events.append(
+                tool_call_event(
+                    "tool_call_started",
+                    tool_call_id=identifier,
+                    name=name,
+                    arguments=tool_call.get("args"),
+                    status="running",
+                    parent_tool_call_id=parent_id,
+                    source="gemini-subagent-checkpoint",
+                )
+            )
+            self._started.add(identifier)
+            if name == "invoke_agent":
+                self.register_started(identifier, name)
+
+        status = _gemini_checkpoint_status(tool_call.get("status"))
+        if status is None or identifier in self._finished:
+            return tuple(events)
+        events.append(
+            tool_call_event(
+                "tool_call_finished",
+                tool_call_id=identifier,
+                name=name,
+                arguments=tool_call.get("args"),
+                result=_gemini_checkpoint_result(tool_call),
+                status=status,
+                parent_tool_call_id=parent_id,
+                source="gemini-subagent-checkpoint",
+            )
+        )
+        self._finished.add(identifier)
+        if name == "invoke_agent":
+            self.register_finished(identifier)
+        return tuple(events)
+
+
+def _checkpoint_sort_key(path: Path) -> tuple[int, str]:
+    try:
+        modified_ns = path.stat().st_mtime_ns
+    except OSError:
+        modified_ns = 0
+    return modified_ns, str(path)
+
+
+def _gemini_checkpoint_status(value: Any) -> str | None:
+    status = str(value or "").strip().lower()
+    if status in {"success", "completed"}:
+        return "success"
+    if status in {"error", "failed", "cancelled", "canceled"}:
+        return status
+    return None
+
+
+def _gemini_checkpoint_result(tool_call: Mapping[str, Any]) -> Any:
+    result = tool_call.get("result")
+    outputs: list[str] = []
+    if isinstance(result, list):
+        for item in result:
+            if not isinstance(item, Mapping):
+                continue
+            function_response = item.get("functionResponse")
+            if not isinstance(function_response, Mapping):
+                continue
+            response = function_response.get("response")
+            if not isinstance(response, Mapping):
+                continue
+            output = response.get("output")
+            if isinstance(output, str):
+                outputs.append(output)
+    if outputs:
+        return "\n".join(outputs)
+    if result is not None:
+        return result
+    error = tool_call.get("error")
+    return error if error is not None else tool_call.get("description")
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
