@@ -213,6 +213,73 @@ export interface RunStartResponse {
   job?: { status?: string };
 }
 
+export interface HarnessOption {
+  spec: {
+    capabilities?: string[];
+    id: string;
+    title?: string;
+    supported_builtin_tools?: string[];
+    supports_api_mode_selection?: boolean;
+    supports_attachments?: boolean;
+    supports_model_selection?: boolean;
+    supports_native_sessions?: boolean;
+  };
+  availability?: { status?: string; reason?: string | null };
+}
+
+export interface HarnessesResponse {
+  harnesses: HarnessOption[];
+  discovery_errors?: string[];
+}
+
+export interface ModelsResponse {
+  ok: boolean;
+  models: string[];
+  source?: string;
+  error?: string | null;
+  note?: string | null;
+}
+
+export interface AttachmentSummary {
+  id: string;
+  filename: string;
+  kind?: string;
+  mime_type?: string | null;
+  size_bytes: number;
+  warnings?: string[];
+}
+
+export interface AttachmentsResponse {
+  attachments: AttachmentSummary[];
+}
+
+export interface AttachmentUploadResponse {
+  attachment: AttachmentSummary;
+}
+
+export interface EventProjection {
+  id: string;
+  run_id: string;
+  type: string;
+  message?: TextProjection;
+  payload_url: string;
+  created_at?: string;
+}
+
+export interface SessionEventsResponse {
+  events: EventProjection[];
+  has_more: boolean;
+  next_cursor: string | null;
+  snapshot_revision: string;
+  byte_count: number;
+}
+
+export interface EventPayloadResponse {
+  event_id: string;
+  hidden: boolean;
+  payload: Readonly<Record<string, unknown>>;
+}
+
 export class CockpitApiError extends Error {
   readonly status: number;
 
@@ -239,13 +306,37 @@ export async function mutateCockpit<T>(
   body?: Readonly<Record<string, unknown>>,
   signal?: AbortSignal,
 ): Promise<T> {
+  return writeCockpit<T>(path, "POST", body, signal);
+}
+
+export async function patchCockpit<T>(
+  path: string,
+  body: Readonly<Record<string, unknown>>,
+  signal?: AbortSignal,
+): Promise<T> {
+  return writeCockpit<T>(path, "PATCH", body, signal);
+}
+
+export async function deleteCockpit<T>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  return writeCockpit<T>(path, "DELETE", undefined, signal);
+}
+
+async function writeCockpit<T>(
+  path: string,
+  method: "DELETE" | "PATCH" | "POST",
+  body?: Readonly<Record<string, unknown>>,
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(path, {
     body: body === undefined ? undefined : JSON.stringify(body),
     headers: {
       Accept: "application/json",
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
-    method: "POST",
+    method,
     signal,
   });
   return parseResponse<T>(response);

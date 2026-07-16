@@ -542,3 +542,42 @@ def test_model_listing_can_be_strict_to_selected_api_mode(monkeypatch):
     assert discovery.models == ()
     assert discovery.source == "/v2/models"
     assert called_urls == ["http://127.0.0.1:8090/v2/models"]
+
+
+def test_model_listing_only_includes_chat_models(monkeypatch):
+    def fake_request_json(method, url, *, payload=None, api_key=None, timeout=60.0):
+        return {
+            "object": "list",
+            "data": [
+                {
+                    "id": "GigaChat-3-Pro",
+                    "object": "model",
+                    "owned_by": "salutedevices",
+                    "type": "chat",
+                },
+                {
+                    "id": "Embeddings-2",
+                    "object": "model",
+                    "owned_by": "salutedevices",
+                    "type": "embedder",
+                },
+                {
+                    "id": "LegacyModel",
+                    "object": "model",
+                    "owned_by": "salutedevices",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(proxy, "request_json", fake_request_json)
+
+    discovery = proxy.discover_models(
+        HarnessConfig(),
+        GigaChatApiMode.V1,
+        include_compat_paths=False,
+        include_fallback=False,
+    )
+
+    assert discovery.ok is True
+    assert discovery.models == ("GigaChat-3-Pro",)
+    assert discovery.source == "/v1/models"

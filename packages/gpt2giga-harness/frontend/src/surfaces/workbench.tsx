@@ -1,16 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  type AttachmentUploadResponse,
+  deleteCockpit,
+  type EventPayloadResponse,
+  fetchCockpit,
   mutateCockpit,
+  patchCockpit,
   type RunStartResponse,
   type SessionSummary,
 } from "../api";
+import { MessageMarkdown } from "../message-markdown";
+import { generatedImageProjection } from "../generated-image";
 import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
 import {
   requestKeys,
+  harnessesOptions,
+  modelsOptions,
+  sessionAttachmentsOptions,
+  sessionEventsOptions,
   sessionIndexOptions,
   sessionMessagesOptions,
   sessionOverviewOptions,
@@ -28,6 +39,25 @@ import {
 import { useRunEventStream } from "../stream-store";
 
 const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
+type SessionAction = "archive" | "delete";
+type RunConfig = { apiMode: string; harnessId: string; mode: string; model: string };
+type AdvancedRunConfig = {
+  capability: string;
+  dryRun: boolean;
+  invocationMode: string;
+  permissionProfile: string;
+  stream: boolean;
+  workspacePolicy: string;
+};
+
+const builtinToolLabels: Record<string, string> = {
+  code_interpreter: "Code interpreter",
+  image_generate: "Image generation",
+  model_3d_generate: "3D generation",
+  url_content_extraction: "URL content",
+  web_search: "Web search",
+};
+const emptyStringList: readonly string[] = [];
 
 export function WorkbenchSurface() {
   const params = useParams({ strict: false });
@@ -45,9 +75,36 @@ export function WorkbenchSurface() {
   const [leftWidth, setLeftWidth] = useState(() => loadWidth("left", 264));
   const [rightWidth, setRightWidth] = useState(() => loadWidth("right", 320));
   const [prompt, setPrompt] = useState("");
+  const [runConfig, setRunConfig] = useState<RunConfig>({
+    apiMode: "v2",
+    harnessId: "echo",
+    mode: "plan",
+    model: "",
+  });
+  const [advancedConfig, setAdvancedConfig] = useState<AdvancedRunConfig>({
+    capability: "chat_completions",
+    dryRun: false,
+    invocationMode: "headless",
+    permissionProfile: "interactive",
+    stream: true,
+    workspacePolicy: "auto",
+  });
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [builtinTools, setBuiltinTools] = useState<string[]>([]);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [startedRun, setStartedRun] = useState<{ sessionId: string; runId: string } | null>(null);
+  const [sessionConfirmation, setSessionConfirmation] = useState<{
+    action: SessionAction;
+    id: string;
+    title: string;
+  } | null>(null);
 
   const index = useQuery(sessionIndexOptions());
+  const harnesses = useQuery(harnessesOptions());
+  const models = useQuery(modelsOptions(runConfig.apiMode));
   const overview = useQuery({
     ...sessionOverviewOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
@@ -58,6 +115,14 @@ export function WorkbenchSurface() {
   });
   const runs = useQuery({
     ...sessionRunsOptions(sessionId ?? "pending"),
+    enabled: sessionId !== undefined,
+  });
+  const attachments = useQuery({
+    ...sessionAttachmentsOptions(sessionId ?? "pending"),
+    enabled: sessionId !== undefined,
+  });
+  const events = useQuery({
+    ...sessionEventsOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
   });
   const retainedLatestRun = latestRun(runs.data?.runs ?? []);
@@ -71,6 +136,23 @@ export function WorkbenchSurface() {
       JSON.stringify({ left: leftWidth, right: rightWidth }),
     );
   }, [leftWidth, rightWidth]);
+
+  useEffect(() => {
+    const session = overview.data?.session;
+    if (session === undefined) return;
+    setRunConfig({
+      apiMode: session.default_api_mode ?? "v2",
+      harnessId: session.default_harness_id ?? "echo",
+      mode: session.default_mode ?? "plan",
+      model: session.default_model ?? "",
+    });
+  }, [
+    overview.data?.session.default_api_mode,
+    overview.data?.session.default_harness_id,
+    overview.data?.session.default_mode,
+    overview.data?.session.default_model,
+    overview.data?.session.id,
+  ]);
 
   const createSession = useMutation({
     mutationFn: () =>
@@ -98,16 +180,19 @@ export function WorkbenchSurface() {
       return mutateCockpit<RunStartResponse>(
         `/api/sessions/${encodeURIComponent(sessionId)}/run/start`,
         {
-          api_mode: session.default_api_mode ?? "v2",
-          capability: "chat_completions",
-          harness_id: session.default_harness_id ?? "echo",
-          invocation_mode: "headless",
-          mode: session.default_mode ?? "plan",
-          model: session.default_model ?? null,
-          permission_profile: "interactive",
+          api_mode: runConfig.apiMode,
+          attachment_ids: attachments.data?.attachments.map((attachment) => attachment.id) ?? [],
+          builtin_tools: runConfig.apiMode === "v2" ? builtinTools : [],
+          capability: advancedConfig.capability,
+          dry_run: advancedConfig.dryRun,
+          harness_id: runConfig.harnessId,
+          invocation_mode: advancedConfig.invocationMode,
+          mode: runConfig.mode,
+          model: runConfig.model.trim() || null,
+          permission_profile: advancedConfig.permissionProfile,
           prompt: prompt.trim(),
-          stream: true,
-          workspace_policy: "auto",
+          stream: advancedConfig.stream,
+          workspace_policy: advancedConfig.workspacePolicy,
         },
       );
     },
@@ -121,6 +206,53 @@ export function WorkbenchSurface() {
     },
   });
 
+  const saveRunConfig = useMutation({
+    mutationFn: (values: Readonly<Record<string, unknown>>) => {
+      if (sessionId === undefined) throw new Error("Session is not selected");
+      return patchCockpit<{ session: SessionSummary }>(
+        `/api/sessions/${encodeURIComponent(sessionId)}`,
+        values,
+      );
+    },
+    onSuccess: ({ session }) => {
+      queryClient.setQueryData(
+        requestKeys.sessionOverview(session.id),
+        (current: typeof overview.data) => current === undefined ? current : { ...current, session },
+      );
+      void queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() });
+    },
+  });
+
+  const uploadFiles = useMutation({
+    mutationFn: async ({ files, source }: { files: File[]; source: string }) => {
+      if (sessionId === undefined) throw new Error("Session is not selected");
+      return Promise.all(files.map(async (file) => mutateCockpit<AttachmentUploadResponse>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/attachments`,
+        {
+          data_base64: await fileToBase64(file),
+          filename: file.name || `pasted-${Date.now()}.png`,
+          mime_type: file.type || "application/octet-stream",
+          source,
+        },
+      )));
+    },
+    onSuccess: async () => {
+      if (sessionId !== undefined) {
+        await queryClient.invalidateQueries({ queryKey: requestKeys.sessionAttachments(sessionId) });
+      }
+    },
+  });
+
+  const removeAttachment = useMutation({
+    mutationFn: (attachmentId: string) =>
+      deleteCockpit(`/api/attachments/${encodeURIComponent(attachmentId)}`),
+    onSuccess: async () => {
+      if (sessionId !== undefined) {
+        await queryClient.invalidateQueries({ queryKey: requestKeys.sessionAttachments(sessionId) });
+      }
+    },
+  });
+
   const cancelRun = useMutation({
     mutationFn: (runId: string) =>
       mutateCockpit(`/api/runs/${encodeURIComponent(runId)}/cancel`),
@@ -129,6 +261,23 @@ export function WorkbenchSurface() {
         await queryClient.invalidateQueries({ queryKey: requestKeys.sessionScope(sessionId) });
       }
       await queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() });
+    },
+  });
+
+  const changeSession = useMutation({
+    mutationFn: ({ action, id }: { action: SessionAction; id: string }) =>
+      action === "archive"
+        ? patchCockpit(`/api/sessions/${encodeURIComponent(id)}`, { archived: true })
+        : deleteCockpit(`/api/sessions/${encodeURIComponent(id)}`),
+    onSuccess: async (_, { id }) => {
+      setSessionConfirmation(null);
+      setStartedRun((current) => current?.sessionId === id ? null : current);
+      await navigate({ to: "/cockpit-v2/work" });
+      queryClient.removeQueries({ queryKey: requestKeys.sessionScope(id) });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() }),
+        queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() }),
+      ]);
     },
   });
 
@@ -144,6 +293,47 @@ export function WorkbenchSurface() {
     gridTemplateColumns: `${leftOpen ? `${leftWidth}px 8px` : "44px"} minmax(360px, 1fr) ${rightOpen ? `8px ${rightWidth}px` : "44px"}`,
   };
   const stage = runStage(retainedLatestRun);
+  const selectedHarness = harnesses.data?.harnesses.find(
+    (harness) => harness.spec.id === runConfig.harnessId,
+  );
+  const supportedBuiltinTools = selectedHarness?.spec.supported_builtin_tools ?? emptyStringList;
+  const builtinToolsAvailable =
+    runConfig.apiMode === "v2" &&
+    advancedConfig.invocationMode === "headless" &&
+    supportedBuiltinTools.length > 0;
+  const modelSuggestions = (models.data?.models ?? []).filter((model) =>
+    model.toLocaleLowerCase(locale).includes(runConfig.model.trim().toLocaleLowerCase(locale)),
+  );
+  const streamedEventIds = new Set(stream.events.map((event) => event.id));
+  const retainedGeneratedEvents = (events.data?.events ?? []).filter(
+    (event) => event.type === "generated_file" && !streamedEventIds.has(event.id),
+  );
+
+  useEffect(() => {
+    const supported = new Set(supportedBuiltinTools);
+    setBuiltinTools((current) => current.filter((tool) => supported.has(tool)));
+    const capabilities = selectedHarness?.spec.capabilities ?? [];
+    if (capabilities.length > 0 && !capabilities.includes(advancedConfig.capability)) {
+      setAdvancedConfig((current) => ({ ...current, capability: capabilities[0] ?? "chat_completions" }));
+    }
+  }, [advancedConfig.capability, runConfig.harnessId, supportedBuiltinTools, selectedHarness?.spec.capabilities]);
+
+  useEffect(() => {
+    if (sessionId !== undefined && stream.status === "closed") {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: requestKeys.sessionProjection(sessionId, "events") }),
+        queryClient.invalidateQueries({ queryKey: requestKeys.sessionProjection(sessionId, "messages") }),
+      ]);
+    }
+  }, [queryClient, sessionId, stream.status]);
+  const setConfig = <Key extends keyof RunConfig>(
+    key: Key,
+    value: RunConfig[Key],
+    persistKey?: string,
+  ) => {
+    setRunConfig((current) => ({ ...current, [key]: value }));
+    if (persistKey !== undefined) saveRunConfig.mutate({ [persistKey]: value || null });
+  };
 
   return (
     <div className="workbench-layout" style={layoutStyle}>
@@ -242,14 +432,45 @@ export function WorkbenchSurface() {
                 <p className="section-kicker">{message(locale, "session")} · {shortId(sessionId)}</p>
                 <h1>{overview.data?.session.title}</h1>
                 <span>
-                  {overview.data?.session.default_model ?? "GigaChat"} · /{overview.data?.session.default_api_mode ?? "v2"} · {overview.data?.session.default_harness_id ?? "echo"}
+                  {runConfig.model || "GigaChat"} · /{runConfig.apiMode} · {runConfig.harnessId}
                 </span>
               </div>
-              {selectedRunId === undefined ? null : (
-                <Link params={{ runId: selectedRunId }} to="/cockpit-v2/runs/$runId">
-                  {message(locale, "openRun")} ↗
-                </Link>
-              )}
+              <div className="work-header-actions">
+                {selectedRunId === undefined ? null : (
+                  <Link params={{ runId: selectedRunId }} to="/cockpit-v2/runs/$runId">
+                    {message(locale, "openRun")} ↗
+                  </Link>
+                )}
+                <button
+                  disabled={changeSession.isPending}
+                  onClick={() => {
+                    changeSession.reset();
+                    setSessionConfirmation({
+                      action: "archive",
+                      id: sessionId,
+                      title: overview.data?.session.title ?? sessionId,
+                    });
+                  }}
+                  type="button"
+                >
+                  {message(locale, "archiveSession")}
+                </button>
+                <button
+                  className="danger-button"
+                  disabled={changeSession.isPending}
+                  onClick={() => {
+                    changeSession.reset();
+                    setSessionConfirmation({
+                      action: "delete",
+                      id: sessionId,
+                      title: overview.data?.session.title ?? sessionId,
+                    });
+                  }}
+                  type="button"
+                >
+                  {message(locale, "deleteSession")}
+                </button>
+              </div>
             </header>
             <section className="message-region" aria-label={message(locale, "sessionMessages")}>
               {messages.isPending ? <ListSkeleton rows={4} /> : null}
@@ -263,11 +484,16 @@ export function WorkbenchSurface() {
                     <strong>{item.role}</strong>
                     <time>{formatTimestamp(item.created_at, locale)}</time>
                   </div>
-                  <p>{item.content.text}</p>
+                  <MessageMarkdown source={item.content.text} />
                   {item.content.truncated ? <span>{message(locale, "boundedPreview")}</span> : null}
                 </article>
               ))}
-              {stream.events.map((event) => (
+              {retainedGeneratedEvents.map((event) => (
+                <GeneratedFilePreview eventId={event.id} key={event.id} payloadUrl={event.payload_url} />
+              ))}
+              {stream.events.map((event) => event.type === "generated_file" ? (
+                <GeneratedImageCard key={event.id} payload={event.payload} />
+              ) : (
                 <article className="message-entry event" key={event.id}>
                   <div><strong>{event.type.replaceAll("_", " ")}</strong></div>
                   <p>{event.message ?? String(event.payload?.delta ?? "")}</p>
@@ -275,22 +501,295 @@ export function WorkbenchSurface() {
               ))}
             </section>
             <form
-              className="composer"
+              className={[
+                "composer",
+                draggingFiles ? "dragging-files" : "",
+                modelMenuOpen || plusMenuOpen ? "popover-open" : "",
+              ].filter(Boolean).join(" ")}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                setDraggingFiles(true);
+              }}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setDraggingFiles(false);
+                }
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDraggingFiles(false);
+                const files = Array.from(event.dataTransfer.files);
+                if (files.length > 0) uploadFiles.mutate({ files, source: "drop" });
+              }}
               onSubmit={(event) => {
                 event.preventDefault();
                 if (prompt.trim() && !startRun.isPending) startRun.mutate();
               }}
             >
+              {attachments.data?.attachments.length ? (
+                <div className="attachment-chips" aria-label={message(locale, "attachedFiles")}>
+                  {attachments.data.attachments.map((attachment) => (
+                    <span className="attachment-chip" key={attachment.id}>
+                      <span aria-hidden="true">{attachment.mime_type?.startsWith("image/") ? "▧" : "◇"}</span>
+                      <span title={attachment.filename}>{attachment.filename}</span>
+                      <small>{formatBytes(attachment.size_bytes)}</small>
+                      <button
+                        aria-label={`${message(locale, "removeAttachment")} ${attachment.filename}`}
+                        disabled={removeAttachment.isPending}
+                        onClick={() => removeAttachment.mutate(attachment.id)}
+                        type="button"
+                      >×</button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <textarea
                 aria-label={message(locale, "composerPlaceholder")}
                 disabled={startRun.isPending}
                 onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && prompt.trim()) {
+                    event.preventDefault();
+                    startRun.mutate();
+                  }
+                }}
+                onPaste={(event) => {
+                  const files = Array.from(event.clipboardData.files);
+                  if (files.length > 0) uploadFiles.mutate({ files, source: "paste" });
+                }}
                 placeholder={message(locale, "composerPlaceholder")}
                 rows={4}
                 value={prompt}
               />
+              {modelMenuOpen && modelSuggestions.length > 0 ? (
+                <div
+                  className="model-suggestions"
+                  onMouseDown={(event) => event.preventDefault()}
+                  role="listbox"
+                >
+                  {modelSuggestions.slice(0, 12).map((model) => (
+                    <button
+                      aria-selected={model === runConfig.model}
+                      key={model}
+                      onClick={() => {
+                        setConfig("model", model);
+                        setModelMenuOpen(false);
+                        saveRunConfig.mutate({ default_model: model });
+                      }}
+                      role="option"
+                      type="button"
+                    >{model}</button>
+                  ))}
+                </div>
+              ) : null}
+              {advancedOpen ? (
+                <section className="advanced-composer-panel" aria-label={message(locale, "advancedSettings")}>
+                  <div className="advanced-panel-heading">
+                    <div>
+                      <strong>{message(locale, "advancedSettings")}</strong>
+                      <span>{message(locale, "advancedSettingsHint")}</span>
+                    </div>
+                    <button aria-label={message(locale, "close")} onClick={() => setAdvancedOpen(false)} type="button">×</button>
+                  </div>
+                  <div className="advanced-config-grid">
+                    <label>
+                      <span>{message(locale, "invocation")}</span>
+                      <select
+                        onChange={(event) => setAdvancedConfig((current) => ({ ...current, invocationMode: event.target.value }))}
+                        value={advancedConfig.invocationMode}
+                      >
+                        <option value="headless">headless</option>
+                        <option disabled={selectedHarness?.spec.supports_native_sessions !== true} value="native">native</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>{message(locale, "capability")}</span>
+                      <select
+                        onChange={(event) => setAdvancedConfig((current) => ({ ...current, capability: event.target.value }))}
+                        value={advancedConfig.capability}
+                      >
+                        {(selectedHarness?.spec.capabilities ?? ["chat_completions"]).map((capability) => (
+                          <option key={capability} value={capability}>{capability}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>{message(locale, "workspacePolicy")}</span>
+                      <select
+                        onChange={(event) => setAdvancedConfig((current) => ({ ...current, workspacePolicy: event.target.value }))}
+                        value={advancedConfig.workspacePolicy}
+                      >
+                        <option value="auto">auto</option>
+                        <option value="current">current</option>
+                        <option value="worktree">worktree</option>
+                        <option value="temp_copy">temp copy</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>{message(locale, "permissionProfile")}</span>
+                      <select
+                        onChange={(event) => setAdvancedConfig((current) => ({ ...current, permissionProfile: event.target.value }))}
+                        value={advancedConfig.permissionProfile}
+                      >
+                        <option value="interactive">interactive</option>
+                        <option value="review_every_action">review every action</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="advanced-switches">
+                    <label><input checked={advancedConfig.dryRun} onChange={(event) => setAdvancedConfig((current) => ({ ...current, dryRun: event.target.checked }))} type="checkbox" /> dry run</label>
+                    <label><input checked={advancedConfig.stream} onChange={(event) => setAdvancedConfig((current) => ({ ...current, stream: event.target.checked }))} type="checkbox" /> stream</label>
+                  </div>
+                  <fieldset className="builtin-tools-panel">
+                    <legend>{message(locale, "builtinTools")}</legend>
+                    <div>
+                      {Object.entries(builtinToolLabels).map(([tool, label]) => (
+                        <label className="builtin-tool-choice" key={tool}>
+                          <input
+                            checked={builtinTools.includes(tool)}
+                            disabled={!builtinToolsAvailable || !supportedBuiltinTools.includes(tool)}
+                            onChange={(event) => setBuiltinTools((current) => event.target.checked
+                              ? [...current, tool]
+                              : current.filter((item) => item !== tool))}
+                            type="checkbox"
+                          />
+                          <span>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <p>
+                      {builtinToolsAvailable
+                        ? message(locale, "builtinToolsHint")
+                        : message(locale, "builtinToolsUnavailable")}
+                    </p>
+                  </fieldset>
+                </section>
+              ) : null}
               <div className="composer-footer">
-                <span className={`stream-indicator ${stream.status}`}>{stream.status.replaceAll("_", " ")}</span>
+                <div className="composer-footer-left">
+                  <div className="composer-controls" aria-label={message(locale, "runConfiguration")}>
+                    <input
+                      className="sr-only"
+                      multiple
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files ?? []);
+                        if (files.length > 0) uploadFiles.mutate({ files, source: "upload" });
+                        event.target.value = "";
+                      }}
+                      ref={fileInputRef}
+                      type="file"
+                    />
+                    <div className="plus-menu-wrapper">
+                      <button
+                        aria-expanded={plusMenuOpen}
+                        aria-label={message(locale, "moreComposerActions")}
+                        className="attach-button"
+                        disabled={uploadFiles.isPending}
+                        onClick={() => setPlusMenuOpen((open) => !open)}
+                        title={message(locale, "moreComposerActions")}
+                        type="button"
+                      >
+                        <span aria-hidden="true">＋</span>
+                      </button>
+                      {plusMenuOpen ? (
+                        <div className="plus-menu" role="menu">
+                          <button onClick={() => { setPlusMenuOpen(false); fileInputRef.current?.click(); }} role="menuitem" type="button">
+                            <span aria-hidden="true">◇</span>
+                            <span><strong>{message(locale, "attachFiles")}</strong><small>{message(locale, "attachFilesHint")}</small></span>
+                          </button>
+                          <button onClick={() => { setPlusMenuOpen(false); setAdvancedOpen(true); }} role="menuitem" type="button">
+                            <span aria-hidden="true">✦</span>
+                            <span><strong>{message(locale, "builtinTools")}</strong><small>{message(locale, "builtinToolsMenuHint")}</small></span>
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                    <label className="compact-control">
+                      <span>{message(locale, "harness")}</span>
+                      <select
+                        aria-label={message(locale, "harness")}
+                        onChange={(event) => setConfig("harnessId", event.target.value, "default_harness_id")}
+                        value={runConfig.harnessId}
+                      >
+                        {harnesses.data?.harnesses.map((harness) => (
+                          <option
+                            disabled={harness.availability?.status === "unavailable"}
+                            key={harness.spec.id}
+                            value={harness.spec.id}
+                          >
+                            {harness.spec.title || harness.spec.id}
+                          </option>
+                        )) ?? <option value={runConfig.harnessId}>{runConfig.harnessId}</option>}
+                      </select>
+                    </label>
+                    <label className="compact-control api-control">
+                      <span>{message(locale, "apiMode")}</span>
+                      <select
+                        aria-label={message(locale, "apiMode")}
+                        disabled={selectedHarness?.spec.supports_api_mode_selection === false}
+                        onChange={(event) => setConfig("apiMode", event.target.value, "default_api_mode")}
+                        value={runConfig.apiMode}
+                      >
+                        <option value="v2">/v2</option>
+                        <option value="v1">/v1</option>
+                      </select>
+                    </label>
+                    <div className="compact-control model-control">
+                      <span>{message(locale, "model")}</span>
+                      <div
+                        className="model-picker"
+                        onBlur={(event) => {
+                          if (!event.currentTarget.contains(event.relatedTarget)) {
+                            setModelMenuOpen(false);
+                            saveRunConfig.mutate({ default_model: runConfig.model.trim() || null });
+                          }
+                        }}
+                      >
+                        <input
+                          aria-label={message(locale, "model")}
+                          autoComplete="off"
+                          disabled={selectedHarness?.spec.supports_model_selection === false}
+                          onChange={(event) => { setConfig("model", event.target.value); setModelMenuOpen(true); }}
+                          onFocus={() => setModelMenuOpen(true)}
+                          placeholder="GigaChat"
+                          type="text"
+                          value={runConfig.model}
+                        />
+                        <button
+                          aria-expanded={modelMenuOpen}
+                          aria-label={message(locale, "showModelSuggestions")}
+                          disabled={selectedHarness?.spec.supports_model_selection === false}
+                          onClick={() => setModelMenuOpen((open) => !open)}
+                          type="button"
+                        >⌄</button>
+                      </div>
+                    </div>
+                    <label className="compact-control mode-control">
+                      <span>{message(locale, "mode")}</span>
+                      <select
+                        aria-label={message(locale, "mode")}
+                        onChange={(event) => setConfig("mode", event.target.value, "default_mode")}
+                        value={runConfig.mode}
+                      >
+                        <option value="plan">plan</option>
+                        <option value="read">read</option>
+                        <option value="edit">edit</option>
+                      </select>
+                    </label>
+                    <button
+                      aria-expanded={advancedOpen}
+                      className={builtinTools.length > 0 ? "advanced-button active" : "advanced-button"}
+                      onClick={() => setAdvancedOpen((open) => !open)}
+                      type="button"
+                    >
+                      {message(locale, "advanced")}{builtinTools.length > 0 ? ` · ${builtinTools.length}` : ""}
+                    </button>
+                  </div>
+                  <span className={`stream-indicator ${stream.status}`}>
+                    {uploadFiles.isPending ? message(locale, "uploadingFiles") : stream.status.replaceAll("_", " ")}
+                  </span>
+                </div>
                 {activeRun(retainedLatestRun) && selectedRunId !== undefined ? (
                   <button
                     className="danger-button"
@@ -306,7 +805,11 @@ export function WorkbenchSurface() {
                   </button>
                 )}
               </div>
-              {startRun.isError ? <div className="error-state" role="alert">{String(startRun.error)}</div> : null}
+              {startRun.isError || uploadFiles.isError || removeAttachment.isError || saveRunConfig.isError ? (
+                <div className="error-state" role="alert">
+                  {String(startRun.error ?? uploadFiles.error ?? removeAttachment.error ?? saveRunConfig.error)}
+                </div>
+              ) : null}
             </form>
           </>
         )}
@@ -334,10 +837,10 @@ export function WorkbenchSurface() {
             <section className="inspector-section">
               <h3>{message(locale, "executionPlan")}</h3>
               <dl className="plan-fields">
-                <div><dt>{message(locale, "mode")}</dt><dd>{overview.data?.session.default_mode ?? "plan"}</dd></div>
+                <div><dt>{message(locale, "mode")}</dt><dd>{runConfig.mode}</dd></div>
                 <div><dt>{message(locale, "workspacePolicy")}</dt><dd>{message(locale, "workspacePolicyValue")}</dd></div>
-                <div><dt>{message(locale, "route")}</dt><dd>{overview.data?.session.default_model ?? "GigaChat"} · /{overview.data?.session.default_api_mode ?? "v2"}</dd></div>
-                <div><dt>{message(locale, "harness")}</dt><dd>{overview.data?.session.default_harness_id ?? "echo"}</dd></div>
+                <div><dt>{message(locale, "route")}</dt><dd>{runConfig.model || "GigaChat"} · /{runConfig.apiMode}</dd></div>
+                <div><dt>{message(locale, "harness")}</dt><dd>{runConfig.harnessId}</dd></div>
               </dl>
             </section>
             <Progression current={stage} locale={locale} />
@@ -361,6 +864,113 @@ export function WorkbenchSurface() {
           <span>‹</span><span>{message(locale, "restore")}</span>
         </button>
       )}
+      {sessionConfirmation === null ? null : (
+        <SessionConfirmationDialog
+          action={sessionConfirmation.action}
+          error={changeSession.isError}
+          locale={locale}
+          onCancel={() => {
+            if (!changeSession.isPending) setSessionConfirmation(null);
+          }}
+          onConfirm={() => changeSession.mutate(sessionConfirmation)}
+          pending={changeSession.isPending}
+          title={sessionConfirmation.title}
+        />
+      )}
+    </div>
+  );
+}
+
+function GeneratedFilePreview({ eventId, payloadUrl }: { eventId: string; payloadUrl: string }) {
+  const payload = useQuery({
+    queryKey: [...requestKeys.root, "event-payload", eventId],
+    queryFn: ({ signal }) => fetchCockpit<EventPayloadResponse>(payloadUrl, signal),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  if (payload.isPending) return <div className="generated-image-skeleton skeleton-row" />;
+  if (payload.isError || payload.data.hidden) return null;
+  return <GeneratedImageCard payload={payload.data.payload} />;
+}
+
+function GeneratedImageCard({ payload }: { payload?: Readonly<Record<string, unknown>> }) {
+  const image = generatedImageProjection(payload);
+  if (image === null) return null;
+  const size = image.sizeBytes === null ? null : formatBytes(image.sizeBytes);
+  return (
+    <article className="message-entry assistant generated-image-message">
+      <div><strong>assistant · image generation</strong></div>
+      <figure>
+        <a href={image.previewUrl} rel="noreferrer" target="_blank">
+          <img alt={image.filename} loading="lazy" src={image.previewUrl} />
+        </a>
+        <figcaption>{image.filename}{size === null ? "" : ` · ${size}`}</figcaption>
+      </figure>
+    </article>
+  );
+}
+
+function SessionConfirmationDialog({
+  action,
+  error,
+  locale,
+  onCancel,
+  onConfirm,
+  pending,
+  title,
+}: {
+  action: SessionAction;
+  error: boolean;
+  locale: "en" | "ru";
+  onCancel: () => void;
+  onConfirm: () => void;
+  pending: boolean;
+  title: string;
+}) {
+  const destructive = action === "delete";
+  const headingId = "session-confirmation-heading";
+  const descriptionId = "session-confirmation-description";
+  return (
+    <div className="dialog-backdrop" onClick={onCancel} role="presentation">
+      <section
+        aria-describedby={descriptionId}
+        aria-labelledby={headingId}
+        aria-modal="true"
+        className="confirmation-dialog"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <span className="section-kicker">{message(locale, "sessionActions")}</span>
+        <h2 id={headingId}>
+          {message(locale, destructive ? "deleteSessionTitle" : "archiveSessionTitle")}
+        </h2>
+        <p id={descriptionId}>
+          <strong>{title}</strong>
+          <span>
+            {message(
+              locale,
+              destructive ? "deleteSessionDescription" : "archiveSessionDescription",
+            )}
+          </span>
+        </p>
+        {error ? (
+          <div className="mutation-error" role="alert">
+            {message(locale, "sessionMutationFailed")}
+          </div>
+        ) : null}
+        <div className="confirmation-actions">
+          <button autoFocus disabled={pending} onClick={onCancel} type="button">
+            {message(locale, "cancel")}
+          </button>
+          <button
+            className={destructive ? "primary-danger-button" : "primary-button"}
+            disabled={pending}
+            onClick={onConfirm}
+            type="button"
+          >
+            {message(locale, destructive ? "deleteSession" : "archiveSession")}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -446,4 +1056,22 @@ function clamp(value: number, minimum: number, maximum: number): number {
 
 function openInbox(kind: "approvals" | "attention") {
   globalThis.dispatchEvent(new CustomEvent("cockpit:open-inbox", { detail: kind }));
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read attachment"));
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      resolve(result.includes(",") ? result.slice(result.indexOf(",") + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }

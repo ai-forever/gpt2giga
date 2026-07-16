@@ -6,13 +6,17 @@ import {
 
 import {
   type ApprovalInboxResponse,
+  type AttachmentsResponse,
   type AttentionInboxResponse,
   fetchCockpit,
+  type HarnessesResponse,
+  type ModelsResponse,
   type RunCenterSummaryResponse,
   type RunOverviewResponse,
   type RunTraceResponse,
   type RunsCenterResponse,
   type SessionIndexResponse,
+  type SessionEventsResponse,
   type SessionMessagesResponse,
   type SessionOverviewResponse,
   type SessionRunsResponse,
@@ -33,6 +37,10 @@ export const requestKeys = {
     [...requestKeys.sessionScope(sessionId), "overview"] as const,
   sessionProjection: (sessionId: string, projection: SessionProjection) =>
     [...requestKeys.sessionScope(sessionId), projection] as const,
+  sessionAttachments: (sessionId: string) =>
+    [...requestKeys.sessionScope(sessionId), "attachments"] as const,
+  harnesses: () => [...rootKey, "harnesses"] as const,
+  models: (apiMode: string) => [...rootKey, "models", apiMode] as const,
   runsCenter: () => [...rootKey, "runs-center"] as const,
   approvals: () => [...rootKey, "approvals"] as const,
   attention: () => [...rootKey, "attention"] as const,
@@ -46,6 +54,35 @@ export const requestKeys = {
   runProjection: (runId: string, projection: RunProjection) =>
     [...requestKeys.runScope(runId), projection] as const,
 };
+
+export function harnessesOptions() {
+  return queryOptions({
+    queryKey: requestKeys.harnesses(),
+    queryFn: ({ signal }) => fetchCockpit<HarnessesResponse>("/api/harnesses", signal),
+    staleTime: 30_000,
+  });
+}
+
+export function modelsOptions(apiMode: string) {
+  return queryOptions({
+    queryKey: requestKeys.models(apiMode),
+    queryFn: ({ signal }) =>
+      fetchCockpit<ModelsResponse>(withQuery("/api/models", { api_mode: apiMode }), signal),
+    staleTime: 30_000,
+  });
+}
+
+export function sessionAttachmentsOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: requestKeys.sessionAttachments(sessionId),
+    queryFn: ({ signal }) =>
+      fetchCockpit<AttachmentsResponse>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/attachments`,
+        signal,
+      ),
+    staleTime: 5_000,
+  });
+}
 
 export function sessionIndexOptions() {
   return queryOptions({
@@ -112,6 +149,21 @@ export function sessionRunsOptions(sessionId: string) {
         withQuery(
           `/api/cockpit/sessions/${encodeURIComponent(sessionId)}/runs`,
           { limit: 50 },
+        ),
+        signal,
+      ),
+    staleTime: 5_000,
+  });
+}
+
+export function sessionEventsOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: requestKeys.sessionProjection(sessionId, "events"),
+    queryFn: ({ signal }) =>
+      fetchCockpit<SessionEventsResponse>(
+        withQuery(
+          `/api/cockpit/sessions/${encodeURIComponent(sessionId)}/events`,
+          { limit: 100 },
         ),
         signal,
       ),
