@@ -6,6 +6,7 @@ from gpt2giga.models.config import ProxyConfig, ProxySettings
 def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_HOST", raising=False)
     monkeypatch.delenv("GPT2GIGA_PASS_MODEL", raising=False)
+    monkeypatch.delenv("GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE", raising=False)
     monkeypatch.delenv("GPT2GIGA_ENABLE_REASONING", raising=False)
     monkeypatch.delenv("GPT2GIGA_DISABLE_REASONING", raising=False)
     monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
@@ -32,6 +33,8 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_PHOENIX_PROJECT_NAME", raising=False)
     monkeypatch.delenv("GPT2GIGA_PHOENIX_API_KEY", raising=False)
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_SAMPLE_RATE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_QUEUE_SIZE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_DROP_ON_BACKPRESSURE", raising=False)
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT", raising=False)
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES", raising=False)
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS", raising=False)
@@ -58,6 +61,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert isinstance(s.port, int)
     assert isinstance(s.log_level, str)
     assert s.pass_model is True
+    assert s.pass_token_client_cache_size == 32
     assert s.enable_reasoning is False
     assert s.disable_reasoning is False
     assert s.structured_output_mode == "function_call"
@@ -89,6 +93,8 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.phoenix_project_name == "gpt2giga"
     assert s.phoenix_api_key is None
     assert s.observability_sample_rate == 1.0
+    assert s.observability_queue_size == 10_000
+    assert s.observability_drop_on_backpressure is True
     assert s.observability_capture_content is False
     assert s.observability_capture_messages is False
     assert s.observability_capture_tool_args is False
@@ -271,6 +277,8 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_PHOENIX_PROJECT_NAME", "gpt2giga-dev")
     monkeypatch.setenv("GPT2GIGA_PHOENIX_API_KEY", "phoenix-secret")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_SAMPLE_RATE", "0.25")
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_QUEUE_SIZE", "321")
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_DROP_ON_BACKPRESSURE", "false")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT", "true")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES", "true")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS", "true")
@@ -324,6 +332,8 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.phoenix_project_name == "gpt2giga-dev"
     assert s.phoenix_api_key == "phoenix-secret"
     assert s.observability_sample_rate == 0.25
+    assert s.observability_queue_size == 321
+    assert s.observability_drop_on_backpressure is False
     assert s.observability_capture_content is True
     assert s.observability_capture_messages is True
     assert s.observability_capture_tool_args is True

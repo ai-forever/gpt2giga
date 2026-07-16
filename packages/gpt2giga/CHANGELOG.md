@@ -9,6 +9,10 @@
 
 ### Исправлено
 - **CPU-нагрузка request context**: тяжёлый PBKDF2 для корреляционных отпечатков IP и API-ключа заменён на быстрый keyed HMAC-SHA256, чтобы middleware не блокировал event loop двумя вычислениями по 100 000 итераций на каждый запрос.
+- **Скрытая сериализация DEBUG payload**: подготовка и маскирование payload теперь полностью пропускаются при стандартном уровне `INFO`, включая response и streaming paths.
+- **Ресурсы `PASS_TOKEN`**: credential-specific клиенты GigaChat переиспользуются ограниченным LRU-пулом, остаются активными до завершения stream и закрываются при вытеснении или остановке.
+- **Неблокирующие sinks**: JSONL traffic log пакетируется через фоновую очередь, а экспорт observability вынесен из request path в ограниченную очередь с управляемым backpressure.
+- **Накладные расходы middleware**: request-id, validation, path normalization и pass-token middleware переведены с `BaseHTTPMiddleware` на чистый ASGI; три вложенных response-итератора заменены одним перехватчиком ASGI `send`.
 
 ## [0.2.3a2] - 2026-07-14
 

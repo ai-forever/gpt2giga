@@ -130,6 +130,7 @@ GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch
 | `GPT2GIGA_API_KEY` | empty | API-ключ прокси. Для общих окружений используйте сильное случайное значение. |
 | `GPT2GIGA_PASS_MODEL` | `True` | Передавать `model` из запроса в GigaChat. Поставьте `False`, чтобы всегда использовать настроенную модель GigaChat. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Разбирать клиентский `Authorization` как учётные данные GigaChat для авторизации в вышестоящем сервисе для каждого запроса. |
+| `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Максимум неактивных клиентов для отдельных учётных данных, сохраняемых для переиспользования соединений. |
 | `GPT2GIGA_EMBEDDINGS` | `EmbeddingsGigaR` | Модель эмбеддингов по умолчанию, если модель из запроса не используется. |
 | `GPT2GIGA_ENABLE_IMAGES` | `True` | Принимать и преобразовывать поддержанные входные изображения. Отключите, если развёртывание должно запрещать обработку изображений. |
 | `GPT2GIGA_DEFAULT_MAX_TOKENS` | empty | Добавлять это положительное значение `max_tokens`, только если клиент не передал `max_tokens`, `max_completion_tokens` или `max_output_tokens`. Пустое значение не добавляет лимит. |
@@ -163,6 +164,8 @@ x-api-key: <GPT2GIGA_API_KEY>
 
 Для обычного развёртывания проще и безопаснее держать учётные данные вышестоящего
 сервиса на сервере через `GIGACHAT_*`.
+При включённой передаче токена клиенты объединяются в пул по учётным данным и
+закрываются при LRU-вытеснении или остановке; активные streaming-запросы не вытесняются.
 
 ## Настройки GigaChat
 
@@ -426,6 +429,8 @@ GPT2GIGA_OPENSEARCH_URL=http://localhost:9200
 
 Захват содержимого включайте только после решения вопросов шифрования хранилища,
 срока хранения, маскирования и доступа к admin-эндпоинтам.
+Все хранилища, включая JSONL, используют ограниченную фоновую очередь. JSONL-записи
+пакетируются, поэтому запрос не ждёт открытия файла и передачи работы в отдельный поток.
 
 ## Вспомогательные переменные Postgres и OpenSearch
 
@@ -487,6 +492,8 @@ GPT2GIGA_PHOENIX_API_KEY=
 
 ```dotenv
 GPT2GIGA_OBSERVABILITY_SAMPLE_RATE=1.0
+GPT2GIGA_OBSERVABILITY_QUEUE_SIZE=10000
+GPT2GIGA_OBSERVABILITY_DROP_ON_BACKPRESSURE=True
 GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=False
 GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES=False
 GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS=False
@@ -494,6 +501,10 @@ GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES=False
 GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH=8000
 GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
 ```
+
+Ограниченная очередь экспортирует спаны вне пути запроса. При стандартной политике
+backpressure новые события отбрасываются, а не задерживают ответы, если экспортёр
+не успевает их обрабатывать.
 
 Содержимое полезной нагрузки попадает в спаны только при явном включении соответствующих
 флагов захвата. Для production обычно оставляют захват выключенным или включают

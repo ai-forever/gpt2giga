@@ -487,7 +487,7 @@ async def test_prepare_chat_completion_prod_logging_omits_payload():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()
     mock_logger.bind.return_value = mock_bound_logger
-    cfg = ProxyConfig(proxy=ProxySettings(mode="PROD"))
+    cfg = ProxyConfig(proxy=ProxySettings(mode="PROD", log_level="DEBUG"))
     rt = RequestTransformer(cfg, logger=mock_logger)
 
     await rt.prepare_chat_completion(
@@ -506,7 +506,7 @@ async def test_prepare_chat_completion_dev_logging_includes_full_payload():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()
     mock_logger.bind.return_value = mock_bound_logger
-    cfg = ProxyConfig(proxy=ProxySettings(mode="DEV"))
+    cfg = ProxyConfig(proxy=ProxySettings(mode="DEV", log_level="DEBUG"))
     rt = RequestTransformer(cfg, logger=mock_logger)
 
     await rt.prepare_chat_completion(

@@ -144,7 +144,7 @@ async def wrap_traffic_log_body_iterator(
         raise
     else:
         if capture_content and not is_streaming:
-            context.response_body_redacted = _decode_captured_body(
+            context.response_body_redacted = decode_captured_response_body(
                 b"".join(captured_chunks),
                 truncated=truncated,
                 redact_sensitive=redact_sensitive,
@@ -194,13 +194,14 @@ def capture_traffic_request_body(request: Any, payload: Mapping[str, Any]) -> No
     )
 
 
-def _decode_captured_body(
+def decode_captured_response_body(
     body: bytes,
     *,
     truncated: bool,
     redact_sensitive: bool,
     redact_extra_keys: list[str] | None,
 ) -> Any:
+    """Decode, redact, and mark a bounded captured response body."""
     if not body:
         return None
     text = body.decode("utf-8", errors="replace")

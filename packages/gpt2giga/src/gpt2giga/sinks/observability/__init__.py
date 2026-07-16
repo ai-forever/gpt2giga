@@ -31,10 +31,12 @@ from gpt2giga.sinks.observability.otel import (
     build_otel_attributes,
 )
 from gpt2giga.sinks.observability.phoenix import create_phoenix_observability_sink
+from gpt2giga.sinks.observability.queue import QueuedObservabilitySink
 
 __all__ = [
     "NoopObservabilitySink",
     "OpenTelemetryObservabilitySink",
+    "QueuedObservabilitySink",
     "CHAT_COMPLETION_SPAN_NAME",
     "EMBEDDINGS_SPAN_NAME",
     "MESSAGES_SPAN_NAME",

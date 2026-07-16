@@ -34,6 +34,7 @@ from gpt2giga.sinks.observability.otel import (
     OpenTelemetryObservabilitySink,
     build_otel_attributes,
 )
+from gpt2giga.sinks.observability.queue import QueuedObservabilitySink
 from gpt2giga.sinks.observability.responses import (
     OpenAIResponseStreamObserver,
     emit_openai_response_observability,
@@ -71,7 +72,7 @@ def test_observability_factory_returns_noop_when_enabled():
 
 def test_observability_factory_returns_phoenix_sink(monkeypatch):
     class FakeSink:
-        async def emit(self, name, attributes=None, *, context=None):
+        async def emit(self, name, attributes=None, *, context=None, events=None):
             return None
 
         async def flush(self):
@@ -83,9 +84,40 @@ def test_observability_factory_returns_phoenix_sink(monkeypatch):
         lambda settings: fake_sink,
     )
 
-    sink = create_observability_sink(ProxySettings(observability_enabled=True))
+    sink = create_observability_sink(
+        ProxySettings(
+            observability_enabled=True,
+            observability_queue_size=7,
+            observability_drop_on_backpressure=False,
+        )
+    )
 
-    assert sink is fake_sink
+    assert isinstance(sink, QueuedObservabilitySink)
+    assert sink.sink is fake_sink
+    assert sink._queue.maxsize == 7
+    assert sink.drop_on_backpressure is False
+
+
+async def test_queued_observability_sink_returns_before_export_and_flushes():
+    release = asyncio.Event()
+    exported = []
+
+    class PausedSink:
+        async def emit(self, name, attributes=None, *, context=None, events=None):
+            await release.wait()
+            exported.append((name, attributes))
+
+        async def flush(self):
+            return None
+
+    sink = QueuedObservabilitySink(PausedSink())
+
+    await asyncio.wait_for(sink.emit("request", {"status": 200}), timeout=0.1)
+    assert exported == []
+    release.set()
+    await sink.flush()
+
+    assert exported == [("request", {"status": 200})]
 
 
 def test_observability_factory_falls_back_to_noop_when_phoenix_unavailable(

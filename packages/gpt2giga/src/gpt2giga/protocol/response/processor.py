@@ -41,6 +41,7 @@ class ResponseProcessor:
         self,
         logger=None,
         mode: str = "DEV",
+        log_level: str = "INFO",
         structured_output_mode: str = "function_call",
     ):
         if logger is None:
@@ -49,6 +50,7 @@ class ResponseProcessor:
             logger = default_logger
         self.logger = logger
         self._mode = mode.upper() if isinstance(mode, str) else "DEV"
+        self._log_level = log_level.upper() if isinstance(log_level, str) else "INFO"
         self._structured_output_mode = (
             structured_output_mode.lower()
             if isinstance(structured_output_mode, str)
@@ -145,6 +147,7 @@ class ResponseProcessor:
             message="Processed chat completion response",
             payload_key="response",
             payload=result,
+            log_level=self._log_level,
             response_id=result.get("id"),
             choice_count=choice_count,
             total_tokens=usage.get("total_tokens"),
@@ -220,6 +223,7 @@ class ResponseProcessor:
             message="Processed responses API response",
             payload_key="response",
             payload=result,
+            log_level=self._log_level,
             response_id=result.get("id"),
             output_count=output_count,
             total_tokens=usage.get("total_tokens"),
@@ -705,6 +709,7 @@ class ResponseProcessor:
             message="Processed stream chunk",
             payload_key="response",
             payload=result,
+            log_level=self._log_level,
             response_id=result.get("id"),
         )
         return result
@@ -783,6 +788,7 @@ class ResponseProcessor:
             message="Processed responses stream chunk",
             payload_key="response",
             payload=result,
+            log_level=self._log_level,
             response_id=response_id,
             sequence_number=sequence_number,
         )

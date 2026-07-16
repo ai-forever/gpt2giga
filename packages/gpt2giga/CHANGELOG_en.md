@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Request-context CPU usage**: replaced expensive PBKDF2 for IP and API-key correlation fingerprints with fast keyed HMAC-SHA256 so middleware no longer blocks the event loop with two 100,000-iteration computations per request.
+- **Hidden DEBUG payload serialization**: payload preparation and redaction are now skipped entirely at the default `INFO` level, including response and streaming paths.
+- **`PASS_TOKEN` resources**: credential-specific GigaChat clients are reused through a bounded LRU pool, remain leased through stream completion, and close on eviction or shutdown.
+- **Non-blocking sinks**: JSONL traffic logs are batched through a background queue, while observability export is moved out of the request path into a bounded queue with configurable backpressure.
+- **Middleware overhead**: request-id, validation, path normalization, and pass-token middleware now use pure ASGI; three nested response iterators are replaced with one ASGI `send` interceptor.
 
 ## [0.2.3a2] - 2026-07-14
 

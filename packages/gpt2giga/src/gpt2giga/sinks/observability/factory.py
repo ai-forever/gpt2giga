@@ -11,6 +11,7 @@ from gpt2giga.core.interfaces import ObservabilitySink
 from gpt2giga.models.config import ProxySettings
 from gpt2giga.sinks.observability.noop import NoopObservabilitySink
 from gpt2giga.sinks.observability.phoenix import create_phoenix_observability_sink
+from gpt2giga.sinks.observability.queue import QueuedObservabilitySink
 
 DEFAULT_OBSERVABILITY_TIMEOUT_SECONDS = 5.0
 
@@ -25,7 +26,12 @@ def create_observability_sink(
         return NoopObservabilitySink()
     if settings.observability_backend == "phoenix":
         try:
-            return create_phoenix_observability_sink(settings)
+            return QueuedObservabilitySink(
+                create_phoenix_observability_sink(settings),
+                queue_size=settings.observability_queue_size,
+                drop_on_backpressure=settings.observability_drop_on_backpressure,
+                logger=logger,
+            )
         except Exception as exc:  # pragma: no cover - log branch covered by tests
             if logger is not None:
                 logger.warning("Phoenix observability sink disabled: {}", exc)

@@ -19,22 +19,33 @@ class JsonlTrafficLogSink:
 
     async def emit(self, event: Any) -> None:
         """Append one event as a single JSON line."""
-        line = json.dumps(
-            traffic_event_to_json_dict(event), ensure_ascii=False, sort_keys=True
+        await self.emit_many([event])
+
+    async def emit_many(self, events: list[Any]) -> None:
+        """Append a batch with one file open and one worker-thread handoff."""
+        if not events:
+            return
+        lines = "\n".join(
+            json.dumps(
+                traffic_event_to_json_dict(event),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            for event in events
         )
         async with self._lock:
-            await asyncio.to_thread(self._append_line, line)
+            await asyncio.to_thread(self._append_lines, lines)
 
     async def flush(self) -> None:
         """Flush pending writes.
 
-        Writes are opened and closed per event, so there is no buffered file handle.
+        Writes are opened and closed per batch, so there is no buffered file handle.
         The method exists to satisfy the sink contract and future implementations.
         """
         return None
 
-    def _append_line(self, line: str) -> None:
+    def _append_lines(self, lines: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as stream:
-            stream.write(line)
+            stream.write(lines)
             stream.write("\n")
