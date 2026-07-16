@@ -227,10 +227,12 @@ from gpt2giga_harness.tool_profiles import (
     build_tool_profile_statuses,
     tool_profile_status_to_dict,
 )
+from gpt2giga_harness.settings import HarnessSettingsStore
 from gpt2giga_harness.ui.performance import ui_performance_budgets
 from gpt2giga_harness.ui.mutation_contracts import install_mutation_contracts
 from gpt2giga_harness.ui.routers.runs import router as runs_router
 from gpt2giga_harness.ui.routers.schedules import router as schedules_router
+from gpt2giga_harness.ui.routers.settings import router as settings_router
 from gpt2giga_harness.ui.routers.agents import router as agents_router
 from gpt2giga_harness.ui.routers.automation import router as automation_router
 from gpt2giga_harness.ui.routers.approvals import router as approvals_router
@@ -307,6 +309,7 @@ def create_app(
     arena_store = FilesystemHarnessArenaStore(config.data_dir)
     eval_store = FilesystemHarnessEvalStore(config.data_dir)
     memory_store = FilesystemProjectMemoryStore()
+    settings_store = HarnessSettingsStore(config.data_dir, config)
     runner = HarnessSessionRunner(
         registry=registry,
         config=config,
@@ -380,6 +383,7 @@ def create_app(
     app.state.harness_native_process_manager = native_process_manager
     app.state.harness_async_diagnostics = async_diagnostics
     app.state.harness_run_event_broker = run_event_broker
+    app.state.harness_settings_store = settings_store
 
     def _approval_gate(
         action: PermissionAction,
@@ -488,11 +492,18 @@ def create_app(
         }
 
     @app.get("/api/defaults")
-    async def defaults() -> dict[str, Any]:
+    def defaults() -> dict[str, Any]:
+        harness_defaults = settings_store.load().defaults
         return {
             "proxy_url": config.proxy_url,
-            "default_model": config.default_model or DEFAULT_MODEL_HINTS[0],
-            "default_api_mode": config.default_api_mode.value,
+            "default_harness_id": harness_defaults.default_harness_id,
+            "default_model": harness_defaults.default_model,
+            "default_api_mode": harness_defaults.default_api_mode,
+            "default_mode": harness_defaults.mode,
+            "invocation_mode": harness_defaults.invocation_mode,
+            "workspace_policy": harness_defaults.workspace_policy,
+            "permission_profile": harness_defaults.permission_profile,
+            "stream": harness_defaults.stream,
             "auto_start_proxy": config.auto_start_proxy,
             "proxy_start_timeout_seconds": config.proxy_start_timeout_seconds,
             "note": pass_model_env_note(),
@@ -1091,14 +1102,23 @@ def create_app(
 
     @app.post("/api/sessions")
     def create_session(payload: dict[str, Any] = Body(default_factory=dict)):
+        harness_defaults = settings_store.load().defaults
         try:
             session = runner.create_session(
                 title=_optional_text(payload.get("title")),
                 workspace=_optional_text(payload.get("workspace")),
-                default_harness_id=str(payload.get("harness_id") or "echo"),
-                default_model=_optional_text(payload.get("model")),
-                default_api_mode=payload.get("api_mode") or config.default_api_mode,
-                default_mode=str(payload.get("mode") or "plan"),
+                default_harness_id=str(
+                    payload.get("harness_id") or harness_defaults.default_harness_id
+                ),
+                default_model=(
+                    _optional_text(payload.get("model"))
+                    if "model" in payload
+                    else harness_defaults.default_model
+                ),
+                default_api_mode=(
+                    payload.get("api_mode") or harness_defaults.default_api_mode
+                ),
+                default_mode=str(payload.get("mode") or harness_defaults.mode),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2804,6 +2824,7 @@ def create_app(
     app.include_router(workflows_router)
     app.include_router(runs_router)
     app.include_router(schedules_router)
+    app.include_router(settings_router)
     app.include_router(create_file_preview_router(config.data_dir))
     # The shell catch-all must remain last so unknown API and asset paths never
     # become HTML responses.

@@ -1,198 +1,220 @@
 {
   "assets": {
-    "assets/automation-DYKw2Zse.js": {
-      "bytes": 4743,
+    "assets/automation-B5-1YOi7.js": {
+      "bytes": 4811,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "4a29676d3e23411048ccb456b68e863cab7974b6688a5e17f634244c67d158b9",
-      "gzip": "assets/automation-DYKw2Zse.js.gz",
-      "gzip_bytes": 1675,
-      "gzip_sha256": "fed10595a80750d5e6aa4c93ad0fdd1317acd3e207bf87bb86ad169b61d0d602",
-      "brotli": "assets/automation-DYKw2Zse.js.br",
-      "brotli_bytes": 1480,
-      "brotli_sha256": "4734320a8c2babeacf935d9f133372a8966255c1dd99ccd91597debee8c4ea2e"
+      "sha256": "e18cef85fcec39c48e6a9661cba7db2495200ae3570bbb3832fd8d84fd84555b",
+      "gzip": "assets/automation-B5-1YOi7.js.gz",
+      "gzip_bytes": 1705,
+      "gzip_sha256": "5ccd10841842645e46df419b4ebed2fa701444afe4fcf993623982e804fcabd6",
+      "brotli": "assets/automation-B5-1YOi7.js.br",
+      "brotli_bytes": 1501,
+      "brotli_sha256": "3a442a75ac8cca09c548b51b2f99b170c26bba3bdf303b2a7fbf7ed91fd86783"
     },
-    "assets/diff-CV_UWm9r.js": {
-      "bytes": 236,
+    "assets/diff-BpwZbHoY.js": {
+      "bytes": 234,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "6a87b109642834f3f35d1ff7f342cb5a573948f57d70973c9252f1f90a61f265",
-      "gzip": "assets/diff-CV_UWm9r.js.gz",
-      "gzip_bytes": 192,
-      "gzip_sha256": "dd2c0d2bd5cabb3d4b21131003d066e4a462527ed5426f63ac99ac44ca843c6f",
-      "brotli": "assets/diff-CV_UWm9r.js.br",
-      "brotli_bytes": 169,
-      "brotli_sha256": "e898cd6dfe11fec0c0ae71f08f1b05e43562abfd96ad5c3e351d6d1ede319ac2"
+      "sha256": "b057b4a8c55cf8a430cc33746a4a536f33309b376e61f9fcb7dd4f2d231de662",
+      "gzip": "assets/diff-BpwZbHoY.js.gz",
+      "gzip_bytes": 188,
+      "gzip_sha256": "81788ec1a47c76e1fcfbf6f1bbf32ca24c1f5a2ed639c8998a69d972e7eb30ad",
+      "brotli": "assets/diff-BpwZbHoY.js.br",
+      "brotli_bytes": 166,
+      "brotli_sha256": "3c45381b74e88276edeecf100b4480f7f0bba442e7ce15eb383dffd4a7b22008"
     },
-    "assets/editor-3WKPuhy_.js": {
-      "bytes": 242,
+    "assets/editor-BhfwXVIO.js": {
+      "bytes": 240,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "4ef0d8ced8135260d1b0d1fd8819cc4ad2806ed84049e4abe8e2c1025326b05c",
-      "gzip": "assets/editor-3WKPuhy_.js.gz",
-      "gzip_bytes": 193,
-      "gzip_sha256": "5adb431f56ce7695e2a17e918a16dc927a30e02f80ee3caf7e9bd1d4fac68fc7",
-      "brotli": "assets/editor-3WKPuhy_.js.br",
-      "brotli_bytes": 170,
-      "brotli_sha256": "5af0ef4a1995a9ac33c6fb7bf4cf14dd8297856af2c3abeee91b8e8b61307ff4"
+      "sha256": "4ad52df93e128ca09fd727e20849c9a19245ec4a666972d998dca29f08ee6ea3",
+      "gzip": "assets/editor-BhfwXVIO.js.gz",
+      "gzip_bytes": 190,
+      "gzip_sha256": "431612a6d6511be81260d24c064a1db328f97c4e6dd4111e2392d4d9691a71a1",
+      "brotli": "assets/editor-BhfwXVIO.js.br",
+      "brotli_bytes": 158,
+      "brotli_sha256": "aa3f1efec1732171a44471eb2a853669a05bde14f397342ee68d4851089fa7a7"
     },
-    "assets/evaluation-Bx0IxyRC.js": {
-      "bytes": 5060,
+    "assets/evaluation-B_5Y_2qG.js": {
+      "bytes": 5128,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "60a3f39e776ede8d82106220eac5d268067ee539ac25bcf37e107fdd34c269e4",
-      "gzip": "assets/evaluation-Bx0IxyRC.js.gz",
-      "gzip_bytes": 1697,
-      "gzip_sha256": "095a9355f1ad43f8c2db00cdf1c3b0aadc756caf1bcbc2f9770c55380a09445d",
-      "brotli": "assets/evaluation-Bx0IxyRC.js.br",
-      "brotli_bytes": 1489,
-      "brotli_sha256": "c9b00da68c31f7a3aee4414564441c3153f3d0cfe5ac9f815331d83a729ba95f"
+      "sha256": "77d24282d5e93c33e33d9481ec906be616d83aa1b085675dcbc87627539b8686",
+      "gzip": "assets/evaluation-B_5Y_2qG.js.gz",
+      "gzip_bytes": 1723,
+      "gzip_sha256": "c3bb05e053ffc992af7c9cfa8fd3b71f88e2627044e5590760e9efba5ad4d873",
+      "brotli": "assets/evaluation-B_5Y_2qG.js.br",
+      "brotli_bytes": 1521,
+      "brotli_sha256": "43b403b4b88efe258d9ed16f4ee5f1f4f44a2fc8f48a04537b3a44b6513cf6d3"
     },
-    "assets/index-B3UeoIXi.css": {
-      "bytes": 50412,
+    "assets/index-BeZpnIa2.css": {
+      "bytes": 55059,
       "media_type": "text/css; charset=utf-8",
-      "sha256": "772f827215aa35d7e4805432ca8b39dc1859ab5c0743d72c16d389fb0ba05861",
-      "gzip": "assets/index-B3UeoIXi.css.gz",
-      "gzip_bytes": 9815,
-      "gzip_sha256": "6780ca26402bbcb41107561fe6db4ba687fffdf041705ba5bab5468fac70a52c",
-      "brotli": "assets/index-B3UeoIXi.css.br",
-      "brotli_bytes": 8662,
-      "brotli_sha256": "3b61b7dd8d97004f177d0f2987ceaccbd907f434a7722e24a6c38687cc67ea13"
+      "sha256": "eccfc110a7ee38e27dc01386d8fdc1e0b230dddbf2d7e23807124da4540c565a",
+      "gzip": "assets/index-BeZpnIa2.css.gz",
+      "gzip_bytes": 10479,
+      "gzip_sha256": "0570fc64032d728d48ae488b8d32a68f90ec4dc5de1ca462fc55be9214eb523d",
+      "brotli": "assets/index-BeZpnIa2.css.br",
+      "brotli_bytes": 9213,
+      "brotli_sha256": "98b647bbf5845ce7248980de90d8089ad712fbf56e3021b922ffc96a6d79979d"
     },
-    "assets/index-LsqfGJkw.js": {
-      "bytes": 356476,
+    "assets/index-CsXAePq4.js": {
+      "bytes": 320947,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "b555389fcbf83cbeaf5220b0e1bb1f0f7e96fb10211cc43c00d3d63efb465336",
-      "gzip": "assets/index-LsqfGJkw.js.gz",
-      "gzip_bytes": 110034,
-      "gzip_sha256": "ffb3de3b4edfe06a281e35572df150832d3253e9f1edc654e6b023d15426aa0b",
-      "brotli": "assets/index-LsqfGJkw.js.br",
-      "brotli_bytes": 95096,
-      "brotli_sha256": "ed596abfa81d4228a5c9a7fef3e9d4e57072d1b49e6daa5c5be13b20eb4d7bda"
+      "sha256": "e002a626e9a2c2513451a602f24d8cb1744d46cc9936d49c3922c7ead9dca124",
+      "gzip": "assets/index-CsXAePq4.js.gz",
+      "gzip_bytes": 98632,
+      "gzip_sha256": "3c4cc428cea87c396e6f0352f39b3f868806ad4562adaaddf14128527897d8c1",
+      "brotli": "assets/index-CsXAePq4.js.br",
+      "brotli_bytes": 85904,
+      "brotli_sha256": "303022f45c5c5ade7efcde6a732497e078812eb82152bac066bd545683a751b6"
     },
-    "assets/InspectorFrame-C8O8sDi5.js": {
-      "bytes": 322,
+    "assets/InspectorFrame-vooN2fi8.js": {
+      "bytes": 320,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "2def1d67521dd54db2250945fc3a9a2f88581c99ef6cb01b663da5a5621264bf",
-      "gzip": "assets/InspectorFrame-C8O8sDi5.js.gz",
-      "gzip_bytes": 230,
-      "gzip_sha256": "86e667f1a1fb16105504187ba3644929e5ad5d25a2392d2883be91476f7fb7f1",
-      "brotli": "assets/InspectorFrame-C8O8sDi5.js.br",
-      "brotli_bytes": 186,
-      "brotli_sha256": "a145da628730abcae4ccbca85e2610087ee74cf6c5cdbc6abd1b3867c6b07f61"
+      "sha256": "4851e0507f302b5164376ffdf93c0f736e83ffbb205b368b70c4ea66a4b385ce",
+      "gzip": "assets/InspectorFrame-vooN2fi8.js.gz",
+      "gzip_bytes": 226,
+      "gzip_sha256": "c38e0140942ad54dea493c501c934ac7b8da36e57d4d32ad46f2ced4f8fd9aad",
+      "brotli": "assets/InspectorFrame-vooN2fi8.js.br",
+      "brotli_bytes": 187,
+      "brotli_sha256": "f08cccf8c70cb5550c0713c9ec499f463ace4197f6c35097be1c839ad3b45ec7"
     },
-    "assets/integrations-ygfKIAwE.js": {
-      "bytes": 5936,
+    "assets/integrations-xIwgVjbR.js": {
+      "bytes": 6004,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "94f72d21c225822ed67cb4fae4d2f0994d36f25f0c5837068f503168d3706e1f",
-      "gzip": "assets/integrations-ygfKIAwE.js.gz",
-      "gzip_bytes": 1873,
-      "gzip_sha256": "58ade3a883b530a23a99fc909c97369f41937d9c7f3ee55c2f9012b804a28c13",
-      "brotli": "assets/integrations-ygfKIAwE.js.br",
-      "brotli_bytes": 1667,
-      "brotli_sha256": "94d18ad31ad3732ff621bb34ef35bf50046d0b00e963edbd0baaf6f9f5b4384d"
+      "sha256": "4a0df80862ef4b76369a5d9902b99cbc62eaca1c64fc06462d012f3b5fe41f35",
+      "gzip": "assets/integrations-xIwgVjbR.js.gz",
+      "gzip_bytes": 1908,
+      "gzip_sha256": "d7ab72647dc3b3781832dce71a8c28cc6486e323ca8930907d073684a03029c6",
+      "brotli": "assets/integrations-xIwgVjbR.js.br",
+      "brotli_bytes": 1699,
+      "brotli_sha256": "996f7c5a3744b7a8a686431229901d06c8f6d481680328ec3c242061abf33d6f"
     },
-    "assets/markdown-CpHvf0YI.js": {
-      "bytes": 873,
+    "assets/markdown-DzjE39YC.js": {
+      "bytes": 908,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "db818fd8445dda42032eeb6c219cc190dbca2e7699ce5d70ed415bb79c9890a6",
-      "gzip": "assets/markdown-CpHvf0YI.js.gz",
-      "gzip_bytes": 542,
-      "gzip_sha256": "b230e72af2e27b4dbc1001bb9ccee47a0d063fcc232f7a0876662f8b3636525e",
-      "brotli": "assets/markdown-CpHvf0YI.js.br",
-      "brotli_bytes": 467,
-      "brotli_sha256": "9ca79c3daeed378b9274571cdae9cd12348319a290493bbb0eb834a744f5093b"
+      "sha256": "b89a521ddd214ec1bf22fcc472d08adc7fe9f671ec12ba3ab6a8e0e030871b56",
+      "gzip": "assets/markdown-DzjE39YC.js.gz",
+      "gzip_bytes": 554,
+      "gzip_sha256": "4cb12e5a882fa4d3bf9046d93109c8be5d7c465eba6c682394fafe959f41ac3d",
+      "brotli": "assets/markdown-DzjE39YC.js.br",
+      "brotli_bytes": 478,
+      "brotli_sha256": "f323a545e26da9a554c83294cf9ce80fea41c635dc65c3cca0dc96befe0baad8"
     },
-    "assets/raw-evidence-Da-OTeLt.js": {
-      "bytes": 257,
+    "assets/messages-Dv2pcm9R.js": {
+      "bytes": 32710,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "1ff2962d6ac0534b70fd130847fc7a67231b5312a3667488002b290216896cd3",
-      "gzip": "assets/raw-evidence-Da-OTeLt.js.gz",
-      "gzip_bytes": 202,
-      "gzip_sha256": "790107bf37bee1bd37eceba18ad0674a1d808be6ccd6fbd2bfbef9b60d698224",
-      "brotli": "assets/raw-evidence-Da-OTeLt.js.br",
-      "brotli_bytes": 174,
-      "brotli_sha256": "a3b81857463916c0afad6be36c1f3f7716c16aeaf0301ebdbe6777bc7f2b5cc7"
+      "sha256": "56053b8f686f6d00c48daf0e8db24549a5a32f6806b6bef4ce088ed8278beae4",
+      "gzip": "assets/messages-Dv2pcm9R.js.gz",
+      "gzip_bytes": 10314,
+      "gzip_sha256": "52ad687dc29081d4360bb9c403cd66a3d0b869ddcadbeeeb388919677e6e029e",
+      "brotli": "assets/messages-Dv2pcm9R.js.br",
+      "brotli_bytes": 8573,
+      "brotli_sha256": "8ea351d897f09210cca1d825cdabbf0fe15bb6ef04b927b3ab53b831f8cfa3c9"
     },
-    "assets/remaining-request-graph-VlcrjkNK.js": {
-      "bytes": 5871,
+    "assets/raw-evidence-Dcv7ORa-.js": {
+      "bytes": 255,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "bd19545b5eb68602dd6f8513bd2319f47e8bc822c7152794e1796e1a297557f2",
-      "gzip": "assets/remaining-request-graph-VlcrjkNK.js.gz",
-      "gzip_bytes": 2123,
-      "gzip_sha256": "962a1e908d44ecb412e85ffe357035a64e3d35b46ed18d17e18ba8882a252c57",
-      "brotli": "assets/remaining-request-graph-VlcrjkNK.js.br",
-      "brotli_bytes": 1869,
-      "brotli_sha256": "240bc830cebe1e403b0d6e54681e646e6cf393d771bba86531dedfd631d729ad"
+      "sha256": "def165776ff3c798d152905f21c2b1ff50ee08376bd711190141bf397f972a75",
+      "gzip": "assets/raw-evidence-Dcv7ORa-.js.gz",
+      "gzip_bytes": 193,
+      "gzip_sha256": "e2b5152b1677a00053ab0ebce2ec262fe2e0c25d0af3630bf7652c3246d9909e",
+      "brotli": "assets/raw-evidence-Dcv7ORa-.js.br",
+      "brotli_bytes": 167,
+      "brotli_sha256": "f47d57a77fb4b3f8e73c0df7aa06c59516d88e9e49bd57384ac0723b116b3226"
     },
-    "assets/runs-DhXnLIg1.js": {
-      "bytes": 12731,
+    "assets/react-BT9oI2Ax.js": {
+      "bytes": 7524,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "f841b4963d29d37d062e30c928c8bd9aae939c2061f0a7f1d10b881d04fbe82f",
-      "gzip": "assets/runs-DhXnLIg1.js.gz",
-      "gzip_bytes": 3699,
-      "gzip_sha256": "dec75db5a029318b7564ae46e0d1e5b44b56dc2e02100e6c048f1b0968686d1c",
-      "brotli": "assets/runs-DhXnLIg1.js.br",
-      "brotli_bytes": 3314,
-      "brotli_sha256": "6b0528cd2d209a55faff5dc13913928a5dd4a6847927f39db279cc06fc855861"
+      "sha256": "e11a46d383709f39feffa37f0bbf592247c2d7c7b385a1d49bf2cbd54675a701",
+      "gzip": "assets/react-BT9oI2Ax.js.gz",
+      "gzip_bytes": 2877,
+      "gzip_sha256": "a6c39d4f7abac22c4cbf8b346d0fe576e569528837bc8f5b662da26d803c0916",
+      "brotli": "assets/react-BT9oI2Ax.js.br",
+      "brotli_bytes": 2579,
+      "brotli_sha256": "1dacc57f0c8c875972a6b113f682d52a8cb82d1f221cce3be35a4647a1569d2c"
     },
-    "assets/settings-BippV8mt.js": {
-      "bytes": 2704,
+    "assets/remaining-request-graph-DR6_9os-.js": {
+      "bytes": 5902,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "9d6e96462ef968fed651072cd7817f9bb0a3cde30dce6aec3b8caedc7d63ab74",
-      "gzip": "assets/settings-BippV8mt.js.gz",
-      "gzip_bytes": 1011,
-      "gzip_sha256": "6e514da5765beb062c3d8af1b2184d3130a843734ce6d31c775e487e7d11fbdf",
-      "brotli": "assets/settings-BippV8mt.js.br",
-      "brotli_bytes": 866,
-      "brotli_sha256": "9d621929c0ce4295e6a43a8dff5d23f80dd2d274b33ecbb6eca82bc1529d5bd9"
+      "sha256": "9d07fb9e632a8ca6744c4a41fbc9b294d896a8a2d81e04c11878c4af51360d10",
+      "gzip": "assets/remaining-request-graph-DR6_9os-.js.gz",
+      "gzip_bytes": 2138,
+      "gzip_sha256": "4b8fd46d86f65d116012bc5ef7ef9e1d02e03195d733424342c6a826b254b65a",
+      "brotli": "assets/remaining-request-graph-DR6_9os-.js.br",
+      "brotli_bytes": 1890,
+      "brotli_sha256": "28debef94dd27ce2ee019e6c43467fca6dc954e3014c10c0823353a55245e601"
     },
-    "assets/stream-store-CW2waaVg.js": {
-      "bytes": 4130,
+    "assets/runs-DX68OwTb.js": {
+      "bytes": 12799,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "a6a1f1cc983c1658d658da5645f7f360e83c791254c2ead53b73320c481caff4",
-      "gzip": "assets/stream-store-CW2waaVg.js.gz",
-      "gzip_bytes": 1471,
-      "gzip_sha256": "bf31e700d0c3b443be49064d847443ba25627530e878037b8c1def716f1974cf",
-      "brotli": "assets/stream-store-CW2waaVg.js.br",
-      "brotli_bytes": 1321,
-      "brotli_sha256": "e54ee37d546a0a22cc5ee639521d6944906e494020cf392d41d8448848c2c9f1"
+      "sha256": "ce88ca65232449726c18bb9456affd632b716a07799e354efcfddb3e53ec81e3",
+      "gzip": "assets/runs-DX68OwTb.js.gz",
+      "gzip_bytes": 3724,
+      "gzip_sha256": "04e6f97aaacbf29f0aa2e7c6d163c391256c7daa716daedacb9278b1807297fe",
+      "brotli": "assets/runs-DX68OwTb.js.br",
+      "brotli_bytes": 3337,
+      "brotli_sha256": "e40ce7a3c336326e1412ddb9223b339890e06f2a440f927975a7b164c9196f32"
     },
-    "assets/terminal-_4cOpAX2.js": {
-      "bytes": 248,
+    "assets/settings-CUcH6K7B.js": {
+      "bytes": 11202,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "8d5f68df87dd44fd17dd23c54710f718c13482137bfcd74be13359581d37bcc2",
-      "gzip": "assets/terminal-_4cOpAX2.js.gz",
-      "gzip_bytes": 199,
-      "gzip_sha256": "1fc7d786f0bba186712771443e09e102e764b5917a100693ae01b6c8e4e79347",
-      "brotli": "assets/terminal-_4cOpAX2.js.br",
-      "brotli_bytes": 171,
-      "brotli_sha256": "bf88f9e9210dcc4ab560d734de854eef3ff24a5668bde3e9e25f7b1f19779380"
+      "sha256": "aed955e8f930ac04a206dd41bc0014870788ca8ca0c37ff00910fc1dacb10422",
+      "gzip": "assets/settings-CUcH6K7B.js.gz",
+      "gzip_bytes": 3118,
+      "gzip_sha256": "8f5a006c2d40078f9551c3f7ab9be31cdc04ae4f09bac0cedc48bcf0b8194fd0",
+      "brotli": "assets/settings-CUcH6K7B.js.br",
+      "brotli_bytes": 2785,
+      "brotli_sha256": "3e7f6751dbf6bbd20362d80d9a978e8419e184ccf38bffa65e4546fbc3813bd8"
     },
-    "assets/workbench-TdviUAWT.js": {
-      "bytes": 54323,
+    "assets/stream-store-TSUy9LYi.js": {
+      "bytes": 4160,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "0e0ec2283d8c46db1449c8a69cd81a50c2a977cfd80a40780d21c049bbd189b2",
-      "gzip": "assets/workbench-TdviUAWT.js.gz",
-      "gzip_bytes": 16082,
-      "gzip_sha256": "a3cf905ece037a7b9bbaf1d08ffe7dba9f18674a548a2662051a099e3f91cca2",
-      "brotli": "assets/workbench-TdviUAWT.js.br",
-      "brotli_bytes": 14547,
-      "brotli_sha256": "72d19b91f0fd23e249e61f8fec2cd4c7eced3ab2324e6fb033aabcc30f892e32"
+      "sha256": "3c266dbff5b88323293efdbda79ec5e516c5f26e832dd885de03ace2e81eee65",
+      "gzip": "assets/stream-store-TSUy9LYi.js.gz",
+      "gzip_bytes": 1485,
+      "gzip_sha256": "7d494d367767134d0607544dbbfc72dafc0f7f686f99588b044b50afc05cbe4f",
+      "brotli": "assets/stream-store-TSUy9LYi.js.br",
+      "brotli_bytes": 1346,
+      "brotli_sha256": "3f588fcda71a2eb5c4f1bc9fbb85d9067f7a588ceb58b302e33b1c3aa6d633d3"
+    },
+    "assets/terminal-BZqjeBqy.js": {
+      "bytes": 246,
+      "media_type": "text/javascript; charset=utf-8",
+      "sha256": "5e87b7ecfc0f30c2fd301aa0029f4d02eba0501c70ee6239c1279c88905d7abf",
+      "gzip": "assets/terminal-BZqjeBqy.js.gz",
+      "gzip_bytes": 190,
+      "gzip_sha256": "2753ababcf2576b2ef15ee915e1d1767dfad73a520afeea8b2d3202a9b0099ea",
+      "brotli": "assets/terminal-BZqjeBqy.js.br",
+      "brotli_bytes": 160,
+      "brotli_sha256": "aee124eb3a76e0b14e5c3242bcc9296e49c5ddcb98d98ac9d00843ce5cf171e7"
+    },
+    "assets/workbench-DcjorkPX.js": {
+      "bytes": 54801,
+      "media_type": "text/javascript; charset=utf-8",
+      "sha256": "c526438fd64f652c1635758d61e019db7fcc7c68002300029cf2f028d5b3237c",
+      "gzip": "assets/workbench-DcjorkPX.js.gz",
+      "gzip_bytes": 16212,
+      "gzip_sha256": "836efe38e525e8d78acf204fb5c988f42c8c1f85664059f921aac99d5cb22cd4",
+      "brotli": "assets/workbench-DcjorkPX.js.br",
+      "brotli_bytes": 14622,
+      "brotli_sha256": "31310d696c97557eba2e8233459eb6f14eb552e3edab8968efdfcfdc25131e0d"
     },
     "index.html": {
-      "bytes": 589,
+      "bytes": 780,
       "media_type": "text/html; charset=utf-8",
-      "sha256": "2adc6f5d728ad38c726926ff9956e38b07d50ee2a94ac4c4f3304647729b942a",
+      "sha256": "af5b19272c1edf6478000d5a8f78c5816f6ec585246b85d6c15eeb2246971410",
       "gzip": "index.html.gz",
-      "gzip_bytes": 348,
-      "gzip_sha256": "311a63576855c03f3a675de1289bbd5f5af44a922fc585c724bbeaaf1d0adc99",
+      "gzip_bytes": 398,
+      "gzip_sha256": "a3144bda2ecf67ea19749818c2cc462a764107a5451c4a2665b07b995787aac1",
       "brotli": "index.html.br",
-      "brotli_bytes": 235,
-      "brotli_sha256": "e3f1c9323e46b215b86b001b29174cb25ed0345bc2a7c9ac3563359d9849442f"
+      "brotli_bytes": 257,
+      "brotli_sha256": "3a6c640921a2ab449d872a34033d94da40a53707a8b750487cff02e5af099448"
     }
   },
   "entry": "index.html",
   "format_version": "gpt2giga-cockpit-v2-assets-v1",
   "initial": [
-    "assets/index-B3UeoIXi.css",
-    "assets/index-LsqfGJkw.js",
+    "assets/index-BeZpnIa2.css",
+    "assets/index-CsXAePq4.js",
     "index.html"
   ]
 }

@@ -1,0 +1,1 @@
+import{n as e,t}from"./messages-Dv2pcm9R.js";import{t as n}from"./InspectorFrame-vooN2fi8.js";var r=e();function i({locale:e}){return(0,r.jsx)(n,{locale:e,title:t(e,`diff`),children:t(e,`diffDescription`)})}export{i as DiffInspector};

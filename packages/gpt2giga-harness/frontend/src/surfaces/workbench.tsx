@@ -32,6 +32,7 @@ import {
   sessionMessagesOptions,
   sessionOverviewOptions,
   sessionRunsOptions,
+  settingsOptions,
   runsCenterOptions,
   workspaceFilesOptions,
 } from "../request-graph";
@@ -144,6 +145,7 @@ export function WorkbenchSurface() {
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => new Set());
   const [completionNotices, setCompletionNotices] = useState<CompletionNotice[]>([]);
   const previousRunStatuses = useRef(new Map<string, string>());
+  const settingsDefaultsApplied = useRef(false);
   const [sessionConfirmation, setSessionConfirmation] = useState<{
     action: SessionAction;
     id: string;
@@ -154,6 +156,7 @@ export function WorkbenchSurface() {
   const runsCenter = useQuery(runsCenterOptions());
   const harnesses = useQuery(harnessesOptions());
   const models = useQuery(modelsOptions(runConfig.apiMode));
+  const settings = useQuery(settingsOptions());
   const overview = useQuery({
     ...sessionOverviewOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
@@ -180,6 +183,25 @@ export function WorkbenchSurface() {
     ...sessionEventsOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
   });
+
+  useEffect(() => {
+    if (sessionId !== undefined || settings.data === undefined || settingsDefaultsApplied.current) return;
+    settingsDefaultsApplied.current = true;
+    const defaults = settings.data.harness_defaults;
+    setRunConfig({
+      apiMode: defaults.default_api_mode,
+      harnessId: defaults.default_harness_id,
+      mode: defaults.mode,
+      model: defaults.default_model ?? "",
+    });
+    setAdvancedConfig((current) => ({
+      ...current,
+      invocationMode: defaults.invocation_mode as InvocationMode,
+      permissionProfile: defaults.permission_profile,
+      stream: defaults.stream,
+      workspacePolicy: defaults.workspace_policy,
+    }));
+  }, [sessionId, settings.data]);
   const retainedLatestRun = latestRun(runs.data?.runs ?? []);
   const selectedRunId =
     sessionId === undefined ? retainedLatestRun?.id : startedRuns[sessionId] ?? retainedLatestRun?.id;

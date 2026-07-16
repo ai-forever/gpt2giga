@@ -135,6 +135,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/runs/{run_id}/trace"),
         ("GET", "/api/schedules"),
         ("GET", "/api/schedules/{schedule_id}"),
+        ("GET", "/api/settings"),
         ("GET", "/api/sessions"),
         ("GET", "/api/sessions/{session_id}"),
         ("GET", "/api/sessions/{session_id}/attachments"),
@@ -174,7 +175,6 @@ _STREAMS = frozenset(
 )
 _EVENT_LOOP_SAFE = frozenset(
     {
-        ("GET", "/api/defaults"),
         ("GET", "/api/policy/profiles"),
         ("GET", "/healthz"),
         ("GET", "/openapi.json"),

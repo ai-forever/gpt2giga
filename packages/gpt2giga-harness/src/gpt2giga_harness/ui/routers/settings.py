@@ -1,0 +1,283 @@
+"""Backend-authoritative, redaction-safe Cockpit Settings APIs."""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+from typing import Any, Mapping
+from urllib.parse import urlsplit, urlunsplit
+
+from fastapi import APIRouter, Body, HTTPException, Query, Request
+
+from gpt2giga_harness.config import DEFAULT_MODEL_HINTS
+from gpt2giga_harness.mcp import MCPProbeHistoryStore, build_mcp_inventory
+from gpt2giga_harness.project import (
+    load_project_config,
+    load_project_state,
+    resolve_project,
+)
+from gpt2giga_harness.runtime.policy import permission_profile
+from gpt2giga_harness.settings import (
+    SETTINGS_FIELDS,
+    HarnessDefaultsSnapshot,
+    SettingsConflictError,
+)
+from gpt2giga_harness.types import parse_api_mode
+from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
+
+
+router = APIRouter(route_class=ConformantAPIRoute)
+
+
+@router.get("/api/settings")
+def settings_read_model(
+    request: Request,
+    workspace: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Return bounded settings categories without credentials or raw paths."""
+    config = request.app.state.harness_config
+    snapshot = request.app.state.harness_settings_store.load()
+    try:
+        project = resolve_project(workspace, data_dir=config.data_dir)
+        project_config = load_project_config(project.root)
+        project_state = load_project_state(project)
+        descriptors, mcp_errors = build_mcp_inventory(project_config.tool_profiles)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    history = MCPProbeHistoryStore(config.data_dir)
+    defaults = snapshot.defaults
+    provider_configured = _provider_configured()
+    harnesses = []
+    for harness in request.app.state.harness_registry.list():
+        spec = harness.spec()
+        availability = harness.availability()
+        harnesses.append(
+            {
+                "id": spec.id,
+                "title": spec.title,
+                "native_supported": spec.supports_native_sessions,
+                "status": availability.status.value,
+            }
+        )
+    models = list(
+        dict.fromkeys(
+            model for model in (defaults.default_model, *DEFAULT_MODEL_HINTS) if model
+        )
+    )[:20]
+    return {
+        "revision": snapshot.revision,
+        "runtime": {
+            "proxy_url": _public_url(config.proxy_url),
+            "proxy_source": _runtime_source("GPT2GIGA_HARNESS_PROXY_URL"),
+            "proxy_health": "not_checked",
+            "auto_start_proxy": config.auto_start_proxy,
+            "change_effect": "restart_required",
+            "editable": False,
+            "proxy_auth_configured": config.api_key is not None,
+        },
+        "provider": {
+            "configured": provider_configured,
+            "source": "environment" if provider_configured else "unconfigured",
+            "health": "not_checked",
+            "secret_readable": False,
+            "change_effect": "restart_required",
+        },
+        "routes": {
+            "default_api_mode": defaults.default_api_mode,
+            "default_model": defaults.default_model,
+            "models": models,
+            "models_source": "configured_default_and_fallbacks",
+            "health": "not_checked",
+            "change_effect": "new_runs",
+        },
+        "harness_defaults": {
+            **asdict(defaults),
+            "harnesses": harnesses[:100],
+            "sources": dict(snapshot.sources),
+            "locked_fields": list(snapshot.locked_fields),
+            "change_effect": "new_runs",
+        },
+        "workspace": {
+            "project_id": project.id,
+            "name": project.name,
+            "is_git_repo": project.is_git_repo,
+            "trusted": project_state.trusted,
+            "workspace_policies": ["auto", "current", "worktree"],
+            "permission_profiles": [
+                "interactive",
+                "review_every_action",
+                "unattended",
+            ],
+            "source": "project_state",
+        },
+        "mcp": {
+            "servers": [
+                {
+                    "id": descriptor.id,
+                    "title": descriptor.title,
+                    "transport": descriptor.transport.value,
+                    "enabled": descriptor.enabled,
+                    "trusted": descriptor.trusted,
+                    "source": descriptor.source,
+                    "health": _mcp_health(history, descriptor.id),
+                }
+                for descriptor in descriptors[:100]
+            ],
+            "errors": list(mcp_errors)[:20],
+            "change_effect": "managed_home_restart",
+        },
+        "diagnostics": {
+            "content_free": True,
+            "actions": [
+                {"id": "check_runtime", "method": "GET", "path": "/api/health"},
+                {"id": "discover_models", "method": "GET", "path": "/api/models"},
+            ],
+            "async_data_plane": request.app.state.harness_async_diagnostics.snapshot(),
+        },
+    }
+
+
+@router.patch("/api/settings/defaults")
+def update_settings_defaults(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Validate, atomically persist, and read back new-run defaults."""
+    store = request.app.state.harness_settings_store
+    current = store.load()
+    patch = payload.get("defaults", payload)
+    if not isinstance(patch, Mapping):
+        raise _field_error({"defaults": "expected an object"})
+    expected_revision = payload.get("expected_revision")
+    unknown = sorted(set(patch) - SETTINGS_FIELDS - {"expected_revision"})
+    if unknown:
+        raise _field_error({field: "unknown setting" for field in unknown})
+    locked = set(current.locked_fields)
+    locked_changes = {
+        field: "owned by the environment; restart with a new environment value"
+        for field in patch
+        if field in locked and getattr(current.defaults, field) != patch[field]
+    }
+    if locked_changes:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "environment_owned", "field_errors": locked_changes},
+        )
+    values = {**asdict(current.defaults), **dict(patch)}
+    field_errors = _validate_defaults(request, values)
+    if field_errors:
+        raise _field_error(field_errors)
+    try:
+        saved = store.save(values, expected_revision=_optional_text(expected_revision))
+    except SettingsConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "revision_conflict", "message": str(exc)},
+        ) from exc
+    return _saved_defaults(saved)
+
+
+def _validate_defaults(request: Request, values: Mapping[str, Any]) -> dict[str, str]:
+    errors: dict[str, str] = {}
+    harness_id = _optional_text(values.get("default_harness_id"))
+    harness = None
+    if harness_id is None:
+        errors["default_harness_id"] = "select a harness"
+    else:
+        try:
+            harness = request.app.state.harness_registry.get(harness_id)
+        except KeyError:
+            errors["default_harness_id"] = "unknown harness"
+    try:
+        api_mode = parse_api_mode(values.get("default_api_mode"))
+    except ValueError:
+        errors["default_api_mode"] = "expected v1 or v2"
+        api_mode = None
+    model = values.get("default_model")
+    if model is not None and (
+        not isinstance(model, str)
+        or not model.strip()
+        or len(model.strip()) > 200
+        or any(ord(character) < 32 for character in model)
+    ):
+        errors["default_model"] = "expected a non-empty model name up to 200 characters"
+    invocation = values.get("invocation_mode")
+    if invocation not in {"headless", "native"}:
+        errors["invocation_mode"] = "expected headless or native"
+    elif invocation == "native" and harness is not None:
+        if not harness.spec().supports_native_sessions:
+            errors["invocation_mode"] = (
+                "selected harness does not support native sessions"
+            )
+    if values.get("mode") not in {"plan", "act"}:
+        errors["mode"] = "expected plan or act"
+    if values.get("workspace_policy") not in {"auto", "current", "worktree"}:
+        errors["workspace_policy"] = "expected auto, current, or worktree"
+    try:
+        permission_profile(values.get("permission_profile"), origin="manual")
+    except ValueError as exc:
+        errors["permission_profile"] = str(exc)
+    if not isinstance(values.get("stream"), bool):
+        errors["stream"] = "expected true or false"
+    if harness is not None and api_mode is not None:
+        spec = harness.spec()
+        if not spec.supports_api_mode_selection and api_mode.value != "v2":
+            errors["default_api_mode"] = "selected harness fixes its API mode"
+    return errors
+
+
+def _saved_defaults(snapshot: HarnessDefaultsSnapshot) -> dict[str, Any]:
+    return {
+        "saved": True,
+        "revision": snapshot.revision,
+        "defaults": asdict(snapshot.defaults),
+        "sources": dict(snapshot.sources),
+        "locked_fields": list(snapshot.locked_fields),
+        "change_effect": "new_runs",
+    }
+
+
+def _field_error(errors: Mapping[str, str]) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={"code": "invalid_settings", "field_errors": dict(errors)},
+    )
+
+
+def _public_url(value: str) -> str:
+    parsed = urlsplit(value)
+    host = parsed.hostname or ""
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    return urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+
+
+def _runtime_source(name: str) -> str:
+    import os
+
+    return "environment" if os.getenv(name) else "built_in"
+
+
+def _provider_configured() -> bool:
+    import os
+
+    return any(
+        os.getenv(name)
+        for name in (
+            "GIGACHAT_ACCESS_TOKEN",
+            "GIGACHAT_CLIENT_ID",
+            "GIGACHAT_CLIENT_SECRET",
+            "GIGACHAT_CREDENTIALS",
+            "GIGACHAT_PASSWORD",
+            "GIGACHAT_USER",
+        )
+    )
+
+
+def _mcp_health(history: MCPProbeHistoryStore, server_id: str) -> str:
+    latest = history.list(server_id, limit=1)
+    return str(latest[0].get("status") or "not_checked") if latest else "not_checked"
+
+
+def _optional_text(value: Any) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    return text or None

@@ -331,6 +331,7 @@ MUTATION_ROUTE_CONTRACTS = (
         (
             "/api/project/state",
             "/api/project/memory/{memory_id}",
+            "/api/settings/defaults",
             "/api/sessions/{session_id}",
         ),
         MutationClass.LOCAL_STATE,

@@ -258,6 +258,89 @@ export interface ModelsResponse {
   note?: string | null;
 }
 
+export interface SettingsResponse {
+  revision: string;
+  runtime: {
+    proxy_url: string;
+    proxy_source: string;
+    proxy_health: string;
+    auto_start_proxy: boolean;
+    change_effect: string;
+    editable: false;
+    proxy_auth_configured: boolean;
+  };
+  provider: {
+    configured: boolean;
+    source: string;
+    health: string;
+    secret_readable: false;
+    change_effect: string;
+  };
+  routes: {
+    default_api_mode: string;
+    default_model: string | null;
+    models: string[];
+    models_source: string;
+    health: string;
+    change_effect: string;
+  };
+  harness_defaults: {
+    default_harness_id: string;
+    default_model: string | null;
+    default_api_mode: string;
+    mode: string;
+    invocation_mode: string;
+    workspace_policy: string;
+    permission_profile: string;
+    stream: boolean;
+    harnesses: Array<{
+      id: string;
+      title: string;
+      native_supported: boolean;
+      status: string;
+    }>;
+    sources: Record<string, string>;
+    locked_fields: string[];
+    change_effect: "new_runs";
+  };
+  workspace: {
+    project_id: string;
+    name: string;
+    is_git_repo: boolean;
+    trusted: boolean | null;
+    workspace_policies: string[];
+    permission_profiles: string[];
+    source: string;
+  };
+  mcp: {
+    servers: Array<{
+      id: string;
+      title: string;
+      transport: string;
+      enabled: boolean;
+      trusted: boolean;
+      source: string;
+      health: string;
+    }>;
+    errors: Array<{ server_id?: string; error?: string }>;
+    change_effect: string;
+  };
+  diagnostics: {
+    content_free: true;
+    actions: Array<{ id: string; method: string; path: string }>;
+    async_data_plane: Record<string, unknown>;
+  };
+}
+
+export interface SettingsSaveResponse {
+  saved: true;
+  revision: string;
+  defaults: Omit<SettingsResponse["harness_defaults"], "harnesses" | "sources" | "locked_fields" | "change_effect">;
+  sources: Record<string, string>;
+  locked_fields: string[];
+  change_effect: "new_runs";
+}
+
 export interface AttachmentSummary {
   id: string;
   filename: string;

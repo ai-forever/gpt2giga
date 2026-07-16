@@ -20,6 +20,7 @@ import {
   type SessionMessagesResponse,
   type SessionOverviewResponse,
   type SessionRunsResponse,
+  type SettingsResponse,
   type WorkspaceFileSearchResponse,
   withQuery,
 } from "./api";
@@ -44,6 +45,7 @@ export const requestKeys = {
     [...requestKeys.sessionScope(sessionId), "workspace-files", query] as const,
   harnesses: () => [...rootKey, "harnesses"] as const,
   models: (apiMode: string) => [...rootKey, "models", apiMode] as const,
+  settings: () => [...rootKey, "settings"] as const,
   runsCenter: () => [...rootKey, "runs-center"] as const,
   approvals: () => [...rootKey, "approvals"] as const,
   attention: () => [...rootKey, "attention"] as const,
@@ -72,6 +74,14 @@ export function modelsOptions(apiMode: string) {
     queryFn: ({ signal }) =>
       fetchCockpit<ModelsResponse>(withQuery("/api/models", { api_mode: apiMode }), signal),
     staleTime: 30_000,
+  });
+}
+
+export function settingsOptions() {
+  return queryOptions({
+    queryKey: requestKeys.settings(),
+    queryFn: ({ signal }) => fetchCockpit<SettingsResponse>("/api/settings", signal),
+    staleTime: 10_000,
   });
 }
 

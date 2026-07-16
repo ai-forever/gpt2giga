@@ -1,1 +1,0 @@
-import{O as e,Z as t}from"./index-LsqfGJkw.js";import{t as n}from"./InspectorFrame-C8O8sDi5.js";var r=t();function i({locale:t}){return(0,r.jsx)(n,{locale:t,title:e(t,`editor`),children:e(t,`editorDescription`)})}export{i as EditorInspector};
