@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { InboxDrawer, type InboxKind } from "./components/InboxDrawer";
+import { PrimaryRailBrand, PrimaryRailIcon } from "./components/PrimaryRailIcon";
 import { message } from "./messages";
 import { primarySurfaces, surfaceForPath } from "./navigation";
 import { PreferencesContext } from "./preferences-context";
@@ -67,18 +68,20 @@ export function AppShell() {
     <PreferencesContext.Provider value={{ preferences, setLocale, setTheme }}>
       <div className="cockpit-shell">
       <aside className="primary-rail">
-        <a className="brand-mark" href="/cockpit-v2/work" aria-label="gpt2giga Cockpit V2">
-          <span>g2</span>
-        </a>
+        <Link className="brand-mark" to="/cockpit-v2/work" aria-label="gpt2giga Cockpit V2">
+          <PrimaryRailBrand />
+        </Link>
         <nav aria-label="Primary navigation">
           {primarySurfaces.map((surface) => (
             <Link
               activeOptions={{ exact: false }}
-              className={activeSurface === surface.id ? "rail-link active" : "rail-link"}
+              className="rail-link"
               key={surface.id}
               to={surface.path}
             >
-              <span className="rail-symbol" aria-hidden="true">{surface.label.slice(0, 1)}</span>
+              <span className="rail-symbol" aria-hidden="true">
+                <PrimaryRailIcon surface={surface.id} />
+              </span>
               <span>{message(preferences.locale, surface.messageKey)}</span>
             </Link>
           ))}
