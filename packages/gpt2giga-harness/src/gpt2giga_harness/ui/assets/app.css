@@ -635,7 +635,6 @@
     .native-history-dialog,
     .preflight-dialog {
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto;
       width: min(760px, calc(100vw - 32px));
       max-height: min(760px, calc(100vh - 48px));
       border: 1px solid var(--border);
@@ -643,6 +642,12 @@
       background: var(--panel);
       box-shadow: 0 24px 80px rgb(0 0 0 / 0.55);
       overflow: hidden;
+    }
+    .native-history-dialog {
+      grid-template-rows: auto minmax(0, 1fr) auto;
+    }
+    .preflight-dialog {
+      grid-template-rows: auto auto minmax(0, 1fr) auto auto;
     }
     .native-history-header,
     .native-history-footer,
@@ -687,6 +692,11 @@
       max-height: 160px;
       min-height: 120px;
       margin: 0 12px 12px;
+    }
+    .preflight-readiness {
+      max-height: 180px;
+      min-height: 100px;
+      margin: 12px 12px 0;
     }
     .native-session-list .native-session-row {
       min-width: 0;
@@ -968,6 +978,9 @@
       .preflight-dialog {
         width: 100%;
         max-height: calc(100vh - 24px);
+      }
+      .preflight-readiness {
+        max-height: 230px;
       }
       .native-session-list .inline-actions {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3309,6 +3322,98 @@
     .runs-trace-list {
       align-content: start;
     }
+    .runs-ownership-panel {
+      display: grid;
+      gap: 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #121922;
+      padding: 12px;
+    }
+    .runs-ownership-panel[hidden] {
+      display: none;
+    }
+    .runs-explanations-panel {
+      display: grid;
+      gap: 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #0f1720;
+      padding: 12px;
+    }
+    .runs-explanations-panel[hidden] {
+      display: none;
+    }
+    .runs-explanations-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 8px;
+    }
+    .runs-explanation-card {
+      display: grid;
+      align-content: start;
+      gap: 7px;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-left: 3px solid #64748b;
+      border-radius: 8px;
+      background: #121922;
+      padding: 9px 10px;
+    }
+    .runs-explanation-card[data-status="ready"] {
+      border-left-color: var(--green);
+    }
+    .runs-explanation-card[data-status="attention"],
+    .runs-explanation-card[data-status="pending"] {
+      border-left-color: var(--amber);
+    }
+    .runs-explanation-card[data-status="blocked"] {
+      border-left-color: var(--red);
+    }
+    .runs-explanation-heading {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .runs-explanation-card p,
+    .runs-explanation-card ul {
+      margin: 0;
+      overflow-wrap: anywhere;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .runs-explanation-card ul {
+      display: grid;
+      gap: 4px;
+      padding-left: 16px;
+      color: var(--muted);
+    }
+    .runs-ownership-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin: 0;
+    }
+    .runs-ownership-grid > div {
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+    }
+    .runs-ownership-grid dt {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .runs-ownership-grid dd {
+      margin: 4px 0 0;
+      overflow-wrap: anywhere;
+      color: var(--text);
+      font-size: 11px;
+    }
     .runs-trace-node {
       display: grid;
       gap: 5px;
@@ -3564,6 +3669,38 @@
       background: var(--panel);
       font-size: 12px;
     }
+    .workflow-run-panel {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel-soft);
+      min-width: 0;
+    }
+    .workflow-run-panel textarea { min-height: 76px; }
+    .workflow-run-inputs { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .workflow-run-inspection {
+      display: grid;
+      grid-template-columns: minmax(190px, .7fr) minmax(0, 1.3fr);
+      gap: 12px;
+      min-width: 0;
+    }
+    .workflow-runs-list { display: grid; gap: 8px; }
+    .workflow-run-card {
+      display: grid;
+      gap: 4px;
+      width: 100%;
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      color: var(--text);
+      text-align: left;
+    }
+    .workflow-run-card.active { border-color: var(--accent); }
+    .workflow-run-card small { color: var(--muted); overflow-wrap: anywhere; }
     @media (max-width: 900px) {
       .workflow-catalog-grid { grid-template-columns: 1fr; }
       .workflow-step-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -3595,6 +3732,7 @@
       .workflows-center .runs-center-header > .inline-actions select { width: 100%; min-width: 0; }
       .workflow-form-grid,
       .workflow-step-row { grid-template-columns: minmax(0, 1fr); }
+      .workflow-run-inspection { grid-template-columns: minmax(0, 1fr); }
       .workflow-editor .agent-editor-header { align-items: flex-start; }
     }
     body.agents-area .shell { grid-template-columns: minmax(0, 1fr); }
@@ -3648,6 +3786,12 @@
       }
       .runs-trace-node[data-depth="2"] {
         margin-left: 24px;
+      }
+      .runs-ownership-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .runs-explanations-grid {
+        grid-template-columns: minmax(0, 1fr);
       }
       .approvals-list {
         grid-template-columns: minmax(0, 1fr);
@@ -3789,4 +3933,21 @@
       .arena-controls-grid .span-2 { grid-column: auto; }
       .arena-grid { grid-template-columns: minmax(0, 1fr); }
       .arena-card-header .badge-row { width: 100%; justify-content: space-between; }
+    }
+    .large-preview-notice {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--muted);
+      background: var(--panel-2);
+      font-size: 12px;
+    }
+    @media (max-width: 520px) {
+      .large-preview-notice { align-items: stretch; flex-direction: column; }
+      .large-preview-notice button { width: 100%; }
     }

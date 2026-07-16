@@ -4,43 +4,46 @@ Centralises body-size enforcement so that every endpoint benefits from the
 limit without duplicating the check in individual handlers.
 """
 
-from typing import Callable
-
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from gpt2giga.models.security import DEFAULT_MAX_REQUEST_BODY_BYTES
 
 
-class RequestValidationMiddleware(BaseHTTPMiddleware):
+class RequestValidationMiddleware:
     """Reject requests whose Content-Length exceeds the configured limit.
 
     The middleware reads the ``Content-Length`` header *before* the body is
     consumed so that obviously oversized requests are rejected early (with a
     ``413 Request Entity Too Large`` response).
 
-    For requests without ``Content-Length`` (e.g. chunked transfer-encoding),
-    the body is streamed and the limit is enforced on the actual bytes read.
+    Requests without ``Content-Length`` remain subject to endpoint-level limits.
     """
 
-    def __init__(self, app, max_body_bytes: int = DEFAULT_MAX_REQUEST_BODY_BYTES):
-        super().__init__(app)
+    def __init__(
+        self, app: ASGIApp, max_body_bytes: int = DEFAULT_MAX_REQUEST_BODY_BYTES
+    ):
+        self.app = app
         self.max_body_bytes = max_body_bytes
 
-    async def dispatch(self, request: Request, call_next: Callable):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
         # Only enforce on methods that carry a body.
-        if request.method in {"POST", "PUT", "PATCH"}:
-            content_length = request.headers.get("content-length")
+        if scope["method"] in {"POST", "PUT", "PATCH"}:
+            content_length = _header(scope, b"content-length")
             if content_length is not None:
                 try:
                     length = int(content_length)
                 except (TypeError, ValueError):
                     length = 0
                 if length > self.max_body_bytes:
-                    return self._too_large_response(length)
+                    response = self._too_large_response(length)
+                    await response(scope, receive, send)
+                    return
 
-        return await call_next(request)
+        await self.app(scope, receive, send)
 
     def _too_large_response(self, actual_size: int) -> JSONResponse:
         return JSONResponse(
@@ -57,3 +60,10 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
                 }
             },
         )
+
+
+def _header(scope: Scope, name: bytes) -> str | None:
+    for header_name, value in scope.get("headers", ()):
+        if header_name.lower() == name:
+            return value.decode("latin-1")
+    return None

@@ -12,6 +12,9 @@ from gpt2giga_harness.harnesses.gemini_cli import GeminiCliHarness
 from gpt2giga_harness.types import HarnessContext, HarnessRequest
 
 
+pytestmark = [pytest.mark.integration, pytest.mark.live_native_cli]
+
+
 @pytest.mark.parametrize(
     ("harness_cls", "prompt_index"),
     (

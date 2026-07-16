@@ -751,7 +751,7 @@ async def test_request_transformer_dev_debug_logging_includes_full_payload():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()
     mock_logger.bind.return_value = mock_bound_logger
-    cfg = ProxyConfig(proxy=ProxySettings(mode="DEV"))
+    cfg = ProxyConfig(proxy=ProxySettings(mode="DEV", log_level="DEBUG"))
     rt = RequestTransformer(cfg, mock_logger)
 
     await rt.prepare_chat(
@@ -801,7 +801,7 @@ def test_response_processor_dev_debug_logging_includes_full_response():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()
     mock_logger.bind.return_value = mock_bound_logger
-    rp = ResponseProcessor(mock_logger, mode="DEV")
+    rp = ResponseProcessor(mock_logger, mode="DEV", log_level="DEBUG")
     giga_resp = MockResponse(
         {
             "choices": [
@@ -887,7 +887,7 @@ def test_response_processor_prod_debug_logging_omits_response():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()
     mock_logger.bind.return_value = mock_bound_logger
-    rp = ResponseProcessor(mock_logger, mode="PROD")
+    rp = ResponseProcessor(mock_logger, mode="PROD", log_level="DEBUG")
     giga_resp = MockResponse(
         {
             "choices": [

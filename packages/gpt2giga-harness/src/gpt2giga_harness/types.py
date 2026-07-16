@@ -93,12 +93,14 @@ class AttachmentTransportSupport:
 class HarnessEventType(str, Enum):
     """Stable event names stored and streamed for harness runs."""
 
+    SESSION_UPDATED = "session.updated"
     RUN_STARTED = "run_started"
     EXTERNAL_THREAD_STARTED = "external_thread_started"
     EXTERNAL_THREAD_STATUS = "external_thread_status"
     EXTERNAL_TURN_STARTED = "external_turn_started"
     EXTERNAL_TURN_COMPLETED = "external_turn_completed"
     MESSAGE_DELTA = "message_delta"
+    REASONING_DELTA = "reasoning_delta"
     STDOUT_DELTA = "stdout_delta"
     STDERR_DELTA = "stderr_delta"
     TOOL_CALL_STARTED = "tool_call_started"

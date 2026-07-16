@@ -1,4 +1,5 @@
 import concurrent.futures
+from contextlib import closing
 import hashlib
 import json
 import sqlite3
@@ -464,7 +465,7 @@ def test_runtime_store_migrates_existing_v1_database(tmp_path):
     store = RuntimeCoordinationStore(tmp_path)
 
     assert store.schema_version == RUNTIME_SCHEMA_VERSION
-    with sqlite3.connect(path) as reopened:
+    with closing(sqlite3.connect(path)) as reopened:
         columns = {
             row[1] for row in reopened.execute("PRAGMA table_info(jobs)").fetchall()
         }
@@ -604,7 +605,7 @@ def test_runtime_store_migrates_legacy_schedule_tables_to_project_keys(tmp_path)
 
     expected_key = hashlib.sha256(b"project-1\0nightly").hexdigest()
     assert store.schema_version == RUNTIME_SCHEMA_VERSION
-    with sqlite3.connect(path) as reopened:
+    with closing(sqlite3.connect(path)) as reopened:
         state = reopened.execute(
             "SELECT schedule_key, definition_json FROM schedule_states"
         ).fetchone()
@@ -763,6 +764,33 @@ def test_runtime_cli_inspect_and_export_json(tmp_path, monkeypatch, capsys):
     assert inspected["schema_version"] == RUNTIME_SCHEMA_VERSION
     assert json.loads(output.read_text(encoding="utf-8"))["jobs"] == []
     assert "Exported runtime coordination state" in capsys.readouterr().out
+
+
+def test_runs_center_revision_tracks_state_but_ignores_worker_heartbeats(tmp_path):
+    store = RuntimeCoordinationStore(tmp_path)
+    initial = store.runs_center_revision()
+    job = store.submit_job(
+        session_id="sess_revision",
+        user_message_id="msg_revision",
+        initial_run_id="run_revision",
+        idempotency_key="revision",
+    ).job
+    queued = store.runs_center_revision()
+    store.register_worker(
+        worker_id="worker_revision",
+        process_id=123,
+        hostname="localhost",
+        capability_fingerprint={},
+    )
+    online = store.runs_center_revision()
+    store.heartbeat_worker("worker_revision")
+
+    assert queued != initial
+    assert online != queued
+    assert store.runs_center_revision() == online
+
+    store.transition_job(job.id, JobStatus.RUNNING)
+    assert store.runs_center_revision() != online
 
 
 def _create_run(

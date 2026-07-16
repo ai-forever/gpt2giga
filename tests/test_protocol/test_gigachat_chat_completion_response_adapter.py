@@ -142,6 +142,112 @@ def test_adapted_chat_completion_response_preserves_provider_state_ids_in_respon
     assert parsed.usage.input_tokens_details.cache_write_tokens == 0
 
 
+def test_adapted_chat_completion_preserves_nested_agent_calls_and_results_metadata():
+    response = ChatCompletionResponse.model_validate(
+        {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tool_state_id": "agent-call",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "invoke_agent",
+                                "arguments": {"agent_name": "investigator"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "tool_state_id": "child-call",
+                    "parent_tool_state_id": "agent-call",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "shell",
+                                "arguments": {"command": "rg TODO"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_state_id": "child-call",
+                    "parent_tool_state_id": "agent-call",
+                    "content": [
+                        {
+                            "function_result": {
+                                "name": "shell",
+                                "result": "src/app.py:10: TODO",
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_state_id": "agent-call",
+                    "content": [
+                        {
+                            "function_result": {
+                                "name": "invoke_agent",
+                                "result": "Repository inspected.",
+                            }
+                        }
+                    ],
+                },
+            ],
+            "finish_reason": "stop",
+        }
+    )
+
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
+    metadata = adapted["_gpt2giga_provider_metadata"]
+
+    assert json.loads(metadata["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "message_index": 0,
+            "name": "invoke_agent",
+            "arguments": {"agent_name": "investigator"},
+            "content_index": 0,
+            "role": "assistant",
+            "tools_state_id": "agent-call",
+        },
+        {
+            "index": 1,
+            "message_index": 1,
+            "name": "shell",
+            "arguments": {"command": "rg TODO"},
+            "content_index": 0,
+            "role": "assistant",
+            "tools_state_id": "child-call",
+            "parent_tool_call_id": "agent-call",
+        },
+    ]
+    assert json.loads(metadata["gigachat_tool_results"]) == [
+        {
+            "index": 0,
+            "message_index": 2,
+            "name": "shell",
+            "result": "src/app.py:10: TODO",
+            "content_index": 0,
+            "role": "tool",
+            "tools_state_id": "child-call",
+            "parent_tool_call_id": "agent-call",
+        },
+        {
+            "index": 1,
+            "message_index": 3,
+            "name": "invoke_agent",
+            "result": "Repository inspected.",
+            "content_index": 0,
+            "role": "tool",
+            "tools_state_id": "agent-call",
+        },
+    ]
+
+
 def test_adapted_chat_completion_text_response_preserves_called_tools_from_responses_input():
     response = ChatCompletionResponse.model_validate(
         {

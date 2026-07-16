@@ -22,10 +22,11 @@ def log_debug_payload(
     payload_key: str,
     payload: Any,
     exclude_none: bool = False,
+    log_level: str | None = None,
     **extra: Any,
 ) -> None:
     """Log full payloads in non-PROD DEBUG logs while omitting them in PROD."""
-    if logger is None:
+    if logger is None or not _is_debug_logging_enabled(config_or_mode, log_level):
         return
 
     if _is_prod_mode(config_or_mode):
@@ -63,3 +64,15 @@ def _is_prod_mode(config_or_mode: Any) -> bool:
     settings = getattr(config_or_mode, "proxy_settings", config_or_mode)
     mode = getattr(settings, "mode", "DEV")
     return isinstance(mode, str) and mode.upper() == "PROD"
+
+
+def _is_debug_logging_enabled(
+    config_or_mode: Any,
+    explicit_log_level: str | None,
+) -> bool:
+    """Return whether payload serialization can reach a DEBUG log sink."""
+    log_level = explicit_log_level
+    if log_level is None and not isinstance(config_or_mode, str):
+        settings = getattr(config_or_mode, "proxy_settings", config_or_mode)
+        log_level = getattr(settings, "log_level", None)
+    return isinstance(log_level, str) and log_level.upper() == "DEBUG"

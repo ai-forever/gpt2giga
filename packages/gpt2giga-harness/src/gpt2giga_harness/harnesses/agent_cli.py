@@ -343,6 +343,15 @@ def run_streaming_command(
                 _stop_process(process)
                 break
 
+            for event in _poll_stream_parser_events(parse_payload):
+                _record_stream_event(
+                    event,
+                    message_parts=message_parts,
+                    usage=usage,
+                    tool_calls=tool_calls,
+                    event_coalescer=event_coalescer,
+                )
+
             try:
                 stream_name, line = output_queue.get(timeout=STREAM_POLL_SECONDS)
             except Empty:
@@ -410,6 +419,14 @@ def run_streaming_command(
     finally:
         if process.poll() is None:
             _stop_process(process)
+        for event in _poll_stream_parser_events(parse_payload):
+            _record_stream_event(
+                event,
+                message_parts=message_parts,
+                usage=usage,
+                tool_calls=tool_calls,
+                event_coalescer=event_coalescer,
+            )
         reader_stop.set()
         for reader in readers:
             reader.join(timeout=PROCESS_READER_JOIN_TIMEOUT_SECONDS)
@@ -573,12 +590,18 @@ def tool_call_event(
     result: Any = None,
     status: Any = None,
     arguments_are_complete: bool = False,
+    parent_tool_call_id: Any = None,
+    source: Any = None,
 ) -> HarnessEvent:
     """Build a normalized tool-call lifecycle event."""
     payload = {
         "tool_call_id": str(tool_call_id or "tool-call"),
         "name": str(name) if name is not None else None,
         "status": str(status) if status is not None else None,
+        "parent_tool_call_id": (
+            str(parent_tool_call_id) if parent_tool_call_id is not None else None
+        ),
+        "source": str(source) if source is not None else None,
     }
     if event_type == "tool_call_delta":
         payload["arguments" if arguments_are_complete else "arguments_delta"] = (
@@ -1019,6 +1042,21 @@ def _stream_terminal_outcome(
             fallback="Structured CLI output did not contain a recognized event contract",
         )
     return None
+
+
+def _poll_stream_parser_events(
+    parse_payload: StreamPayloadParser,
+) -> tuple[HarnessEvent, ...]:
+    poll_events = getattr(parse_payload, "poll_events", None)
+    if not callable(poll_events):
+        return ()
+    try:
+        events = poll_events()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return ()
+    if not isinstance(events, (list, tuple)):
+        return ()
+    return tuple(event for event in events if isinstance(event, HarnessEvent))
 
 
 def _concise_stream_error(value: Any, *, fallback: str) -> str:

@@ -421,13 +421,20 @@ class ScheduleService:
             "worker": self.worker_health(),
         }
 
-    def test_now(self, project: HarnessProject, schedule_id: str) -> dict[str, Any]:
+    def test_now(
+        self,
+        project: HarnessProject,
+        schedule_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
         definition = load_schedule(project.root, schedule_id)
         occurrence = self._create_occurrence(
             definition,
             schedule_key=_schedule_key(project.id, schedule_id),
             trigger="test",
             scheduled_for=_utc_now(),
+            idempotency_key=idempotency_key,
         )
         return self._execute(project, definition, occurrence, dry_run=True)
 
@@ -485,7 +492,13 @@ class ScheduleService:
             )
         return {"archived": True, "schedule_id": schedule_id}
 
-    def run_now(self, project: HarnessProject, schedule_id: str) -> dict[str, Any]:
+    def run_now(
+        self,
+        project: HarnessProject,
+        schedule_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
         definition = load_schedule(project.root, schedule_id)
         with self.runtime_store._connect() as connection:  # noqa: SLF001
             state = connection.execute(
@@ -501,6 +514,7 @@ class ScheduleService:
             schedule_key=_schedule_key(project.id, schedule_id),
             trigger="run_now",
             scheduled_for=_utc_now(),
+            idempotency_key=idempotency_key,
         )
         return self._execute(project, definition, occurrence, dry_run=False)
 
@@ -603,14 +617,38 @@ class ScheduleService:
         scheduled_for: str,
         status: str = "claimed",
         error: str | None = None,
+        idempotency_key: str | None = None,
     ) -> ScheduleOccurrence:
-        occurrence_id = f"occurrence_{uuid4().hex}"
+        occurrence_id = (
+            _manual_occurrence_id(
+                schedule_key,
+                trigger,
+                idempotency_key,
+            )
+            if idempotency_key is not None
+            else f"occurrence_{uuid4().hex}"
+        )
         now = _utc_now()
         session_id = (
             definition.session_id if definition.destination == "resume" else None
         )
         with self.runtime_store._connect() as connection:  # noqa: SLF001
             connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM schedule_occurrences WHERE id = ?",
+                (occurrence_id,),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["definition_hash"]) != definition.source_hash
+                    or str(existing["trigger"]) != trigger
+                ):
+                    connection.rollback()
+                    raise ScheduleError(
+                        "idempotency key is already bound to a different schedule action"
+                    )
+                connection.commit()
+                return _occurrence_from_row(existing)
             existing = connection.execute(
                 """
                 SELECT * FROM schedule_occurrences
@@ -1102,6 +1140,20 @@ def _first_scheduled(
 
 def _schedule_key(project_id: str, schedule_id: str) -> str:
     return hashlib.sha256(f"{project_id}\0{schedule_id}".encode()).hexdigest()
+
+
+def _manual_occurrence_id(
+    schedule_key: str,
+    trigger: str,
+    idempotency_key: str,
+) -> str:
+    key = str(idempotency_key or "").strip()
+    if not key:
+        raise ScheduleError("idempotency key is required")
+    if len(key) > 200:
+        raise ScheduleError("idempotency key must be at most 200 characters")
+    identity = f"{schedule_key}\0{trigger}\0{key}"
+    return f"occurrence_{hashlib.sha256(identity.encode()).hexdigest()}"
 
 
 def _occurrence_from_row(row: Any) -> ScheduleOccurrence:

@@ -46,7 +46,7 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     )
     client = TestClient(app)
 
-    index_response = client.get("/")
+    index_response = client.get("/legacy")
     css_response = client.get("/assets/app.css")
     js_response = client.get("/assets/app.js")
     favicon_response = client.get("/assets/favicon.ico")
@@ -57,13 +57,13 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert index_response.headers["content-type"].startswith("text/html")
     assert index_response.headers["cache-control"] == "no-cache"
     assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.38">' in index_response.text
+        '<link rel="stylesheet" href="/assets/app.css?v=38.44">' in index_response.text
     )
     assert (
         '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.43"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.53"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -913,6 +913,8 @@ def test_ui_models_rejects_invalid_api_mode_non_fatally():
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is False
+    assert body["health"] == "unknown"
+    assert body["last_checked_at"]
     assert body["source"] == "fallback"
     assert body["models"][0] == "ConfiguredModel"
     assert "api_mode" in body["error"]
@@ -934,6 +936,10 @@ def test_ui_models_handles_discovery_exception_safely(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is False
+    assert body["api_mode"] == "v2"
+    assert body["health"] == "unknown"
+    assert body["route_path"] == "/v2/models"
+    assert body["last_checked_at"]
     assert body["source"] == "/v2/models"
     assert body["models"] == []
     assert body["error"] == "model discovery failed"
@@ -964,6 +970,10 @@ def test_ui_models_uses_selected_versioned_endpoint_only(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["models"] == ["v1-only-model"]
+    assert body["api_mode"] == "v1"
+    assert body["health"] == "ready"
+    assert body["route_path"] == "/v1/models"
+    assert body["last_checked_at"]
     assert body["source"] == "/v1/models"
     assert captured["mode"].value == "v1"
     assert captured["kwargs"] == {
@@ -1002,9 +1012,9 @@ def test_ui_route_recommendation_endpoint_returns_safe_response():
     assert "secret-token-screen.png" not in response.text
 
 
-def test_ui_can_run_echo_harness():
+def test_ui_can_run_echo_harness(tmp_path):
     app = create_app(
-        HarnessConfig(),
+        HarnessConfig(data_dir=str(tmp_path)),
         registry=create_default_registry(include_entry_points=False),
     )
     client = TestClient(app)
@@ -1244,7 +1254,7 @@ def test_ui_index_contains_control_panel_elements():
     )
     client = TestClient(app)
 
-    response = client.get("/")
+    response = client.get("/legacy")
 
     assert response.status_code == 200
     html = response.text
@@ -1308,6 +1318,7 @@ def test_ui_index_contains_control_panel_elements():
         "close-native-history-button",
         "preflight-modal",
         "preflight-status",
+        "preflight-readiness",
         "preflight-finding-list",
         "preflight-budget",
         "preflight-footer-status",
@@ -1433,6 +1444,11 @@ def test_ui_index_contains_control_panel_elements():
         "apply-agent-button",
         "duplicate-agent-button",
         "run-agent-button",
+        "run-workflow-button",
+        "workflow-run-prompt",
+        "workflow-run-inputs",
+        "workflow-runs-list",
+        "workflow-run-detail",
         "evals-panel",
         "evals-status",
         "refresh-evals-button",
@@ -1516,6 +1532,9 @@ def test_ui_index_contains_control_panel_elements():
         "/api/evals",
         "evalSpecs",
         "runSelectedEval",
+        "runSelectedWorkflow",
+        "/api/workflows/${encodeURIComponent(workflow.id)}/run",
+        "/api/workflow-runs/${encodeURIComponent(runId)}",
         "eval-scorecard",
         "Eval Lab",
         "Protocol conformance",
@@ -1535,6 +1554,8 @@ def test_ui_index_contains_control_panel_elements():
         "Preflight",
         "Continue anyway",
         "Checking run context",
+        "Selected execution plan",
+        "preflightReadinessText",
         "/api/preflight/run",
         "confirmRunPreflight",
         "Exclude file",

@@ -10,6 +10,8 @@ import tarfile
 
 import pytest
 
+from gpt2giga_harness.base_install import BASE_DIRECT_DISTRIBUTIONS
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
@@ -30,6 +32,7 @@ def _project_version(member: Path) -> str:
 GATEWAY_VERSION = _project_version(GATEWAY_MEMBER)
 HARNESS_VERSION = _project_version(HARNESS_MEMBER)
 IMPORT_DISTRIBUTIONS = {
+    "anyio": "anyio",
     "dateutil": "python-dateutil",
     "fastapi": "fastapi",
     "gigachat": "gigachat",
@@ -181,14 +184,23 @@ assert "/v1beta/models/{model}:generateContent" in paths
 
 HARNESS_SMOKE = """
 import importlib.metadata
+import json
 import os
 from pathlib import Path
+import stat
 
 from fastapi.testclient import TestClient
 
 import gpt2giga
 import gpt2giga_harness
+from gpt2giga_harness.cli import build_parser
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.doctor import write_doctor_support_report
+from gpt2giga_harness.state_backup import (
+    create_state_backup,
+    restore_state_backup,
+    verify_state_backup,
+)
 from gpt2giga_harness.ui.app import create_app
 from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 
@@ -210,6 +222,23 @@ assert scripts == {
     "giga": "gpt2giga_harness.cli:main",
     "gpt2giga-harness": "gpt2giga_harness.cli:main",
 }
+doctor_output = installed_root.parent / "doctor-support.json"
+doctor_args = build_parser().parse_args(
+    ["doctor", ".", "--json", "--output", str(doctor_output), "--fail-on", "degraded"]
+)
+assert doctor_args.output == str(doctor_output)
+assert doctor_args.fail_on == "degraded"
+write_doctor_support_report(
+    {
+        "schema_version": 1,
+        "kind": "gpt2giga_harness_doctor_report",
+        "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+        "checks": [],
+    },
+    doctor_output,
+)
+assert json.loads(doctor_output.read_text(encoding="utf-8"))["schema_version"] == 1
+assert stat.S_IMODE(doctor_output.stat().st_mode) == 0o600
 assert "function boot()" in load_text_asset("app.js")
 assert ".app {" in load_text_asset("app.css")
 
@@ -228,6 +257,15 @@ harnesses = client.get("/api/harnesses")
 assert harnesses.status_code == 200
 ids = {item["spec"]["id"] for item in harnesses.json()["harnesses"]}
 assert {"direct-chat", "echo"} <= ids
+
+backup = installed_root.parent / "runtime-smoke-backup.zip"
+created = create_state_backup(data_dir, backup)
+assert created == verify_state_backup(backup)
+restored = installed_root.parent / "runtime-smoke-restored"
+restore_result = restore_state_backup(backup, restored)
+assert restore_result.backup == created
+assert restore_result.replaced_existing is False
+assert (restored / "runtime.sqlite3").is_file()
 """
 
 
@@ -328,6 +366,9 @@ def test_optional_and_development_dependencies_stay_with_their_owner():
         "postgres",
     }
     assert "optional-dependencies" not in harness_metadata["project"]
+    assert _declared_distribution_names(harness_metadata) == set(
+        BASE_DIRECT_DISTRIBUTIONS
+    )
 
 
 def test_harness_gateway_imports_stay_within_the_reviewed_boundary():

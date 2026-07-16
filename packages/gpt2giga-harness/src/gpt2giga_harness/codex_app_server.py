@@ -223,7 +223,6 @@ class CodexAppServerSupervisor:
                         **_thread_identity_params(request),
                         "threadId": source_thread_id,
                         "lastTurnId": continuation.get("fork_turn_id"),
-                        "excludeTurns": True,
                     },
                     timeout=APP_SERVER_TIMEOUT_SECONDS,
                 )
@@ -262,7 +261,6 @@ class CodexAppServerSupervisor:
                         {
                             **_thread_identity_params(request),
                             "threadId": thread_id,
-                            "excludeTurns": True,
                         },
                         timeout=APP_SERVER_TIMEOUT_SECONDS,
                     )
@@ -365,6 +363,8 @@ class CodexAppServerSupervisor:
         final_text = ""
         deadline = time.monotonic() + max(context.timeout_seconds, 0.1)
         interrupt_sent = False
+        subagent_parents: dict[str, str] = {}
+        seen_subagent_events: set[tuple[str, str, str]] = set()
         while time.monotonic() < deadline:
             if _cancel_requested(request.cancel_event) and not interrupt_sent:
                 runtime.client.request(
@@ -394,11 +394,54 @@ class CodexAppServerSupervisor:
                 continue
             if params.get("turnId") not in {None, turn_id}:
                 continue
+            subagent_snapshots: tuple[dict[str, Any], ...] = ()
+            item = _mapping(params.get("item"))
+            if (
+                method in {"item/started", "item/completed"}
+                and str(item.get("type") or "") == "collabToolCall"
+            ):
+                subagent_snapshots = _read_collab_subagents(runtime.client, item)
+                if subagent_snapshots:
+                    enriched_item = {
+                        **item,
+                        "subagents": [
+                            _public_collab_subagent(snapshot)
+                            for snapshot in subagent_snapshots
+                        ],
+                    }
+                    params = {**params, "item": enriched_item}
+                    item = enriched_item
+                if _collab_tool(item) == "spawn_agent":
+                    parent_id = str(item.get("id") or "")
+                    for child_id in _collab_thread_ids(item):
+                        if parent_id:
+                            subagent_parents[child_id] = parent_id
+            if method == "turn/completed":
+                emitted_tool_ids = {
+                    str(event.payload.get("tool_call_id") or "")
+                    for event in collected
+                    if event.payload.get("tool_call_id")
+                }
+                for rollout_event in _rollout_multi_agent_events(
+                    runtime.client,
+                    home=self.data_dir / "app_server" / "homes" / runtime.scope_id,
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                    seen_tool_call_ids=emitted_tool_ids,
+                ):
+                    _publish(request, collected, rollout_event)
             event, item_text = _normalize_notification(method, params)
             if item_text is not None:
                 final_text = item_text
             if event is not None:
                 _publish(request, collected, event)
+            if method == "item/completed" and subagent_snapshots:
+                for child_event in _collab_child_tool_events(
+                    subagent_snapshots,
+                    subagent_parents=subagent_parents,
+                    seen=seen_subagent_events,
+                ):
+                    _publish(request, collected, child_event)
             if method == "turn/completed":
                 turn = _mapping(params.get("turn"))
                 status = str(turn.get("status") or "failed")
@@ -690,6 +733,31 @@ def _normalize_notification(
             ),
             None,
         )
+    if method == "thread/tokenUsage/updated":
+        token_usage = _mapping(params.get("tokenUsage"))
+        usage = _mapping(token_usage.get("last")) or token_usage
+        aliases = {
+            "input_tokens": "inputTokens",
+            "output_tokens": "outputTokens",
+            "total_tokens": "totalTokens",
+            "cached_input_tokens": "cachedInputTokens",
+            "reasoning_output_tokens": "reasoningOutputTokens",
+        }
+        payload = {
+            target: usage[source]
+            for target, source in aliases.items()
+            if isinstance(usage.get(source), int)
+        }
+        return (
+            HarnessEvent(
+                type=HarnessEventType.USAGE.value,
+                message="Codex app-server updated token usage.",
+                payload=payload,
+            )
+            if payload
+            else None,
+            None,
+        )
     if method == "turn/started":
         turn = _mapping(params.get("turn"))
         return (
@@ -697,6 +765,33 @@ def _normalize_notification(
                 type=HarnessEventType.EXTERNAL_TURN_STARTED.value,
                 message="Codex app-server turn started.",
                 payload={"turn_id": turn.get("id"), "status": turn.get("status")},
+            ),
+            None,
+        )
+    if method == "turn/plan/updated":
+        plan = []
+        for item in params.get("plan") or ():
+            if not isinstance(item, Mapping):
+                continue
+            step = str(item.get("step") or "").strip()
+            if not step:
+                continue
+            status = {
+                "inProgress": "in_progress",
+                "completed": "completed",
+                "pending": "pending",
+            }.get(str(item.get("status") or ""), "pending")
+            plan.append({"step": step, "status": status})
+        return (
+            HarnessEvent(
+                type="plan_updated",
+                message="Codex app-server updated the execution plan.",
+                payload={
+                    "tool_call_id": f"plan:{params.get('turnId') or 'current'}",
+                    "name": "update_plan",
+                    "status": "running",
+                    "arguments": {"plan": plan},
+                },
             ),
             None,
         )
@@ -727,6 +822,27 @@ def _normalize_notification(
                 type=HarnessEventType.MESSAGE_DELTA.value,
                 message="Codex app-server streamed assistant text.",
                 payload={"delta": delta},
+            )
+            if delta
+            else None,
+            None,
+        )
+    if method in {
+        "item/reasoning/summaryTextDelta",
+        "item/reasoning/textDelta",
+    }:
+        delta = str(params.get("delta") or "")
+        return (
+            HarnessEvent(
+                type=HarnessEventType.REASONING_DELTA.value,
+                message="Codex app-server streamed reasoning text.",
+                payload={
+                    "delta": delta,
+                    "item_id": params.get("itemId"),
+                    "kind": (
+                        "summary" if method.endswith("summaryTextDelta") else "text"
+                    ),
+                },
             )
             if delta
             else None,
@@ -773,6 +889,12 @@ def _normalize_notification(
                 "name": tool_name,
                 "status": item.get("status"),
                 "arguments": _tool_arguments(item),
+                **(
+                    {"result": result}
+                    if method == "item/completed"
+                    and (result := _tool_result(item)) is not None
+                    else {}
+                ),
             },
         ),
         None,
@@ -824,6 +946,8 @@ def _tool_name(item: Mapping[str, Any]) -> str | None:
         return str(item.get("tool") or "dynamic_tool")
     if item_type == "webSearch":
         return "web_search"
+    if item_type == "collabToolCall":
+        return _collab_tool(item)
     return None
 
 
@@ -833,7 +957,409 @@ def _tool_arguments(item: Mapping[str, Any]) -> Any:
         return {"command": item.get("command"), "cwd": item.get("cwd")}
     if item_type == "webSearch":
         return {"query": item.get("query")}
+    if item_type == "collabToolCall":
+        return {
+            "prompt": item.get("prompt"),
+            "subagents": item.get("subagents") or _collab_agent_states(item),
+        }
     return item.get("arguments") or {}
+
+
+def _tool_result(item: Mapping[str, Any]) -> Any:
+    for key in (
+        "aggregatedOutput",
+        "aggregated_output",
+        "output",
+        "result",
+        "error",
+    ):
+        value = item.get(key)
+        if value not in (None, "", (), [], {}):
+            return value
+    if str(item.get("status") or "").lower() in {"failed", "error"}:
+        failure = {
+            key: item[key]
+            for key in (
+                "exitCode",
+                "exit_code",
+                "stderr",
+                "failureReason",
+                "failure_reason",
+            )
+            if item.get(key) not in (None, "", (), [], {})
+        }
+        return failure or {"error": "Tool failed without diagnostic output."}
+    return None
+
+
+def _collab_tool(item: Mapping[str, Any]) -> str | None:
+    value = str(item.get("tool") or "").strip()
+    if not value:
+        return None
+    aliases = {
+        "spawnAgent": "spawn_agent",
+        "sendInput": "send_input",
+        "resumeAgent": "resume_agent",
+        "closeAgent": "close_agent",
+    }
+    return aliases.get(value, value)
+
+
+def _collab_thread_ids(item: Mapping[str, Any]) -> tuple[str, ...]:
+    values = item.get("receiverThreadIds") or item.get("receiver_thread_ids") or ()
+    if not isinstance(values, (list, tuple)):
+        values = (values,)
+    candidates = [
+        *values,
+        item.get("receiverThreadId"),
+        item.get("receiver_thread_id"),
+        item.get("newThreadId"),
+        item.get("new_thread_id"),
+    ]
+    return tuple(
+        dict.fromkeys(
+            text for value in candidates if (text := str(value or "").strip())
+        )
+    )
+
+
+def _collab_agent_states(item: Mapping[str, Any]) -> list[dict[str, Any]]:
+    states = _mapping(item.get("agentsStates") or item.get("agents_states"))
+    return [
+        {
+            "id": thread_id,
+            "status": _mapping(state).get("status"),
+            "message": _mapping(state).get("message"),
+        }
+        for thread_id, state in states.items()
+    ]
+
+
+def _read_collab_subagents(
+    client: AppServerClient,
+    item: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    states = {str(entry.get("id")): entry for entry in _collab_agent_states(item)}
+    snapshots: list[dict[str, Any]] = []
+    for thread_id in _collab_thread_ids(item):
+        try:
+            response = client.request(
+                "thread/read",
+                {"threadId": thread_id, "includeTurns": True},
+                timeout=APP_SERVER_TIMEOUT_SECONDS,
+            )
+        except (AppServerProtocolError, OSError, RuntimeError, ValueError):
+            thread = {}
+        else:
+            thread = _mapping(response.get("thread"))
+        state = states.get(thread_id, {})
+        snapshots.append(
+            {
+                "id": thread_id,
+                "name": (
+                    thread.get("agentNickname")
+                    or thread.get("agent_nickname")
+                    or thread_id[:8]
+                ),
+                "role": thread.get("agentRole") or thread.get("agent_role"),
+                "status": state.get("status")
+                or _mapping(thread.get("status")).get("type"),
+                "message": state.get("message"),
+                "prompt": item.get("prompt"),
+                "turns": thread.get("turns") or [],
+            }
+        )
+    return tuple(snapshots)
+
+
+def _public_collab_subagent(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: snapshot.get(key)
+        for key in ("id", "name", "role", "status", "message", "prompt")
+        if snapshot.get(key) is not None
+    }
+
+
+def _collab_child_tool_events(
+    snapshots: tuple[dict[str, Any], ...],
+    *,
+    subagent_parents: Mapping[str, str],
+    seen: set[tuple[str, str, str]],
+) -> tuple[HarnessEvent, ...]:
+    events: list[HarnessEvent] = []
+    for snapshot in snapshots:
+        child_id = str(snapshot.get("id") or "")
+        parent_id = subagent_parents.get(child_id)
+        if not child_id or not parent_id:
+            continue
+        for turn in snapshot.get("turns") or ():
+            if not isinstance(turn, Mapping):
+                continue
+            for item in turn.get("items") or ():
+                if not isinstance(item, Mapping):
+                    continue
+                name = _tool_name(item)
+                item_id = str(item.get("id") or "").strip()
+                if name is None or not item_id:
+                    continue
+                status = str(item.get("status") or "completed")
+                event_type = (
+                    HarnessEventType.TOOL_CALL_STARTED.value
+                    if status in {"inProgress", "in_progress", "running"}
+                    else HarnessEventType.TOOL_CALL_FINISHED.value
+                )
+                identity = (child_id, item_id, event_type)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                payload = {
+                    "tool_call_id": f"{child_id}:{item_id}",
+                    "parent_tool_call_id": parent_id,
+                    "name": name,
+                    "status": status,
+                    "arguments": _tool_arguments(item),
+                    "source": "codex-app-server-subagent",
+                    "subagent_id": child_id,
+                    "subagent_name": snapshot.get("name"),
+                    "subagent_role": snapshot.get("role"),
+                    "subagent_description": snapshot.get("prompt"),
+                }
+                result = _tool_result(item)
+                if (
+                    event_type == HarnessEventType.TOOL_CALL_FINISHED.value
+                    and result is not None
+                ):
+                    payload["result"] = result
+                events.append(
+                    HarnessEvent(
+                        type=event_type,
+                        message=f"Codex subagent {snapshot.get('name')} ran {name}.",
+                        payload=payload,
+                    )
+                )
+    return tuple(events)
+
+
+def _rollout_multi_agent_events(
+    client: AppServerClient,
+    *,
+    home: Path,
+    thread_id: str,
+    turn_id: str,
+    seen_tool_call_ids: set[str],
+) -> tuple[HarnessEvent, ...]:
+    """Recover multi-agent calls omitted from Codex app-server thread items."""
+    try:
+        response = client.request(
+            "thread/read",
+            {"threadId": thread_id, "includeTurns": True},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+    except (AppServerProtocolError, OSError, RuntimeError, ValueError):
+        return ()
+    thread = _mapping(response.get("thread"))
+    rollout_path = _managed_rollout_path(home, thread.get("path"))
+    if rollout_path is None:
+        return ()
+
+    events: list[HarnessEvent] = []
+    child_seen: set[tuple[str, str, str]] = set()
+    for call in _read_rollout_multi_agent_calls(rollout_path, turn_id=turn_id):
+        call_id = str(call.get("call_id") or call.get("id") or "").strip()
+        if not call_id or call_id in seen_tool_call_ids:
+            continue
+        name = str(call.get("name") or "").strip()
+        arguments = _json_value(call.get("arguments"), fallback={})
+        if not isinstance(arguments, Mapping):
+            arguments = {"value": arguments}
+        public_arguments: dict[str, Any] = dict(arguments)
+        result = _json_value(call.get("output"), fallback=call.get("output"))
+        child_snapshots: tuple[dict[str, Any], ...] = ()
+        if name == "spawn_agent" and isinstance(result, Mapping):
+            child_id = str(
+                result.get("agent_id") or result.get("thread_id") or ""
+            ).strip()
+            if child_id:
+                prompt = str(
+                    public_arguments.get("message")
+                    or public_arguments.get("prompt")
+                    or ""
+                ).strip()
+                child_snapshots = (
+                    _read_function_subagent(
+                        client,
+                        thread_id=child_id,
+                        prompt=prompt or None,
+                        fallback_name=str(result.get("nickname") or "").strip() or None,
+                    ),
+                )
+                public_arguments.update(
+                    {
+                        "prompt": prompt or None,
+                        "subagents": [
+                            _public_collab_subagent(snapshot)
+                            for snapshot in child_snapshots
+                        ],
+                    }
+                )
+        payload: dict[str, Any] = {
+            "tool_call_id": call_id,
+            "name": name,
+            "status": "completed",
+            "arguments": public_arguments,
+            "source": "codex-app-server-rollout",
+        }
+        if result not in (None, "", (), [], {}):
+            payload["result"] = result
+        events.append(
+            HarnessEvent(
+                type=HarnessEventType.TOOL_CALL_FINISHED.value,
+                message=f"Codex app-server finished {name}.",
+                payload=payload,
+            )
+        )
+        seen_tool_call_ids.add(call_id)
+        if child_snapshots:
+            child_id = str(child_snapshots[0].get("id") or "")
+            events.extend(
+                _collab_child_tool_events(
+                    child_snapshots,
+                    subagent_parents={child_id: call_id},
+                    seen=child_seen,
+                )
+            )
+    return tuple(events)
+
+
+def _managed_rollout_path(home: Path, value: Any) -> Path | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        resolved_home = home.expanduser().resolve()
+        path = Path(text).expanduser().resolve(strict=True)
+    except OSError:
+        return None
+    if not path.is_file() or not path.is_relative_to(resolved_home):
+        return None
+    return path
+
+
+def _read_rollout_multi_agent_calls(
+    path: Path,
+    *,
+    turn_id: str,
+) -> tuple[dict[str, Any], ...]:
+    calls: dict[str, dict[str, Any]] = {}
+    active_turn_id: str | None = None
+    try:
+        lines = path.open(encoding="utf-8")
+    except OSError:
+        return ()
+    try:
+        with lines:
+            for line in lines:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, Mapping):
+                    continue
+                record_type = str(record.get("type") or "")
+                payload = _mapping(record.get("payload"))
+                if record_type == "event_msg" and payload.get("type") == "task_started":
+                    active_turn_id = str(payload.get("turn_id") or "") or None
+                    continue
+                if record_type == "turn_context":
+                    active_turn_id = str(payload.get("turn_id") or "") or active_turn_id
+                    continue
+                if record_type != "response_item":
+                    continue
+                metadata = _mapping(
+                    payload.get("internal_chat_message_metadata_passthrough")
+                )
+                payload_turn_id = str(metadata.get("turn_id") or active_turn_id or "")
+                if payload_turn_id != turn_id:
+                    continue
+                payload_type = str(payload.get("type") or "")
+                call_id = str(payload.get("call_id") or "").strip()
+                if payload_type == "function_call":
+                    if str(payload.get("namespace") or "") != "multi_agent_v1":
+                        continue
+                    if not call_id:
+                        call_id = str(payload.get("id") or "").strip()
+                    if not call_id:
+                        continue
+                    calls[call_id] = {
+                        "id": payload.get("id"),
+                        "call_id": call_id,
+                        "name": _multi_agent_tool_name(payload.get("name")),
+                        "arguments": payload.get("arguments"),
+                    }
+                elif payload_type == "function_call_output" and call_id in calls:
+                    calls[call_id]["output"] = payload.get("output")
+    except OSError:
+        return ()
+    return tuple(calls.values())
+
+
+def _multi_agent_tool_name(value: Any) -> str:
+    name = str(value or "").strip()
+    for prefix in ("multi_agent_v1__", "multi_agent_v1."):
+        if name.startswith(prefix):
+            name = name[len(prefix) :]
+            break
+    aliases = {
+        "spawnAgent": "spawn_agent",
+        "sendInput": "send_input",
+        "resumeAgent": "resume_agent",
+        "closeAgent": "close_agent",
+    }
+    return aliases.get(name, name)
+
+
+def _json_value(value: Any, *, fallback: Any) -> Any:
+    if not isinstance(value, str):
+        return value if value is not None else fallback
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return fallback
+
+
+def _read_function_subagent(
+    client: AppServerClient,
+    *,
+    thread_id: str,
+    prompt: str | None,
+    fallback_name: str | None,
+) -> dict[str, Any]:
+    try:
+        response = client.request(
+            "thread/read",
+            {"threadId": thread_id, "includeTurns": True},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+    except (AppServerProtocolError, OSError, RuntimeError, ValueError):
+        thread = {}
+    else:
+        thread = _mapping(response.get("thread"))
+    turns = thread.get("turns") or []
+    latest_turn = _mapping(turns[-1]) if turns else {}
+    return {
+        "id": thread_id,
+        "name": (
+            thread.get("agentNickname")
+            or thread.get("agent_nickname")
+            or fallback_name
+            or thread_id[:8]
+        ),
+        "role": thread.get("agentRole") or thread.get("agent_role"),
+        "status": latest_turn.get("status")
+        or _mapping(thread.get("status")).get("type"),
+        "prompt": prompt,
+        "turns": turns,
+    }
 
 
 def _turn_text(turn: Mapping[str, Any]) -> str:

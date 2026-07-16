@@ -56,6 +56,19 @@ def _model_id(model: dict[str, Any]) -> str:
     return str(model.get("id") or model.get("id_") or model.get("model") or "")
 
 
+def _add_model_type_metadata(model: dict[str, Any]) -> None:
+    """Expose the upstream model kind after SDK normalization drops it."""
+    raw_metadata = model.get("metadata")
+    metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+    model_type = model.get("type")
+    if not isinstance(model_type, str) or not model_type:
+        model_type = (
+            "embedder" if "embedding" in _model_id(model).casefold() else "chat"
+        )
+    metadata["type"] = model_type
+    model["metadata"] = metadata
+
+
 def _anthropic_created_at() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -141,6 +154,7 @@ async def show_available_models(request: Request):
 
     current_timestamp = int(time.time())
     for model in models:
+        _add_model_type_metadata(model)
         model["created"] = current_timestamp
     model_page = AsyncPage(
         data=[OpenAIModel(**model) for model in models],
@@ -163,5 +177,6 @@ async def get_model(model: str, request: Request):
     if _is_gemini_models_request(request):
         return build_gemini_model(model_data)
 
+    _add_model_type_metadata(model_data)
     model_data["created"] = int(time.time())
     return OpenAIModel(**model_data)

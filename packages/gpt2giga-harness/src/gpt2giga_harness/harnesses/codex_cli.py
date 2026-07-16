@@ -667,6 +667,24 @@ def _codex_tool_arguments(item_type: str, item: Mapping[str, Any]) -> Any:
             )
             plan.append({"step": text.strip(), "status": status})
         return {"plan": plan}
+    if item_type == "collab_tool_call":
+        receiver_ids = item.get("receiver_thread_ids") or ()
+        if not isinstance(receiver_ids, (list, tuple)):
+            receiver_ids = (receiver_ids,)
+        states = _mapping(item.get("agents_states"))
+        return {
+            "prompt": item.get("prompt"),
+            "subagents": [
+                {
+                    "id": thread_id,
+                    "name": str(thread_id)[:8],
+                    "status": _mapping(states.get(thread_id)).get("status"),
+                    "message": _mapping(states.get(thread_id)).get("message"),
+                }
+                for thread_id in receiver_ids
+                if str(thread_id or "").strip()
+            ],
+        }
     return _first_present(
         item,
         "arguments",

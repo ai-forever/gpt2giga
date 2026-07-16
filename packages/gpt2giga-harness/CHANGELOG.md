@@ -5,6 +5,36 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.1.0b1] - 2026-07-17
+
+### Изменено
+- **Нативная Automation**: Cockpit теперь создаёт и редактирует agents, workflows и schedules через типизированные backend API, сохраняя optimistic revision checks и явные действия оператора вместо копирования YAML-команд вручную.
+- **Одновременная Arena**: сравнение нескольких harness перестроено как набор независимых чатов с параллельным стартом, отдельной историей и follow-up для каждого участника.
+- **Рендеринг сообщений**: Cockpit использует стандартный Markdown pipeline с безопасным HTML, подсветкой кода, таблицами, task lists и локально упакованным KaTeX.
+- **Настройки моделей Cockpit**: модели по умолчанию для чатов и генерации заголовков теперь выбираются независимо из discovery-списка и сохраняются в backend-owned Harness Settings; Workbench и headless run используют сохранённый выбор без model-id, зашитого в клиент или session runner.
+- **Rollout Cockpit V2**: пакетный React cockpit теперь открывается как локальный UI по умолчанию, прежние top-level deep links перенаправляются в канонические Workbench, Runs, Automation, Evaluation или Integrations, а `/legacy/**` остаётся release-level путём отката без миграции retained state. Новые Cockpit streams подключаются к durable live tail, а retained history остаётся в bounded snapshots, поэтому открытие большого завершённого run не прокручивает через браузер все сохранённые events. ETag read model получает новый process namespace, чтобы restart, смена data-dir или rollback не переиспользовали устаревший browser snapshot с тем же SQLite generation.
+
+### Исправлено
+- **Codex continuity**: app-server resume сохраняет историю разговора и активность subagents, включая `output_text` из предыдущих turns, а Workbench показывает связанные события без потери структуры.
+- **Lifecycle UI**: readiness выбранного route не теряется при durable retry, UI worker pool настраивается явно, а graceful shutdown ограничен по времени.
+
+### Добавлено
+- **Политика зависимостей базовой установки**: clean wheel installs теперь запускают versioned audit для десяти проверенных прямых dependencies, лимита 64 resolved distributions и явных семейств исключений Office, remote channels, external clients и sandbox providers; optional providers остаются отдельно устанавливаемыми интеграциями, а не скрытыми базовыми зависимостями.
+- **Контракт doctor для CI и support**: `giga doctor --json` теперь включает стабильную identity отчёта, версии packages/Python/platform и существующие evidence совместимости внешних CLI; `--fail-on blocked|degraded` задаёт явную CI exit policy, а `--output` атомарно записывает каноническое redaction-safe вложение для issue с mode `0600`.
+- **Окна поддержки внешних CLI**: version-aware probes теперь требуют одновременно проверенные capabilities и объявленную minor-линию Codex CLI `0.144.x`, Claude Code `2.1.x` или Gemini CLI `0.46.x`; слишком старые и потерявшие обязательные флаги версии получают `unsupported`, а новые или неразбираемые версии — машинно-читаемый `degraded` и остаются fail-closed до обновления fixtures и окна поддержки.
+- **Offline restore state и compatibility gate**: `giga state restore` теперь проверяет и переносит приватный backup в staging перед явной атомарной заменой, отклоняет активный или параллельно меняющийся destination, сохраняет file modes и SQLite integrity, принимает старые runtime schemas для forward migration при следующем открытии и fail-closed отклоняет schemas новее установленного Harness. Package rollback восстанавливает pre-upgrade архив вместо попытки reverse migration.
+- **Детерминированный backup пользовательского state**: `giga state backup` теперь создаёт атомарный versioned content-addressed архив quiescent Harness data directory с согласованными SQLite snapshots, защитой от transient files и symbolic links и mode `0600`; `giga state verify` проверяет manifest hashes, безопасные пути, ZIP integrity и каждую сохранённую SQLite database перед обновлением или откатом.
+- **Оставшиеся поверхности Cockpit V2**: Automation теперь объединяет Agents, Workflows и Schedules, Evaluation — Arena, Evals и Baselines, а Integrations — Harnesses, Models & routes, MCP и selected-plan Doctor; вторичная вкладка и выбранная запись сохраняются в deep link, React немедленно ограничивает ответы content-free projections, а run/eval/baseline/probe/doctor остаются отдельными действиями существующих API при сохранении legacy-маршрутов.
+- **Вертикали Cockpit Workbench и Runs**: opt-in React-клиент теперь реализует канонический путь Work → Run → Evidence → Review → Reuse поверх bounded projections сессий/runs и durable live tail, показывает реальное состояние ownership, trace, artifacts, approvals, Attention, apply и promotion и сохраняет approval, apply и promotion отдельными явными операциями с responsive-управлением панелями Workbench.
+- **Event-driven Cockpit streams**: run events теперь передаются через per-run уведомления, durable opaque cursor и `Last-Event-ID` вместо 250 мс full-state polling; heartbeat подхватывает межпроцессные записи, ограниченные client queues требуют явный resnapshot при backpressure, а React stream store пакетирует presentation deltas по animation frame, приоритизирует control events и предоставляет bounded virtualization, scroll-anchor и incremental Markdown primitives.
+- **Ограниченная read model Cockpit**: additive индексированные lookup сессий/runs, ограниченные по байтам и cursor страницы messages/runs/events/artifacts, ETag-bound snapshots и ленивые projections raw/diff/report заменяют full-bundle чтение при запуске Cockpit V2; клиент отменяет устаревшие scopes, дедуплицирует параллельные запросы, изолирует ответы вне порядка и точечно обновляет cache entries.
+- **Асинхронный UI data plane**: все FastAPI routes теперь имеют исчерпывающие контракты workload, storage/execution owner, deadline, cancellation, idempotency, payload, cursor и latency; filesystem, SQLite, network, subprocess, durable-job и SSE работа проходит через workload-bounded offload, а content-free диагностика показывает event-loop lag, queue/DB/storage/handler/serialization timing, response bytes и счётчики cancellation.
+- **Пакетный shell Cockpit V2**: добавлен закреплённый React/TypeScript/Vite frontend с пятью route-split поверхностями, ленивыми inspector-модулями, детерминированным content-hashed manifest, integrity-bound Brotli/gzip assets, CSP-safe same-origin загрузкой и wheel smoke без Node; legacy cockpit остаётся явным recovery route.
+
+- **Policy conformance для mutation-маршрутов**: все unsafe-method маршруты Harness API теперь входят в единый fail-closed semantic inventory с effect class, enforcement control и owner, стабильными permission actions там, где они применимы, и retained evidence для allow/ask/deny/stale/redaction; создание приложения и CI отклоняют неклассифицированные маршруты.
+- **Бюджеты производительности Cockpit**: packaged shell публикует и проверяет machine-readable бюджеты для веса critical assets, времени first-ready, размера/rendering большого trace DOM, cursor reconnect и ограниченных diff/report preview; полный retained report и явные copy, open и apply остаются доступны отдельно.
+- **Readiness выбранного запуска**: CLI/API/UI preflight до spawn показывает redaction-safe `ready`/`degraded`/`blocked` checks и remediation только для выбранных harness, invocation mode, route/model, workspace policy и durable/synchronous path; нерелевантные сбои не блокируют локальный Echo.
+
 ## [0.0.1a3] - 2026-07-15
 
 ### Добавлено
@@ -70,6 +100,7 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
+[0.1.0b1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.1.0b1
 [0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3
 [0.0.1a2]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a1...gpt2giga-harness-v0.0.1a2
 [0.0.1a1]: https://github.com/ai-forever/gpt2giga/releases/tag/gpt2giga-harness-v0.0.1a1

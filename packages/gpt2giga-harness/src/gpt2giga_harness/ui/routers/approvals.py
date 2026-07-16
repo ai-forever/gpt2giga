@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
+from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.runtime.models import ApprovalStatus
 from gpt2giga_harness.runtime.policy import (
     ApprovalDecision,
@@ -22,7 +23,7 @@ from gpt2giga_harness.sessions.models import HarnessStoredEvent
 from gpt2giga_harness.sessions.store import new_id, utc_now
 
 
-router = APIRouter()
+router = APIRouter(route_class=ConformantAPIRoute)
 
 
 @router.get("/api/policy/profiles")
@@ -49,7 +50,7 @@ async def policy_profiles() -> dict[str, Any]:
 
 
 @router.get("/api/approvals")
-async def approval_inbox(
+def approval_inbox(
     request: Request,
     status: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
@@ -69,7 +70,7 @@ async def approval_inbox(
 
 
 @router.post("/api/approvals/{approval_id}/decision")
-async def decide_approval(
+def decide_approval(
     approval_id: str,
     request: Request,
     payload: dict[str, Any] = Body(...),

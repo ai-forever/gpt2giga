@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 from pathlib import Path
 import platform
 import sqlite3
+import tempfile
 from typing import Any, Mapping
 
 from gpt2giga_harness import proxy
@@ -24,6 +27,7 @@ from gpt2giga_harness.runtime.store import RUNTIME_DB_NAME
 from gpt2giga_harness.types import AvailabilityStatus, redact_secrets
 
 DOCTOR_SCHEMA_VERSION = 1
+DOCTOR_REPORT_KIND = "gpt2giga_harness_doctor_report"
 _WORKER_STALE_AFTER_SECONDS = 30.0
 _MAX_SNAPSHOT_VALIDATIONS = 100
 _MAX_SNAPSHOT_BYTES = 1_000_000
@@ -84,6 +88,22 @@ def build_doctor_report(
     }
     report = {
         "schema_version": DOCTOR_SCHEMA_VERSION,
+        "kind": DOCTOR_REPORT_KIND,
+        "environment": {
+            "packages": {
+                "gpt2giga": _package_version("gpt2giga"),
+                "gpt2giga-harness": _package_version("gpt2giga-harness"),
+            },
+            "python": {
+                "implementation": platform.python_implementation(),
+                "version": platform.python_version(),
+            },
+            "platform": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "machine": platform.machine(),
+            },
+        },
         "ok": summary["blocked"] == 0,
         "summary": summary,
         "checks": checks,
@@ -101,6 +121,38 @@ def run_doctor(
     return format_doctor_report(
         build_doctor_report(config, registry, workspace=workspace)
     )
+
+
+def write_doctor_support_report(
+    report: Mapping[str, Any],
+    output: str | Path,
+) -> Path:
+    """Atomically write one canonical private JSON report for support."""
+    destination = Path(output).expanduser()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=destination.parent,
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+    )
+    temporary = Path(temporary_name)
+    payload = json.dumps(
+        _sanitize_report(dict(report)),
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(f"{payload}\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return destination
 
 
 def format_doctor_report(report: Mapping[str, Any]) -> str:
@@ -138,6 +190,10 @@ def _proxy_checks(
     sidecar: proxy.SidecarPreflight,
     models: proxy.ModelDiscovery,
     route_probes: Mapping[str, proxy.RouteProbe],
+    *,
+    selected_api_mode: str | None = None,
+    route_paths: tuple[str, ...] = ("/v1/chat/completions", "/v2/chat/completions"),
+    selected_model: str | None = None,
 ) -> list[dict[str, Any]]:
     if health.ok:
         proxy_status = "ready"
@@ -192,16 +248,16 @@ def _proxy_checks(
             ),
         ),
     ]
-    for path in ("/v1/chat/completions", "/v2/chat/completions"):
+    selected_mode = selected_api_mode or config.default_api_mode.value
+    for path in route_paths:
         route = route_probes.get(path)
-        selected_path = f"/{config.default_api_mode.value}/chat/completions"
         status = (
             "ready"
             if route is not None and route.ok
             else "degraded"
             if route is None and sidecar.ok
             else "blocked"
-            if path == selected_path
+            if path.split("/")[1] == selected_mode
             else "degraded"
         )
         checks.append(
@@ -231,7 +287,11 @@ def _proxy_checks(
                 ),
             )
         )
-    model_status = "ready" if models.models or config.default_model else "degraded"
+    model_status = (
+        "ready"
+        if models.models or selected_model or config.default_model
+        else "degraded"
+    )
     checks.append(
         _check(
             "model-discovery",
@@ -241,7 +301,7 @@ def _proxy_checks(
             evidence={
                 "count": len(models.models),
                 "source": models.source,
-                "default_configured": bool(config.default_model),
+                "default_configured": bool(selected_model or config.default_model),
             },
             remediation=(
                 ()
@@ -249,7 +309,7 @@ def _proxy_checks(
                 else (
                     _remedy(
                         "Set a default model or fix proxy model discovery.",
-                        "export GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max",
+                        "export GPT2GIGA_HARNESS_DEFAULT_MODEL=<model-from-/v2/models>",
                     ),
                 )
             ),
@@ -298,10 +358,17 @@ def _gigachat_check(
     )
 
 
-def _harness_checks(registry: HarnessRegistry) -> list[dict[str, Any]]:
+def _harness_checks(
+    registry: HarnessRegistry,
+    *,
+    harness_ids: tuple[str, ...] | None = None,
+    include_compatibility: bool = True,
+) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     for harness in registry.list():
         spec = harness.spec()
+        if harness_ids is not None and spec.id not in harness_ids:
+            continue
         availability = harness.availability()
         status = (
             "ready"
@@ -313,7 +380,7 @@ def _harness_checks(registry: HarnessRegistry) -> list[dict[str, Any]]:
             "reason": availability.reason,
         }
         probe_method = getattr(harness, "capability_probe", None)
-        if callable(probe_method):
+        if include_compatibility and callable(probe_method):
             compatibility = cli_capability_snapshot_to_dict(probe_method())
             compatibility.pop("command", None)
             evidence["compatibility"] = compatibility
@@ -557,8 +624,8 @@ def _read_worker_state(data_dir: str | Path) -> dict[str, Any]:
     if not path.is_file():
         return {"initialized": False, "online": 0, "offline": 0, "total": 0}
     try:
-        with sqlite3.connect(
-            f"{path.resolve().as_uri()}?mode=ro", uri=True
+        with closing(
+            sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
         ) as connection:
             rows = connection.execute(
                 "SELECT status, heartbeat_at FROM workers"
@@ -632,6 +699,13 @@ def _sanitize_report(value: Any) -> Any:
         home = str(Path.home())
         return value.replace(home, "~") if home else value
     return value
+
+
+def _package_version(distribution: str) -> str:
+    try:
+        return version(distribution)
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _health_text(health: proxy.ProxyHealth) -> str:

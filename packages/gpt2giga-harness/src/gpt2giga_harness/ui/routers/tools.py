@@ -6,7 +6,6 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from starlette.concurrency import run_in_threadpool
 
 from gpt2giga_harness.mcp import (
     MCPProbeHistoryStore,
@@ -16,6 +15,7 @@ from gpt2giga_harness.mcp import (
     mcp_probe_to_dict,
     probe_mcp_server,
 )
+from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.managed_mcp import (
     ManagedConfigConflictError,
     ManagedConfigOwnershipError,
@@ -30,6 +30,7 @@ from gpt2giga_harness.project import (
 )
 from gpt2giga_harness.runtime.policy import (
     EnforcementLevel,
+    MCP_SERVER_PROBE_OWNER,
     PermissionAction,
     PolicyContext,
     PolicyDecision,
@@ -40,11 +41,11 @@ from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.tools import CompositeSecretResolver, EnvironmentSecretResolver
 
 
-router = APIRouter()
+router = APIRouter(route_class=ConformantAPIRoute)
 
 
 @router.get("/api/tool-servers")
-async def tool_inventory(
+def tool_inventory(
     request: Request,
     workspace: str | None = Query(default=None),
 ) -> dict[str, Any]:
@@ -88,7 +89,7 @@ async def tool_inventory(
 
 
 @router.get("/api/tool-servers/{server_id}")
-async def tool_server_detail(
+def tool_server_detail(
     server_id: str,
     request: Request,
     workspace: str | None = Query(default=None),
@@ -106,7 +107,7 @@ async def tool_server_detail(
 
 
 @router.post("/api/tool-servers/{server_id}/probe", response_model=None)
-async def probe_tool_server(
+def probe_tool_server(
     server_id: str,
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
@@ -141,6 +142,7 @@ async def probe_tool_server(
                 "url": descriptor.url,
                 "operation": "initialize and list capabilities only",
             },
+            enforcement_owner=MCP_SERVER_PROBE_OWNER,
         )
         resolution = request.app.state.harness_policy_engine.resolve(
             action,
@@ -163,13 +165,13 @@ async def probe_tool_server(
     resolver = getattr(request.app.state, "harness_secret_resolver", None)
     if resolver is None:
         resolver = CompositeSecretResolver((EnvironmentSecretResolver(),))
-    result = await run_in_threadpool(probe_mcp_server, descriptor, resolver)
+    result = probe_mcp_server(descriptor, resolver)
     _history_store(request).append(result)
     return {"probe": mcp_probe_to_dict(result)}
 
 
 @router.post("/api/tool-config/preview")
-async def preview_tool_config(
+def preview_tool_config(
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
@@ -193,7 +195,7 @@ async def preview_tool_config(
 
 
 @router.post("/api/tool-config/apply")
-async def apply_tool_config(
+def apply_tool_config(
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
@@ -233,7 +235,7 @@ async def apply_tool_config(
 
 
 @router.post("/api/tool-config/rollback")
-async def rollback_tool_config(
+def rollback_tool_config(
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:

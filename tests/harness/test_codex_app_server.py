@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, replace
+import json
+from pathlib import Path
 import threading
 from typing import Any, Mapping
 
 from gpt2giga_harness.codex_app_server import (
     CodexAppServerSupervisor,
+    _collab_child_tool_events,
+    _normalize_notification,
     build_execution_snapshot,
 )
 from gpt2giga_harness.executables import ExecutableResolution
@@ -146,6 +150,196 @@ class _FakeAppServerClient:
         self._alive = False
 
 
+def test_turn_plan_update_is_normalized_for_workbench_rendering():
+    event, text = _normalize_notification(
+        "turn/plan/updated",
+        {
+            "turnId": "turn-1",
+            "plan": [
+                {"step": "Inspect stream", "status": "completed"},
+                {"step": "Render tools", "status": "inProgress"},
+            ],
+        },
+    )
+
+    assert text is None
+    assert event is not None
+    assert event.type == "plan_updated"
+    assert event.payload == {
+        "tool_call_id": "plan:turn-1",
+        "name": "update_plan",
+        "status": "running",
+        "arguments": {
+            "plan": [
+                {"step": "Inspect stream", "status": "completed"},
+                {"step": "Render tools", "status": "in_progress"},
+            ]
+        },
+    }
+
+
+def test_reasoning_usage_and_tool_result_are_normalized_for_workbench():
+    reasoning, _ = _normalize_notification(
+        "item/reasoning/summaryTextDelta",
+        {"delta": "Inspecting files", "itemId": "reason-1"},
+    )
+    usage, _ = _normalize_notification(
+        "thread/tokenUsage/updated",
+        {
+            "tokenUsage": {
+                "last": {
+                    "inputTokens": 21,
+                    "outputTokens": 8,
+                    "totalTokens": 29,
+                    "cachedInputTokens": 3,
+                },
+                "total": {
+                    "inputTokens": 100,
+                    "outputTokens": 50,
+                    "totalTokens": 150,
+                    "cachedInputTokens": 20,
+                },
+            }
+        },
+    )
+    tool, _ = _normalize_notification(
+        "item/completed",
+        {
+            "item": {
+                "id": "tool-1",
+                "type": "commandExecution",
+                "command": "pwd",
+                "cwd": "/workspace",
+                "status": "completed",
+                "aggregatedOutput": "/workspace\n",
+            }
+        },
+    )
+    failed_tool, _ = _normalize_notification(
+        "item/completed",
+        {
+            "item": {
+                "id": "tool-2",
+                "type": "commandExecution",
+                "command": "ls missing",
+                "cwd": "/workspace",
+                "status": "failed",
+                "exitCode": 2,
+                "stderr": "No such file or directory",
+            }
+        },
+    )
+
+    assert reasoning is not None
+    assert reasoning.type == "reasoning_delta"
+    assert reasoning.payload == {
+        "delta": "Inspecting files",
+        "item_id": "reason-1",
+        "kind": "summary",
+    }
+    assert usage is not None
+    assert usage.type == "usage"
+    assert usage.payload == {
+        "input_tokens": 21,
+        "output_tokens": 8,
+        "total_tokens": 29,
+        "cached_input_tokens": 3,
+    }
+    assert tool is not None
+    assert tool.payload["result"] == "/workspace\n"
+    assert failed_tool is not None
+    assert failed_tool.payload["status"] == "failed"
+    assert failed_tool.payload["result"] == {
+        "exitCode": 2,
+        "stderr": "No such file or directory",
+    }
+
+
+def test_collab_tool_exposes_subagent_identity_and_prompt():
+    event, text = _normalize_notification(
+        "item/completed",
+        {
+            "item": {
+                "id": "spawn-1",
+                "type": "collabToolCall",
+                "tool": "spawnAgent",
+                "status": "completed",
+                "prompt": "Inspect the repository configuration",
+                "receiverThreadIds": ["thread-child"],
+                "subagents": [
+                    {
+                        "id": "thread-child",
+                        "name": "Hypatia",
+                        "role": "explorer",
+                        "status": "completed",
+                    }
+                ],
+            }
+        },
+    )
+
+    assert text is None
+    assert event is not None
+    assert event.type == "tool_call_finished"
+    assert event.payload["name"] == "spawn_agent"
+    assert event.payload["arguments"] == {
+        "prompt": "Inspect the repository configuration",
+        "subagents": [
+            {
+                "id": "thread-child",
+                "name": "Hypatia",
+                "role": "explorer",
+                "status": "completed",
+            }
+        ],
+    }
+
+
+def test_collab_child_tools_are_nested_under_spawn_call():
+    events = _collab_child_tool_events(
+        (
+            {
+                "id": "thread-child",
+                "name": "Hypatia",
+                "role": "explorer",
+                "prompt": "Inspect the repository configuration",
+                "turns": [
+                    {
+                        "items": [
+                            {
+                                "id": "command-1",
+                                "type": "commandExecution",
+                                "command": "rg --files",
+                                "cwd": "/workspace",
+                                "status": "completed",
+                                "aggregatedOutput": "pyproject.toml\n",
+                            }
+                        ]
+                    }
+                ],
+            },
+        ),
+        subagent_parents={"thread-child": "spawn-1"},
+        seen=set(),
+    )
+
+    assert len(events) == 1
+    assert events[0].type == "tool_call_finished"
+    assert events[0].payload == {
+        "tool_call_id": "thread-child:command-1",
+        "parent_tool_call_id": "spawn-1",
+        "name": "shell",
+        "status": "completed",
+        "arguments": {"command": "rg --files", "cwd": "/workspace"},
+        "source": "codex-app-server-subagent",
+        "subagent_id": "thread-child",
+        "subagent_name": "Hypatia",
+        "subagent_role": "explorer",
+        "subagent_description": "Inspect the repository configuration",
+        "result": "pyproject.toml\n",
+    }
+
+
 class _ApprovalAppServerClient(_FakeAppServerClient):
     def request(
         self, method: str, params: Mapping[str, Any], *, timeout: float
@@ -162,6 +356,174 @@ class _ApprovalAppServerClient(_FakeAppServerClient):
                         "command": "dangerous",
                     },
                 }
+            )
+        return result
+
+
+class _CollabAppServerClient(_FakeAppServerClient):
+    def request(
+        self, method: str, params: Mapping[str, Any], *, timeout: float
+    ) -> Mapping[str, Any]:
+        if method == "thread/read" and params.get("threadId") == "thread-child":
+            self.recorder.append((method, dict(params)))
+            return {
+                "thread": {
+                    "id": "thread-child",
+                    "agentNickname": "Hypatia",
+                    "agentRole": "explorer",
+                    "status": {"type": "idle"},
+                    "turns": [
+                        {
+                            "items": [
+                                {
+                                    "id": "child-command",
+                                    "type": "commandExecution",
+                                    "command": "rg --files",
+                                    "cwd": "/workspace",
+                                    "status": "completed",
+                                    "aggregatedOutput": "pyproject.toml\n",
+                                }
+                            ]
+                        }
+                    ],
+                }
+            }
+        result = super().request(method, params, timeout=timeout)
+        if method == "turn/start":
+            completed = self.messages.pop()
+            thread_id = str(params["threadId"])
+            turn_id = str(result["turn"]["id"])
+            shared = {
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "item": {
+                    "status": "completed",
+                    "receiverThreadIds": ["thread-child"],
+                    "agentsStates": {
+                        "thread-child": {
+                            "status": "completed",
+                            "message": "Repository inspected",
+                        }
+                    },
+                },
+            }
+            self.messages.extend(
+                (
+                    {
+                        "method": "item/completed",
+                        "params": {
+                            **shared,
+                            "item": {
+                                **shared["item"],
+                                "id": "spawn-1",
+                                "type": "collabToolCall",
+                                "tool": "spawnAgent",
+                                "prompt": "Inspect repository configuration",
+                            },
+                        },
+                    },
+                    {
+                        "method": "item/completed",
+                        "params": {
+                            **shared,
+                            "item": {
+                                **shared["item"],
+                                "id": "wait-1",
+                                "type": "collabToolCall",
+                                "tool": "wait",
+                            },
+                        },
+                    },
+                    completed,
+                )
+            )
+        return result
+
+
+class _RolloutFunctionCallAppServerClient(_FakeAppServerClient):
+    def __init__(self, **kwargs) -> None:
+        self.home = Path(kwargs["env"]["CODEX_HOME"])
+        self.rollout_path = self.home / "sessions" / "parent.jsonl"
+        super().__init__(**kwargs)
+
+    def request(
+        self, method: str, params: Mapping[str, Any], *, timeout: float
+    ) -> Mapping[str, Any]:
+        if method == "thread/read" and params.get("threadId") == "thread-1":
+            self.recorder.append((method, dict(params)))
+            return {
+                "thread": {
+                    "id": "thread-1",
+                    "path": str(self.rollout_path),
+                    "turns": [],
+                }
+            }
+        if method == "thread/read" and params.get("threadId") == "thread-child":
+            self.recorder.append((method, dict(params)))
+            return {
+                "thread": {
+                    "id": "thread-child",
+                    "agentNickname": "Hilbert",
+                    "status": {"type": "notLoaded"},
+                    "turns": [
+                        {
+                            "status": "completed",
+                            "items": [
+                                {
+                                    "id": "child-command",
+                                    "type": "commandExecution",
+                                    "command": "rg --files",
+                                    "cwd": "/workspace",
+                                    "status": "completed",
+                                    "aggregatedOutput": "pyproject.toml\n",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        result = super().request(method, params, timeout=timeout)
+        if method == "turn/start":
+            turn_id = str(result["turn"]["id"])
+            records = (
+                {
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": turn_id},
+                },
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call",
+                        "id": "fc-spawn",
+                        "name": "spawn_agent",
+                        "namespace": "multi_agent_v1",
+                        "arguments": json.dumps(
+                            {"message": "Inspect repository configuration"}
+                        ),
+                        "call_id": "call-spawn",
+                        "internal_chat_message_metadata_passthrough": {
+                            "turn_id": turn_id
+                        },
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call_output",
+                        "call_id": "call-spawn",
+                        "output": json.dumps(
+                            {"agent_id": "thread-child", "nickname": "Hilbert"}
+                        ),
+                        "internal_chat_message_metadata_passthrough": {
+                            "turn_id": turn_id
+                        },
+                    },
+                },
+            )
+            self.rollout_path.parent.mkdir(parents=True, exist_ok=True)
+            self.rollout_path.write_text(
+                "".join(json.dumps(record) + "\n" for record in records),
+                encoding="utf-8",
             )
         return result
 
@@ -218,7 +580,9 @@ def test_two_prompts_share_one_app_server_thread_and_process(tmp_path):
     assert [method for method, _params in recorder] == [
         "thread/start",
         "turn/start",
+        "thread/read",
         "turn/start",
+        "thread/read",
     ]
     turn_starts = [params for method, params in recorder if method == "turn/start"]
     assert [params["threadId"] for params in turn_starts] == [
@@ -233,6 +597,106 @@ def test_two_prompts_share_one_app_server_thread_and_process(tmp_path):
         "first prompt" not in item.read_text(encoding="utf-8")
         for item in tmp_path.rglob("*.json")
     )
+
+
+def test_app_server_projects_named_subagent_with_nested_tools(tmp_path):
+    recorder: list[tuple[str, dict[str, Any]]] = []
+    supervisor = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=lambda **kwargs: _CollabAppServerClient(
+            recorder=recorder, **kwargs
+        ),
+    )
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+    )
+    request = _request(tmp_path, session_id="sess-collab")
+    snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
+
+    result = supervisor.run_turn(
+        request,
+        context,
+        resolution=_resolution(),
+        prompt="delegate",
+        continuation=_continuation(snapshot, prompt_id="msg-collab"),
+    )
+
+    assert result.ok is True
+    spawn = next(
+        event
+        for event in result.events
+        if event.payload.get("tool_call_id") == "spawn-1"
+    )
+    child = next(
+        event
+        for event in result.events
+        if event.payload.get("tool_call_id") == "thread-child:child-command"
+    )
+    assert spawn.payload["arguments"]["subagents"][0] == {
+        "id": "thread-child",
+        "name": "Hypatia",
+        "role": "explorer",
+        "status": "completed",
+        "message": "Repository inspected",
+        "prompt": "Inspect repository configuration",
+    }
+    assert child.payload["parent_tool_call_id"] == "spawn-1"
+    assert child.payload["subagent_name"] == "Hypatia"
+
+
+def test_app_server_backfills_rollout_function_calls_omitted_from_thread_items(
+    tmp_path,
+):
+    recorder: list[tuple[str, dict[str, Any]]] = []
+    supervisor = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=lambda **kwargs: _RolloutFunctionCallAppServerClient(
+            recorder=recorder, **kwargs
+        ),
+    )
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+    )
+    request = _request(tmp_path, session_id="sess-rollout-collab")
+    snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
+
+    result = supervisor.run_turn(
+        request,
+        context,
+        resolution=_resolution(),
+        prompt="delegate",
+        continuation=_continuation(snapshot, prompt_id="msg-rollout-collab"),
+    )
+
+    assert result.ok is True
+    spawn = next(
+        event
+        for event in result.events
+        if event.payload.get("tool_call_id") == "call-spawn"
+    )
+    child = next(
+        event
+        for event in result.events
+        if event.payload.get("tool_call_id") == "thread-child:child-command"
+    )
+    assert spawn.type == "tool_call_finished"
+    assert spawn.payload["name"] == "spawn_agent"
+    assert spawn.payload["source"] == "codex-app-server-rollout"
+    assert spawn.payload["arguments"]["prompt"] == ("Inspect repository configuration")
+    assert spawn.payload["arguments"]["subagents"] == [
+        {
+            "id": "thread-child",
+            "name": "Hilbert",
+            "status": "completed",
+            "prompt": "Inspect repository configuration",
+        }
+    ]
+    assert child.payload["parent_tool_call_id"] == "call-spawn"
+    assert child.payload["subagent_name"] == "Hilbert"
 
 
 def test_owner_change_reads_and_resumes_persisted_thread(tmp_path):
@@ -274,7 +738,12 @@ def test_owner_change_reads_and_resumes_persisted_thread(tmp_path):
         "thread/read",
         "thread/resume",
         "turn/start",
+        "thread/read",
     ]
+    resume_params = next(
+        params for method, params in recovered_recorder if method == "thread/resume"
+    )
+    assert "excludeTurns" not in resume_params
     link = result.raw["app_server_thread"]
     assert link["thread_id"] == "thread-1"
     assert link["recovery_outcome"] == "resumed_after_owner_change"
@@ -316,6 +785,8 @@ def test_fork_uses_thread_fork_and_duplicate_prompt_is_rejected(tmp_path):
     assert first.raw["app_server_thread"]["forked_from_thread_id"] == "thread-source"
     assert duplicate.ok is False
     assert "already submitted" in str(duplicate.error)
+    fork_params = next(params for method, params in recorder if method == "thread/fork")
+    assert "excludeTurns" not in fork_params
     assert [method for method, _params in recorder].count("thread/fork") == 1
     assert [method for method, _params in recorder].count("turn/start") == 1
 

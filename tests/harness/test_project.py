@@ -75,7 +75,7 @@ def test_load_project_config_returns_defaults_when_missing(tmp_path):
     assert config.exists is False
     assert config.project_name is None
     assert config.defaults.harness == "codex-cli"
-    assert config.defaults.model == "GigaChat-2-Max"
+    assert config.defaults.model == "GigaChat-3.5-432B-A28B"
     assert config.defaults.api_mode.value == "v2"
     assert config.defaults.mode == "plan"
     assert config.enabled_harnesses == DEFAULT_ENABLED_HARNESSES

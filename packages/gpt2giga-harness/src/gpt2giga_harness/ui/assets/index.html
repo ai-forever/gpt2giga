@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>gpt2giga Harness</title>
   <link rel="icon" href="/assets/favicon.ico" sizes="any">
-  <link rel="stylesheet" href="/assets/app.css?v=38.38">
+  <link rel="stylesheet" href="/assets/app.css?v=38.44">
 </head>
 <body>
   <div class="app">
@@ -424,6 +424,18 @@
               <button id="save-workflow-button" type="button" disabled>Save revision</button>
             </div>
             <div class="workflow-dag-panel"><h3>DAG preview</h3><div id="workflow-dag" class="workflow-dag"></div></div>
+            <section class="workflow-run-panel" aria-label="Run selected workflow">
+              <div class="agent-editor-header">
+                <div><h3>Run workflow</h3><p id="workflow-run-status" class="status-line">Select a workflow to start the same durable contract used by CLI and API.</p></div>
+                <button id="run-workflow-button" type="button" disabled>Run workflow</button>
+              </div>
+              <label>Prompt override<textarea id="workflow-run-prompt" placeholder="Leave empty to use the workflow default" disabled></textarea></label>
+              <label>Input overrides (JSON object)<textarea id="workflow-run-inputs" class="workflow-run-inputs" spellcheck="false" disabled>{}</textarea></label>
+              <div class="workflow-run-inspection">
+                <div><h3>Durable runs</h3><div id="workflow-runs-list" class="workflow-runs-list" aria-live="polite">No workflow selected.</div></div>
+                <div><h3>Exact run state</h3><pre id="workflow-run-detail" class="runs-payload-panel">Select a durable run to inspect its content-free state.</pre></div>
+              </div>
+            </section>
             <details><summary>Revision history</summary><div id="workflow-history" class="tool-profile-list"></div></details>
           </div>
         </div>
@@ -597,8 +609,23 @@
                 <button id="runs-retry-button" type="button" disabled>Retry safe attempt</button>
                 <button id="runs-open-worktree-button" class="secondary" type="button" disabled>Open worktree</button>
                 <button id="runs-inspect-artifact-button" class="secondary" type="button" disabled>Inspect artifact</button>
+                <button id="runs-support-bundle-button" class="secondary" type="button" disabled>Export support bundle</button>
               </div>
             </div>
+            <section id="runs-ownership-panel" class="runs-ownership-panel" aria-label="Activity ownership" hidden>
+              <div class="agent-team-heading">
+                <strong>Activity &amp; ownership</strong>
+                <span id="runs-ownership-summary" class="status-line"></span>
+              </div>
+              <dl id="runs-ownership-grid" class="runs-ownership-grid"></dl>
+            </section>
+            <section id="runs-explanations-panel" class="runs-explanations-panel" aria-label="Operational explanations" hidden>
+              <div class="agent-team-heading">
+                <strong>Why this run is in this state</strong>
+                <span id="runs-explanations-summary" class="status-line"></span>
+              </div>
+              <div id="runs-explanations-grid" class="runs-explanations-grid"></div>
+            </section>
             <section id="runs-team-panel" class="agent-team-panel" hidden>
               <div class="agent-team-heading">
                 <strong id="runs-team-title">Agent team</strong>
@@ -812,6 +839,7 @@
           </div>
           <button id="close-preflight-button" class="secondary" type="button" aria-label="Close preflight">Close</button>
         </div>
+        <pre id="preflight-readiness" class="mono-panel preflight-readiness">No execution readiness report.</pre>
         <div id="preflight-finding-list" class="preflight-list"></div>
         <pre id="preflight-budget" class="mono-panel preflight-budget">No preflight report.</pre>
         <div class="preflight-footer">
@@ -835,6 +863,6 @@
     </div>
   </div>
 
-  <script src="/assets/app.js?v=38.43"></script>
+  <script src="/assets/app.js?v=38.53"></script>
 </body>
 </html>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -28,7 +29,11 @@ from gpt2giga_harness.capability_matrix import (
 )
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
-from gpt2giga_harness.doctor import build_doctor_report, run_doctor
+from gpt2giga_harness.doctor import (
+    build_doctor_report,
+    format_doctor_report,
+    write_doctor_support_report,
+)
 from gpt2giga_harness.editor import (
     build_open_diff_plan,
     build_open_file_plan,
@@ -104,6 +109,7 @@ from gpt2giga_harness.provenance import (
     build_run_provenance,
     run_provenance_to_dict,
 )
+from gpt2giga_harness.readiness import build_execution_readiness
 from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
 from gpt2giga_harness.registry import UnknownHarnessError, create_default_registry
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
@@ -139,6 +145,11 @@ from gpt2giga_harness.sessions.models import (
 )
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import new_id, utc_now
+from gpt2giga_harness.state_backup import (
+    create_state_backup,
+    restore_state_backup,
+    verify_state_backup,
+)
 from gpt2giga_harness.types import (
     HarnessCapability,
     HarnessRequest,
@@ -150,6 +161,7 @@ from gpt2giga_harness.types import (
     spec_capability_values,
     spec_to_dict,
 )
+from gpt2giga_harness.worktrees import parse_workspace_policy
 from gpt2giga_harness.ui.app import create_app, validate_ui_bind
 from gpt2giga_harness.ui.security import is_loopback_host
 from gpt2giga_harness.workspace import resolve_workspace
@@ -172,6 +184,8 @@ AGENT_ALIASES = {
 
 UI_WORKER_START_TIMEOUT_SECONDS = 5.0
 UI_WORKER_STOP_TIMEOUT_SECONDS = 3.0
+UI_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5
+MAX_UI_WORKER_COUNT = 32
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -224,6 +238,17 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = subparsers.add_parser("doctor", parents=[common])
     doctor.add_argument("workspace", nargs="?", default=None)
     doctor.add_argument("--json", action="store_true")
+    doctor.add_argument(
+        "--output",
+        default=None,
+        help="Atomically write a private canonical JSON support report",
+    )
+    doctor.add_argument(
+        "--fail-on",
+        choices=("blocked", "degraded"),
+        default=None,
+        help="Return 1 when the selected CI readiness threshold is reached",
+    )
     doctor.set_defaults(handler=_handle_doctor)
 
     config_parser = subparsers.add_parser("config")
@@ -261,7 +286,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--start-worker",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Start a local durable worker when no online worker is available",
+        help="Start local durable workers until the target worker count is online",
+    )
+    ui.add_argument(
+        "--worker-count",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Target durable worker pool size when worker auto-start is enabled",
     )
     ui.set_defaults(handler=_handle_ui)
 
@@ -302,6 +334,26 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_export = runtime_subparsers.add_parser("export")
     runtime_export.add_argument("--output", default=None)
     runtime_export.set_defaults(handler=_handle_runtime_export)
+
+    state = subparsers.add_parser("state")
+    state_subparsers = state.add_subparsers(dest="state_command")
+
+    state_backup = state_subparsers.add_parser("backup")
+    state_backup.add_argument("--output", required=True)
+    state_backup.add_argument("--json", action="store_true")
+    state_backup.set_defaults(handler=_handle_state_backup)
+
+    state_verify = state_subparsers.add_parser("verify")
+    state_verify.add_argument("archive")
+    state_verify.add_argument("--json", action="store_true")
+    state_verify.set_defaults(handler=_handle_state_verify)
+
+    state_restore = state_subparsers.add_parser("restore")
+    state_restore.add_argument("archive")
+    state_restore.add_argument("--destination", default=None)
+    state_restore.add_argument("--replace", action="store_true")
+    state_restore.add_argument("--json", action="store_true")
+    state_restore.set_defaults(handler=_handle_state_restore)
 
     worker = subparsers.add_parser("worker", parents=[common])
     worker_subparsers = worker.add_subparsers(dest="worker_command")
@@ -619,10 +671,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _handle_doctor(args: argparse.Namespace, config: HarnessConfig) -> int:
+    report = build_doctor_report(config, workspace=args.workspace)
+    if args.output is not None:
+        write_doctor_support_report(report, args.output)
     if args.json:
-        _print_json(build_doctor_report(config, workspace=args.workspace))
+        _print_json(report)
     else:
-        print(run_doctor(config, workspace=args.workspace))
+        print(format_doctor_report(report))
+    summary = report.get("summary") or {}
+    blocked = int(summary.get("blocked") or 0)
+    degraded = int(summary.get("degraded") or 0)
+    if args.fail_on == "blocked" and blocked:
+        return 1
+    if args.fail_on == "degraded" and (blocked or degraded):
+        return 1
     return 0
 
 
@@ -1013,6 +1075,45 @@ def _handle_runtime_export(args: argparse.Namespace, config: HarnessConfig) -> i
     )
     temp.replace(output)
     print(f"Exported runtime coordination state to {output}")
+    return 0
+
+
+def _handle_state_backup(args: argparse.Namespace, config: HarnessConfig) -> int:
+    result = create_state_backup(config.data_dir, args.output)
+    if args.json:
+        _print_json(result.to_dict())
+    else:
+        print(f"Backed up Harness state to {Path(args.output).expanduser()}")
+        print(f"SHA-256: {result.sha256}")
+        print(f"Files: {result.file_count}; bytes: {result.total_bytes}")
+    return 0
+
+
+def _handle_state_verify(args: argparse.Namespace, config: HarnessConfig) -> int:
+    del config
+    result = verify_state_backup(args.archive)
+    if args.json:
+        _print_json(result.to_dict())
+    else:
+        print(f"Verified Harness state backup: {Path(args.archive).expanduser()}")
+        print(f"SHA-256: {result.sha256}")
+        print(f"Files: {result.file_count}; bytes: {result.total_bytes}")
+    return 0
+
+
+def _handle_state_restore(args: argparse.Namespace, config: HarnessConfig) -> int:
+    destination = args.destination or config.data_dir
+    result = restore_state_backup(
+        args.archive,
+        destination,
+        replace=args.replace,
+    )
+    if args.json:
+        _print_json(result.to_dict())
+    else:
+        print(f"Restored Harness state to {Path(destination).expanduser()}")
+        print(f"SHA-256: {result.backup.sha256}")
+        print(f"Files: {result.backup.file_count}; bytes: {result.backup.total_bytes}")
     return 0
 
 
@@ -1793,6 +1894,10 @@ def _handle_open_file(args: argparse.Namespace, config: HarnessConfig) -> int:
 def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     config = config.with_overrides(ui_host=args.host, ui_port=args.port)
     validate_ui_bind(config.ui_host, allow_remote=args.allow_remote)
+    if not 1 <= args.worker_count <= MAX_UI_WORKER_COUNT:
+        raise ValueError(
+            f"UI worker count must be between 1 and {MAX_UI_WORKER_COUNT}."
+        )
     if args.allow_remote and not is_loopback_host(config.ui_host):
         if config.ui_bootstrap_token:
             warning = "Remote UI browser authentication is enabled."
@@ -1805,21 +1910,41 @@ def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     print(
         f"Starting gpt2giga Unified Harness UI at http://{config.ui_host}:{config.ui_port}/"
     )
-    worker_process = _start_ui_worker(config) if args.start_worker else None
+    worker_processes = (
+        _start_ui_workers(config, worker_count=args.worker_count)
+        if args.start_worker
+        else ()
+    )
     try:
         app = create_app(config)
-        uvicorn.run(app, host=config.ui_host, port=config.ui_port, log_level="info")
+        uvicorn.run(
+            app,
+            host=config.ui_host,
+            port=config.ui_port,
+            log_level="info",
+            timeout_graceful_shutdown=UI_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
+        )
     finally:
-        if worker_process is not None:
-            _stop_ui_worker(worker_process)
+        _stop_ui_workers(worker_processes)
     return 0
 
 
-def _start_ui_worker(config: HarnessConfig) -> subprocess.Popen[bytes] | None:
+def _start_ui_workers(
+    config: HarnessConfig,
+    *,
+    worker_count: int,
+) -> tuple[subprocess.Popen[bytes], ...]:
     runtime_store = RuntimeCoordinationStore(config.data_dir)
-    if worker_status(runtime_store)["online"]:
-        print("Using an existing online durable Harness worker.")
-        return None
+    online = int(worker_status(runtime_store)["online"])
+    missing = max(worker_count - online, 0)
+    if missing == 0:
+        print(f"Using {online} existing online durable Harness worker(s).")
+        return ()
+    if online:
+        print(
+            f"Using {online} existing online durable Harness worker(s); "
+            f"starting {missing} more."
+        )
 
     environment = os.environ.copy()
     environment.update(
@@ -1836,14 +1961,37 @@ def _start_ui_worker(config: HarnessConfig) -> subprocess.Popen[bytes] | None:
     if config.default_model:
         environment["GPT2GIGA_HARNESS_DEFAULT_MODEL"] = config.default_model
 
+    processes: list[subprocess.Popen[bytes]] = []
     try:
-        process = subprocess.Popen(
-            [sys.executable, "-m", "gpt2giga_harness.cli", "worker", "start"],
-            env=environment,
-        )
-    except OSError as exc:
-        raise ValueError(f"Failed to start durable Harness worker: {exc}") from exc
+        for _ in range(missing):
+            try:
+                process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "gpt2giga_harness.cli",
+                        "worker",
+                        "start",
+                    ],
+                    env=environment,
+                )
+            except OSError as exc:
+                raise ValueError(
+                    f"Failed to start durable Harness worker: {exc}"
+                ) from exc
+            processes.append(process)
+            _wait_for_ui_worker(runtime_store, process)
+            print(f"Started durable Harness worker pid={process.pid}.")
+    except Exception:
+        _stop_ui_workers(processes)
+        raise
+    return tuple(processes)
 
+
+def _wait_for_ui_worker(
+    runtime_store: RuntimeCoordinationStore,
+    process: subprocess.Popen[bytes],
+) -> None:
     deadline = time.monotonic() + UI_WORKER_START_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         return_code = process.poll()
@@ -1851,13 +1999,21 @@ def _start_ui_worker(config: HarnessConfig) -> subprocess.Popen[bytes] | None:
             raise ValueError(
                 f"Durable Harness worker exited during startup with code {return_code}."
             )
-        if worker_status(runtime_store)["online"]:
-            print(f"Started durable Harness worker pid={process.pid}.")
-            return process
+        status = worker_status(runtime_store)
+        if any(
+            worker["status"] == "online" and int(worker["process_id"]) == process.pid
+            for worker in status["workers"]
+        ):
+            return
         time.sleep(0.05)
-
-    _stop_ui_worker(process)
     raise ValueError("Timed out waiting for the durable Harness worker to start.")
+
+
+def _stop_ui_workers(
+    processes: tuple[subprocess.Popen[bytes], ...] | list[subprocess.Popen[bytes]],
+) -> None:
+    for process in reversed(processes):
+        _stop_ui_worker(process)
 
 
 def _stop_ui_worker(process: subprocess.Popen[bytes]) -> None:
@@ -1978,6 +2134,19 @@ def _run_harness(
         prompt=request.prompt,
         workspace=request.workspace,
         data_dir=config.data_dir,
+        readiness=build_execution_readiness(
+            config,
+            registry,
+            harness_id=harness_id,
+            invocation_mode=invocation_mode,
+            api_mode=request.api_mode,
+            model=request.model or config.default_model,
+            mode=request.mode,
+            workspace=request.workspace,
+            workspace_policy=parse_workspace_policy(workspace_policy),
+            durable=False,
+            dry_run=dry_run,
+        ),
     )
     if preflight.hard_block:
         return HarnessResult(
@@ -1988,35 +2157,47 @@ def _run_harness(
         )
     if native:
         if not spec.supports_native_sessions:
-            return HarnessResult(
-                ok=False,
-                text="",
-                error=f"Harness does not support native sessions: {harness_id}",
+            return _result_with_preflight(
+                HarnessResult(
+                    ok=False,
+                    text="",
+                    error=f"Harness does not support native sessions: {harness_id}",
+                ),
+                preflight,
             )
         if not dry_run:
-            return HarnessResult(
-                ok=False,
-                text="",
-                error="Native CLI runs currently require --dry-run",
+            return _result_with_preflight(
+                HarnessResult(
+                    ok=False,
+                    text="",
+                    error="Native CLI runs currently require --dry-run",
+                ),
+                preflight,
             )
         try:
             connector = create_default_native_registry(data_dir=config.data_dir).get(
                 harness_id
             )
         except UnknownNativeHistoryConnectorError:
-            return HarnessResult(
-                ok=False,
-                text="",
-                error=f"Native connector is not registered: {harness_id}",
+            return _result_with_preflight(
+                HarnessResult(
+                    ok=False,
+                    text="",
+                    error=f"Native connector is not registered: {harness_id}",
+                ),
+                preflight,
             )
         plan = connector.build_start_command(request, config.to_context())
-        return HarnessResult(
-            ok=True,
-            text="native dry run",
-            raw={"native_command_plan": native_command_plan_to_dict(plan)},
-            command=plan.command,
+        return _result_with_preflight(
+            HarnessResult(
+                ok=True,
+                text="native dry run",
+                raw={"native_command_plan": native_command_plan_to_dict(plan)},
+                command=plan.command,
+            ),
+            preflight,
         )
-    return harness.run(request, config.to_context())
+    return _result_with_preflight(harness.run(request, config.to_context()), preflight)
 
 
 def _config_from_args(args: argparse.Namespace) -> HarnessConfig:
@@ -2032,10 +2213,43 @@ def _print_result(result, *, as_json: bool) -> None:
     if as_json:
         _print_json(payload)
         return
+    _print_readiness_remediation(payload)
     if result.ok:
         print(result.text)
     else:
         print(result.error or "harness failed", file=sys.stderr)
+
+
+def _result_with_preflight(result: HarnessResult, preflight) -> HarnessResult:
+    return replace(
+        result,
+        raw={
+            **dict(result.raw),
+            "preflight": preflight_report_to_dict(preflight),
+        },
+    )
+
+
+def _print_readiness_remediation(payload: Mapping[str, Any]) -> None:
+    raw = payload.get("raw")
+    preflight = raw.get("preflight") if isinstance(raw, Mapping) else None
+    readiness = preflight.get("readiness") if isinstance(preflight, Mapping) else None
+    findings = readiness.get("findings") if isinstance(readiness, Mapping) else None
+    for finding in findings or ():
+        if not isinstance(finding, Mapping) or finding.get("status") == "ready":
+            continue
+        status = str(finding.get("status") or "degraded").upper()
+        summary = str(finding.get("summary") or finding.get("id") or "readiness")
+        print(f"Readiness [{status}]: {summary}", file=sys.stderr)
+        for remedy in finding.get("remediation") or ():
+            if not isinstance(remedy, Mapping):
+                continue
+            message = remedy.get("message")
+            command = remedy.get("command")
+            if message:
+                print(f"  Remedy: {message}", file=sys.stderr)
+            if command:
+                print(f"  Command: {command}", file=sys.stderr)
 
 
 def _print_json(value: Any) -> None:

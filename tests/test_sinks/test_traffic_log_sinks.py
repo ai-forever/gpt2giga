@@ -96,8 +96,38 @@ def test_traffic_log_factory_creates_jsonl_when_enabled(tmp_path):
 
     sink = create_traffic_log_sink(settings)
 
-    assert isinstance(sink, JsonlTrafficLogSink)
-    assert sink.path == path
+    assert isinstance(sink, QueuedTrafficLogSink)
+    assert isinstance(sink.sink, JsonlTrafficLogSink)
+    assert sink.sink.path == path
+
+
+async def test_jsonl_traffic_log_sink_writes_batch_in_one_append(tmp_path):
+    path = tmp_path / "traffic.jsonl"
+    sink = JsonlTrafficLogSink(path)
+
+    await sink.emit_many(
+        [
+            TrafficLogEvent(
+                request_id="req-1",
+                trace_id="trace-1",
+                protocol="openai",
+                route="/v1/models",
+                method="GET",
+            ),
+            TrafficLogEvent(
+                request_id="req-2",
+                trace_id="trace-2",
+                protocol="openai",
+                route="/v1/models",
+                method="GET",
+            ),
+        ]
+    )
+
+    payloads = [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [payload["request_id"] for payload in payloads] == ["req-1", "req-2"]
 
 
 def test_traffic_log_factory_creates_noop_for_postgres_without_dsn():

@@ -179,7 +179,7 @@ def _executable(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "#!/bin/sh\n"
-        'if [ "$1" = "--version" ]; then echo "fixture 1.2.3"; exit 0; fi\n'
+        'if [ "$1" = "--version" ]; then echo "fixture 0.144.3"; exit 0; fi\n'
         'echo "--json --sandbox --ephemeral --image --output-format stream-json '
         "--permission-mode --no-session-persistence --include-partial-messages "
         '--approval-mode --skip-trust --prompt-interactive --list-sessions --resume"\n',

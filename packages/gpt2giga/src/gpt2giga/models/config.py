@@ -46,6 +46,10 @@ class ProxySettings(BaseSettings):
     pass_token: bool = Field(
         default=False, description="Передавать токен из запроса в API"
     )
+    pass_token_client_cache_size: PositiveInt = Field(
+        default=32,
+        description="Maximum number of idle credential-specific GigaChat clients.",
+    )
     embeddings: str = Field(
         default="EmbeddingsGigaR", description="Модель для эмбеддингов"
     )
@@ -285,6 +289,14 @@ class ProxySettings(BaseSettings):
         ge=0.0,
         le=1.0,
         description="Fraction of requests to trace when observability is enabled.",
+    )
+    observability_queue_size: PositiveInt = Field(
+        default=10_000,
+        description="Maximum queued observability events awaiting export.",
+    )
+    observability_drop_on_backpressure: bool = Field(
+        default=True,
+        description="Drop observability events instead of blocking requests when full.",
     )
     observability_capture_content: bool = Field(
         default=False,

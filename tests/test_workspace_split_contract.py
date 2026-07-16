@@ -179,6 +179,7 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert ".venv-artifact/bin/gpt2giga --help" in workflow
     assert ".venv-artifact/bin/giga --help" in workflow
     assert ".venv-artifact/bin/gpt2giga-harness --help" in workflow
+    assert "python -I -m gpt2giga_harness.base_install --json" in workflow
 
 
 def test_code_workflows_skip_documentation_only_changes():
@@ -277,7 +278,7 @@ def test_split_install_and_namespace_migration_are_documented():
 
     for guide in (readme, quickstart):
         assert "uv tool install --prerelease allow gpt2giga" in guide
-        assert "uv tool install gpt2giga-harness" in guide
+        assert "uv tool install --prerelease allow gpt2giga-harness" in guide
         assert "gpt2giga_harness" in guide
 
     assert "Migration from the Combined Prerelease" in harness_guide
@@ -311,3 +312,4 @@ def test_production_docker_build_remains_gateway_only():
     assert "packages/gpt2giga-harness" not in dockerfile
     assert "gpt2giga_harness" not in dockerfile
     assert "packages/gpt2giga-harness" not in docker_workflows
+    assert "- 'uv.lock'" not in docker_workflows

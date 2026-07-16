@@ -17,6 +17,7 @@ from gpt2giga_harness.safe_paths import (
     resolve_operator_path,
     resolve_path_within,
 )
+from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 
 _MAX_PREVIEW_BYTES = 25 * 1024 * 1024
 _SAFE_IMAGE_TYPES = frozenset(
@@ -58,12 +59,12 @@ _SAFE_TEXT_SUFFIXES = frozenset(
 
 def create_file_preview_router(data_dir: str | None = None) -> APIRouter:
     """Create the bounded local-file preview router."""
-    router = APIRouter()
+    router = APIRouter(route_class=ConformantAPIRoute)
 
     @router.get(
         "/api/files/generated/{run_key}/{filename}", response_class=FileResponse
     )
-    async def generated_file(run_key: str, filename: str) -> FileResponse:
+    def generated_file(run_key: str, filename: str) -> FileResponse:
         if data_dir is None:
             raise HTTPException(status_code=404, detail="Generated file not found")
         try:
@@ -89,7 +90,7 @@ def create_file_preview_router(data_dir: str | None = None) -> APIRouter:
         )
 
     @router.get("/api/files/preview", response_class=FileResponse)
-    async def preview_file(
+    def preview_file(
         path: str = Query(min_length=1),
         workspace: str | None = Query(default=None),
     ) -> FileResponse:

@@ -1,6 +1,7 @@
 """Request-scoped context for internal routing and future observability."""
 
 import hashlib
+import hmac
 import secrets
 import uuid
 from contextvars import ContextVar
@@ -13,7 +14,6 @@ from starlette.requests import Request
 from gpt2giga.core.caller import infer_request_caller
 
 _FINGERPRINT_KEY = secrets.token_bytes(32)
-_FINGERPRINT_ITERATIONS = 100_000
 
 
 @dataclass
@@ -183,11 +183,5 @@ def fingerprint_sensitive_value(value: Optional[str]) -> Optional[str]:
     """Return a request-correlation fingerprint without storing raw secrets."""
     if not value:
         return None
-    digest = hashlib.pbkdf2_hmac(
-        "sha256",
-        value.encode("utf-8"),
-        _FINGERPRINT_KEY,
-        _FINGERPRINT_ITERATIONS,
-        dklen=8,
-    ).hex()
-    return f"pbkdf2-sha256:{digest}"
+    digest = hmac.digest(_FINGERPRINT_KEY, value.encode("utf-8"), hashlib.sha256)
+    return f"hmac-sha256:{digest[:8].hex()}"

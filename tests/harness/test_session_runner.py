@@ -1,5 +1,8 @@
+import json
 import subprocess
 from pathlib import Path
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -252,6 +255,7 @@ def test_session_runner_deduplicates_live_usage_and_merges_partial_metadata():
     }
     assert result.run.metadata["usage"] == expected_usage
     assert result.bundle.messages[-1].metadata["usage"] == expected_usage
+    assert result.bundle.messages[-1].metadata["reasoning"] == "Short summary"
 
 
 def test_session_runner_updates_session_defaults_before_terminal_event():
@@ -341,6 +345,228 @@ def test_queued_turn_waits_for_preceding_assistant_in_request_history():
         ("assistant", "answer: first"),
         ("user", "second"),
     ]
+
+
+def test_durable_worker_reuses_submission_readiness_for_retry_without_second_probe(
+    monkeypatch,
+):
+    harness = _CaptureHarness()
+    runner = _runner(harness)
+    session = runner.create_session(default_harness_id="capture")
+    calls = 0
+
+    def readiness(_options, *, durable):
+        nonlocal calls
+        calls += 1
+        return {
+            "ok": True,
+            "blocked": False,
+            "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+            "plan": {"delivery": "durable" if durable else "synchronous"},
+            "findings": [],
+        }
+
+    monkeypatch.setattr(runner, "_execution_readiness", readiness)
+    payload = {"harness_id": "capture", "prompt": "only one readiness probe"}
+    queued = runner.enqueue_in_session(session.id, payload, run_id=new_id("run"))
+
+    runner.run_in_session(
+        session.id,
+        payload,
+        existing_run_id=queued.run.id,
+        user_message_id=queued.user_message.id,
+        durable=True,
+    )
+    retry_run_id = new_id("run")
+    runner.run_in_session(
+        session.id,
+        payload,
+        existing_run_id=retry_run_id,
+        user_message_id=queued.user_message.id,
+        excluded_history_run_ids=(queued.run.id,),
+        durable=True,
+    )
+
+    assert calls == 1
+    assert runner.store.get_run(retry_run_id).status.value == "succeeded"
+
+
+def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):
+    runner = _runner(_CaptureHarness())
+    session = runner.create_session(default_harness_id="capture")
+    captured = {}
+    request_started = threading.Event()
+    release_request = threading.Event()
+
+    def request_json(method, url, *, payload, api_key, timeout):
+        captured.update(
+            method=method, url=url, payload=payload, api_key=api_key, timeout=timeout
+        )
+        request_started.set()
+        assert release_request.wait(timeout=2)
+        return {"choices": [{"message": {"content": "Починить стрим чата"}}]}
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.proxy.request_json", request_json
+    )
+
+    started_at = time.monotonic()
+    result = runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "capture",
+            "prompt": "Почему чат не показывает поток ответа?",
+            "extra": {
+                "generate_session_title": True,
+                "session_title_model": "GigaChat-3-Lightning",
+            },
+        },
+    )
+
+    assert request_started.wait(timeout=1)
+    assert time.monotonic() - started_at < 1
+    assert result.session.title == "Untitled session"
+    release_request.set()
+    deadline = time.monotonic() + 2
+    while runner.store.get_session(session.id).title == "Untitled session":
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    assert runner.store.get_session(session.id).title == "Починить стрим чата"
+    deadline = time.monotonic() + 2
+    while not any(
+        event.type == "session.updated"
+        for event in runner.store.list_events(session.id)
+    ):
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    title_event = next(
+        event
+        for event in runner.store.list_events(session.id)
+        if event.type == "session.updated"
+    )
+    assert title_event.run_id == result.run.id
+    assert title_event.payload["changed_fields"] == ["title"]
+    assert "Почему чат не показывает поток ответа?" not in json.dumps(
+        {"message": title_event.message, "payload": title_event.payload},
+        ensure_ascii=False,
+    )
+    assert captured["payload"]["model"] == "GigaChat-3-Lightning"
+    assert captured["url"].endswith("/v2/chat/completions")
+
+
+def test_session_title_proxy_failure_publishes_deterministic_fallback(monkeypatch):
+    runner = _runner(_CaptureHarness())
+    session = runner.create_session(default_harness_id="capture")
+    prompt = "Fallback title when proxy is offline"
+
+    def request_json(*args, **kwargs):
+        raise OSError("proxy offline")
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.proxy.request_json", request_json
+    )
+
+    result = runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "capture",
+            "prompt": prompt,
+            "extra": {"generate_session_title": True},
+        },
+    )
+
+    deadline = time.monotonic() + 2
+    while runner.store.get_session(session.id).title == "Untitled session":
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    assert runner.store.get_session(session.id).title == prompt
+    while not any(
+        event.type == "session.updated" and event.run_id == result.run.id
+        for event in runner.store.list_events(session.id)
+    ):
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+
+
+def test_delayed_session_title_never_overwrites_user_rename(monkeypatch):
+    runner = _runner(_CaptureHarness())
+    session = runner.create_session(default_harness_id="capture")
+    request_started = threading.Event()
+    release_request = threading.Event()
+
+    def request_json(*args, **kwargs):
+        request_started.set()
+        assert release_request.wait(timeout=2)
+        return {"choices": [{"message": {"content": "Generated title"}}]}
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.proxy.request_json", request_json
+    )
+    runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "capture",
+            "prompt": "Generate this later",
+            "extra": {"generate_session_title": True},
+        },
+    )
+
+    assert request_started.wait(timeout=1)
+    runner.store.update_session(session.id, title="User rename")
+    release_request.set()
+    _wait_for_session_title_thread(session.id)
+
+    assert runner.store.get_session(session.id).title == "User rename"
+    assert not any(
+        event.type == "session.updated"
+        for event in runner.store.list_events(session.id)
+    )
+
+
+def test_delayed_session_title_does_not_recreate_deleted_session(monkeypatch):
+    runner = _runner(_CaptureHarness())
+    session = runner.create_session(default_harness_id="capture")
+    request_started = threading.Event()
+    release_request = threading.Event()
+
+    def request_json(*args, **kwargs):
+        request_started.set()
+        assert release_request.wait(timeout=2)
+        return {"choices": [{"message": {"content": "Generated title"}}]}
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.proxy.request_json", request_json
+    )
+    runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "capture",
+            "prompt": "Delete this session",
+            "extra": {"generate_session_title": True},
+        },
+    )
+
+    assert request_started.wait(timeout=1)
+    runner.store.delete_session(session.id)
+    release_request.set()
+    _wait_for_session_title_thread(session.id)
+
+    with pytest.raises(KeyError):
+        runner.store.get_session(session.id)
+
+
+def _wait_for_session_title_thread(session_id: str) -> None:
+    name = f"harness-session-title-{session_id}"
+    deadline = time.monotonic() + 2
+    while True:
+        thread = next(
+            (item for item in threading.enumerate() if item.name == name),
+            None,
+        )
+        if thread is None:
+            return
+        thread.join(timeout=0.05)
+        assert time.monotonic() < deadline
 
 
 def test_session_runner_create_session_records_project_metadata(tmp_path):
@@ -470,7 +696,7 @@ def test_session_runner_edit_fails_closed_for_non_git_workspace(tmp_path):
     harness = _WorkspaceEditHarness()
     runner = _runner(harness, data_dir=tmp_path / "data")
 
-    with pytest.raises(ValueError, match="requires a Git repository"):
+    with pytest.raises(PreflightBlockedError, match="git-readiness"):
         runner.create_and_run(
             {
                 "harness_id": "edit-workspace",
@@ -660,6 +886,16 @@ class _StreamingHarness(BaseHarness):
         context: HarnessContext,
     ) -> HarnessResult:
         events = (
+            HarnessEvent(
+                type="reasoning_delta",
+                message="Assistant reasoning delta.",
+                payload={"delta": "verbose thought", "kind": "text"},
+            ),
+            HarnessEvent(
+                type="reasoning_delta",
+                message="Assistant reasoning delta.",
+                payload={"delta": "Short summary", "kind": "summary"},
+            ),
             HarnessEvent(
                 type="message_delta",
                 message="Assistant message delta.",

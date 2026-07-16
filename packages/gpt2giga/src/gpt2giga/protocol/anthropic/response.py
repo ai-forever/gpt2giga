@@ -59,6 +59,7 @@ def _build_anthropic_response(
     is_structured_output: bool = False,
     logger: Any = None,
     mode: str = "DEV",
+    log_level: str = "INFO",
 ) -> Dict:
     """Build Anthropic Messages API response from a GigaChat response."""
     choice = giga_dict["choices"][0]
@@ -152,6 +153,7 @@ def _build_anthropic_response(
         message="Processed Anthropic message response",
         payload_key="response",
         payload=result,
+        log_level=log_level,
         response_id=result["id"],
         content_block_count=len(content_blocks),
     )

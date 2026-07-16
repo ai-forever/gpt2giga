@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import AsyncIterator
 from datetime import datetime
+import hashlib
 import json
+import re
+from time import monotonic
 from typing import Any, Mapping
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.responses import Response, StreamingResponse
 
+from gpt2giga_harness.ui.async_execution import ConformantAPIRoute, run_stream_offload
 from gpt2giga_harness.runtime.models import (
     JobAttempt,
     JobAttemptStatus,
@@ -17,6 +23,7 @@ from gpt2giga_harness.runtime.models import (
     attempt_to_dict,
     job_to_dict,
 )
+from gpt2giga_harness.runtime.policy import ApprovalRequest, approval_request_to_dict
 from gpt2giga_harness.runtime.store import (
     InvalidStateTransitionError,
     RuntimeCoordinationStore,
@@ -31,10 +38,16 @@ from gpt2giga_harness.sessions.store import (
     RunNotFoundError,
     SessionNotFoundError,
 )
+from gpt2giga_harness.sessions.event_stream import (
+    RunEventSubscription,
+    StreamCapacityError,
+    StreamSignal,
+)
+from gpt2giga_harness.support_bundle import build_run_support_bundle
 from gpt2giga_harness.ui.routers.schemas import RunBundleResponse
 
 
-router = APIRouter()
+router = APIRouter(route_class=ConformantAPIRoute)
 
 _STATUS_GROUPS: dict[str, tuple[JobStatus, ...]] = {
     "queued": (JobStatus.QUEUED, JobStatus.RETRY_WAIT),
@@ -49,10 +62,12 @@ _STATUS_GROUPS: dict[str, tuple[JobStatus, ...]] = {
 }
 _HIDDEN_REASONING_MARKERS = ("reasoning", "chain_of_thought", "thinking", "thought")
 _SAFE_RETRY_CLASSES = {"read_only", "safe_retry", "deterministic"}
+_RUNS_CENTER_STREAM_HEARTBEAT_SECONDS = 10.0
+_RUNS_CENTER_STREAM_REVISION_SECONDS = 1.0
 
 
 @router.get("/api/runs")
-async def list_runs_center(
+def list_runs_center(
     request: Request,
     status: str | None = Query(default=None),
     project_id: str | None = Query(default=None),
@@ -88,8 +103,47 @@ async def list_runs_center(
     }
 
 
+@router.get("/api/runs/updates/stream")
+async def runs_center_updates_stream(
+    request: Request,
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    """Stream content-free global revisions without heartbeat-driven refreshes."""
+    runtime_store = _runtime_store(request)
+    session_store = _session_store(request)
+    broker = request.app.state.harness_run_event_broker
+    try:
+        subscription = broker.subscribe_runs_center()
+    except StreamCapacityError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    try:
+        initial_revision = await run_stream_offload(
+            _runs_center_revision,
+            runtime_store,
+            session_store,
+        )
+    except Exception:
+        subscription.close()
+        raise
+
+    return StreamingResponse(
+        _stream_runs_center_updates(
+            runtime_store,
+            session_store,
+            subscription,
+            initial_revision=initial_revision,
+            last_event_id=last_event_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/api/runs/{run_id}/trace")
-async def run_trace(
+def run_trace(
     run_id: str,
     request: Request,
     cursor: str | None = Query(default=None),
@@ -150,7 +204,7 @@ async def run_trace(
 
 
 @router.get("/api/runs/{run_id}/summary")
-async def run_center_summary(run_id: str, request: Request) -> dict[str, Any]:
+def run_center_summary(run_id: str, request: Request) -> dict[str, Any]:
     """Resolve one durable run to its lightweight Runs Center summary."""
     session_store = _session_store(request)
     runtime_store = _runtime_store(request)
@@ -164,8 +218,57 @@ async def run_center_summary(run_id: str, request: Request) -> dict[str, Any]:
     return {"run": _job_summary(runtime_store, session_store, job)}
 
 
+@router.get("/api/runs/{run_id}/support-bundle")
+def run_support_bundle(run_id: str, request: Request) -> Response:
+    """Download a redaction-safe, content-free support bundle for one run."""
+    session_store = _session_store(request)
+    runtime_store = _runtime_store(request)
+    try:
+        run = session_store.get_run(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Run not found") from exc
+    job = runtime_store.find_job_for_run(run_id) if runtime_store else None
+    if job is None or runtime_store is None:
+        raise HTTPException(status_code=404, detail="Durable run not found")
+    attempts = runtime_store.list_attempts(job.id)
+    events = _job_events(session_store, run, attempts)
+    approvals = runtime_store.list_run_approval_requests(
+        run_id=run_id,
+        job_id=job.id,
+    )
+    artifacts = _artifact_summary(run)
+    workflow = _workflow_team_summary(runtime_store, job)
+    payload = build_run_support_bundle(
+        run=run,
+        job=job,
+        attempts=attempts,
+        events=events,
+        registry=request.app.state.harness_registry,
+        artifact_inventory=_artifact_inventory(artifacts, workflow),
+        explanations=_run_explanations(job, attempts, run, approvals),
+        approval_states=[_approval_summary(item) for item in approvals],
+    )
+    content = json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ).encode("utf-8")
+    safe_run_id = re.sub(r"[^A-Za-z0-9._-]+", "-", run.id).strip("-") or "run"
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="gpt2giga-support-{safe_run_id}.json"'
+            ),
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 @router.get("/api/runs/{run_id}/events/{event_id}")
-async def run_event_payload(
+def run_event_payload(
     run_id: str,
     event_id: str,
     request: Request,
@@ -199,7 +302,7 @@ async def run_event_payload(
 
 
 @router.post("/api/runs/{run_id}/retry")
-async def retry_run(run_id: str, request: Request) -> dict[str, Any]:
+def retry_run(run_id: str, request: Request) -> dict[str, Any]:
     """Requeue the owning logical job when its latest attempt is retry-safe."""
     runtime_store = _runtime_store(request)
     if runtime_store is None:
@@ -219,7 +322,7 @@ async def retry_run(run_id: str, request: Request) -> dict[str, Any]:
 
 
 @router.get("/api/runs/{run_id}", response_model=RunBundleResponse)
-async def run_bundle(run_id: str, request: Request) -> dict[str, Any]:
+def run_bundle(run_id: str, request: Request) -> dict[str, Any]:
     """Resolve one run id to its complete persisted session bundle."""
     store = _session_store(request)
     try:
@@ -237,6 +340,65 @@ def _runtime_store(request: Request) -> RuntimeCoordinationStore | None:
 
 def _session_store(request: Request) -> HarnessSessionStore:
     return request.app.state.harness_session_store
+
+
+def _runs_center_revision(
+    runtime_store: RuntimeCoordinationStore | None,
+    session_store: HarnessSessionStore,
+) -> str:
+    runtime_revision = (
+        runtime_store.runs_center_revision() if runtime_store is not None else "none"
+    )
+    session_generation, run_generation = session_store.runs_center_generation()
+    content = f"{runtime_revision}:{session_generation}:{run_generation}".encode()
+    return hashlib.sha256(content).hexdigest()
+
+
+async def _stream_runs_center_updates(
+    runtime_store: RuntimeCoordinationStore | None,
+    session_store: HarnessSessionStore,
+    subscription: RunEventSubscription,
+    *,
+    initial_revision: str,
+    last_event_id: str | None,
+) -> AsyncIterator[str]:
+    revision = initial_revision
+    next_heartbeat_at = monotonic() + _RUNS_CENTER_STREAM_HEARTBEAT_SECONDS
+    try:
+        yield ": connected\n\n"
+        if last_event_id is not None and last_event_id != revision:
+            yield _runs_center_update_sse(revision)
+        while True:
+            signal = await subscription.wait(_RUNS_CENTER_STREAM_REVISION_SECONDS)
+            next_revision = await run_stream_offload(
+                _runs_center_revision,
+                runtime_store,
+                session_store,
+            )
+            if next_revision != revision:
+                revision = next_revision
+                yield _runs_center_update_sse(revision)
+                next_heartbeat_at = monotonic() + _RUNS_CENTER_STREAM_HEARTBEAT_SECONDS
+            elif signal is StreamSignal.RESNAPSHOT_REQUIRED:
+                yield _runs_center_resnapshot_sse(revision)
+            elif signal is None and monotonic() >= next_heartbeat_at:
+                yield ": heartbeat\n\n"
+                next_heartbeat_at = monotonic() + _RUNS_CENTER_STREAM_HEARTBEAT_SECONDS
+    finally:
+        subscription.close()
+
+
+def _runs_center_update_sse(revision: str) -> str:
+    payload = json.dumps(
+        {"revision": revision, "type": "runs.updated"},
+        separators=(",", ":"),
+    )
+    return f"id: {revision}\ndata: {payload}\n\n"
+
+
+def _runs_center_resnapshot_sse(revision: str) -> str:
+    payload = json.dumps({"revision": revision}, separators=(",", ":"))
+    return f"event: resnapshot\ndata: {payload}\n\n"
 
 
 def _parse_status_filter(value: str | None) -> tuple[JobStatus, ...]:
@@ -280,6 +442,10 @@ def _job_summary(
     run_payload = _lightweight_run_summary(run) if run is not None else None
     artifacts = _artifact_summary(run)
     workflow = _workflow_team_summary(runtime_store, job)
+    approvals = runtime_store.list_run_approval_requests(
+        run_id=run_id,
+        job_id=job.id,
+    )
     return {
         "job": job_to_dict(job),
         "run": run_payload,
@@ -298,6 +464,10 @@ def _job_summary(
         ),
         "metrics": _selected_metrics(run),
         "artifacts": artifacts,
+        "artifact_inventory": _artifact_inventory(artifacts, workflow),
+        "ownership": _ownership_summary(job, attempt),
+        "approvals": [_approval_summary(item) for item in approvals],
+        "explanations": _run_explanations(job, attempts, run, approvals),
         "workflow": workflow,
         "actions": {
             "open_task": f"/work/{job.session_id}",
@@ -313,6 +483,7 @@ def _job_summary(
             "inspect_artifact": f"/api/runs/{run_id}/pr"
             if artifacts["pr"]
             else (f"/api/runs/{run_id}/diff" if artifacts["diff"] else None),
+            "support_bundle": f"/api/runs/{run_id}/support-bundle",
         },
     }
 
@@ -433,6 +604,430 @@ def _artifact_summary(run: HarnessRun | None) -> dict[str, bool]:
         "diff": bool(execution.get("patch") or metadata.get("diff")),
         "pr": isinstance(pr_artifact, Mapping),
     }
+
+
+def _artifact_inventory(
+    artifacts: Mapping[str, bool], workflow: Mapping[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Return artifact presence and lineage without paths or captured content."""
+    inventory = [
+        {"type": artifact_type, "source": "run"}
+        for artifact_type in ("worktree", "diff", "pr")
+        if artifacts.get(artifact_type)
+    ]
+    if workflow:
+        for step in workflow.get("steps", ()):
+            if not isinstance(step, Mapping):
+                continue
+            for artifact_type in step.get("artifact_types", ()):
+                item = {
+                    "type": str(artifact_type),
+                    "source": "workflow_step",
+                    "step_id": str(step.get("id") or ""),
+                }
+                if item not in inventory:
+                    inventory.append(item)
+    return inventory
+
+
+def _ownership_summary(job: RuntimeJob, attempt: JobAttempt | None) -> dict[str, Any]:
+    """Project the current durable owner without process or task payloads."""
+    return {
+        "job_id": job.id,
+        "job_status": job.status.value,
+        "attempt_id": attempt.id if attempt else None,
+        "attempt_number": attempt.attempt_number if attempt else None,
+        "attempt_status": attempt.status.value if attempt else None,
+        "worker_id": attempt.lease_owner if attempt else None,
+        "heartbeat_at": attempt.heartbeat_at if attempt else None,
+        "leased_until": attempt.leased_until if attempt else None,
+    }
+
+
+def _approval_summary(approval: Any) -> dict[str, Any]:
+    """Return approval identity and state without its contextual preview."""
+    payload = approval_request_to_dict(approval)
+    return {
+        key: payload[key]
+        for key in (
+            "id",
+            "action",
+            "status",
+            "enforcement",
+            "policy_source",
+            "enforcement_owner",
+            "decision",
+            "expires_at",
+            "decided_at",
+            "created_at",
+        )
+    }
+
+
+def _run_explanations(
+    job: RuntimeJob,
+    attempts: tuple[JobAttempt, ...],
+    run: HarnessRun | None,
+    approvals: tuple[ApprovalRequest, ...],
+) -> list[dict[str, Any]]:
+    """Explain retained run state without exposing paths or captured content."""
+    return [
+        _policy_explanation(approvals),
+        _worktree_explanation(run),
+        _provenance_explanation(run),
+        _recovery_explanation(job, attempts),
+        _promotion_explanation(run),
+    ]
+
+
+def _policy_explanation(approvals: tuple[ApprovalRequest, ...]) -> dict[str, Any]:
+    if not approvals:
+        return _explanation(
+            "policy",
+            "Policy decisions",
+            "neutral",
+            "No approval-gated policy decision is linked to this run.",
+            (
+                "Read-only or pre-approved work can complete without an approval record.",
+            ),
+        )
+    counts = {
+        status: sum(item.status.value == status for item in approvals)
+        for status in ("pending", "approved", "denied", "expired", "canceled")
+    }
+    if counts["pending"]:
+        status = "attention"
+        summary = _counted(
+            counts["pending"],
+            "policy decision awaits an operator decision",
+            "policy decisions await an operator decision",
+        )
+    elif counts["denied"]:
+        status = "blocked"
+        summary = _counted(
+            counts["denied"],
+            "guarded action was denied and was not enforced",
+            "guarded actions were denied and were not enforced",
+        )
+    elif counts["approved"]:
+        status = "ready"
+        summary = _counted(
+            counts["approved"],
+            "approval decision is retained for this run",
+            "approval decisions are retained for this run",
+        )
+    else:
+        status = "neutral"
+        summary = "Linked policy decisions are closed and no action is pending."
+    details = tuple(
+        f"{item.action.value.replace('.', ' ').capitalize()}: "
+        f"{item.status.value.replace('_', ' ')}; "
+        f"{item.enforcement.value.replace('_', ' ')}."
+        for item in approvals[:3]
+    )
+    if len(approvals) > len(details):
+        details += (f"{len(approvals) - len(details)} more linked decisions retained.",)
+    return _explanation("policy", "Policy decisions", status, summary, details)
+
+
+def _worktree_explanation(run: HarnessRun | None) -> dict[str, Any]:
+    if run is None:
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "attention",
+            "Run history is unavailable, so worktree state cannot be verified.",
+        )
+    execution = _workspace_execution(run)
+    patch = bool(execution.get("patch") or run.metadata.get("diff"))
+    retained = bool(execution.get("worktree_path"))
+    if not execution:
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "neutral",
+            "This run did not retain an isolated edit worktree.",
+            ("No worktree mutation is available from Runs Center.",),
+        )
+    if not retained and execution.get("policy") not in {"worktree", None}:
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "neutral",
+            "This run used its selected workspace policy without an isolated worktree.",
+            ("No retained worktree is available for reviewed apply.",),
+        )
+    if execution.get("discarded_at"):
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "neutral",
+            "The isolated worktree was discarded without applying its patch.",
+            ("Discarded work cannot be reviewed, applied, or promoted.",),
+        )
+    if execution.get("truncated"):
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "blocked",
+            "The captured patch is truncated, so reviewed apply stays blocked.",
+            ("Run again with a bounded patch before requesting approval.",),
+        )
+    if execution.get("applied_at"):
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "ready",
+            "The reviewed patch was applied through the explicit approval flow.",
+            ("The retained review identity remains linked to the run.",),
+        )
+    if retained and patch:
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "attention",
+            "An isolated patch is retained and awaits explicit review before apply.",
+            ("The source checkout remains unchanged until approval and apply.",),
+        )
+    if retained:
+        return _explanation(
+            "worktree",
+            "Worktree state",
+            "neutral",
+            "The isolated worktree is retained, but no patch was captured.",
+        )
+    return _explanation(
+        "worktree",
+        "Worktree state",
+        "blocked",
+        "Worktree execution was requested, but no retained checkout is available.",
+        ("Reviewed apply remains unavailable.",),
+    )
+
+
+def _provenance_explanation(run: HarnessRun | None) -> dict[str, Any]:
+    provenance = _provenance(run)
+    present, total = _provenance_completeness(provenance)
+    reviewed = isinstance(provenance.get("reviewed_evidence"), Mapping)
+    if not provenance:
+        return _explanation(
+            "provenance",
+            "Provenance completeness",
+            "attention",
+            "No stored provenance snapshot is attached to this run.",
+            ("Reconstruct provenance from the exact run records before reuse.",),
+        )
+    status = "ready" if present == total else "attention"
+    summary = f"{present} of {total} core provenance sections are retained."
+    details = (
+        "Reviewed mutation evidence is linked."
+        if reviewed
+        else "No reviewed mutation evidence is linked; this is expected until a governed mutation is enforced.",
+    )
+    return _explanation(
+        "provenance",
+        "Provenance completeness",
+        status,
+        summary,
+        details,
+    )
+
+
+def _recovery_explanation(
+    job: RuntimeJob, attempts: tuple[JobAttempt, ...]
+) -> dict[str, Any]:
+    if not attempts:
+        return _explanation(
+            "recovery",
+            "Retry & recovery",
+            "pending",
+            "No worker attempt has claimed this job yet.",
+            ("A retry decision is not available before the first attempt.",),
+        )
+    latest = attempts[-1]
+    retry_markers = sum(bool(item.retry_reason) for item in attempts)
+    details = [
+        f"{len(attempts)} durable attempt{'s' if len(attempts) != 1 else ''} retained.",
+        f"Latest attempt is classified as {latest.idempotency_class.replace('_', ' ')}.",
+    ]
+    if retry_markers:
+        details.append(
+            f"{retry_markers} attempt{'s' if retry_markers != 1 else ''} carry a retry or recovery marker."
+        )
+    safe_retry = latest.idempotency_class in _SAFE_RETRY_CLASSES
+    if job.status is JobStatus.FAILED and safe_retry:
+        return _explanation(
+            "recovery",
+            "Retry & recovery",
+            "ready",
+            "Safe retry is available as a new durable attempt.",
+            tuple(details),
+        )
+    if job.status is JobStatus.FAILED:
+        return _explanation(
+            "recovery",
+            "Retry & recovery",
+            "blocked",
+            "Retry is blocked because the latest attempt is not retry-safe.",
+            tuple(details),
+        )
+    if job.status in {JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.RETRY_WAIT}:
+        return _explanation(
+            "recovery",
+            "Retry & recovery",
+            "pending",
+            "The durable job is active; recovery remains owned by its lease state.",
+            tuple(details),
+        )
+    if job.status is JobStatus.SUCCEEDED:
+        summary = (
+            "The job succeeded after a retained retry or recovery sequence."
+            if len(attempts) > 1 or retry_markers
+            else "The job succeeded without a retry or recovery attempt."
+        )
+        return _explanation(
+            "recovery", "Retry & recovery", "ready", summary, tuple(details)
+        )
+    return _explanation(
+        "recovery",
+        "Retry & recovery",
+        "neutral",
+        f"The job finished {job.status.value}; no retry action is available.",
+        tuple(details),
+    )
+
+
+def _promotion_explanation(run: HarnessRun | None) -> dict[str, Any]:
+    if run is None:
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            "Promotion is unavailable because the source run cannot be loaded.",
+        )
+    if run.status.value in {"queued", "running"}:
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "pending",
+            "Promotion remains pending until the run succeeds.",
+        )
+    if run.status.value != "succeeded":
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            f"A {run.status.value} run is not eligible for reusable promotion.",
+        )
+    if not run.workspace:
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            "Promotion requires a project workspace for the reviewed YAML draft.",
+        )
+    if not run.prompt.strip():
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            "Promotion requires a non-empty redacted source instruction.",
+        )
+    execution = _workspace_execution(run)
+    patch = bool(execution.get("patch") or run.metadata.get("diff"))
+    isolated = bool(
+        execution.get("worktree_path") or execution.get("policy") == "worktree"
+    )
+    if execution.get("discarded_at"):
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            "A discarded worktree cannot be promoted into reusable project state.",
+        )
+    if execution.get("truncated"):
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "blocked",
+            "Promotion is blocked because the retained patch is incomplete.",
+        )
+    if isolated and patch and not execution.get("applied_at"):
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "attention",
+            "Review and apply the isolated patch before promoting this run.",
+            (
+                "Approval, promotion preview, promotion apply, and scheduling remain separate actions.",
+            ),
+        )
+    present, total = _provenance_completeness(_provenance(run))
+    if present < total:
+        return _explanation(
+            "promotion",
+            "Promotion eligibility",
+            "attention",
+            "Promotion preview is available, but provenance should be refreshed before apply.",
+            (
+                f"{present} of {total} core provenance sections are retained.",
+                "Preview and apply remain separate explicit actions.",
+            ),
+        )
+    return _explanation(
+        "promotion",
+        "Promotion eligibility",
+        "ready",
+        "This run is eligible for a reviewed promotion preview.",
+        ("Preview, apply, and scheduling remain separate explicit actions.",),
+    )
+
+
+def _workspace_execution(run: HarnessRun) -> Mapping[str, Any]:
+    value = run.metadata.get("workspace_execution")
+    return value if isinstance(value, Mapping) else {}
+
+
+def _provenance(run: HarnessRun | None) -> Mapping[str, Any]:
+    if run is None:
+        return {}
+    value = run.metadata.get("provenance")
+    return value if isinstance(value, Mapping) else {}
+
+
+def _provenance_completeness(provenance: Mapping[str, Any]) -> tuple[int, int]:
+    required = (
+        "project",
+        "git",
+        "harness",
+        "request",
+        "execution",
+        "records",
+        "replay_request",
+    )
+    return sum(isinstance(provenance.get(key), Mapping) for key in required), len(
+        required
+    )
+
+
+def _explanation(
+    key: str,
+    title: str,
+    status: str,
+    summary: str,
+    details: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    return {
+        "key": key,
+        "title": title,
+        "status": status,
+        "summary": summary,
+        "details": list(details),
+    }
+
+
+def _counted(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}."
 
 
 def _lightweight_run_summary(run: HarnessRun) -> dict[str, Any]:

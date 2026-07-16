@@ -58,7 +58,20 @@ def test_agent_api_detects_etag_conflict_and_rejects_bad_profile(tmp_path):
     assert invalid.status_code == 400
 
 
-def test_agent_api_duplicates_as_preview_and_runs_with_snapshot(tmp_path):
+def test_agent_api_duplicates_as_preview_and_runs_with_snapshot(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.HarnessSessionRunner._execution_readiness",
+        lambda _self, _options, *, durable: {
+            "ok": True,
+            "blocked": False,
+            "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+            "plan": {"delivery": "durable" if durable else "synchronous"},
+            "findings": [],
+        },
+    )
     client, workspace = _client(tmp_path)
     duplicate = client.post(
         "/api/agents/reviewer/duplicate",
@@ -70,7 +83,11 @@ def test_agent_api_duplicates_as_preview_and_runs_with_snapshot(tmp_path):
 
     run = client.post(
         "/api/agents/reviewer/run",
-        json={"workspace": str(workspace), "prompt": "Review the patch"},
+        json={
+            "workspace": str(workspace),
+            "prompt": "Review the patch",
+            "idempotency_key": "cockpit-agent-review-1",
+        },
     )
     assert run.status_code == 200
     assert run.json()["run"]["metadata"]["agent_id"] == "reviewer"
@@ -80,6 +97,28 @@ def test_agent_api_duplicates_as_preview_and_runs_with_snapshot(tmp_path):
     plan = run.json()["run"]["metadata"]["agent_execution_plan"]
     assert plan["queueable"] is True
     assert plan["options"]["budgets.max_attempts"]["effective"] == 1
+
+    retried = client.post(
+        "/api/agents/reviewer/run",
+        json={
+            "workspace": str(workspace),
+            "prompt": "Review the patch",
+            "idempotency_key": "cockpit-agent-review-1",
+        },
+    )
+    rebound = client.post(
+        "/api/agents/reviewer/run",
+        json={
+            "workspace": str(workspace),
+            "prompt": "Review a different patch",
+            "idempotency_key": "cockpit-agent-review-1",
+        },
+    )
+
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["run"]["id"] == run.json()["run"]["id"]
+    assert retried.json()["session"]["id"] == run.json()["session"]["id"]
+    assert rebound.status_code == 409
 
 
 def test_agent_api_rejects_unsupported_options_before_creating_a_run(tmp_path):

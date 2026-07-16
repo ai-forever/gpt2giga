@@ -12,6 +12,23 @@
     const NATIVE_TRUST_STORAGE_KEY = "gpt2giga.nativeTrustResolved.v1";
     const RUNS_CENTER_PAGE_SIZE = 25;
     const RUNS_TRACE_DOM_LIMIT = 200;
+    const LARGE_PREVIEW_CHAR_LIMIT = 100000;
+    const UI_BOOT_STARTED_AT = window.performance && typeof window.performance.now === "function"
+      ? window.performance.now()
+      : Date.now();
+    const uiPerformance = {
+      budgets: {
+        critical_asset_bytes: 575000,
+        initial_page_ready_ms: 3500,
+        large_trace_nodes: RUNS_TRACE_DOM_LIMIT,
+        large_trace_render_ms: 100,
+        cursor_reconnect_ms: 1000,
+        large_preview_chars: LARGE_PREVIEW_CHAR_LIMIT,
+        large_preview_render_ms: 100
+      },
+      measurements: {}
+    };
+    window.__gpt2gigaPerformance = uiPerformance;
     const state = {
       defaults: {},
       harnesses: [],
@@ -37,6 +54,7 @@
       workflowTemplates: [],
       promotionDraft: null,
       selectedWorkflow: null,
+      selectedWorkflowRunId: null,
       toolSyncPreview: null,
       toolError: null,
       evalSpecs: [],
@@ -123,6 +141,40 @@
       if (node) node.textContent = value == null ? "" : String(value);
     };
 
+    function uiPerformanceNow() {
+      return window.performance && typeof window.performance.now === "function"
+        ? window.performance.now()
+        : Date.now();
+    }
+
+    function recordUiPerformance(name, startedAt, budgetMs) {
+      const durationMs = Math.max(0, uiPerformanceNow() - startedAt);
+      const measurement = {
+        duration_ms: Number(durationMs.toFixed(2)),
+        budget_ms: budgetMs,
+        within_budget: durationMs <= budgetMs
+      };
+      uiPerformance.measurements[name] = measurement;
+      const attribute = `data-performance-${name.replace(/_/g, "-")}`;
+      document.documentElement.setAttribute(`${attribute}-ms`, String(measurement.duration_ms));
+      document.documentElement.setAttribute(`${attribute}-budget-ms`, String(budgetMs));
+      document.documentElement.setAttribute(`${attribute}-within-budget`, String(measurement.within_budget));
+      return measurement;
+    }
+
+    function boundedPreviewText(value, label) {
+      const text = value == null ? "" : String(value);
+      if (text.length <= LARGE_PREVIEW_CHAR_LIMIT) return text;
+      let visibleChars = LARGE_PREVIEW_CHAR_LIMIT;
+      let suffix = "";
+      for (let pass = 0; pass < 3; pass += 1) {
+        const omitted = text.length - visibleChars;
+        suffix = `\n\n[${label} preview capped at ${LARGE_PREVIEW_CHAR_LIMIT.toLocaleString()} characters; ${omitted.toLocaleString()} omitted. Use the copy/open action for the full retained content.]`;
+        visibleChars = Math.max(0, LARGE_PREVIEW_CHAR_LIMIT - suffix.length);
+      }
+      return `${text.slice(0, visibleChars)}${suffix}`;
+    }
+
     function readNativeTrustResolvedProcessIds() {
       try {
         const values = JSON.parse(window.sessionStorage.getItem(NATIVE_TRUST_STORAGE_KEY) || "[]");
@@ -157,6 +209,9 @@
       const result = await getJson("/api/defaults");
       if (!result.ok) return result;
       state.defaults = result.data;
+      if (result.data.performance_budgets && typeof result.data.performance_budgets === "object") {
+        uiPerformance.budgets = { ...uiPerformance.budgets, ...result.data.performance_budgets };
+      }
       byId("model-input").value = result.data.default_model || "GigaChat-2-Max";
       byId("arena-model-input").value = result.data.default_model || "GigaChat-2-Max";
       const mode = result.data.default_api_mode || "v2";
@@ -449,21 +504,122 @@
         return;
       }
       state.selectedWorkflow = result.data;
+      state.selectedWorkflowRunId = null;
       const workflow = result.data.workflow;
       byId("workflow-title-input").value = workflow.title || "";
       byId("workflow-version-input").value = workflow.version || "";
       byId("workflow-description-input").value = workflow.description || "";
       byId("workflow-source-input").value = result.data.source || "";
-      for (const id of ["workflow-title-input", "workflow-version-input", "workflow-description-input", "workflow-source-input", "validate-workflow-button", "save-workflow-button", "duplicate-workflow-button", "add-workflow-step-button"]) byId(id).disabled = false;
+      byId("workflow-run-prompt").value = workflow.inputs && workflow.inputs.prompt ? String(workflow.inputs.prompt) : "";
+      byId("workflow-run-inputs").value = "{}";
+      for (const id of ["workflow-title-input", "workflow-version-input", "workflow-description-input", "workflow-source-input", "validate-workflow-button", "save-workflow-button", "duplicate-workflow-button", "add-workflow-step-button", "workflow-run-prompt", "workflow-run-inputs", "run-workflow-button"]) byId(id).disabled = false;
       byId("export-workflow-link").href = `/api/workflows/${encodeURIComponent(workflow.id)}/export?workspace=${encodeURIComponent(state.project.root)}`;
       byId("export-workflow-link").setAttribute("aria-disabled", "false");
       setText("workflow-editor-title", workflow.title);
       setText("workflow-editor-meta", `${workflow.id} · ${workflow.source_path} · ${String(workflow.source_hash || "").slice(0, 12)}`);
+      setText("workflow-run-status", "Ready to create one immutable durable run from this exact workflow revision.");
+      byId("workflow-run-detail").textContent = "Select a durable run to inspect its content-free state.";
       renderWorkflowSteps(workflow.steps || []);
       renderWorkflowDag(result.data.plan || {});
+      renderWorkflowRuns(result.data.runs || []);
       renderWorkflowHistory(result.data.history || []);
       renderWorkflowCatalog();
       if (syncRoute) syncBrowserRoute("workflows", workflow.id);
+    }
+
+    function workflowRunProjection(run) {
+      return {
+        id: run.id,
+        workflow_id: run.workflow_id,
+        definition_hash: run.definition_hash,
+        schema_version: run.schema_version,
+        status: run.status,
+        project_id: run.project_id,
+        session_id: run.session_id,
+        max_concurrency: run.max_concurrency,
+        cancel_requested_at: run.cancel_requested_at,
+        error_summary_present: Boolean(run.error_summary),
+        created_at: run.created_at,
+        updated_at: run.updated_at,
+        finished_at: run.finished_at,
+        steps: (run.steps || []).map((step) => ({
+          step_id: step.step_id,
+          attempt_number: step.attempt_number,
+          kind: step.kind,
+          status: step.status,
+          job_id: step.job_id,
+          child_run_id: step.outputs && step.outputs.run_id ? step.outputs.run_id : null,
+          eval_run_id: step.outputs && step.outputs.eval_run_id ? step.outputs.eval_run_id : null,
+          arena_id: step.outputs && step.outputs.arena_id ? step.outputs.arena_id : null,
+          artifact_types: (step.artifact_refs || []).map((item) => item.type).filter(Boolean),
+          error_summary_present: Boolean(step.error_summary)
+        }))
+      };
+    }
+
+    function renderWorkflowRuns(runs) {
+      const list = byId("workflow-runs-list");
+      list.textContent = "";
+      for (const run of runs) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "workflow-run-card";
+        button.classList.toggle("active", state.selectedWorkflowRunId === run.id);
+        button.innerHTML = `<strong>${escapeHtml(run.status || "unknown")}</strong><small>${escapeHtml(run.id || "")}</small><small>${escapeHtml(String(run.definition_hash || "").slice(0, 12))} · ${escapeHtml(run.updated_at || "")}</small>`;
+        button.addEventListener("click", () => inspectWorkflowRun(run.id));
+        list.appendChild(button);
+      }
+      if (!runs.length) {
+        const empty = document.createElement("div");
+        empty.className = "status-line";
+        empty.textContent = "No durable runs for this workflow yet.";
+        list.appendChild(empty);
+      }
+    }
+
+    function renderWorkflowRunDetail(run) {
+      state.selectedWorkflowRunId = run.id;
+      byId("workflow-run-detail").textContent = pretty(workflowRunProjection(run));
+      renderWorkflowRuns((state.selectedWorkflow && state.selectedWorkflow.runs) || []);
+    }
+
+    async function inspectWorkflowRun(runId) {
+      setText("workflow-run-status", `Refreshing durable run ${runId}...`);
+      const result = await getJson(`/api/workflow-runs/${encodeURIComponent(runId)}`);
+      if (!result.ok) return setText("workflow-run-status", result.data.detail || "Workflow run could not be inspected.");
+      const run = result.data.run;
+      const runs = (state.selectedWorkflow && state.selectedWorkflow.runs) || [];
+      state.selectedWorkflow.runs = [run, ...runs.filter((item) => item.id !== run.id)];
+      renderWorkflowRunDetail(run);
+      setText("workflow-run-status", `Durable run ${run.id} is ${run.status}; CLI and API expose the same run id.`);
+    }
+
+    async function runSelectedWorkflow() {
+      if (!state.selectedWorkflow || !state.project) return;
+      let inputs;
+      try {
+        inputs = JSON.parse(byId("workflow-run-inputs").value || "{}");
+      } catch (_error) {
+        return setText("workflow-run-status", "Input overrides must be a valid JSON object.");
+      }
+      if (!inputs || Array.isArray(inputs) || typeof inputs !== "object") {
+        return setText("workflow-run-status", "Input overrides must be a JSON object.");
+      }
+      const workflow = state.selectedWorkflow.workflow;
+      const prompt = byId("workflow-run-prompt").value.trim();
+      byId("run-workflow-button").disabled = true;
+      setText("workflow-run-status", `Starting ${workflow.id} from its immutable definition snapshot...`);
+      const result = await getJson(`/api/workflows/${encodeURIComponent(workflow.id)}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.project.root, prompt: prompt || null, inputs })
+      });
+      byId("run-workflow-button").disabled = false;
+      if (!result.ok) return setText("workflow-run-status", result.data.detail || "Workflow could not start.");
+      const run = result.data.run;
+      state.selectedWorkflow.runs = [run, ...((state.selectedWorkflow.runs || []).filter((item) => item.id !== run.id))];
+      renderWorkflowRunDetail(run);
+      setText("workflow-run-status", `Started durable run ${run.id}; inspect the same id with giga workflow status or the REST API.`);
     }
 
     function renderWorkflowSteps(steps) {
@@ -1065,6 +1221,9 @@
       byId("runs-retry-button").disabled = !actions.retry;
       byId("runs-open-worktree-button").disabled = !actions.open_worktree;
       byId("runs-inspect-artifact-button").disabled = !actions.inspect_artifact;
+      byId("runs-support-bundle-button").disabled = !actions.support_bundle;
+      renderRunsOwnership(item);
+      renderRunsExplanations(item);
       renderAgentTeam(byId("runs-team-tree"), item && item.workflow, {
         panel: byId("runs-team-panel"),
         title: byId("runs-team-title"),
@@ -1073,6 +1232,89 @@
       if (!item) {
         byId("runs-trace-list").textContent = "";
         byId("runs-payload-panel").hidden = true;
+      }
+    }
+
+    function renderRunsOwnership(item) {
+      const panel = byId("runs-ownership-panel");
+      const grid = byId("runs-ownership-grid");
+      grid.textContent = "";
+      panel.hidden = !item;
+      if (!item) return;
+      const ownership = item.ownership || {};
+      const approvals = Array.isArray(item.approvals) ? item.approvals : [];
+      const artifacts = Array.isArray(item.artifact_inventory) ? item.artifact_inventory : [];
+      const workflow = item.workflow || null;
+      const pendingApprovals = approvals.filter((approval) => approval.status === "pending").length;
+      setText(
+        "runs-ownership-summary",
+        `${pendingApprovals} pending approvals · ${artifacts.length} retained artifacts`
+      );
+      const latestApproval = approvals[0] || null;
+      const workflowProgress = workflow
+        ? `${workflow.completed_steps || 0}/${workflow.total_steps || 0} steps · ${workflow.status || "pending"}`
+        : "No workflow children";
+      for (const [label, value] of [
+        ["Job", [ownership.job_status, ownership.job_id].filter(Boolean).join(" · ")],
+        ["Attempt", ownership.attempt_id ? [`#${ownership.attempt_number || 1}`, ownership.attempt_status, ownership.attempt_id].filter(Boolean).join(" · ") : "Not claimed"],
+        ["Lease", ownership.worker_id ? [ownership.worker_id, ownership.leased_until ? `until ${ownership.leased_until}` : null, ownership.heartbeat_at ? `heartbeat ${ownership.heartbeat_at}` : null].filter(Boolean).join(" · ") : "Unowned"],
+        ["Approvals", latestApproval ? [`${approvals.length} linked`, latestApproval.status, latestApproval.action].filter(Boolean).join(" · ") : "None linked"],
+        ["Artifacts", artifacts.length ? artifacts.map((artifact) => artifact.type).join(", ") : "None retained"],
+        ["Workflow", workflowProgress]
+      ]) {
+        const cell = document.createElement("div");
+        const term = document.createElement("dt");
+        const description = document.createElement("dd");
+        term.textContent = label;
+        description.textContent = value || "Unavailable";
+        cell.append(term, description);
+        grid.appendChild(cell);
+      }
+    }
+
+    function renderRunsExplanations(item) {
+      const panel = byId("runs-explanations-panel");
+      const grid = byId("runs-explanations-grid");
+      const explanations = item && Array.isArray(item.explanations) ? item.explanations : [];
+      grid.textContent = "";
+      panel.hidden = !item;
+      if (!item) return;
+      const actionable = explanations.filter((entry) => ["attention", "blocked"].includes(entry.status)).length;
+      const ready = explanations.filter((entry) => entry.status === "ready").length;
+      setText("runs-explanations-summary", `${ready} ready · ${actionable} need attention`);
+      if (!explanations.length) {
+        const empty = document.createElement("p");
+        empty.className = "status-line";
+        empty.textContent = "No operational explanation is available for this retained run.";
+        grid.appendChild(empty);
+        return;
+      }
+      for (const entry of explanations) {
+        const card = document.createElement("article");
+        card.className = "runs-explanation-card";
+        card.dataset.status = entry.status || "neutral";
+        const heading = document.createElement("div");
+        heading.className = "runs-explanation-heading";
+        const title = document.createElement("strong");
+        title.textContent = entry.title || entry.key || "Run state";
+        const badge = document.createElement("span");
+        badge.className = `runs-status ${entry.status || "neutral"}`;
+        badge.textContent = String(entry.status || "neutral").replace(/_/g, " ");
+        heading.append(title, badge);
+        const summary = document.createElement("p");
+        summary.textContent = entry.summary || "No explanation retained.";
+        card.append(heading, summary);
+        const details = Array.isArray(entry.details) ? entry.details.filter(Boolean) : [];
+        if (details.length) {
+          const list = document.createElement("ul");
+          for (const detail of details) {
+            const row = document.createElement("li");
+            row.textContent = detail;
+            list.appendChild(row);
+          }
+          card.appendChild(list);
+        }
+        grid.appendChild(card);
       }
     }
 
@@ -1214,30 +1456,32 @@
         return;
       }
       const nodes = Array.isArray(result.data.nodes) ? result.data.nodes : [];
-      if (older) {
-        const existing = new Set(state.runsTraceNodes.map((node) => node.id));
-        state.runsTraceNodes = [...nodes.filter((node) => !existing.has(node.id)), ...state.runsTraceNodes];
-      } else {
-        state.runsTraceNodes = nodes.slice(-RUNS_TRACE_DOM_LIMIT);
-      }
+      state.runsTraceNodes = nodes.slice(-RUNS_TRACE_DOM_LIMIT);
       state.runsTraceCursor = result.data.next_cursor || null;
       byId("load-older-trace-button").hidden = !state.runsTraceCursor;
       renderRunsTrace();
     }
 
     function renderRunsTrace() {
+      const startedAt = uiPerformanceNow();
       const list = byId("runs-trace-list");
-      list.textContent = "";
       if (!state.runsTraceNodes.length) {
         const empty = document.createElement("li");
         empty.className = "status-line";
         empty.textContent = "No trace spans recorded yet.";
-        list.appendChild(empty);
+        list.replaceChildren(empty);
         return;
       }
+      const fragment = document.createDocumentFragment();
       for (const node of state.runsTraceNodes.slice(-RUNS_TRACE_DOM_LIMIT)) {
-        list.appendChild(createRunsTraceNode(node));
+        fragment.appendChild(createRunsTraceNode(node));
       }
+      list.replaceChildren(fragment);
+      recordUiPerformance(
+        "large_trace_render",
+        startedAt,
+        uiPerformance.budgets.large_trace_render_ms
+      );
     }
 
     function createRunsTraceNode(node) {
@@ -1305,9 +1549,18 @@
       if (!item || !["queued", "running", "blocked", "approval-needed"].includes(item.status_group) || !window.EventSource) return;
       const latest = [...state.runsTraceNodes].reverse().find((node) => node.event_id);
       const query = latest ? `?after_id=${encodeURIComponent(latest.event_id)}` : "";
+      const reconnectStartedAt = uiPerformanceNow();
       const source = new EventSource(`/api/runs/${encodeURIComponent(item.run_id)}/events/stream${query}`);
       state.runsEventSource = source;
       state.runsEventSourceRunId = item.run_id;
+      source.onopen = () => {
+        if (state.runsEventSource !== source) return;
+        recordUiPerformance(
+          "runs_cursor_reconnect",
+          reconnectStartedAt,
+          uiPerformance.budgets.cursor_reconnect_ms
+        );
+      };
       source.onmessage = (message) => {
         if (!state.runsCenterSelected || state.runsCenterSelected.run_id !== item.run_id) return;
         try {
@@ -1340,6 +1593,10 @@
       if (name === "open_task") {
         window.history.pushState({}, "", url);
         await applyCurrentRoute();
+        return;
+      }
+      if (name === "support_bundle") {
+        window.location.assign(url);
         return;
       }
       const result = await getJson(url, {
@@ -3294,7 +3551,11 @@
       const report = body.preflight;
       state.pendingPreflight = report;
       state.pendingPreflightPayload = payload;
-      if (!Array.isArray(report.findings) || !report.findings.length) return true;
+      const readinessFindings = report.readiness && Array.isArray(report.readiness.findings)
+        ? report.readiness.findings
+        : [];
+      const needsReadinessReview = readinessFindings.some((finding) => finding.status !== "ready");
+      if ((!Array.isArray(report.findings) || !report.findings.length) && !needsReadinessReview) return true;
       return openPreflightModal(report, payload);
     }
 
@@ -3317,11 +3578,19 @@
 
     function renderPreflightModal(report, payload) {
       const findings = Array.isArray(report.findings) ? report.findings : [];
-      const hardBlock = report.hard_block === true || findings.some((finding) => finding.severity === "block");
-      setText("preflight-status", hardBlock ? "Hard block: remove blocked context first" : `${findings.length} warning${findings.length === 1 ? "" : "s"}`);
-      setText("preflight-footer-status", hardBlock ? "Blocked findings cannot be continued." : "Only warning-level findings can continue.");
+      const readiness = report.readiness || {};
+      const readinessFindings = Array.isArray(readiness.findings) ? readiness.findings : [];
+      const nonReady = readinessFindings.filter((finding) => finding.status !== "ready");
+      const hardBlock = report.hard_block === true
+        || readiness.blocked === true
+        || findings.some((finding) => finding.severity === "block")
+        || readinessFindings.some((finding) => finding.status === "blocked");
+      const reviewCount = findings.length + nonReady.length;
+      setText("preflight-status", hardBlock ? "Hard block: resolve required readiness or context" : `${reviewCount} item${reviewCount === 1 ? "" : "s"} to review`);
+      setText("preflight-footer-status", hardBlock ? "Blocked requirements cannot be continued." : "Degraded readiness and warning-level context can continue.");
       byId("continue-preflight-button").hidden = hardBlock;
       byId("continue-preflight-button").disabled = hardBlock;
+      setText("preflight-readiness", preflightReadinessText(readiness));
       setText("preflight-budget", preflightBudgetText(report.context_budget || {}));
       const list = byId("preflight-finding-list");
       list.textContent = "";
@@ -3331,10 +3600,34 @@
       if (!findings.length) {
         const empty = document.createElement("div");
         empty.className = "status-line";
-        empty.textContent = "No preflight findings.";
+        empty.textContent = "No content-safety findings.";
         list.appendChild(empty);
       }
       setText("raw-request-panel", pretty({ ...payload, preflight: report }));
+    }
+
+    function preflightReadinessText(readiness) {
+      const plan = readiness.plan || {};
+      const summary = readiness.summary || {};
+      const lines = [
+        "Selected execution plan",
+        `Harness: ${plan.harness_id || "-"} · ${plan.invocation_mode || "-"}`,
+        `Route/model: /${plan.api_mode || "-"} · ${plan.model || "default"}`,
+        `Workspace: ${plan.workspace_policy || "auto"} · ${plan.mode || "plan"}`,
+        `Delivery: ${plan.delivery || "synchronous"}`,
+        `Readiness: ${summary.ready || 0} ready, ${summary.degraded || 0} degraded, ${summary.blocked || 0} blocked`
+      ];
+      const findings = Array.isArray(readiness.findings) ? readiness.findings : [];
+      for (const finding of findings.filter((item) => item.status !== "ready")) {
+        lines.push("");
+        lines.push(`[${String(finding.status || "degraded").toUpperCase()}] ${finding.summary || finding.id || "Readiness"}`);
+        const remedies = Array.isArray(finding.remediation) ? finding.remediation : [];
+        for (const remedy of remedies) {
+          if (remedy.message) lines.push(`Remedy: ${remedy.message}`);
+          if (remedy.command) lines.push(`Command: ${remedy.command}`);
+        }
+      }
+      return lines.join("\n");
     }
 
     function preflightFindingCard(finding) {
@@ -3402,7 +3695,7 @@
         lines.push("Truncation warnings:");
         for (const warning of warnings) lines.push(`- ${warning}`);
       }
-      return lines.join("\\n");
+      return lines.join("\n");
     }
 
     function currentLastDiff() {
@@ -4503,6 +4796,32 @@
       node.replaceChildren(fragment);
     }
 
+    function renderReportPreviewInto(node, value) {
+      const text = value == null ? "" : String(value);
+      const startedAt = uiPerformanceNow();
+      if (text.length <= LARGE_PREVIEW_CHAR_LIMIT) {
+        renderMarkdownInto(node, text);
+        return;
+      }
+      renderMarkdownInto(node, text.slice(0, LARGE_PREVIEW_CHAR_LIMIT));
+      const notice = document.createElement("div");
+      notice.className = "large-preview-notice";
+      const summary = document.createElement("span");
+      summary.textContent = `Report preview capped at ${LARGE_PREVIEW_CHAR_LIMIT.toLocaleString()} characters.`;
+      const expand = document.createElement("button");
+      expand.type = "button";
+      expand.className = "secondary";
+      expand.textContent = "Render full report";
+      expand.addEventListener("click", () => renderMarkdownInto(node, text));
+      notice.append(summary, expand);
+      node.appendChild(notice);
+      recordUiPerformance(
+        "large_report_preview",
+        startedAt,
+        uiPerformance.budgets.large_preview_render_ms
+      );
+    }
+
     function eventToolPayload(event) {
       const payload = event && event.payload && typeof event.payload === "object" ? event.payload : {};
       const toolCall = payload.tool_call && typeof payload.tool_call === "object" ? payload.tool_call : {};
@@ -4900,7 +5219,7 @@
       content.className = "message-content markdown-body";
       const liveNonterminal = options.live && !["succeeded", "failed", "canceled"].includes(options.liveStatus);
       if (message.content) {
-        renderMarkdownInto(content, message.content);
+        renderReportPreviewInto(content, message.content);
       } else if (liveNonterminal) {
         const waiting = document.createElement("p");
         waiting.className = "hint";
@@ -5436,7 +5755,16 @@
       if (changedFiles.length) lines.push(`Changed files: ${changedFiles.join(", ")}`);
       if (untrackedFiles.length) lines.push(`Untracked files: ${untrackedFiles.join(", ")}`);
       const summary = lines.length ? lines.join("\\n") : "No run selected.";
-      setText("diff-text", `${summary}\\n\\n${patch || "No diff captured."}`);
+      const previewStartedAt = uiPerformanceNow();
+      const diffText = `${summary}\\n\\n${patch || "No diff captured."}`;
+      setText("diff-text", boundedPreviewText(diffText, "Diff"));
+      if (diffText.length > LARGE_PREVIEW_CHAR_LIMIT) {
+        recordUiPerformance(
+          "large_diff_preview",
+          previewStartedAt,
+          uiPerformance.budgets.large_preview_render_ms
+        );
+      }
       const canApply = Boolean(run && run.id && execution.policy === "worktree" && patch && patch !== "No diff captured." && !execution.truncated && !execution.applied_at && !execution.discarded_at);
       const canDiscard = Boolean(run && run.id && execution.policy === "worktree" && !execution.discarded_at);
       byId("apply-run-diff-button").disabled = !canApply;
@@ -5470,7 +5798,16 @@
         `Changed files:\\n${(artifact.changed_files || []).join("\\n") || "None"}`,
         `Patch:\\n${artifact.patch || "No patch captured."}`
       ];
-      setText("pr-text", lines.join("\\n\\n"));
+      const previewStartedAt = uiPerformanceNow();
+      const reportText = lines.join("\\n\\n");
+      setText("pr-text", boundedPreviewText(reportText, "PR report"));
+      if (reportText.length > LARGE_PREVIEW_CHAR_LIMIT) {
+        recordUiPerformance(
+          "large_pr_report_preview",
+          previewStartedAt,
+          uiPerformance.budgets.large_preview_render_ms
+        );
+      }
       byId("pr-branch-input").disabled = !canCreateBranch;
       byId("copy-pr-title-button").disabled = !(artifact.title || "").trim();
       byId("copy-pr-body-button").disabled = !(artifact.body || "").trim();
@@ -6220,10 +6557,19 @@
     function openNativeOutputStream(processId) {
       closeNativeOutputStream();
       const query = `?cursor=${encodeURIComponent(state.nativeOutputCursor)}`;
+      const reconnectStartedAt = uiPerformanceNow();
       const source = new EventSource(`/api/native/processes/${encodeURIComponent(processId)}/output/stream${query}`);
       state.nativeEventSource = source;
       state.nativeEventSourceProcessId = processId;
       state.nativeStreamFailures = 0;
+      source.onopen = () => {
+        if (state.nativeEventSource !== source) return;
+        recordUiPerformance(
+          "native_cursor_reconnect",
+          reconnectStartedAt,
+          uiPerformance.budgets.cursor_reconnect_ms
+        );
+      };
       source.onmessage = async (event) => {
         if (state.nativeEventSource !== source || state.nativeEventSourceProcessId !== processId) return;
         state.nativeStreamFailures = 0;
@@ -7045,6 +7391,7 @@
       byId("runs-retry-button").addEventListener("click", () => runCenterAction("retry"));
       byId("runs-open-worktree-button").addEventListener("click", () => runCenterAction("open_worktree"));
       byId("runs-inspect-artifact-button").addEventListener("click", () => runCenterAction("inspect_artifact"));
+      byId("runs-support-bundle-button").addEventListener("click", () => runCenterAction("support_bundle"));
       for (const filter of document.querySelectorAll("[data-run-status]")) {
         filter.addEventListener("click", async () => {
           state.runsCenterStatus = filter.dataset.runStatus || "";
@@ -7100,6 +7447,7 @@
       byId("save-workflow-button").addEventListener("click", saveSelectedWorkflow);
       byId("duplicate-workflow-button").addEventListener("click", duplicateSelectedWorkflow);
       byId("add-workflow-step-button").addEventListener("click", () => addWorkflowStepRow());
+      byId("run-workflow-button").addEventListener("click", runSelectedWorkflow);
       byId("run-eval-button").addEventListener("click", runSelectedEval);
       byId("harness-select").addEventListener("change", (event) => {
         selectHarness(event.target.value);
@@ -7445,6 +7793,13 @@
         await loadSession(state.projectState.last_selected_session);
       }
       renderAll();
+      const initialMeasurement = recordUiPerformance(
+        "initial_page_ready",
+        UI_BOOT_STARTED_AT,
+        uiPerformance.budgets.initial_page_ready_ms
+      );
+      document.documentElement.dataset.harnessReady = "true";
+      document.documentElement.dataset.initialPageReadyMs = String(initialMeasurement.duration_ms);
       await secondaryLoads;
     }
 

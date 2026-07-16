@@ -1,11 +1,28 @@
+import json
+
 from fastapi.testclient import TestClient
 
+from gpt2giga_harness import cli
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.project import init_project_config
 from gpt2giga_harness.ui.app import create_app
 
 
-def test_workflow_api_lists_validates_runs_status_and_cancels(tmp_path) -> None:
+def test_workflow_api_lists_validates_runs_status_and_cancels(
+    capsys,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.HarnessSessionRunner._execution_readiness",
+        lambda _self, _options, *, durable: {
+            "ok": True,
+            "blocked": False,
+            "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+            "plan": {"delivery": "durable" if durable else "synchronous"},
+            "findings": [],
+        },
+    )
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     init_project_config(workspace)
@@ -14,6 +31,26 @@ def test_workflow_api_lists_validates_runs_status_and_cancels(tmp_path) -> None:
         proxy_url="http://127.0.0.1:9",
         auto_start_proxy=False,
     )
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", config.data_dir)
+    monkeypatch.setenv("GPT2GIGA_HARNESS_PROXY_URL", config.proxy_url)
+    monkeypatch.setenv("GPT2GIGA_HARNESS_AUTO_START_PROXY", "false")
+
+    assert (
+        cli.main(
+            [
+                "workflow",
+                "run",
+                "review-team",
+                "--workspace",
+                str(workspace),
+                "--prompt",
+                "Review this project",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    cli_run = json.loads(capsys.readouterr().out)["run"]
 
     with TestClient(create_app(config)) as client:
         listed = client.get("/api/workflows", params={"workspace": str(workspace)})
@@ -32,12 +69,49 @@ def test_workflow_api_lists_validates_runs_status_and_cancels(tmp_path) -> None:
 
         started = client.post(
             "/api/workflows/review-team/run",
-            json={"workspace": str(workspace), "prompt": "Review this project"},
+            json={
+                "workspace": str(workspace),
+                "prompt": "Review this project",
+                "idempotency_key": "cockpit-workflow-review-1",
+            },
         )
         assert started.status_code == 200
         run = started.json()["run"]
         assert run["definition_hash"]
         assert run["steps"][0]["status"] == "queued"
+        assert run["definition_hash"] == cli_run["definition_hash"]
+        assert run["definition"] == cli_run["definition"]
+        assert run["inputs"] == cli_run["inputs"]
+        assert run["max_concurrency"] == cli_run["max_concurrency"]
+        assert [
+            (step["step_id"], step["kind"], step["status"], step["snapshot"])
+            for step in run["steps"]
+        ] == [
+            (step["step_id"], step["kind"], step["status"], step["snapshot"])
+            for step in cli_run["steps"]
+        ]
+
+        retried = client.post(
+            "/api/workflows/review-team/run",
+            json={
+                "workspace": str(workspace),
+                "prompt": "Review this project",
+                "idempotency_key": "cockpit-workflow-review-1",
+            },
+        )
+        rebound = client.post(
+            "/api/workflows/review-team/run",
+            json={
+                "workspace": str(workspace),
+                "prompt": "Review something else",
+                "idempotency_key": "cockpit-workflow-review-1",
+            },
+        )
+        assert retried.status_code == 200
+        assert retried.json()["run"]["id"] == run["id"]
+        assert retried.json()["run"]["session_id"] == run["session_id"]
+        assert rebound.status_code == 400
+        assert "different workflow submission" in rebound.json()["detail"]
 
         child_summary = client.get(
             f"/api/runs/{run['steps'][0]['outputs']['run_id']}/summary"

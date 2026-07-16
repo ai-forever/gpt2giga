@@ -82,6 +82,12 @@ OpenAI form by default, but returns the Gemini form for Google/Gemini clients,
 for example with the `X-Goog-Api-Client` or `X-Goog-Api-Key` headers, or with the
 `?key=...` query parameter.
 
+OpenAI-shaped model objects include the gpt2giga extension
+`metadata.type="chat"|"embedder"`. The gateway preserves an upstream type when
+available and otherwise infers embedding models from their model id. Consumers
+such as Harness use this metadata to keep embedding-only models out of chat
+model selectors without changing the standard OpenAI model fields.
+
 If proxy API-key authentication is enabled, Gemini-compatible clients can pass
 the key via `x-goog-api-key` or `?key=...`, in addition to the common
 `Authorization: Bearer ...`, `x-api-key`, and `?x-api-key=...`. For new setups,

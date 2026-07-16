@@ -1,8 +1,8 @@
 # Unified Harness
 
-:::warning[Альфа-превью — активная разработка]
+:::warning[Бета-превью — prerelease]
 
-Линейка `gpt2giga-harness` 0.0.x — ранняя версия для тестирования и обратной
+Линейка `gpt2giga-harness` 0.1.x — beta-preview для тестирования и обратной
 связи. UI, CLI, YAML-файлы проекта, схема runtime-хранилища и процесс обновления
 могут меняться. Используйте Harness локально, для контролируемой работы под
 наблюдением, а не как критичный production-сервис или удалённую multi-user
@@ -48,7 +48,7 @@ Approval в Harness относится к действиям, которыми H
 не обещает видеть каждое внутреннее действие непрозрачного Codex, Claude или
 Gemini subprocess.
 
-## Кому подходит альфа
+## Кому подходит бета
 
 Попробуйте preview, если хотите оценить локальный agent cockpit, сравнить
 несколько harness, собрать проверяемый workflow или повлиять на интерфейсы
@@ -60,7 +60,7 @@ Gemini subprocess.
 централизованное multi-user администрирование или полноценная security boundary
 вокруг произвольных действий стороннего CLI.
 
-Во время альфы:
+Во время беты:
 
 - перед обновлением читайте release notes и делайте резервную копию
   `~/.gpt2giga/harness` и важных определений из `.giga/`;
@@ -78,11 +78,11 @@ Gemini subprocess.
 
 ### 1. Получите preview
 
-Требуются Python 3.10–3.14 и `uv`. Текущий и всегда доступный путь для alpha —
+Требуются Python 3.10–3.14 и `uv`. Текущий и всегда доступный путь для beta —
 запуск из source checkout:
 
 ```bash
-git clone --branch feature/harness_enrichment \
+git clone --branch feature/productize_harness \
   https://github.com/ai-forever/gpt2giga.git
 cd gpt2giga
 uv sync --all-packages --all-extras --dev
@@ -104,11 +104,45 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
+Будущий дистрибутив `gpt2giga-harness==0.1.0b1` требует
+`gpt2giga==0.2.4a1` и добавляет команды `giga` и `gpt2giga-harness`.
+
 Для Direct Chat понадобятся credentials из [быстрого старта gpt2giga](quickstart.md).
 Codex, Claude Code и Gemini — опциональные интеграции: соответствующий CLI
 executable должен быть в `PATH` или задан явным override, а локальный gateway —
 настроен и доступен. Для описанного Harness route отдельный vendor login не
 нужен. Отсутствующий CLI будет недоступен, но не сломает остальной cockpit.
+
+#### Базовая установка и опциональные providers
+
+Базовый distribution содержит десять проверенных прямых runtime dependencies,
+включая совместимое требование к `gpt2giga`. В release CI оба wheel
+устанавливаются в чистые окружения Python 3.10 и 3.14, после чего versioned
+audit завершается ошибкой, если resolved environment превышает 64 distributions
+или содержит packages из следующих семейств опциональных интеграций:
+
+- чтение и запись Office-документов;
+- удалённые messaging channels;
+- внешние client или agent UI frameworks;
+- sandbox и container providers.
+
+Такие возможности подключаются через отдельно установленный provider
+distribution или entry-point plugin Harness. Базовый пакет не устанавливает и
+не включает их неявно. Адаптеры Codex, Claude Code и Gemini остаются
+встроенными, но их отдельно управляемые CLI executables обнаруживаются в
+`PATH`, а не устанавливаются как Python dependencies.
+
+Для проверки release или package запускайте следующую команду только в чистом
+base-install environment. Окружение с намеренно установленным optional provider
+ожидаемо не пройдёт base-only audit:
+
+```bash
+python -I -m gpt2giga_harness.base_install --json
+```
+
+Команда source-checkout `uv sync --all-packages --all-extras --dev`
+устанавливает development tooling и repository integration fixtures, поэтому
+не измеряет footprint базовой установки.
 
 ### 2. Инициализируйте тестовый проект
 
@@ -129,7 +163,20 @@ Harness-managed homes и managed MCP snapshots. Проверки получаю�
 `ready`, `degraded` или `blocked`; для degraded и blocked prerequisites отчёт
 предлагает remediation-команду. Secret values редактируются, абсолютный путь
 workspace не публикуется, а существующий runtime worker state читается без
-перезаписи.
+перезаписи. Отчёт также содержит стабильный kind, точные версии Harness/gateway,
+Python и platform metadata; совместимость внешних CLI берётся из тех же
+ограниченных capability probes, которые используются перед execution.
+
+Для CI порог задаётся явно. `--fail-on blocked` возвращает exit code 1 только
+при blocked checks, а `--fail-on degraded` — при degraded или blocked. Без
+`--fail-on` сохраняется интерактивный exit code 0. Для issue report флаг
+`--output` атомарно записывает тот же канонический redaction-safe JSON с mode
+`0600`, а stdout сохраняет выбранный human или JSON формат:
+
+```bash
+giga doctor . --json --fail-on blocked
+giga doctor . --json --output harness-doctor.json
+```
 
 `giga init` создаёт в `.giga/` non-secret конфигурацию, стартовые agent profiles,
 prompts, smoke eval и review workflow. Существующие файлы не заменяются без
@@ -222,12 +269,17 @@ giga ui
 
 Рекомендуемый первый маршрут:
 
-1. В **Work** проверьте название проекта и текущую Git branch.
+1. В **Workbench** проверьте текущий проект и выбранную сессию.
 2. Выберите `echo` и отправьте безопасный prompt.
 3. В **Runs** откройте attempt, trace и сохранённые redacted payloads.
-4. В **Arena** сравните два доступных harness на одной задаче.
-5. Изучите **Approvals**, **Agents**, **Workflows**, **Evaluate**, **Tools** и
-   **Scheduled**, прежде чем включать edits или unattended execution.
+4. В **Evaluation → Arena** сравните доступные harness на одной задаче.
+5. Изучите **Approvals**, **Attention**, **Automation**, **Evaluation** и
+   **Integrations**, прежде чем включать edits или unattended execution.
+
+Cockpit V2 является локальным UI по умолчанию. Предыдущий no-build cockpit
+остаётся доступен по адресу `http://127.0.0.1:8091/legacy` на release-level
+период отката; переключение между ними не мигрирует и не переписывает runtime
+state Harness.
 
 Если worker уже запущен отдельно или UI нужен только для просмотра состояния:
 
@@ -299,6 +351,14 @@ GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS=15
 GPT2GIGA_HARNESS_TIMEOUT_SECONDS=3600
 GPT2GIGA_HARNESS_DATA_DIR=~/.gpt2giga/harness
 ```
+
+В Cockpit Settings модели по умолчанию для чатов и генерации заголовков
+настраиваются независимо. Нажмите **Найти модели** и выберите оба значения из
+списка, который вернул активный API route. Настройки сохраняются в
+`settings/defaults.json` внутри Harness data directory и применяются к новым
+запускам; если модель заголовков очищена, используется выбранная модель чатов.
+`GPT2GIGA_HARNESS_DEFAULT_MODEL` или `GIGACHAT_MODEL` по-прежнему блокирует
+изменение модели чатов, если значение принадлежит окружению.
 
 Если `GPT2GIGA_HARNESS_API_KEY` не задан, Harness использует
 `GPT2GIGA_API_KEY` для локального proxy. GigaChat credentials, OAuth tokens,
@@ -397,6 +457,13 @@ giga run --agent codex --mode read --workspace . --dry-run "Проверь пр�
 giga harness inspect codex-cli --json
 giga doctor
 ```
+
+Machine-readable секция `readiness` проецирует doctor checks только на
+выбранный execution plan: harness, invocation mode, точный API route/model,
+workspace/Git policy и synchronous или durable delivery. Отсутствующие
+обязательные capabilities блокируют запуск, а degraded checks показывают
+redaction-safe remediation message и command. Нерелевантные сбои proxy,
+внешнего CLI или worker не блокируют независимый локальный Echo path.
 
 Ошибка preflight не должна оставлять process, worktree или временный managed
 home. Existing external proxy никогда не останавливается Harness; созданный им
@@ -659,6 +726,24 @@ cockpit. Для Gemini wrapper можно задать безопасный TOML
 `~/.gpt2giga/harness/config.toml`; элементы передаются напрямую без `shell=True`.
 Парсеры допускают неизвестные добавочные поля из versioned fixtures, но поток
 без единого распознанного обязательного event contract завершается ошибкой.
+
+Текущие окна поддержки внешних CLI намеренно ограничены minor-линиями,
+которые покрыты пакетными fixtures для headless-потока и native history:
+
+| Адаптер | Поддерживаемое окно версий |
+|---|---|
+| Codex CLI | `>=0.144.0,<0.145.0` |
+| Claude Code | `>=2.1.0,<2.2.0` |
+| Gemini CLI | `>=0.46.0,<0.47.0` |
+
+Должны одновременно пройти окно версии и probes обязательных capabilities.
+Версия ниже окна или binary без обязательного флага получает статус
+`unsupported`. Более новая версия со всеми обязательными флагами получает
+`degraded`: диагностика показывает `version_contract.status=above_window`, но
+запуск остаётся fail-closed до пересмотра fixtures и объявленного окна.
+Неразбираемый вывод версии обрабатывается так же со статусом
+`version_contract.status=unparsed`. JSON-контракт также публикует `minimum` и
+`maximum_exclusive`, поэтому CI и issue reports не должны разбирать warning.
 
 Headless-потоки и Codex app-server публикуют стабильные tool, command, file,
 usage, failure и lifecycle events только из capability-probed structured schema.
@@ -954,6 +1039,50 @@ Adapter обязан явно описать execution modes, continuation, even
 attachments transport, tool/policy ownership, required executable и redaction
 boundaries. Не объявляйте capability, которую не подтверждает probe или test.
 
+## Резервная копия пользовательского state и runtime export
+
+Перед обновлением или откатом package остановите Cockpit, durable workers и
+активные runs, которые используют выбранный data directory. Создайте архив вне
+каталога Harness state и проверьте его до изменения установленной версии:
+
+```bash
+giga state backup --output ../gpt2giga-harness-state.zip
+giga state verify ../gpt2giga-harness-state.zip --json
+# после остановки Harness восстановите отсутствующий каталог или подтвердите замену
+giga state restore ../gpt2giga-harness-state.zip --replace --json
+```
+
+Backup использует versioned content-addressed schema: относительные пути,
+детерминированные ZIP metadata, согласованные SQLite snapshots и SHA-256 для
+каждого файла. Transient lock, WAL, SHM и временные файлы не включаются.
+Создание fail-closed при symbolic link, неподдерживаемом типе файла,
+существующем destination, output внутри data directory или изменении source
+state во время capture.
+
+Архив записывается атомарно с mode `0600`, но не редактируется: в нём могут
+быть opt-in captured content, attachments и managed configuration. Храните его
+как приватный пользовательский state и не прикладывайте к issue. Для support
+используйте content-free coordination export:
+
+```bash
+giga runtime export --output /tmp/harness-runtime.json
+```
+
+`giga state backup` охватывает настроенный Harness user data directory
+(`GPT2GIGA_HARNESS_DATA_DIR`, обычно `~/.gpt2giga/harness`). Project-local
+`.giga/` остаётся вне архива и должно входить в backup/version-control policy
+самого проекта.
+
+`giga state restore` повторно проверяет архив, отклоняет runtime schema новее
+поддерживаемой установленным Harness, переносит retained modes и проверяет
+SQLite integrity в приватном sibling staging-каталоге, а затем публикует
+восстановленный каталог. Для существующего destination обязателен `--replace`;
+активные lock/WAL/SHM markers или параллельное изменение destination завершают
+операцию до swap. Более старая runtime schema обновляется только при следующем
+штатном открытии store установленным package. Reverse migrations не
+поддерживаются: для package rollback нужно восстановить pre-upgrade архив,
+созданный соответствующей версией. Команда не изменяет project-local `.giga/`.
+
 ## Миграция со старого combined prerelease
 
 Gateway и Harness теперь два самостоятельных дистрибутива и namespace. Перед
@@ -967,8 +1096,8 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-Текущая metadata `gpt2giga-harness==0.0.1a2` требует ровно
-`gpt2giga==0.2.3a2`. Старый import `gpt2giga.harness` больше не является
+Будущая metadata `gpt2giga-harness==0.1.0b1` требует
+`gpt2giga==0.2.4a1`. Старый import `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
 перезаписывает `~/.gpt2giga/harness`, `.giga/` или vendor-owned CLI homes.
 

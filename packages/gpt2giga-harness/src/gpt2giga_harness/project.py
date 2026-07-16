@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-from gpt2giga_harness.config import DEFAULT_HARNESS_DATA_DIR
+from gpt2giga_harness.config import DEFAULT_CHAT_MODEL, DEFAULT_HARNESS_DATA_DIR
 from gpt2giga_harness.editor import DEFAULT_EDITOR_COMMAND, DEFAULT_TERMINAL_COMMAND
 from gpt2giga_harness.native.models import (
     HarnessInvocationMode,
@@ -26,7 +26,7 @@ from gpt2giga_harness.types import (
 )
 
 PROJECT_CONFIG_RELATIVE_PATH = Path(".giga") / "harness.toml"
-DEFAULT_PROJECT_MODEL = "GigaChat-2-Max"
+DEFAULT_PROJECT_MODEL = DEFAULT_CHAT_MODEL
 DEFAULT_PROJECT_HARNESS = "codex-cli"
 DEFAULT_PROJECT_MODE = "plan"
 DEFAULT_ENABLED_HARNESSES = (

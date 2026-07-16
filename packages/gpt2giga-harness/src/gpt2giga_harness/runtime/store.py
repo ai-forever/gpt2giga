@@ -8,9 +8,11 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+from time import perf_counter
 from typing import Any, Iterator, Mapping
 from uuid import uuid4
 
+from gpt2giga_harness.instrumentation import record_duration
 from gpt2giga_harness.runtime.models import (
     ApprovalStatus,
     ClaimedJob,
@@ -722,6 +724,33 @@ class RuntimeCoordinationStore:
             tuple(_job_from_row(row) for row in rows[:page_size]),
             has_more,
         )
+
+    def runs_center_revision(self) -> str:
+        """Return a content-free revision excluding lease heartbeat churn."""
+        with self._connect() as connection:
+            jobs = connection.execute(
+                "SELECT COUNT(*), COALESCE(SUM(version), 0) FROM jobs"
+            ).fetchone()
+            approvals = connection.execute(
+                """
+                SELECT status, COUNT(*), COALESCE(MAX(COALESCE(decided_at, created_at)), '')
+                FROM approval_requests GROUP BY status ORDER BY status
+                """
+            ).fetchall()
+            workers = connection.execute(
+                """
+                SELECT status, COUNT(*), COALESCE(MAX(COALESCE(stopped_at, started_at)), '')
+                FROM workers GROUP BY status ORDER BY status
+                """
+            ).fetchall()
+        payload = {
+            "approvals": [tuple(row) for row in approvals],
+            "jobs": tuple(jobs),
+            "workers": [tuple(row) for row in workers],
+        }
+        return hashlib.sha256(
+            json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        ).hexdigest()
 
     def transition_job(
         self,
@@ -1977,6 +2006,37 @@ class RuntimeCoordinationStore:
                 ).fetchall()
         return tuple(_approval_request_from_row(row) for row in rows)
 
+    def list_run_approval_requests(
+        self,
+        *,
+        run_id: str,
+        job_id: str | None = None,
+        limit: int = 100,
+    ) -> tuple[ApprovalRequest, ...]:
+        """List approval records linked to one run or its durable job."""
+        page_size = max(1, min(int(limit), 200))
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            _expire_approvals(connection, now)
+            if job_id:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM approval_requests
+                    WHERE run_id = ? OR job_id = ?
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    """,
+                    (run_id, job_id, page_size),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM approval_requests WHERE run_id = ?
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    """,
+                    (run_id, page_size),
+                ).fetchall()
+        return tuple(_approval_request_from_row(row) for row in rows)
+
     def attention_read_ids(self, item_ids: tuple[str, ...]) -> frozenset[str]:
         """Return the subset of derived attention item ids marked as read."""
         if not item_ids:
@@ -2924,7 +2984,9 @@ def _project_schedule_key(project_id: str, schedule_id: str) -> str:
 
 @contextmanager
 def _transaction(connection: sqlite3.Connection) -> Iterator[None]:
+    started_at = perf_counter()
     connection.execute("BEGIN IMMEDIATE")
+    record_duration("db_wait_ms", (perf_counter() - started_at) * 1000)
     try:
         yield
     except BaseException:

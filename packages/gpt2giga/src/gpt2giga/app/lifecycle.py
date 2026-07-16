@@ -13,6 +13,7 @@ from gpt2giga.providers.gigachat.client import (
     close_gigachat_client,
     create_gigachat_client,
 )
+from gpt2giga.providers.gigachat.pool import GigaChatClientPool
 from gpt2giga.sinks.logs.factory import create_traffic_log_sink, flush_traffic_log_sink
 from gpt2giga.sinks.logs.query import (
     close_traffic_log_query_store,
@@ -68,6 +69,15 @@ async def lifespan(app: FastAPI):
         acquire_timeout=config.proxy_settings.model_max_connections_acquire_timeout,
     )
     app.state.gigachat_client = create_gigachat_client(config.gigachat_settings)
+    app.state.gigachat_pool = (
+        GigaChatClientPool(
+            config.gigachat_settings,
+            max_size=config.proxy_settings.pass_token_client_cache_size,
+            logger=logger,
+        )
+        if config.proxy_settings.pass_token
+        else None
+    )
 
     attachment_processor = AttachmentProcessor(
         app.state.logger,
@@ -82,6 +92,7 @@ async def lifespan(app: FastAPI):
     app.state.response_processor = ResponseProcessor(
         app.state.logger,
         mode=config.proxy_settings.mode,
+        log_level=config.proxy_settings.log_level,
         structured_output_mode=config.proxy_settings.structured_output_mode,
     )
 
@@ -103,4 +114,7 @@ async def lifespan(app: FastAPI):
         getattr(app.state, "traffic_log_query_store", None), logger=logger
     )
     await close_gigachat_client(getattr(app.state, "gigachat_client", None), logger)
+    gigachat_pool = getattr(app.state, "gigachat_pool", None)
+    if gigachat_pool is not None:
+        await gigachat_pool.aclose()
     await attachment_processor.close()

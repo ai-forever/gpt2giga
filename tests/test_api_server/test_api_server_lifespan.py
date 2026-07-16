@@ -113,3 +113,30 @@ def test_lifespan_flushes_extension_sinks(monkeypatch):
         pass
 
     assert flushed == ["observability", "traffic"]
+
+
+def test_lifespan_closes_pass_token_client_pool(monkeypatch):
+    closed = []
+
+    class DummyClient:
+        async def aclose(self):
+            return None
+
+    class DummyPool:
+        async def aclose(self):
+            closed.append(True)
+
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: DummyClient(),
+    )
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.GigaChatClientPool",
+        lambda *args, **kwargs: DummyPool(),
+    )
+
+    app = create_app(ProxyConfig(proxy=ProxySettings(pass_token=True)))
+    with TestClient(app):
+        pass
+
+    assert closed == [True]

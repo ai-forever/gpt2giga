@@ -28,6 +28,8 @@ class CliProbeContract:
     display_name: str
     help_argv: tuple[str, ...]
     required_tokens: tuple[str, ...]
+    minimum_version: str
+    maximum_version_exclusive: str
     optional_tokens: tuple[str, ...] = ()
     event_schema: str = "unknown"
     history_schema: str = "unknown"
@@ -51,6 +53,9 @@ class CliCapabilitySnapshot:
     native_structured_events: bool = False
     warning: str | None = None
     evidence: str | None = None
+    version_window_status: str = "not_probed"
+    minimum_version: str | None = None
+    maximum_version_exclusive: str | None = None
 
     @property
     def compatible(self) -> bool:
@@ -65,6 +70,8 @@ CLI_PROBE_CONTRACTS = {
         help_argv=("exec", "--help"),
         required_tokens=("--json", "--sandbox", "--ephemeral"),
         optional_tokens=("--image", "--config", "--strict-config"),
+        minimum_version="0.144.0",
+        maximum_version_exclusive="0.145.0",
         event_schema="codex-exec-jsonl-v1",
         history_schema="codex-session-jsonl-v1",
     ),
@@ -85,6 +92,8 @@ CLI_PROBE_CONTRACTS = {
             "--allowedTools",
             "--disallowedTools",
         ),
+        minimum_version="2.1.0",
+        maximum_version_exclusive="2.2.0",
         event_schema="claude-stream-json-v1",
         history_schema="claude-project-jsonl-v1",
     ),
@@ -99,6 +108,8 @@ CLI_PROBE_CONTRACTS = {
             "--skip-trust",
         ),
         optional_tokens=("--prompt-interactive", "--list-sessions", "--resume"),
+        minimum_version="0.46.0",
+        maximum_version_exclusive="0.47.0",
         event_schema="gemini-stream-json-v1",
         history_schema="gemini-checkpoint-jsonl-v1",
     ),
@@ -168,6 +179,7 @@ def probe_cli_capabilities(
         missing = [
             token for token in contract.required_tokens if not capabilities[token]
         ]
+        version_window_status = _version_window_status(version, contract)
         warning = None
         status = "supported"
         if missing:
@@ -176,6 +188,27 @@ def probe_cli_capabilities(
                 f"{contract.display_name} {version} is missing required adapter "
                 f"capabilities: {', '.join(missing)}."
             )
+        elif version_window_status == "below_window":
+            status = "unsupported"
+            warning = (
+                f"{contract.display_name} {version} is below the supported version "
+                f"window {_format_version_window(contract)}."
+            )
+        elif version_window_status == "above_window":
+            status = "degraded"
+            warning = (
+                f"{contract.display_name} {version} is newer than the validated "
+                f"version window {_format_version_window(contract)}; required "
+                "capabilities are present, but execution remains blocked until the "
+                "window is reviewed."
+            )
+        elif version_window_status == "unparsed":
+            status = "degraded"
+            warning = (
+                f"{contract.display_name} version could not be matched to the "
+                f"supported version window {_format_version_window(contract)}; "
+                "required capabilities are present, but execution remains blocked."
+            )
         snapshot = _snapshot(
             contract,
             status=status,
@@ -183,7 +216,10 @@ def probe_cli_capabilities(
             version=version,
             capabilities=capabilities,
             warning=warning,
-            evidence="bounded --version and --help probes",
+            evidence=(
+                "bounded --version and --help probes against the declared "
+                "external CLI version window"
+            ),
         )
     with _PROBE_CACHE_LOCK:
         _PROBE_CACHE[cache_key] = snapshot
@@ -205,6 +241,11 @@ def cli_capability_snapshot_to_dict(
         "compatible": snapshot.compatible,
         "version": snapshot.version,
         "parsed_version": snapshot.parsed_version,
+        "version_contract": {
+            "status": snapshot.version_window_status,
+            "minimum": snapshot.minimum_version,
+            "maximum_exclusive": snapshot.maximum_version_exclusive,
+        },
         "command": list(_redacted_command(snapshot.command)),
         "capabilities": dict(snapshot.capabilities),
         "event_schema": snapshot.event_schema,
@@ -248,6 +289,7 @@ def _snapshot(
     evidence: str | None = None,
 ) -> CliCapabilitySnapshot:
     match = _VERSION_PATTERN.search(version or "")
+    version_window_status = _version_window_status(version, contract)
     return CliCapabilitySnapshot(
         harness_id=contract.harness_id,
         status=status,
@@ -261,7 +303,50 @@ def _snapshot(
         native_structured_events=contract.native_structured_events,
         warning=str(redact_secrets(warning)) if warning else None,
         evidence=evidence,
+        version_window_status=version_window_status,
+        minimum_version=contract.minimum_version,
+        maximum_version_exclusive=contract.maximum_version_exclusive,
     )
+
+
+def _version_window_status(version: str | None, contract: CliProbeContract) -> str:
+    if version is None:
+        return "not_probed"
+    parsed = _release_tuple(version)
+    if parsed is None:
+        return "unparsed"
+    if parsed < _release_tuple_required(contract.minimum_version):
+        return "below_window"
+    if parsed >= _release_tuple_required(contract.maximum_version_exclusive):
+        return "above_window"
+    return "in_window"
+
+
+def _release_tuple(version: str) -> tuple[int, int, int] | None:
+    match = _VERSION_PATTERN.search(version)
+    if match is None:
+        return None
+    release = match.group(1).split("+", 1)[0].split("-", 1)[0]
+    parts = release.split(".")
+    numeric: list[int] = []
+    for part in parts[:3]:
+        match_part = re.match(r"\d+", part)
+        if match_part is None:
+            return None
+        numeric.append(int(match_part.group(0)))
+    numeric.extend(0 for _ in range(3 - len(numeric)))
+    return numeric[0], numeric[1], numeric[2]
+
+
+def _release_tuple_required(version: str) -> tuple[int, int, int]:
+    parsed = _release_tuple(version)
+    if parsed is None:  # pragma: no cover - static contracts are covered in tests
+        raise ValueError(f"Invalid CLI version-window boundary: {version}")
+    return parsed
+
+
+def _format_version_window(contract: CliProbeContract) -> str:
+    return f">={contract.minimum_version},<{contract.maximum_version_exclusive}"
 
 
 def _run_probe(command: tuple[str, ...], harness_id: str) -> tuple[str, str]:

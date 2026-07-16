@@ -5,6 +5,16 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.2.4a1] - 2026-07-16
+
+### Исправлено
+- **История OpenAI Responses**: текстовые части `output_text` из предыдущих turns теперь преобразуются вместе с `input_text`, поэтому Codex app-server не теряет продолжение разговора и контекст subagents.
+- **CPU-нагрузка request context**: тяжёлый PBKDF2 для корреляционных отпечатков IP и API-ключа заменён на быстрый keyed HMAC-SHA256, чтобы middleware не блокировал event loop двумя вычислениями по 100 000 итераций на каждый запрос.
+- **Скрытая сериализация DEBUG payload**: подготовка и маскирование payload теперь полностью пропускаются при стандартном уровне `INFO`, включая response и streaming paths.
+- **Ресурсы `PASS_TOKEN`**: credential-specific клиенты GigaChat переиспользуются ограниченным LRU-пулом, остаются активными до завершения stream и закрываются при вытеснении или остановке.
+- **Неблокирующие sinks**: JSONL traffic log пакетируется через фоновую очередь, а экспорт observability вынесен из request path в ограниченную очередь с управляемым backpressure.
+- **Накладные расходы middleware**: request-id, validation, path normalization и pass-token middleware переведены с `BaseHTTPMiddleware` на чистый ASGI; три вложенных response-итератора заменены одним перехватчиком ASGI `send`.
+
 ## [0.2.3a2] - 2026-07-14
 
 ### Исправлено
@@ -482,6 +492,7 @@
 
 ---
 
+[0.2.4a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a2...v0.2.4a1
 [0.2.3a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a1...v0.2.3a2
 [0.2.3a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.2a1...v0.2.3a1
 [0.2.2a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.1a1...v0.2.2a1

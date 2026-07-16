@@ -130,6 +130,7 @@ can be visible to other processes.
 | `GPT2GIGA_API_KEY` | empty | Proxy API key. For shared environments, use a strong random value. |
 | `GPT2GIGA_PASS_MODEL` | `True` | Pass the `model` from the request to GigaChat. Set `False` to always use the configured GigaChat model. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Parse the client `Authorization` as GigaChat credentials for per-request upstream authorization. |
+| `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Maximum idle credential-specific clients retained for connection reuse. |
 | `GPT2GIGA_EMBEDDINGS` | `EmbeddingsGigaR` | Default embeddings model when the model from the request is not used. |
 | `GPT2GIGA_ENABLE_IMAGES` | `True` | Accept and translate supported image inputs. Disable when the deployment must reject image processing. |
 | `GPT2GIGA_DEFAULT_MAX_TOKENS` | empty | Add this positive `max_tokens` value only when the client did not provide `max_tokens`, `max_completion_tokens`, or `max_output_tokens`. Empty means no injected limit. |
@@ -163,6 +164,8 @@ pass its own GigaChat credentials. The following prefixes are supported in
 
 For a regular deployment, it is simpler and safer to keep upstream credentials on
 the server via `GIGACHAT_*`.
+When pass-through is enabled, clients are pooled by credential and closed on
+least-recently-used eviction or shutdown; active streaming requests are never evicted.
 
 ## GigaChat settings
 
@@ -426,6 +429,8 @@ GPT2GIGA_OPENSEARCH_URL=http://localhost:9200
 
 Enable content capture only after resolving storage encryption, retention,
 redaction, and admin-endpoint access.
+All storage backends, including JSONL, use the bounded background queue. JSONL
+writes are batched so a request does not wait for a file open and worker-thread handoff.
 
 ## Postgres and OpenSearch helper variables
 
@@ -487,6 +492,8 @@ The capture flags are independent and disabled by default:
 
 ```dotenv
 GPT2GIGA_OBSERVABILITY_SAMPLE_RATE=1.0
+GPT2GIGA_OBSERVABILITY_QUEUE_SIZE=10000
+GPT2GIGA_OBSERVABILITY_DROP_ON_BACKPRESSURE=True
 GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=False
 GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES=False
 GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS=False
@@ -494,6 +501,10 @@ GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES=False
 GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH=8000
 GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
 ```
+
+The bounded queue exports spans outside the request path. With the default
+backpressure policy, new events are dropped rather than delaying responses when
+the exporter cannot keep up.
 
 Payload content reaches spans only when the corresponding capture flags are
 explicitly enabled. For production, capture is usually left disabled or enabled

@@ -1,8 +1,8 @@
 # Unified Harness
 
-:::warning[Alpha preview — under active development]
+:::warning[Beta preview — prerelease]
 
-The `gpt2giga-harness` 0.0.x line is an early preview for testing and feedback.
+The `gpt2giga-harness` 0.1.x line is a beta preview for testing and feedback.
 The UI, CLI, project YAML, runtime schema, and upgrade behavior can change while
 the product is being developed. Use it for local evaluation and supervised
 workflows, not as a production-critical or unattended multi-user service.
@@ -47,7 +47,7 @@ This separation matters: an approval shown by Unified Harness covers actions it
 owns, such as spawning a run or applying a captured patch. It cannot claim to
 observe every internal action performed by a black-box external CLI.
 
-## Is the alpha preview for you?
+## Is the beta preview for you?
 
 Try it now if you want to evaluate a local agent cockpit, compare harnesses,
 prototype reviewable workflows, or give feedback while the interfaces are
@@ -58,7 +58,7 @@ Wait for a later release if you need a stable automation API, guaranteed
 backward compatibility, high availability, central multi-user administration,
 or a security boundary around arbitrary behavior inside third-party CLIs.
 
-During the alpha:
+During the beta:
 
 - read release notes before upgrading and back up `~/.gpt2giga/harness` plus
   important project `.giga/` definitions;
@@ -75,10 +75,10 @@ During the alpha:
 
 ### 1. Get the preview and check the workstation
 
-The source checkout is the current, always-available alpha path:
+The source checkout is the current, always-available beta path:
 
 ```bash
-git clone --branch feature/harness_enrichment \
+git clone --branch feature/productize_harness \
   https://github.com/ai-forever/gpt2giga.git
 cd gpt2giga
 uv sync --all-packages --all-extras --dev
@@ -100,8 +100,8 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-The distribution installs the exact compatible gateway dependency declared in
-its package metadata and provides the `giga` and `gpt2giga-harness` commands.
+The upcoming `gpt2giga-harness==0.1.0b1` distribution requires
+`gpt2giga==0.2.4a1` and provides the `giga` and `gpt2giga-harness` commands.
 
 Requirements are Python 3.10–3.14 and `uv`. Direct GigaChat runs also need the
 gateway credentials described in the [gpt2giga quickstart](quickstart.md).
@@ -109,6 +109,37 @@ Codex, Claude Code, and Gemini integrations require the matching external CLI
 executable on `PATH` (or an explicit executable override) plus a configured
 local gateway. They do not require a separate vendor login for the documented
 Harness route. Unavailable CLIs stay disabled rather than breaking the cockpit.
+
+#### Base install and optional providers
+
+The base distribution has ten reviewed direct runtime dependencies, including
+the compatible `gpt2giga` requirement. Release CI installs both wheels into
+clean Python 3.10 and 3.14 environments and runs a versioned audit that fails
+if the resolved environment exceeds 64 distributions or includes packages from
+these optional integration families:
+
+- Office document readers and writers;
+- remote messaging channels;
+- external client or agent UI frameworks;
+- sandbox and container providers.
+
+Add those capabilities through a separately installed provider distribution or
+a Harness entry-point plugin. The base package does not install or silently
+enable them. The Codex, Claude Code, and Gemini adapters remain built in, but
+their separately managed CLI executables are discovered on `PATH` rather than
+installed as Python dependencies.
+
+For release or package debugging, run this only inside a clean base-install
+environment; an environment with an intentionally installed optional provider
+is expected to fail the base-only audit:
+
+```bash
+python -I -m gpt2giga_harness.base_install --json
+```
+
+The source-checkout `uv sync --all-packages --all-extras --dev` command installs
+development tooling and repository integration fixtures, so it is not a base
+footprint measurement.
 
 ### 2. Initialize a disposable or test project
 
@@ -129,7 +160,21 @@ durable worker, Harness-managed homes, and managed MCP snapshots. Checks are
 classified as `ready`, `degraded`, or `blocked`; degraded and blocked
 prerequisites include a remediation command. The report redacts secret values,
 does not publish an absolute workspace path, and reads existing runtime worker
-state without rewriting it.
+state without rewriting it. It also carries a stable report kind plus exact
+Harness/gateway, Python, and platform metadata; external CLI compatibility is
+embedded from the same bounded capability probes used for execution.
+
+For CI, choose the failure threshold explicitly. `blocked` returns exit code 1
+only for blocked checks; `degraded` returns 1 for either degraded or blocked
+checks. Without `--fail-on`, doctor keeps its interactive exit-code-0 behavior.
+For an issue report, `--output` atomically writes the same canonical,
+redaction-safe JSON with mode `0600` while stdout keeps the selected human or
+JSON format:
+
+```bash
+giga doctor . --json --fail-on blocked
+giga doctor . --json --output harness-doctor.json
+```
 
 `giga init` creates non-secret starter configuration, agent profiles, prompts,
 an eval, and a review workflow under `.giga/`. Existing files are not replaced
@@ -239,12 +284,16 @@ giga ui
 
 Then open `http://127.0.0.1:8091/`. A useful first tour is:
 
-1. Confirm the current repository and branch in **Work**.
+1. Confirm the current project and selected session in **Workbench**.
 2. Select `echo` and submit a harmless prompt.
 3. Open **Runs** and inspect the attempt, trace, and stored redacted payloads.
-4. Use **Arena** to compare two available harnesses with the same task.
-5. Inspect **Approvals**, **Agents**, **Workflows**, **Evaluate**, **Tools**, and
-   **Scheduled** before enabling edits or unattended execution.
+4. Open **Evaluation → Arena** to compare available harnesses on one task.
+5. Inspect **Approvals**, **Attention**, **Automation**, **Evaluation**, and
+   **Integrations** before enabling edits or unattended execution.
+
+Cockpit V2 is the default local UI. The previous no-build cockpit remains at
+`http://127.0.0.1:8091/legacy` for one release-level rollback window; switching
+between the two does not migrate or rewrite Harness runtime state.
 
 `giga ui` starts a local durable worker automatically when no online worker is
 registered. Use `giga ui --no-start-worker` when a separately supervised worker
@@ -412,6 +461,14 @@ GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS=15
 GPT2GIGA_HARNESS_TIMEOUT_SECONDS=3600
 GPT2GIGA_HARNESS_DATA_DIR=~/.gpt2giga/harness
 ```
+
+Cockpit Settings exposes separate defaults for chat requests and generated
+session titles. Use **Discover models** and select both values from the models
+reported by the active API route. The choices are stored in
+`settings/defaults.json` under the Harness data directory and apply to new
+runs; when the title model is cleared, title generation uses the selected chat
+model. `GPT2GIGA_HARNESS_DEFAULT_MODEL` or `GIGACHAT_MODEL` continues to lock
+the chat default when it is environment-owned.
 
 If `GPT2GIGA_HARNESS_API_KEY` is not set, the harness falls back to
 `GPT2GIGA_API_KEY` for calls to the local proxy. It never passes
@@ -671,6 +728,15 @@ messages, and selected attachments for private-key material, token-looking
 values, credential assignments, `.env`-style files, deny-listed paths,
 git-ignored workspace files, and large attachments.
 
+The same report now contains a machine-readable `readiness` projection for the
+selected execution plan: harness availability, invocation mode, exact API
+route/model, required workspace/Git policy, managed state, and synchronous or
+durable delivery. Only relevant checks are selected. A missing proxy or agent
+CLI cannot block Echo, while a missing selected executable or Git repository
+required for an isolated edit blocks before process or worktree creation. Every
+non-ready check carries a redaction-safe remediation message and command shared
+with `giga doctor`.
+
 Hard-block findings stop the run before `HarnessRun`, messages, raw requests,
 or external CLI processes are written. Warning findings are saved in
 `run.metadata.preflight`, included in the redacted raw request, and emitted as a
@@ -680,9 +746,10 @@ warning event when a run continues. The browser UI calls the same check through:
 POST /api/preflight/run
 ```
 
-The response includes `hard_block`, a list of findings with safe remediation
-actions, and a context budget estimate covering prompt length, enabled memory,
-attached files, image count/size, previous chat turns, and truncation warnings.
+The response includes `hard_block`, the selected-plan `readiness` report, a list
+of content findings with safe remediation actions, and a context budget estimate
+covering prompt length, enabled memory, attached files, image count/size,
+previous chat turns, and truncation warnings.
 For attachment findings, the UI can remove the file from the current composer
 selection or send only an `@path` reference. `Continue anyway` is shown only for
 warning-level findings, not hard blocks.
@@ -1115,6 +1182,24 @@ fingerprints, `giga harness inspect --json`, `/api/harnesses`, and the cockpit
 expose the redaction-safe version, event/history schema, proven flags, and any
 compatibility warning. Structured parsers ignore unknown additive fields, but a
 stream with no recognized required event contract fails explicitly.
+
+The current external CLI support windows are deliberately bounded to the
+minor lines covered by the packaged headless and native-history fixtures:
+
+| Adapter | Supported version window |
+|---|---|
+| Codex CLI | `>=0.144.0,<0.145.0` |
+| Claude Code | `>=2.1.0,<2.2.0` |
+| Gemini CLI | `>=0.46.0,<0.47.0` |
+
+Both the version window and required capability flags must pass. A version
+below its window or a binary missing a required flag is `unsupported`. A newer
+version with all required flags is `degraded`: diagnostics expose
+`version_contract.status=above_window`, but execution remains fail-closed until
+fixtures and the declared window are reviewed. Unparseable version output is
+handled the same way with `version_contract.status=unparsed`. The JSON contract
+also publishes `minimum` and `maximum_exclusive`, so CI and issue reports do not
+need to infer compatibility from warning text.
 
 Inspect one harness:
 
@@ -2039,6 +2124,51 @@ For a starting template:
 giga harness scaffold my-harness
 ```
 
+## User-State Backup and Runtime Export
+
+Before an upgrade or package rollback, stop every Cockpit process, durable
+worker, and active run that owns the selected data directory. Create the
+archive outside the Harness data directory and verify it before changing the
+installed package:
+
+```bash
+giga state backup --output ../gpt2giga-harness-state.zip
+giga state verify ../gpt2giga-harness-state.zip --json
+# after stopping Harness, restore into an absent directory or confirm replacement
+giga state restore ../gpt2giga-harness-state.zip --replace --json
+```
+
+The backup schema is versioned and content-addressed. Archive paths are
+relative, ZIP metadata is deterministic, SQLite databases are copied through
+consistent snapshots, and each retained file has a SHA-256 digest. Transient
+lock, WAL, SHM, and temporary files are omitted. Creation fails closed on
+symbolic links, unsupported file types, an existing destination, output inside
+the state directory, or any source change observed during capture.
+
+The archive is written atomically with mode `0600`, but it is not redacted: it
+can contain opt-in captured content, attachments, and managed configuration.
+Store it as private user state and do not attach it to an issue. Use the
+content-free coordination export for support instead:
+
+```bash
+giga runtime export --output /tmp/harness-runtime.json
+```
+
+`giga state backup` covers the configured Harness user data directory
+(`GPT2GIGA_HARNESS_DATA_DIR`, normally `~/.gpt2giga/harness`). Project-local
+`.giga/` directories remain outside that archive and belong in the project's
+own backup or version-control policy.
+
+`giga state restore` verifies the archive again, rejects a runtime schema newer
+than the installed Harness supports, stages retained modes and SQLite integrity
+checks in a private sibling directory, and only then publishes the restored
+directory. Restoring over an existing directory requires `--replace`; active
+lock/WAL/SHM markers or a concurrent destination change fail before the swap.
+An older runtime schema is upgraded only when the restored store is opened by
+the installed package. Reverse migrations are not supported: package rollback
+must restore the pre-upgrade archive created for that version. The command does
+not touch project-local `.giga/` state.
+
 ## Migration from the Combined Prerelease
 
 The previous branch-only combined prerelease exposed Harness modules below
@@ -2061,7 +2191,7 @@ Remove the old combined wheel before installing the split packages so stale
 
 ```bash
 python -m pip uninstall -y gpt2giga gpt2giga-harness
-python -m pip install gpt2giga-harness
+python -m pip install --pre gpt2giga-harness
 ```
 
 For `uv` tool installations, recreate both tool environments:
@@ -2070,8 +2200,11 @@ For `uv` tool installations, recreate both tool environments:
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
 uv tool install --prerelease allow gpt2giga
-uv tool install gpt2giga-harness
+uv tool install --prerelease allow gpt2giga-harness
 ```
+
+The upcoming `gpt2giga-harness==0.1.0b1` metadata requires
+`gpt2giga==0.2.4a1`.
 
 This package migration does not move or rewrite Harness state. Existing
 `~/.gpt2giga/harness` data and project-local `.giga/` directories remain in

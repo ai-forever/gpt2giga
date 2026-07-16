@@ -129,6 +129,10 @@ class HarnessUISecurityMiddleware(BaseHTTPMiddleware):
         )
         shell_request = request.method == "GET" and (
             path == "/"
+            or path == "/cockpit-v2"
+            or path.startswith("/cockpit-v2/")
+            or path == "/legacy"
+            or path.startswith("/legacy/")
             or path == "/work"
             or path.startswith("/work/")
             or path == "/arena"

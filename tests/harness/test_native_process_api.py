@@ -28,6 +28,7 @@ from gpt2giga_harness.native.registry import NativeHistoryConnectorRegistry
 from gpt2giga_harness.native.store import FilesystemNativeSessionIndexStore
 from gpt2giga_harness.project import project_id_for_root
 from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.runtime.policy import NATIVE_PROCESS_SPAWN_OWNER
 from gpt2giga_harness.sessions import (
     FilesystemHarnessSessionStore,
     InMemoryHarnessSessionStore,
@@ -680,6 +681,7 @@ def test_native_process_api_approval_blocks_before_worktree_and_spawn(tmp_path):
     approval = waiting.json()["approval"]
     assert approval["action"] == "process.spawn"
     assert approval["enforcement"] == "enforced_by_harness"
+    assert approval["enforcement_owner"] == NATIVE_PROCESS_SPAWN_OWNER
     assert "edit safely" not in str(approval)
     assert store.list_runs(session.id) == ()
     assert not (data_dir / "worktrees").exists()

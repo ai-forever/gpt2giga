@@ -117,6 +117,7 @@ class HarnessPreflightReport:
     max_severity: str
     findings: tuple[HarnessPreflightFinding, ...]
     context_budget: ContextBudgetEstimate
+    readiness: Mapping[str, Any] = field(default_factory=dict)
 
 
 def build_preflight_report(
@@ -129,6 +130,7 @@ def build_preflight_report(
     data_dir: str | Path | None = None,
     limits: AttachmentLimits | None = None,
     max_history_messages: int = DEFAULT_MAX_HISTORY_MESSAGES,
+    readiness: Mapping[str, Any] | None = None,
 ) -> HarnessPreflightReport:
     """Build a redacted pre-run safety and budget report."""
     attachment_limits = limits or AttachmentLimits()
@@ -181,13 +183,25 @@ def build_preflight_report(
     )
     _extend_findings(findings, _budget_findings(budget))
     findings = _with_stable_ids(findings)
-    hard_block = any(finding.severity == SEVERITY_BLOCK for finding in findings)
+    readiness_payload = dict(readiness or {})
+    readiness_blocked = bool(readiness_payload.get("blocked"))
+    hard_block = readiness_blocked or any(
+        finding.severity == SEVERITY_BLOCK for finding in findings
+    )
+    max_severity = _max_severity(findings)
+    if readiness_blocked:
+        max_severity = SEVERITY_BLOCK
+    elif (readiness_payload.get("summary") or {}).get(
+        "degraded"
+    ) and max_severity == SEVERITY_INFO:
+        max_severity = SEVERITY_WARNING
     return HarnessPreflightReport(
         ok=not hard_block,
         hard_block=hard_block,
-        max_severity=_max_severity(findings),
+        max_severity=max_severity,
         findings=tuple(findings),
         context_budget=budget,
+        readiness=readiness_payload,
     )
 
 
@@ -275,6 +289,7 @@ def preflight_report_to_dict(report: HarnessPreflightReport) -> dict[str, Any]:
             for finding in report.findings
         ],
         "context_budget": context_budget_to_dict(report.context_budget),
+        "readiness": dict(report.readiness),
     }
 
 
@@ -310,6 +325,18 @@ def format_preflight_block_message(report: HarnessPreflightReport) -> str:
             if finding.severity == SEVERITY_BLOCK
         }
     )
+    readiness_ids = sorted(
+        str(finding.get("id"))
+        for finding in report.readiness.get("findings") or ()
+        if isinstance(finding, Mapping) and finding.get("status") == "blocked"
+    )
+    if readiness_ids and not codes:
+        return (
+            "Preflight blocked this run before invoking a harness. "
+            "Resolve required execution readiness first ("
+            + ", ".join(readiness_ids)
+            + ")."
+        )
     suffix = ", ".join(codes) if codes else "blocked context"
     return (
         "Preflight blocked this run before invoking a harness. "

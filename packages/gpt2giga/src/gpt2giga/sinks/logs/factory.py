@@ -49,7 +49,14 @@ def _create_one_traffic_log_sink(
     logger: Any | None = None,
 ) -> TrafficLogSink:
     if sink_name == "jsonl":
-        return JsonlTrafficLogSink(settings.traffic_log_jsonl_path)
+        return QueuedTrafficLogSink(
+            JsonlTrafficLogSink(settings.traffic_log_jsonl_path),
+            queue_size=settings.traffic_log_queue_size,
+            batch_size=settings.traffic_log_batch_size,
+            flush_interval_ms=settings.traffic_log_flush_interval_ms,
+            drop_on_backpressure=settings.traffic_log_drop_on_backpressure,
+            logger=logger,
+        )
 
     if sink_name == "postgres":
         if not settings.traffic_log_postgres_dsn:

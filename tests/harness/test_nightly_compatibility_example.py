@@ -106,6 +106,9 @@ def test_nightly_guardian_runs_headless_and_surfaces_only_regression_attention(
         pytest.skip("git is not installed")
     workspace = tmp_path / "nightly-guardian"
     shutil.copytree(EXAMPLE_SOURCE, workspace)
+    readme = (workspace / "README.md").read_text(encoding="utf-8")
+    assert "/api/workflows/nightly-compatibility-guardian/run" in readme
+    assert "Run workflow" in readme
     _git(workspace, "init", "-b", "main")
     _git(workspace, "config", "user.email", "harness-example@example.invalid")
     _git(workspace, "config", "user.name", "Harness Example")

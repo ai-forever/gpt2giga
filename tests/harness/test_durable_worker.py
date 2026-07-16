@@ -518,7 +518,8 @@ def test_worker_timeout_fails_job_and_records_process_metadata(tmp_path):
             "harness_id": "process-worker",
             "prompt": "timeout",
             "mode": "read",
-            "timeout_seconds": 0.05,
+            # Allow the harness to publish process metadata before cancellation.
+            "timeout_seconds": 0.5,
         },
         idempotency_key="timeout",
     )

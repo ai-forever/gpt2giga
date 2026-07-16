@@ -7,9 +7,11 @@ from fastapi import FastAPI
 from fastapi import Request
 import pytest
 from starlette.testclient import TestClient
+from starlette.responses import StreamingResponse
 
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.context import RequestContext
+from gpt2giga.core.context import fingerprint_sensitive_value
 from gpt2giga.core.context import get_request_context
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.models.config import ProxySettings
@@ -166,6 +168,9 @@ def test_pass_token_middleware(monkeypatch):
         def __init__(self, **kwargs):
             self._settings = SimpleNamespace(**kwargs)
 
+        async def aclose(self):
+            return None
+
     # Mock settings
     config = SimpleNamespace(
         proxy_settings=SimpleNamespace(pass_token=True),
@@ -268,9 +273,21 @@ def test_rquid_middleware_sets_request_context_and_header():
     assert data["caller_sdk"] == "openai-python"
     assert data["caller_client_family"] == "openai"
     assert data["annotations"]["caller"]["sdk"] == "openai-python"
-    assert data["client_ip_hash"].startswith("pbkdf2-sha256:")
-    assert data["api_key_hash"].startswith("pbkdf2-sha256:")
+    assert data["client_ip_hash"].startswith("hmac-sha256:")
+    assert data["api_key_hash"].startswith("hmac-sha256:")
     assert "local-secret" not in data["api_key_hash"]
+
+
+def test_sensitive_fingerprint_is_stable_and_opaque():
+    first = fingerprint_sensitive_value("local-secret")
+
+    assert first == fingerprint_sensitive_value("local-secret")
+    assert first != fingerprint_sensitive_value("another-secret")
+    assert first is not None
+    assert first.startswith("hmac-sha256:")
+    assert len(first.removeprefix("hmac-sha256:")) == 16
+    assert "local-secret" not in first
+    assert fingerprint_sensitive_value(None) is None
 
 
 def test_rquid_middleware_infers_v2_protocols():
@@ -414,9 +431,31 @@ def test_rquid_middleware_emits_traffic_event_for_completed_request():
     assert event.method == "GET"
     assert event.status_code == 200
     assert event.provider == "gigachat"
-    assert event.api_key_hash.startswith("pbkdf2-sha256:")
+    assert event.api_key_hash.startswith("hmac-sha256:")
     assert event.metadata["lifecycle"] == "request_completed"
     assert event.latency_ms >= 0
+
+
+def test_rquid_middleware_keeps_context_through_stream_completion():
+    test_app = FastAPI()
+    sink = RecordingTrafficSink()
+    test_app.state.traffic_log_sink = sink
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.get("/v1/chat/completions")
+    async def chat():
+        async def chunks():
+            assert get_request_context() is not None
+            yield b"data: {}\n\n"
+
+        return StreamingResponse(chunks(), media_type="text/event-stream")
+
+    response = TestClient(test_app).get("/v1/chat/completions")
+
+    assert response.status_code == 200
+    assert response.content == b"data: {}\n\n"
+    assert len(sink.events) == 1
+    assert sink.events[0].metadata["lifecycle"] == "streaming_completed"
 
 
 def test_rquid_middleware_captures_redacted_traffic_payloads_when_enabled():

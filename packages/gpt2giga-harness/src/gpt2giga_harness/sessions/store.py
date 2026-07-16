@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+import threading
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
@@ -19,6 +20,13 @@ from gpt2giga_harness.sessions.models import (
     HarnessStoredEvent,
     native_link_from_dict,
     native_link_to_dict,
+)
+from gpt2giga_harness.sessions.event_stream import (
+    EventCursorPosition,
+    EventTailItem,
+    EventTailPage,
+    RunEventBroker,
+    event_stream_size,
 )
 from gpt2giga_harness.sessions.redaction import (
     redact_event_payload,
@@ -70,6 +78,14 @@ class HarnessSessionStore(Protocol):
     def update_session(self, session_id: str, **patch: Any) -> HarnessSession:
         """Patch one session."""
 
+    def update_session_if_title(
+        self,
+        session_id: str,
+        expected_title: str,
+        **patch: Any,
+    ) -> HarnessSession | None:
+        """Atomically patch one session only while its title is unchanged."""
+
     def delete_session(self, session_id: str) -> None:
         """Delete one session."""
 
@@ -114,8 +130,34 @@ class HarnessSessionStore(Protocol):
     def list_runs(self, session_id: str) -> tuple[HarnessRun, ...]:
         """List runs for one session."""
 
+    def runs_center_generation(self) -> tuple[int, int]:
+        """Return cheap session/run generations for global live invalidation."""
+
     def append_event(self, event: HarnessStoredEvent) -> HarnessStoredEvent:
         """Append one event."""
+
+    def event_tail_offset(self, session_id: str) -> int:
+        """Return the durable append offset after all retained session events."""
+
+    def list_event_tail_page(
+        self,
+        session_id: str,
+        *,
+        run_id: str | None,
+        offset: int = 0,
+        limit: int = 100,
+        max_bytes: int = 1024 * 1024,
+    ) -> EventTailPage:
+        """Return a bounded optionally run-filtered durable event page."""
+
+    def resolve_event_cursor(
+        self,
+        session_id: str,
+        *,
+        run_id: str | None,
+        event_id: str,
+    ) -> EventCursorPosition | None:
+        """Resolve one retained event identity to its durable append offset."""
 
     def list_events(
         self,
@@ -182,6 +224,10 @@ class InMemoryHarnessSessionStore:
         self._raw_requests: dict[str, list[HarnessRawRecord]] = {}
         self._raw_responses: dict[str, list[HarnessRawRecord]] = {}
         self._native_links: dict[str, list[HarnessNativeLink]] = {}
+        self._session_lock = threading.RLock()
+        self._session_generation = 0
+        self._run_generation = 0
+        self.event_broker = RunEventBroker()
 
     def create_session(
         self,
@@ -210,6 +256,8 @@ class InMemoryHarnessSessionStore:
             metadata=_redacted_mapping(metadata),
         )
         self._sessions[session.id] = session
+        self._session_generation += 1
+        self.event_broker.publish_runs_center()
         return session
 
     def list_sessions(
@@ -246,20 +294,44 @@ class InMemoryHarnessSessionStore:
             raise SessionNotFoundError(session_id) from exc
 
     def update_session(self, session_id: str, **patch: Any) -> HarnessSession:
-        session = self.get_session(session_id)
-        updated = _patch_session(session, patch)
-        self._sessions[session_id] = updated
+        with self._session_lock:
+            session = self.get_session(session_id)
+            updated = _patch_session(session, patch)
+            self._sessions[session_id] = updated
+        self._session_generation += 1
+        self.event_broker.publish_runs_center()
+        return updated
+
+    def update_session_if_title(
+        self,
+        session_id: str,
+        expected_title: str,
+        **patch: Any,
+    ) -> HarnessSession | None:
+        """Atomically patch a session unless a user already renamed it."""
+        with self._session_lock:
+            session = self.get_session(session_id)
+            if session.title != expected_title:
+                return None
+            updated = _patch_session(session, patch)
+            self._sessions[session_id] = updated
+        self._session_generation += 1
+        self.event_broker.publish_runs_center()
         return updated
 
     def delete_session(self, session_id: str) -> None:
-        self.get_session(session_id)
-        self._sessions.pop(session_id, None)
-        self._messages.pop(session_id, None)
-        self._runs.pop(session_id, None)
-        self._events.pop(session_id, None)
-        self._raw_requests.pop(session_id, None)
-        self._raw_responses.pop(session_id, None)
-        self._native_links.pop(session_id, None)
+        with self._session_lock:
+            self.get_session(session_id)
+            self._sessions.pop(session_id, None)
+            self._messages.pop(session_id, None)
+            self._runs.pop(session_id, None)
+            self._events.pop(session_id, None)
+            self._raw_requests.pop(session_id, None)
+            self._raw_responses.pop(session_id, None)
+            self._native_links.pop(session_id, None)
+            self._session_generation += 1
+        self.event_broker.publish_session(session_id)
+        self.event_broker.publish_runs_center()
 
     def archive_session(
         self,
@@ -319,12 +391,16 @@ class InMemoryHarnessSessionStore:
             metadata=_redacted_mapping(metadata),
         )
         self._runs.setdefault(session_id, []).append(run)
+        self._run_generation += 1
+        self.event_broker.publish_runs_center()
         return run
 
     def update_run(self, run_id: str, **patch: Any) -> HarnessRun:
         session_id, index, run = self._find_run(run_id)
         updated = _patch_run(run, patch)
         self._runs[session_id][index] = updated
+        self._run_generation += 1
+        self.event_broker.publish_runs_center()
         return updated
 
     def get_run(self, run_id: str) -> HarnessRun:
@@ -334,6 +410,10 @@ class InMemoryHarnessSessionStore:
         self.get_session(session_id)
         return tuple(self._runs.get(session_id, ()))
 
+    def runs_center_generation(self) -> tuple[int, int]:
+        """Return cheap session/run generations for global live invalidation."""
+        return self._session_generation, self._run_generation
+
     def append_event(self, event: HarnessStoredEvent) -> HarnessStoredEvent:
         self.get_session(event.session_id)
         stored = replace(
@@ -342,7 +422,70 @@ class InMemoryHarnessSessionStore:
             payload=redact_event_payload(event.payload),
         )
         self._events.setdefault(event.session_id, []).append(stored)
+        self.event_broker.publish(stored)
         return stored
+
+    def event_tail_offset(self, session_id: str) -> int:
+        """Return the in-memory append offset without replaying retained events."""
+        self.get_session(session_id)
+        return len(self._events.get(session_id, ()))
+
+    def list_event_tail_page(
+        self,
+        session_id: str,
+        *,
+        run_id: str | None,
+        offset: int = 0,
+        limit: int = 100,
+        max_bytes: int = 1024 * 1024,
+    ) -> EventTailPage:
+        """Return a bounded run-filtered page without replaying prior positions."""
+        self.get_session(session_id)
+        events = self._events.get(session_id, ())
+        if offset < 0 or offset > len(events):
+            raise ValueError("event cursor offset is outside the retained tail")
+        bounded_limit = min(max(limit, 1), 100)
+        bounded_bytes = min(max(max_bytes, 1024), 1024 * 1024)
+        items: list[EventTailItem] = []
+        byte_count = 0
+        position = offset
+        scan_limit = min(len(events), offset + (bounded_limit * 16))
+        while position < scan_limit and len(items) < bounded_limit:
+            event = events[position]
+            position += 1
+            if run_id is not None and event.run_id != run_id:
+                continue
+            size = event_stream_size(event)
+            if items and byte_count + size > bounded_bytes:
+                position -= 1
+                break
+            if size > bounded_bytes:
+                raise ValueError("stored event exceeds the stream byte limit")
+            items.append(EventTailItem(event=event, next_offset=position))
+            byte_count += size
+        return EventTailPage(
+            items=tuple(items),
+            next_offset=position,
+            has_more=position < len(events),
+            byte_count=byte_count,
+        )
+
+    def resolve_event_cursor(
+        self,
+        session_id: str,
+        *,
+        run_id: str | None,
+        event_id: str,
+    ) -> EventCursorPosition | None:
+        """Resolve one legacy event id to its append-order tail offset."""
+        self.get_session(session_id)
+        for position, event in enumerate(self._events.get(session_id, ()), start=1):
+            if (run_id is None or event.run_id == run_id) and event.id == event_id:
+                return EventCursorPosition(
+                    offset=position,
+                    terminal_seen=event.type == "run_finished",
+                )
+        return None
 
     def list_events(
         self,

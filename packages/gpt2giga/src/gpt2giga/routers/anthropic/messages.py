@@ -172,6 +172,7 @@ async def messages(request: Request):
                 is_structured_output=structured_output_fallback,
                 logger=state.logger,
                 mode=state.config.proxy_settings.mode,
+                log_level=state.config.proxy_settings.log_level,
             )
             await commit_anthropic_response(request, conversation_turn, result)
             await emit_anthropic_message_observability(
@@ -226,6 +227,7 @@ async def messages(request: Request):
             is_structured_output=structured_output_fallback,
             logger=state.logger,
             mode=state.config.proxy_settings.mode,
+            log_level=state.config.proxy_settings.log_level,
         )
         await commit_anthropic_response(request, conversation_turn, result)
         await emit_anthropic_message_observability(
