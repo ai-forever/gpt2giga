@@ -354,14 +354,27 @@ class HarnessSessionRunner:
         )
         readiness: Mapping[str, Any] | None = None
         if durable and existing_run_id is not None:
-            queued_run = self.store.get_run(existing_run_id)
-            queued_preflight = _mapping(queued_run.metadata).get("preflight")
-            if isinstance(queued_preflight, Mapping):
+            candidate_run_ids = (
+                existing_run_id,
+                *reversed(excluded_history_run_ids),
+            )
+            for candidate_run_id in candidate_run_ids:
+                try:
+                    queued_run = self.store.get_run(candidate_run_id)
+                except KeyError:
+                    continue
+                if queued_run.session_id != session.id:
+                    continue
+                queued_preflight = _mapping(queued_run.metadata).get("preflight")
+                if not isinstance(queued_preflight, Mapping):
+                    continue
                 queued_readiness = queued_preflight.get("readiness")
                 if isinstance(queued_readiness, Mapping):
                     # Durable submission already performed admission checks before
-                    # creating this queued run. Reuse that immutable evidence.
+                    # creating the first queued run. Retries reuse the last retained
+                    # attempt's immutable evidence before their new run exists.
                     readiness = dict(queued_readiness)
+                    break
         if readiness is None:
             readiness = self._execution_readiness(options, durable=durable)
         preflight = build_preflight_report(

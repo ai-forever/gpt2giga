@@ -347,7 +347,9 @@ def test_queued_turn_waits_for_preceding_assistant_in_request_history():
     ]
 
 
-def test_durable_worker_reuses_submission_readiness_without_second_probe(monkeypatch):
+def test_durable_worker_reuses_submission_readiness_for_retry_without_second_probe(
+    monkeypatch,
+):
     harness = _CaptureHarness()
     runner = _runner(harness)
     session = runner.create_session(default_harness_id="capture")
@@ -375,8 +377,18 @@ def test_durable_worker_reuses_submission_readiness_without_second_probe(monkeyp
         user_message_id=queued.user_message.id,
         durable=True,
     )
+    retry_run_id = new_id("run")
+    runner.run_in_session(
+        session.id,
+        payload,
+        existing_run_id=retry_run_id,
+        user_message_id=queued.user_message.id,
+        excluded_history_run_ids=(queued.run.id,),
+        durable=True,
+    )
 
     assert calls == 1
+    assert runner.store.get_run(retry_run_id).status.value == "succeeded"
 
 
 def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):
