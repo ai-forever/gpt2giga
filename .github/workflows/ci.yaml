@@ -22,6 +22,33 @@ on:
       - '.github/workflows/ci.yaml'
 
 jobs:
+  cockpit-v2-frontend:
+    name: Cockpit V2 frontend gates
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 22.13
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22.13.0'
+          cache: npm
+          cache-dependency-path: packages/gpt2giga-harness/frontend/package-lock.json
+
+      - name: Install pinned frontend dependencies
+        working-directory: packages/gpt2giga-harness/frontend
+        run: npm ci --ignore-scripts
+
+      - name: Run typecheck, lint, unit, build, determinism, and bundle gates
+        working-directory: packages/gpt2giga-harness/frontend
+        run: npm run check
+
+      - name: Reject stale generated Cockpit V2 assets
+        run: git diff --exit-code -- packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
+
   test:
     name: Test on Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
@@ -180,10 +207,11 @@ jobs:
           GATEWAY_VERSION: ${{ steps.versions.outputs.gateway }}
           HARNESS_VERSION: ${{ steps.versions.outputs.harness }}
         run: |
-          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, os, gpt2giga, gpt2giga_harness; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert m.version('gpt2giga-harness') == os.environ['HARNESS_VERSION']; assert r.files('gpt2giga_harness.ui').joinpath('assets/index.html').is_file()"
+          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, os, gpt2giga, gpt2giga_harness; from gpt2giga_harness.ui.cockpit_v2 import load_cockpit_v2_manifest; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert m.version('gpt2giga-harness') == os.environ['HARNESS_VERSION']; assert r.files('gpt2giga_harness.ui').joinpath('assets/index.html').is_file(); assert load_cockpit_v2_manifest().entry == 'index.html'"
           .venv-artifact/bin/gpt2giga --help
           .venv-artifact/bin/giga --help
           .venv-artifact/bin/gpt2giga-harness --help
+          .venv-artifact/bin/python -I -m gpt2giga_harness.base_install --json
 
 
   coverage-badge:

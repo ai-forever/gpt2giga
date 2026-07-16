@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
@@ -13,11 +13,11 @@ import json
 from pathlib import Path
 import re
 import threading
+from time import monotonic
 from typing import Any, Mapping
 
 from fastapi import Body, FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from starlette.concurrency import run_in_threadpool
 
 from gpt2giga_harness.arena import (
     ArenaNotFoundError,
@@ -26,7 +26,9 @@ from gpt2giga_harness.arena import (
     HarnessArenaRun,
     arena_child_to_dict,
     arena_to_dict,
+    continue_arena,
     queue_arena,
+    queue_arena_follow_up,
     run_arena,
 )
 from gpt2giga_harness import proxy
@@ -47,6 +49,16 @@ from gpt2giga_harness.config import (
     HarnessConfig,
     pass_model_env_note,
 )
+from gpt2giga_harness.ui.async_execution import (
+    AsyncDiagnosticsMiddleware,
+    AsyncExecutionDiagnostics,
+    ConformantAPIRoute,
+    async_handler_contract_errors,
+    run_in_threadpool,
+    run_stream_offload,
+    stop_monitor,
+)
+from gpt2giga_harness.ui.execution_contracts import install_execution_contracts
 from gpt2giga_harness.harnesses.attachment_plan import attachment_capability_error
 from gpt2giga_harness.evals import (
     EvalRunNotFoundError,
@@ -155,6 +167,7 @@ from gpt2giga_harness.runtime.payloads import DurableJobPayloadStore
 from gpt2giga_harness.runtime.policy import (
     EnforcementLevel,
     INTERACTIVE_PROFILE,
+    NATIVE_PROCESS_SPAWN_OWNER,
     PermissionAction,
     PolicyContext,
     PolicyDecision,
@@ -174,6 +187,12 @@ from gpt2giga_harness.sessions import (
     HarnessSessionStore,
     RunNotFoundError,
     SessionNotFoundError,
+)
+from gpt2giga_harness.sessions.event_stream import (
+    EventCursorPosition,
+    RunEventBroker,
+    StreamCapacityError,
+    StreamSignal,
 )
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.models import (
@@ -210,11 +229,16 @@ from gpt2giga_harness.tool_profiles import (
     build_tool_profile_statuses,
     tool_profile_status_to_dict,
 )
+from gpt2giga_harness.settings import HarnessSettingsStore
+from gpt2giga_harness.ui.performance import ui_performance_budgets
+from gpt2giga_harness.ui.mutation_contracts import install_mutation_contracts
 from gpt2giga_harness.ui.routers.runs import router as runs_router
 from gpt2giga_harness.ui.routers.schedules import router as schedules_router
+from gpt2giga_harness.ui.routers.settings import router as settings_router
 from gpt2giga_harness.ui.routers.agents import router as agents_router
 from gpt2giga_harness.ui.routers.automation import router as automation_router
 from gpt2giga_harness.ui.routers.approvals import router as approvals_router
+from gpt2giga_harness.ui.routers.cockpit import router as cockpit_router
 from gpt2giga_harness.ui.routers.evaluate import router as evaluate_router
 from gpt2giga_harness.ui.routers.files import create_file_preview_router
 from gpt2giga_harness.ui.routers.tools import router as tools_router
@@ -243,6 +267,8 @@ from gpt2giga_harness.workspace import (
 
 
 NATIVE_SUBMIT_KEY_DELAY_SECONDS = 0.05
+RUN_EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
+RUN_EVENT_STREAM_POLL_SECONDS = 0.1
 
 
 @dataclass
@@ -285,6 +311,7 @@ def create_app(
     arena_store = FilesystemHarnessArenaStore(config.data_dir)
     eval_store = FilesystemHarnessEvalStore(config.data_dir)
     memory_store = FilesystemProjectMemoryStore()
+    settings_store = HarnessSettingsStore(config.data_dir, config)
     runner = HarnessSessionRunner(
         registry=registry,
         config=config,
@@ -304,9 +331,33 @@ def create_app(
     )
     policy_engine = PolicyEngine(runtime_store)
     active_headless_runs: dict[str, _ActiveHeadlessRun] = {}
-    app = FastAPI(title="gpt2giga Unified Harness", docs_url=None, redoc_url=None)
+    async_diagnostics = AsyncExecutionDiagnostics()
+    run_event_broker = getattr(store, "event_broker", RunEventBroker())
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        monitor = asyncio.create_task(
+            async_diagnostics.monitor_event_loop(),
+            name="harness-event-loop-lag",
+        )
+        try:
+            yield
+        finally:
+            await stop_monitor(monitor)
+
+    app = FastAPI(
+        title="gpt2giga Unified Harness",
+        docs_url=None,
+        redoc_url=None,
+        lifespan=lifespan,
+    )
+    app.router.route_class = ConformantAPIRoute
     ui_security = HarnessUISecurity(config)
     app.add_middleware(HarnessUISecurityMiddleware, security=ui_security)
+    app.add_middleware(
+        AsyncDiagnosticsMiddleware,
+        diagnostics=async_diagnostics,
+    )
     app.state.harness_config = config
     app.state.harness_registry = registry
     app.state.harness_session_store = store
@@ -332,6 +383,9 @@ def create_app(
     app.state.harness_native_registry = native_registry
     app.state.harness_native_index_store = native_index_store
     app.state.harness_native_process_manager = native_process_manager
+    app.state.harness_async_diagnostics = async_diagnostics
+    app.state.harness_run_event_broker = run_event_broker
+    app.state.harness_settings_store = settings_store
 
     def _approval_gate(
         action: PermissionAction,
@@ -414,7 +468,7 @@ def create_app(
         )
 
     @app.get("/api/harnesses")
-    async def harnesses() -> dict[str, Any]:
+    def harnesses() -> dict[str, Any]:
         harness_items = []
         for harness in registry.list():
             spec = harness.spec()
@@ -440,18 +494,26 @@ def create_app(
         }
 
     @app.get("/api/defaults")
-    async def defaults() -> dict[str, Any]:
+    def defaults() -> dict[str, Any]:
+        harness_defaults = settings_store.load().defaults
         return {
             "proxy_url": config.proxy_url,
-            "default_model": config.default_model or DEFAULT_MODEL_HINTS[0],
-            "default_api_mode": config.default_api_mode.value,
+            "default_harness_id": harness_defaults.default_harness_id,
+            "default_model": harness_defaults.default_model,
+            "default_api_mode": harness_defaults.default_api_mode,
+            "default_mode": harness_defaults.mode,
+            "invocation_mode": harness_defaults.invocation_mode,
+            "workspace_policy": harness_defaults.workspace_policy,
+            "permission_profile": harness_defaults.permission_profile,
+            "stream": harness_defaults.stream,
             "auto_start_proxy": config.auto_start_proxy,
             "proxy_start_timeout_seconds": config.proxy_start_timeout_seconds,
             "note": pass_model_env_note(),
+            "performance_budgets": ui_performance_budgets(),
         }
 
     @app.get("/api/project")
-    async def project(workspace: str | None = Query(default=None)) -> dict[str, Any]:
+    def project(workspace: str | None = Query(default=None)) -> dict[str, Any]:
         try:
             return _project_response(
                 workspace=_optional_text(workspace),
@@ -461,7 +523,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/project/config")
-    async def project_config(
+    def project_config(
         workspace: str | None = Query(default=None),
     ) -> dict[str, Any]:
         try:
@@ -475,7 +537,7 @@ def create_app(
         return {"config": project_config_to_dict(loaded)}
 
     @app.get("/api/project/presets")
-    async def project_presets(
+    def project_presets(
         workspace: str | None = Query(default=None),
     ) -> dict[str, Any]:
         try:
@@ -495,7 +557,7 @@ def create_app(
         }
 
     @app.post("/api/project/presets/{preset_name}/render")
-    async def render_preset(
+    def render_preset(
         preset_name: str,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
@@ -523,7 +585,7 @@ def create_app(
         }
 
     @app.get("/api/project/state")
-    async def project_state(
+    def project_state(
         workspace: str | None = Query(default=None),
     ) -> dict[str, Any]:
         try:
@@ -539,7 +601,7 @@ def create_app(
         }
 
     @app.patch("/api/project/state")
-    async def update_state(
+    def update_state(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         try:
@@ -557,7 +619,7 @@ def create_app(
         }
 
     @app.post("/api/editor/open-workspace")
-    async def editor_open_workspace(
+    def editor_open_workspace(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         try:
@@ -581,7 +643,7 @@ def create_app(
         }
 
     @app.post("/api/editor/open-file")
-    async def editor_open_file(
+    def editor_open_file(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         try:
@@ -611,7 +673,7 @@ def create_app(
         }
 
     @app.post("/api/editor/open-diff")
-    async def editor_open_diff(
+    def editor_open_diff(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         try:
@@ -644,7 +706,7 @@ def create_app(
         }
 
     @app.post("/api/editor/open-terminal")
-    async def editor_open_terminal(
+    def editor_open_terminal(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         try:
@@ -678,7 +740,7 @@ def create_app(
         }
 
     @app.get("/api/project/memory")
-    async def project_memory(
+    def project_memory(
         workspace: str | None = Query(default=None),
         include_disabled: bool = Query(default=True),
     ) -> dict[str, Any]:
@@ -700,7 +762,7 @@ def create_app(
         }
 
     @app.post("/api/project/memory")
-    async def add_project_memory(
+    def add_project_memory(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         try:
@@ -728,7 +790,7 @@ def create_app(
         }
 
     @app.patch("/api/project/memory/{memory_id}")
-    async def update_project_memory(
+    def update_project_memory(
         memory_id: str,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
@@ -763,7 +825,7 @@ def create_app(
         }
 
     @app.delete("/api/project/memory/{memory_id}")
-    async def delete_project_memory(
+    def delete_project_memory(
         memory_id: str,
         workspace: str | None = Query(default=None),
     ) -> dict[str, Any]:
@@ -784,7 +846,7 @@ def create_app(
         }
 
     @app.get("/api/tools")
-    async def tools(workspace: str | None = Query(default=None)) -> dict[str, Any]:
+    def tools(workspace: str | None = Query(default=None)) -> dict[str, Any]:
         try:
             project_context = resolve_project(
                 _optional_text(workspace),
@@ -804,7 +866,7 @@ def create_app(
         }
 
     @app.post("/api/tools/sync")
-    async def tools_sync(
+    def tools_sync(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         try:
@@ -827,7 +889,7 @@ def create_app(
         }
 
     @app.get("/api/evals")
-    async def evals(workspace: str | None = Query(default=None)) -> dict[str, Any]:
+    def evals(workspace: str | None = Query(default=None)) -> dict[str, Any]:
         try:
             project_context = resolve_project(
                 _optional_text(workspace),
@@ -848,7 +910,7 @@ def create_app(
         }
 
     @app.get("/api/evals/runs/{eval_run_id}")
-    async def get_eval_run(eval_run_id: str) -> dict[str, Any]:
+    def get_eval_run(eval_run_id: str) -> dict[str, Any]:
         try:
             eval_run = eval_store.get_any(eval_run_id)
         except EvalRunNotFoundError as exc:
@@ -861,12 +923,16 @@ def create_app(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         try:
-            project_context = resolve_project(
-                _optional_text(payload.get("workspace")),
-                data_dir=config.data_dir,
-                load_config_name=False,
-            )
-            spec = load_eval_spec(project_context.root, eval_name)
+
+            def prepare_eval():
+                project_context = resolve_project(
+                    _optional_text(payload.get("workspace")),
+                    data_dir=config.data_dir,
+                    load_config_name=False,
+                )
+                return project_context, load_eval_spec(project_context.root, eval_name)
+
+            project_context, spec = await run_in_threadpool(prepare_eval)
             eval_runner = queue_eval if durable_dispatcher is not None else run_eval
             eval_run = await run_in_threadpool(
                 eval_runner,
@@ -891,10 +957,10 @@ def create_app(
             raise HTTPException(status_code=404, detail="Eval spec not found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _eval_run_response(eval_run, store)
+        return await run_in_threadpool(_eval_run_response, eval_run, store)
 
     @app.post("/api/project/init")
-    async def project_init(
+    def project_init(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         try:
@@ -916,12 +982,18 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/models")
-    async def models(api_mode: str = Query(default="v2")) -> dict[str, Any]:
+    def models(api_mode: str = Query(default="v2")) -> dict[str, Any]:
+        checked_at = datetime.now(timezone.utc).isoformat()
         try:
             mode = parse_api_mode(api_mode)
         except ValueError:
             return {
+                "schema_version": 1,
                 "ok": False,
+                "api_mode": None,
+                "route_path": None,
+                "health": "unknown",
+                "last_checked_at": checked_at,
                 "models": _fallback_models(config),
                 "source": "fallback",
                 "error": "invalid api_mode; expected v1 or v2",
@@ -936,22 +1008,32 @@ def create_app(
             )
         except Exception:
             return {
+                "schema_version": 1,
                 "ok": False,
+                "api_mode": mode.value,
+                "route_path": f"/{mode.value}/models",
+                "health": "unknown",
+                "last_checked_at": checked_at,
                 "models": [],
                 "source": f"/{mode.value}/models",
                 "error": "model discovery failed",
                 "note": pass_model_env_note(),
             }
         return {
+            "schema_version": 1,
             "ok": discovery.ok,
-            "models": list(discovery.models),
+            "api_mode": mode.value,
+            "route_path": f"/{mode.value}/models",
+            "health": "ready" if discovery.ok else "blocked",
+            "last_checked_at": checked_at,
+            "models": list(discovery.models[:100]),
             "source": discovery.source,
-            "error": discovery.error,
+            "error": None if discovery.ok else "model discovery failed",
             "note": pass_model_env_note(),
         }
 
     @app.get("/api/health")
-    async def health() -> dict[str, Any]:
+    def health() -> dict[str, Any]:
         status = proxy.health_check(config)
         return {
             "ok": status.ok,
@@ -959,16 +1041,25 @@ def create_app(
             "path": status.path,
             "status_code": status.status_code,
             "error": status.error,
+            "async_data_plane": async_diagnostics.snapshot(),
+            "event_streams": run_event_broker.snapshot(),
         }
 
     @app.post("/api/preflight/run")
-    async def preflight_run(
+    def preflight_run(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
+        durable = bool(
+            durable_dispatcher is not None
+            and str(payload.get("invocation_mode") or "headless") != "native"
+        )
+        if payload.get("durable") is False:
+            durable = False
         try:
             report = runner.preflight(
                 payload,
                 session_id=_optional_text(payload.get("session_id")),
+                durable=durable,
             )
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
@@ -979,7 +1070,7 @@ def create_app(
         return {"preflight": preflight_report_to_dict(report)}
 
     @app.post("/api/route/recommendation")
-    async def route_recommendation(
+    def route_recommendation(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         try:
@@ -1002,7 +1093,7 @@ def create_app(
         return {"recommendation": route_recommendation_to_dict(recommendation)}
 
     @app.get("/api/sessions")
-    async def sessions(
+    def sessions(
         project_id: str | None = Query(default=None),
         workspace: str | None = Query(default=None),
         harness_id: str | None = Query(default=None),
@@ -1020,40 +1111,58 @@ def create_app(
             include_archived=include_archived,
             limit=limit if include_arena else None,
         )
+        arenas = arena_store.list(workspace=resolved_workspace)
+        arena_child_session_ids = {
+            child.session_id
+            for arena in arenas
+            for child in arena.child_runs
+            if child.session_id is not None
+        }
+        items = tuple(
+            session for session in items if session.id not in arena_child_session_ids
+        )
         if not include_arena:
-            arena_session_ids = {
-                arena.session_id
-                for arena in arena_store.list(workspace=resolved_workspace)
-            }
+            arena_session_ids = {arena.session_id for arena in arenas}
             items = tuple(
                 session for session in items if session.id not in arena_session_ids
             )[:limit]
+        else:
+            items = items[:limit]
         return {"sessions": [_session_summary(store, session.id) for session in items]}
 
     @app.post("/api/sessions")
-    async def create_session(payload: dict[str, Any] = Body(default_factory=dict)):
+    def create_session(payload: dict[str, Any] = Body(default_factory=dict)):
+        harness_defaults = settings_store.load().defaults
         try:
             session = runner.create_session(
                 title=_optional_text(payload.get("title")),
                 workspace=_optional_text(payload.get("workspace")),
-                default_harness_id=str(payload.get("harness_id") or "echo"),
-                default_model=_optional_text(payload.get("model")),
-                default_api_mode=payload.get("api_mode") or config.default_api_mode,
-                default_mode=str(payload.get("mode") or "plan"),
+                default_harness_id=str(
+                    payload.get("harness_id") or harness_defaults.default_harness_id
+                ),
+                default_model=(
+                    _optional_text(payload.get("model"))
+                    if "model" in payload
+                    else harness_defaults.default_model
+                ),
+                default_api_mode=(
+                    payload.get("api_mode") or harness_defaults.default_api_mode
+                ),
+                default_mode=str(payload.get("mode") or harness_defaults.mode),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"session": _session_summary(store, session.id)}
 
     @app.get("/api/sessions/{session_id}")
-    async def get_session(session_id: str) -> dict[str, Any]:
+    def get_session(session_id: str) -> dict[str, Any]:
         try:
             return bundle_to_dict(store.get_session_bundle(session_id))
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
 
     @app.get("/api/native/sessions")
-    async def native_sessions(
+    def native_sessions(
         harness_id: str | None = Query(default=None),
         workspace: str | None = Query(default=None),
         project_id: str | None = Query(default=None),
@@ -1076,7 +1185,7 @@ def create_app(
         return {"sessions": [native_session_ref_to_dict(ref) for ref in refs]}
 
     @app.post("/api/native/sessions/sync")
-    async def native_sessions_sync(
+    def native_sessions_sync(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
         resolved_workspace = resolve_workspace(_optional_text(payload.get("workspace")))
@@ -1114,7 +1223,7 @@ def create_app(
         }
 
     @app.get("/api/native/sessions/{native_ref_id}/preview")
-    async def native_session_preview(
+    def native_session_preview(
         native_ref_id: str,
         max_messages: int = Query(default=20, ge=1, le=100),
     ) -> dict[str, Any]:
@@ -1129,7 +1238,7 @@ def create_app(
         }
 
     @app.post("/api/native/sessions/{native_ref_id}/import")
-    async def native_session_import(native_ref_id: str) -> dict[str, Any]:
+    def native_session_import(native_ref_id: str) -> dict[str, Any]:
         ref = _native_ref_or_404(native_index_store, native_ref_id)
         if not ref.can_import:
             raise HTTPException(
@@ -1237,7 +1346,7 @@ def create_app(
         }
 
     @app.post("/api/sessions/{session_id}/native/link")
-    async def native_session_link(
+    def native_session_link(
         session_id: str,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
@@ -1277,7 +1386,7 @@ def create_app(
         }
 
     @app.post("/api/native/processes/start", response_model=None)
-    async def native_process_start(
+    def native_process_start(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any] | JSONResponse:
         run = None
@@ -1518,11 +1627,16 @@ def create_app(
         message = None
         try:
             data = payload.get("data", payload.get("text", ""))
-            process_ref = native_process_manager.write(process_id, str(data))
+            process_ref = await run_in_threadpool(
+                native_process_manager.write, process_id, str(data)
+            )
             if payload.get("submit") is True:
                 await asyncio.sleep(NATIVE_SUBMIT_KEY_DELAY_SECONDS)
-                process_ref = native_process_manager.write(process_id, "\r")
-            run = _sync_native_process_run(
+                process_ref = await run_in_threadpool(
+                    native_process_manager.write, process_id, "\r"
+                )
+            run = await run_in_threadpool(
+                _sync_native_process_run,
                 store,
                 process_ref,
                 native_registry=native_registry,
@@ -1530,7 +1644,8 @@ def create_app(
             )
             message_content = _optional_text(payload.get("message"))
             if message_content is not None and run is not None:
-                message = store.append_message(
+                message = await run_in_threadpool(
+                    store.append_message,
                     HarnessMessage(
                         id=new_id("msg"),
                         session_id=run.session_id,
@@ -1542,7 +1657,7 @@ def create_app(
                         model=run.model,
                         api_mode=run.api_mode,
                         metadata={"source": "native_stdin"},
-                    )
+                    ),
                 )
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
@@ -1557,7 +1672,7 @@ def create_app(
         }
 
     @app.get("/api/native/processes/{process_id}/output")
-    async def native_process_output(
+    def native_process_output(
         process_id: str,
         cursor: int = Query(default=0, ge=0),
     ) -> dict[str, Any]:
@@ -1596,7 +1711,7 @@ def create_app(
     ) -> StreamingResponse:
         stream_cursor = max(cursor, _native_sse_cursor(last_event_id))
         try:
-            native_process_manager.status(process_id)
+            await run_stream_offload(native_process_manager.status, process_id)
         except NativeProcessNotFoundError as exc:
             raise HTTPException(
                 status_code=404, detail="Native process not found"
@@ -1605,12 +1720,38 @@ def create_app(
         async def stream_output():
             current_cursor = stream_cursor
             last_keepalive = asyncio.get_running_loop().time()
+
+            def poll_stream(cursor_value: int):
+                chunk = native_process_manager.read_since(process_id, cursor_value)
+                process_ref = native_process_manager.status(process_id)
+                run = _sync_native_process_run(
+                    store,
+                    process_ref,
+                    native_registry=native_registry,
+                    native_index_store=native_index_store,
+                )
+                event_payload = native_output_chunk_to_dict(chunk)
+                event_payload["run"] = run_to_dict(run) if run is not None else None
+                event_payload["messages"] = (
+                    [
+                        message_to_dict(message)
+                        for message in _native_run_messages(store, run)
+                    ]
+                    if run is not None
+                    else []
+                )
+                event_payload["events"] = (
+                    [event_to_dict(event) for event in _native_run_events(store, run)]
+                    if run is not None
+                    else []
+                )
+                return chunk, process_ref, event_payload
+
             while True:
                 try:
-                    chunk = native_process_manager.read_since(
-                        process_id, current_cursor
+                    chunk, process_ref, event_payload = await run_stream_offload(
+                        poll_stream, current_cursor
                     )
-                    process_ref = native_process_manager.status(process_id)
                 except NativeProcessNotFoundError:
                     break
                 should_emit = (
@@ -1620,30 +1761,6 @@ def create_app(
                 )
                 if should_emit:
                     current_cursor = chunk.cursor
-                    run = _sync_native_process_run(
-                        store,
-                        process_ref,
-                        native_registry=native_registry,
-                        native_index_store=native_index_store,
-                    )
-                    event_payload = native_output_chunk_to_dict(chunk)
-                    event_payload["run"] = run_to_dict(run) if run is not None else None
-                    event_payload["messages"] = (
-                        [
-                            message_to_dict(message)
-                            for message in _native_run_messages(store, run)
-                        ]
-                        if run is not None
-                        else []
-                    )
-                    event_payload["events"] = (
-                        [
-                            event_to_dict(event)
-                            for event in _native_run_events(store, run)
-                        ]
-                        if run is not None
-                        else []
-                    )
                     yield _native_output_sse(event_payload)
                     last_keepalive = asyncio.get_running_loop().time()
                 if process_ref.status is not NativeProcessStatus.RUNNING:
@@ -1664,7 +1781,7 @@ def create_app(
         )
 
     @app.post("/api/native/processes/{process_id}/resize")
-    async def native_process_resize(
+    def native_process_resize(
         process_id: str,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
@@ -1687,7 +1804,7 @@ def create_app(
         }
 
     @app.get("/api/native/processes/{process_id}")
-    async def native_process_status(process_id: str) -> dict[str, Any]:
+    def native_process_status(process_id: str) -> dict[str, Any]:
         try:
             process_ref = native_process_manager.status(process_id)
             run = _sync_native_process_run(
@@ -1706,12 +1823,9 @@ def create_app(
         }
 
     @app.delete("/api/native/processes/{process_id}")
-    async def native_process_stop(process_id: str) -> dict[str, Any]:
+    def native_process_stop(process_id: str) -> dict[str, Any]:
         try:
-            process_ref = await run_in_threadpool(
-                native_process_manager.stop,
-                process_id,
-            )
+            process_ref = native_process_manager.stop(process_id)
             run = _sync_native_process_run(
                 store,
                 process_ref,
@@ -1730,7 +1844,7 @@ def create_app(
         }
 
     @app.patch("/api/sessions/{session_id}")
-    async def update_session(
+    def update_session(
         session_id: str,
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
@@ -1744,7 +1858,7 @@ def create_app(
         return {"session": _session_summary(store, session.id)}
 
     @app.delete("/api/sessions/{session_id}")
-    async def delete_session(session_id: str) -> dict[str, Any]:
+    def delete_session(session_id: str) -> dict[str, Any]:
         try:
             store.delete_session(session_id)
         except SessionNotFoundError as exc:
@@ -1752,7 +1866,7 @@ def create_app(
         return {"deleted": True}
 
     @app.post("/api/sessions/{session_id}/attachments")
-    async def create_attachment(
+    def create_attachment(
         session_id: str,
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
@@ -1775,7 +1889,7 @@ def create_app(
         return {"attachment": _attachment_response(registry, attachment)}
 
     @app.post("/api/sessions/{session_id}/attachments/workspace")
-    async def create_workspace_attachment(
+    def create_workspace_attachment(
         session_id: str,
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
@@ -1798,8 +1912,34 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"attachment": _attachment_response(registry, attachment)}
 
+    @app.get("/api/sessions/{session_id}/attachments/workspace/search")
+    def search_session_workspace_attachments(
+        session_id: str,
+        q: str | None = Query(default=None),
+        limit: int = Query(default=20, ge=1, le=50),
+    ) -> dict[str, Any]:
+        """Return bounded safe attachment candidates for one session workspace."""
+        try:
+            session = store.get_session(session_id)
+            workspace_root = _attachment_workspace(session, {})
+            files = workspace_tree(
+                workspace_root,
+                query=q,
+                limits=_attachment_limits(session, workspace_root=workspace_root),
+                result_limit=limit,
+            )
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except (AttachmentValidationError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "q": _optional_text(q) or "",
+            "files": files,
+            "bounded": True,
+        }
+
     @app.get("/api/sessions/{session_id}/attachments")
-    async def session_attachments(session_id: str) -> dict[str, Any]:
+    def session_attachments(session_id: str) -> dict[str, Any]:
         try:
             store.get_session(session_id)
             attachments = attachment_store.list_session_attachments(session_id)
@@ -1812,7 +1952,7 @@ def create_app(
         }
 
     @app.get("/api/attachments/{attachment_id}/metadata")
-    async def attachment_metadata(attachment_id: str) -> dict[str, Any]:
+    def attachment_metadata(attachment_id: str) -> dict[str, Any]:
         try:
             attachment = attachment_store.get_attachment(attachment_id)
         except AttachmentNotFoundError as exc:
@@ -1820,7 +1960,7 @@ def create_app(
         return {"attachment": _attachment_response(registry, attachment)}
 
     @app.get("/api/attachments/{attachment_id}")
-    async def attachment_blob(attachment_id: str) -> Response:
+    def attachment_blob(attachment_id: str) -> Response:
         try:
             attachment = attachment_store.get_attachment(attachment_id)
             data = attachment_store.read_blob(attachment_id)
@@ -1838,7 +1978,7 @@ def create_app(
         )
 
     @app.delete("/api/attachments/{attachment_id}")
-    async def delete_attachment(attachment_id: str) -> dict[str, Any]:
+    def delete_attachment(attachment_id: str) -> dict[str, Any]:
         try:
             attachment_store.delete_attachment(attachment_id)
         except AttachmentNotFoundError as exc:
@@ -1846,7 +1986,7 @@ def create_app(
         return {"deleted": True}
 
     @app.get("/api/workspace/tree")
-    async def workspace_tree_endpoint(
+    def workspace_tree_endpoint(
         workspace: str | None = Query(default=None),
         q: str | None = Query(default=None),
         limit: int = Query(default=50, ge=1, le=200),
@@ -1868,7 +2008,7 @@ def create_app(
         }
 
     @app.get("/api/workspace/file/metadata")
-    async def workspace_file_metadata_endpoint(
+    def workspace_file_metadata_endpoint(
         workspace: str | None = Query(default=None),
         path: str = Query(...),
     ) -> dict[str, Any]:
@@ -1890,25 +2030,37 @@ def create_app(
         session_id: str,
         payload: Mapping[str, Any],
     ) -> HarnessRun:
+        effective_payload = dict(payload)
+        extra = _metadata_mapping(payload.get("extra"))
+        if (
+            bool(extra.get("generate_session_title"))
+            and _optional_text(extra.get("session_title_model")) is None
+        ):
+            settings_snapshot = await run_in_threadpool(settings_store.load)
+            title_model = settings_snapshot.defaults.default_title_model
+            if title_model is not None:
+                extra["session_title_model"] = title_model
+        effective_payload["extra"] = extra
         if durable_dispatcher is not None:
             idempotency_key = str(
-                payload.get("idempotency_key") or f"ui_{new_id('submit')}"
+                effective_payload.get("idempotency_key") or f"ui_{new_id('submit')}"
             )
             submission = await run_in_threadpool(
                 durable_dispatcher.submit,
                 session_id,
-                payload,
+                effective_payload,
                 idempotency_key=idempotency_key,
                 origin="interactive",
             )
             return submission.queued.run
-        before_run_ids = {run.id for run in store.list_runs(session_id)}
+        existing_runs = await run_in_threadpool(store.list_runs, session_id)
+        before_run_ids = {run.id for run in existing_runs}
         cancel_event = threading.Event()
         task = asyncio.create_task(
             run_in_threadpool(
                 runner.run_in_session,
                 session_id,
-                payload,
+                effective_payload,
                 cancel_event=cancel_event,
             )
         )
@@ -1959,16 +2111,27 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
-            harness_id = str(payload.get("harness_id") or "echo")
+            settings_snapshot = await run_in_threadpool(settings_store.load)
+            harness_defaults = settings_snapshot.defaults
+            harness_id = str(
+                payload.get("harness_id") or harness_defaults.default_harness_id
+            )
             registry.get(harness_id)
-            session = runner.create_session(
+            session = await run_in_threadpool(
+                runner.create_session,
                 title=_optional_text(payload.get("title"))
                 or title_from_prompt(str(payload.get("prompt") or "")),
                 workspace=_optional_text(payload.get("workspace")),
                 default_harness_id=harness_id,
-                default_model=_optional_text(payload.get("model")),
-                default_api_mode=payload.get("api_mode") or config.default_api_mode,
-                default_mode=str(payload.get("mode") or "plan"),
+                default_model=(
+                    _optional_text(payload.get("model"))
+                    if "model" in payload
+                    else harness_defaults.default_model
+                ),
+                default_api_mode=(
+                    payload.get("api_mode") or harness_defaults.default_api_mode
+                ),
+                default_mode=str(payload.get("mode") or harness_defaults.mode),
             )
             run = await _start_headless_run(session.id, payload)
         except KeyError as exc:
@@ -1977,7 +2140,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        return _run_start_response(run)
+        return await run_in_threadpool(_run_start_response, run)
 
     @app.post("/api/sessions/{session_id}/run/start")
     async def start_run_in_session(
@@ -1985,7 +2148,7 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
-            store.get_session(session_id)
+            await run_in_threadpool(store.get_session, session_id)
             run = await _start_headless_run(session_id, payload)
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
@@ -1995,47 +2158,75 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        return _run_start_response(run)
+        return await run_in_threadpool(_run_start_response, run)
 
     @app.get("/api/runs/{run_id}/events/stream")
     async def run_events_stream(
         run_id: str,
         after_id: str | None = Query(default=None),
+        tail_only: bool = Query(default=False),
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
     ) -> StreamingResponse:
         try:
-            store.get_run(run_id)
+            initial_run = await run_stream_offload(store.get_run, run_id)
         except RunNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Run not found") from exc
+        try:
+            subscription = run_event_broker.subscribe(run_id)
+        except StreamCapacityError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        try:
+            cursor_position = await run_stream_offload(
+                _resolve_run_stream_cursor,
+                store,
+                initial_run,
+                _optional_text(last_event_id) or _optional_text(after_id),
+                tail_only=tail_only,
+            )
+        except ValueError as exc:
+            subscription.close()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
         async def stream_events():
-            last_id = _optional_text(after_id)
-            terminal_event_seen = False
-            while True:
-                try:
-                    current_run = store.get_run(run_id)
-                    events = store.list_events(
-                        current_run.session_id,
-                        run_id=run_id,
-                        after_id=last_id,
-                    )
-                except (RunNotFoundError, SessionNotFoundError):
-                    break
-                for event in events:
-                    last_id = event.id
-                    if event.type == HarnessEventType.RUN_FINISHED.value:
-                        terminal_event_seen = True
-                    yield _sse_event(event)
-                if _run_status_is_terminal(current_run.status) and not events:
-                    if not terminal_event_seen:
-                        terminal_event_seen = any(
-                            event.type == HarnessEventType.RUN_FINISHED.value
-                            for event in store.list_events(
-                                current_run.session_id,
-                                run_id=run_id,
-                            )
+            current_offset = cursor_position.offset
+            terminal_event_seen = cursor_position.terminal_seen
+            next_heartbeat_at = monotonic() + RUN_EVENT_STREAM_HEARTBEAT_SECONDS
+            try:
+                while True:
+                    try:
+                        current_run, page = await run_stream_offload(
+                            _read_run_event_tail,
+                            store,
+                            run_id,
+                            current_offset,
                         )
-                    if not terminal_event_seen:
-                        yield _sse_event(
+                    except (RunNotFoundError, SessionNotFoundError, ValueError):
+                        break
+                    for item in page.items:
+                        current_offset = item.next_offset
+                        event = item.event
+                        if event.type == HarnessEventType.RUN_FINISHED.value:
+                            terminal_event_seen = True
+                        cursor = _encode_run_stream_cursor(
+                            current_run,
+                            current_offset,
+                            terminal_event_seen=terminal_event_seen,
+                        )
+                        yield _run_sse_event(event, cursor)
+                    if page.next_offset > current_offset:
+                        current_offset = page.next_offset
+                    if page.has_more:
+                        continue
+                    if _run_status_is_terminal(current_run.status):
+                        if terminal_event_seen:
+                            break
+                        terminal_event_seen = True
+                        cursor = _encode_run_stream_cursor(
+                            current_run,
+                            current_offset,
+                            terminal_event_seen=True,
+                        )
+                        yield _run_sse_event(
                             HarnessStoredEvent(
                                 id=f"evt_terminal_{current_run.id}",
                                 session_id=current_run.session_id,
@@ -2051,10 +2242,25 @@ def create_app(
                                     or current_run.updated_at
                                     or current_run.created_at
                                 ),
-                            )
+                            ),
+                            cursor,
                         )
-                    break
-                await asyncio.sleep(0.25)
+                        break
+                    signal = await subscription.wait(RUN_EVENT_STREAM_POLL_SECONDS)
+                    cursor = _encode_run_stream_cursor(
+                        current_run,
+                        current_offset,
+                        terminal_event_seen=terminal_event_seen,
+                    )
+                    if signal is StreamSignal.RESNAPSHOT_REQUIRED:
+                        yield _run_resnapshot_sse(current_run, cursor)
+                    elif signal is None and monotonic() >= next_heartbeat_at:
+                        yield ": heartbeat\n\n"
+                        next_heartbeat_at = (
+                            monotonic() + RUN_EVENT_STREAM_HEARTBEAT_SECONDS
+                        )
+            finally:
+                subscription.close()
 
         return StreamingResponse(
             stream_events(),
@@ -2066,7 +2272,7 @@ def create_app(
         )
 
     @app.post("/api/runs/{run_id}/cancel")
-    async def cancel_run(run_id: str) -> dict[str, Any]:
+    def cancel_run(run_id: str) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
         except RunNotFoundError as exc:
@@ -2198,7 +2404,7 @@ def create_app(
         }
 
     @app.get("/api/runs/{run_id}/diff")
-    async def run_diff(run_id: str) -> dict[str, Any]:
+    def run_diff(run_id: str) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
         except RunNotFoundError as exc:
@@ -2206,7 +2412,7 @@ def create_app(
         return {"run": run_to_dict(run), "diff": run_diff_response(run.metadata)}
 
     @app.get("/api/runs/{run_id}/pr")
-    async def run_pr_artifact(run_id: str) -> dict[str, Any]:
+    def run_pr_artifact(run_id: str) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
         except RunNotFoundError as exc:
@@ -2218,7 +2424,7 @@ def create_app(
         }
 
     @app.get("/api/runs/{run_id}/provenance")
-    async def run_provenance(run_id: str) -> dict[str, Any]:
+    def run_provenance(run_id: str) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
         except RunNotFoundError as exc:
@@ -2226,7 +2432,7 @@ def create_app(
         return _run_provenance_response(run)
 
     @app.post("/api/runs/{run_id}/replay")
-    async def replay_run(
+    def replay_run(
         run_id: str,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
@@ -2255,7 +2461,7 @@ def create_app(
         return response
 
     @app.post("/api/runs/{run_id}/fork")
-    async def fork_run(run_id: str) -> dict[str, Any]:
+    def fork_run(run_id: str) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
             session = _fork_session_from_run(store, run)
@@ -2271,7 +2477,7 @@ def create_app(
         }
 
     @app.get("/api/runs/{run_id}/patch")
-    async def run_patch(run_id: str) -> Response:
+    def run_patch(run_id: str) -> Response:
         try:
             run = store.get_run(run_id)
         except RunNotFoundError as exc:
@@ -2280,7 +2486,7 @@ def create_app(
         return Response(content=artifact.patch, media_type="text/plain")
 
     @app.post("/api/runs/{run_id}/apply", response_model=None)
-    async def apply_run_patch(
+    def apply_run_patch(
         run_id: str,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any] | JSONResponse:
@@ -2337,7 +2543,7 @@ def create_app(
         }
 
     @app.post("/api/runs/{run_id}/branch", response_model=None)
-    async def create_run_branch(
+    def create_run_branch(
         run_id: str,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any] | JSONResponse:
@@ -2404,7 +2610,7 @@ def create_app(
         }
 
     @app.post("/api/runs/{run_id}/discard")
-    async def discard_run_worktree_endpoint(run_id: str) -> dict[str, Any]:
+    def discard_run_worktree_endpoint(run_id: str) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
             workspace_execution = discard_run_worktree(run.metadata)
@@ -2435,7 +2641,7 @@ def create_app(
         }
 
     @app.post("/api/runs/{run_id}/open-worktree")
-    async def open_run_worktree(run_id: str) -> dict[str, Any]:
+    def open_run_worktree(run_id: str) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
             response = open_worktree_response(run.metadata)
@@ -2444,7 +2650,7 @@ def create_app(
         return {"run": run_to_dict(run), "worktree": response}
 
     @app.post("/api/sessions/run")
-    async def create_session_and_run(
+    def create_session_and_run(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
@@ -2456,7 +2662,7 @@ def create_app(
         return result.to_dict()
 
     @app.post("/api/sessions/{session_id}/run")
-    async def run_in_session(
+    def run_in_session(
         session_id: str,
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
@@ -2471,7 +2677,7 @@ def create_app(
         return result.to_dict()
 
     @app.get("/api/sessions/{session_id}/events")
-    async def session_events(
+    def session_events(
         session_id: str,
         run_id: str | None = Query(default=None),
         after_id: str | None = Query(default=None),
@@ -2496,19 +2702,58 @@ def create_app(
         }
 
     @app.get("/api/arena/runs")
-    async def list_arena_runs(
+    def list_arena_runs(
         workspace: str | None = Query(default=None),
         limit: int = Query(default=20, ge=1, le=100),
     ) -> dict[str, Any]:
         resolved_workspace = resolve_workspace(_optional_text(workspace))
         arenas = arena_store.list(workspace=resolved_workspace, limit=limit)
-        return {"arenas": [_arena_response(arena, store)["arena"] for arena in arenas]}
+        return {"arenas": [_arena_summary_response(arena) for arena in arenas]}
 
     @app.post("/api/arena/runs")
     async def create_arena_run(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
+            payload = dict(payload)
+            if not str(payload.get("prompt") or "").strip():
+                raise ValueError("prompt is required")
+            if _first_text(payload.get("harness_ids")) is None:
+                raise ValueError("harness_ids must contain at least one harness")
+            workspace_paths = _bounded_arena_workspace_paths(
+                payload.pop("workspace_paths", None)
+            )
+            session_id = _optional_text(payload.get("session_id"))
+            if workspace_paths and session_id is None:
+                session = runner.create_session(
+                    title=title_from_prompt(str(payload.get("prompt") or "")),
+                    workspace=_optional_text(payload.get("workspace")),
+                    default_harness_id=_first_text(payload.get("harness_ids"))
+                    or "echo",
+                    default_model=_optional_text(payload.get("model")),
+                    default_api_mode=payload.get("api_mode"),
+                    default_mode=str(payload.get("mode") or "plan"),
+                )
+                session_id = session.id
+                payload["session_id"] = session_id
+            if workspace_paths:
+                session = store.get_session(session_id or "")
+                workspace_root = _attachment_workspace(session, payload)
+                attachment_ids = [
+                    attachment_store.create_workspace_reference(
+                        session_id=session.id,
+                        project_id=_session_project_id(session)
+                        or resolve_project(workspace_root, data_dir=config.data_dir).id,
+                        workspace_root=workspace_root,
+                        path=path,
+                        metadata={"arena_shared": True},
+                        limits=_attachment_limits(
+                            session, workspace_root=workspace_root
+                        ),
+                    ).id
+                    for path in workspace_paths
+                ]
+                payload["attachment_ids"] = attachment_ids
             arena_runner = queue_arena if durable_dispatcher is not None else run_arena
             arena = await run_in_threadpool(
                 arena_runner,
@@ -2524,17 +2769,156 @@ def create_app(
             )
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
-        except ValueError as exc:
+        except (AttachmentValidationError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _arena_response(arena, store)
+        return await run_in_threadpool(_arena_response, arena, store)
 
     @app.get("/api/arena/runs/{arena_id}")
-    async def get_arena_run(arena_id: str) -> dict[str, Any]:
+    def get_arena_run(arena_id: str) -> dict[str, Any]:
         try:
             arena = arena_store.get(arena_id)
         except ArenaNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Arena run not found") from exc
         return _arena_response(arena, store)
+
+    @app.post("/api/arena/runs/{arena_id}/turns")
+    async def create_arena_follow_up(
+        arena_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            arena = await run_in_threadpool(arena_store.get, arena_id)
+            payload = dict(payload)
+            if not str(payload.get("prompt") or "").strip():
+                raise ValueError("prompt is required")
+            workspace_paths = _bounded_arena_workspace_paths(
+                payload.pop("workspace_paths", None)
+            )
+            if workspace_paths:
+                session = await run_in_threadpool(store.get_session, arena.session_id)
+                workspace_root = _attachment_workspace(session, payload)
+
+                def create_shared_attachments() -> list[str]:
+                    return [
+                        attachment_store.create_workspace_reference(
+                            session_id=session.id,
+                            project_id=_session_project_id(session)
+                            or resolve_project(
+                                workspace_root, data_dir=config.data_dir
+                            ).id,
+                            workspace_root=workspace_root,
+                            path=path,
+                            metadata={"arena_shared": True, "arena_id": arena.id},
+                            limits=_attachment_limits(
+                                session, workspace_root=workspace_root
+                            ),
+                        ).id
+                        for path in workspace_paths
+                    ]
+
+                payload["attachment_ids"] = await run_in_threadpool(
+                    create_shared_attachments
+                )
+            follow_up_runner = (
+                queue_arena_follow_up
+                if durable_dispatcher is not None
+                else continue_arena
+            )
+            arena = await run_in_threadpool(
+                follow_up_runner,
+                runner=runner,
+                arena_store=arena_store,
+                arena=arena,
+                payload=payload,
+                **(
+                    {"dispatcher": durable_dispatcher}
+                    if durable_dispatcher is not None
+                    else {}
+                ),
+            )
+        except ArenaNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        except (AttachmentValidationError, SessionNotFoundError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return await run_in_threadpool(_arena_response, arena, store)
+
+    @app.post("/api/arena/runs/{arena_id}/children/{child_index}/retry")
+    async def retry_arena_child(
+        arena_id: str,
+        child_index: int,
+    ) -> dict[str, Any]:
+        try:
+            arena = await run_in_threadpool(arena_store.get, arena_id)
+            child = next(item for item in arena.child_runs if item.index == child_index)
+            if child.run_id is None or child.session_id is None:
+                raise ValueError("arena child has not started")
+            source_run = await run_in_threadpool(store.get_run, child.run_id)
+            raw_request = await run_in_threadpool(
+                _latest_raw_request_for_run, store, source_run
+            )
+            replay_payload = build_replay_request(
+                source_run,
+                raw_request=raw_request,
+                reviewed_evidence=_reviewed_evidence_for_run(
+                    runtime_store, source_run.id
+                ),
+            )
+            if source_run.status.value in {"queued", "running", "retry_wait"}:
+                raise ValueError("arena child is still active")
+            replay_payload["extra"] = {
+                **dict(replay_payload.get("extra") or {}),
+                "arena": {
+                    "arena_id": arena.id,
+                    "child_index": child.index,
+                    "child_count": len(arena.harness_ids),
+                    "parent_session_id": arena.session_id,
+                    "turn_index": max(int(arena.metadata.get("turn_count") or 0), 0),
+                },
+            }
+            if durable_dispatcher is not None:
+                submission = await run_in_threadpool(
+                    durable_dispatcher.submit,
+                    child.session_id,
+                    replay_payload,
+                    idempotency_key=(
+                        f"arena:{arena.id}:{child.index}:retry:{source_run.id}"
+                    ),
+                    origin="manual",
+                )
+                replacement = HarnessArenaChildRun(
+                    harness_id=child.harness_id,
+                    index=child.index,
+                    session_id=child.session_id,
+                    run_id=submission.queued.run.id,
+                    status="queued",
+                )
+            else:
+                result = await run_in_threadpool(
+                    runner.run_in_session, child.session_id, replay_payload
+                )
+                replacement = HarnessArenaChildRun(
+                    harness_id=child.harness_id,
+                    index=child.index,
+                    session_id=child.session_id,
+                    run_id=result.run.id,
+                    status=result.run.status.value,
+                    error=result.run.error,
+                    result_text=(
+                        result.result.text
+                        if result.run.status.value == "succeeded"
+                        else None
+                    ),
+                )
+            arena = arena_store.upsert_child(arena.id, replacement)
+        except ArenaNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        except (RunNotFoundError, StopIteration) as exc:
+            raise HTTPException(
+                status_code=404, detail="Arena child not found"
+            ) from exc
+        except (SessionNotFoundError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return await run_in_threadpool(_arena_response, arena, store)
 
     @app.get("/api/arena/runs/{arena_id}/events/stream")
     async def arena_events_stream(
@@ -2542,18 +2926,29 @@ def create_app(
         after_id: str | None = Query(default=None),
     ) -> StreamingResponse:
         try:
-            arena_store.get(arena_id)
+            await run_stream_offload(arena_store.get, arena_id)
         except ArenaNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Arena run not found") from exc
 
         async def stream_events():
             last_id = _optional_text(after_id)
+
+            def poll_stream(cursor_value: str | None):
+                current_arena = arena_store.get(arena_id)
+                events = _arena_events(
+                    current_arena,
+                    store,
+                    after_id=cursor_value,
+                )
+                return current_arena, events
+
             while True:
                 try:
-                    current_arena = arena_store.get(arena_id)
+                    current_arena, events = await run_stream_offload(
+                        poll_stream, last_id
+                    )
                 except ArenaNotFoundError:
                     break
-                events = _arena_events(current_arena, store, after_id=last_id)
                 for child, event in events:
                     last_id = event.id
                     yield _arena_sse_event(current_arena, child, event)
@@ -2571,7 +2966,7 @@ def create_app(
         )
 
     @app.post("/api/run")
-    async def run(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    def run(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         harness_id = str(payload.get("harness_id") or "echo")
         try:
             harness = registry.get(harness_id)
@@ -2652,15 +3047,23 @@ def create_app(
     app.include_router(agents_router)
     app.include_router(automation_router)
     app.include_router(approvals_router)
+    app.include_router(cockpit_router)
     app.include_router(evaluate_router)
     app.include_router(tools_router)
     app.include_router(workflows_router)
     app.include_router(runs_router)
     app.include_router(schedules_router)
+    app.include_router(settings_router)
     app.include_router(create_file_preview_router(config.data_dir))
     # The shell catch-all must remain last so unknown API and asset paths never
     # become HTML responses.
     app.include_router(create_shell_router(ui_security))
+    install_mutation_contracts(app)
+    install_execution_contracts(app)
+    if handler_errors := async_handler_contract_errors(app.routes):
+        raise RuntimeError(
+            "Harness async handler contract invalid: " + "; ".join(handler_errors)
+        )
     return app
 
 
@@ -2807,9 +3210,8 @@ async def _wait_for_started_run(
     task: asyncio.Task[Any],
 ) -> HarnessRun:
     for _ in range(200):
-        runs = [
-            run for run in store.list_runs(session_id) if run.id not in before_run_ids
-        ]
+        stored_runs = await run_in_threadpool(store.list_runs, session_id)
+        runs = [run for run in stored_runs if run.id not in before_run_ids]
         if runs:
             return runs[-1]
         if task.done():
@@ -2861,10 +3263,118 @@ def _text_tuple(value: Any) -> tuple[str, ...]:
     return tuple(items)
 
 
-def _sse_event(event: HarnessStoredEvent) -> str:
+def _run_sse_event(event: HarnessStoredEvent, cursor: str) -> str:
     payload = _event_response(event)
     data = json.dumps(payload, ensure_ascii=False)
-    return f"id: {event.id}\ndata: {data}\n\n"
+    return f"id: {cursor}\ndata: {data}\n\n"
+
+
+def _run_resnapshot_sse(run: HarnessRun, cursor: str) -> str:
+    payload = {
+        "type": "resnapshot_required",
+        "reason": "slow_consumer",
+        "cursor": cursor,
+        "snapshot_url": f"/api/cockpit/sessions/{run.session_id}/events",
+        "stream_url": f"/api/runs/{run.id}/events/stream",
+    }
+    data = json.dumps(payload, ensure_ascii=False)
+    return f"event: resnapshot\nid: {cursor}\ndata: {data}\n\n"
+
+
+def _read_run_event_tail(
+    store: HarnessSessionStore,
+    run_id: str,
+    offset: int,
+):
+    run = store.get_run(run_id)
+    reader = getattr(store, "list_event_tail_page", None)
+    if not callable(reader):
+        raise ValueError("session store does not support durable event tails")
+    page = reader(
+        run.session_id,
+        run_id=run.id,
+        offset=offset,
+        limit=100,
+        max_bytes=1024 * 1024,
+    )
+    return run, page
+
+
+def _resolve_run_stream_cursor(
+    store: HarnessSessionStore,
+    run: HarnessRun,
+    value: str | None,
+    *,
+    tail_only: bool = False,
+) -> EventCursorPosition:
+    if value is None:
+        if tail_only:
+            resolver = getattr(store, "event_tail_offset", None)
+            if not callable(resolver):
+                raise ValueError("session store does not support durable event tails")
+            return EventCursorPosition(
+                offset=resolver(run.session_id),
+                terminal_seen=False,
+            )
+        return EventCursorPosition(offset=0, terminal_seen=False)
+    if value.startswith("hc1."):
+        return _decode_run_stream_cursor(value, run)
+    resolver = getattr(store, "resolve_event_cursor", None)
+    if not callable(resolver):
+        raise ValueError("session store does not support durable event cursors")
+    position = resolver(run.session_id, run_id=run.id, event_id=value)
+    if position is None:
+        raise ValueError("event cursor is stale; fetch a bounded snapshot")
+    return position
+
+
+def _encode_run_stream_cursor(
+    run: HarnessRun,
+    offset: int,
+    *,
+    terminal_event_seen: bool,
+) -> str:
+    scope = hashlib.sha256(f"{run.session_id}\0{run.id}".encode()).hexdigest()[:16]
+    payload = json.dumps(
+        {
+            "v": 1,
+            "scope": scope,
+            "offset": max(offset, 0),
+            "terminal": terminal_event_seen,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return "hc1." + base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_run_stream_cursor(value: str, run: HarnessRun) -> EventCursorPosition:
+    try:
+        encoded = value.removeprefix("hc1.")
+        padding = "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(encoded + padding))
+        scope = hashlib.sha256(f"{run.session_id}\0{run.id}".encode()).hexdigest()[:16]
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("v") != 1
+            or payload.get("scope") != scope
+        ):
+            raise ValueError
+        offset = int(payload["offset"])
+        if offset < 0:
+            raise ValueError
+    except (
+        binascii.Error,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ValueError("invalid or cross-run event cursor") from exc
+    return EventCursorPosition(
+        offset=offset,
+        terminal_seen=bool(payload.get("terminal")),
+    )
 
 
 def _native_sse_cursor(last_event_id: str | None) -> int:
@@ -2898,6 +3408,13 @@ def _arena_response(
     return {"arena": payload}
 
 
+def _arena_summary_response(arena: HarnessArenaRun) -> dict[str, Any]:
+    payload = arena_to_dict(arena)
+    payload["prompt"] = ""
+    payload["child_runs"] = [arena_child_to_dict(child) for child in arena.child_runs]
+    return payload
+
+
 def _eval_run_response(
     eval_run,
     store: HarnessSessionStore,
@@ -2921,7 +3438,26 @@ def _arena_child_response(
         run = store.get_run(child.run_id)
         payload["run"] = run_to_dict(run)
         payload["message"] = _last_run_message(store, run)
-        payload["event_count"] = len(store.list_events(run.session_id, run_id=run.id))
+        messages = store.list_messages(run.session_id)[-100:]
+        runs = store.list_runs(run.session_id)[-50:]
+        events = store.list_events(run.session_id)[-200:]
+        payload["messages"] = [message_to_dict(item) for item in messages]
+        payload["runs"] = [run_to_dict(item) for item in runs]
+        payload["activity"] = [
+            event_to_dict(item)
+            for item in events
+            if item.type.startswith(("tool_", "approval_"))
+            or item.type
+            in {
+                "cancel_requested",
+                "error",
+                "run_canceled",
+                "run_finished",
+                "warning",
+            }
+        ][-100:]
+        payload["event_count"] = len(events)
+        payload["bounded"] = True
     except (RunNotFoundError, SessionNotFoundError):
         payload["missing"] = True
     return payload
@@ -2995,6 +3531,25 @@ def _run_status_is_terminal(status: str) -> bool:
 
 def _arena_status_is_terminal(status: str) -> bool:
     return status in {"succeeded", "failed", "partial", "canceled"}
+
+
+def _bounded_arena_workspace_paths(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("workspace_paths must be a list")
+    if len(value) > 8:
+        raise ValueError("workspace_paths must contain at most 8 files")
+    paths = tuple(str(item).strip() for item in value)
+    if any(not path for path in paths):
+        raise ValueError("workspace_paths must contain non-empty strings")
+    return paths
+
+
+def _first_text(value: Any) -> str | None:
+    if not isinstance(value, list) or not value:
+        return None
+    return _optional_text(value[0])
 
 
 def _native_project_id(
@@ -3151,6 +3706,7 @@ def _native_process_policy_gate(
             "workspace": payload.get("workspace") or session.workspace,
             "workspace_policy": payload.get("workspace_policy") or "auto",
         },
+        enforcement_owner=NATIVE_PROCESS_SPAWN_OWNER,
     )
     resolution = policy_engine.resolve(
         PermissionAction.PROCESS_SPAWN,

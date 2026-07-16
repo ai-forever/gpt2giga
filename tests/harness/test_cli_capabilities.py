@@ -34,6 +34,7 @@ def clear_probe_cache():
         "version",
         "help_output",
         "expected_schema",
+        "expected_window",
         "expected_calls",
     ),
     (
@@ -42,6 +43,7 @@ def clear_probe_cache():
             "codex-cli 0.144.3",
             "exec --json --sandbox --ephemeral --image --config --strict-config",
             "codex-exec-jsonl-v1",
+            ("0.144.0", "0.145.0"),
             7,
         ),
         (
@@ -51,6 +53,7 @@ def clear_probe_cache():
             "--no-session-persistence --include-partial-messages --resume "
             "--effort --allowedTools --disallowedTools",
             "claude-stream-json-v1",
+            ("2.1.0", "2.2.0"),
             5,
         ),
         (
@@ -59,6 +62,7 @@ def clear_probe_cache():
             "--output-format stream-json --approval-mode --skip-trust "
             "--prompt-interactive --list-sessions --resume",
             "gemini-stream-json-v1",
+            ("0.46.0", "0.47.0"),
             5,
         ),
     ),
@@ -69,6 +73,7 @@ def test_probe_proves_required_contract_and_caches_by_command_version(
     version,
     help_output,
     expected_schema,
+    expected_window,
     expected_calls,
 ):
     calls = []
@@ -104,6 +109,7 @@ def test_probe_proves_required_contract_and_caches_by_command_version(
     assert third == first
     assert first.compatible is True
     assert first.parsed_version is not None
+    assert first.version_window_status == "in_window"
     assert first.event_schema == expected_schema
     assert first.native_event_schema == "raw-terminal-v1"
     assert first.native_structured_events is False
@@ -111,7 +117,13 @@ def test_probe_proves_required_contract_and_caches_by_command_version(
     assert len(calls) == expected_calls  # cached call only refreshes the version key
     if harness_id == "codex-cli":
         assert first.capabilities["app-server"] is True
-    assert cli_capability_snapshot_to_dict(first)["warning"] is None
+    payload = cli_capability_snapshot_to_dict(first)
+    assert payload["warning"] is None
+    assert payload["version_contract"] == {
+        "status": "in_window",
+        "minimum": expected_window[0],
+        "maximum_exclusive": expected_window[1],
+    }
 
 
 def test_usage_normalization_preserves_proven_token_details():
@@ -154,6 +166,74 @@ def test_probe_rejects_present_binary_without_required_contract(monkeypatch):
     assert snapshot.compatible is False
     assert "--output-format" in (snapshot.warning or "")
     assert "usage: gemini" not in json.dumps(cli_capability_snapshot_to_dict(snapshot))
+
+
+@pytest.mark.parametrize(
+    ("version", "expected_status", "window_status", "warning_fragment"),
+    (
+        ("gemini 0.45.9", "unsupported", "below_window", "below the supported"),
+        ("gemini 0.47.0", "degraded", "above_window", "newer than the validated"),
+        ("gemini development build", "degraded", "unparsed", "could not be matched"),
+    ),
+)
+def test_probe_fails_closed_outside_supported_version_window(
+    monkeypatch,
+    version,
+    expected_status,
+    window_status,
+    warning_fragment,
+):
+    outputs = iter(
+        (
+            version,
+            "--output-format stream-json --approval-mode --skip-trust",
+        )
+    )
+    monkeypatch.setattr(
+        "gpt2giga_harness.cli_capabilities.subprocess.run",
+        lambda *args, **kwargs: _Completed(stdout=next(outputs)),
+    )
+    resolution = ExecutableResolution(
+        harness_id="gemini-cli",
+        command_name="gemini",
+        executable="/tmp/gemini",
+        source="path",
+        argv=("/tmp/gemini",),
+    )
+
+    snapshot = probe_cli_capabilities(resolution, "gemini-cli")
+    payload = cli_capability_snapshot_to_dict(snapshot)
+
+    assert snapshot.status == expected_status
+    assert snapshot.compatible is False
+    assert snapshot.version_window_status == window_status
+    assert warning_fragment in (snapshot.warning or "")
+    assert payload["version_contract"] == {
+        "status": window_status,
+        "minimum": "0.46.0",
+        "maximum_exclusive": "0.47.0",
+    }
+
+
+def test_missing_required_capability_remains_unsupported_above_window(monkeypatch):
+    outputs = iter(("gemini 0.47.1", "usage: gemini --output-format stream-json"))
+    monkeypatch.setattr(
+        "gpt2giga_harness.cli_capabilities.subprocess.run",
+        lambda *args, **kwargs: _Completed(stdout=next(outputs)),
+    )
+    resolution = ExecutableResolution(
+        harness_id="gemini-cli",
+        command_name="gemini",
+        executable="/tmp/gemini",
+        source="path",
+        argv=("/tmp/gemini",),
+    )
+
+    snapshot = probe_cli_capabilities(resolution, "gemini-cli")
+
+    assert snapshot.status == "unsupported"
+    assert snapshot.version_window_status == "above_window"
+    assert "missing required adapter capabilities" in (snapshot.warning or "")
 
 
 @pytest.mark.parametrize(

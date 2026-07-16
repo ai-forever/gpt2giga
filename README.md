@@ -52,13 +52,13 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Unified Harness пока доступен как активно разрабатываемое альфа-превью. Текущий
+Unified Harness готовится как beta-preview `0.1.0b1`. Текущий
 способ запуска — [из source checkout](./docs/harness.md#quickstart). После
 появления отдельного пакета в вашем package index он подтянет совместимую
 gateway-версию и добавит команды `giga` и `gpt2giga-harness`:
 
 ```sh
-uv tool install gpt2giga-harness
+uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 giga ui
 ```
@@ -231,7 +231,7 @@ uv build --package gpt2giga-harness
 ```sh
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest tests/ -n 4 --cov=. --cov-report=term --cov-fail-under=80
+uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 ```
 
 Live-тесты с реальными вызовами GigaChat запускаются отдельно и требуют

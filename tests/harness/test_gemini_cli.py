@@ -1,3 +1,4 @@
+import json
 import sys
 
 from gpt2giga_harness import proxy
@@ -15,6 +16,7 @@ from gpt2giga_harness.types import (
     AvailabilityStatus,
     GigaChatApiMode,
     HarnessContext,
+    HarnessEvent,
     HarnessRequest,
     HarnessResult,
 )
@@ -147,12 +149,207 @@ def test_gemini_stream_parser_normalizes_message_tool_and_usage():
     ]
     assert events[0].payload["delta"] == "Hello"
     assert events[1].payload["arguments"] == {"path": "README.md"}
+    assert events[2].payload["name"] == "read_file"
+    assert events[2].payload["arguments"] == {"path": "README.md"}
     assert events[2].payload["result"] == "contents"
     assert events[-1].payload == {
         "input_tokens": 11,
         "output_tokens": 5,
         "total_tokens": 16,
     }
+
+
+def test_gemini_stream_parser_tails_nested_subagent_tools(tmp_path):
+    parser = _GeminiStreamParser(home=tmp_path)
+    parent_id = "invoke_agent__parent"
+
+    parent_events = parser(
+        {
+            "type": "tool_use",
+            "tool_name": "invoke_agent",
+            "tool_id": parent_id,
+            "parameters": {"agent_name": "codebase_investigator"},
+        }
+    )
+
+    checkpoint = (
+        tmp_path
+        / ".gemini"
+        / "tmp"
+        / "project"
+        / "chats"
+        / "parent-session"
+        / "child-session.jsonl"
+    )
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_text(
+        json.dumps({"$set": {"kind": "subagent"}})
+        + "\n"
+        + json.dumps(
+            {
+                "type": "gemini",
+                "toolCalls": [
+                    {
+                        "id": "read_file__child",
+                        "name": "read_file",
+                        "status": "success",
+                        "args": {"file_path": "README.md"},
+                        "result": [
+                            {
+                                "functionResponse": {
+                                    "name": "read_file",
+                                    "response": {"output": "README contents"},
+                                }
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    child_events = parser.poll_events()
+
+    assert parent_events[0].payload["tool_call_id"] == parent_id
+    assert [event.type for event in child_events] == [
+        "tool_call_started",
+        "tool_call_finished",
+    ]
+    assert child_events[0].payload == {
+        "tool_call_id": "read_file__child",
+        "name": "read_file",
+        "status": "running",
+        "parent_tool_call_id": parent_id,
+        "source": "gemini-subagent-checkpoint",
+        "arguments": {"file_path": "README.md"},
+    }
+    assert child_events[1].payload["parent_tool_call_id"] == parent_id
+    assert child_events[1].payload["result"] == "README contents"
+    assert parser.poll_events() == ()
+
+
+def test_streaming_runner_polls_parser_side_channel():
+    class PollingParser:
+        terminal_outcome = None
+        recognized_payloads = 0
+
+        def __init__(self):
+            self.emitted = False
+
+        def __call__(self, payload):
+            self.recognized_payloads += 1
+            return ()
+
+        def poll_events(self) -> list[HarnessEvent]:
+            if self.emitted:
+                return []
+            self.emitted = True
+            return [
+                HarnessEvent(
+                    type="tool_call_started",
+                    message="Nested tool started.",
+                    payload={
+                        "tool_call_id": "child",
+                        "parent_tool_call_id": "parent",
+                        "name": "read_file",
+                    },
+                )
+            ]
+
+    script = """
+import json
+import time
+print(json.dumps({"type": "init"}), flush=True)
+time.sleep(0.1)
+"""
+
+    result = run_streaming_command(
+        label="Gemini CLI",
+        command=(sys.executable, "-u", "-c", script),
+        env={},
+        cwd=None,
+        timeout_seconds=5,
+        request=HarnessRequest(prompt="inspect", stream=True),
+        parse_payload=PollingParser(),
+    )
+
+    assert result.ok is True
+    assert result.raw["tool_calls"] == [
+        {
+            "tool_call_id": "child",
+            "name": "read_file",
+        }
+    ]
+
+
+def test_gemini_streaming_runner_emits_nested_checkpoint_tools(tmp_path):
+    emitted = []
+    script = """
+import json
+from pathlib import Path
+import sys
+import time
+
+home = Path(sys.argv[1])
+parent_id = "invoke_agent__parent"
+print(json.dumps({
+    "type": "tool_use",
+    "tool_name": "invoke_agent",
+    "tool_id": parent_id,
+    "parameters": {"agent_name": "investigator"},
+}), flush=True)
+time.sleep(0.1)
+checkpoint = home / ".gemini/tmp/project/chats/parent/child.jsonl"
+checkpoint.parent.mkdir(parents=True)
+checkpoint.write_text(json.dumps({
+    "type": "gemini",
+    "toolCalls": [{
+        "id": "list_directory__child",
+        "name": "list_directory",
+        "status": "success",
+        "args": {"dir_path": "."},
+        "result": [{"functionResponse": {
+            "name": "list_directory",
+            "response": {"output": "README.md"},
+        }}],
+    }],
+}) + "\\n", encoding="utf-8")
+time.sleep(0.15)
+print(json.dumps({
+    "type": "tool_result",
+    "tool_id": parent_id,
+    "status": "success",
+    "output": "done",
+}), flush=True)
+print(json.dumps({"type": "result", "status": "success"}), flush=True)
+"""
+
+    result = run_streaming_command(
+        label="Gemini CLI",
+        command=(sys.executable, "-u", "-c", script, str(tmp_path)),
+        env={},
+        cwd=None,
+        timeout_seconds=5,
+        request=HarnessRequest(
+            prompt="inspect",
+            stream=True,
+            event_sink=emitted.append,
+        ),
+        parse_payload=_GeminiStreamParser(home=tmp_path),
+    )
+
+    tool_events = [event for event in emitted if event.type.startswith("tool_call_")]
+    assert result.ok is True
+    assert [event.type for event in tool_events] == [
+        "tool_call_started",
+        "tool_call_started",
+        "tool_call_finished",
+        "tool_call_finished",
+    ]
+    assert tool_events[1].payload["parent_tool_call_id"] == "invoke_agent__parent"
+    assert tool_events[2].payload["result"] == "README.md"
 
 
 def test_gemini_stream_parser_marks_structured_failures_terminal():

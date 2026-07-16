@@ -388,6 +388,7 @@ class DurableJobWorker:
                     "capability_fingerprint": self.fingerprint,
                 },
                 process_sink=lambda process: self._record_process(attempt.id, process),
+                durable=True,
             )
         except Exception as exc:
             error = str(exc)

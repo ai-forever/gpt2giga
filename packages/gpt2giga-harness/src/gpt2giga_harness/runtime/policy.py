@@ -58,6 +58,11 @@ class PolicyAuditPhase(str, Enum):
 REVIEWED_PROMOTION_APPLY_OWNER = "reviewed_promotion.run_apply"
 REVIEWED_PROMOTION_BRANCH_OWNER = "reviewed_promotion.branch_create"
 REVIEWED_PROMOTION_MERGE_OWNER = "reviewed_promotion.workflow_merge_apply"
+NATIVE_PROCESS_SPAWN_OWNER = "native_process.start"
+MCP_SERVER_PROBE_OWNER = "managed_mcp.server_probe"
+SCHEDULE_CREATE_OWNER = "schedules.create_or_update"
+SCHEDULE_ENABLE_OWNER = "schedules.enable"
+SCHEDULE_RUN_NOW_OWNER = "schedules.run_now"
 
 
 @dataclass(frozen=True)

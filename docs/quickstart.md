@@ -65,12 +65,12 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-The current Unified Harness alpha runs from the source checkout described in
-the [Unified Harness guide](harness.md). After the standalone package appears
-in your package index, install the local control plane with:
+The upcoming Unified Harness `0.1.0b1` beta runs from the source checkout
+described in the [Unified Harness guide](harness.md). After the standalone
+package appears in your package index, install the local control plane with:
 
 ```sh
-uv tool install gpt2giga-harness
+uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 giga ui
 ```
@@ -79,10 +79,10 @@ The Harness distribution uses the `gpt2giga_harness` Python namespace and
 provides the `giga` and `gpt2giga-harness` commands. The gateway distribution
 provides only the `gpt2giga` command.
 
-:::warning[Alpha preview]
+:::warning[Beta preview]
 
 Unified Harness is under active development. Start with local, supervised
-workflows and read the [Unified Harness alpha guide](harness.md) before enabling
+workflows and read the [Unified Harness beta guide](harness.md) before enabling
 edit mode, remote access, or scheduled jobs.
 
 :::

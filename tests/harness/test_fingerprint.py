@@ -23,7 +23,7 @@ def test_worker_fingerprint_uses_resolved_user_executable(tmp_path):
     executable = tmp_path / "bin" / "codex"
     executable.parent.mkdir()
     executable.write_text(
-        '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex 1.2.3"; '
+        '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex 0.144.3"; '
         'else echo "--json --sandbox --ephemeral --image --config"; fi\n',
         encoding="utf-8",
     )
@@ -43,7 +43,7 @@ def test_worker_fingerprint_uses_resolved_user_executable(tmp_path):
 
     assert codex["binary_path"] == str(executable)
     assert codex["binary_source"] == "user_config"
-    assert codex["binary_version"] == "codex 1.2.3"
+    assert codex["binary_version"] == "codex 0.144.3"
     assert codex["compatibility"]["status"] == "supported"
     assert codex["features"]["agent_reasoning_effort"] is True
     assert codex["features"]["agent_allowed_tools"] is False

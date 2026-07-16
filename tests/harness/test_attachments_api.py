@@ -107,6 +107,40 @@ def test_attachments_api_creates_workspace_reference(tmp_path):
     assert "no stored blob" in blob.json()["detail"]
 
 
+def test_session_attachment_search_is_bounded_and_hides_workspace_root(tmp_path):
+    data_dir = tmp_path / "data"
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    source = workspace / "src" / "app.py"
+    source.parent.mkdir()
+    source.write_text("print('hello')\n", encoding="utf-8")
+    (workspace / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    client = _client(data_dir)
+    session_id = _create_session(client, workspace=str(workspace))
+
+    response = client.get(
+        f"/api/sessions/{session_id}/attachments/workspace/search",
+        params={"q": "@src", "limit": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "q": "@src",
+        "files": [
+            {
+                "path": "src/app.py",
+                "name": "app.py",
+                "mime_type": "text/x-python",
+                "kind": "text",
+                "size_bytes": source.stat().st_size,
+            }
+        ],
+        "bounded": True,
+    }
+    assert str(workspace) not in response.text
+    assert ".env" not in response.text
+
+
 def test_attachments_api_rejects_unsafe_upload_without_leaking_payload(tmp_path):
     client = _client(tmp_path / "data")
     session_id = _create_session(client)

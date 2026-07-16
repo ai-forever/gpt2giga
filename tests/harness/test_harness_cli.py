@@ -3,7 +3,7 @@ import signal
 
 import pytest
 
-from gpt2giga_harness import cli
+from gpt2giga_harness import cli, proxy
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga_harness.harnesses.codex_cli import CodexCliHarness
@@ -36,9 +36,8 @@ from gpt2giga_harness.types import (
 
 
 class _FakeWorkerProcess:
-    pid = 4242
-
-    def __init__(self):
+    def __init__(self, pid=4242):
+        self.pid = pid
         self.return_code = None
         self.signals = []
         self.terminated = False
@@ -63,6 +62,15 @@ class _FakeWorkerProcess:
         return self.return_code
 
 
+def _ready_execution_readiness(*_args, **_kwargs):
+    return {
+        "ok": True,
+        "blocked": False,
+        "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+        "findings": [],
+    }
+
+
 def test_cli_ui_starts_and_stops_worker_when_none_is_online(
     capsys,
     monkeypatch,
@@ -76,7 +84,12 @@ def test_cli_ui_starts_and_stops_worker_when_none_is_online(
     def fake_worker_status(_store):
         nonlocal status_calls
         status_calls += 1
-        return {"workers": [], "online": int(status_calls > 1)}
+        workers = (
+            [{"status": "online", "process_id": process.pid}]
+            if status_calls > 1
+            else []
+        )
+        return {"workers": workers, "online": len(workers)}
 
     monkeypatch.setattr(cli, "worker_status", fake_worker_status)
     monkeypatch.setattr(
@@ -85,7 +98,12 @@ def test_cli_ui_starts_and_stops_worker_when_none_is_online(
         lambda command, **kwargs: popen_calls.append((command, kwargs)) or process,
     )
     monkeypatch.setattr(cli, "create_app", lambda _config: "app")
-    monkeypatch.setattr(cli.uvicorn, "run", lambda *args, **kwargs: None)
+    uvicorn_calls = []
+    monkeypatch.setattr(
+        cli.uvicorn,
+        "run",
+        lambda *args, **kwargs: uvicorn_calls.append((args, kwargs)),
+    )
 
     assert cli.main(["ui"]) == 0
 
@@ -98,6 +116,17 @@ def test_cli_ui_starts_and_stops_worker_when_none_is_online(
     ]
     assert options["env"]["GPT2GIGA_HARNESS_DATA_DIR"] == str(tmp_path)
     assert options["env"]["GPT2GIGA_HARNESS_AUTO_START_PROXY"] == "false"
+    assert uvicorn_calls == [
+        (
+            ("app",),
+            {
+                "host": "127.0.0.1",
+                "port": 8091,
+                "log_level": "info",
+                "timeout_graceful_shutdown": 5,
+            },
+        )
+    ]
     assert process.signals == [signal.SIGINT]
     assert process.terminated is False
     assert "Started durable Harness worker pid=4242." in capsys.readouterr().out
@@ -131,12 +160,78 @@ def test_cli_ui_reuses_online_worker_or_allows_autostart_opt_out(
     assert cli.main(["ui", "--no-start-worker"]) == 0
 
 
+def test_cli_ui_starts_missing_workers_to_reach_target_pool(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path))
+    processes: list[_FakeWorkerProcess] = []
+
+    def fake_worker_status(_store):
+        workers = [{"status": "online", "process_id": 1000}]
+        workers.extend(
+            {"status": "online", "process_id": process.pid} for process in processes
+        )
+        return {"workers": workers, "online": len(workers)}
+
+    def fake_popen(*_args, **_kwargs):
+        process = _FakeWorkerProcess(pid=2000 + len(processes))
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(cli, "worker_status", fake_worker_status)
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(cli, "create_app", lambda _config: "app")
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *args, **kwargs: None)
+
+    assert cli.main(["ui", "--worker-count", "4"]) == 0
+
+    assert [process.pid for process in processes] == [2000, 2001, 2002]
+    assert all(process.signals == [signal.SIGINT] for process in processes)
+    output = capsys.readouterr().out
+    assert (
+        "Using 1 existing online durable Harness worker(s); starting 3 more." in output
+    )
+
+
+@pytest.mark.parametrize("worker_count", ["0", "33"])
+def test_cli_ui_rejects_invalid_worker_count(capsys, worker_count):
+    assert cli.main(["ui", "--worker-count", worker_count]) == 2
+    assert "UI worker count must be between 1 and 32." in capsys.readouterr().err
+
+
 def test_cli_harness_list_outputs_direct_chat(capsys):
     exit_code = cli.main(["harness", "list"])
 
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "direct-chat" in output
+
+
+def test_cli_harness_run_json_includes_selected_execution_readiness(capsys):
+    exit_code = cli.main(["harness", "run", "echo", "--prompt", "hello", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    readiness = payload["raw"]["preflight"]["readiness"]
+    assert exit_code == 0
+    assert readiness["ok"] is True
+    assert readiness["plan"] == {
+        "harness_id": "echo",
+        "invocation_mode": "headless",
+        "api_mode": "v2",
+        "model": None,
+        "mode": "plan",
+        "workspace_configured": False,
+        "workspace_policy": "auto",
+        "delivery": "synchronous",
+        "dry_run": False,
+    }
+    assert {finding["id"] for finding in readiness["findings"]} == {
+        "harness-echo",
+        "invocation-mode",
+        "delivery",
+    }
 
 
 def test_cli_doctor_json_passes_explicit_workspace(capsys, monkeypatch, tmp_path):
@@ -159,6 +254,54 @@ def test_cli_doctor_json_passes_explicit_workspace(capsys, monkeypatch, tmp_path
     assert captured["workspace"] == str(tmp_path)
     assert payload["schema_version"] == 1
     assert payload["ok"] is True
+
+
+def test_cli_doctor_exports_support_report_and_fails_ci_threshold(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    report = {
+        "schema_version": 1,
+        "kind": "gpt2giga_harness_doctor_report",
+        "ok": True,
+        "summary": {"ready": 2, "degraded": 1, "blocked": 0},
+        "checks": [],
+    }
+    monkeypatch.setattr(cli, "build_doctor_report", lambda *args, **kwargs: report)
+    output = tmp_path / "doctor.json"
+
+    assert (
+        cli.main(
+            [
+                "doctor",
+                "--json",
+                "--output",
+                str(output),
+                "--fail-on",
+                "degraded",
+            ]
+        )
+        == 1
+    )
+
+    assert json.loads(capsys.readouterr().out) == report
+    assert json.loads(output.read_text(encoding="utf-8")) == report
+
+
+def test_cli_doctor_ci_threshold_preserves_default_exit_code(capsys, monkeypatch):
+    report = {
+        "schema_version": 1,
+        "kind": "gpt2giga_harness_doctor_report",
+        "ok": False,
+        "summary": {"ready": 1, "degraded": 0, "blocked": 1},
+        "checks": [],
+    }
+    monkeypatch.setattr(cli, "build_doctor_report", lambda *args, **kwargs: report)
+
+    assert cli.main(["doctor", "--json"]) == 0
+    capsys.readouterr()
+    assert cli.main(["doctor", "--json", "--fail-on", "blocked"]) == 1
 
 
 def test_cli_harness_list_json_shows_native_metadata(capsys):
@@ -675,8 +818,10 @@ def test_cli_run_provenance_and_replay(capsys, tmp_path, monkeypatch):
     )
 
 
-def test_cli_chat_passes_api_mode_and_model(monkeypatch, capsys):
+def test_cli_chat_passes_api_mode_and_model(monkeypatch, capsys, tmp_path):
     captured = {}
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(cli, "build_execution_readiness", _ready_execution_readiness)
 
     def fake_run(self, request, context):
         captured["request"] = request
@@ -684,6 +829,31 @@ def test_cli_chat_passes_api_mode_and_model(monkeypatch, capsys):
         return HarnessResult(ok=True, text="ok")
 
     monkeypatch.setattr(DirectChatHarness, "run", fake_run)
+    monkeypatch.setattr(
+        proxy,
+        "health_check",
+        lambda config: proxy.ProxyHealth(
+            ok=True,
+            url=config.proxy_url,
+            path="/health",
+            status_code=200,
+        ),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "sidecar_preflight",
+        lambda _context: proxy.SidecarPreflight(ok=True, reason="ready"),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "probe_json_route",
+        lambda _config, path, **_kwargs: proxy.RouteProbe(
+            ok=True,
+            path=path,
+            method="POST",
+            status_code=422,
+        ),
+    )
 
     exit_code = cli.main(
         [
@@ -712,6 +882,11 @@ def test_cli_no_start_proxy_override(monkeypatch, capsys):
         return HarnessResult(ok=True, text="ok")
 
     monkeypatch.setattr(DirectChatHarness, "run", fake_run)
+    monkeypatch.setattr(
+        cli,
+        "build_execution_readiness",
+        _ready_execution_readiness,
+    )
 
     exit_code = cli.main(["chat", "--no-start-proxy", "hello"])
 
@@ -730,6 +905,7 @@ def test_cli_agent_alias_passes_workspace(monkeypatch, capsys, tmp_path):
         return HarnessResult(ok=True, text="ok")
 
     monkeypatch.setattr(CodexCliHarness, "run", fake_run)
+    monkeypatch.setattr(cli, "build_execution_readiness", _ready_execution_readiness)
 
     exit_code = cli.main(
         [
@@ -760,6 +936,7 @@ def test_cli_agent_aliases_include_claude_and_gemini(monkeypatch, capsys):
 
     monkeypatch.setattr(ClaudeCodeHarness, "run", fake_run)
     monkeypatch.setattr(GeminiCliHarness, "run", fake_run)
+    monkeypatch.setattr(cli, "build_execution_readiness", _ready_execution_readiness)
 
     assert cli.main(["run", "--agent", "claude", "inspect"]) == 0
     assert cli.main(["run", "--agent", "gemini", "inspect"]) == 0
@@ -953,6 +1130,15 @@ def test_cli_native_dry_run_prints_command_plan_without_headless_run(
     assert payload["ok"] is True
     assert payload["text"] == "native dry run"
     assert payload["raw"]["native_command_plan"]["metadata"]["managed"] is True
+    readiness = payload["raw"]["preflight"]["readiness"]
+    assert readiness["schema_version"] == 2
+    assert readiness["status"] in {"ready", "degraded"}
+    assert readiness["evidence_status"] in {"not_checked", "unknown"}
+    route = next(
+        finding for finding in readiness["findings"] if finding["id"] == "route-v2"
+    )
+    assert route["status"] == "not_checked"
+    assert route["remediation"][0]["command"] == "giga doctor --json"
     for item in forbidden:
         assert item not in command
     assert secret not in output

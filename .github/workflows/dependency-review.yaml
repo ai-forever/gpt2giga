@@ -7,6 +7,8 @@ on:
     paths:
       - 'pyproject.toml'
       - 'packages/*/pyproject.toml'
+      - 'packages/gpt2giga-harness/frontend/package.json'
+      - 'packages/gpt2giga-harness/frontend/package-lock.json'
       - 'uv.lock'
       - 'docs-site/package.json'
       - 'docs-site/package-lock.json'

@@ -1,4 +1,5 @@
 import base64
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -97,6 +98,27 @@ def test_direct_chat_maps_selected_v2_builtin_tools(monkeypatch):
         {"type": "web_search"},
         {"type": "code_interpreter"},
     ]
+
+
+def test_direct_chat_forwards_selected_reasoning_effort(monkeypatch):
+    captured = {}
+
+    def fake_request_json(method, url, *, payload, api_key, timeout):
+        captured["payload"] = payload
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(proxy, "request_json", fake_request_json)
+
+    DirectChatHarness().run(
+        HarnessRequest(
+            prompt="reason",
+            model="GigaChat-2-Reasoning",
+            extra={"agent_adapter_options": {"reasoning_effort": "medium"}},
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert captured["payload"]["reasoning_effort"] == "medium"
 
 
 def test_direct_chat_records_nonstream_builtin_tools(monkeypatch):
@@ -293,6 +315,194 @@ def test_direct_chat_streams_coalesced_message_tool_and_usage_events(monkeypatch
     assert emitted[4].payload["arguments"] == '{"city":"Moscow"}'
 
 
+def test_direct_chat_streams_v2_message_reasoning_tool_and_usage_events(monkeypatch):
+    emitted = []
+
+    def fake_stream_sse_json(*args, **kwargs):
+        del args, kwargs
+        yield {"messages": [{"role": "reasoning", "content": [{"text": "Think "}]}]}
+        yield {
+            "messages": [
+                {
+                    "role": "reasoning",
+                    "content": [{"tool_execution": {"name": "web_search"}}],
+                }
+            ]
+        }
+        yield {
+            "messages": [
+                {
+                    "role": "reasoning",
+                    "content": [
+                        {
+                            "tool_execution": {
+                                "name": "web_search",
+                                "status": "success",
+                            }
+                        }
+                    ],
+                }
+            ]
+        }
+        yield {"messages": [{"role": "assistant", "content": [{"text": "Answer"}]}]}
+        yield {
+            "finish_reason": "stop",
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 4,
+                "total_tokens": 16,
+            },
+        }
+
+    monkeypatch.setattr(proxy, "stream_sse_json", fake_stream_sse_json)
+
+    result = DirectChatHarness().run(
+        HarnessRequest(prompt="hello", stream=True, event_sink=emitted.append),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert result.ok is True
+    assert result.text == "Answer"
+    assert [event.type for event in emitted] == [
+        "reasoning_delta",
+        "tool_call_started",
+        "tool_call_finished",
+        "message_delta",
+        "usage",
+    ]
+    assert emitted[0].payload["delta"] == "Think "
+    assert emitted[2].payload["status"] == "completed"
+    assert emitted[3].payload["delta"] == "Answer"
+    assert emitted[4].payload["input_tokens"] == 12
+
+
+def test_direct_chat_streams_nested_agent_tools_with_results(monkeypatch):
+    emitted = []
+
+    def fake_stream_sse_json(*args, **kwargs):
+        del args, kwargs
+        yield {
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "agent-call",
+                                "type": "function",
+                                "function": {
+                                    "name": "invoke_agent",
+                                    "arguments": '{"agent_name":"investigator"}',
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+            "metadata": {
+                "gigachat_called_tools": json.dumps(
+                    [
+                        {
+                            "name": "invoke_agent",
+                            "arguments": {"agent_name": "investigator"},
+                            "tools_state_id": "agent-call",
+                        }
+                    ]
+                )
+            },
+        }
+        yield {
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "child-call",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": '{"command":"rg TODO"}',
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+            "metadata": {
+                "gigachat_called_tools": json.dumps(
+                    [
+                        {
+                            "name": "invoke_agent",
+                            "arguments": {"agent_name": "investigator"},
+                            "tools_state_id": "agent-call",
+                        },
+                        {
+                            "name": "shell",
+                            "arguments": {"command": "rg TODO"},
+                            "tools_state_id": "child-call",
+                        },
+                    ]
+                )
+            },
+        }
+        yield {
+            "choices": [],
+            "metadata": {
+                "gigachat_tool_results": json.dumps(
+                    [
+                        {
+                            "name": "shell",
+                            "result": "src/app.py:10: TODO",
+                            "tools_state_id": "child-call",
+                        }
+                    ]
+                )
+            },
+        }
+        yield {
+            "choices": [],
+            "metadata": {
+                "gigachat_tool_results": json.dumps(
+                    [
+                        {
+                            "name": "invoke_agent",
+                            "result": "Repository inspected.",
+                            "tools_state_id": "agent-call",
+                        }
+                    ]
+                )
+            },
+        }
+        yield {
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+
+    monkeypatch.setattr(proxy, "stream_sse_json", fake_stream_sse_json)
+
+    result = DirectChatHarness().run(
+        HarnessRequest(prompt="inspect", stream=True, event_sink=emitted.append),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert result.ok is True
+    assert [event.type for event in emitted] == [
+        "tool_call_started",
+        "tool_call_started",
+        "tool_call_finished",
+        "tool_call_finished",
+        "usage",
+    ]
+    assert emitted[0].payload["tool_call_id"] == "agent-call"
+    assert emitted[1].payload["parent_tool_call_id"] == "agent-call"
+    assert emitted[2].payload["result"] == "src/app.py:10: TODO"
+    assert emitted[2].payload["parent_tool_call_id"] == "agent-call"
+    assert emitted[3].payload["result"] == "Repository inspected."
+
+
 def test_direct_chat_streams_gigachat_builtin_tool_events(monkeypatch, tmp_path):
     emitted = []
 
@@ -435,6 +645,8 @@ def test_generated_image_download_uses_local_proxy_gigachat_config(monkeypatch):
 def test_direct_chat_flushes_pending_text_during_upstream_pause(monkeypatch):
     emitted = []
     observed = {}
+    clock = iter((0.0, 1.0))
+    monkeypatch.setattr(direct_chat_module.time, "monotonic", lambda: next(clock))
 
     def fake_stream_sse_json(
         method,
@@ -451,7 +663,6 @@ def test_direct_chat_flushes_pending_text_during_upstream_pause(monkeypatch):
             "model": "GigaChat",
             "choices": [{"index": 0, "delta": {"content": "A"}}],
         }
-        idle_callback.__self__._started_at -= 1
         idle_callback()
         observed["event_count_during_pause"] = len(emitted)
 
@@ -542,3 +753,42 @@ def test_model_listing_can_be_strict_to_selected_api_mode(monkeypatch):
     assert discovery.models == ()
     assert discovery.source == "/v2/models"
     assert called_urls == ["http://127.0.0.1:8090/v2/models"]
+
+
+def test_model_listing_excludes_explicit_non_chat_models(monkeypatch):
+    def fake_request_json(method, url, *, payload=None, api_key=None, timeout=60.0):
+        return {
+            "object": "list",
+            "data": [
+                {
+                    "id": "GigaChat-3-Pro",
+                    "object": "model",
+                    "owned_by": "salutedevices",
+                    "metadata": {"type": "chat"},
+                },
+                {
+                    "id": "Embeddings-2",
+                    "object": "model",
+                    "owned_by": "salutedevices",
+                    "metadata": {"type": "embedder"},
+                },
+                {
+                    "id": "LegacyModel",
+                    "object": "model",
+                    "owned_by": "salutedevices",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(proxy, "request_json", fake_request_json)
+
+    discovery = proxy.discover_models(
+        HarnessConfig(),
+        GigaChatApiMode.V1,
+        include_compat_paths=False,
+        include_fallback=False,
+    )
+
+    assert discovery.ok is True
+    assert discovery.models == ("GigaChat-3-Pro", "LegacyModel")
+    assert discovery.source == "/v1/models"

@@ -102,6 +102,14 @@ class DirectChatHarness(BaseHarness):
             "messages": _payload_messages(request),
             "stream": bool(request.stream),
         }
+        adapter_options = request.extra.get("agent_adapter_options")
+        reasoning_effort = (
+            adapter_options.get("reasoning_effort")
+            if isinstance(adapter_options, Mapping)
+            else None
+        )
+        if reasoning_effort in {"low", "medium", "high"}:
+            payload["reasoning_effort"] = reasoning_effort
         if request.builtin_tools:
             payload["tools"] = [{"type": tool.value} for tool in request.builtin_tools]
         api_key = context.api_key or proxy.cached_sidecar_api_key(context.proxy_url)
@@ -197,6 +205,10 @@ class DirectChatHarness(BaseHarness):
                 error=str(exc),
             )
         events = list(events)
+        provider_trace = _ProviderToolTrace()
+        provider_trace.register_payload(data)
+        for event in provider_trace.drain_events():
+            _emit_or_collect(request, events, event)
         for event in _builtin_tool_execution_events(data, final=True):
             _emit_or_collect(request, events, event)
         for event in _generated_file_events(data, request=request, context=context):
@@ -233,9 +245,28 @@ class DirectChatHarness(BaseHarness):
         for event in events:
             _emit_or_collect(request, pending_events, event)
         accumulator = OpenAIChatCompletionStreamAccumulator()
+        provider_trace = _ProviderToolTrace()
         builtin_tools_seen: set[str] = set()
         generated_files_seen: set[str] = set()
-        message_deltas = _MessageDeltaCoalescer(request, pending_events)
+        message_deltas = _TextDeltaCoalescer(
+            request,
+            pending_events,
+            event_type=HarnessEventType.MESSAGE_DELTA.value,
+            payload_key="delta",
+            event_message="Assistant message delta.",
+        )
+        reasoning_deltas = _TextDeltaCoalescer(
+            request,
+            pending_events,
+            event_type=HarnessEventType.REASONING_DELTA.value,
+            payload_key="delta",
+            event_message="Assistant reasoning delta.",
+        )
+
+        def flush_due_deltas() -> None:
+            message_deltas.flush_if_due()
+            reasoning_deltas.flush_if_due()
+
         chunk_count = 0
         last_payload: Mapping[str, Any] = {}
         try:
@@ -246,15 +277,17 @@ class DirectChatHarness(BaseHarness):
                 api_key=api_key,
                 timeout=context.timeout_seconds,
                 cancel_event=request.cancel_event,
-                idle_callback=message_deltas.flush_if_due,
+                idle_callback=flush_due_deltas,
             ):
                 chunk_count += 1
                 last_payload = stream_payload
+                provider_trace.register_payload(stream_payload)
                 for event in _builtin_tool_execution_events(
                     stream_payload,
                     seen=builtin_tools_seen,
                 ):
                     message_deltas.flush()
+                    reasoning_deltas.flush()
                     _emit_or_collect(request, pending_events, event)
                 for event in _generated_file_events(
                     stream_payload,
@@ -263,17 +296,30 @@ class DirectChatHarness(BaseHarness):
                     seen=generated_files_seen,
                 ):
                     message_deltas.flush()
+                    reasoning_deltas.flush()
                     _emit_or_collect(request, pending_events, event)
                 for normalized_event in accumulator.observe_payload(stream_payload):
                     if normalized_event.type == "content_delta":
+                        reasoning_deltas.flush()
                         message_deltas.push(normalized_event)
                         continue
+                    if normalized_event.type == "reasoning_delta":
+                        message_deltas.flush()
+                        reasoning_deltas.push(normalized_event)
+                        continue
                     message_deltas.flush()
+                    reasoning_deltas.flush()
                     event = _normalized_harness_event(normalized_event)
                     if event is not None:
+                        event = provider_trace.enrich_event(event)
                         _emit_or_collect(request, pending_events, event)
+                for event in provider_trace.drain_events():
+                    message_deltas.flush()
+                    reasoning_deltas.flush()
+                    _emit_or_collect(request, pending_events, event)
         except proxy.ProxyRequestError as exc:
             message_deltas.flush()
+            reasoning_deltas.flush()
             return HarnessResult(
                 ok=False,
                 text="",
@@ -291,13 +337,14 @@ class DirectChatHarness(BaseHarness):
             )
 
         message_deltas.flush()
+        reasoning_deltas.flush()
         response = accumulator.to_normalized_response()
         for index, raw_tool_call in sorted(accumulator.tool_calls.items()):
             tool_call = stream_tool_call_to_normalized_tool_call(raw_tool_call)
             tool_call.raw_extensions["index"] = index
-            _emit_or_collect(
-                request,
-                pending_events,
+            if provider_trace.is_finished(tool_call.id):
+                continue
+            event = provider_trace.enrich_event(
                 HarnessEvent(
                     type=HarnessEventType.TOOL_CALL_FINISHED.value,
                     message=f"Tool call {tool_call.name or tool_call.id or index} assembled.",
@@ -306,7 +353,12 @@ class DirectChatHarness(BaseHarness):
                         "status": "requested",
                         "source": "direct-chat",
                     },
-                ),
+                )
+            )
+            _emit_or_collect(
+                request,
+                pending_events,
+                event,
             )
         error = response.error.message if response.error is not None else None
         return HarnessResult(
@@ -411,16 +463,23 @@ def _emit_or_collect(
         events.append(event)
 
 
-class _MessageDeltaCoalescer:
-    """Batch tiny token deltas before hitting the persistent session event store."""
+class _TextDeltaCoalescer:
+    """Batch tiny text deltas before hitting the persistent session event store."""
 
     def __init__(
         self,
         request: HarnessRequest,
         events: list[HarnessEvent],
+        *,
+        event_type: str,
+        payload_key: str,
+        event_message: str,
     ) -> None:
         self._request = request
         self._events = events
+        self._event_type = event_type
+        self._payload_key = payload_key
+        self._event_message = event_message
         self._parts: list[str] = []
         self._character_count = 0
         self._started_at: float | None = None
@@ -428,7 +487,11 @@ class _MessageDeltaCoalescer:
 
     def push(self, event: NormalizedStreamEvent) -> None:
         """Add one content delta and flush when the size/time budget is reached."""
-        delta = event.content_delta
+        delta = (
+            event.reasoning_delta
+            if self._event_type == HarnessEventType.REASONING_DELTA.value
+            else event.content_delta
+        )
         if not delta:
             return
         now = time.monotonic()
@@ -451,7 +514,7 @@ class _MessageDeltaCoalescer:
         if not self._parts:
             return
         payload: dict[str, Any] = {
-            "delta": "".join(self._parts),
+            self._payload_key: "".join(self._parts),
             "source": "direct-chat",
         }
         if self._last_sequence is not None:
@@ -460,8 +523,8 @@ class _MessageDeltaCoalescer:
             self._request,
             self._events,
             HarnessEvent(
-                type=HarnessEventType.MESSAGE_DELTA.value,
-                message="Assistant message delta.",
+                type=self._event_type,
+                message=self._event_message,
                 payload=payload,
             ),
         )
@@ -487,6 +550,17 @@ def _normalized_harness_event(event: NormalizedStreamEvent) -> HarnessEvent | No
             message="Assistant message delta.",
             payload={
                 "delta": event.content_delta,
+                "sequence": event.sequence,
+                "source": "direct-chat",
+            },
+        )
+    if event.type == "reasoning_delta" and event.reasoning_delta:
+        return HarnessEvent(
+            type=HarnessEventType.REASONING_DELTA.value,
+            message="Assistant reasoning delta.",
+            payload={
+                "delta": event.reasoning_delta,
+                "kind": "model",
                 "sequence": event.sequence,
                 "source": "direct-chat",
             },
@@ -545,6 +619,315 @@ def _usage_event(value: Any) -> HarnessEvent | None:
     )
 
 
+class _ProviderToolTrace:
+    """Rebuild provider-internal tool nesting from response metadata."""
+
+    def __init__(self) -> None:
+        self._calls: dict[str, dict[str, Any]] = {}
+        self._call_order: list[str] = []
+        self._started: set[str] = set()
+        self._provider_finished: set[str] = set()
+        self._active_agents: list[str] = []
+        self._visible_ids: dict[str, str] = {}
+        self._pending_calls: list[str] = []
+        self._pending_results: list[dict[str, Any]] = []
+
+    def register_payload(self, payload: Mapping[str, Any]) -> None:
+        result_items = _provider_metadata_items(payload, "gigachat_tool_results")
+        result_ids = {
+            identifier
+            for item in result_items
+            if (identifier := _provider_tool_identifier(item)) is not None
+        }
+        current_ids = _payload_tool_call_ids(payload)
+        for identifier in current_ids:
+            self._visible_ids[_canonical_tool_id(identifier)] = identifier
+
+        call_items = _current_provider_call_items(
+            _provider_metadata_items(payload, "gigachat_called_tools"),
+            current_ids=current_ids,
+            result_ids=result_ids,
+            known_ids=set(self._calls),
+        )
+        for item in call_items:
+            identifier = _provider_tool_identifier(item)
+            name = _provider_tool_name(item)
+            if identifier is None or name is None:
+                continue
+            key = _canonical_tool_id(identifier)
+            explicit_parent = _provider_parent_identifier(item)
+            parent_key = (
+                _canonical_tool_id(explicit_parent)
+                if explicit_parent is not None
+                else self._active_agents[-1]
+                if self._active_agents and self._active_agents[-1] != key
+                else None
+            )
+            record = self._calls.setdefault(
+                key,
+                {
+                    "id": identifier,
+                    "name": name,
+                    "parent_key": parent_key,
+                },
+            )
+            record.update(
+                {
+                    "id": identifier,
+                    "name": name,
+                    "arguments": item.get("arguments"),
+                    "parent_key": parent_key or record.get("parent_key"),
+                }
+            )
+            if key not in self._call_order:
+                self._call_order.append(key)
+            if key not in self._started and key not in self._pending_calls:
+                self._pending_calls.append(key)
+            if name == "invoke_agent" and key not in self._active_agents:
+                self._active_agents.append(key)
+
+        self._pending_results.extend(result_items)
+
+    def enrich_event(self, event: HarnessEvent) -> HarnessEvent:
+        identifier = _provider_tool_identifier(event.payload)
+        if identifier is None:
+            return event
+        key = _canonical_tool_id(identifier)
+        self._visible_ids[key] = identifier
+        record = self._calls.get(key)
+        payload = dict(event.payload)
+        if record is not None:
+            if record.get("name") is not None:
+                payload.setdefault("name", record["name"])
+            if record.get("arguments") is not None:
+                payload.setdefault("arguments", record["arguments"])
+            parent_id = self._parent_visible_id(record.get("parent_key"))
+            if parent_id is not None:
+                payload["parent_tool_call_id"] = parent_id
+        if event.type in {
+            HarnessEventType.TOOL_CALL_STARTED.value,
+            HarnessEventType.TOOL_CALL_DELTA.value,
+        }:
+            self._started.add(key)
+            if key in self._pending_calls:
+                self._pending_calls.remove(key)
+        return HarnessEvent(type=event.type, message=event.message, payload=payload)
+
+    def drain_events(self) -> tuple[HarnessEvent, ...]:
+        events: list[HarnessEvent] = []
+        for key in self._pending_calls:
+            if key in self._started:
+                continue
+            events.append(self._started_event(key))
+            self._started.add(key)
+        self._pending_calls.clear()
+
+        for result in self._pending_results:
+            key = self._result_key(result)
+            if key is None or key in self._provider_finished:
+                continue
+            if key not in self._started:
+                events.append(self._started_event(key))
+                self._started.add(key)
+            record = self._calls[key]
+            status = str(result.get("status") or "completed")
+            payload = {
+                "tool_call_id": self._visible_ids.get(key, str(record["id"])),
+                "name": record["name"],
+                "arguments": record.get("arguments"),
+                "result": result.get("result"),
+                "status": status,
+                "source": "direct-chat-provider",
+            }
+            parent_id = self._parent_visible_id(record.get("parent_key"))
+            if parent_id is not None:
+                payload["parent_tool_call_id"] = parent_id
+            events.append(
+                HarnessEvent(
+                    type=HarnessEventType.TOOL_CALL_FINISHED.value,
+                    message=f"Tool call {record['name']} {status}.",
+                    payload={
+                        key: value
+                        for key, value in payload.items()
+                        if value is not None
+                    },
+                )
+            )
+            self._provider_finished.add(key)
+            self._close_agent(key)
+        self._pending_results.clear()
+        return tuple(events)
+
+    def is_finished(self, identifier: Any) -> bool:
+        return (
+            isinstance(identifier, str)
+            and _canonical_tool_id(identifier) in self._provider_finished
+        )
+
+    def _result_key(self, result: Mapping[str, Any]) -> str | None:
+        identifier = _provider_tool_identifier(result)
+        if identifier is not None:
+            key = _canonical_tool_id(identifier)
+            if key not in self._calls:
+                name = _provider_tool_name(result) or "tool"
+                parent_id = _provider_parent_identifier(result)
+                parent_key = (
+                    _canonical_tool_id(parent_id)
+                    if parent_id is not None
+                    else self._active_agents[-1]
+                    if self._active_agents and name != "invoke_agent"
+                    else None
+                )
+                self._calls[key] = {
+                    "id": identifier,
+                    "name": name,
+                    "parent_key": parent_key,
+                }
+                self._call_order.append(key)
+            return key
+        name = _provider_tool_name(result)
+        if name is None:
+            return None
+        return next(
+            (
+                key
+                for key in reversed(self._call_order)
+                if self._calls[key].get("name") == name
+                and key not in self._provider_finished
+            ),
+            None,
+        )
+
+    def _started_event(self, key: str) -> HarnessEvent:
+        record = self._calls[key]
+        payload = {
+            "tool_call_id": self._visible_ids.get(key, str(record["id"])),
+            "name": record["name"],
+            "arguments": record.get("arguments"),
+            "status": "running",
+            "source": "direct-chat-provider",
+        }
+        parent_id = self._parent_visible_id(record.get("parent_key"))
+        if parent_id is not None:
+            payload["parent_tool_call_id"] = parent_id
+        return HarnessEvent(
+            type=HarnessEventType.TOOL_CALL_STARTED.value,
+            message=f"Tool call {record['name']} started.",
+            payload={key: value for key, value in payload.items() if value is not None},
+        )
+
+    def _parent_visible_id(self, parent_key: Any) -> str | None:
+        if not isinstance(parent_key, str):
+            return None
+        parent = self._calls.get(parent_key)
+        fallback = str(parent["id"]) if parent is not None else parent_key
+        return self._visible_ids.get(parent_key, fallback)
+
+    def _close_agent(self, key: str) -> None:
+        if key not in self._active_agents:
+            return
+        index = self._active_agents.index(key)
+        del self._active_agents[index:]
+
+
+def _provider_metadata_items(
+    payload: Mapping[str, Any],
+    key: str,
+) -> list[dict[str, Any]]:
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return []
+    raw_items = metadata.get(key)
+    if not isinstance(raw_items, str) or not raw_items:
+        return []
+    try:
+        decoded = json.loads(raw_items)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(decoded, list):
+        return []
+    return [dict(item) for item in decoded if isinstance(item, Mapping)]
+
+
+def _payload_tool_call_ids(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    identifiers: list[str] = []
+    for choice in payload.get("choices") or ():
+        if not isinstance(choice, Mapping):
+            continue
+        for message_key in ("delta", "message"):
+            message = choice.get(message_key)
+            if not isinstance(message, Mapping):
+                continue
+            for tool_call in message.get("tool_calls") or ():
+                if not isinstance(tool_call, Mapping):
+                    continue
+                identifier = _provider_tool_identifier(tool_call)
+                if identifier is not None:
+                    identifiers.append(identifier)
+    return tuple(identifiers)
+
+
+def _current_provider_call_items(
+    items: list[dict[str, Any]],
+    *,
+    current_ids: tuple[str, ...],
+    result_ids: set[str],
+    known_ids: set[str],
+) -> list[dict[str, Any]]:
+    current_keys = {_canonical_tool_id(identifier) for identifier in current_ids}
+    result_keys = {_canonical_tool_id(identifier) for identifier in result_ids}
+    candidate_indexes = [
+        index
+        for index, item in enumerate(items)
+        if (identifier := _provider_tool_identifier(item)) is not None
+        and _canonical_tool_id(identifier) in current_keys | result_keys
+    ]
+    if candidate_indexes:
+        start = min(candidate_indexes)
+        if not current_keys:
+            for index in range(start - 1, -1, -1):
+                if _provider_tool_name(items[index]) == "invoke_agent":
+                    start = index
+                    break
+        return items[start:]
+    return [
+        item
+        for item in items
+        if _provider_parent_identifier(item) is not None
+        or (
+            (identifier := _provider_tool_identifier(item)) is not None
+            and _canonical_tool_id(identifier) in known_ids
+        )
+    ]
+
+
+def _provider_tool_identifier(value: Mapping[str, Any]) -> str | None:
+    for key in ("tools_state_id", "tool_call_id", "call_id", "id"):
+        identifier = value.get(key)
+        if isinstance(identifier, str) and identifier.strip():
+            return identifier.strip()
+    return None
+
+
+def _provider_parent_identifier(value: Mapping[str, Any]) -> str | None:
+    parent_id = value.get("parent_tool_call_id")
+    return (
+        parent_id.strip() if isinstance(parent_id, str) and parent_id.strip() else None
+    )
+
+
+def _provider_tool_name(value: Mapping[str, Any]) -> str | None:
+    name = value.get("name")
+    return name.strip() if isinstance(name, str) and name.strip() else None
+
+
+def _canonical_tool_id(identifier: str) -> str:
+    for prefix in ("fc_", "call_"):
+        if identifier.startswith(prefix) and len(identifier) > len(prefix):
+            return identifier.removeprefix(prefix)
+    return identifier
+
+
 def _builtin_tool_execution_events(
     payload: Mapping[str, Any],
     *,
@@ -554,44 +937,57 @@ def _builtin_tool_execution_events(
     """Normalize GigaChat built-in tool metadata into Harness tool events."""
     seen = seen if seen is not None else set()
     events = []
+    messages: list[Mapping[str, Any]] = []
     for choice in payload.get("choices") or ():
-        if not isinstance(choice, Mapping):
-            continue
-        for message_key in ("delta", "message"):
-            message = choice.get(message_key)
-            if not isinstance(message, Mapping):
+        if isinstance(choice, Mapping):
+            messages.extend(
+                message
+                for message_key in ("delta", "message")
+                if isinstance((message := choice.get(message_key)), Mapping)
+            )
+    messages.extend(
+        message
+        for message in payload.get("messages") or ()
+        if isinstance(message, Mapping)
+    )
+    for message in messages:
+        executions = list(message.get("tool_executions") or ())
+        for part in message.get("content") or ():
+            if isinstance(part, Mapping) and isinstance(
+                part.get("tool_execution"), Mapping
+            ):
+                executions.append(part["tool_execution"])
+        for execution in executions:
+            if not isinstance(execution, Mapping):
                 continue
-            for execution in message.get("tool_executions") or ():
-                if not isinstance(execution, Mapping):
-                    continue
-                name = str(execution.get("name") or "").strip()
-                if not name:
-                    continue
-                tool_call_id = f"builtin:{name}"
-                status = _builtin_tool_status(execution.get("status"), final=final)
-                if status in {"completed", "failed"}:
-                    event_type = HarnessEventType.TOOL_CALL_FINISHED.value
-                elif tool_call_id in seen:
-                    event_type = HarnessEventType.TOOL_CALL_DELTA.value
-                else:
-                    event_type = HarnessEventType.TOOL_CALL_STARTED.value
-                seen.add(tool_call_id)
-                event_payload = {
-                    "tool_call_id": tool_call_id,
-                    "name": name,
-                    "type": "builtin",
-                    "status": status,
-                    "source": "direct-chat",
-                }
-                if execution.get("seconds_left") is not None:
-                    event_payload["seconds_left"] = execution["seconds_left"]
-                events.append(
-                    HarnessEvent(
-                        type=event_type,
-                        message=f"Built-in tool {name} {status}.",
-                        payload=event_payload,
-                    )
+            name = str(execution.get("name") or "").strip()
+            if not name:
+                continue
+            tool_call_id = f"builtin:{name}"
+            status = _builtin_tool_status(execution.get("status"), final=final)
+            if status in {"completed", "failed"}:
+                event_type = HarnessEventType.TOOL_CALL_FINISHED.value
+            elif tool_call_id in seen:
+                event_type = HarnessEventType.TOOL_CALL_DELTA.value
+            else:
+                event_type = HarnessEventType.TOOL_CALL_STARTED.value
+            seen.add(tool_call_id)
+            event_payload = {
+                "tool_call_id": tool_call_id,
+                "name": name,
+                "type": "builtin",
+                "status": status,
+                "source": "direct-chat",
+            }
+            if execution.get("seconds_left") is not None:
+                event_payload["seconds_left"] = execution["seconds_left"]
+            events.append(
+                HarnessEvent(
+                    type=event_type,
+                    message=f"Built-in tool {name} {status}.",
+                    payload=event_payload,
                 )
+            )
     return tuple(events)
 
 

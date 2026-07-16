@@ -7,6 +7,10 @@ from fastapi.testclient import TestClient
 from gpt2giga_harness import cli
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.project import resolve_project
+from gpt2giga_harness.runtime.policy import (
+    SCHEDULE_CREATE_OWNER,
+    SCHEDULE_ENABLE_OWNER,
+)
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.runtime.worker import DurableJobWorker
 from gpt2giga_harness.schedules import (
@@ -62,6 +66,9 @@ def test_schedule_api_requires_exact_test_hash_and_online_worker(tmp_path):
 
         create_gate = client.post("/api/schedules", json=payload)
         assert create_gate.status_code == 202
+        assert (
+            create_gate.json()["approval"]["enforcement_owner"] == SCHEDULE_CREATE_OWNER
+        )
         create_approval = create_gate.json()["approval"]["id"]
         approved_create = client.post(
             f"/api/approvals/{create_approval}/decision",
@@ -80,10 +87,28 @@ def test_schedule_api_requires_exact_test_hash_and_online_worker(tmp_path):
 
         tested = client.post(
             "/api/schedules/daily-echo/test-now",
-            json={"workspace": str(workspace)},
+            json={
+                "workspace": str(workspace),
+                "idempotency_key": "cockpit-schedule-test-1",
+            },
         )
         assert tested.status_code == 200
         assert tested.json()["occurrence"]["status"] == "queued"
+        tested_retry = client.post(
+            "/api/schedules/daily-echo/test-now",
+            json={
+                "workspace": str(workspace),
+                "idempotency_key": "cockpit-schedule-test-1",
+            },
+        )
+        assert tested_retry.status_code == 200
+        assert (
+            tested_retry.json()["occurrence"]["id"] == tested.json()["occurrence"]["id"]
+        )
+        assert (
+            tested_retry.json()["occurrence"]["run_id"]
+            == tested.json()["occurrence"]["run_id"]
+        )
 
         offline = client.post(
             "/api/schedules/daily-echo/enable", json={"workspace": str(workspace)}
@@ -96,6 +121,9 @@ def test_schedule_api_requires_exact_test_hash_and_online_worker(tmp_path):
             "/api/schedules/daily-echo/enable", json={"workspace": str(workspace)}
         )
         assert enable_gate.status_code == 202
+        assert (
+            enable_gate.json()["approval"]["enforcement_owner"] == SCHEDULE_ENABLE_OWNER
+        )
         enable_approval = enable_gate.json()["approval"]["id"]
         assert (
             client.post(

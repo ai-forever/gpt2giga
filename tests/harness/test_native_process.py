@@ -208,6 +208,31 @@ def test_native_process_manager_cleanup_marks_exited_process(tmp_path):
     )
 
 
+def test_native_process_manager_closes_pipes_after_natural_exit(tmp_path):
+    script = tmp_path / "exit.py"
+    script.write_text("print('done', flush=True)\n", encoding="utf-8")
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Native process")
+    manager = NativeProcessManager(session_store=store, use_pty=False)
+    ref = manager.start(
+        NativeCommandPlan(
+            command=(sys.executable, str(script)),
+            env=_python_env(),
+            cwd=str(tmp_path),
+            metadata={"harness_id": "fake-cli"},
+        ),
+        session_id=session.id,
+    )
+
+    _wait_for_status(manager, ref.id, NativeProcessStatus.EXITED)
+    record = manager._records[ref.id]
+
+    assert record.resources_closed is True
+    assert record.stdin is not None and record.stdin.closed
+    assert record.process.stdout is not None and record.process.stdout.closed
+    assert record.process.stderr is not None and record.process.stderr.closed
+
+
 @pytest.mark.skipif(
     native_process_module.fcntl is None or native_process_module.termios is None,
     reason="PTY resize is POSIX-only",

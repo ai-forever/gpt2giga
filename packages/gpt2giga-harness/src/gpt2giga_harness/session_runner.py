@@ -7,8 +7,10 @@ from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
+import threading
 from typing import Any, Mapping
 
+from gpt2giga_harness import proxy
 from gpt2giga_harness.attachments import (
     AttachmentNotFoundError,
     FilesystemAttachmentStore,
@@ -39,6 +41,7 @@ from gpt2giga_harness.provenance import (
     build_run_provenance,
     run_provenance_to_dict,
 )
+from gpt2giga_harness.readiness import build_execution_readiness
 from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.sessions.models import (
     HarnessMessage,
@@ -51,6 +54,7 @@ from gpt2giga_harness.sessions.models import (
 )
 from gpt2giga_harness.sessions.store import (
     HarnessSessionStore,
+    SessionNotFoundError,
     new_id,
     title_from_prompt,
     utc_now,
@@ -79,6 +83,7 @@ from gpt2giga_harness.worktrees import (
 from gpt2giga_harness.workspace import resolve_workspace
 
 MAX_HISTORY_MESSAGES = 20
+MAX_REASONING_CHARACTERS = 32_768
 
 
 @dataclass(frozen=True)
@@ -143,6 +148,7 @@ class HarnessSessionRunner:
         payload: Mapping[str, Any],
         *,
         session_id: str | None = None,
+        durable: bool = False,
     ):
         """Build a pre-run safety report without invoking a harness."""
         session = self.store.get_session(session_id) if session_id is not None else None
@@ -169,6 +175,7 @@ class HarnessSessionRunner:
             project_memory=project_memory,
             data_dir=self.config.data_dir,
             max_history_messages=MAX_HISTORY_MESSAGES,
+            readiness=self._execution_readiness(options, durable=durable),
         )
 
     def create_session(
@@ -229,7 +236,7 @@ class HarnessSessionRunner:
         options = self._run_options(payload, session=session)
         if options["invocation_mode"].value != "headless":
             raise ValueError("durable jobs currently support headless runs only")
-        report = self.preflight(payload, session_id=session_id)
+        report = self.preflight(payload, session_id=session_id, durable=True)
         if report.hard_block:
             raise PreflightBlockedError(report)
         managed_mcp_snapshot = self._prepare_managed_mcp_snapshot(options)
@@ -282,9 +289,11 @@ class HarnessSessionRunner:
             title=(
                 title_from_prompt(options["prompt"])
                 if session.title == "Untitled session"
+                and not _generate_session_title_requested(options["extra"])
                 else session.title
             ),
         )
+        self._schedule_session_title(session, run.id, options)
         return QueuedHarnessRun(
             session=updated_session, run=run, user_message=user_message
         )
@@ -300,6 +309,7 @@ class HarnessSessionRunner:
         excluded_history_run_ids: tuple[str, ...] = (),
         runtime_metadata: Mapping[str, Any] | None = None,
         process_sink: Any | None = None,
+        durable: bool = False,
     ) -> HarnessSessionRunResult:
         """Run one prompt inside an existing session."""
         session = self.store.get_session(session_id)
@@ -342,6 +352,31 @@ class HarnessSessionRunner:
         project_memory_payload = (
             memory_entries_to_context(project_memory) if project_memory else None
         )
+        readiness: Mapping[str, Any] | None = None
+        if durable and existing_run_id is not None:
+            candidate_run_ids = (
+                existing_run_id,
+                *reversed(excluded_history_run_ids),
+            )
+            for candidate_run_id in candidate_run_ids:
+                try:
+                    queued_run = self.store.get_run(candidate_run_id)
+                except KeyError:
+                    continue
+                if queued_run.session_id != session.id:
+                    continue
+                queued_preflight = _mapping(queued_run.metadata).get("preflight")
+                if not isinstance(queued_preflight, Mapping):
+                    continue
+                queued_readiness = queued_preflight.get("readiness")
+                if isinstance(queued_readiness, Mapping):
+                    # Durable submission already performed admission checks before
+                    # creating the first queued run. Retries reuse the last retained
+                    # attempt's immutable evidence before their new run exists.
+                    readiness = dict(queued_readiness)
+                    break
+        if readiness is None:
+            readiness = self._execution_readiness(options, durable=durable)
         preflight = build_preflight_report(
             prompt=options["prompt"],
             workspace=options["workspace"],
@@ -350,6 +385,7 @@ class HarnessSessionRunner:
             project_memory=project_memory,
             data_dir=self.config.data_dir,
             max_history_messages=MAX_HISTORY_MESSAGES,
+            readiness=readiness,
         )
         if preflight.hard_block:
             raise PreflightBlockedError(preflight)
@@ -475,6 +511,8 @@ class HarnessSessionRunner:
                 "builtin_tools": [tool.value for tool in options["builtin_tools"]],
             },
         )
+        if existing_run_id is None:
+            self._schedule_session_title(session, run.id, options)
         if workspace_execution.fallback_reason:
             self._append_event(
                 session.id,
@@ -501,6 +539,7 @@ class HarnessSessionRunner:
         request_extra["preflight"] = preflight_payload
         emitted_event_counts: Counter[str] = Counter()
         latest_usage: dict[str, Any] = {}
+        reasoning_parts: dict[str, list[str]] = {"summary": [], "text": [], "model": []}
 
         def event_sink(event: HarnessEvent) -> None:
             self._append_event(
@@ -514,6 +553,7 @@ class HarnessSessionRunner:
             usage = _usage_from_event(event)
             if usage is not None:
                 _merge_usage(latest_usage, usage)
+            _collect_reasoning(reasoning_parts, event)
 
         request = HarnessRequest(
             prompt=effective_prompt,
@@ -667,6 +707,7 @@ class HarnessSessionRunner:
             usage = _usage_from_event(event)
             if usage is not None:
                 _merge_usage(latest_usage, usage)
+            _collect_reasoning(reasoning_parts, event)
 
         if _cancel_requested(cancel_event):
             status = "canceled"
@@ -689,6 +730,12 @@ class HarnessSessionRunner:
             event_type = HarnessEventType.ERROR.value
             event_message = "Harness run failed."
             error = content
+        message_metadata: dict[str, Any] = {}
+        if role == "assistant" and latest_usage:
+            message_metadata["usage"] = dict(latest_usage)
+        reasoning = _final_reasoning(reasoning_parts)
+        if role == "assistant" and reasoning:
+            message_metadata["reasoning"] = reasoning
         self.store.append_message(
             HarnessMessage(
                 id=new_id("msg"),
@@ -700,9 +747,7 @@ class HarnessSessionRunner:
                 harness_id=options["harness_id"],
                 model=options["model"],
                 api_mode=options["api_mode"],
-                metadata={"usage": dict(latest_usage)}
-                if role == "assistant" and latest_usage
-                else {},
+                metadata=message_metadata,
             )
         )
         self._append_event(
@@ -793,7 +838,10 @@ class HarnessSessionRunner:
             session_metadata.pop("app_server_fork", None)
         if session_metadata:
             session_patch["metadata"] = session_metadata
-        if session.title == "Untitled session":
+        if (
+            session.title == "Untitled session"
+            and not _generate_session_title_requested(options["extra"])
+        ):
             session_patch["title"] = title_from_prompt(options["prompt"])
         updated_session = self.store.update_session(session.id, **session_patch)
         self._append_event(
@@ -921,18 +969,91 @@ class HarnessSessionRunner:
         history.append(HarnessChatMessage(role="user", content=prompt))
         return tuple(history[-MAX_HISTORY_MESSAGES:])
 
+    def _execution_readiness(
+        self,
+        options: Mapping[str, Any],
+        *,
+        durable: bool,
+    ) -> dict[str, Any]:
+        return build_execution_readiness(
+            self.config,
+            self.registry,
+            harness_id=str(options["harness_id"]),
+            invocation_mode=options["invocation_mode"],
+            api_mode=options["api_mode"],
+            model=options["model"],
+            mode=str(options["mode"]),
+            workspace=options["workspace"],
+            workspace_policy=options["workspace_policy"],
+            durable=durable,
+            dry_run=bool(_mapping(options["extra"]).get("dry_run")),
+        )
+
+    def _schedule_session_title(
+        self,
+        session: HarnessSession,
+        run_id: str,
+        options: Mapping[str, Any],
+    ) -> None:
+        """Generate the first UI title off the run's critical path."""
+        if session.title != "Untitled session" or not _generate_session_title_requested(
+            options["extra"]
+        ):
+            return
+        prompt = str(options["prompt"])
+        model = (
+            _optional_text(options["extra"].get("session_title_model"))
+            or _optional_text(options.get("model"))
+            or self.config.default_model
+        )
+
+        def generate() -> None:
+            try:
+                title = _generate_session_title(self.config, prompt, model=model)
+                updated = self.store.update_session_if_title(
+                    session.id,
+                    "Untitled session",
+                    title=title,
+                )
+                if updated is None:
+                    return
+                self._append_event(
+                    session.id,
+                    run_id,
+                    HarnessEventType.SESSION_UPDATED.value,
+                    "Session title revision stored.",
+                    {
+                        "session_id": session.id,
+                        "revision": updated.updated_at,
+                        "changed_fields": ["title"],
+                    },
+                )
+            except (OSError, SessionNotFoundError, ValueError):
+                return
+
+        threading.Thread(
+            target=generate,
+            name=f"harness-session-title-{session.id}",
+            daemon=True,
+        ).start()
+
     def _load_attachments(
         self,
         session_id: str,
         attachment_ids: tuple[str, ...],
     ) -> tuple[HarnessAttachment, ...]:
+        session = self.store.get_session(session_id)
+        shared_parent_session_id = _optional_text(
+            session.metadata.get("arena_parent_session_id")
+        )
+        allowed_session_ids = {session_id, shared_parent_session_id}
         attachments: list[HarnessAttachment] = []
         for attachment_id in attachment_ids:
             try:
                 attachment = self.attachment_store.get_attachment(attachment_id)
             except AttachmentNotFoundError as exc:
                 raise ValueError(f"Unknown attachment id: {attachment_id}") from exc
-            if attachment.session_id != session_id:
+            if attachment.session_id not in allowed_session_ids:
                 raise ValueError(
                     f"Attachment does not belong to session: {attachment_id}"
                 )
@@ -1265,6 +1386,50 @@ def _prompt_with_project_memory(
     )
 
 
+def _generate_session_title_requested(extra: Mapping[str, Any]) -> bool:
+    return bool(extra.get("generate_session_title"))
+
+
+def _generate_session_title(
+    config: HarnessConfig,
+    prompt: str,
+    *,
+    model: str | None,
+) -> str:
+    """Generate a compact title through the local proxy with a safe fallback."""
+    fallback = title_from_prompt(prompt)
+    if model is None:
+        return fallback
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Create a concise session title of 3 to 7 words in the user's "
+                    "language. Return only the title without quotes or punctuation."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "max_tokens": 32,
+    }
+    api_key = config.api_key or proxy.cached_sidecar_api_key(config.proxy_url)
+    try:
+        response = proxy.request_json(
+            "POST",
+            proxy.build_chat_completions_url(config.proxy_url, GigaChatApiMode.V2),
+            payload=payload,
+            api_key=api_key,
+            timeout=min(config.timeout_seconds, 15.0),
+        )
+    except (OSError, proxy.ProxyRequestError, ValueError):
+        return fallback
+    generated = proxy.extract_text(response).strip().strip("\"'`").strip()
+    return title_from_prompt(generated) if generated else fallback
+
+
 def _optional_text(value: Any) -> str | None:
     if value is None:
         return None
@@ -1418,6 +1583,25 @@ def _usage_from_event(event: HarnessEvent) -> dict[str, Any] | None:
 
 def _is_nonnegative_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _collect_reasoning(
+    target: dict[str, list[str]],
+    event: HarnessEvent,
+) -> None:
+    if event.type != HarnessEventType.REASONING_DELTA.value:
+        return
+    payload = event_to_dict(event)["payload"]
+    delta = payload.get("delta")
+    if not isinstance(delta, str) or not delta:
+        return
+    kind = str(payload.get("kind") or "model")
+    target.setdefault(kind, []).append(delta)
+
+
+def _final_reasoning(parts: Mapping[str, list[str]]) -> str:
+    selected = parts.get("summary") or parts.get("model") or parts.get("text") or []
+    return "".join(selected)[:MAX_REASONING_CHARACTERS]
 
 
 def _merge_usage(target: dict[str, Any], update: Mapping[str, Any]) -> None:

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -34,9 +35,22 @@ from gpt2giga_harness.sessions.models import (
     session_to_dict,
 )
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
+from gpt2giga_harness.sessions.event_stream import (
+    EventCursorPosition,
+    EventTailItem,
+    EventTailPage,
+    RunEventBroker,
+    event_stream_size,
+)
 from gpt2giga_harness.sessions.redaction import (
     redact_event_payload,
     redact_for_storage,
+)
+from gpt2giga_harness.sessions.read_index import (
+    SessionIndexCursor,
+    SessionIndexPage,
+    SessionReadIndex,
+    StaleReadSnapshotError,
 )
 from gpt2giga_harness.sessions.store import (
     RunNotFoundError,
@@ -60,6 +74,18 @@ EVENTS_FILE = "events.jsonl"
 RAW_REQUESTS_FILE = "raw_requests.jsonl"
 RAW_RESPONSES_FILE = "raw_responses.jsonl"
 NATIVE_LINKS_FILE = "native_links.jsonl"
+READ_INDEX_FILE = "read_model.sqlite3"
+
+
+@dataclass(frozen=True)
+class FilesystemRecordPage:
+    """One bounded append-order page from a session JSONL file."""
+
+    items: tuple[dict[str, Any], ...]
+    next_offset: int | None
+    has_more: bool
+    snapshot_revision: str
+    byte_count: int
 
 
 class FilesystemHarnessSessionStore:
@@ -68,6 +94,11 @@ class FilesystemHarnessSessionStore:
     def __init__(self, data_dir: str | Path) -> None:
         self.data_dir = Path(data_dir).expanduser()
         self.sessions_dir = self.data_dir / "sessions"
+        read_index_path = self.sessions_dir / READ_INDEX_FILE
+        self._read_index: SessionReadIndex | None = (
+            SessionReadIndex(read_index_path) if read_index_path.exists() else None
+        )
+        self.event_broker = RunEventBroker()
 
     def create_session(
         self,
@@ -100,6 +131,9 @@ class FilesystemHarnessSessionStore:
         (session_dir / "artifacts").mkdir(exist_ok=True)
         self._write_session(session, session_dir)
         self._upsert_index(session.id, session_dir)
+        if self._read_index is not None:
+            self._read_index.upsert_session(session)
+        self.event_broker.publish_runs_center()
         return session
 
     def list_sessions(
@@ -143,6 +177,102 @@ class FilesystemHarnessSessionStore:
             self._remove_index_entry(session_id)
             raise SessionNotFoundError(session_id) from exc
 
+    def list_sessions_page(
+        self,
+        *,
+        project_id: str | None = None,
+        workspace: str | None = None,
+        harness_id: str | None = None,
+        q: str | None = None,
+        include_archived: bool = False,
+        cursor: SessionIndexCursor | None = None,
+        limit: int = 50,
+    ) -> SessionIndexPage:
+        """Return a bounded newest-first page from the derived read index."""
+        self._ensure_read_index()
+        return self._session_read_index().list_sessions_page(
+            project_id=project_id,
+            workspace=workspace,
+            harness_id=harness_id,
+            q=q,
+            include_archived=include_archived,
+            cursor=cursor,
+            limit=limit,
+        )
+
+    def list_record_page(
+        self,
+        session_id: str,
+        *,
+        record_type: str,
+        projector: Callable[[Any], dict[str, Any]],
+        offset: int = 0,
+        snapshot_revision: str | None = None,
+        limit: int = 50,
+        max_bytes: int = 1024 * 1024,
+    ) -> FilesystemRecordPage:
+        """Read a bounded cursor page without scanning preceding history."""
+        self.get_session(session_id)
+        filename, parser = _RECORD_PAGE_TYPES.get(record_type, (None, None))
+        if filename is None or parser is None:
+            raise ValueError(f"unsupported session record type: {record_type}")
+        path = self._session_dir(session_id) / filename
+        revision = _record_snapshot_revision(path)
+        if snapshot_revision is not None and snapshot_revision != revision:
+            raise StaleReadSnapshotError(f"{record_type} cursor snapshot is stale")
+        bounded_limit = min(max(limit, 1), 100)
+        bounded_bytes = min(max(max_bytes, 1024), 1024 * 1024)
+        if not path.exists():
+            return FilesystemRecordPage((), None, False, revision, 0)
+        items: list[dict[str, Any]] = []
+        byte_count = 0
+        next_offset: int | None = None
+        has_more = False
+        with path.open("rb") as handle:
+            file_size = path.stat().st_size
+            if offset < 0 or offset > file_size:
+                raise ValueError("record cursor offset is outside its snapshot")
+            handle.seek(offset)
+            while len(items) < bounded_limit:
+                line_start = handle.tell()
+                line = handle.readline((bounded_bytes * 4) + 1)
+                if not line:
+                    break
+                if not line.endswith(b"\n") and handle.tell() < file_size:
+                    raise ValueError("stored record exceeds the bounded read limit")
+                text = line.strip()
+                if not text:
+                    continue
+                decoded = json.loads(text)
+                if not isinstance(decoded, Mapping):
+                    continue
+                projected = projector(parser(decoded))
+                projected_bytes = len(
+                    json.dumps(
+                        projected,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                )
+                if items and byte_count + projected_bytes > bounded_bytes:
+                    has_more = True
+                    next_offset = line_start
+                    break
+                if projected_bytes > bounded_bytes:
+                    raise ValueError("projected record exceeds the response byte limit")
+                items.append(projected)
+                byte_count += projected_bytes
+            if next_offset is None and handle.tell() < file_size:
+                has_more = True
+                next_offset = handle.tell()
+        return FilesystemRecordPage(
+            tuple(items),
+            next_offset if has_more else None,
+            has_more,
+            revision,
+            byte_count,
+        )
+
     def update_session(self, session_id: str, **patch: Any) -> HarnessSession:
         session_dir = self._session_dir(session_id)
         path = session_dir / MANIFEST_FILE
@@ -150,6 +280,29 @@ class FilesystemHarnessSessionStore:
             session = session_from_dict(_read_json(path))
             updated = _patch_session(session, patch)
             _write_json_atomic_unlocked(path, session_to_dict(updated))
+        if self._read_index is not None:
+            self._read_index.upsert_session(updated)
+        self.event_broker.publish_runs_center()
+        return updated
+
+    def update_session_if_title(
+        self,
+        session_id: str,
+        expected_title: str,
+        **patch: Any,
+    ) -> HarnessSession | None:
+        """Atomically patch a session unless a user already renamed it."""
+        session_dir = self._session_dir(session_id)
+        path = session_dir / MANIFEST_FILE
+        with exclusive_file_lock(path):
+            session = session_from_dict(_read_json(path))
+            if session.title != expected_title:
+                return None
+            updated = _patch_session(session, patch)
+            _write_json_atomic_unlocked(path, session_to_dict(updated))
+        if self._read_index is not None:
+            self._read_index.upsert_session(updated)
+        self.event_broker.publish_runs_center()
         return updated
 
     def delete_session(self, session_id: str) -> None:
@@ -159,6 +312,10 @@ class FilesystemHarnessSessionStore:
             raise SessionNotFoundError(session_id)
         shutil.rmtree(session_dir)
         self._remove_index_entry(session_id)
+        if self._read_index is not None:
+            self._read_index.delete_session(session_id)
+        self.event_broker.publish_session(session_id)
+        self.event_broker.publish_runs_center()
 
     def archive_session(
         self,
@@ -226,6 +383,9 @@ class FilesystemHarnessSessionStore:
             metadata=_redacted_mapping(metadata),
         )
         self._append_jsonl(self._session_dir(session_id) / RUNS_FILE, run_to_dict(run))
+        if self._read_index is not None:
+            self._read_index.upsert_run(run, 0)
+        self.event_broker.publish_runs_center()
         return run
 
     def update_run(self, run_id: str, **patch: Any) -> HarnessRun:
@@ -242,11 +402,17 @@ class FilesystemHarnessSessionStore:
                     path,
                     [redact_for_storage(run_to_dict(item)) for item in runs],
                 )
+                self._session_read_index().upsert_run(updated, index)
+                self.event_broker.publish_runs_center()
                 return updated
         raise RunNotFoundError(run_id)
 
     def get_run(self, run_id: str) -> HarnessRun:
-        return self._find_run(run_id)[2]
+        self._ensure_read_index()
+        indexed = self._session_read_index().lookup_run(run_id)
+        if indexed is None:
+            raise RunNotFoundError(run_id)
+        return indexed[2]
 
     def list_runs(self, session_id: str) -> tuple[HarnessRun, ...]:
         self.get_session(session_id)
@@ -256,6 +422,11 @@ class FilesystemHarnessSessionStore:
                 run_from_dict,
             )
         )
+
+    def runs_center_generation(self) -> tuple[int, int]:
+        """Return cheap session/run generations for global live invalidation."""
+        self._ensure_read_index()
+        return self._session_read_index().runs_center_generation()
 
     def append_event(self, event: HarnessStoredEvent) -> HarnessStoredEvent:
         self.get_session(event.session_id)
@@ -268,7 +439,102 @@ class FilesystemHarnessSessionStore:
             self._session_dir(event.session_id) / EVENTS_FILE,
             event_to_dict(stored),
         )
+        self.event_broker.publish(stored)
         return stored
+
+    def event_tail_offset(self, session_id: str) -> int:
+        """Return the JSONL byte offset without reading retained event rows."""
+        self.get_session(session_id)
+        path = self._session_dir(session_id) / EVENTS_FILE
+        return path.stat().st_size if path.exists() else 0
+
+    def list_event_tail_page(
+        self,
+        session_id: str,
+        *,
+        run_id: str | None,
+        offset: int = 0,
+        limit: int = 100,
+        max_bytes: int = 1024 * 1024,
+    ) -> EventTailPage:
+        """Read a bounded run tail from a durable byte offset."""
+        self.get_session(session_id)
+        path = self._session_dir(session_id) / EVENTS_FILE
+        if not path.exists():
+            if offset != 0:
+                raise ValueError("event cursor offset is outside the retained tail")
+            return EventTailPage((), 0, False, 0)
+        file_size = path.stat().st_size
+        if offset < 0 or offset > file_size:
+            raise ValueError("event cursor offset is outside the retained tail")
+        bounded_limit = min(max(limit, 1), 100)
+        bounded_bytes = min(max(max_bytes, 1024), 1024 * 1024)
+        max_scan_bytes = bounded_bytes * 4
+        items: list[EventTailItem] = []
+        byte_count = 0
+        scan_start = offset
+        position = offset
+        with path.open("rb") as handle:
+            handle.seek(offset)
+            while len(items) < bounded_limit and handle.tell() < file_size:
+                if handle.tell() - scan_start >= max_scan_bytes:
+                    break
+                line_start = handle.tell()
+                line = handle.readline((bounded_bytes * 4) + 1)
+                if not line.endswith(b"\n") and handle.tell() < file_size:
+                    raise ValueError("stored event exceeds the bounded scan limit")
+                position = handle.tell()
+                text = line.strip()
+                if not text:
+                    continue
+                decoded = json.loads(text)
+                if not isinstance(decoded, Mapping):
+                    continue
+                event = event_from_dict(decoded)
+                if run_id is not None and event.run_id != run_id:
+                    continue
+                size = event_stream_size(event)
+                if items and byte_count + size > bounded_bytes:
+                    position = line_start
+                    break
+                if size > bounded_bytes:
+                    raise ValueError("stored event exceeds the stream byte limit")
+                items.append(EventTailItem(event=event, next_offset=position))
+                byte_count += size
+        return EventTailPage(
+            items=tuple(items),
+            next_offset=position,
+            has_more=position < file_size,
+            byte_count=byte_count,
+        )
+
+    def resolve_event_cursor(
+        self,
+        session_id: str,
+        *,
+        run_id: str | None,
+        event_id: str,
+    ) -> EventCursorPosition | None:
+        """Resolve a legacy event id once; opaque reconnects stay offset-based."""
+        self.get_session(session_id)
+        path = self._session_dir(session_id) / EVENTS_FILE
+        if not path.exists():
+            return None
+        with path.open("rb") as handle:
+            for line in handle:
+                text = line.strip()
+                if not text:
+                    continue
+                decoded = json.loads(text)
+                if not isinstance(decoded, Mapping):
+                    continue
+                event = event_from_dict(decoded)
+                if (run_id is None or event.run_id == run_id) and event.id == event_id:
+                    return EventCursorPosition(
+                        offset=handle.tell(),
+                        terminal_seen=event.type == "run_finished",
+                    )
+        return None
 
     def list_events(
         self,
@@ -400,15 +666,57 @@ class FilesystemHarnessSessionStore:
         return record
 
     def _find_run(self, run_id: str) -> tuple[str, int, HarnessRun, list[HarnessRun]]:
-        for session_id in self._index().keys():
-            try:
-                runs = list(self.list_runs(session_id))
-            except (SessionNotFoundError, ValueError, OSError):
-                continue
+        self._ensure_read_index()
+        indexed = self._session_read_index().lookup_run(run_id)
+        if indexed is not None:
+            session_id, _, expected = indexed
+            runs = list(self.list_runs(session_id))
             for index, run in enumerate(runs):
                 if run.id == run_id:
                     return session_id, index, run, runs
+            # The JSONL files remain authoritative if the derived row is stale.
+            self._rebuild_read_index()
+            refreshed = self._session_read_index().lookup_run(run_id)
+            if refreshed is not None:
+                return self._find_run_from_session(refreshed[0], run_id)
         raise RunNotFoundError(run_id)
+
+    def _find_run_from_session(
+        self, session_id: str, run_id: str
+    ) -> tuple[str, int, HarnessRun, list[HarnessRun]]:
+        runs = list(self.list_runs(session_id))
+        for index, run in enumerate(runs):
+            if run.id == run_id:
+                return session_id, index, run, runs
+        raise RunNotFoundError(run_id)
+
+    def _ensure_read_index(self) -> None:
+        if not self._session_read_index().is_complete():
+            self._rebuild_read_index()
+
+    def _session_read_index(self) -> SessionReadIndex:
+        if self._read_index is None:
+            self._read_index = SessionReadIndex(self.sessions_dir / READ_INDEX_FILE)
+        return self._read_index
+
+    def _rebuild_read_index(self) -> None:
+        sessions: list[HarnessSession] = []
+        runs: list[tuple[HarnessRun, int]] = []
+        for session_id in self._index().keys():
+            try:
+                session_dir = self._session_dir(session_id)
+                sessions.append(
+                    session_from_dict(_read_json(session_dir / MANIFEST_FILE))
+                )
+                runs.extend(
+                    (run, index)
+                    for index, run in enumerate(
+                        _read_jsonl(session_dir / RUNS_FILE, run_from_dict)
+                    )
+                )
+            except (SessionNotFoundError, ValueError, OSError, KeyError):
+                continue
+        self._session_read_index().replace_all(sessions, runs)
 
     def _write_session(self, session: HarnessSession, session_dir: Path) -> None:
         _write_json_atomic(session_dir / MANIFEST_FILE, session_to_dict(session))
@@ -577,6 +885,25 @@ def _index_from_payload(raw: Mapping[str, Any]) -> dict[str, Path]:
         if session_id and rel_path:
             index[str(session_id)] = Path(str(rel_path))
     return index
+
+
+_RECORD_PAGE_TYPES: dict[str, tuple[str, Callable[[Mapping[str, Any]], Any]]] = {
+    "messages": (MESSAGES_FILE, message_from_dict),
+    "runs": (RUNS_FILE, run_from_dict),
+    "events": (EVENTS_FILE, event_from_dict),
+    "raw_requests": (RAW_REQUESTS_FILE, raw_record_from_dict),
+    "raw_responses": (RAW_RESPONSES_FILE, raw_record_from_dict),
+    "native_links": (NATIVE_LINKS_FILE, native_link_from_dict),
+}
+
+
+def _record_snapshot_revision(path: Path) -> str:
+    if not path.exists():
+        source = f"{path.name}:empty"
+    else:
+        stat = path.stat()
+        source = f"{path.name}:{stat.st_size}:{stat.st_mtime_ns}"
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
 def _redacted_native_link(link: HarnessNativeLink) -> HarnessNativeLink:

@@ -725,6 +725,12 @@ def _extract_model_ids(data: dict[str, Any]) -> list[str]:
     for item in raw_models:
         if not isinstance(item, dict):
             continue
+        metadata = item.get("metadata")
+        model_type = item.get("type")
+        if model_type is None and isinstance(metadata, Mapping):
+            model_type = metadata.get("type")
+        if model_type is not None and model_type != "chat":
+            continue
         model_id = item.get("id") or item.get("name") or item.get("model")
         if model_id:
             ids.append(str(model_id))

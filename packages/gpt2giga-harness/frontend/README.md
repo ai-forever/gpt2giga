@@ -1,0 +1,23 @@
+# Harness Cockpit V2 frontend
+
+This package-local React/TypeScript/Vite project owns only the browser shell
+introduced by roadmap slice P2.5-02. FastAPI, the Harness runtime, policy,
+approvals, redaction, durable state, and SSE semantics remain authoritative.
+
+From this directory, run:
+
+```bash
+npm ci --ignore-scripts
+npm run check
+```
+
+`npm run check` runs type checking, lint, unit tests, two deterministic
+production builds, manifest validation, compression, and initial bundle
+budgets. Generated content-hashed assets are committed under
+`src/gpt2giga_harness/ui/cockpit_v2/assets/` and packaged into the Python wheel.
+Node.js and npm are build/CI inputs only; installed Harness wheels do not need
+them.
+
+The legacy cockpit remains the default. Cockpit V2 is explicitly selectable at
+`/cockpit-v2/**`, with `/legacy/**` retained as the recovery route. Do not move
+backend ownership or surface migration into this frontend package.
