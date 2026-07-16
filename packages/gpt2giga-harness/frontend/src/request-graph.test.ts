@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionOverviewResponse } from "./api";
 import {
   cancelRequestScope,
+  refreshSessionAfterRunStart,
   requestKeys,
   runProjectionOptions,
   sessionOverviewOptions,
@@ -133,6 +134,21 @@ describe("Cockpit request graph", () => {
         requestKeys.sessionOverview("second"),
       )?.session.title,
     ).toBe("second");
+  });
+
+  it("refreshes retained messages immediately after a run starts", async () => {
+    const client = queryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+
+    await refreshSessionAfterRunStart(client, "session-one");
+
+    expect(invalidate).toHaveBeenCalledTimes(2);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: requestKeys.sessionProjection("session-one", "messages"),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: requestKeys.runsCenter(),
+    });
   });
 
   it("keeps heavy evidence behind explicit lazy projection URLs", async () => {

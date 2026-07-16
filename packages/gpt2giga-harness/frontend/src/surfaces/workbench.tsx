@@ -20,6 +20,7 @@ import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
 import {
   requestKeys,
+  refreshSessionAfterRunStart,
   harnessesOptions,
   modelsOptions,
   sessionAttachmentsOptions,
@@ -255,8 +256,8 @@ export function WorkbenchSurface() {
     onSuccess: async ({ run }) => {
       setStartedRuns((current) => ({ ...current, [run.session_id]: run.id }));
       previousRunStatuses.current.set(run.id, run.status);
+      await refreshSessionAfterRunStart(queryClient, run.session_id);
       setPrompt("");
-      await queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() });
     },
   });
 

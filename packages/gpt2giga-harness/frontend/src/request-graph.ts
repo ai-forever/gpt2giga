@@ -259,6 +259,18 @@ export function cancelRequestScope(
   return queryClient.cancelQueries({ queryKey: scope });
 }
 
+export async function refreshSessionAfterRunStart(
+  queryClient: QueryClient,
+  sessionId: string,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: requestKeys.sessionProjection(sessionId, "messages"),
+    }),
+    queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() }),
+  ]);
+}
+
 export function updateSessionOverview(
   queryClient: QueryClient,
   sessionId: string,
