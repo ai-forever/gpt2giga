@@ -26,7 +26,7 @@ from gpt2giga_harness.types import (
 )
 
 PROJECT_CONFIG_RELATIVE_PATH = Path(".giga") / "harness.toml"
-DEFAULT_PROJECT_MODEL = "GigaChat-2-Max"
+DEFAULT_PROJECT_MODEL = "GigaChat-3.5-432B-A28B"
 DEFAULT_PROJECT_HARNESS = "codex-cli"
 DEFAULT_PROJECT_MODE = "plan"
 DEFAULT_ENABLED_HARNESSES = (
