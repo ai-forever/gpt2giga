@@ -184,6 +184,7 @@ AGENT_ALIASES = {
 
 UI_WORKER_START_TIMEOUT_SECONDS = 5.0
 UI_WORKER_STOP_TIMEOUT_SECONDS = 3.0
+UI_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5
 MAX_UI_WORKER_COUNT = 32
 
 
@@ -1916,7 +1917,13 @@ def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     )
     try:
         app = create_app(config)
-        uvicorn.run(app, host=config.ui_host, port=config.ui_port, log_level="info")
+        uvicorn.run(
+            app,
+            host=config.ui_host,
+            port=config.ui_port,
+            log_level="info",
+            timeout_graceful_shutdown=UI_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
+        )
     finally:
         _stop_ui_workers(worker_processes)
     return 0

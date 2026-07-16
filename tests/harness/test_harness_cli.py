@@ -98,7 +98,12 @@ def test_cli_ui_starts_and_stops_worker_when_none_is_online(
         lambda command, **kwargs: popen_calls.append((command, kwargs)) or process,
     )
     monkeypatch.setattr(cli, "create_app", lambda _config: "app")
-    monkeypatch.setattr(cli.uvicorn, "run", lambda *args, **kwargs: None)
+    uvicorn_calls = []
+    monkeypatch.setattr(
+        cli.uvicorn,
+        "run",
+        lambda *args, **kwargs: uvicorn_calls.append((args, kwargs)),
+    )
 
     assert cli.main(["ui"]) == 0
 
@@ -111,6 +116,17 @@ def test_cli_ui_starts_and_stops_worker_when_none_is_online(
     ]
     assert options["env"]["GPT2GIGA_HARNESS_DATA_DIR"] == str(tmp_path)
     assert options["env"]["GPT2GIGA_HARNESS_AUTO_START_PROXY"] == "false"
+    assert uvicorn_calls == [
+        (
+            ("app",),
+            {
+                "host": "127.0.0.1",
+                "port": 8091,
+                "log_level": "info",
+                "timeout_graceful_shutdown": 5,
+            },
+        )
+    ]
     assert process.signals == [signal.SIGINT]
     assert process.terminated is False
     assert "Started durable Harness worker pid=4242." in capsys.readouterr().out
