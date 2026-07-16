@@ -135,6 +135,20 @@ def test_ci_smoke_v1_models(monkeypatch):
     body = response.json()
     assert body["object"] == "list"
     assert body["data"][0]["id"] == "GigaChat"
+    assert body["data"][0]["metadata"] == {"type": "chat"}
+
+
+def test_ci_smoke_v2_models(monkeypatch):
+    app = make_app(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.get("/v2/models")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["object"] == "list"
+    assert body["data"][0]["id"] == "GigaChat"
+    assert body["data"][0]["metadata"] == {"type": "chat"}
 
 
 def test_ci_smoke_litellm_model_info(monkeypatch):

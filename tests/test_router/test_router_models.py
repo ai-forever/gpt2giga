@@ -18,7 +18,10 @@ def make_app():
         """Владелец модели"""
 
     class FakeModels(BaseModel):
-        data: list = [Model(**{"id": "m1", "object": "model", "owned_by": "m1"})]
+        data: list = [
+            Model(**{"id": "GigaChat-3-Pro", "object": "model", "owned_by": "m1"}),
+            Model(**{"id": "Embeddings-2", "object": "model", "owned_by": "m1"}),
+        ]
         object_: str = "list"
 
     class FakeClient:
@@ -39,6 +42,10 @@ def test_models_list():
     assert resp.status_code == 200
     body = resp.json()
     assert body["object"] == "list"
+    assert [model["metadata"]["type"] for model in body["data"]] == [
+        "chat",
+        "embedder",
+    ]
 
 
 def test_models_one():
@@ -47,3 +54,12 @@ def test_models_one():
     resp = client.get("/models/m1")
     assert resp.status_code == 200
     assert resp.json()["id"] == "m1"
+    assert resp.json()["metadata"] == {"type": "chat"}
+
+
+def test_embedding_model_metadata():
+    app = make_app()
+    client = TestClient(app)
+    resp = client.get("/models/Embeddings-2")
+    assert resp.status_code == 200
+    assert resp.json()["metadata"] == {"type": "embedder"}

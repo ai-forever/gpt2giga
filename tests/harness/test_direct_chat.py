@@ -553,13 +553,13 @@ def test_model_listing_excludes_explicit_non_chat_models(monkeypatch):
                     "id": "GigaChat-3-Pro",
                     "object": "model",
                     "owned_by": "salutedevices",
-                    "type": "chat",
+                    "metadata": {"type": "chat"},
                 },
                 {
                     "id": "Embeddings-2",
                     "object": "model",
                     "owned_by": "salutedevices",
-                    "type": "embedder",
+                    "metadata": {"type": "embedder"},
                 },
                 {
                     "id": "LegacyModel",
