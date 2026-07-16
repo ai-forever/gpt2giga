@@ -600,6 +600,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .mutation-error, .mutation-success { margin: 12px 0 0; font-size: 11px; line-height: 1.5; }
 .mutation-error { color: var(--danger); }
 .mutation-success { color: var(--success); }
+.action-unavailable { margin: 12px 0; border-left: 2px solid var(--warning); padding-left: 10px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.automation-action-receipt { display: grid; gap: 8px; margin-top: 14px; border: 1px solid color-mix(in srgb, var(--success) 48%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--success) 6%, var(--surface)); padding: 12px; }
+.automation-action-receipt strong { color: var(--success); font-size: 12px; }
+.automation-action-receipt code { overflow-wrap: anywhere; color: var(--muted); font-size: 10px; }
+.automation-action-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.automation-action-links a, .automation-action-links button { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-size: 11px; font-weight: 700; text-decoration: none; cursor: pointer; }
 .doctor-result { display: grid; gap: 9px; margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
 .doctor-result > p { margin: 0; color: var(--muted); font-size: 11px; }
 .doctor-finding { display: grid; gap: 4px; border-left: 3px solid var(--warning); padding: 8px 10px; background: color-mix(in srgb, var(--warning) 5%, var(--surface)); }

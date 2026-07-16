@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.authoring import AuthoringConflictError, ProjectAuthoringService
 from gpt2giga_harness.project import project_to_dict, resolve_project
 from gpt2giga_harness.sessions.models import run_to_dict
+from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt
 
 
@@ -193,23 +195,61 @@ def agent_run(
             default_timeout_seconds=request.app.state.harness_config.timeout_seconds,
         )
         runner = request.app.state.harness_session_runner
-        session = runner.create_session(
-            title=title_from_prompt(prompt),
-            workspace=project.root,
-            default_harness_id=profile.harness_id,
-            default_model=profile.model,
-            default_api_mode=profile.api_mode,
-            default_mode=profile.mode,
-        )
         dispatcher = request.app.state.harness_job_dispatcher
         if dispatcher is None:
             raise RuntimeError("Durable runtime is required for agent runs")
+        idempotency_key = _idempotency_key(
+            payload.get("idempotency_key") or f"agent_{new_id('submit')}"
+        )
+        existing = request.app.state.harness_runtime_store.find_job_by_idempotency(
+            origin="manual",
+            idempotency_key=idempotency_key,
+        )
+        if existing is None:
+            session = runner.create_session(
+                title=title_from_prompt(prompt),
+                workspace=project.root,
+                default_harness_id=profile.harness_id,
+                default_model=profile.model,
+                default_api_mode=profile.api_mode,
+                default_mode=profile.mode,
+            )
+        else:
+            if existing.agent_id != agent_id or existing.project_id != project.id:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "idempotency key is already bound to a different agent submission"
+                    ),
+                )
+            stored_payload = dispatcher.payload_store.load(existing.id)
+            candidate_payload = redact_for_storage(run_payload)
+            compared_fields = (
+                "agent_id",
+                "agent_profile_snapshot",
+                "harness_id",
+                "prompt",
+                "workspace",
+            )
+            mismatched_fields = [
+                field
+                for field in compared_fields
+                if _canonical_intent_value(stored_payload.get(field))
+                != _canonical_intent_value(candidate_payload.get(field))
+            ]
+            if mismatched_fields:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "idempotency key is already bound to a different agent submission "
+                        f"({', '.join(mismatched_fields)})"
+                    ),
+                )
+            session = runner.store.get_session(existing.session_id)
         submission = dispatcher.submit(
             session.id,
             run_payload,
-            idempotency_key=str(
-                payload.get("idempotency_key") or f"agent_{new_id('submit')}"
-            ),
+            idempotency_key=idempotency_key,
             origin="manual",
         )
     except KeyError as exc:
@@ -267,3 +307,16 @@ def _profile_payload(request: Request, profile: Any) -> dict[str, Any]:
 def _optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _idempotency_key(value: Any) -> str:
+    key = str(value or "").strip()
+    if not key:
+        raise ValueError("idempotency key is required")
+    if len(key) > 200:
+        raise ValueError("idempotency key must be at most 200 characters")
+    return key
+
+
+def _canonical_intent_value(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)

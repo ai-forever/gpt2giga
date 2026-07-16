@@ -4,10 +4,16 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { useRouterState, useSearch } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { Link, useRouterState, useSearch } from "@tanstack/react-router";
+import { useMemo, useRef, useState } from "react";
 
 import { mutateCockpit } from "../api";
+import {
+  createAutomationSubmissionKey,
+  planAutomationAction,
+  projectAutomationActionResult,
+  type AutomationSection,
+} from "../automation-actions";
 import {
   LoadingRows,
   OperationalRowLink,
@@ -17,6 +23,7 @@ import {
 } from "../components/OperationalSurface";
 import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
+import { requestKeys } from "../request-graph";
 import {
   automationSurfaceOptions,
   remainingRequestKeys,
@@ -59,7 +66,7 @@ export function AutomationSurface() {
 }
 
 function AutomationList({ section, query, selectedId }: {
-  section: "agents" | "workflows" | "schedules";
+  section: AutomationSection;
   query: UseQueryResult<AutomationProjection, Error>;
   selectedId: string | undefined;
 }) {
@@ -96,7 +103,7 @@ function AutomationList({ section, query, selectedId }: {
 
 function AutomationRow({ item, section, selected }: {
   item: AgentProjection | WorkflowProjection | ScheduleProjection;
-  section: "agents" | "workflows" | "schedules";
+  section: AutomationSection;
   selected: boolean;
 }) {
   const { preferences } = usePreferences();
@@ -114,39 +121,136 @@ function AutomationRow({ item, section, selected }: {
   return <OperationalRowLink selected={selected} selectedId={workflow.id} to={to}><div><strong>{workflow.title}</strong><span>{workflow.id}</span></div><span>{workflow.trigger}</span><span>{workflow.stepCount} {message(locale, "steps")}</span><StatusBadge status={workflow.lastRunStatus ?? "not run"} /></OperationalRowLink>;
 }
 
-function AutomationDetail({ section, selectedId }: { section: "agents" | "workflows" | "schedules"; selectedId: string | undefined }) {
+function AutomationDetail({
+  section,
+  selectedId,
+}: {
+  section: AutomationSection;
+  selectedId: string | undefined;
+}) {
+  return (
+    <AutomationDetailSelection
+      key={`${section}:${selectedId ?? "none"}`}
+      section={section}
+      selectedId={selectedId}
+    />
+  );
+}
+
+function AutomationDetailSelection({
+  section,
+  selectedId,
+}: {
+  section: AutomationSection;
+  selectedId: string | undefined;
+}) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
   const query = useQuery(automationSurfaceOptions());
   const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState("");
+  const submissionKey = useRef<string | null>(null);
   const selected = useMemo(() => query.data?.[section].find((item) => item.id === selectedId), [query.data, section, selectedId]);
+  const plan = selected === undefined ? null : planAutomationAction(section, selected);
   const run = useMutation({
-    mutationFn: async () => {
-      if (selected === undefined) throw new Error("Select an item first");
-      if (section === "agents") {
-        if (!prompt.trim()) throw new Error(message(locale, "promptRequired"));
-        return mutateCockpit(`/api/agents/${encodeURIComponent(selected.id)}/run`, { prompt: prompt.trim() });
+    mutationFn: async ({ key }: { key: string }) => {
+      if (selected === undefined || plan === null) {
+        throw new Error("Select an item first");
       }
-      if (section === "schedules") return mutateCockpit(`/api/schedules/${encodeURIComponent(selected.id)}/run-now`, {});
-      return mutateCockpit(`/api/workflows/${encodeURIComponent(selected.id)}/run`, {});
+      const itemId = encodeURIComponent(selected.id);
+      let response: unknown;
+      if (plan.kind === "agent_run") {
+        response = await mutateCockpit(`/api/agents/${itemId}/run`, {
+          idempotency_key: key,
+          prompt: prompt.trim(),
+        });
+      } else if (plan.kind === "workflow_run") {
+        response = await mutateCockpit(`/api/workflows/${itemId}/run`, {
+          idempotency_key: key,
+          ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
+        });
+      } else {
+        const action = plan.kind === "schedule_test" ? "test-now" : "run-now";
+        response = await mutateCockpit(`/api/schedules/${itemId}/${action}`, {
+          idempotency_key: key,
+        });
+      }
+      return projectAutomationActionResult(response);
     },
-    onSuccess: async () => queryClient.invalidateQueries({ queryKey: remainingRequestKeys.automation() }),
+    onSuccess: async (identity) => {
+      submissionKey.current = null;
+      const invalidations = [
+        queryClient.invalidateQueries({ queryKey: remainingRequestKeys.automation() }),
+      ];
+      if (identity.runId || identity.sessionId || identity.workflowRunId) {
+        invalidations.push(
+          queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() }),
+          queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() }),
+        );
+      }
+      if (identity.approvalId) {
+        invalidations.push(
+          queryClient.invalidateQueries({ queryKey: requestKeys.approvals() }),
+        );
+      }
+      await Promise.all(invalidations);
+    },
   });
 
   if (selected === undefined) return <div className="detail-empty"><span className="section-kicker">{message(locale, "selectedDefinition")}</span><h2>{message(locale, "selectReusableDefinition")}</h2><p>{message(locale, "automationSelectionHint")}</p></div>;
+  if (plan === null) return null;
+  const promptMissing = plan.prompt === "required" && !prompt.trim();
+  const disabledReason = plan.disabledReason;
+  const submit = () => {
+    if (run.isPending || disabledReason !== null || promptMissing) return;
+    submissionKey.current ??= createAutomationSubmissionKey(section, selected.id);
+    run.mutate({ key: submissionKey.current });
+  };
+  const updatePrompt = (value: string) => {
+    if (value !== prompt && run.isError) {
+      submissionKey.current = null;
+      run.reset();
+    }
+    setPrompt(value);
+  };
   return (
     <div className="definition-detail">
       <span className="section-kicker">{message(locale, "selectedDefinition")}</span>
       <h2>{selected.title}</h2>
       <code>{selected.id}</code>
       <dl className="compact-fields">
-        {Object.entries(selected).filter(([key]) => !["id", "title"].includes(key)).slice(0, 5).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value === null ? "—" : String(value)}</dd></div>)}
+        {Object.entries(selected).filter(([key]) => !["id", "title", "queueable", "tested", "unavailableReason"].includes(key)).slice(0, 5).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value === null ? "—" : String(value)}</dd></div>)}
       </dl>
-      {section === "agents" ? <label className="field-control">{message(locale, "runPrompt")}<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={message(locale, "composerPlaceholder")} /></label> : null}
-      <button className="primary-button" disabled={run.isPending} onClick={() => run.mutate()} type="button">{message(locale, run.isPending ? "loading" : "runNow")}</button>
+      {plan.prompt !== "none" ? <label className="field-control">{message(locale, plan.prompt === "required" ? "runPrompt" : "optionalRunPrompt")}<textarea value={prompt} onChange={(event) => updatePrompt(event.target.value)} placeholder={message(locale, "composerPlaceholder")} /></label> : null}
+      {disabledReason ? <p className="action-unavailable" role="note">{message(locale, "actionUnavailable")} {disabledReason}</p> : null}
+      <button className="primary-button" disabled={run.isPending || disabledReason !== null || promptMissing} onClick={submit} type="button">{message(locale, run.isPending ? "loading" : plan.labelKey)}</button>
       {run.isError ? <p className="mutation-error" role="alert">{run.error.message}</p> : null}
-      {run.isSuccess ? <p className="mutation-success" role="status">{message(locale, "runQueued")}</p> : null}
+      {run.isSuccess ? <AutomationActionReceipt identity={run.data} /> : null}
     </div>
   );
+}
+
+function AutomationActionReceipt({
+  identity,
+}: {
+  identity: ReturnType<typeof projectAutomationActionResult>;
+}) {
+  const { preferences } = usePreferences();
+  const locale = preferences.locale;
+  const exactId = identity.runId ?? identity.workflowRunId ?? identity.occurrenceId ?? identity.approvalId;
+  return (
+    <section className="automation-action-receipt" role="status">
+      <strong>{message(locale, identity.approvalId ? "approvalRequired" : "operationAccepted")}</strong>
+      {exactId ? <code>{exactId}</code> : null}
+      <div className="automation-action-links">
+        {identity.runId ? <Link params={{ runId: identity.runId }} to="/cockpit-v2/runs/$runId">{message(locale, "openRun")}</Link> : null}
+        {!identity.runId && identity.sessionId ? <Link params={{ sessionId: identity.sessionId }} to="/cockpit-v2/work/$sessionId">{message(locale, "openSession")}</Link> : null}
+        {identity.approvalId ? <button onClick={() => openInbox("approvals")} type="button">{message(locale, "reviewApproval")}</button> : null}
+      </div>
+    </section>
+  );
+}
+
+function openInbox(tab: string) {
+  globalThis.dispatchEvent(new CustomEvent("cockpit:open-inbox", { detail: tab }));
 }

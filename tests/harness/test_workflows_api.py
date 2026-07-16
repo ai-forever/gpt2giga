@@ -69,7 +69,11 @@ def test_workflow_api_lists_validates_runs_status_and_cancels(
 
         started = client.post(
             "/api/workflows/review-team/run",
-            json={"workspace": str(workspace), "prompt": "Review this project"},
+            json={
+                "workspace": str(workspace),
+                "prompt": "Review this project",
+                "idempotency_key": "cockpit-workflow-review-1",
+            },
         )
         assert started.status_code == 200
         run = started.json()["run"]
@@ -86,6 +90,28 @@ def test_workflow_api_lists_validates_runs_status_and_cancels(
             (step["step_id"], step["kind"], step["status"], step["snapshot"])
             for step in cli_run["steps"]
         ]
+
+        retried = client.post(
+            "/api/workflows/review-team/run",
+            json={
+                "workspace": str(workspace),
+                "prompt": "Review this project",
+                "idempotency_key": "cockpit-workflow-review-1",
+            },
+        )
+        rebound = client.post(
+            "/api/workflows/review-team/run",
+            json={
+                "workspace": str(workspace),
+                "prompt": "Review something else",
+                "idempotency_key": "cockpit-workflow-review-1",
+            },
+        )
+        assert retried.status_code == 200
+        assert retried.json()["run"]["id"] == run["id"]
+        assert retried.json()["run"]["session_id"] == run["session_id"]
+        assert rebound.status_code == 400
+        assert "different workflow submission" in rebound.json()["detail"]
 
         child_summary = client.get(
             f"/api/runs/{run['steps'][0]['outputs']['run_id']}/summary"

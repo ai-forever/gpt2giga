@@ -15,6 +15,7 @@ describe("remaining Cockpit surface projections", () => {
           id: `reviewer-${index}`,
           title: "Reviewer",
           harness_id: "echo",
+          execution_plan: { queueable: true, errors: [] },
           prompt: "secret",
         })),
         project: { root: "/private/repo" },
@@ -24,13 +25,14 @@ describe("remaining Cockpit surface projections", () => {
         runs: [{ workflow_id: "review", status: "passed", updated_at: "2026-07-16T10:00:00Z", inputs: { token: "secret" } }],
       },
       {
-        schedules: [{ definition: { id: "nightly", title: "Nightly", target: { kind: "eval", id: "compat" }, prompt: "secret" }, state: { status: "enabled" }, preview: ["2026-07-17T00:00:00Z"], worker: { online: true } }],
+        schedules: [{ definition: { id: "nightly", title: "Nightly", source_hash: "hash-1", target: { kind: "eval", id: "compat" }, prompt: "secret" }, state: { status: "enabled", tested_hash: "hash-1" }, preview: ["2026-07-17T00:00:00Z"], worker: { online: true } }],
       },
     );
 
     expect(projected.agents).toHaveLength(100);
     expect(projected.workflows[0]).toMatchObject({ id: "review", stepCount: 1, lastRunStatus: "passed" });
-    expect(projected.schedules[0]).toMatchObject({ target: "eval:compat", workerOnline: true });
+    expect(projected.agents[0]).toMatchObject({ queueable: true, unavailableReason: null });
+    expect(projected.schedules[0]).toMatchObject({ target: "eval:compat", workerOnline: true, tested: true });
     expect(JSON.stringify(projected)).not.toContain("secret");
     expect(JSON.stringify(projected)).not.toContain("/private/repo");
   });

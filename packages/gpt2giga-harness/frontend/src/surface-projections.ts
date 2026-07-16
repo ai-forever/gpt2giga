@@ -4,6 +4,8 @@ export interface AgentProjection {
   harnessId: string;
   mode: string;
   model: string | null;
+  queueable: boolean;
+  unavailableReason: string | null;
 }
 
 export interface WorkflowProjection {
@@ -22,6 +24,7 @@ export interface ScheduleProjection {
   status: string;
   nextRunAt: string | null;
   workerOnline: boolean;
+  tested: boolean;
 }
 
 export interface AutomationProjection {
@@ -140,12 +143,19 @@ export function projectAutomation(
       .slice(0, MAX_ROWS)
       .map((value) => {
         const item = record(value);
+        const executionPlan = record(item.execution_plan);
         return {
           id: text(item.id),
           title: text(item.title) || text(item.id),
           harnessId: text(item.harness_id),
           mode: text(item.mode) || "plan",
           model: nullableText(item.model),
+          queueable: executionPlan.queueable === true,
+          unavailableReason:
+            executionPlan.queueable === true
+              ? null
+              : nullableText(array(executionPlan.errors)[0]) ??
+                "This agent cannot be queued with the current runtime capabilities.",
         };
       })
       .filter((item) => item.id),
@@ -174,6 +184,7 @@ export function projectAutomation(
         const state = record(item.state);
         const worker = record(item.worker);
         const preview = array(item.preview);
+        const definitionHash = text(definition.source_hash);
         return {
           id: text(definition.id),
           title: text(definition.title) || text(definition.id),
@@ -181,6 +192,8 @@ export function projectAutomation(
           status: text(state.status) || "disabled",
           nextRunAt: nullableText(state.next_run_at) ?? nullableText(preview[0]),
           workerOnline: worker.online === true,
+          tested:
+            Boolean(definitionHash) && text(state.tested_hash) === definitionHash,
         };
       })
       .filter((item) => item.id),

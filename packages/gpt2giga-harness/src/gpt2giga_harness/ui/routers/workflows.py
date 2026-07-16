@@ -74,6 +74,7 @@ class WorkflowRunRequest(BaseModel):
     workspace: str | None = None
     prompt: str | None = None
     inputs: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class WorkflowSaveRequest(BaseModel):
@@ -361,6 +362,7 @@ def workflow_run(
             definition,
             inputs=dict(payload.inputs),
             prompt=_optional_text(payload.prompt),
+            idempotency_key=payload.idempotency_key,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow not found") from exc

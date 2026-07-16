@@ -344,9 +344,11 @@ class WorkflowRepository:
         project: HarnessProject,
         session_id: str,
         inputs: Mapping[str, Any],
+        *,
+        run_id: str | None = None,
     ) -> WorkflowRun:
         """Persist a run and immutable initial step snapshots atomically."""
-        run_id = f"workflow_{uuid4().hex}"
+        run_id = run_id or f"workflow_{uuid4().hex}"
         now = utc_now()
         definition_payload = workflow_definition_to_dict(definition)
         with self.runtime_store._connect() as connection:  # noqa: SLF001
@@ -586,6 +588,7 @@ class WorkflowCoordinator:
         *,
         inputs: Mapping[str, Any] | None = None,
         prompt: str | None = None,
+        idempotency_key: str | None = None,
     ) -> WorkflowRun:
         """Create and advance one immutable workflow definition snapshot."""
         for step in definition.steps:
@@ -595,14 +598,58 @@ class WorkflowCoordinator:
         effective_inputs.update(dict(inputs or {}))
         if prompt is not None:
             effective_inputs["prompt"] = prompt
+        if idempotency_key is not None:
+            key = _submission_key(idempotency_key)
+            run_id = _workflow_submission_run_id(
+                self.project.id,
+                definition.id,
+                key,
+            )
+            lock = (
+                Path(self.runtime_store.data_dir)
+                / "runtime"
+                / "workflow_submission_locks"
+                / run_id
+            )
+            with exclusive_file_lock(lock):
+                try:
+                    existing = self.repository.get_run(run_id)
+                except KeyError:
+                    pass
+                else:
+                    if (
+                        existing.definition_hash != (definition.source_hash or "")
+                        or dict(existing.inputs) != effective_inputs
+                    ):
+                        raise ValueError(
+                            "idempotency key is already bound to a different workflow submission"
+                        )
+                    return self.advance(existing.id)
+                return self._start_new(definition, effective_inputs, run_id=run_id)
+        return self._start_new(definition, effective_inputs)
+
+    def _start_new(
+        self,
+        definition: WorkflowDefinition,
+        effective_inputs: Mapping[str, Any],
+        *,
+        run_id: str | None = None,
+    ) -> WorkflowRun:
+        """Create one new retained workflow identity and advance it."""
         session = self.runner.create_session(
-            title=title_from_prompt(prompt or definition.title),
+            title=title_from_prompt(
+                str(effective_inputs.get("prompt") or definition.title)
+            ),
             workspace=self.project.root,
             default_harness_id="echo",
             default_mode="read",
         )
         run = self.repository.create_run(
-            definition, self.project, session.id, effective_inputs
+            definition,
+            self.project,
+            session.id,
+            effective_inputs,
+            run_id=run_id,
         )
         return self.advance(run.id)
 
@@ -1572,6 +1619,22 @@ def _safe_id(value: Any, name: str) -> str:
     if not WORKFLOW_ID_PATTERN.fullmatch(text):
         raise ValueError(f"{name} must match ^[a-z][a-z0-9_-]{{1,63}}$")
     return text
+
+
+def _submission_key(value: Any) -> str:
+    key = _required_text(value, "idempotency key")
+    if len(key) > 200:
+        raise ValueError("idempotency key must be at most 200 characters")
+    return key
+
+
+def _workflow_submission_run_id(
+    project_id: str,
+    workflow_id: str,
+    idempotency_key: str,
+) -> str:
+    identity = f"{project_id}\0{workflow_id}\0{idempotency_key}"
+    return f"workflow_{hashlib.sha256(identity.encode()).hexdigest()}"
 
 
 def _required_text(value: Any, name: str) -> str:

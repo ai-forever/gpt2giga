@@ -83,7 +83,11 @@ def test_agent_api_duplicates_as_preview_and_runs_with_snapshot(
 
     run = client.post(
         "/api/agents/reviewer/run",
-        json={"workspace": str(workspace), "prompt": "Review the patch"},
+        json={
+            "workspace": str(workspace),
+            "prompt": "Review the patch",
+            "idempotency_key": "cockpit-agent-review-1",
+        },
     )
     assert run.status_code == 200
     assert run.json()["run"]["metadata"]["agent_id"] == "reviewer"
@@ -93,6 +97,28 @@ def test_agent_api_duplicates_as_preview_and_runs_with_snapshot(
     plan = run.json()["run"]["metadata"]["agent_execution_plan"]
     assert plan["queueable"] is True
     assert plan["options"]["budgets.max_attempts"]["effective"] == 1
+
+    retried = client.post(
+        "/api/agents/reviewer/run",
+        json={
+            "workspace": str(workspace),
+            "prompt": "Review the patch",
+            "idempotency_key": "cockpit-agent-review-1",
+        },
+    )
+    rebound = client.post(
+        "/api/agents/reviewer/run",
+        json={
+            "workspace": str(workspace),
+            "prompt": "Review a different patch",
+            "idempotency_key": "cockpit-agent-review-1",
+        },
+    )
+
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["run"]["id"] == run.json()["run"]["id"]
+    assert retried.json()["session"]["id"] == run.json()["session"]["id"]
+    assert rebound.status_code == 409
 
 
 def test_agent_api_rejects_unsupported_options_before_creating_a_run(tmp_path):

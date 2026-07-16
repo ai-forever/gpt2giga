@@ -225,7 +225,13 @@ def _action(
             )
             if gated is not None:
                 return gated
-        return getattr(_service(request), method)(project, schedule_id)
+        kwargs = (
+            {"idempotency_key": _idempotency_key(payload.get("idempotency_key"))}
+            if method in {"test_now", "run_now"}
+            and payload.get("idempotency_key") is not None
+            else {}
+        )
+        return getattr(_service(request), method)(project, schedule_id, **kwargs)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Schedule not found") from exc
     except ScheduleError as exc:
@@ -290,3 +296,12 @@ def _project(request: Request, workspace: Any):
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _idempotency_key(value: Any) -> str:
+    key = str(value or "").strip()
+    if not key:
+        raise ScheduleError("idempotency key is required")
+    if len(key) > 200:
+        raise ScheduleError("idempotency key must be at most 200 characters")
+    return key
