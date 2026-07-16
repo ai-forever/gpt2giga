@@ -75,3 +75,17 @@ const index = await readFile(join(outputRoot, "index.html"), "utf8");
 if (/https?:\/\//u.test(index) || /<script(?![^>]*\bsrc=)/u.test(index)) {
   throw new Error("Cockpit V2 index must load only CSP-safe local script assets");
 }
+
+const initialStyles = (
+  await Promise.all(
+    manifest.initial
+      .filter((name) => name.endsWith(".css"))
+      .map((name) => readFile(join(outputRoot, name), "utf8")),
+  )
+).join("\n");
+if (/\.message-entry\s+strong\b/u.test(initialStyles)) {
+  throw new Error("Message chrome must not override semantic Markdown strong styles");
+}
+if (!/\.message-role\b/u.test(initialStyles) || !/\.message-markdown\s+strong\b/u.test(initialStyles)) {
+  throw new Error("Packaged chat typography contract is missing");
+}

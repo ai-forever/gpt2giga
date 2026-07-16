@@ -1,1 +1,0 @@
-import{O as e,U as t}from"./index-BCFSx338.js";import{t as n}from"./InspectorFrame-du250dH2.js";var r=t();function i({locale:t}){return(0,r.jsx)(n,{locale:t,title:e(t,`rawEvidence`),children:e(t,`rawEvidenceDescription`)})}export{i as RawEvidenceInspector};

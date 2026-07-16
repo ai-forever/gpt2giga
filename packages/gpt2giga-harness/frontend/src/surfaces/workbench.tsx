@@ -809,13 +809,13 @@ export function WorkbenchSurface() {
                     </>
                   ) : null}
                   <article className={`message-entry ${item.role}`}>
-                    <div>
-                      <strong>{item.role}</strong>
+                    <header className="message-entry-header">
+                      <span className="message-role">{item.role}</span>
                       <span className="message-header-meta">
                         <TokenUsage usage={item.usage} />
                         <time>{formatTimestamp(item.created_at, locale)}</time>
                       </span>
-                    </div>
+                    </header>
                     {item.reasoning?.text ? (
                       <ReasoningDisclosure text={item.reasoning.text} locale={locale} />
                     ) : null}
@@ -840,10 +840,10 @@ export function WorkbenchSurface() {
                 : null}
               {streamPresentation.assistantText ? (
                 <article className="message-entry assistant" key={`live-${selectedRunId}`}>
-                  <div>
-                    <strong>assistant</strong>
+                  <header className="message-entry-header">
+                    <span className="message-role">assistant</span>
                     <TokenUsage usage={streamPresentation.usage} />
-                  </div>
+                  </header>
                   <MessageMarkdown source={streamPresentation.assistantText} />
                 </article>
               ) : null}
@@ -1544,7 +1544,9 @@ function GeneratedImageCard({ payload }: { payload?: Readonly<Record<string, unk
   const size = image.sizeBytes === null ? null : formatBytes(image.sizeBytes);
   return (
     <article className="message-entry assistant generated-image-message">
-      <div><strong>assistant · image generation</strong></div>
+      <header className="message-entry-header">
+        <span className="message-role">assistant · image generation</span>
+      </header>
       <figure>
         <a href={image.previewUrl} rel="noreferrer" target="_blank">
           <img alt={image.filename} loading="lazy" src={image.previewUrl} />
