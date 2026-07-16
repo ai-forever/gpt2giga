@@ -1,4 +1,5 @@
 import base64
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -373,6 +374,133 @@ def test_direct_chat_streams_v2_message_reasoning_tool_and_usage_events(monkeypa
     assert emitted[2].payload["status"] == "completed"
     assert emitted[3].payload["delta"] == "Answer"
     assert emitted[4].payload["input_tokens"] == 12
+
+
+def test_direct_chat_streams_nested_agent_tools_with_results(monkeypatch):
+    emitted = []
+
+    def fake_stream_sse_json(*args, **kwargs):
+        del args, kwargs
+        yield {
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "agent-call",
+                                "type": "function",
+                                "function": {
+                                    "name": "invoke_agent",
+                                    "arguments": '{"agent_name":"investigator"}',
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+            "metadata": {
+                "gigachat_called_tools": json.dumps(
+                    [
+                        {
+                            "name": "invoke_agent",
+                            "arguments": {"agent_name": "investigator"},
+                            "tools_state_id": "agent-call",
+                        }
+                    ]
+                )
+            },
+        }
+        yield {
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "child-call",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": '{"command":"rg TODO"}',
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+            "metadata": {
+                "gigachat_called_tools": json.dumps(
+                    [
+                        {
+                            "name": "invoke_agent",
+                            "arguments": {"agent_name": "investigator"},
+                            "tools_state_id": "agent-call",
+                        },
+                        {
+                            "name": "shell",
+                            "arguments": {"command": "rg TODO"},
+                            "tools_state_id": "child-call",
+                        },
+                    ]
+                )
+            },
+        }
+        yield {
+            "choices": [],
+            "metadata": {
+                "gigachat_tool_results": json.dumps(
+                    [
+                        {
+                            "name": "shell",
+                            "result": "src/app.py:10: TODO",
+                            "tools_state_id": "child-call",
+                        }
+                    ]
+                )
+            },
+        }
+        yield {
+            "choices": [],
+            "metadata": {
+                "gigachat_tool_results": json.dumps(
+                    [
+                        {
+                            "name": "invoke_agent",
+                            "result": "Repository inspected.",
+                            "tools_state_id": "agent-call",
+                        }
+                    ]
+                )
+            },
+        }
+        yield {
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+
+    monkeypatch.setattr(proxy, "stream_sse_json", fake_stream_sse_json)
+
+    result = DirectChatHarness().run(
+        HarnessRequest(prompt="inspect", stream=True, event_sink=emitted.append),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert result.ok is True
+    assert [event.type for event in emitted] == [
+        "tool_call_started",
+        "tool_call_started",
+        "tool_call_finished",
+        "tool_call_finished",
+        "usage",
+    ]
+    assert emitted[0].payload["tool_call_id"] == "agent-call"
+    assert emitted[1].payload["parent_tool_call_id"] == "agent-call"
+    assert emitted[2].payload["result"] == "src/app.py:10: TODO"
+    assert emitted[2].payload["parent_tool_call_id"] == "agent-call"
+    assert emitted[3].payload["result"] == "Repository inspected."
 
 
 def test_direct_chat_streams_gigachat_builtin_tool_events(monkeypatch, tmp_path):

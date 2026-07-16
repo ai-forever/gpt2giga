@@ -206,6 +206,13 @@ class OpenAIChatCompletionStreamAccumulator:
         index = raw_tool_call.get("index", len(self.tool_calls))
         if not isinstance(index, int):
             index = len(self.tool_calls)
+        raw_id = string_or_none(raw_tool_call.get("id"))
+        existing = self.tool_calls.get(index)
+        existing_id = (
+            string_or_none(existing.get("id")) if existing is not None else None
+        )
+        if raw_id is not None and existing_id is not None and raw_id != existing_id:
+            index = max(self.tool_calls, default=-1) + 1
         started = index in self.tool_calls
         tool_call = self.tool_calls.setdefault(
             index,

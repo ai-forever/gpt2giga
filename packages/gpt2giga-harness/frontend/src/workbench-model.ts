@@ -20,9 +20,11 @@ export interface WorkbenchPlanItem {
 }
 
 export interface WorkbenchToolActivity {
+  children?: readonly WorkbenchToolActivity[];
   id: string;
   label: string;
   name: string;
+  parentId?: string;
   result?: unknown;
   status: string;
 }
@@ -63,7 +65,13 @@ export function projectWorkbenchStream(
       if (projected.plan.length > 0) {
         plan = projected.plan;
       } else if (projected.activity !== null) {
-        toolActivities.set(projected.activity.id, projected.activity);
+        const previous = toolActivities.get(projected.activity.id);
+        toolActivities.set(
+          projected.activity.id,
+          previous === undefined
+            ? projected.activity
+            : mergeToolActivity(previous, projected.activity),
+        );
       }
     }
     if (!hasRetainedResponse && event.type === "message_delta") {
@@ -95,7 +103,7 @@ export function projectWorkbenchStream(
           : reasoningParts.text
     ).join(""),
     terminalEvent,
-    toolActivities: [...toolActivities.values()],
+    toolActivities: nestWorkbenchToolActivities([...toolActivities.values()]),
     usage,
   };
 }
@@ -110,16 +118,82 @@ export function projectToolPayload(
   if (plan.length > 0) return { activity: null, plan };
   const id = typeof payload.tool_call_id === "string" ? payload.tool_call_id : fallbackId;
   const status = typeof payload.status === "string" ? payload.status : "running";
+  const parentId =
+    typeof payload.parent_tool_call_id === "string"
+      ? payload.parent_tool_call_id
+      : undefined;
   return {
     activity: {
       id,
       label: toolLabel(name, payload.arguments),
       name,
+      ...(parentId === undefined ? {} : { parentId }),
       ...(payload.result === undefined ? {} : { result: payload.result }),
       status,
     },
     plan: [],
   };
+}
+
+export function nestWorkbenchToolActivities(
+  activities: readonly WorkbenchToolActivity[],
+): readonly WorkbenchToolActivity[] {
+  const byId = new Map<string, WorkbenchToolActivity>(
+    activities.map((activity) => [activity.id, { ...activity, children: undefined }]),
+  );
+  const childIds = new Set<string>();
+
+  for (const activity of activities) {
+    if (
+      activity.parentId === undefined ||
+      activity.parentId === activity.id ||
+      !byId.has(activity.parentId) ||
+      toolParentChainContains(activity.parentId, activity.id, byId)
+    ) {
+      continue;
+    }
+    const parent = byId.get(activity.parentId);
+    const child = byId.get(activity.id);
+    if (parent === undefined || child === undefined) continue;
+    parent.children = [...(parent.children ?? []), child];
+    childIds.add(activity.id);
+  }
+
+  return activities.flatMap((activity) => {
+    const nested = byId.get(activity.id);
+    return nested === undefined || childIds.has(activity.id) ? [] : [nested];
+  });
+}
+
+function mergeToolActivity(
+  previous: WorkbenchToolActivity,
+  current: WorkbenchToolActivity,
+): WorkbenchToolActivity {
+  return {
+    ...previous,
+    ...current,
+    ...(current.parentId === undefined && previous.parentId !== undefined
+      ? { parentId: previous.parentId }
+      : {}),
+    ...(current.result === undefined && previous.result !== undefined
+      ? { result: previous.result }
+      : {}),
+  };
+}
+
+function toolParentChainContains(
+  parentId: string,
+  childId: string,
+  byId: ReadonlyMap<string, WorkbenchToolActivity>,
+): boolean {
+  const visited = new Set<string>();
+  let currentId: string | undefined = parentId;
+  while (currentId !== undefined && !visited.has(currentId)) {
+    if (currentId === childId) return true;
+    visited.add(currentId);
+    currentId = byId.get(currentId)?.parentId;
+  }
+  return false;
 }
 
 function mergeUsage(

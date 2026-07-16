@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
@@ -47,6 +47,7 @@ import {
 } from "../surface-model";
 import { useRunEventStream } from "../stream-store";
 import {
+  nestWorkbenchToolActivities,
   projectToolPayload,
   projectWorkbenchStream,
   type WorkbenchPlanItem,
@@ -787,11 +788,12 @@ export function WorkbenchSurface() {
               {messages.data?.messages.map((item) => (
                 <Fragment key={item.id}>
                   {(item.role === "assistant" || item.role === "error") && item.run_id
-                    ? retainedToolEvents
-                        .filter((event) => event.run_id === item.run_id)
-                        .map((event) => (
-                          <RetainedToolActivity event={event} key={event.id} locale={locale} />
-                        ))
+                    ? (
+                        <RetainedToolActivities
+                          events={retainedToolEvents.filter((event) => event.run_id === item.run_id)}
+                          locale={locale}
+                        />
+                      )
                     : null}
                   {(item.role === "assistant" || item.role === "error") && item.run_id === selectedRunId ? (
                     <>
@@ -1342,24 +1344,41 @@ export function WorkbenchSurface() {
   );
 }
 
-function RetainedToolActivity({
-  event,
+function RetainedToolActivities({
+  events,
   locale,
 }: {
-  event: EventProjection;
+  events: readonly EventProjection[];
   locale: "en" | "ru";
 }) {
-  const payload = useQuery({
-    queryKey: [...requestKeys.root, "event-payload", event.id],
-    queryFn: ({ signal }) => fetchCockpit<EventPayloadResponse>(event.payload_url, signal),
-    staleTime: Number.POSITIVE_INFINITY,
+  const payloads = useQueries({
+    queries: events.map((event) => ({
+      queryKey: [...requestKeys.root, "event-payload", event.id],
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        fetchCockpit<EventPayloadResponse>(event.payload_url, signal),
+      staleTime: Number.POSITIVE_INFINITY,
+    })),
   });
-  if (!payload.isSuccess || payload.data.hidden) return null;
-  const projection = projectToolPayload(payload.data.payload, event.id);
-  if (projection.plan.length > 0) return <PlanCard items={projection.plan} locale={locale} />;
-  return projection.activity === null
-    ? null
-    : <ToolActivityCard activity={projection.activity} locale={locale} />;
+  const activities = new Map<string, WorkbenchToolActivity>();
+  let plan: readonly WorkbenchPlanItem[] = [];
+  payloads.forEach((payload, index) => {
+    if (!payload.isSuccess || payload.data.hidden) return;
+    const projection = projectToolPayload(payload.data.payload, events[index]?.id ?? `event-${index}`);
+    if (projection.plan.length > 0) {
+      plan = projection.plan;
+    } else if (projection.activity !== null) {
+      activities.set(projection.activity.id, projection.activity);
+    }
+  });
+  const nestedActivities = nestWorkbenchToolActivities([...activities.values()]);
+  return (
+    <>
+      {plan.length > 0 ? <PlanCard items={plan} locale={locale} /> : null}
+      {nestedActivities.map((activity) => (
+        <ToolActivityCard activity={activity} key={activity.id} locale={locale} />
+      ))}
+    </>
+  );
 }
 
 function ToolActivityCard({
@@ -1375,7 +1394,13 @@ function ToolActivityCard({
     activity.result ?? (failed ? message(locale, "toolFailedNoDetails") : undefined),
   );
   return (
-    <article className={failed ? "tool-activity-card failed" : "tool-activity-card"}>
+    <article
+      className={[
+        "tool-activity-card",
+        failed ? "failed" : "",
+        activity.children?.length ? "has-children" : "",
+      ].filter(Boolean).join(" ")}
+    >
       <div className="tool-activity-heading">
         <span aria-hidden="true">{complete ? "✓" : failed ? "!" : "◇"}</span>
         <div>
@@ -1389,6 +1414,13 @@ function ToolActivityCard({
           <pre>{result}</pre>
         </details>
       )}
+      {activity.children?.length ? (
+        <div className="nested-tool-activities" aria-label={message(locale, "toolActivity")}>
+          {activity.children.map((child) => (
+            <ToolActivityCard activity={child} key={child.id} locale={locale} />
+          ))}
+        </div>
+      ) : null}
     </article>
   );
 }

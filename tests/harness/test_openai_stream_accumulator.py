@@ -29,3 +29,61 @@ def test_chat_completion_stream_accumulator_rebuilds_content_tools_and_usage():
     assert response.choices[0].message.content == "Hi"
     assert response.choices[0].message.tool_calls[0].arguments == '{"q":"ping"}'
     assert response.usage.total_tokens == 3
+
+
+def test_chat_completion_stream_accumulator_keeps_distinct_tools_reusing_index_zero():
+    accumulator = OpenAIChatCompletionStreamAccumulator()
+
+    first = accumulator.observe_payload(
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "agent-call",
+                                "type": "function",
+                                "function": {
+                                    "name": "invoke_agent",
+                                    "arguments": "{}",
+                                },
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    )
+    second = accumulator.observe_payload(
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "child-call",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": '{"command":"pwd"}',
+                                },
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    )
+
+    assert [event.type for event in (*first, *second)] == [
+        "tool_call_start",
+        "tool_call_start",
+    ]
+    assert [
+        tool_call.id
+        for tool_call in accumulator.to_normalized_response()
+        .choices[0]
+        .message.tool_calls
+    ] == ["agent-call", "child-call"]

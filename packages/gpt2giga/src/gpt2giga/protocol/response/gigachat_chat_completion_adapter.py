@@ -233,6 +233,14 @@ def extract_chat_completion_provider_metadata(response_or_chunk: Any) -> dict[st
             separators=(",", ":"),
         )
 
+    tool_results = _extract_tool_result_items(data)
+    if tool_results:
+        metadata["gigachat_tool_results"] = json.dumps(
+            tool_results,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
     return metadata
 
 
@@ -622,6 +630,7 @@ def _extract_called_tool_items(data: dict) -> list[dict[str, Any]]:
                 _called_tool_item(
                     function_call,
                     message,
+                    source=message,
                     call_index=len(items),
                     message_index=message_index,
                 )
@@ -640,6 +649,7 @@ def _extract_called_tool_items(data: dict) -> list[dict[str, Any]]:
                 _called_tool_item(
                     function_call,
                     message,
+                    source=part,
                     call_index=len(items),
                     message_index=message_index,
                     content_index=content_index,
@@ -653,6 +663,7 @@ def _called_tool_item(
     function_call: dict[str, Any],
     message: dict[str, Any],
     *,
+    source: dict[str, Any],
     call_index: int,
     message_index: int,
     content_index: Optional[int] = None,
@@ -671,10 +682,120 @@ def _called_tool_item(
     message_id = _normalize_metadata_string(message.get("message_id"))
     if message_id:
         item["message_id"] = message_id
-    state_id = _extract_message_tool_state_id(message)
+    state_id = _extract_message_tool_state_id(source) or _extract_message_tool_state_id(
+        message
+    )
     if state_id:
         item["tools_state_id"] = state_id
+    item.update(_tool_relation_metadata(source, message))
     return item
+
+
+def _extract_tool_result_items(data: dict) -> list[dict[str, Any]]:
+    messages = data.get("messages")
+    if isinstance(messages, list):
+        message_items = [
+            (index, _dump_model(raw_message))
+            for index, raw_message in enumerate(messages)
+        ]
+    elif {"role", "content", "function_result"} & data.keys():
+        message_items = [(0, data)]
+    else:
+        return []
+
+    items: list[dict[str, Any]] = []
+    for message_index, message in message_items:
+        function_result = _normalize_function_result(message.get("function_result"))
+        if function_result:
+            items.append(
+                _tool_result_item(
+                    function_result,
+                    message,
+                    source=message,
+                    result_index=len(items),
+                    message_index=message_index,
+                )
+            )
+
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for content_index, raw_part in enumerate(content):
+            part = _dump_model(raw_part)
+            function_result = _normalize_function_result(part.get("function_result"))
+            if not function_result:
+                continue
+            items.append(
+                _tool_result_item(
+                    function_result,
+                    message,
+                    source=part,
+                    result_index=len(items),
+                    message_index=message_index,
+                    content_index=content_index,
+                )
+            )
+    return items
+
+
+def _normalize_function_result(value: Any) -> Optional[dict[str, Any]]:
+    result_data = _dump_model(value)
+    name = result_data.get("name")
+    if not isinstance(name, str) or not name:
+        return None
+    result = {
+        "name": map_tool_name_from_gigachat(name),
+        "result": result_data.get("result"),
+    }
+    if result_data.get("status") is not None:
+        result["status"] = result_data["status"]
+    return result
+
+
+def _tool_result_item(
+    function_result: dict[str, Any],
+    message: dict[str, Any],
+    *,
+    source: dict[str, Any],
+    result_index: int,
+    message_index: int,
+    content_index: Optional[int] = None,
+) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "index": result_index,
+        "message_index": message_index,
+        **function_result,
+    }
+    if content_index is not None:
+        item["content_index"] = content_index
+    role = _normalize_metadata_string(message.get("role"))
+    if role:
+        item["role"] = role
+    message_id = _normalize_metadata_string(message.get("message_id"))
+    if message_id:
+        item["message_id"] = message_id
+    state_id = _extract_message_tool_state_id(source) or _extract_message_tool_state_id(
+        message
+    )
+    if state_id:
+        item["tools_state_id"] = state_id
+    item.update(_tool_relation_metadata(source, message))
+    return item
+
+
+def _tool_relation_metadata(*containers: dict[str, Any]) -> dict[str, str]:
+    for container in containers:
+        for field_name in (
+            "parent_tool_call_id",
+            "parent_tools_state_id",
+            "parent_tool_state_id",
+            "parent_function_state_id",
+            "agent_tool_state_id",
+        ):
+            parent_id = _normalize_metadata_string(container.get(field_name))
+            if parent_id:
+                return {"parent_tool_call_id": parent_id}
+    return {}
 
 
 def _normalize_metadata_string(value: Any) -> Optional[str]:

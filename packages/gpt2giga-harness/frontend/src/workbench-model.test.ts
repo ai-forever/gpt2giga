@@ -161,4 +161,76 @@ describe("workbench presentation model", () => {
     expect(projection.usage).toEqual({ input_tokens: 21, output_tokens: 8 });
     expect(projection.toolActivities[0]?.result).toBe("file-one\nfile-two");
   });
+
+  it("nests subagent tools under invoke_agent and keeps their final results", () => {
+    const projection = projectWorkbenchStream(
+      [
+        {
+          id: "agent-start",
+          payload: {
+            arguments: { agent_name: "investigator" },
+            name: "invoke_agent",
+            status: "running",
+            tool_call_id: "agent-call",
+          },
+          run_id: "run-one",
+          type: "tool_call_started",
+        },
+        {
+          id: "child-start",
+          payload: {
+            arguments: { command: "rg TODO" },
+            name: "shell",
+            parent_tool_call_id: "agent-call",
+            status: "running",
+            tool_call_id: "child-call",
+          },
+          run_id: "run-one",
+          type: "tool_call_started",
+        },
+        {
+          id: "child-finish",
+          payload: {
+            name: "shell",
+            parent_tool_call_id: "agent-call",
+            result: "src/app.py:10: TODO",
+            status: "completed",
+            tool_call_id: "child-call",
+          },
+          run_id: "run-one",
+          type: "tool_call_finished",
+        },
+        {
+          id: "agent-finish",
+          payload: {
+            name: "invoke_agent",
+            result: "Repository inspected.",
+            status: "completed",
+            tool_call_id: "agent-call",
+          },
+          run_id: "run-one",
+          type: "tool_call_finished",
+        },
+      ],
+      [],
+      "run-one",
+    );
+
+    expect(projection.toolActivities).toHaveLength(1);
+    expect(projection.toolActivities[0]).toMatchObject({
+      id: "agent-call",
+      name: "invoke_agent",
+      result: "Repository inspected.",
+      status: "completed",
+    });
+    expect(projection.toolActivities[0]?.children).toEqual([
+      expect.objectContaining({
+        id: "child-call",
+        name: "shell",
+        parentId: "agent-call",
+        result: "src/app.py:10: TODO",
+        status: "completed",
+      }),
+    ]);
+  });
 });
