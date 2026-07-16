@@ -5,6 +5,11 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4a1] - 2026-07-16
+
+### Fixed
+- **Request-context CPU usage**: replaced expensive PBKDF2 for IP and API-key correlation fingerprints with fast keyed HMAC-SHA256 so middleware no longer blocks the event loop with two 100,000-iteration computations per request.
+
 ## [0.2.3a2] - 2026-07-14
 
 ### Fixed

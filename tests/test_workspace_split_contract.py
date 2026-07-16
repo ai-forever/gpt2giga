@@ -110,7 +110,7 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
     assert harness_metadata["name"] == "gpt2giga-harness"
     assert harness_metadata["version"]
     assert (
-        f"gpt2giga=={gateway_metadata['version']}" in harness_metadata["dependencies"]
+        f"gpt2giga>={gateway_metadata['version']}" in harness_metadata["dependencies"]
     )
     assert any(
         dependency.startswith("pyyaml")
