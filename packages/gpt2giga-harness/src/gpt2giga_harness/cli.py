@@ -184,6 +184,7 @@ AGENT_ALIASES = {
 
 UI_WORKER_START_TIMEOUT_SECONDS = 5.0
 UI_WORKER_STOP_TIMEOUT_SECONDS = 3.0
+MAX_UI_WORKER_COUNT = 32
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -284,7 +285,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--start-worker",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Start a local durable worker when no online worker is available",
+        help="Start local durable workers until the target worker count is online",
+    )
+    ui.add_argument(
+        "--worker-count",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Target durable worker pool size when worker auto-start is enabled",
     )
     ui.set_defaults(handler=_handle_ui)
 
@@ -1885,6 +1893,10 @@ def _handle_open_file(args: argparse.Namespace, config: HarnessConfig) -> int:
 def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     config = config.with_overrides(ui_host=args.host, ui_port=args.port)
     validate_ui_bind(config.ui_host, allow_remote=args.allow_remote)
+    if not 1 <= args.worker_count <= MAX_UI_WORKER_COUNT:
+        raise ValueError(
+            f"UI worker count must be between 1 and {MAX_UI_WORKER_COUNT}."
+        )
     if args.allow_remote and not is_loopback_host(config.ui_host):
         if config.ui_bootstrap_token:
             warning = "Remote UI browser authentication is enabled."
@@ -1897,21 +1909,35 @@ def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     print(
         f"Starting gpt2giga Unified Harness UI at http://{config.ui_host}:{config.ui_port}/"
     )
-    worker_process = _start_ui_worker(config) if args.start_worker else None
+    worker_processes = (
+        _start_ui_workers(config, worker_count=args.worker_count)
+        if args.start_worker
+        else ()
+    )
     try:
         app = create_app(config)
         uvicorn.run(app, host=config.ui_host, port=config.ui_port, log_level="info")
     finally:
-        if worker_process is not None:
-            _stop_ui_worker(worker_process)
+        _stop_ui_workers(worker_processes)
     return 0
 
 
-def _start_ui_worker(config: HarnessConfig) -> subprocess.Popen[bytes] | None:
+def _start_ui_workers(
+    config: HarnessConfig,
+    *,
+    worker_count: int,
+) -> tuple[subprocess.Popen[bytes], ...]:
     runtime_store = RuntimeCoordinationStore(config.data_dir)
-    if worker_status(runtime_store)["online"]:
-        print("Using an existing online durable Harness worker.")
-        return None
+    online = int(worker_status(runtime_store)["online"])
+    missing = max(worker_count - online, 0)
+    if missing == 0:
+        print(f"Using {online} existing online durable Harness worker(s).")
+        return ()
+    if online:
+        print(
+            f"Using {online} existing online durable Harness worker(s); "
+            f"starting {missing} more."
+        )
 
     environment = os.environ.copy()
     environment.update(
@@ -1928,14 +1954,37 @@ def _start_ui_worker(config: HarnessConfig) -> subprocess.Popen[bytes] | None:
     if config.default_model:
         environment["GPT2GIGA_HARNESS_DEFAULT_MODEL"] = config.default_model
 
+    processes: list[subprocess.Popen[bytes]] = []
     try:
-        process = subprocess.Popen(
-            [sys.executable, "-m", "gpt2giga_harness.cli", "worker", "start"],
-            env=environment,
-        )
-    except OSError as exc:
-        raise ValueError(f"Failed to start durable Harness worker: {exc}") from exc
+        for _ in range(missing):
+            try:
+                process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "gpt2giga_harness.cli",
+                        "worker",
+                        "start",
+                    ],
+                    env=environment,
+                )
+            except OSError as exc:
+                raise ValueError(
+                    f"Failed to start durable Harness worker: {exc}"
+                ) from exc
+            processes.append(process)
+            _wait_for_ui_worker(runtime_store, process)
+            print(f"Started durable Harness worker pid={process.pid}.")
+    except Exception:
+        _stop_ui_workers(processes)
+        raise
+    return tuple(processes)
 
+
+def _wait_for_ui_worker(
+    runtime_store: RuntimeCoordinationStore,
+    process: subprocess.Popen[bytes],
+) -> None:
     deadline = time.monotonic() + UI_WORKER_START_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         return_code = process.poll()
@@ -1943,13 +1992,21 @@ def _start_ui_worker(config: HarnessConfig) -> subprocess.Popen[bytes] | None:
             raise ValueError(
                 f"Durable Harness worker exited during startup with code {return_code}."
             )
-        if worker_status(runtime_store)["online"]:
-            print(f"Started durable Harness worker pid={process.pid}.")
-            return process
+        status = worker_status(runtime_store)
+        if any(
+            worker["status"] == "online" and int(worker["process_id"]) == process.pid
+            for worker in status["workers"]
+        ):
+            return
         time.sleep(0.05)
-
-    _stop_ui_worker(process)
     raise ValueError("Timed out waiting for the durable Harness worker to start.")
+
+
+def _stop_ui_workers(
+    processes: tuple[subprocess.Popen[bytes], ...] | list[subprocess.Popen[bytes]],
+) -> None:
+    for process in reversed(processes):
+        _stop_ui_worker(process)
 
 
 def _stop_ui_worker(process: subprocess.Popen[bytes]) -> None:

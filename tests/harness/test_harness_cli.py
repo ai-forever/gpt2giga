@@ -36,9 +36,8 @@ from gpt2giga_harness.types import (
 
 
 class _FakeWorkerProcess:
-    pid = 4242
-
-    def __init__(self):
+    def __init__(self, pid=4242):
+        self.pid = pid
         self.return_code = None
         self.signals = []
         self.terminated = False
@@ -85,7 +84,12 @@ def test_cli_ui_starts_and_stops_worker_when_none_is_online(
     def fake_worker_status(_store):
         nonlocal status_calls
         status_calls += 1
-        return {"workers": [], "online": int(status_calls > 1)}
+        workers = (
+            [{"status": "online", "process_id": process.pid}]
+            if status_calls > 1
+            else []
+        )
+        return {"workers": workers, "online": len(workers)}
 
     monkeypatch.setattr(cli, "worker_status", fake_worker_status)
     monkeypatch.setattr(
@@ -138,6 +142,47 @@ def test_cli_ui_reuses_online_worker_or_allows_autostart_opt_out(
         lambda _store: pytest.fail("opt-out must skip worker discovery"),
     )
     assert cli.main(["ui", "--no-start-worker"]) == 0
+
+
+def test_cli_ui_starts_missing_workers_to_reach_target_pool(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path))
+    processes: list[_FakeWorkerProcess] = []
+
+    def fake_worker_status(_store):
+        workers = [{"status": "online", "process_id": 1000}]
+        workers.extend(
+            {"status": "online", "process_id": process.pid} for process in processes
+        )
+        return {"workers": workers, "online": len(workers)}
+
+    def fake_popen(*_args, **_kwargs):
+        process = _FakeWorkerProcess(pid=2000 + len(processes))
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(cli, "worker_status", fake_worker_status)
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(cli, "create_app", lambda _config: "app")
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *args, **kwargs: None)
+
+    assert cli.main(["ui", "--worker-count", "4"]) == 0
+
+    assert [process.pid for process in processes] == [2000, 2001, 2002]
+    assert all(process.signals == [signal.SIGINT] for process in processes)
+    output = capsys.readouterr().out
+    assert (
+        "Using 1 existing online durable Harness worker(s); starting 3 more." in output
+    )
+
+
+@pytest.mark.parametrize("worker_count", ["0", "33"])
+def test_cli_ui_rejects_invalid_worker_count(capsys, worker_count):
+    assert cli.main(["ui", "--worker-count", worker_count]) == 2
+    assert "UI worker count must be between 1 and 32." in capsys.readouterr().err
 
 
 def test_cli_harness_list_outputs_direct_chat(capsys):
