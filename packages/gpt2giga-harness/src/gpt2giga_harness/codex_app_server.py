@@ -416,6 +416,20 @@ class CodexAppServerSupervisor:
                     for child_id in _collab_thread_ids(item):
                         if parent_id:
                             subagent_parents[child_id] = parent_id
+            if method == "turn/completed":
+                emitted_tool_ids = {
+                    str(event.payload.get("tool_call_id") or "")
+                    for event in collected
+                    if event.payload.get("tool_call_id")
+                }
+                for rollout_event in _rollout_multi_agent_events(
+                    runtime.client,
+                    home=self.data_dir / "app_server" / "homes" / runtime.scope_id,
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                    seen_tool_call_ids=emitted_tool_ids,
+                ):
+                    _publish(request, collected, rollout_event)
             event, item_text = _normalize_notification(method, params)
             if item_text is not None:
                 final_text = item_text
@@ -1124,6 +1138,228 @@ def _collab_child_tool_events(
                     )
                 )
     return tuple(events)
+
+
+def _rollout_multi_agent_events(
+    client: AppServerClient,
+    *,
+    home: Path,
+    thread_id: str,
+    turn_id: str,
+    seen_tool_call_ids: set[str],
+) -> tuple[HarnessEvent, ...]:
+    """Recover multi-agent calls omitted from Codex app-server thread items."""
+    try:
+        response = client.request(
+            "thread/read",
+            {"threadId": thread_id, "includeTurns": True},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+    except (AppServerProtocolError, OSError, RuntimeError, ValueError):
+        return ()
+    thread = _mapping(response.get("thread"))
+    rollout_path = _managed_rollout_path(home, thread.get("path"))
+    if rollout_path is None:
+        return ()
+
+    events: list[HarnessEvent] = []
+    child_seen: set[tuple[str, str, str]] = set()
+    for call in _read_rollout_multi_agent_calls(rollout_path, turn_id=turn_id):
+        call_id = str(call.get("call_id") or call.get("id") or "").strip()
+        if not call_id or call_id in seen_tool_call_ids:
+            continue
+        name = str(call.get("name") or "").strip()
+        arguments = _json_value(call.get("arguments"), fallback={})
+        if not isinstance(arguments, Mapping):
+            arguments = {"value": arguments}
+        public_arguments: dict[str, Any] = dict(arguments)
+        result = _json_value(call.get("output"), fallback=call.get("output"))
+        child_snapshots: tuple[dict[str, Any], ...] = ()
+        if name == "spawn_agent" and isinstance(result, Mapping):
+            child_id = str(
+                result.get("agent_id") or result.get("thread_id") or ""
+            ).strip()
+            if child_id:
+                prompt = str(
+                    public_arguments.get("message")
+                    or public_arguments.get("prompt")
+                    or ""
+                ).strip()
+                child_snapshots = (
+                    _read_function_subagent(
+                        client,
+                        thread_id=child_id,
+                        prompt=prompt or None,
+                        fallback_name=str(result.get("nickname") or "").strip() or None,
+                    ),
+                )
+                public_arguments.update(
+                    {
+                        "prompt": prompt or None,
+                        "subagents": [
+                            _public_collab_subagent(snapshot)
+                            for snapshot in child_snapshots
+                        ],
+                    }
+                )
+        payload: dict[str, Any] = {
+            "tool_call_id": call_id,
+            "name": name,
+            "status": "completed",
+            "arguments": public_arguments,
+            "source": "codex-app-server-rollout",
+        }
+        if result not in (None, "", (), [], {}):
+            payload["result"] = result
+        events.append(
+            HarnessEvent(
+                type=HarnessEventType.TOOL_CALL_FINISHED.value,
+                message=f"Codex app-server finished {name}.",
+                payload=payload,
+            )
+        )
+        seen_tool_call_ids.add(call_id)
+        if child_snapshots:
+            child_id = str(child_snapshots[0].get("id") or "")
+            events.extend(
+                _collab_child_tool_events(
+                    child_snapshots,
+                    subagent_parents={child_id: call_id},
+                    seen=child_seen,
+                )
+            )
+    return tuple(events)
+
+
+def _managed_rollout_path(home: Path, value: Any) -> Path | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        resolved_home = home.expanduser().resolve()
+        path = Path(text).expanduser().resolve(strict=True)
+    except OSError:
+        return None
+    if not path.is_file() or not path.is_relative_to(resolved_home):
+        return None
+    return path
+
+
+def _read_rollout_multi_agent_calls(
+    path: Path,
+    *,
+    turn_id: str,
+) -> tuple[dict[str, Any], ...]:
+    calls: dict[str, dict[str, Any]] = {}
+    active_turn_id: str | None = None
+    try:
+        lines = path.open(encoding="utf-8")
+    except OSError:
+        return ()
+    try:
+        with lines:
+            for line in lines:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, Mapping):
+                    continue
+                record_type = str(record.get("type") or "")
+                payload = _mapping(record.get("payload"))
+                if record_type == "event_msg" and payload.get("type") == "task_started":
+                    active_turn_id = str(payload.get("turn_id") or "") or None
+                    continue
+                if record_type == "turn_context":
+                    active_turn_id = str(payload.get("turn_id") or "") or active_turn_id
+                    continue
+                if record_type != "response_item":
+                    continue
+                metadata = _mapping(
+                    payload.get("internal_chat_message_metadata_passthrough")
+                )
+                payload_turn_id = str(metadata.get("turn_id") or active_turn_id or "")
+                if payload_turn_id != turn_id:
+                    continue
+                payload_type = str(payload.get("type") or "")
+                call_id = str(payload.get("call_id") or "").strip()
+                if payload_type == "function_call":
+                    if str(payload.get("namespace") or "") != "multi_agent_v1":
+                        continue
+                    if not call_id:
+                        call_id = str(payload.get("id") or "").strip()
+                    if not call_id:
+                        continue
+                    calls[call_id] = {
+                        "id": payload.get("id"),
+                        "call_id": call_id,
+                        "name": _multi_agent_tool_name(payload.get("name")),
+                        "arguments": payload.get("arguments"),
+                    }
+                elif payload_type == "function_call_output" and call_id in calls:
+                    calls[call_id]["output"] = payload.get("output")
+    except OSError:
+        return ()
+    return tuple(calls.values())
+
+
+def _multi_agent_tool_name(value: Any) -> str:
+    name = str(value or "").strip()
+    for prefix in ("multi_agent_v1__", "multi_agent_v1."):
+        if name.startswith(prefix):
+            name = name[len(prefix) :]
+            break
+    aliases = {
+        "spawnAgent": "spawn_agent",
+        "sendInput": "send_input",
+        "resumeAgent": "resume_agent",
+        "closeAgent": "close_agent",
+    }
+    return aliases.get(name, name)
+
+
+def _json_value(value: Any, *, fallback: Any) -> Any:
+    if not isinstance(value, str):
+        return value if value is not None else fallback
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return fallback
+
+
+def _read_function_subagent(
+    client: AppServerClient,
+    *,
+    thread_id: str,
+    prompt: str | None,
+    fallback_name: str | None,
+) -> dict[str, Any]:
+    try:
+        response = client.request(
+            "thread/read",
+            {"threadId": thread_id, "includeTurns": True},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+    except (AppServerProtocolError, OSError, RuntimeError, ValueError):
+        thread = {}
+    else:
+        thread = _mapping(response.get("thread"))
+    turns = thread.get("turns") or []
+    latest_turn = _mapping(turns[-1]) if turns else {}
+    return {
+        "id": thread_id,
+        "name": (
+            thread.get("agentNickname")
+            or thread.get("agent_nickname")
+            or fallback_name
+            or thread_id[:8]
+        ),
+        "role": thread.get("agentRole") or thread.get("agent_role"),
+        "status": latest_turn.get("status")
+        or _mapping(thread.get("status")).get("type"),
+        "prompt": prompt,
+        "turns": turns,
+    }
 
 
 def _turn_text(turn: Mapping[str, Any]) -> str:
