@@ -26,7 +26,9 @@ from gpt2giga_harness.arena import (
     HarnessArenaRun,
     arena_child_to_dict,
     arena_to_dict,
+    continue_arena,
     queue_arena,
+    queue_arena_follow_up,
     run_arena,
 )
 from gpt2giga_harness import proxy
@@ -1109,14 +1111,23 @@ def create_app(
             include_archived=include_archived,
             limit=limit if include_arena else None,
         )
+        arenas = arena_store.list(workspace=resolved_workspace)
+        arena_child_session_ids = {
+            child.session_id
+            for arena in arenas
+            for child in arena.child_runs
+            if child.session_id is not None
+        }
+        items = tuple(
+            session for session in items if session.id not in arena_child_session_ids
+        )
         if not include_arena:
-            arena_session_ids = {
-                arena.session_id
-                for arena in arena_store.list(workspace=resolved_workspace)
-            }
+            arena_session_ids = {arena.session_id for arena in arenas}
             items = tuple(
                 session for session in items if session.id not in arena_session_ids
             )[:limit]
+        else:
+            items = items[:limit]
         return {"sessions": [_session_summary(store, session.id) for session in items]}
 
     @app.post("/api/sessions")
@@ -2676,13 +2687,52 @@ def create_app(
     ) -> dict[str, Any]:
         resolved_workspace = resolve_workspace(_optional_text(workspace))
         arenas = arena_store.list(workspace=resolved_workspace, limit=limit)
-        return {"arenas": [_arena_response(arena, store)["arena"] for arena in arenas]}
+        return {"arenas": [_arena_summary_response(arena) for arena in arenas]}
 
     @app.post("/api/arena/runs")
     async def create_arena_run(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
+            payload = dict(payload)
+            if not str(payload.get("prompt") or "").strip():
+                raise ValueError("prompt is required")
+            if _first_text(payload.get("harness_ids")) is None:
+                raise ValueError("harness_ids must contain at least one harness")
+            workspace_paths = _bounded_arena_workspace_paths(
+                payload.pop("workspace_paths", None)
+            )
+            session_id = _optional_text(payload.get("session_id"))
+            if workspace_paths and session_id is None:
+                session = runner.create_session(
+                    title=title_from_prompt(str(payload.get("prompt") or "")),
+                    workspace=_optional_text(payload.get("workspace")),
+                    default_harness_id=_first_text(payload.get("harness_ids"))
+                    or "echo",
+                    default_model=_optional_text(payload.get("model")),
+                    default_api_mode=payload.get("api_mode"),
+                    default_mode=str(payload.get("mode") or "plan"),
+                )
+                session_id = session.id
+                payload["session_id"] = session_id
+            if workspace_paths:
+                session = store.get_session(session_id or "")
+                workspace_root = _attachment_workspace(session, payload)
+                attachment_ids = [
+                    attachment_store.create_workspace_reference(
+                        session_id=session.id,
+                        project_id=_session_project_id(session)
+                        or resolve_project(workspace_root, data_dir=config.data_dir).id,
+                        workspace_root=workspace_root,
+                        path=path,
+                        metadata={"arena_shared": True},
+                        limits=_attachment_limits(
+                            session, workspace_root=workspace_root
+                        ),
+                    ).id
+                    for path in workspace_paths
+                ]
+                payload["attachment_ids"] = attachment_ids
             arena_runner = queue_arena if durable_dispatcher is not None else run_arena
             arena = await run_in_threadpool(
                 arena_runner,
@@ -2698,7 +2748,7 @@ def create_app(
             )
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
-        except ValueError as exc:
+        except (AttachmentValidationError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return await run_in_threadpool(_arena_response, arena, store)
 
@@ -2709,6 +2759,175 @@ def create_app(
         except ArenaNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Arena run not found") from exc
         return _arena_response(arena, store)
+
+    @app.post("/api/arena/runs/{arena_id}/turns")
+    async def create_arena_follow_up(
+        arena_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            arena = await run_in_threadpool(arena_store.get, arena_id)
+            payload = dict(payload)
+            if not str(payload.get("prompt") or "").strip():
+                raise ValueError("prompt is required")
+            workspace_paths = _bounded_arena_workspace_paths(
+                payload.pop("workspace_paths", None)
+            )
+            if workspace_paths:
+                session = await run_in_threadpool(store.get_session, arena.session_id)
+                workspace_root = _attachment_workspace(session, payload)
+
+                def create_shared_attachments() -> list[str]:
+                    return [
+                        attachment_store.create_workspace_reference(
+                            session_id=session.id,
+                            project_id=_session_project_id(session)
+                            or resolve_project(
+                                workspace_root, data_dir=config.data_dir
+                            ).id,
+                            workspace_root=workspace_root,
+                            path=path,
+                            metadata={"arena_shared": True, "arena_id": arena.id},
+                            limits=_attachment_limits(
+                                session, workspace_root=workspace_root
+                            ),
+                        ).id
+                        for path in workspace_paths
+                    ]
+
+                payload["attachment_ids"] = await run_in_threadpool(
+                    create_shared_attachments
+                )
+            follow_up_runner = (
+                queue_arena_follow_up
+                if durable_dispatcher is not None
+                else continue_arena
+            )
+            arena = await run_in_threadpool(
+                follow_up_runner,
+                runner=runner,
+                arena_store=arena_store,
+                arena=arena,
+                payload=payload,
+                **(
+                    {"dispatcher": durable_dispatcher}
+                    if durable_dispatcher is not None
+                    else {}
+                ),
+            )
+        except ArenaNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        except (AttachmentValidationError, SessionNotFoundError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return await run_in_threadpool(_arena_response, arena, store)
+
+    @app.post("/api/arena/runs/{arena_id}/children/{child_index}/retry")
+    async def retry_arena_child(
+        arena_id: str,
+        child_index: int,
+    ) -> dict[str, Any]:
+        try:
+            arena = await run_in_threadpool(arena_store.get, arena_id)
+            child = next(item for item in arena.child_runs if item.index == child_index)
+            if child.run_id is None or child.session_id is None:
+                raise ValueError("arena child has not started")
+            source_run = await run_in_threadpool(store.get_run, child.run_id)
+            raw_request = await run_in_threadpool(
+                _latest_raw_request_for_run, store, source_run
+            )
+            replay_payload = build_replay_request(
+                source_run,
+                raw_request=raw_request,
+                reviewed_evidence=_reviewed_evidence_for_run(
+                    runtime_store, source_run.id
+                ),
+            )
+            if source_run.status.value in {"queued", "running", "retry_wait"}:
+                raise ValueError("arena child is still active")
+            replay_payload["extra"] = {
+                **dict(replay_payload.get("extra") or {}),
+                "arena": {
+                    "arena_id": arena.id,
+                    "child_index": child.index,
+                    "child_count": len(arena.harness_ids),
+                    "parent_session_id": arena.session_id,
+                    "turn_index": max(int(arena.metadata.get("turn_count") or 0), 0),
+                },
+            }
+            if durable_dispatcher is not None:
+                submission = await run_in_threadpool(
+                    durable_dispatcher.submit,
+                    child.session_id,
+                    replay_payload,
+                    idempotency_key=(
+                        f"arena:{arena.id}:{child.index}:retry:{source_run.id}"
+                    ),
+                    origin="manual",
+                )
+                replacement = HarnessArenaChildRun(
+                    harness_id=child.harness_id,
+                    index=child.index,
+                    session_id=child.session_id,
+                    run_id=submission.queued.run.id,
+                    status="queued",
+                )
+            else:
+                result = await run_in_threadpool(
+                    runner.run_in_session, child.session_id, replay_payload
+                )
+                replacement = HarnessArenaChildRun(
+                    harness_id=child.harness_id,
+                    index=child.index,
+                    session_id=child.session_id,
+                    run_id=result.run.id,
+                    status=result.run.status.value,
+                    error=result.run.error,
+                    result_text=(
+                        result.result.text
+                        if result.run.status.value == "succeeded"
+                        else None
+                    ),
+                )
+            arena = arena_store.upsert_child(arena.id, replacement)
+        except ArenaNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        except (RunNotFoundError, StopIteration) as exc:
+            raise HTTPException(
+                status_code=404, detail="Arena child not found"
+            ) from exc
+        except (SessionNotFoundError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return await run_in_threadpool(_arena_response, arena, store)
+
+    @app.post("/api/arena/runs/{arena_id}/verdict")
+    def save_arena_verdict(
+        arena_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            arena = arena_store.get(arena_id)
+        except ArenaNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        verdict = str(payload.get("verdict") or "")
+        if verdict not in {"a_better", "b_better", "tie", "both_failed"}:
+            raise HTTPException(status_code=400, detail="Invalid arena verdict")
+        note = str(payload.get("note") or "").strip()
+        if len(note) > 2000:
+            raise HTTPException(
+                status_code=400, detail="Arena verdict note is too long"
+            )
+        updated = replace(
+            arena,
+            updated_at=utc_now(),
+            metadata={
+                **dict(arena.metadata),
+                "verdict": verdict,
+                "verdict_note": note or None,
+                "verdict_child_run_ids": [child.run_id for child in arena.child_runs],
+            },
+        )
+        arena_store.save(updated)
+        return _arena_response(updated, store)
 
     @app.get("/api/arena/runs/{arena_id}/events/stream")
     async def arena_events_stream(
@@ -3198,6 +3417,13 @@ def _arena_response(
     return {"arena": payload}
 
 
+def _arena_summary_response(arena: HarnessArenaRun) -> dict[str, Any]:
+    payload = arena_to_dict(arena)
+    payload["prompt"] = ""
+    payload["child_runs"] = [arena_child_to_dict(child) for child in arena.child_runs]
+    return payload
+
+
 def _eval_run_response(
     eval_run,
     store: HarnessSessionStore,
@@ -3221,7 +3447,26 @@ def _arena_child_response(
         run = store.get_run(child.run_id)
         payload["run"] = run_to_dict(run)
         payload["message"] = _last_run_message(store, run)
-        payload["event_count"] = len(store.list_events(run.session_id, run_id=run.id))
+        messages = store.list_messages(run.session_id)[-100:]
+        runs = store.list_runs(run.session_id)[-50:]
+        events = store.list_events(run.session_id)[-200:]
+        payload["messages"] = [message_to_dict(item) for item in messages]
+        payload["runs"] = [run_to_dict(item) for item in runs]
+        payload["activity"] = [
+            event_to_dict(item)
+            for item in events
+            if item.type.startswith(("tool_", "approval_"))
+            or item.type
+            in {
+                "cancel_requested",
+                "error",
+                "run_canceled",
+                "run_finished",
+                "warning",
+            }
+        ][-100:]
+        payload["event_count"] = len(events)
+        payload["bounded"] = True
     except (RunNotFoundError, SessionNotFoundError):
         payload["missing"] = True
     return payload
@@ -3295,6 +3540,25 @@ def _run_status_is_terminal(status: str) -> bool:
 
 def _arena_status_is_terminal(status: str) -> bool:
     return status in {"succeeded", "failed", "partial", "canceled"}
+
+
+def _bounded_arena_workspace_paths(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("workspace_paths must be a list")
+    if len(value) > 8:
+        raise ValueError("workspace_paths must contain at most 8 files")
+    paths = tuple(str(item).strip() for item in value)
+    if any(not path for path in paths):
+        raise ValueError("workspace_paths must contain non-empty strings")
+    return paths
+
+
+def _first_text(value: Any) -> str | None:
+    if not isinstance(value, list) or not value:
+        return None
+    return _optional_text(value[0])
 
 
 def _native_project_id(

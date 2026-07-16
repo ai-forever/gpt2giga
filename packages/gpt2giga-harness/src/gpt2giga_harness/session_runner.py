@@ -1026,13 +1026,18 @@ class HarnessSessionRunner:
         session_id: str,
         attachment_ids: tuple[str, ...],
     ) -> tuple[HarnessAttachment, ...]:
+        session = self.store.get_session(session_id)
+        shared_parent_session_id = _optional_text(
+            session.metadata.get("arena_parent_session_id")
+        )
+        allowed_session_ids = {session_id, shared_parent_session_id}
         attachments: list[HarnessAttachment] = []
         for attachment_id in attachment_ids:
             try:
                 attachment = self.attachment_store.get_attachment(attachment_id)
             except AttachmentNotFoundError as exc:
                 raise ValueError(f"Unknown attachment id: {attachment_id}") from exc
-            if attachment.session_id != session_id:
+            if attachment.session_id not in allowed_session_ids:
                 raise ValueError(
                     f"Attachment does not belong to session: {attachment_id}"
                 )

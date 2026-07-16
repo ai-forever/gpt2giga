@@ -17,6 +17,7 @@ import {
   remainingRequestKeys,
 } from "../remaining-request-graph";
 import type { EvaluationProjection } from "../surface-projections";
+import { ArenaWorkspace } from "./arena-workspace";
 
 const tabs: readonly OperationalTab[] = [
   { id: "arena", labelKey: "arena", href: "/cockpit-v2/evaluation/arena" },
@@ -29,6 +30,7 @@ export function EvaluationSurface() {
   const section = pathname.endsWith("/arena") ? "arena" : pathname.endsWith("/baselines") ? "baselines" : "evals";
   const { selected: selectedId } = useSearch({ strict: false });
   const query = useQuery(evaluationSurfaceOptions());
+  if (section === "arena") return <ArenaWorkspace selectedId={selectedId} />;
   return (
     <OperationalSurface
       activeTab={section}

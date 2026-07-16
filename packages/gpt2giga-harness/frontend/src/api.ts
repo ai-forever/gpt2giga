@@ -373,6 +373,71 @@ export interface WorkspaceFileSearchResponse {
   bounded: true;
 }
 
+export interface ArenaWorkspaceFileSearchResponse {
+  workspace: string;
+  q: string;
+  files: WorkspaceFileCandidate[];
+}
+
+export interface ArenaMessageProjection {
+  id: string;
+  run_id?: string | null;
+  role: string;
+  content: string;
+  created_at: string;
+  metadata?: { usage?: TokenUsageProjection; attachments?: unknown[] };
+}
+
+export interface ArenaActivityProjection {
+  id: string;
+  run_id: string;
+  type: string;
+  message?: string;
+  payload?: Readonly<Record<string, unknown>>;
+  created_at?: string;
+}
+
+export interface ArenaChildProjection {
+  harness_id: string;
+  index: number;
+  session_id: string | null;
+  run_id: string | null;
+  status: string;
+  error?: string | null;
+  result_text?: string | null;
+  run?: RunSummary;
+  runs?: RunSummary[];
+  messages?: ArenaMessageProjection[];
+  activity?: ArenaActivityProjection[];
+  bounded?: true;
+}
+
+export type ArenaVerdict = "a_better" | "b_better" | "tie" | "both_failed";
+
+export interface ArenaProjectionResponse {
+  arena: {
+    id: string;
+    session_id: string;
+    status: string;
+    prompt: string;
+    harness_ids: string[];
+    model: string | null;
+    api_mode: string;
+    mode: string;
+    workspace: string | null;
+    attachment_ids: string[];
+    created_at: string;
+    updated_at: string;
+    child_runs: ArenaChildProjection[];
+    metadata: {
+      turn_count?: number;
+      verdict?: ArenaVerdict;
+      verdict_note?: string | null;
+      verdict_child_run_ids?: Array<string | null>;
+    };
+  };
+}
+
 export interface NativeProcessProjection {
   id: string;
   status: string;

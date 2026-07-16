@@ -1,6 +1,11 @@
 import { queryOptions } from "@tanstack/react-query";
 
-import { fetchCockpit, withQuery } from "./api";
+import {
+  type ArenaProjectionResponse,
+  type ArenaWorkspaceFileSearchResponse,
+  fetchCockpit,
+  withQuery,
+} from "./api";
 import {
   projectAutomation,
   projectEvaluation,
@@ -11,9 +16,35 @@ const rootKey = ["cockpit", "remaining-surfaces"] as const;
 
 export const remainingRequestKeys = {
   automation: () => [...rootKey, "automation"] as const,
+  arena: (arenaId: string) => [...rootKey, "arena", arenaId] as const,
+  arenaFiles: (query: string) => [...rootKey, "arena-files", query] as const,
   evaluation: () => [...rootKey, "evaluation"] as const,
   integrations: () => [...rootKey, "integrations"] as const,
 };
+
+export function arenaDetailOptions(arenaId: string) {
+  return queryOptions({
+    queryKey: remainingRequestKeys.arena(arenaId),
+    queryFn: ({ signal }) =>
+      fetchCockpit<ArenaProjectionResponse>(
+        `/api/arena/runs/${encodeURIComponent(arenaId)}`,
+        signal,
+      ),
+    staleTime: 2_000,
+  });
+}
+
+export function arenaWorkspaceFilesOptions(query: string) {
+  return queryOptions({
+    queryKey: remainingRequestKeys.arenaFiles(query),
+    queryFn: ({ signal }) =>
+      fetchCockpit<ArenaWorkspaceFileSearchResponse>(
+        withQuery("/api/workspace/tree", { workspace: ".", q: query, limit: 20 }),
+        signal,
+      ),
+    staleTime: 10_000,
+  });
+}
 
 export function automationSurfaceOptions() {
   return queryOptions({

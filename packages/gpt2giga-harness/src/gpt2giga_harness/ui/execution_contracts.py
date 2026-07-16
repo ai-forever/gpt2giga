@@ -218,6 +218,8 @@ _DURABLE_JOB_IDENTITIES = frozenset(
     {
         ("POST", "/api/agents/{agent_id}/run"),
         ("POST", "/api/arena/runs"),
+        ("POST", "/api/arena/runs/{arena_id}/children/{child_index}/retry"),
+        ("POST", "/api/arena/runs/{arena_id}/turns"),
         ("POST", "/api/evals/{eval_name}/runs"),
         ("POST", "/api/runs/{run_id}/fork"),
         ("POST", "/api/runs/{run_id}/replay"),
@@ -245,6 +247,7 @@ _NATIVE_ASYNC = frozenset(
 )
 _EXPLICIT_BOUNDED_ASYNC = frozenset(
     {
+        ("POST", "/api/arena/runs/{arena_id}/verdict"),
         ("POST", "/api/runs/{run_id}/promotions/apply"),
         ("POST", "/api/runs/{run_id}/promotions/preview"),
         ("POST", "/api/tool-servers/{server_id}/probe"),

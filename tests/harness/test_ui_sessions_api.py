@@ -846,6 +846,159 @@ def test_arena_api_creates_child_runs_without_shared_history(tmp_path):
     assert fetched.json()["arena"]["id"] == arena["id"]
 
 
+def test_arena_children_run_concurrently_and_follow_up_in_isolated_sessions(tmp_path):
+    barrier = threading.Barrier(2)
+    first = _ConcurrentArenaHarness("arena-concurrent-a", barrier)
+    second = _ConcurrentArenaHarness("arena-concurrent-b", barrier)
+    registry = HarnessRegistry()
+    registry.register(first)
+    registry.register(second)
+    client = _client(
+        config=HarnessConfig(data_dir=str(tmp_path / "data")),
+        registry=registry,
+        store=InMemoryHarnessSessionStore(),
+    )
+
+    created = client.post(
+        "/api/arena/runs",
+        json={
+            "prompt": "compare concurrently",
+            "harness_ids": ["arena-concurrent-a", "arena-concurrent-b"],
+        },
+    )
+
+    assert created.status_code == 200
+    arena = created.json()["arena"]
+    child_session_ids = [child["session_id"] for child in arena["child_runs"]]
+    assert len(set(child_session_ids)) == 2
+    assert arena["session_id"] not in child_session_ids
+    assert all(child["status"] == "succeeded" for child in arena["child_runs"])
+
+    followed_up = client.post(
+        f"/api/arena/runs/{arena['id']}/turns",
+        json={"prompt": "shared follow-up"},
+    )
+
+    assert followed_up.status_code == 200
+    updated = followed_up.json()["arena"]
+    assert updated["metadata"]["turn_count"] == 1
+    assert [request.prompt for request in first.requests] == [
+        "compare concurrently",
+        "shared follow-up",
+    ]
+    assert [request.prompt for request in second.requests] == [
+        "compare concurrently",
+        "shared follow-up",
+    ]
+    assert "arena-concurrent-a: compare concurrently" in [
+        message.content for message in first.requests[1].messages
+    ]
+    assert "arena-concurrent-b: compare concurrently" not in [
+        message.content for message in first.requests[1].messages
+    ]
+    assert all(child["bounded"] is True for child in updated["child_runs"])
+    assert all(len(child["messages"]) == 4 for child in updated["child_runs"])
+
+    verdict = client.post(
+        f"/api/arena/runs/{arena['id']}/verdict",
+        json={"verdict": "tie", "note": "same evidence"},
+    )
+    retried = client.post(
+        f"/api/arena/runs/{arena['id']}/children/0/retry",
+    )
+
+    assert verdict.status_code == 200
+    assert verdict.json()["arena"]["metadata"]["verdict"] == "tie"
+    assert len(verdict.json()["arena"]["metadata"]["verdict_child_run_ids"]) == 2
+    assert retried.status_code == 200
+    assert len(first.requests) == 3
+    assert len(second.requests) == 2
+
+
+def test_arena_workspace_files_share_one_frozen_attachment_identity(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "brief.md").write_text("shared evidence\n", encoding="utf-8")
+    data_dir = tmp_path / "data"
+    registry = HarnessRegistry()
+    first = _ArenaCaptureHarness("arena-attachment-a")
+    second = _ArenaCaptureHarness("arena-attachment-b")
+    registry.register(first)
+    registry.register(second)
+    store = FilesystemHarnessSessionStore(data_dir)
+    config = HarnessConfig(data_dir=str(data_dir))
+    client = _client(
+        config=config,
+        registry=registry,
+        store=store,
+    )
+
+    response = client.post(
+        "/api/arena/runs",
+        json={
+            "prompt": "compare the brief",
+            "harness_ids": ["arena-attachment-a", "arena-attachment-b"],
+            "workspace": str(workspace),
+            "workspace_paths": ["brief.md"],
+        },
+    )
+
+    assert response.status_code == 200
+    arena = response.json()["arena"]
+    assert len(arena["attachment_ids"]) == 1
+    attachment_id = arena["attachment_ids"][0]
+    worker = DurableJobWorker(config, registry=registry, worker_id="worker_arena_files")
+    assert worker.run_once() is True
+    assert worker.run_once() is True
+    assert first.requests[0].extra["attachment_ids"] == [attachment_id]
+    assert second.requests[0].extra["attachment_ids"] == [attachment_id]
+    assert (
+        first.requests[0].extra["attachments"][0]["sha256"]
+        == (second.requests[0].extra["attachments"][0]["sha256"])
+    )
+
+
+def test_arena_retry_queues_one_durable_child_and_rejects_active_source(tmp_path):
+    data_dir = tmp_path / "data"
+    config = HarnessConfig(data_dir=str(data_dir))
+    store = FilesystemHarnessSessionStore(data_dir)
+    runtime = RuntimeCoordinationStore(data_dir)
+    client = TestClient(
+        create_app(
+            config,
+            registry=create_default_registry(include_entry_points=False),
+            store=store,
+            runtime_store=runtime,
+        )
+    )
+    created = client.post(
+        "/api/arena/runs",
+        json={"prompt": "durable retry", "harness_ids": ["echo", "direct-chat"]},
+    )
+    assert created.status_code == 200
+    arena = created.json()["arena"]
+    source_run_id = arena["child_runs"][0]["run_id"]
+
+    active_retry = client.post(
+        f"/api/arena/runs/{arena['id']}/children/0/retry",
+    )
+    assert active_retry.status_code == 400
+    assert active_retry.json()["detail"] == "arena child is still active"
+
+    store.update_run(source_run_id, status="succeeded", finished_at=utc_now())
+    retried = client.post(
+        f"/api/arena/runs/{arena['id']}/children/0/retry",
+    )
+
+    assert retried.status_code == 200
+    retried_child = retried.json()["arena"]["child_runs"][0]
+    assert retried_child["run_id"] != source_run_id
+    assert retried_child["status"] == "queued"
+    job = runtime.find_job_for_run(retried_child["run_id"])
+    assert job is not None
+    assert job.origin == "manual"
+
+
 def test_arena_history_is_persisted_and_hidden_from_work_sessions(tmp_path):
     store = InMemoryHarnessSessionStore()
     registry = HarnessRegistry()
@@ -891,7 +1044,8 @@ def test_arena_history_is_persisted_and_hidden_from_work_sessions(tmp_path):
 
     assert history.status_code == 200
     assert [item["id"] for item in history.json()["arenas"]] == [created["id"]]
-    assert history.json()["arenas"][0]["child_runs"][0]["message"]["content"]
+    assert history.json()["arenas"][0]["prompt"] == ""
+    assert "messages" not in history.json()["arenas"][0]["child_runs"][0]
     assert [item["id"] for item in work_sessions.json()["sessions"]] == [normal["id"]]
     assert {item["id"] for item in all_sessions.json()["sessions"]} == {
         normal["id"],
@@ -1265,6 +1419,7 @@ class _ArenaCaptureHarness(BaseHarness):
             kind="test",
             description="Capture arena request",
             capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
+            supports_attachments=True,
         )
 
     def availability(self) -> Availability:
@@ -1281,6 +1436,22 @@ class _ArenaCaptureHarness(BaseHarness):
             text=f"{self.harness_id}: {request.prompt}",
             raw={"harness_id": self.harness_id},
         )
+
+
+class _ConcurrentArenaHarness(_ArenaCaptureHarness):
+    def __init__(self, harness_id: str, barrier: threading.Barrier) -> None:
+        super().__init__(harness_id)
+        self.barrier = barrier
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        self.requests.append(request)
+        if len(self.requests) <= 2:
+            self.barrier.wait(timeout=2)
+        return HarnessResult(ok=True, text=f"{self.harness_id}: {request.prompt}")
 
 
 class _FailingArenaHarness(BaseHarness):
