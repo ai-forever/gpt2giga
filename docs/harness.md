@@ -2053,6 +2053,40 @@ For a starting template:
 giga harness scaffold my-harness
 ```
 
+## User-State Backup and Runtime Export
+
+Before an upgrade or package rollback, stop every Cockpit process, durable
+worker, and active run that owns the selected data directory. Create the
+archive outside the Harness data directory and verify it before changing the
+installed package:
+
+```bash
+giga state backup --output ../gpt2giga-harness-state.zip
+giga state verify ../gpt2giga-harness-state.zip --json
+```
+
+The backup schema is versioned and content-addressed. Archive paths are
+relative, ZIP metadata is deterministic, SQLite databases are copied through
+consistent snapshots, and each retained file has a SHA-256 digest. Transient
+lock, WAL, SHM, and temporary files are omitted. Creation fails closed on
+symbolic links, unsupported file types, an existing destination, output inside
+the state directory, or any source change observed during capture.
+
+The archive is written atomically with mode `0600`, but it is not redacted: it
+can contain opt-in captured content, attachments, and managed configuration.
+Store it as private user state and do not attach it to an issue. Use the
+content-free coordination export for support instead:
+
+```bash
+giga runtime export --output /tmp/harness-runtime.json
+```
+
+`giga state backup` covers the configured Harness user data directory
+(`GPT2GIGA_HARNESS_DATA_DIR`, normally `~/.gpt2giga/harness`). Project-local
+`.giga/` directories remain outside that archive and belong in the project's
+own backup or version-control policy. This release does not provide automatic
+restore or state migration; those lifecycle contracts remain gated separately.
+
 ## Migration from the Combined Prerelease
 
 The previous branch-only combined prerelease exposed Harness modules below

@@ -190,6 +190,7 @@ from fastapi.testclient import TestClient
 import gpt2giga
 import gpt2giga_harness
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.state_backup import create_state_backup, verify_state_backup
 from gpt2giga_harness.ui.app import create_app
 from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 
@@ -229,6 +230,10 @@ harnesses = client.get("/api/harnesses")
 assert harnesses.status_code == 200
 ids = {item["spec"]["id"] for item in harnesses.json()["harnesses"]}
 assert {"direct-chat", "echo"} <= ids
+
+backup = installed_root.parent / "runtime-smoke-backup.zip"
+created = create_state_backup(data_dir, backup)
+assert created == verify_state_backup(backup)
 """
 
 

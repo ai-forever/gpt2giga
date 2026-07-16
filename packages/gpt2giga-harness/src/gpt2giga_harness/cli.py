@@ -141,6 +141,7 @@ from gpt2giga_harness.sessions.models import (
 )
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import new_id, utc_now
+from gpt2giga_harness.state_backup import create_state_backup, verify_state_backup
 from gpt2giga_harness.types import (
     HarnessCapability,
     HarnessRequest,
@@ -305,6 +306,19 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_export = runtime_subparsers.add_parser("export")
     runtime_export.add_argument("--output", default=None)
     runtime_export.set_defaults(handler=_handle_runtime_export)
+
+    state = subparsers.add_parser("state")
+    state_subparsers = state.add_subparsers(dest="state_command")
+
+    state_backup = state_subparsers.add_parser("backup")
+    state_backup.add_argument("--output", required=True)
+    state_backup.add_argument("--json", action="store_true")
+    state_backup.set_defaults(handler=_handle_state_backup)
+
+    state_verify = state_subparsers.add_parser("verify")
+    state_verify.add_argument("archive")
+    state_verify.add_argument("--json", action="store_true")
+    state_verify.set_defaults(handler=_handle_state_verify)
 
     worker = subparsers.add_parser("worker", parents=[common])
     worker_subparsers = worker.add_subparsers(dest="worker_command")
@@ -1016,6 +1030,29 @@ def _handle_runtime_export(args: argparse.Namespace, config: HarnessConfig) -> i
     )
     temp.replace(output)
     print(f"Exported runtime coordination state to {output}")
+    return 0
+
+
+def _handle_state_backup(args: argparse.Namespace, config: HarnessConfig) -> int:
+    result = create_state_backup(config.data_dir, args.output)
+    if args.json:
+        _print_json(result.to_dict())
+    else:
+        print(f"Backed up Harness state to {Path(args.output).expanduser()}")
+        print(f"SHA-256: {result.sha256}")
+        print(f"Files: {result.file_count}; bytes: {result.total_bytes}")
+    return 0
+
+
+def _handle_state_verify(args: argparse.Namespace, config: HarnessConfig) -> int:
+    del config
+    result = verify_state_backup(args.archive)
+    if args.json:
+        _print_json(result.to_dict())
+    else:
+        print(f"Verified Harness state backup: {Path(args.archive).expanduser()}")
+        print(f"SHA-256: {result.sha256}")
+        print(f"Files: {result.file_count}; bytes: {result.total_bytes}")
     return 0
 
 

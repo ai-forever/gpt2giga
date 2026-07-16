@@ -966,6 +966,39 @@ Adapter обязан явно описать execution modes, continuation, even
 attachments transport, tool/policy ownership, required executable и redaction
 boundaries. Не объявляйте capability, которую не подтверждает probe или test.
 
+## Резервная копия пользовательского state и runtime export
+
+Перед обновлением или откатом package остановите Cockpit, durable workers и
+активные runs, которые используют выбранный data directory. Создайте архив вне
+каталога Harness state и проверьте его до изменения установленной версии:
+
+```bash
+giga state backup --output ../gpt2giga-harness-state.zip
+giga state verify ../gpt2giga-harness-state.zip --json
+```
+
+Backup использует versioned content-addressed schema: относительные пути,
+детерминированные ZIP metadata, согласованные SQLite snapshots и SHA-256 для
+каждого файла. Transient lock, WAL, SHM и временные файлы не включаются.
+Создание fail-closed при symbolic link, неподдерживаемом типе файла,
+существующем destination, output внутри data directory или изменении source
+state во время capture.
+
+Архив записывается атомарно с mode `0600`, но не редактируется: в нём могут
+быть opt-in captured content, attachments и managed configuration. Храните его
+как приватный пользовательский state и не прикладывайте к issue. Для support
+используйте content-free coordination export:
+
+```bash
+giga runtime export --output /tmp/harness-runtime.json
+```
+
+`giga state backup` охватывает настроенный Harness user data directory
+(`GPT2GIGA_HARNESS_DATA_DIR`, обычно `~/.gpt2giga/harness`). Project-local
+`.giga/` остаётся вне архива и должно входить в backup/version-control policy
+самого проекта. Автоматические restore и state migration в этот slice не
+входят и остаются отдельными lifecycle gates.
+
 ## Миграция со старого combined prerelease
 
 Gateway и Harness теперь два самостоятельных дистрибутива и namespace. Перед
@@ -979,7 +1012,7 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-Текущая metadata `gpt2giga-harness==0.0.1a2` требует ровно
+Текущая metadata `gpt2giga-harness==0.0.1a4` требует ровно
 `gpt2giga==0.2.3a2`. Старый import `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
 перезаписывает `~/.gpt2giga/harness`, `.giga/` или vendor-owned CLI homes.

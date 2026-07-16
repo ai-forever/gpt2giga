@@ -36,7 +36,7 @@ giga doctor
 giga ui
 ```
 
-The current `gpt2giga-harness==0.0.1a3` metadata depends exactly on
+The current `gpt2giga-harness==0.0.1a4` metadata depends exactly on
 `gpt2giga==0.2.3a2`. Installing only `gpt2giga` never adds Harness commands or
 the `gpt2giga_harness` namespace.
 
@@ -174,6 +174,30 @@ my-harness = "my_package.my_harness:MyHarness"
 
 Use `giga harness scaffold`, `giga harness validate`, and
 `giga harness inspect` to develop and diagnose an adapter.
+
+## Back up user state
+
+Stop the Cockpit, durable workers, and active runs before taking an offline
+backup. Write the archive outside `~/.gpt2giga/harness` and verify it before an
+upgrade or package rollback:
+
+```sh
+giga state backup --output ../gpt2giga-harness-state.zip
+giga state verify ../gpt2giga-harness-state.zip --json
+```
+
+The versioned archive preserves Harness-owned files and consistent SQLite
+snapshots with deterministic hashes. It excludes transient lock, WAL, SHM, and
+temporary files, rejects symbolic links, and fails if source state changes
+during capture. The archive is created with mode `0600`, but it may still
+contain opt-in captured content, attachments, or managed configuration; treat
+it as private state, not as a support bundle. Project-local `.giga/` directories
+remain separate and should stay in the project backup or version-control plan.
+
+`giga runtime export` remains the redaction-safe coordination export for issue
+reports. Automated restore and stored-state migration are not part of this
+backup command yet; preserve the archive for the documented offline rollback
+procedure of the target release.
 
 ## Upgrade from the combined prerelease
 
