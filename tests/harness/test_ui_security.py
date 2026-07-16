@@ -25,7 +25,8 @@ def test_local_shell_issues_strict_httponly_session_cookie():
 
     assert denied.status_code == 401
     assert response.status_code == 200
-    cookie = response.headers["set-cookie"]
+    assert response.history[0].headers["location"] == "/cockpit-v2/work"
+    cookie = response.history[0].headers["set-cookie"]
     assert "gpt2giga_harness_session=" in cookie
     assert "HttpOnly" in cookie
     assert "SameSite=strict" in cookie
@@ -47,7 +48,8 @@ def test_local_arena_deep_link_issues_browser_session_cookie():
     response = client.get("/arena")
 
     assert response.status_code == 200
-    assert "gpt2giga_harness_session=" in response.headers["set-cookie"]
+    assert response.history[0].headers["location"] == "/cockpit-v2/evaluation/arena"
+    assert "gpt2giga_harness_session=" in response.history[0].headers["set-cookie"]
     assert client.get("/api/defaults").status_code == 200
 
 

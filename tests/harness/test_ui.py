@@ -46,7 +46,7 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     )
     client = TestClient(app)
 
-    index_response = client.get("/")
+    index_response = client.get("/legacy")
     css_response = client.get("/assets/app.css")
     js_response = client.get("/assets/app.js")
     favicon_response = client.get("/assets/favicon.ico")
@@ -1244,7 +1244,7 @@ def test_ui_index_contains_control_panel_elements():
     )
     client = TestClient(app)
 
-    response = client.get("/")
+    response = client.get("/legacy")
 
     assert response.status_code == 200
     html = response.text

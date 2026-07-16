@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import secrets
 from typing import Any, Callable, Mapping
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -38,6 +39,7 @@ router = APIRouter(route_class=ConformantAPIRoute)
 _DEFAULT_PAGE_BYTES = 256 * 1024
 _MAX_PAGE_BYTES = 1024 * 1024
 _ITEM_TEXT_BYTES = 32 * 1024
+_REVISION_NAMESPACE = secrets.token_hex(16)
 
 
 @router.get("/api/cockpit/sessions")
@@ -608,7 +610,9 @@ def _scope_hash(*parts: Any) -> str:
 
 
 def _revision(*parts: str) -> str:
-    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        "\0".join((_REVISION_NAMESPACE, *parts)).encode("utf-8")
+    ).hexdigest()
 
 
 def _encode_cursor(kind: str, scope: str, **payload: Any) -> str:

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.ui.routers.schemas import (
@@ -42,6 +43,15 @@ _COCKPIT_V2_SHELL_HEADERS = {
     "X-Content-Type-Options": "nosniff",
 }
 
+_LEGACY_ROUTE_REDIRECTS = {
+    "": "/cockpit-v2/work",
+    "agents": "/cockpit-v2/automation/agents",
+    "approvals": "/cockpit-v2/runs",
+    "arena": "/cockpit-v2/evaluation/arena",
+    "evaluate": "/cockpit-v2/evaluation/evals",
+    "tools": "/cockpit-v2/integrations/mcp",
+}
+
 
 def _accepted_encoding(value: str | None) -> str:
     """Select a supported precompressed variant, honoring explicit q=0."""
@@ -76,6 +86,26 @@ def _cockpit_unavailable(exc: CockpitV2UnavailableError) -> HTTPException:
             "installation is repaired"
         ),
     )
+
+
+def _default_cockpit_path(spa_path: str) -> str:
+    """Map the retired default shell routes onto canonical Cockpit V2 URLs."""
+    normalized = spa_path.strip("/")
+    static_redirect = _LEGACY_ROUTE_REDIRECTS.get(normalized)
+    if static_redirect is not None:
+        return static_redirect
+    route, _, selected_id = normalized.partition("/")
+    if route in {"work", "runs"}:
+        return f"/cockpit-v2/{normalized}"
+    if route == "workflows":
+        target = "/cockpit-v2/automation/workflows"
+    elif route == "scheduled":
+        target = "/cockpit-v2/automation/schedules"
+    else:  # pragma: no cover - guarded by _SPA_PATH before this helper is called
+        raise ValueError(f"unsupported legacy route: {normalized}")
+    if not selected_id:
+        return target
+    return f"{target}?selected={quote(selected_id, safe='')}"
 
 
 def create_shell_router(security: HarnessUISecurity) -> APIRouter:
@@ -182,12 +212,16 @@ def create_shell_router(security: HarnessUISecurity) -> APIRouter:
         return HTMLResponse(INDEX_HTML, headers={"Cache-Control": "no-cache"})
 
     @router.get(
-        "/{spa_path:path}", response_class=HTMLResponse, include_in_schema=False
+        "/{spa_path:path}", response_class=RedirectResponse, include_in_schema=False
     )
-    def spa_shell(spa_path: str) -> HTMLResponse:
+    def spa_shell(spa_path: str) -> RedirectResponse:
         normalized = spa_path.strip("/")
         if normalized and _SPA_PATH.fullmatch(normalized) is None:
             raise HTTPException(status_code=404, detail="Not found")
-        return HTMLResponse(INDEX_HTML, headers={"Cache-Control": "no-cache"})
+        return RedirectResponse(
+            _default_cockpit_path(normalized),
+            status_code=307,
+            headers={"Cache-Control": "no-cache"},
+        )
 
     return router

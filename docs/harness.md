@@ -239,12 +239,16 @@ giga ui
 
 Then open `http://127.0.0.1:8091/`. A useful first tour is:
 
-1. Confirm the current repository and branch in **Work**.
+1. Confirm the current project and selected session in **Workbench**.
 2. Select `echo` and submit a harmless prompt.
 3. Open **Runs** and inspect the attempt, trace, and stored redacted payloads.
-4. Use **Arena** to compare two available harnesses with the same task.
-5. Inspect **Approvals**, **Agents**, **Workflows**, **Evaluate**, **Tools**, and
-   **Scheduled** before enabling edits or unattended execution.
+4. Open **Evaluation → Arena** to compare available harnesses on one task.
+5. Inspect **Approvals**, **Attention**, **Automation**, **Evaluation**, and
+   **Integrations** before enabling edits or unattended execution.
+
+Cockpit V2 is the default local UI. The previous no-build cockpit remains at
+`http://127.0.0.1:8091/legacy` for one release-level rollback window; switching
+between the two does not migrate or rewrite Harness runtime state.
 
 `giga ui` starts a local durable worker automatically when no online worker is
 registered. Use `giga ui --no-start-worker` when a separately supervised worker

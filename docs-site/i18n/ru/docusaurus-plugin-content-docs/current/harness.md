@@ -222,12 +222,17 @@ giga ui
 
 Рекомендуемый первый маршрут:
 
-1. В **Work** проверьте название проекта и текущую Git branch.
+1. В **Workbench** проверьте текущий проект и выбранную сессию.
 2. Выберите `echo` и отправьте безопасный prompt.
 3. В **Runs** откройте attempt, trace и сохранённые redacted payloads.
-4. В **Arena** сравните два доступных harness на одной задаче.
-5. Изучите **Approvals**, **Agents**, **Workflows**, **Evaluate**, **Tools** и
-   **Scheduled**, прежде чем включать edits или unattended execution.
+4. В **Evaluation → Arena** сравните доступные harness на одной задаче.
+5. Изучите **Approvals**, **Attention**, **Automation**, **Evaluation** и
+   **Integrations**, прежде чем включать edits или unattended execution.
+
+Cockpit V2 является локальным UI по умолчанию. Предыдущий no-build cockpit
+остаётся доступен по адресу `http://127.0.0.1:8091/legacy` на release-level
+период отката; переключение между ними не мигрирует и не переписывает runtime
+state Harness.
 
 Если worker уже запущен отдельно или UI нужен только для просмотра состояния:
 

@@ -2065,6 +2065,7 @@ def create_app(
     async def run_events_stream(
         run_id: str,
         after_id: str | None = Query(default=None),
+        tail_only: bool = Query(default=False),
         last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
     ) -> StreamingResponse:
         try:
@@ -2081,6 +2082,7 @@ def create_app(
                 store,
                 initial_run,
                 _optional_text(last_event_id) or _optional_text(after_id),
+                tail_only=tail_only,
             )
         except ValueError as exc:
             subscription.close()
@@ -3020,8 +3022,18 @@ def _resolve_run_stream_cursor(
     store: HarnessSessionStore,
     run: HarnessRun,
     value: str | None,
+    *,
+    tail_only: bool = False,
 ) -> EventCursorPosition:
     if value is None:
+        if tail_only:
+            resolver = getattr(store, "event_tail_offset", None)
+            if not callable(resolver):
+                raise ValueError("session store does not support durable event tails")
+            return EventCursorPosition(
+                offset=resolver(run.session_id),
+                terminal_seen=False,
+            )
         return EventCursorPosition(offset=0, terminal_seen=False)
     if value.startswith("hc1."):
         return _decode_run_stream_cursor(value, run)

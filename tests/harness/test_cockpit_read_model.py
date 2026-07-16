@@ -8,6 +8,7 @@ from gpt2giga_harness.sessions.models import HarnessMessage, HarnessStoredEvent
 from gpt2giga_harness.sessions.store import new_id, utc_now
 from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
 from gpt2giga_harness.ui.app import create_app
+from gpt2giga_harness.ui.routers import cockpit as cockpit_router
 
 
 def _app(tmp_path):
@@ -59,6 +60,13 @@ def test_cockpit_session_pages_are_indexed_cursor_bound_and_etagged(
             ).status_code
             == 304
         )
+        monkeypatch.setattr(cockpit_router, "_REVISION_NAMESPACE", "restarted")
+        after_restart = client.get(
+            "/api/cockpit/sessions?limit=2",
+            headers={"If-None-Match": first.headers["etag"]},
+        )
+        assert after_restart.status_code == 200
+        assert after_restart.headers["etag"] != first.headers["etag"]
 
         second = client.get(
             "/api/cockpit/sessions",

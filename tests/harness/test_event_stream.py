@@ -65,6 +65,8 @@ def test_event_tail_pages_are_offset_bounded_and_run_filtered(tmp_path, store_ki
             )
         )
 
+    assert store.event_tail_offset(session.id) > 0
+
     page = store.list_event_tail_page(
         session.id,
         run_id="run-one",

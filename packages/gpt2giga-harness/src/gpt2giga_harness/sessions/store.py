@@ -124,6 +124,29 @@ class HarnessSessionStore(Protocol):
     def append_event(self, event: HarnessStoredEvent) -> HarnessStoredEvent:
         """Append one event."""
 
+    def event_tail_offset(self, session_id: str) -> int:
+        """Return the durable append offset after all retained session events."""
+
+    def list_event_tail_page(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        offset: int = 0,
+        limit: int = 100,
+        max_bytes: int = 1024 * 1024,
+    ) -> EventTailPage:
+        """Return a bounded run-filtered page from one durable append offset."""
+
+    def resolve_event_cursor(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        event_id: str,
+    ) -> EventCursorPosition | None:
+        """Resolve one retained event identity to its durable append offset."""
+
     def list_events(
         self,
         session_id: str,
@@ -352,6 +375,11 @@ class InMemoryHarnessSessionStore:
         self._events.setdefault(event.session_id, []).append(stored)
         self.event_broker.publish(stored)
         return stored
+
+    def event_tail_offset(self, session_id: str) -> int:
+        """Return the in-memory append offset without replaying retained events."""
+        self.get_session(session_id)
+        return len(self._events.get(session_id, ()))
 
     def list_event_tail_page(
         self,

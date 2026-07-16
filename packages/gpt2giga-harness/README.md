@@ -94,15 +94,17 @@ needed; pass `--no-start-worker` when another supervisor owns that lifecycle.
 The default loopback binding is intentional. Remote binding requires explicit
 authentication and remote-access opt-in.
 
-After the first run starts, Work reveals a compact Run → Evidence → Approval /
-worktree → Reuse / automation path. Once
-the run reaches a terminal state, **Open evidence** deep-links to that exact
-run's retained trace in Runs Center; prompts, responses, and workspace paths
-are not copied into the transition summary. For a retained isolated patch,
-**Review worktree** opens that run's Diff inspector, where apply and approval
-remain separate explicit operator actions. A successful run with no pending
-worktree review enables **Reuse run**, which opens the exact run's existing
-provenance/promotion inspector. Promotion preview/apply and later scheduling
+The root URL opens Cockpit V2. During its release-level rollback window, the
+previous no-build cockpit remains available at `http://127.0.0.1:8091/legacy`
+without migrating or rewriting Harness runtime state.
+
+After the first run starts, Workbench reveals a compact Run → Evidence → Review
+→ Reuse path. Once the run reaches a terminal state, the exact retained trace
+is available in Runs; prompts, responses, and workspace paths are not copied
+into the transition summary. For a retained isolated patch, the Review tab
+opens that run's diff while apply and approval remain separate explicit
+operator actions. An eligible successful run exposes its existing provenance
+and promotion state under Reuse. Promotion preview/apply and later scheduling
 remain separate explicit actions.
 
 Useful orientation commands:

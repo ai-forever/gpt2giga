@@ -1,0 +1,1 @@
+import{P as e,S as t}from"./index-Cf07PxUL.js";import{t as n}from"./InspectorFrame-Bkn9wlet.js";var r=e();function i({locale:e}){return(0,r.jsx)(n,{locale:e,title:t(e,`editor`),children:t(e,`editorDescription`)})}export{i as EditorInspector};

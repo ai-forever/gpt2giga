@@ -56,18 +56,22 @@ def test_cockpit_v2_loader_rejects_unknown_and_direct_compressed_paths():
         load_cockpit_v2_asset("../manifest.json")
 
 
-def test_cockpit_v2_routes_are_opt_in_and_legacy_remains_default():
+def test_cockpit_v2_is_default_and_legacy_remains_explicit_fallback():
     client = _client()
 
-    legacy_default = client.get("/")
+    default_redirect = client.get("/", follow_redirects=False)
+    cockpit_default = client.get("/")
     legacy_recovery = client.get("/legacy/runs/run_123")
     cockpit = client.get("/cockpit-v2/work/session_123")
     unknown = client.get("/cockpit-v2/unknown")
 
-    assert legacy_default.status_code == 200
-    assert "gpt2giga Harness — Cockpit V2" not in legacy_default.text
+    assert default_redirect.status_code == 307
+    assert default_redirect.headers["location"] == "/cockpit-v2/work"
+    assert default_redirect.headers["cache-control"] == "no-cache"
+    assert cockpit_default.status_code == 200
+    assert "gpt2giga Harness — Cockpit V2" in cockpit_default.text
     assert legacy_recovery.status_code == 200
-    assert legacy_recovery.text == legacy_default.text
+    assert "gpt2giga Harness — Cockpit V2" not in legacy_recovery.text
     assert cockpit.status_code == 200
     assert "gpt2giga Harness — Cockpit V2" in cockpit.text
     assert cockpit.headers["content-security-policy"].startswith(
@@ -75,6 +79,35 @@ def test_cockpit_v2_routes_are_opt_in_and_legacy_remains_default():
     )
     assert cockpit.headers["x-content-type-options"] == "nosniff"
     assert unknown.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("legacy_path", "cockpit_path"),
+    (
+        ("/work", "/cockpit-v2/work"),
+        ("/work/session_123", "/cockpit-v2/work/session_123"),
+        ("/runs/run_123", "/cockpit-v2/runs/run_123"),
+        (
+            "/workflows/workflow_123",
+            "/cockpit-v2/automation/workflows?selected=workflow_123",
+        ),
+        (
+            "/scheduled/schedule_123",
+            "/cockpit-v2/automation/schedules?selected=schedule_123",
+        ),
+        ("/agents", "/cockpit-v2/automation/agents"),
+        ("/arena", "/cockpit-v2/evaluation/arena"),
+        ("/evaluate", "/cockpit-v2/evaluation/evals"),
+        ("/tools", "/cockpit-v2/integrations/mcp"),
+        ("/approvals", "/cockpit-v2/runs"),
+    ),
+)
+def test_legacy_default_deep_links_redirect_locally(legacy_path, cockpit_path):
+    response = _client().get(legacy_path, follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == cockpit_path
+    assert response.headers["cache-control"] == "no-cache"
 
 
 @pytest.mark.parametrize(

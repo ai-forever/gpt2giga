@@ -102,11 +102,18 @@ describe("run event stream store", () => {
       onmessage: null,
       onopen: null,
     };
+    let streamUrl = "";
     const store = new RunEventStreamStore({
-      createEventSource: () => source,
+      createEventSource: (url) => {
+        streamUrl = url;
+        return source;
+      },
     });
 
     const cleanup = store.connect("run one");
+    expect(streamUrl).toBe(
+      "/api/runs/run%20one/events/stream?tail_only=true",
+    );
     source.onopen?.(new Event("open"));
     listeners.get("resnapshot")?.({
       data: JSON.stringify({

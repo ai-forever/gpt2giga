@@ -411,6 +411,12 @@ class FilesystemHarnessSessionStore:
         self.event_broker.publish(stored)
         return stored
 
+    def event_tail_offset(self, session_id: str) -> int:
+        """Return the JSONL byte offset without reading retained event rows."""
+        self.get_session(session_id)
+        path = self._session_dir(session_id) / EVENTS_FILE
+        return path.stat().st_size if path.exists() else 0
+
     def list_event_tail_page(
         self,
         session_id: str,

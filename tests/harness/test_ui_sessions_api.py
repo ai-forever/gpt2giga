@@ -234,6 +234,45 @@ def test_run_event_stream_synthesizes_terminal_event_for_legacy_run():
     assert '"synthetic": true' in text
 
 
+def test_run_event_stream_tail_only_skips_history_and_closes_with_terminal():
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Bounded live tail")
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="hello",
+        model=None,
+        api_mode=session.default_api_mode,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=None,
+        status="succeeded",
+    )
+    store.append_event(
+        HarnessStoredEvent(
+            id="evt-retained-terminal",
+            session_id=session.id,
+            run_id=run.id,
+            type=HarnessEventType.RUN_FINISHED.value,
+            message="retained terminal",
+            payload={"status": "succeeded"},
+            created_at=utc_now(),
+        )
+    )
+    client = _client(store=store)
+
+    with client.stream(
+        "GET",
+        f"/api/runs/{run.id}/events/stream?tail_only=true",
+    ) as response:
+        assert response.status_code == 200
+        text = "".join(response.iter_text())
+
+    frames = _sse_frames(text)
+    assert [frame["data"]["id"] for frame in frames] == [f"evt_terminal_{run.id}"]
+    assert frames[0]["data"]["payload"]["synthetic"] is True
+
+
 def test_run_event_stream_reconnects_from_opaque_cursor_without_gap_or_duplicate():
     store = InMemoryHarnessSessionStore()
     session = store.create_session(title="Reconnect")

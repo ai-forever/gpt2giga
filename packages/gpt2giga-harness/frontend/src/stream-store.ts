@@ -130,7 +130,7 @@ export class RunEventStreamStore {
       resnapshotUrl: null,
     });
     const source = this.createEventSource(
-      `/api/runs/${encodeURIComponent(runId)}/events/stream`,
+      `/api/runs/${encodeURIComponent(runId)}/events/stream?tail_only=true`,
     );
     this.source = source;
     source.onopen = () => {
