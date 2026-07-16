@@ -147,15 +147,18 @@ def test_worktree_git_readiness_blocks_edit_but_not_current_read(
     assert edit_by_id["git-readiness"]["remediation"][0]["command"] == "git init"
 
 
-def test_selected_route_probe_failure_becomes_redacted_block(monkeypatch, tmp_path):
+def test_selected_model_discovery_failure_becomes_redacted_block(monkeypatch, tmp_path):
     registry = HarnessRegistry()
     registry.register(_AgentHarness(available=True))
     _ready_proxy(monkeypatch)
     monkeypatch.setattr(
         readiness.proxy,
-        "probe_json_route",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            TimeoutError("password=readiness-secret-value")
+        "discover_models",
+        lambda *_args, **_kwargs: proxy.ModelDiscovery(
+            ok=False,
+            models=(),
+            source="/v2/models",
+            error="password=readiness-secret-value",
         ),
     )
 
@@ -208,6 +211,13 @@ def test_preflight_combines_readiness_block_with_content_safety_report():
 def _ready_proxy(monkeypatch):
     monkeypatch.setattr(
         readiness.proxy,
+        "probe_json_route",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("execution readiness must not call Chat Completions")
+        ),
+    )
+    monkeypatch.setattr(
+        readiness.proxy,
         "health_check",
         lambda config: proxy.ProxyHealth(
             ok=True,
@@ -223,12 +233,11 @@ def _ready_proxy(monkeypatch):
     )
     monkeypatch.setattr(
         readiness.proxy,
-        "probe_json_route",
-        lambda _config, path, **_kwargs: proxy.RouteProbe(
+        "discover_models",
+        lambda _config, _api_mode, **_kwargs: proxy.ModelDiscovery(
             ok=True,
-            path=path,
-            method="POST",
-            status_code=422,
+            models=("GigaChat-2-Max",),
+            source="/v2/models",
         ),
     )
 

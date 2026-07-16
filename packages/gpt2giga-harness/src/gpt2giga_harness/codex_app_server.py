@@ -926,6 +926,19 @@ def _tool_result(item: Mapping[str, Any]) -> Any:
         value = item.get(key)
         if value not in (None, "", (), [], {}):
             return value
+    if str(item.get("status") or "").lower() in {"failed", "error"}:
+        failure = {
+            key: item[key]
+            for key in (
+                "exitCode",
+                "exit_code",
+                "stderr",
+                "failureReason",
+                "failure_reason",
+            )
+            if item.get(key) not in (None, "", (), [], {})
+        }
+        return failure or {"error": "Tool failed without diagnostic output."}
     return None
 
 

@@ -141,14 +141,13 @@ def _selected_proxy_checks(
 ) -> list[dict[str, Any]]:
     health = proxy.health_check(config)
     sidecar = proxy.sidecar_preflight(config.to_context())
-    if model is not None or config.default_model is not None:
-        models = proxy.ModelDiscovery(
-            ok=True,
-            models=tuple(item for item in (model, config.default_model) if item),
-            source="selected execution plan",
+    if health.ok:
+        models = proxy.discover_models(
+            config,
+            api_mode,
+            include_compat_paths=False,
+            include_fallback=False,
         )
-    elif health.ok:
-        models = proxy.discover_models(config, api_mode)
     else:
         models = proxy.ModelDiscovery(
             ok=False,
@@ -156,22 +155,21 @@ def _selected_proxy_checks(
             source="proxy unavailable",
             error="model discovery skipped until the selected proxy is reachable",
         )
-    route_path = f"/{api_mode.value}/chat/completions"
-    route_probes: dict[str, proxy.RouteProbe] = {}
-    if health.ok:
-        try:
-            route_probes[route_path] = proxy.probe_json_route(
-                config,
-                route_path,
-                model=model or config.default_model,
-            )
-        except Exception as exc:
-            route_probes[route_path] = proxy.RouteProbe(
-                ok=False,
-                path=route_path,
-                method="POST",
-                error=f"route readiness probe failed: {exc}",
-            )
+    route_path = f"/{api_mode.value}/models"
+    route_probes = {
+        route_path: proxy.RouteProbe(
+            ok=models.ok,
+            path=route_path,
+            method="GET",
+            status_code=200 if models.ok else None,
+            detail=(
+                "authenticated model discovery accepted"
+                if models.ok
+                else "authenticated model discovery failed"
+            ),
+            error=models.error,
+        )
+    }
     projected = _proxy_checks(
         config,
         health,

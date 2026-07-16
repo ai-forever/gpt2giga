@@ -1,5 +1,7 @@
 import subprocess
 from pathlib import Path
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -380,17 +382,22 @@ def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):
     runner = _runner(_CaptureHarness())
     session = runner.create_session(default_harness_id="capture")
     captured = {}
+    request_started = threading.Event()
+    release_request = threading.Event()
 
     def request_json(method, url, *, payload, api_key, timeout):
         captured.update(
             method=method, url=url, payload=payload, api_key=api_key, timeout=timeout
         )
+        request_started.set()
+        assert release_request.wait(timeout=2)
         return {"choices": [{"message": {"content": "Починить стрим чата"}}]}
 
     monkeypatch.setattr(
         "gpt2giga_harness.session_runner.proxy.request_json", request_json
     )
 
+    started_at = time.monotonic()
     result = runner.run_in_session(
         session.id,
         {
@@ -403,7 +410,15 @@ def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):
         },
     )
 
-    assert result.session.title == "Починить стрим чата"
+    assert request_started.wait(timeout=1)
+    assert time.monotonic() - started_at < 1
+    assert result.session.title == "Untitled session"
+    release_request.set()
+    deadline = time.monotonic() + 2
+    while runner.store.get_session(session.id).title == "Untitled session":
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    assert runner.store.get_session(session.id).title == "Починить стрим чата"
     assert captured["payload"]["model"] == "GigaChat-3-Lightning"
     assert captured["url"].endswith("/v2/chat/completions")
 

@@ -212,6 +212,20 @@ def test_reasoning_usage_and_tool_result_are_normalized_for_workbench():
             }
         },
     )
+    failed_tool, _ = _normalize_notification(
+        "item/completed",
+        {
+            "item": {
+                "id": "tool-2",
+                "type": "commandExecution",
+                "command": "ls missing",
+                "cwd": "/workspace",
+                "status": "failed",
+                "exitCode": 2,
+                "stderr": "No such file or directory",
+            }
+        },
+    )
 
     assert reasoning is not None
     assert reasoning.type == "reasoning_delta"
@@ -230,6 +244,12 @@ def test_reasoning_usage_and_tool_result_are_normalized_for_workbench():
     }
     assert tool is not None
     assert tool.payload["result"] == "/workspace\n"
+    assert failed_tool is not None
+    assert failed_tool.payload["status"] == "failed"
+    assert failed_tool.payload["result"] == {
+        "exitCode": 2,
+        "stderr": "No such file or directory",
+    }
 
 
 class _ApprovalAppServerClient(_FakeAppServerClient):

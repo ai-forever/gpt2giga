@@ -197,9 +197,7 @@ def _proxy_checks(
             ),
         ),
     ]
-    selected_path = (
-        f"/{selected_api_mode or config.default_api_mode.value}/chat/completions"
-    )
+    selected_mode = selected_api_mode or config.default_api_mode.value
     for path in route_paths:
         route = route_probes.get(path)
         status = (
@@ -208,7 +206,7 @@ def _proxy_checks(
             else "degraded"
             if route is None and sidecar.ok
             else "blocked"
-            if path == selected_path
+            if path.split("/")[1] == selected_mode
             else "degraded"
         )
         checks.append(

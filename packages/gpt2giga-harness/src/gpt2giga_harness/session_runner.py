@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
+import threading
 from typing import Any, Mapping
 
 from gpt2giga_harness import proxy
@@ -53,6 +54,7 @@ from gpt2giga_harness.sessions.models import (
 )
 from gpt2giga_harness.sessions.store import (
     HarnessSessionStore,
+    SessionNotFoundError,
     new_id,
     title_from_prompt,
     utc_now,
@@ -233,6 +235,7 @@ class HarnessSessionRunner:
         """Prepare one durable headless run without executing its harness."""
         session = self.store.get_session(session_id)
         options = self._run_options(payload, session=session)
+        self._schedule_session_title(session, options)
         if options["invocation_mode"].value != "headless":
             raise ValueError("durable jobs currently support headless runs only")
         report = self.preflight(payload, session_id=session_id, durable=True)
@@ -357,10 +360,11 @@ class HarnessSessionRunner:
             if isinstance(queued_preflight, Mapping):
                 queued_readiness = queued_preflight.get("readiness")
                 if isinstance(queued_readiness, Mapping):
-                    # Durable submission already performed the route probe before
-                    # creating this queued run. Reuse that immutable admission
-                    # evidence instead of issuing a duplicate Chat Completions ping.
+                    # Durable submission already performed admission checks before
+                    # creating this queued run. Reuse that immutable evidence.
                     readiness = dict(queued_readiness)
+        if existing_run_id is None:
+            self._schedule_session_title(session, options)
         if readiness is None:
             readiness = self._execution_readiness(options, durable=durable)
         preflight = build_preflight_report(
@@ -822,16 +826,11 @@ class HarnessSessionRunner:
             session_metadata.pop("app_server_fork", None)
         if session_metadata:
             session_patch["metadata"] = session_metadata
-        if session.title == "Untitled session":
-            session_patch["title"] = (
-                _generate_session_title(
-                    self.config,
-                    options["prompt"],
-                    model=_optional_text(options["extra"].get("session_title_model")),
-                )
-                if _generate_session_title_requested(options["extra"])
-                else title_from_prompt(options["prompt"])
-            )
+        if (
+            session.title == "Untitled session"
+            and not _generate_session_title_requested(options["extra"])
+        ):
+            session_patch["title"] = title_from_prompt(options["prompt"])
         updated_session = self.store.update_session(session.id, **session_patch)
         self._append_event(
             session.id,
@@ -977,6 +976,34 @@ class HarnessSessionRunner:
             durable=durable,
             dry_run=bool(_mapping(options["extra"]).get("dry_run")),
         )
+
+    def _schedule_session_title(
+        self,
+        session: HarnessSession,
+        options: Mapping[str, Any],
+    ) -> None:
+        """Generate the first UI title off the run's critical path."""
+        if session.title != "Untitled session" or not _generate_session_title_requested(
+            options["extra"]
+        ):
+            return
+        prompt = str(options["prompt"])
+        model = _optional_text(options["extra"].get("session_title_model"))
+
+        def generate() -> None:
+            try:
+                title = _generate_session_title(self.config, prompt, model=model)
+                current = self.store.get_session(session.id)
+                if current.title == "Untitled session":
+                    self.store.update_session(session.id, title=title)
+            except (OSError, SessionNotFoundError, ValueError):
+                return
+
+        threading.Thread(
+            target=generate,
+            name=f"harness-session-title-{session.id}",
+            daemon=True,
+        ).start()
 
     def _load_attachments(
         self,

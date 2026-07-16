@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import re
 import threading
+from time import monotonic
 from typing import Any, Mapping
 
 from fastapi import Body, FastAPI, Header, HTTPException, Query
@@ -263,6 +264,7 @@ from gpt2giga_harness.workspace import (
 
 NATIVE_SUBMIT_KEY_DELAY_SECONDS = 0.05
 RUN_EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
+RUN_EVENT_STREAM_POLL_SECONDS = 0.1
 
 
 @dataclass
@@ -2091,6 +2093,7 @@ def create_app(
         async def stream_events():
             current_offset = cursor_position.offset
             terminal_event_seen = cursor_position.terminal_seen
+            next_heartbeat_at = monotonic() + RUN_EVENT_STREAM_HEARTBEAT_SECONDS
             try:
                 while True:
                     try:
@@ -2146,7 +2149,7 @@ def create_app(
                             cursor,
                         )
                         break
-                    signal = await subscription.wait(RUN_EVENT_STREAM_HEARTBEAT_SECONDS)
+                    signal = await subscription.wait(RUN_EVENT_STREAM_POLL_SECONDS)
                     cursor = _encode_run_stream_cursor(
                         current_run,
                         current_offset,
@@ -2154,8 +2157,11 @@ def create_app(
                     )
                     if signal is StreamSignal.RESNAPSHOT_REQUIRED:
                         yield _run_resnapshot_sse(current_run, cursor)
-                    elif signal is None:
+                    elif signal is None and monotonic() >= next_heartbeat_at:
                         yield ": heartbeat\n\n"
+                        next_heartbeat_at = (
+                            monotonic() + RUN_EVENT_STREAM_HEARTBEAT_SECONDS
+                        )
             finally:
                 subscription.close()
 

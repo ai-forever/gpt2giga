@@ -1,1 +1,0 @@
-import{T as e,z as t}from"./index-BsquWqwN.js";import{t as n}from"./InspectorFrame-Y-APY6UR.js";var r=t();function i({locale:t}){return(0,r.jsx)(n,{locale:t,title:e(t,`terminal`),children:e(t,`terminalDescription`)})}export{i as TerminalInspector};

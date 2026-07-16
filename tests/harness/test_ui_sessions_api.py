@@ -2,10 +2,12 @@ import base64
 import hashlib
 import json
 import subprocess
+import threading
 import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.harnesses.base import BaseHarness
@@ -21,6 +23,7 @@ from gpt2giga_harness.sessions.models import HarnessStoredEvent
 from gpt2giga_harness.sessions.store import utc_now
 from gpt2giga_harness.types import (
     Availability,
+    GigaChatApiMode,
     HarnessCapability,
     HarnessContext,
     HarnessRequest,
@@ -271,6 +274,72 @@ def test_run_event_stream_tail_only_skips_history_and_closes_with_terminal():
     frames = _sse_frames(text)
     assert [frame["data"]["id"] for frame in frames] == [f"evt_terminal_{run.id}"]
     assert frames[0]["data"]["payload"]["synthetic"] is True
+
+
+@pytest.mark.parametrize("api_mode", [GigaChatApiMode.V1, GigaChatApiMode.V2])
+def test_run_event_stream_polls_cross_process_filesystem_appends(
+    tmp_path,
+    api_mode,
+):
+    config = HarnessConfig(data_dir=str(tmp_path))
+    store = FilesystemHarnessSessionStore(tmp_path)
+    external_store = FilesystemHarnessSessionStore(tmp_path)
+    session = store.create_session(
+        title="Cross process stream",
+        default_api_mode=api_mode,
+    )
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="hello",
+        model=None,
+        api_mode=session.default_api_mode,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=None,
+        status="running",
+    )
+    client = TestClient(create_app(config, store=store))
+
+    def append_from_worker() -> None:
+        time.sleep(0.15)
+        external_store.append_event(
+            HarnessStoredEvent(
+                id="evt-cross-process-delta",
+                session_id=session.id,
+                run_id=run.id,
+                type=HarnessEventType.MESSAGE_DELTA.value,
+                message="delta",
+                payload={"delta": "streamed"},
+                created_at=utc_now(),
+            )
+        )
+        external_store.update_run(run.id, status="succeeded", finished_at=utc_now())
+        external_store.append_event(
+            HarnessStoredEvent(
+                id="evt-cross-process-finished",
+                session_id=session.id,
+                run_id=run.id,
+                type=HarnessEventType.RUN_FINISHED.value,
+                message="finished",
+                payload={"status": "succeeded"},
+                created_at=utc_now(),
+            )
+        )
+
+    writer = threading.Thread(target=append_from_worker)
+    started_at = time.monotonic()
+    writer.start()
+    with client.stream("GET", f"/api/runs/{run.id}/events/stream") as response:
+        assert response.status_code == 200
+        text = "".join(response.iter_text())
+    writer.join(timeout=1)
+
+    assert time.monotonic() - started_at < 2
+    assert [frame["data"]["id"] for frame in _sse_frames(text)] == [
+        "evt-cross-process-delta",
+        "evt-cross-process-finished",
+    ]
 
 
 def test_run_event_stream_reconnects_from_opaque_cursor_without_gap_or_duplicate():

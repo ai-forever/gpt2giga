@@ -28,6 +28,7 @@ import {
   sessionMessagesOptions,
   sessionOverviewOptions,
   sessionRunsOptions,
+  runsCenterOptions,
 } from "../request-graph";
 import {
   formatTimestamp,
@@ -70,6 +71,15 @@ const builtinToolLabels: Record<string, string> = {
   web_search: "Web search",
 };
 const emptyStringList: readonly string[] = [];
+const activeRunStatusGroups = new Set(["approval-needed", "blocked", "queued", "running"]);
+const terminalRunStatusGroups = new Set(["canceled", "completed", "failed"]);
+
+type CompletionNotice = {
+  id: string;
+  sessionId: string;
+  status: string;
+  title: string;
+};
 
 export function WorkbenchSurface() {
   const params = useParams({ strict: false });
@@ -106,7 +116,10 @@ export function WorkbenchSurface() {
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [startedRun, setStartedRun] = useState<{ sessionId: string; runId: string } | null>(null);
+  const [startedRuns, setStartedRuns] = useState<Record<string, string>>({});
+  const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => new Set());
+  const [completionNotices, setCompletionNotices] = useState<CompletionNotice[]>([]);
+  const previousRunStatuses = useRef(new Map<string, string>());
   const [sessionConfirmation, setSessionConfirmation] = useState<{
     action: SessionAction;
     id: string;
@@ -114,6 +127,10 @@ export function WorkbenchSurface() {
   } | null>(null);
 
   const index = useQuery(sessionIndexOptions());
+  const runsCenter = useQuery({
+    ...runsCenterOptions(),
+    refetchInterval: 1_000,
+  });
   const harnesses = useQuery(harnessesOptions());
   const models = useQuery(modelsOptions(runConfig.apiMode));
   const overview = useQuery({
@@ -138,11 +155,9 @@ export function WorkbenchSurface() {
   });
   const retainedLatestRun = latestRun(runs.data?.runs ?? []);
   const selectedRunId =
-    startedRun?.sessionId === sessionId ? startedRun?.runId : retainedLatestRun?.id;
+    sessionId === undefined ? retainedLatestRun?.id : startedRuns[sessionId] ?? retainedLatestRun?.id;
   const locallyStartedRunSelected =
-    startedRun !== null &&
-    startedRun.sessionId === sessionId &&
-    startedRun.runId === selectedRunId;
+    sessionId !== undefined && startedRuns[sessionId] === selectedRunId;
   const stream = useRunEventStream(selectedRunId, 0, !locallyStartedRunSelected);
 
   useEffect(() => {
@@ -191,9 +206,9 @@ export function WorkbenchSurface() {
         harness_id: runConfig.harnessId,
         mode: runConfig.mode,
         model: runConfig.model || null,
+        workspace: ".",
       }),
     onSuccess: ({ session }) => {
-      setStartedRun(null);
       setPrompt("");
       setBuiltinTools([]);
       void navigate({
@@ -232,17 +247,16 @@ export function WorkbenchSurface() {
           permission_profile: advancedConfig.permissionProfile,
           prompt: prompt.trim(),
           stream: advancedConfig.stream,
+          workspace: session.workspace_bound ? undefined : ".",
           workspace_policy: advancedConfig.workspacePolicy,
         },
       );
     },
     onSuccess: async ({ run }) => {
-      setStartedRun({ runId: run.id, sessionId: run.session_id });
+      setStartedRuns((current) => ({ ...current, [run.session_id]: run.id }));
+      previousRunStatuses.current.set(run.id, run.status);
       setPrompt("");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: requestKeys.sessionScope(run.session_id) }),
-        queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() });
     },
   });
 
@@ -311,7 +325,11 @@ export function WorkbenchSurface() {
         : deleteCockpit(`/api/sessions/${encodeURIComponent(id)}`),
     onSuccess: async (_, { id }) => {
       setSessionConfirmation(null);
-      setStartedRun((current) => current?.sessionId === id ? null : current);
+      setStartedRuns((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
       await navigate({ to: "/cockpit-v2/work" });
       queryClient.removeQueries({ queryKey: requestKeys.sessionScope(id) });
       await Promise.all([
@@ -328,6 +346,16 @@ export function WorkbenchSurface() {
       ? items.filter((session) => session.title.toLocaleLowerCase(locale).includes(needle))
       : items;
   }, [index.data?.sessions, locale, search]);
+
+  const latestRunStateBySession = useMemo(() => {
+    const states = new Map<string, { runId: string; status: string }>();
+    for (const item of runsCenter.data?.runs ?? []) {
+      if (!states.has(item.session_id)) {
+        states.set(item.session_id, { runId: item.run_id, status: item.status_group });
+      }
+    }
+    return states;
+  }, [runsCenter.data?.runs]);
 
   const layoutStyle = {
     gridTemplateColumns: `${leftOpen ? `${leftWidth}px 8px` : "44px"} minmax(360px, 1fr) ${rightOpen ? `8px ${rightWidth}px` : "44px"}`,
@@ -350,6 +378,10 @@ export function WorkbenchSurface() {
     ),
     [messages.data?.messages, selectedRunId, stream.events],
   );
+  const selectedRunHasRetainedResponse = useMemo(
+    () => hasRetainedResponse(messages.data?.messages ?? [], selectedRunId),
+    [messages.data?.messages, selectedRunId],
+  );
   const streamedEventIds = new Set(
     stream.events.map((event) => event.id),
   );
@@ -368,10 +400,7 @@ export function WorkbenchSurface() {
   if (retainedPlanEvent !== undefined && !streamedEventIds.has(retainedPlanEvent.id)) {
     retainedToolEvents.unshift(retainedPlanEvent);
   }
-  const locallyStartedRunId =
-    startedRun !== null && startedRun.sessionId === sessionId
-      ? startedRun.runId
-      : undefined;
+  const locallyStartedRunId = sessionId === undefined ? undefined : startedRuns[sessionId];
   const selectedRunActive = workbenchRunActive(
     retainedLatestRun,
     selectedRunId,
@@ -397,6 +426,56 @@ export function WorkbenchSurface() {
       ]);
     }
   }, [queryClient, sessionId, streamPresentation.terminalEvent?.id]);
+
+  useEffect(() => {
+    if (sessionId === undefined) return;
+    setUnreadSessionIds((current) => {
+      if (!current.has(sessionId)) return current;
+      const next = new Set(current);
+      next.delete(sessionId);
+      return next;
+    });
+  }, [sessionId]);
+
+  useEffect(() => {
+    const items = runsCenter.data?.runs;
+    if (items === undefined) return;
+    const previous = previousRunStatuses.current;
+    const completed: CompletionNotice[] = [];
+    for (const item of items) {
+      const prior = previous.get(item.run_id);
+      previous.set(item.run_id, item.status_group);
+      if (
+        prior !== undefined &&
+        activeRunStatusGroups.has(prior) &&
+        terminalRunStatusGroups.has(item.status_group) &&
+        item.session_id !== sessionId
+      ) {
+        completed.push({
+          id: item.run_id,
+          sessionId: item.session_id,
+          status: item.status_group,
+          title: item.session_title,
+        });
+      }
+    }
+    if (completed.length === 0) return;
+    setUnreadSessionIds((current) => {
+      const next = new Set(current);
+      for (const item of completed) next.add(item.sessionId);
+      return next;
+    });
+    setCompletionNotices((current) => [...current, ...completed].slice(-3));
+    for (const item of completed) {
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        new Notification(item.title, {
+          body: message(locale, item.status === "completed" ? "backgroundRunCompleted" : "backgroundRunFailed"),
+          tag: item.id,
+        });
+      }
+    }
+    void queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() });
+  }, [locale, queryClient, runsCenter.data?.runs, sessionId]);
   const setConfig = <Key extends keyof RunConfig>(
     key: Key,
     value: RunConfig[Key],
@@ -455,20 +534,44 @@ export function WorkbenchSurface() {
             {sessionGroups(filteredSessions).map((group) => (
               <section className="project-group" key={group.projectId}>
                 <h2>{group.projectId === "unbound" ? message(locale, "localSessions") : group.projectId}</h2>
-                {group.sessions.map((session) => (
-                  <Link
-                    className={session.id === sessionId ? "session-row selected" : "session-row"}
-                    key={session.id}
-                    params={{ sessionId: session.id }}
-                    to="/cockpit-v2/work/$sessionId"
-                  >
-                    <strong>{session.title}</strong>
-                    <span>
-                      {session.default_harness_id ?? "echo"} · {session.default_api_mode ?? "v2"}
-                    </span>
-                    <time>{formatTimestamp(session.updated_at, locale)}</time>
-                  </Link>
-                ))}
+                {group.sessions.map((session) => {
+                  const runState = latestRunStateBySession.get(session.id);
+                  const running = runState !== undefined && activeRunStatusGroups.has(runState.status);
+                  const unread = unreadSessionIds.has(session.id);
+                  return (
+                    <Link
+                      className={[
+                        "session-row",
+                        session.id === sessionId ? "selected" : "",
+                        running ? "running" : "",
+                        unread ? "unread" : "",
+                      ].filter(Boolean).join(" ")}
+                      key={session.id}
+                      onClick={() => {
+                        setUnreadSessionIds((current) => {
+                          if (!current.has(session.id)) return current;
+                          const next = new Set(current);
+                          next.delete(session.id);
+                          return next;
+                        });
+                      }}
+                      params={{ sessionId: session.id }}
+                      to="/cockpit-v2/work/$sessionId"
+                    >
+                      <strong>{session.title}</strong>
+                      <span>
+                        {session.default_harness_id ?? "echo"} · {session.default_api_mode ?? "v2"}
+                      </span>
+                      {running ? (
+                        <span aria-label={message(locale, "running")} className="session-status-icon running-spinner" />
+                      ) : unread ? (
+                        <span aria-label={message(locale, "unreadSession")} className="session-status-icon unread-dot" />
+                      ) : (
+                        <time>{formatTimestamp(session.updated_at, locale)}</time>
+                      )}
+                    </Link>
+                  );
+                })}
               </section>
             ))}
           </nav>
@@ -558,6 +661,19 @@ export function WorkbenchSurface() {
                           <RetainedToolActivity event={event} key={event.id} locale={locale} />
                         ))
                     : null}
+                  {(item.role === "assistant" || item.role === "error") && item.run_id === selectedRunId ? (
+                    <>
+                      {!item.reasoning?.text && streamPresentation.reasoningText ? (
+                        <ReasoningDisclosure text={streamPresentation.reasoningText} locale={locale} />
+                      ) : null}
+                      {streamPresentation.plan.length > 0 ? (
+                        <PlanCard items={streamPresentation.plan} locale={locale} />
+                      ) : null}
+                      {streamPresentation.toolActivities.map((activity) => (
+                        <ToolActivityCard activity={activity} key={activity.id} locale={locale} />
+                      ))}
+                    </>
+                  ) : null}
                   <article className={`message-entry ${item.role}`}>
                     <div>
                       <strong>{item.role}</strong>
@@ -577,15 +693,17 @@ export function WorkbenchSurface() {
               {retainedGeneratedEvents.map((event) => (
                 <GeneratedFilePreview eventId={event.id} key={event.id} payloadUrl={event.payload_url} />
               ))}
-              {streamPresentation.reasoningText ? (
+              {!selectedRunHasRetainedResponse && streamPresentation.reasoningText ? (
                 <ReasoningDisclosure text={streamPresentation.reasoningText} locale={locale} />
               ) : null}
-              {streamPresentation.plan.length > 0 ? (
+              {!selectedRunHasRetainedResponse && streamPresentation.plan.length > 0 ? (
                 <PlanCard items={streamPresentation.plan} locale={locale} />
               ) : null}
-              {streamPresentation.toolActivities.map((activity) => (
-                <ToolActivityCard activity={activity} key={activity.id} locale={locale} />
-              ))}
+              {!selectedRunHasRetainedResponse
+                ? streamPresentation.toolActivities.map((activity) => (
+                    <ToolActivityCard activity={activity} key={activity.id} locale={locale} />
+                  ))
+                : null}
               {streamPresentation.assistantText ? (
                 <article className="message-entry assistant" key={`live-${selectedRunId}`}>
                   <div>
@@ -985,6 +1103,22 @@ export function WorkbenchSurface() {
           title={sessionConfirmation.title}
         />
       )}
+      <div aria-live="polite" className="completion-notices">
+        {completionNotices.map((notice) => (
+          <button
+            className={notice.status === "completed" ? "completion-notice" : "completion-notice failed"}
+            key={notice.id}
+            onClick={() => {
+              setCompletionNotices((current) => current.filter((item) => item.id !== notice.id));
+              void navigate({ params: { sessionId: notice.sessionId }, to: "/cockpit-v2/work/$sessionId" });
+            }}
+            type="button"
+          >
+            <span aria-hidden="true">{notice.status === "completed" ? "✓" : "!"}</span>
+            <span><strong>{notice.title}</strong><small>{message(locale, notice.status === "completed" ? "backgroundRunCompleted" : "backgroundRunFailed")}</small></span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1017,11 +1151,14 @@ function ToolActivityCard({
   locale: "en" | "ru";
 }) {
   const complete = ["completed", "succeeded", "success"].includes(activity.status.toLowerCase());
-  const result = formatToolResult(activity.result);
+  const failed = ["error", "failed"].includes(activity.status.toLowerCase());
+  const result = formatToolResult(
+    activity.result ?? (failed ? message(locale, "toolFailedNoDetails") : undefined),
+  );
   return (
-    <article className="tool-activity-card">
+    <article className={failed ? "tool-activity-card failed" : "tool-activity-card"}>
       <div className="tool-activity-heading">
-        <span aria-hidden="true">{complete ? "✓" : "◇"}</span>
+        <span aria-hidden="true">{complete ? "✓" : failed ? "!" : "◇"}</span>
         <div>
           <strong>{activity.label}</strong>
           <small>{message(locale, "toolActivity")} · {activity.status}</small>
@@ -1072,6 +1209,15 @@ function formatToolResult(value: unknown): string | null {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   if (!text) return null;
   return text.length > 16_384 ? `${text.slice(0, 16_384)}\n…` : text;
+}
+
+function hasRetainedResponse(
+  messages: readonly { role: string; run_id?: string | null }[],
+  runId: string | undefined,
+): boolean {
+  return runId !== undefined && messages.some(
+    (item) => item.run_id === runId && (item.role === "assistant" || item.role === "error"),
+  );
 }
 
 function PlanCard({ items, locale }: { items: readonly WorkbenchPlanItem[]; locale: "en" | "ru" }) {
