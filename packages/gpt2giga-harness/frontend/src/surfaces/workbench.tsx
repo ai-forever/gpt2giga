@@ -249,11 +249,20 @@ export function WorkbenchSurface() {
   ]);
 
   useEffect(() => {
-    if (runConfig.model || models.isPending) return;
-    const selectedModel = models.isSuccess && models.data.models.length > 0
-      ? preferredModel(models.data.models)
+    if (models.isPending) return;
+    const availableModels = models.data?.models ?? [];
+    const selectedModel = models.isSuccess && availableModels.length > 0
+      ? preferredModel(availableModels)
       : settings.data?.harness_defaults.default_model ?? "";
-    setRunConfig((current) => current.model ? current : { ...current, model: selectedModel });
+    setRunConfig((current) => {
+      if (
+        current.model &&
+        (!models.isSuccess || availableModels.length === 0 || availableModels.includes(current.model))
+      ) {
+        return current;
+      }
+      return current.model === selectedModel ? current : { ...current, model: selectedModel };
+    });
   }, [
     models.data?.models,
     models.isPending,

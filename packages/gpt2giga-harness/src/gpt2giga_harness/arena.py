@@ -580,9 +580,11 @@ def _follow_up_request(
     if not prompt.strip():
         raise ValueError("prompt is required")
     attachment_ids = _text_tuple(payload.get("attachment_ids"), "attachment_ids")
+    model = _optional_text(payload.get("model")) if "model" in payload else arena.model
     turn_index = max(int(arena.metadata.get("turn_count") or 0), 0) + 1
     updated = replace(
         arena,
+        model=model,
         updated_at=utc_now(),
         metadata={**dict(arena.metadata), "turn_count": turn_index},
     )
@@ -591,7 +593,7 @@ def _follow_up_request(
         HarnessArenaRequest(
             prompt=prompt,
             harness_ids=arena.harness_ids,
-            model=arena.model,
+            model=model,
             api_mode=arena.api_mode,
             mode=arena.mode,
             workspace=arena.workspace,

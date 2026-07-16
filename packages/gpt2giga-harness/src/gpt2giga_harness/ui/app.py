@@ -2920,36 +2920,6 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return await run_in_threadpool(_arena_response, arena, store)
 
-    @app.post("/api/arena/runs/{arena_id}/verdict")
-    def save_arena_verdict(
-        arena_id: str,
-        payload: dict[str, Any] = Body(...),
-    ) -> dict[str, Any]:
-        try:
-            arena = arena_store.get(arena_id)
-        except ArenaNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="Arena run not found") from exc
-        verdict = str(payload.get("verdict") or "")
-        if verdict not in {"a_better", "b_better", "tie", "both_failed"}:
-            raise HTTPException(status_code=400, detail="Invalid arena verdict")
-        note = str(payload.get("note") or "").strip()
-        if len(note) > 2000:
-            raise HTTPException(
-                status_code=400, detail="Arena verdict note is too long"
-            )
-        updated = replace(
-            arena,
-            updated_at=utc_now(),
-            metadata={
-                **dict(arena.metadata),
-                "verdict": verdict,
-                "verdict_note": note or None,
-                "verdict_child_run_ids": [child.run_id for child in arena.child_runs],
-            },
-        )
-        arena_store.save(updated)
-        return _arena_response(updated, store)
-
     @app.get("/api/arena/runs/{arena_id}/events/stream")
     async def arena_events_stream(
         arena_id: str,

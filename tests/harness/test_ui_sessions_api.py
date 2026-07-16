@@ -918,11 +918,12 @@ def test_arena_children_run_concurrently_and_follow_up_in_isolated_sessions(tmp_
 
     followed_up = client.post(
         f"/api/arena/runs/{arena['id']}/turns",
-        json={"prompt": "shared follow-up"},
+        json={"prompt": "shared follow-up", "model": "GigaChat-3-Pro"},
     )
 
     assert followed_up.status_code == 200
     updated = followed_up.json()["arena"]
+    assert updated["model"] == "GigaChat-3-Pro"
     assert updated["metadata"]["turn_count"] == 1
     assert [request.prompt for request in first.requests] == [
         "compare concurrently",
@@ -940,18 +941,17 @@ def test_arena_children_run_concurrently_and_follow_up_in_isolated_sessions(tmp_
     ]
     assert all(child["bounded"] is True for child in updated["child_runs"])
     assert all(len(child["messages"]) == 4 for child in updated["child_runs"])
+    assert first.requests[1].model == "GigaChat-3-Pro"
+    assert second.requests[1].model == "GigaChat-3-Pro"
 
-    verdict = client.post(
-        f"/api/arena/runs/{arena['id']}/verdict",
-        json={"verdict": "tie", "note": "same evidence"},
-    )
     retried = client.post(
         f"/api/arena/runs/{arena['id']}/children/0/retry",
     )
 
-    assert verdict.status_code == 200
-    assert verdict.json()["arena"]["metadata"]["verdict"] == "tie"
-    assert len(verdict.json()["arena"]["metadata"]["verdict_child_run_ids"]) == 2
+    assert (
+        "/api/arena/runs/{arena_id}/verdict"
+        not in client.get("/openapi.json").json()["paths"]
+    )
     assert retried.status_code == 200
     assert len(first.requests) == 3
     assert len(second.requests) == 2

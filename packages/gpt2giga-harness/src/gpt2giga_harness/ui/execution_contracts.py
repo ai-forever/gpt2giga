@@ -247,7 +247,6 @@ _NATIVE_ASYNC = frozenset(
 )
 _EXPLICIT_BOUNDED_ASYNC = frozenset(
     {
-        ("POST", "/api/arena/runs/{arena_id}/verdict"),
         ("POST", "/api/runs/{run_id}/promotions/apply"),
         ("POST", "/api/runs/{run_id}/promotions/preview"),
         ("POST", "/api/tool-servers/{server_id}/probe"),

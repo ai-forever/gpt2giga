@@ -374,7 +374,6 @@ MUTATION_ROUTE_CONTRACTS = (
             "/api/workflow-runs/{run_id}/handoffs/{step_id}/discard",
             "/api/workflow-runs/{run_id}/merge-queue",
             "/api/runs/{run_id}/retry",
-            "/api/arena/runs/{arena_id}/verdict",
             "/api/schedules/{schedule_id}/pause",
         ),
         MutationClass.LOCAL_STATE,

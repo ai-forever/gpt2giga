@@ -413,8 +413,6 @@ export interface ArenaChildProjection {
   bounded?: true;
 }
 
-export type ArenaVerdict = "a_better" | "b_better" | "tie" | "both_failed";
-
 export interface ArenaProjectionResponse {
   arena: {
     id: string;
@@ -432,9 +430,6 @@ export interface ArenaProjectionResponse {
     child_runs: ArenaChildProjection[];
     metadata: {
       turn_count?: number;
-      verdict?: ArenaVerdict;
-      verdict_note?: string | null;
-      verdict_child_run_ids?: Array<string | null>;
     };
   };
 }

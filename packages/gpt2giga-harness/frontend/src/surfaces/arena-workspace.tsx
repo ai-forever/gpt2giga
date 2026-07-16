@@ -12,7 +12,6 @@ import {
 import type {
   ArenaChildProjection,
   ArenaProjectionResponse,
-  ArenaVerdict,
   HarnessOption,
   WorkspaceFileCandidate,
 } from "../api";
@@ -32,6 +31,7 @@ import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
 import {
   harnessesOptions,
+  modelsOptions,
   requestKeys,
 } from "../request-graph";
 import {
@@ -44,12 +44,7 @@ import { useRunEventStream } from "../stream-store";
 import { activeAtQuery, consumeAtQuery } from "../workbench-execution";
 
 const activeStatuses = new Set(["queued", "running", "retry_wait"]);
-const verdicts: readonly ArenaVerdict[] = [
-  "a_better",
-  "b_better",
-  "tie",
-  "both_failed",
-];
+const hiddenArenaHarnesses = new Set(["echo"]);
 
 export function ArenaWorkspace({ selectedId }: { selectedId: string | undefined }) {
   const { preferences } = usePreferences();
@@ -58,11 +53,13 @@ export function ArenaWorkspace({ selectedId }: { selectedId: string | undefined 
   const queryClient = useQueryClient();
   const history = useQuery(evaluationSurfaceOptions());
   const harnesses = useQuery(harnessesOptions());
+  const models = useQuery(modelsOptions("v2"));
   const detail = useQuery({
     ...arenaDetailOptions(selectedId ?? "pending"),
     enabled: selectedId !== undefined,
   });
   const [selectedHarnesses, setSelectedHarnesses] = useState<string[]>([]);
+  const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState("");
   const [caret, setCaret] = useState(0);
   const [selectedFiles, setSelectedFiles] = useState<WorkspaceFileCandidate[]>([]);
@@ -79,11 +76,33 @@ export function ArenaWorkspace({ selectedId }: { selectedId: string | undefined 
     if (selectedHarnesses.length > 0 || harnesses.data === undefined) return;
     setSelectedHarnesses(
       harnesses.data.harnesses
-        .filter((item) => item.availability?.status !== "unavailable")
+        .filter((item) =>
+          item.availability?.status !== "unavailable" &&
+          !hiddenArenaHarnesses.has(item.spec.id)
+        )
         .slice(0, 2)
         .map((item) => item.spec.id),
     );
   }, [harnesses.data, selectedHarnesses.length]);
+
+  useEffect(() => {
+    const available = models.data?.models ?? [];
+    if (available.length === 0) return;
+    setModel((current) =>
+      available.includes(current) ? current : preferredArenaModel(available)
+    );
+  }, [models.data?.models]);
+
+  useEffect(() => {
+    const arena = detail.data?.arena;
+    const available = models.data?.models ?? [];
+    if (arena === undefined) return;
+    setModel(
+      arena.model !== null && available.includes(arena.model)
+        ? arena.model
+        : preferredArenaModel(available),
+    );
+  }, [detail.data?.arena.id, detail.data?.arena.model, models.data?.models]);
 
   const create = useMutation({
     mutationFn: () =>
@@ -91,6 +110,7 @@ export function ArenaWorkspace({ selectedId }: { selectedId: string | undefined 
         api_mode: "v2",
         harness_ids: selectedHarnesses,
         mode: "plan",
+        model: model || null,
         prompt: prompt.trim(),
         workspace: ".",
         workspace_paths: selectedFiles.map((item) => item.path),
@@ -117,6 +137,7 @@ export function ArenaWorkspace({ selectedId }: { selectedId: string | undefined 
         `/api/arena/runs/${encodeURIComponent(selectedId)}/turns`,
         {
           prompt: prompt.trim(),
+          model: model || null,
           workspace_paths: selectedFiles.map((item) => item.path),
         },
       );
@@ -152,7 +173,7 @@ export function ArenaWorkspace({ selectedId }: { selectedId: string | undefined 
   };
 
   return (
-    <div className="arena-workspace">
+    <div className={`arena-workspace ${selectedId === undefined ? "arena-workspace-setup" : ""}`}>
       <header className="arena-header">
         <div>
           <span className="section-kicker">{message(locale, "arenaWorkspace")}</span>
@@ -210,6 +231,8 @@ export function ArenaWorkspace({ selectedId }: { selectedId: string | undefined 
         }
         fileSelection={fileSelection}
         files={files.data?.files ?? []}
+        model={model}
+        models={models.data?.models ?? []}
         pending={create.isPending || followUp.isPending}
         prompt={prompt}
         selectedFiles={selectedFiles}
@@ -217,6 +240,7 @@ export function ArenaWorkspace({ selectedId }: { selectedId: string | undefined 
         onCaret={setCaret}
         onChooseFile={chooseFile}
         onFileSelection={setFileSelection}
+        onModel={setModel}
         onPrompt={setPrompt}
         onRemoveFile={(path) =>
           setSelectedFiles((current) => current.filter((item) => item.path !== path))
@@ -241,13 +265,9 @@ function ArenaSetup({
   const locale = preferences.locale;
   return (
     <section className="arena-setup">
-      <div>
-        <span className="section-kicker">{message(locale, "selectHarnesses")}</span>
-        <h2>{message(locale, "arenaColumns")}</h2>
-        <p>{message(locale, "arenaHarnessHint")}</p>
-      </div>
+      <h2>{message(locale, "selectHarnesses")}</h2>
       <div className="arena-harness-grid">
-        {harnesses.map((item) => {
+        {harnesses.filter((item) => !hiddenArenaHarnesses.has(item.spec.id)).map((item) => {
           const checked = selected.includes(item.spec.id);
           const unavailable = item.availability?.status === "unavailable";
           return (
@@ -266,7 +286,7 @@ function ArenaSetup({
               />
               <strong>{item.spec.title ?? item.spec.id}</strong>
               <span>{item.spec.id}</span>
-              <small>{unavailable ? item.availability?.reason : message(locale, "independentChat")}</small>
+              {unavailable ? <small>{item.availability?.reason}</small> : null}
             </label>
           );
         })}
@@ -277,10 +297,8 @@ function ArenaSetup({
 
 function ArenaDetail({ response }: { response: ArenaProjectionResponse }) {
   const { arena } = response;
-  const queryClient = useQueryClient();
   const { preferences } = usePreferences();
   const locale = preferences.locale;
-  const [note, setNote] = useState(arena.metadata.verdict_note ?? "");
   const [streamStatuses, setStreamStatuses] = useState<Record<string, string>>({});
   const recordStreamStatus = useCallback((runId: string, status: string) => {
     setStreamStatuses((current) =>
@@ -293,15 +311,6 @@ function ArenaDetail({ response }: { response: ArenaProjectionResponse }) {
       return (run === undefined ? undefined : streamStatuses[run.id]) ?? child.status;
     }),
   );
-  const verdict = useMutation({
-    mutationFn: (value: ArenaVerdict) =>
-      mutateCockpit<ArenaProjectionResponse>(
-        `/api/arena/runs/${encodeURIComponent(arena.id)}/verdict`,
-        { note, verdict: value },
-      ),
-    onSuccess: ({ arena: updated }) =>
-      queryClient.setQueryData(remainingRequestKeys.arena(updated.id), { arena: updated }),
-  });
   return (
     <>
       <div className="arena-identity-strip">
@@ -320,32 +329,6 @@ function ArenaDetail({ response }: { response: ArenaProjectionResponse }) {
           />
         ))}
       </div>
-      <section className="arena-verdict">
-        <div>
-          <span className="section-kicker">{message(locale, "comparisonVerdict")}</span>
-          <strong>{message(locale, "verdictEvidenceHint")}</strong>
-        </div>
-        <div className="arena-verdict-actions">
-          {verdicts.map((value) => (
-            <button
-              className={arena.metadata.verdict === value ? "active" : ""}
-              disabled={verdict.isPending}
-              key={value}
-              onClick={() => verdict.mutate(value)}
-              type="button"
-            >
-              {message(locale, value)}
-            </button>
-          ))}
-        </div>
-        <input
-          aria-label={message(locale, "optionalVerdictNote")}
-          maxLength={2000}
-          onChange={(event) => setNote(event.target.value)}
-          placeholder={message(locale, "optionalVerdictNote")}
-          value={note}
-        />
-      </section>
     </>
   );
 }
@@ -454,6 +437,8 @@ function SharedComposer({
   error,
   fileSelection,
   files,
+  model,
+  models,
   pending,
   prompt,
   selectedFiles,
@@ -461,6 +446,7 @@ function SharedComposer({
   onCaret,
   onChooseFile,
   onFileSelection,
+  onModel,
   onPrompt,
   onRemoveFile,
   onSubmit,
@@ -472,6 +458,8 @@ function SharedComposer({
   error: string | null;
   fileSelection: number;
   files: readonly WorkspaceFileCandidate[];
+  model: string;
+  models: readonly string[];
   pending: boolean;
   prompt: string;
   selectedFiles: readonly WorkspaceFileCandidate[];
@@ -479,6 +467,7 @@ function SharedComposer({
   onCaret: (value: number) => void;
   onChooseFile: (file: WorkspaceFileCandidate) => void;
   onFileSelection: (value: number) => void;
+  onModel: (value: string) => void;
   onPrompt: (value: string) => void;
   onRemoveFile: (path: string) => void;
   onSubmit: () => void;
@@ -488,7 +477,22 @@ function SharedComposer({
   const locale = preferences.locale;
   return (
     <section className="arena-composer">
-      <span className="section-kicker">{message(locale, "sharedTask")}</span>
+      <div className="arena-composer-toolbar">
+        <span className="section-kicker">{message(locale, "sharedTask")}</span>
+        <label>
+          <span>{message(locale, "model")}</span>
+          <select
+            aria-label={message(locale, "model")}
+            disabled={pending || models.length === 0}
+            onChange={(event) => onModel(event.target.value)}
+            value={model}
+          >
+            {models.length === 0 ? (
+              <option value="">{message(locale, "noDiscoveredModels")}</option>
+            ) : models.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+      </div>
       {selectedFiles.length > 0 ? <div className="arena-file-chips">{selectedFiles.map((file) => <button key={file.path} onClick={() => onRemoveFile(file.path)} type="button">@{file.path} ×</button>)}</div> : null}
       <div className="arena-composer-input">
         <textarea
@@ -529,4 +533,8 @@ function formatElapsed(value: number | null): string {
   if (value === null) return "—";
   if (value < 60_000) return `${(value / 1000).toFixed(1)}s`;
   return `${Math.floor(value / 60_000)}m ${Math.floor((value % 60_000) / 1000)}s`;
+}
+
+function preferredArenaModel(models: readonly string[]): string {
+  return models.find((item) => item !== "GigaChat") ?? models[0] ?? "";
 }
