@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { useRouterState } from "@tanstack/react-router";
+import { useRouterState, useSearch } from "@tanstack/react-router";
 import { useMemo } from "react";
 
 import { mutateCockpit } from "../api";
 import {
   LoadingRows,
+  OperationalRowLink,
   OperationalSurface,
   StatusBadge,
   type OperationalTab,
@@ -25,9 +26,8 @@ const tabs: readonly OperationalTab[] = [
 
 export function EvaluationSurface() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const search = useRouterState({ select: (state) => state.location.searchStr });
   const section = pathname.endsWith("/arena") ? "arena" : pathname.endsWith("/baselines") ? "baselines" : "evals";
-  const selectedId = new URLSearchParams(search).get("selected");
+  const { selected: selectedId } = useSearch({ strict: false });
   const query = useQuery(evaluationSurfaceOptions());
   return (
     <OperationalSurface
@@ -46,7 +46,7 @@ export function EvaluationSurface() {
 function EvaluationList({ section, query, selectedId }: {
   section: "arena" | "evals" | "baselines";
   query: UseQueryResult<EvaluationProjection, Error>;
-  selectedId: string | null;
+  selectedId: string | undefined;
 }) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
@@ -57,20 +57,20 @@ function EvaluationList({ section, query, selectedId }: {
     <>
       <div className="operations-toolbar">
         <div><span className="section-kicker">{message(locale, section)}</span><strong>{rows.length} {message(locale, "retainedItems")}</strong></div>
-        {section === "arena" ? <a className="primary-link" href="/arena">{message(locale, "newArena")}</a> : null}
+        {section === "arena" ? <a className="primary-link" data-legacy-transition="true" href="/arena">{message(locale, "openLegacyArenaAuthoring")}</a> : null}
       </div>
       {rows.length === 0 ? <div className="empty-state">{message(locale, section === "evals" ? "noEvaluationResults" : "noItems")}</div> : (
         <div className="operations-table" role="table">
-          {section === "arena" ? query.data.arenas.map((item) => <a className={`operations-row ${selectedId === item.id ? "selected" : ""}`} href={`/cockpit-v2/evaluation/arena?selected=${encodeURIComponent(item.id)}`} key={item.id}><div><strong>{item.id}</strong><span>{item.harnessCount} {message(locale, "harnesses")}</span></div><span>{item.createdAt}</span><span>{item.updatedAt}</span><StatusBadge status={item.status} /></a>) : null}
-          {section === "evals" ? query.data.evals.map((item) => <a className={`operations-row ${selectedId === item.name ? "selected" : ""}`} href={`/cockpit-v2/evaluation/evals?selected=${encodeURIComponent(item.name)}`} key={item.name}><div><strong>{item.name}</strong><span>{item.description}</span></div><span>{item.caseCount} {message(locale, "cases")}</span><span>{item.latestScore ?? "—"}</span><StatusBadge status={item.latestStatus ?? "not run"} /></a>) : null}
-          {section === "baselines" ? query.data.baselines.map((item) => <a className={`operations-row ${selectedId === item.specName ? "selected" : ""}`} href={`/cockpit-v2/evaluation/baselines?selected=${encodeURIComponent(item.specName)}`} key={item.specName}><div><strong>{item.specName}</strong><span>{item.evalRunId}</span></div><span>{item.pinnedAt ?? "—"}</span><span>{message(locale, "reviewedIntent")}</span><StatusBadge status="pinned" /></a>) : null}
+          {section === "arena" ? query.data.arenas.map((item) => <OperationalRowLink selected={selectedId === item.id} selectedId={item.id} to="/cockpit-v2/evaluation/arena" key={item.id}><div><strong>{item.id}</strong><span>{item.harnessCount} {message(locale, "harnesses")}</span></div><span>{item.createdAt}</span><span>{item.updatedAt}</span><StatusBadge status={item.status} /></OperationalRowLink>) : null}
+          {section === "evals" ? query.data.evals.map((item) => <OperationalRowLink selected={selectedId === item.name} selectedId={item.name} to="/cockpit-v2/evaluation/evals" key={item.name}><div><strong>{item.name}</strong><span>{item.description}</span></div><span>{item.caseCount} {message(locale, "cases")}</span><span>{item.latestScore ?? "—"}</span><StatusBadge status={item.latestStatus ?? "not run"} /></OperationalRowLink>) : null}
+          {section === "baselines" ? query.data.baselines.map((item) => <OperationalRowLink selected={selectedId === item.specName} selectedId={item.specName} to="/cockpit-v2/evaluation/baselines" key={item.specName}><div><strong>{item.specName}</strong><span>{item.evalRunId}</span></div><span>{item.pinnedAt ?? "—"}</span><span>{message(locale, "reviewedIntent")}</span><StatusBadge status="pinned" /></OperationalRowLink>) : null}
         </div>
       )}
     </>
   );
 }
 
-function EvaluationDetail({ section, selectedId }: { section: "arena" | "evals" | "baselines"; selectedId: string | null }) {
+function EvaluationDetail({ section, selectedId }: { section: "arena" | "evals" | "baselines"; selectedId: string | undefined }) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
   const query = useQuery(evaluationSurfaceOptions());

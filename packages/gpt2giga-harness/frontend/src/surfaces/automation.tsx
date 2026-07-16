@@ -4,12 +4,13 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { useRouterState } from "@tanstack/react-router";
+import { useRouterState, useSearch } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import { mutateCockpit } from "../api";
 import {
   LoadingRows,
+  OperationalRowLink,
   OperationalSurface,
   StatusBadge,
   type OperationalTab,
@@ -35,13 +36,12 @@ const tabs: readonly OperationalTab[] = [
 
 export function AutomationSurface() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const search = useRouterState({ select: (state) => state.location.searchStr });
   const section = pathname.endsWith("/agents")
     ? "agents"
     : pathname.endsWith("/schedules")
       ? "schedules"
       : "workflows";
-  const selectedId = new URLSearchParams(search).get("selected");
+  const { selected: selectedId } = useSearch({ strict: false });
   const query = useQuery(automationSurfaceOptions());
 
   return (
@@ -61,7 +61,7 @@ export function AutomationSurface() {
 function AutomationList({ section, query, selectedId }: {
   section: "agents" | "workflows" | "schedules";
   query: UseQueryResult<AutomationProjection, Error>;
-  selectedId: string | null;
+  selectedId: string | undefined;
 }) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
@@ -77,8 +77,8 @@ function AutomationList({ section, query, selectedId }: {
           <span className="section-kicker">{message(locale, section)}</span>
           <strong>{rows.length} {message(locale, "retainedItems")}</strong>
         </div>
-        <a className="primary-link" href={section === "agents" ? "/agents" : section === "schedules" ? "/scheduled" : "/workflows"}>
-          {message(locale, section === "workflows" ? "newWorkflow" : "openAuthoring")}
+        <a className="primary-link" data-legacy-transition="true" href={section === "agents" ? "/agents" : section === "schedules" ? "/scheduled" : "/workflows"}>
+          {message(locale, "openLegacyAuthoring")}
         </a>
       </div>
       {rows.length === 0 ? (
@@ -101,20 +101,20 @@ function AutomationRow({ item, section, selected }: {
 }) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
-  const href = `/cockpit-v2/automation/${section}?selected=${encodeURIComponent(item.id)}`;
+  const to = `/cockpit-v2/automation/${section}` as const;
   if (section === "agents") {
     const agent = item as AgentProjection;
-    return <a className={`operations-row ${selected ? "selected" : ""}`} href={href}><div><strong>{agent.title}</strong><span>{agent.id}</span></div><span>{agent.harnessId}</span><span>{agent.model ?? message(locale, "defaultRoute")}</span><StatusBadge status={agent.mode} /></a>;
+    return <OperationalRowLink selected={selected} selectedId={agent.id} to={to}><div><strong>{agent.title}</strong><span>{agent.id}</span></div><span>{agent.harnessId}</span><span>{agent.model ?? message(locale, "defaultRoute")}</span><StatusBadge status={agent.mode} /></OperationalRowLink>;
   }
   if (section === "schedules") {
     const schedule = item as ScheduleProjection;
-    return <a className={`operations-row ${selected ? "selected" : ""}`} href={href}><div><strong>{schedule.title}</strong><span>{schedule.id}</span></div><span>{schedule.target}</span><span>{schedule.nextRunAt ?? "—"}</span><StatusBadge status={schedule.status} /></a>;
+    return <OperationalRowLink selected={selected} selectedId={schedule.id} to={to}><div><strong>{schedule.title}</strong><span>{schedule.id}</span></div><span>{schedule.target}</span><span>{schedule.nextRunAt ?? "—"}</span><StatusBadge status={schedule.status} /></OperationalRowLink>;
   }
   const workflow = item as WorkflowProjection;
-  return <a className={`operations-row ${selected ? "selected" : ""}`} href={href}><div><strong>{workflow.title}</strong><span>{workflow.id}</span></div><span>{workflow.trigger}</span><span>{workflow.stepCount} {message(locale, "steps")}</span><StatusBadge status={workflow.lastRunStatus ?? "not run"} /></a>;
+  return <OperationalRowLink selected={selected} selectedId={workflow.id} to={to}><div><strong>{workflow.title}</strong><span>{workflow.id}</span></div><span>{workflow.trigger}</span><span>{workflow.stepCount} {message(locale, "steps")}</span><StatusBadge status={workflow.lastRunStatus ?? "not run"} /></OperationalRowLink>;
 }
 
-function AutomationDetail({ section, selectedId }: { section: "agents" | "workflows" | "schedules"; selectedId: string | null }) {
+function AutomationDetail({ section, selectedId }: { section: "agents" | "workflows" | "schedules"; selectedId: string | undefined }) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
   const query = useQuery(automationSurfaceOptions());

@@ -1,10 +1,11 @@
 import { useMutation, useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { useRouterState } from "@tanstack/react-router";
+import { useRouterState, useSearch } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import { mutateCockpit } from "../api";
 import {
   LoadingRows,
+  OperationalRowLink,
   OperationalSurface,
   StatusBadge,
   type OperationalTab,
@@ -23,9 +24,8 @@ const tabs: readonly OperationalTab[] = [
 
 export function IntegrationsSurface() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const search = useRouterState({ select: (state) => state.location.searchStr });
   const section = pathname.endsWith("/models") ? "models" : pathname.endsWith("/mcp") ? "mcp" : pathname.endsWith("/doctor") ? "doctor" : "harnesses";
-  const selectedId = new URLSearchParams(search).get("selected");
+  const { selected: selectedId } = useSearch({ strict: false });
   const query = useQuery(integrationsSurfaceOptions());
   return (
     <OperationalSurface
@@ -44,7 +44,7 @@ export function IntegrationsSurface() {
 function IntegrationList({ section, query, selectedId }: {
   section: "harnesses" | "models" | "mcp" | "doctor";
   query: UseQueryResult<IntegrationsProjection, Error>;
-  selectedId: string | null;
+  selectedId: string | undefined;
 }) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
@@ -56,15 +56,15 @@ function IntegrationList({ section, query, selectedId }: {
     <>
       <div className="operations-toolbar"><div><span className="section-kicker">{message(locale, section === "models" ? "modelsAndRoutes" : section)}</span><strong>{rows.length} {message(locale, "retainedItems")}</strong></div></div>
       {rows.length === 0 ? <div className="empty-state">{message(locale, "noItems")}</div> : <div className="operations-table" role="table">
-        {section === "harnesses" ? query.data.harnesses.map((item) => <a className={`operations-row ${selectedId === item.id ? "selected" : ""}`} href={`/cockpit-v2/integrations/harnesses?selected=${encodeURIComponent(item.id)}`} key={item.id}><div><strong>{item.title}</strong><span>{item.id}</span></div><span>{item.kind}</span><span>{item.reason}</span><StatusBadge status={item.status} /></a>) : null}
-        {section === "models" ? query.data.routes.map((item) => <a className={`operations-row ${selectedId === item.apiMode ? "selected" : ""}`} href={`/cockpit-v2/integrations/models?selected=${encodeURIComponent(item.apiMode)}`} key={item.apiMode}><div><strong>/{item.apiMode}</strong><span>{message(locale, "apiMode")}</span></div><span>{item.model}</span><span>{message(locale, "backendAuthoritative")}</span><StatusBadge status="selected" /></a>) : null}
-        {section === "mcp" ? query.data.mcp.map((item) => <a className={`operations-row ${selectedId === item.id ? "selected" : ""}`} href={`/cockpit-v2/integrations/mcp?selected=${encodeURIComponent(item.id)}`} key={item.id}><div><strong>{item.title}</strong><span>{item.id}</span></div><span>{item.transport}</span><span>{item.trusted ? message(locale, "trusted") : message(locale, "reviewRequired")}</span><StatusBadge status={item.status} /></a>) : null}
+        {section === "harnesses" ? query.data.harnesses.map((item) => <OperationalRowLink selected={selectedId === item.id} selectedId={item.id} to="/cockpit-v2/integrations/harnesses" key={item.id}><div><strong>{item.title}</strong><span>{item.id}</span></div><span>{item.kind}</span><span>{item.reason}</span><StatusBadge status={item.status} /></OperationalRowLink>) : null}
+        {section === "models" ? query.data.routes.map((item) => <OperationalRowLink selected={selectedId === item.apiMode} selectedId={item.apiMode} to="/cockpit-v2/integrations/models" key={item.apiMode}><div><strong>/{item.apiMode}</strong><span>{message(locale, "apiMode")}</span></div><span>{item.model}</span><span>{message(locale, "backendAuthoritative")}</span><StatusBadge status="selected" /></OperationalRowLink>) : null}
+        {section === "mcp" ? query.data.mcp.map((item) => <OperationalRowLink selected={selectedId === item.id} selectedId={item.id} to="/cockpit-v2/integrations/mcp" key={item.id}><div><strong>{item.title}</strong><span>{item.id}</span></div><span>{item.transport}</span><span>{item.trusted ? message(locale, "trusted") : message(locale, "reviewRequired")}</span><StatusBadge status={item.status} /></OperationalRowLink>) : null}
       </div>}
     </>
   );
 }
 
-function IntegrationDetail({ section, selectedId }: { section: "harnesses" | "models" | "mcp" | "doctor"; selectedId: string | null }) {
+function IntegrationDetail({ section, selectedId }: { section: "harnesses" | "models" | "mcp" | "doctor"; selectedId: string | undefined }) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
   const query = useQuery(integrationsSurfaceOptions());

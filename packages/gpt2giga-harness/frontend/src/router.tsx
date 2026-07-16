@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 
 import { AppShell } from "./AppShell";
+import { validateOperationalSearch } from "./operational-navigation";
 
 const rootRoute = createRootRoute({ component: AppShell });
 
@@ -34,18 +35,18 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/runs", component: runsComponent }),
   createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/runs/$runId", component: runsComponent }),
   createRoute({ beforeLoad: () => { throw redirect({ to: "/cockpit-v2/automation/workflows" }); }, getParentRoute: () => rootRoute, path: "/cockpit-v2/automation" }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/automation/agents", component: automationComponent }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/automation/workflows", component: automationComponent }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/automation/schedules", component: automationComponent }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/automation/agents", component: automationComponent, validateSearch: validateOperationalSearch }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/automation/workflows", component: automationComponent, validateSearch: validateOperationalSearch }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/automation/schedules", component: automationComponent, validateSearch: validateOperationalSearch }),
   createRoute({ beforeLoad: () => { throw redirect({ to: "/cockpit-v2/evaluation/evals" }); }, getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation" }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation/arena", component: evaluationComponent }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation/evals", component: evaluationComponent }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation/baselines", component: evaluationComponent }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation/arena", component: evaluationComponent, validateSearch: validateOperationalSearch }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation/evals", component: evaluationComponent, validateSearch: validateOperationalSearch }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/evaluation/baselines", component: evaluationComponent, validateSearch: validateOperationalSearch }),
   createRoute({ beforeLoad: () => { throw redirect({ to: "/cockpit-v2/integrations/harnesses" }); }, getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations" }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/harnesses", component: integrationsComponent }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/models", component: integrationsComponent }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/mcp", component: integrationsComponent }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/doctor", component: integrationsComponent }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/harnesses", component: integrationsComponent, validateSearch: validateOperationalSearch }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/models", component: integrationsComponent, validateSearch: validateOperationalSearch }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/mcp", component: integrationsComponent, validateSearch: validateOperationalSearch }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/doctor", component: integrationsComponent, validateSearch: validateOperationalSearch }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/cockpit-v2/settings",

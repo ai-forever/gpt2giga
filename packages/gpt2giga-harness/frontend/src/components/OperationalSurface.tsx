@@ -22,6 +22,28 @@ export interface OperationalTab {
   labelKey: MessageKey;
 }
 
+export function OperationalRowLink({
+  children,
+  selected,
+  selectedId,
+  to,
+}: {
+  children: ReactNode;
+  selected: boolean;
+  selectedId: string;
+  to: OperationalPath;
+}) {
+  return (
+    <Link
+      className={`operations-row ${selected ? "selected" : ""}`}
+      search={{ selected: selectedId }}
+      to={to}
+    >
+      {children}
+    </Link>
+  );
+}
+
 export function OperationalSurface({
   activeTab,
   aside,
@@ -57,6 +79,7 @@ export function OperationalSurface({
             aria-current={activeTab === tab.id ? "page" : undefined}
             className={activeTab === tab.id ? "active" : ""}
             key={tab.id}
+            search={{}}
             to={tab.href}
           >
             {message(locale, tab.labelKey)}
