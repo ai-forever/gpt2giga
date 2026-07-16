@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import AsyncIterator
 from datetime import datetime
+import hashlib
 import json
 import re
+from time import monotonic
 from typing import Any, Mapping
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import Response
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.responses import Response, StreamingResponse
 
-from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
+from gpt2giga_harness.ui.async_execution import ConformantAPIRoute, run_stream_offload
 from gpt2giga_harness.runtime.models import (
     JobAttempt,
     JobAttemptStatus,
@@ -35,6 +38,11 @@ from gpt2giga_harness.sessions.store import (
     RunNotFoundError,
     SessionNotFoundError,
 )
+from gpt2giga_harness.sessions.event_stream import (
+    RunEventSubscription,
+    StreamCapacityError,
+    StreamSignal,
+)
 from gpt2giga_harness.support_bundle import build_run_support_bundle
 from gpt2giga_harness.ui.routers.schemas import RunBundleResponse
 
@@ -54,6 +62,8 @@ _STATUS_GROUPS: dict[str, tuple[JobStatus, ...]] = {
 }
 _HIDDEN_REASONING_MARKERS = ("reasoning", "chain_of_thought", "thinking", "thought")
 _SAFE_RETRY_CLASSES = {"read_only", "safe_retry", "deterministic"}
+_RUNS_CENTER_STREAM_HEARTBEAT_SECONDS = 10.0
+_RUNS_CENTER_STREAM_REVISION_SECONDS = 1.0
 
 
 @router.get("/api/runs")
@@ -91,6 +101,45 @@ def list_runs_center(
         "next_cursor": next_cursor,
         "workers": [_worker_summary(worker) for worker in runtime_store.list_workers()],
     }
+
+
+@router.get("/api/runs/updates/stream")
+async def runs_center_updates_stream(
+    request: Request,
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    """Stream content-free global revisions without heartbeat-driven refreshes."""
+    runtime_store = _runtime_store(request)
+    session_store = _session_store(request)
+    broker = request.app.state.harness_run_event_broker
+    try:
+        subscription = broker.subscribe_runs_center()
+    except StreamCapacityError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    try:
+        initial_revision = await run_stream_offload(
+            _runs_center_revision,
+            runtime_store,
+            session_store,
+        )
+    except Exception:
+        subscription.close()
+        raise
+
+    return StreamingResponse(
+        _stream_runs_center_updates(
+            runtime_store,
+            session_store,
+            subscription,
+            initial_revision=initial_revision,
+            last_event_id=last_event_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/api/runs/{run_id}/trace")
@@ -291,6 +340,65 @@ def _runtime_store(request: Request) -> RuntimeCoordinationStore | None:
 
 def _session_store(request: Request) -> HarnessSessionStore:
     return request.app.state.harness_session_store
+
+
+def _runs_center_revision(
+    runtime_store: RuntimeCoordinationStore | None,
+    session_store: HarnessSessionStore,
+) -> str:
+    runtime_revision = (
+        runtime_store.runs_center_revision() if runtime_store is not None else "none"
+    )
+    session_generation, run_generation = session_store.runs_center_generation()
+    content = f"{runtime_revision}:{session_generation}:{run_generation}".encode()
+    return hashlib.sha256(content).hexdigest()
+
+
+async def _stream_runs_center_updates(
+    runtime_store: RuntimeCoordinationStore | None,
+    session_store: HarnessSessionStore,
+    subscription: RunEventSubscription,
+    *,
+    initial_revision: str,
+    last_event_id: str | None,
+) -> AsyncIterator[str]:
+    revision = initial_revision
+    next_heartbeat_at = monotonic() + _RUNS_CENTER_STREAM_HEARTBEAT_SECONDS
+    try:
+        yield ": connected\n\n"
+        if last_event_id is not None and last_event_id != revision:
+            yield _runs_center_update_sse(revision)
+        while True:
+            signal = await subscription.wait(_RUNS_CENTER_STREAM_REVISION_SECONDS)
+            next_revision = await run_stream_offload(
+                _runs_center_revision,
+                runtime_store,
+                session_store,
+            )
+            if next_revision != revision:
+                revision = next_revision
+                yield _runs_center_update_sse(revision)
+                next_heartbeat_at = monotonic() + _RUNS_CENTER_STREAM_HEARTBEAT_SECONDS
+            elif signal is StreamSignal.RESNAPSHOT_REQUIRED:
+                yield _runs_center_resnapshot_sse(revision)
+            elif signal is None and monotonic() >= next_heartbeat_at:
+                yield ": heartbeat\n\n"
+                next_heartbeat_at = monotonic() + _RUNS_CENTER_STREAM_HEARTBEAT_SECONDS
+    finally:
+        subscription.close()
+
+
+def _runs_center_update_sse(revision: str) -> str:
+    payload = json.dumps(
+        {"revision": revision, "type": "runs.updated"},
+        separators=(",", ":"),
+    )
+    return f"id: {revision}\ndata: {payload}\n\n"
+
+
+def _runs_center_resnapshot_sse(revision: str) -> str:
+    payload = json.dumps({"revision": revision}, separators=(",", ":"))
+    return f"event: resnapshot\ndata: {payload}\n\n"
 
 
 def _parse_status_filter(value: str | None) -> tuple[JobStatus, ...]:

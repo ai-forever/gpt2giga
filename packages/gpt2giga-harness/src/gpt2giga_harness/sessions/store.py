@@ -130,6 +130,9 @@ class HarnessSessionStore(Protocol):
     def list_runs(self, session_id: str) -> tuple[HarnessRun, ...]:
         """List runs for one session."""
 
+    def runs_center_generation(self) -> tuple[int, int]:
+        """Return cheap session/run generations for global live invalidation."""
+
     def append_event(self, event: HarnessStoredEvent) -> HarnessStoredEvent:
         """Append one event."""
 
@@ -222,6 +225,8 @@ class InMemoryHarnessSessionStore:
         self._raw_responses: dict[str, list[HarnessRawRecord]] = {}
         self._native_links: dict[str, list[HarnessNativeLink]] = {}
         self._session_lock = threading.RLock()
+        self._session_generation = 0
+        self._run_generation = 0
         self.event_broker = RunEventBroker()
 
     def create_session(
@@ -251,6 +256,8 @@ class InMemoryHarnessSessionStore:
             metadata=_redacted_mapping(metadata),
         )
         self._sessions[session.id] = session
+        self._session_generation += 1
+        self.event_broker.publish_runs_center()
         return session
 
     def list_sessions(
@@ -291,7 +298,9 @@ class InMemoryHarnessSessionStore:
             session = self.get_session(session_id)
             updated = _patch_session(session, patch)
             self._sessions[session_id] = updated
-            return updated
+        self._session_generation += 1
+        self.event_broker.publish_runs_center()
+        return updated
 
     def update_session_if_title(
         self,
@@ -306,7 +315,9 @@ class InMemoryHarnessSessionStore:
                 return None
             updated = _patch_session(session, patch)
             self._sessions[session_id] = updated
-            return updated
+        self._session_generation += 1
+        self.event_broker.publish_runs_center()
+        return updated
 
     def delete_session(self, session_id: str) -> None:
         with self._session_lock:
@@ -318,7 +329,9 @@ class InMemoryHarnessSessionStore:
             self._raw_requests.pop(session_id, None)
             self._raw_responses.pop(session_id, None)
             self._native_links.pop(session_id, None)
+            self._session_generation += 1
         self.event_broker.publish_session(session_id)
+        self.event_broker.publish_runs_center()
 
     def archive_session(
         self,
@@ -378,12 +391,16 @@ class InMemoryHarnessSessionStore:
             metadata=_redacted_mapping(metadata),
         )
         self._runs.setdefault(session_id, []).append(run)
+        self._run_generation += 1
+        self.event_broker.publish_runs_center()
         return run
 
     def update_run(self, run_id: str, **patch: Any) -> HarnessRun:
         session_id, index, run = self._find_run(run_id)
         updated = _patch_run(run, patch)
         self._runs[session_id][index] = updated
+        self._run_generation += 1
+        self.event_broker.publish_runs_center()
         return updated
 
     def get_run(self, run_id: str) -> HarnessRun:
@@ -392,6 +409,10 @@ class InMemoryHarnessSessionStore:
     def list_runs(self, session_id: str) -> tuple[HarnessRun, ...]:
         self.get_session(session_id)
         return tuple(self._runs.get(session_id, ()))
+
+    def runs_center_generation(self) -> tuple[int, int]:
+        """Return cheap session/run generations for global live invalidation."""
+        return self._session_generation, self._run_generation
 
     def append_event(self, event: HarnessStoredEvent) -> HarnessStoredEvent:
         self.get_session(event.session_id)

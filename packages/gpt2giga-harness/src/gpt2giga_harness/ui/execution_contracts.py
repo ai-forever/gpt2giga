@@ -122,6 +122,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/project/presets"),
         ("GET", "/api/project/state"),
         ("GET", "/api/runs"),
+        ("GET", "/api/runs/updates/stream"),
         ("GET", "/api/runs/{run_id}"),
         ("GET", "/api/runs/{run_id}/diff"),
         ("GET", "/api/runs/{run_id}/events/stream"),
@@ -167,6 +168,7 @@ _STREAMS = frozenset(
         ("GET", "/api/arena/runs/{arena_id}/events/stream"),
         ("GET", "/api/cockpit/sessions/{session_id}/updates/stream"),
         ("GET", "/api/native/processes/{process_id}/output/stream"),
+        ("GET", "/api/runs/updates/stream"),
         ("GET", "/api/runs/{run_id}/events/stream"),
     }
 )

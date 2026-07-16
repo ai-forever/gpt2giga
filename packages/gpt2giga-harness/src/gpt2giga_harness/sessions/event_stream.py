@@ -140,6 +140,7 @@ class RunEventBroker:
         self._lock = threading.Lock()
         self._subscriptions: dict[str, dict[str, RunEventSubscription]] = {}
         self._session_subscriptions: dict[str, dict[str, RunEventSubscription]] = {}
+        self._runs_center_subscriptions: dict[str, RunEventSubscription] = {}
 
     def subscribe(self, run_id: str) -> RunEventSubscription:
         """Register one bounded subscriber for an exact run."""
@@ -175,6 +176,21 @@ class RunEventBroker:
             session_items[subscription.token] = subscription
         return subscription
 
+    def subscribe_runs_center(self) -> RunEventSubscription:
+        """Register one bounded subscriber for global Runs Center revisions."""
+        subscription = RunEventSubscription(
+            self, "runs_center", "global", self.queue_size
+        )
+        with self._lock:
+            total = self._subscriber_total()
+            if (
+                total >= self.max_subscribers
+                or len(self._runs_center_subscriptions) >= self.max_subscribers_per_run
+            ):
+                raise StreamCapacityError("live event stream capacity is exhausted")
+            self._runs_center_subscriptions[subscription.token] = subscription
+        return subscription
+
     def publish(self, event: HarnessStoredEvent) -> None:
         """Wake subscribers for the persisted event's exact run and session."""
         with self._lock:
@@ -198,6 +214,13 @@ class RunEventBroker:
         for subscription in subscriptions:
             subscription.schedule(StreamSignal.CHANGED)
 
+    def publish_runs_center(self) -> None:
+        """Wake global subscribers after a Runs Center projection change."""
+        with self._lock:
+            subscriptions = tuple(self._runs_center_subscriptions.values())
+        for subscription in subscriptions:
+            subscription.schedule(StreamSignal.CHANGED)
+
     def subscriber_count(self, run_id: str | None = None) -> int:
         """Return aggregate content-free occupancy for tests and diagnostics."""
         with self._lock:
@@ -212,6 +235,11 @@ class RunEventBroker:
                 return len(self._session_subscriptions.get(session_id, ()))
             return sum(len(items) for items in self._session_subscriptions.values())
 
+    def runs_center_subscriber_count(self) -> int:
+        """Return global Runs Center stream occupancy."""
+        with self._lock:
+            return len(self._runs_center_subscriptions)
+
     def snapshot(self) -> dict[str, int | bool]:
         """Return aggregate content-free queue and occupancy diagnostics."""
         with self._lock:
@@ -219,7 +247,10 @@ class RunEventBroker:
             session_subscribers = sum(
                 len(items) for items in self._session_subscriptions.values()
             )
-            subscribers = run_subscribers + session_subscribers
+            runs_center_subscribers = len(self._runs_center_subscriptions)
+            subscribers = (
+                run_subscribers + session_subscribers + runs_center_subscribers
+            )
             active_runs = len(self._subscriptions)
             active_sessions = len(self._session_subscriptions)
         return {
@@ -227,6 +258,7 @@ class RunEventBroker:
             "subscribers": subscribers,
             "run_subscribers": run_subscribers,
             "session_subscribers": session_subscribers,
+            "runs_center_subscribers": runs_center_subscribers,
             "active_runs": active_runs,
             "active_sessions": active_sessions,
             "queue_size": self.queue_size,
@@ -236,6 +268,9 @@ class RunEventBroker:
 
     def _remove(self, subscription: RunEventSubscription) -> None:
         with self._lock:
+            if subscription.scope == "runs_center":
+                self._runs_center_subscriptions.pop(subscription.token, None)
+                return
             subscriptions = (
                 self._subscriptions
                 if subscription.scope == "run"
@@ -249,8 +284,10 @@ class RunEventBroker:
                 subscriptions.pop(subscription.scope_id, None)
 
     def _subscriber_total(self) -> int:
-        return sum(len(items) for items in self._subscriptions.values()) + sum(
-            len(items) for items in self._session_subscriptions.values()
+        return (
+            sum(len(items) for items in self._subscriptions.values())
+            + sum(len(items) for items in self._session_subscriptions.values())
+            + len(self._runs_center_subscriptions)
         )
 
 

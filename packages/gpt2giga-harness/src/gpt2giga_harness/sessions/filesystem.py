@@ -133,6 +133,7 @@ class FilesystemHarnessSessionStore:
         self._upsert_index(session.id, session_dir)
         if self._read_index is not None:
             self._read_index.upsert_session(session)
+        self.event_broker.publish_runs_center()
         return session
 
     def list_sessions(
@@ -281,6 +282,7 @@ class FilesystemHarnessSessionStore:
             _write_json_atomic_unlocked(path, session_to_dict(updated))
         if self._read_index is not None:
             self._read_index.upsert_session(updated)
+        self.event_broker.publish_runs_center()
         return updated
 
     def update_session_if_title(
@@ -300,6 +302,7 @@ class FilesystemHarnessSessionStore:
             _write_json_atomic_unlocked(path, session_to_dict(updated))
         if self._read_index is not None:
             self._read_index.upsert_session(updated)
+        self.event_broker.publish_runs_center()
         return updated
 
     def delete_session(self, session_id: str) -> None:
@@ -312,6 +315,7 @@ class FilesystemHarnessSessionStore:
         if self._read_index is not None:
             self._read_index.delete_session(session_id)
         self.event_broker.publish_session(session_id)
+        self.event_broker.publish_runs_center()
 
     def archive_session(
         self,
@@ -381,6 +385,7 @@ class FilesystemHarnessSessionStore:
         self._append_jsonl(self._session_dir(session_id) / RUNS_FILE, run_to_dict(run))
         if self._read_index is not None:
             self._read_index.upsert_run(run, 0)
+        self.event_broker.publish_runs_center()
         return run
 
     def update_run(self, run_id: str, **patch: Any) -> HarnessRun:
@@ -398,6 +403,7 @@ class FilesystemHarnessSessionStore:
                     [redact_for_storage(run_to_dict(item)) for item in runs],
                 )
                 self._session_read_index().upsert_run(updated, index)
+                self.event_broker.publish_runs_center()
                 return updated
         raise RunNotFoundError(run_id)
 
@@ -416,6 +422,11 @@ class FilesystemHarnessSessionStore:
                 run_from_dict,
             )
         )
+
+    def runs_center_generation(self) -> tuple[int, int]:
+        """Return cheap session/run generations for global live invalidation."""
+        self._ensure_read_index()
+        return self._session_read_index().runs_center_generation()
 
     def append_event(self, event: HarnessStoredEvent) -> HarnessStoredEvent:
         self.get_session(event.session_id)

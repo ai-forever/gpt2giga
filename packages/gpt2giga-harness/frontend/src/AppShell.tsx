@@ -1,6 +1,6 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { InboxDrawer, type InboxKind } from "./components/InboxDrawer";
 import { PrimaryRailBrand, PrimaryRailIcon } from "./components/PrimaryRailIcon";
@@ -14,7 +14,8 @@ import {
   type LocalePreference,
   type ThemePreference,
 } from "./preferences";
-import { approvalsOptions, attentionOptions } from "./request-graph";
+import { approvalsOptions, attentionOptions, requestKeys } from "./request-graph";
+import { observeRunsCenterUpdates } from "./runs-center-update-stream";
 
 function ApprovalIcon() {
   return (
@@ -39,6 +40,7 @@ export function AppShell() {
   const activeSurface = surfaceForPath(pathname);
   const [preferences, setPreferences] = useState(loadPreferences);
   const [inbox, setInbox] = useState<InboxKind | null>(null);
+  const queryClient = useQueryClient();
   const approvals = useQuery(approvalsOptions());
   const attention = useQuery(attentionOptions());
   const migratedSurface = activeSurface !== null && activeSurface !== "settings";
@@ -47,6 +49,13 @@ export function AppShell() {
     applyTheme(preferences.theme);
     savePreferences(preferences);
   }, [preferences]);
+
+  useEffect(() => {
+    if (typeof globalThis.EventSource !== "function") return;
+    return observeRunsCenterUpdates(() => {
+      void queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() });
+    });
+  }, [queryClient]);
 
   useEffect(() => {
     const openInbox = (event: Event) => {

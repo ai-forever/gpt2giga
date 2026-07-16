@@ -151,10 +151,7 @@ export function WorkbenchSurface() {
   } | null>(null);
 
   const index = useQuery(sessionIndexOptions());
-  const runsCenter = useQuery({
-    ...runsCenterOptions(),
-    refetchInterval: 1_000,
-  });
+  const runsCenter = useQuery(runsCenterOptions());
   const harnesses = useQuery(harnessesOptions());
   const models = useQuery(modelsOptions(runConfig.apiMode));
   const overview = useQuery({

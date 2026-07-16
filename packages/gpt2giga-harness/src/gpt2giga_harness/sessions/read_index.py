@@ -86,6 +86,9 @@ class SessionReadIndex:
             connection.execute(
                 "INSERT OR IGNORE INTO read_index_meta(key, value) VALUES ('complete', '0')"
             )
+            connection.execute(
+                "INSERT OR IGNORE INTO read_index_meta(key, value) VALUES ('run_generation', '0')"
+            )
 
     def is_complete(self) -> bool:
         """Return whether legacy state has been fully indexed."""
@@ -108,6 +111,11 @@ class SessionReadIndex:
                 self._upsert_run(connection, run, position)
             generation = self._generation(connection) + 1
             self._set_meta(connection, "generation", str(generation))
+            self._set_meta(
+                connection,
+                "run_generation",
+                str(self._run_generation(connection) + 1),
+            )
             self._set_meta(connection, "complete", "1")
 
     def upsert_session(self, session: HarnessSession) -> None:
@@ -141,6 +149,17 @@ class SessionReadIndex:
         """Refresh one direct run lookup row."""
         with self._connect() as connection:
             self._upsert_run(connection, run, position)
+            if self._meta(connection, "complete") == "1":
+                self._set_meta(
+                    connection,
+                    "run_generation",
+                    str(self._run_generation(connection) + 1),
+                )
+
+    def runs_center_generation(self) -> tuple[int, int]:
+        """Return cheap session/run generations for global live invalidation."""
+        with self._connect() as connection:
+            return self._generation(connection), self._run_generation(connection)
 
     def lookup_run(self, run_id: str) -> tuple[str, int, HarnessRun] | None:
         """Resolve one run without scanning session directories or run history."""
@@ -295,6 +314,9 @@ class SessionReadIndex:
 
     def _generation(self, connection: sqlite3.Connection) -> int:
         return int(self._meta(connection, "generation"))
+
+    def _run_generation(self, connection: sqlite3.Connection) -> int:
+        return int(self._meta(connection, "run_generation"))
 
     @staticmethod
     def _set_meta(connection: sqlite3.Connection, key: str, value: str) -> None:

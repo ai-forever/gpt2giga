@@ -89,6 +89,21 @@ def test_cockpit_session_pages_are_indexed_cursor_bound_and_etagged(
     assert store.get_run(run.id).id == run.id
 
 
+def test_runs_center_generation_advances_for_session_and_run_projections(tmp_path):
+    app = _app(tmp_path)
+    store = app.state.harness_session_store
+    initial = store.runs_center_generation()
+    session = store.create_session(title="revision")
+    after_session = store.runs_center_generation()
+    run = _run(store, session.id)
+    after_run = store.runs_center_generation()
+    store.update_run(run.id, status="running")
+
+    assert after_session[0] > initial[0]
+    assert after_run[1] > after_session[1]
+    assert store.runs_center_generation()[1] > after_run[1]
+
+
 def test_cockpit_record_pages_enforce_item_byte_bounds_and_stale_snapshots(tmp_path):
     app = _app(tmp_path)
     store = app.state.harness_session_store

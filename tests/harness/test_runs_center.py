@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from gpt2giga_harness.config import HarnessConfig
@@ -14,6 +16,12 @@ from gpt2giga_harness.sessions.models import HarnessStoredEvent
 from gpt2giga_harness.sessions.store import new_id, utc_now
 from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
 from gpt2giga_harness.ui.app import create_app
+from gpt2giga_harness.ui.routers.runs import (
+    _runs_center_resnapshot_sse,
+    _runs_center_revision,
+    _runs_center_update_sse,
+    _stream_runs_center_updates,
+)
 from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 from gpt2giga_harness.tools.policy import PolicyDecision
 
@@ -74,6 +82,45 @@ def test_runs_center_lists_filters_and_resolves_lightweight_summary(tmp_path):
     assert summary.json()["run"]["run_id"] == run_id
     assert client.get("/api/runs?status=unknown").status_code == 400
     assert runtime.get_job(job_id).status.value == "failed"
+
+
+def test_runs_center_stream_contract_is_global_content_free_and_routable(tmp_path):
+    client, runtime, sessions, _run_id, _job_id, _event_id = _failed_run(tmp_path)
+    revision = _runs_center_revision(runtime, sessions)
+    update = _runs_center_update_sse(revision)
+    resnapshot = _runs_center_resnapshot_sse(revision)
+
+    assert "/api/runs/updates/stream" in client.get("/openapi.json").json()["paths"]
+    assert update == (
+        f'id: {revision}\ndata: {{"revision":"{revision}","type":"runs.updated"}}\n\n'
+    )
+    assert resnapshot == (f'event: resnapshot\ndata: {{"revision":"{revision}"}}\n\n')
+    assert "run_id" not in update
+    assert "session_id" not in update
+
+
+async def test_runs_center_stream_emits_revision_and_cleans_up_subscription(tmp_path):
+    _client, runtime, sessions, run_id, _job_id, _event_id = _failed_run(tmp_path)
+    subscription = sessions.event_broker.subscribe_runs_center()
+    initial = _runs_center_revision(runtime, sessions)
+    stream = _stream_runs_center_updates(
+        runtime,
+        sessions,
+        subscription,
+        initial_revision=initial,
+        last_event_id=None,
+    )
+    try:
+        assert await anext(stream) == ": connected\n\n"
+        session_id = sessions.get_run(run_id).session_id
+        sessions.update_session(session_id, title="Updated from another task")
+        frame = await asyncio.wait_for(anext(stream), timeout=1)
+        assert '"type":"runs.updated"' in frame
+        assert initial not in frame
+    finally:
+        await stream.aclose()
+
+    assert sessions.event_broker.runs_center_subscriber_count() == 0
 
 
 def test_runs_center_projects_active_attempt_lease_without_process_details(tmp_path):

@@ -70,6 +70,23 @@ async def test_session_event_broker_wakes_only_for_session_revisions():
     assert broker.session_subscriber_count() == 0
 
 
+async def test_runs_center_broker_is_global_bounded_and_content_free():
+    broker = RunEventBroker(queue_size=1)
+    subscription = broker.subscribe_runs_center()
+    try:
+        broker.publish_runs_center()
+        broker.publish_runs_center()
+        await asyncio.sleep(0)
+
+        assert await subscription.wait(0.1) is StreamSignal.RESNAPSHOT_REQUIRED
+        assert broker.runs_center_subscriber_count() == 1
+        assert broker.snapshot()["runs_center_subscribers"] == 1
+    finally:
+        subscription.close()
+
+    assert broker.runs_center_subscriber_count() == 0
+
+
 @pytest.mark.parametrize("store_kind", ["memory", "filesystem"])
 def test_event_tail_pages_are_offset_bounded_and_run_filtered(tmp_path, store_kind):
     store = (

@@ -766,6 +766,33 @@ def test_runtime_cli_inspect_and_export_json(tmp_path, monkeypatch, capsys):
     assert "Exported runtime coordination state" in capsys.readouterr().out
 
 
+def test_runs_center_revision_tracks_state_but_ignores_worker_heartbeats(tmp_path):
+    store = RuntimeCoordinationStore(tmp_path)
+    initial = store.runs_center_revision()
+    job = store.submit_job(
+        session_id="sess_revision",
+        user_message_id="msg_revision",
+        initial_run_id="run_revision",
+        idempotency_key="revision",
+    ).job
+    queued = store.runs_center_revision()
+    store.register_worker(
+        worker_id="worker_revision",
+        process_id=123,
+        hostname="localhost",
+        capability_fingerprint={},
+    )
+    online = store.runs_center_revision()
+    store.heartbeat_worker("worker_revision")
+
+    assert queued != initial
+    assert online != queued
+    assert store.runs_center_revision() == online
+
+    store.transition_job(job.id, JobStatus.RUNNING)
+    assert store.runs_center_revision() != online
+
+
 def _create_run(
     store: FilesystemHarnessSessionStore,
     session_id: str,
