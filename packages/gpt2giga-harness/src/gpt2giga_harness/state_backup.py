@@ -8,11 +8,14 @@ from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 from pathlib import Path, PurePosixPath
+import shutil
 import sqlite3
 import stat
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkdtemp
 from typing import BinaryIO, Iterator
 from zipfile import ZIP_STORED, BadZipFile, ZipFile, ZipInfo
+
+from gpt2giga_harness.runtime.store import RUNTIME_SCHEMA_VERSION
 
 
 BACKUP_KIND = "gpt2giga_harness_state_backup"
@@ -33,8 +36,11 @@ class StateBackupResult:
     file_count: int
     total_bytes: int
     sha256: str
+    runtime_schema_version: int | None
+    max_supported_runtime_schema_version: int
+    restore_compatible: bool
 
-    def to_dict(self) -> dict[str, int | str]:
+    def to_dict(self) -> dict[str, bool | int | str | None]:
         """Serialize the stable result without exposing a local path."""
         return {
             "schema_version": self.schema_version,
@@ -42,6 +48,27 @@ class StateBackupResult:
             "file_count": self.file_count,
             "total_bytes": self.total_bytes,
             "sha256": self.sha256,
+            "runtime_schema_version": self.runtime_schema_version,
+            "max_supported_runtime_schema_version": (
+                self.max_supported_runtime_schema_version
+            ),
+            "restore_compatible": self.restore_compatible,
+        }
+
+
+@dataclass(frozen=True)
+class StateRestoreResult:
+    """Content-free result of atomically restoring one state archive."""
+
+    backup: StateBackupResult
+    replaced_existing: bool
+
+    def to_dict(self) -> dict[str, bool | int | str | None]:
+        """Serialize restore evidence without exposing local paths."""
+        return {
+            **self.backup.to_dict(),
+            "restored": True,
+            "replaced_existing": self.replaced_existing,
         }
 
 
@@ -113,8 +140,9 @@ def verify_state_backup(archive: str | Path) -> StateBackupResult:
             expected_names = {BACKUP_MANIFEST, *(entry["path"] for entry in entries)}
             if set(names) != expected_names:
                 raise ValueError("State backup contents do not match its manifest.")
+            runtime_schema_version: int | None = None
             with TemporaryDirectory(prefix="gpt2giga-harness-verify-") as temp_dir:
-                for entry in entries:
+                for index, entry in enumerate(entries):
                     archived_mode = info_by_name[entry["path"]].external_attr >> 16
                     if not stat.S_ISREG(archived_mode) or stat.S_IMODE(
                         archived_mode
@@ -128,12 +156,83 @@ def verify_state_backup(archive: str | Path) -> StateBackupResult:
                             f"State backup entry failed verification: {entry['path']}"
                         )
                     if entry["kind"] == "sqlite":
-                        sqlite_path = Path(temp_dir) / Path(entry["path"]).name
+                        sqlite_path = Path(temp_dir) / f"sqlite-{index}.sqlite3"
                         sqlite_path.write_bytes(bundle.read(entry["path"]))
-                        _verify_sqlite(sqlite_path, entry["path"])
+                        user_version = _verify_sqlite(sqlite_path, entry["path"])
+                        declared_version = entry.get("sqlite_user_version")
+                        if (
+                            declared_version is not None
+                            and declared_version != user_version
+                        ):
+                            raise ValueError(
+                                "State backup SQLite schema metadata does not "
+                                f"match its contents: {entry['path']}"
+                            )
+                        if entry["path"] == "runtime.sqlite3":
+                            runtime_schema_version = user_version
     except BadZipFile as exc:
         raise ValueError("State backup is not a valid ZIP archive.") from exc
-    return _result_for_archive(path, manifest)
+    return _result_for_archive(path, manifest, runtime_schema_version)
+
+
+def restore_state_backup(
+    archive: str | Path,
+    destination: str | Path,
+    *,
+    replace: bool = False,
+) -> StateRestoreResult:
+    """Restore a verified archive through an offline atomic directory swap."""
+    source = Path(archive).expanduser().resolve()
+    raw_destination = Path(destination).expanduser()
+    if raw_destination.is_symlink():
+        raise ValueError("State restore destination must not be a symbolic link.")
+    target = raw_destination.resolve()
+    if target.parent == target:
+        raise ValueError("State restore destination must not be a filesystem root.")
+    if source == target or source.is_relative_to(target):
+        raise ValueError(
+            "State restore archive must be outside the destination directory."
+        )
+
+    verified = verify_state_backup(source)
+    if not verified.restore_compatible:
+        raise ValueError(
+            "State backup runtime schema is newer than this Harness supports: "
+            f"archive={verified.runtime_schema_version}, "
+            f"supported={verified.max_supported_runtime_schema_version}."
+        )
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    existed = target.exists()
+    before: dict[str, tuple[int, str]] | None = None
+    if existed:
+        if not target.is_dir():
+            raise ValueError("State restore destination is not a directory.")
+        if not replace:
+            raise ValueError(
+                "State restore destination already exists; stop Harness and pass "
+                "--replace to confirm offline replacement."
+            )
+        _assert_restore_destination_quiescent(target)
+        before = _fingerprint_tree(target)
+
+    with TemporaryDirectory(
+        prefix=f".{target.name}.restore-", dir=target.parent
+    ) as temp_dir:
+        stage = Path(temp_dir) / "state"
+        stage.mkdir(mode=0o700)
+        _extract_archive(source, stage)
+        if _hash_file(source)[0] != verified.sha256:
+            raise ValueError("State backup changed while it was being restored.")
+        if existed:
+            _assert_restore_destination_quiescent(target)
+            if before != _fingerprint_tree(target):
+                raise ValueError(
+                    "Harness state changed while restore was staged; stop the UI, "
+                    "workers, and active runs, then retry."
+                )
+        _publish_restored_state(stage, target, replace=existed)
+    return StateRestoreResult(backup=verified, replaced_existing=existed)
 
 
 def _write_archive(source: Path, output: Path, temp_dir: Path) -> dict[str, object]:
@@ -144,21 +243,22 @@ def _write_archive(source: Path, output: Path, temp_dir: Path) -> dict[str, obje
             mode = stat.S_IMODE(path.stat().st_mode)
             if path.name.endswith(_SQLITE_SUFFIX):
                 snapshot = temp_dir / f"sqlite-{len(entries)}.sqlite3"
-                _snapshot_sqlite(path, snapshot)
+                sqlite_user_version = _snapshot_sqlite(path, snapshot)
                 digest, size = _write_file(bundle, relative, snapshot, mode)
                 kind = "sqlite"
             else:
                 digest, size = _write_file(bundle, relative, path, mode)
                 kind = "file"
-            entries.append(
-                {
-                    "kind": kind,
-                    "mode": mode,
-                    "path": relative,
-                    "sha256": digest,
-                    "size": size,
-                }
-            )
+            entry: dict[str, int | str] = {
+                "kind": kind,
+                "mode": mode,
+                "path": relative,
+                "sha256": digest,
+                "size": size,
+            }
+            if kind == "sqlite":
+                entry["sqlite_user_version"] = sqlite_user_version
+            entries.append(entry)
         manifest: dict[str, object] = {
             "schema_version": BACKUP_SCHEMA_VERSION,
             "kind": BACKUP_KIND,
@@ -222,30 +322,133 @@ def _is_transient(path: Path) -> bool:
     )
 
 
-def _snapshot_sqlite(source: Path, destination: Path) -> None:
+def _snapshot_sqlite(source: Path, destination: Path) -> int:
     try:
         source_uri = f"{source.resolve().as_uri()}?mode=ro"
         with sqlite3.connect(source_uri, uri=True) as source_db:
             with sqlite3.connect(destination) as destination_db:
                 source_db.backup(destination_db)
                 result = destination_db.execute("PRAGMA quick_check").fetchone()
+                user_version_row = destination_db.execute(
+                    "PRAGMA user_version"
+                ).fetchone()
     except sqlite3.Error as exc:
         raise ValueError(f"Unable to snapshot SQLite state: {source.name}") from exc
     if result is None or result[0] != "ok":
         raise ValueError(f"SQLite state failed integrity check: {source.name}")
+    return int(user_version_row[0]) if user_version_row is not None else 0
 
 
-def _verify_sqlite(path: Path, archive_name: str) -> None:
+def _verify_sqlite(path: Path, archive_name: str) -> int:
     try:
         uri = f"{path.resolve().as_uri()}?mode=ro"
         with sqlite3.connect(uri, uri=True) as connection:
             result = connection.execute("PRAGMA quick_check").fetchone()
+            user_version_row = connection.execute("PRAGMA user_version").fetchone()
     except sqlite3.Error as exc:
         raise ValueError(
             f"State backup SQLite entry is invalid: {archive_name}"
         ) from exc
     if result is None or result[0] != "ok":
         raise ValueError(f"State backup SQLite entry is corrupt: {archive_name}")
+    return int(user_version_row[0]) if user_version_row is not None else 0
+
+
+def _assert_restore_destination_quiescent(destination: Path) -> None:
+    for root, directories, files in os.walk(destination, followlinks=False):
+        root_path = Path(root)
+        for name in (*directories, *files):
+            path = root_path / name
+            if path.is_symlink():
+                raise ValueError(
+                    "Harness state contains a symbolic link and cannot be replaced "
+                    "safely."
+                )
+        for name in files:
+            if name.endswith((*_TRANSIENT_SUFFIXES, ".lock")):
+                raise ValueError(
+                    "Harness state has active lock/WAL/SHM markers; stop the UI, "
+                    "workers, and active runs before restore."
+                )
+
+
+def _extract_archive(archive: Path, destination: Path) -> None:
+    try:
+        with ZipFile(archive, "r") as bundle:
+            manifest = json.loads(bundle.read(BACKUP_MANIFEST))
+            entries = _validate_manifest(manifest)
+            for entry in entries:
+                relative = PurePosixPath(str(entry["path"]))
+                target = destination.joinpath(*relative.parts)
+                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                digest = sha256()
+                size = 0
+                with bundle.open(str(entry["path"]), "r") as source:
+                    with target.open("xb") as output:
+                        while chunk := source.read(_CHUNK_SIZE):
+                            output.write(chunk)
+                            digest.update(chunk)
+                            size += len(chunk)
+                        output.flush()
+                        os.fsync(output.fileno())
+                os.chmod(target, int(entry["mode"]))
+                if digest.hexdigest() != entry["sha256"] or size != entry["size"]:
+                    raise ValueError(
+                        f"Restored state entry failed verification: {entry['path']}"
+                    )
+                if entry["kind"] == "sqlite":
+                    _verify_sqlite(target, str(entry["path"]))
+    except (BadZipFile, KeyError, json.JSONDecodeError) as exc:
+        raise ValueError("State backup changed while it was being restored.") from exc
+    for directory in sorted(
+        (path for path in destination.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    ):
+        os.chmod(directory, 0o700)
+        _fsync_directory(directory)
+    os.chmod(destination, 0o700)
+    _fsync_directory(destination)
+
+
+def _publish_restored_state(
+    stage: Path,
+    destination: Path,
+    *,
+    replace: bool,
+) -> None:
+    if not replace:
+        stage.replace(destination)
+        _fsync_directory(destination.parent)
+        return
+
+    previous = Path(
+        mkdtemp(prefix=f".{destination.name}.pre-restore-", dir=destination.parent)
+    )
+    previous.rmdir()
+    destination.replace(previous)
+    _fsync_directory(destination.parent)
+    try:
+        stage.replace(destination)
+        _fsync_directory(destination.parent)
+    except BaseException:
+        if not destination.exists() and previous.exists():
+            previous.replace(destination)
+            _fsync_directory(destination.parent)
+        raise
+    shutil.rmtree(previous)
+    _fsync_directory(destination.parent)
+
+
+def _fsync_directory(path: Path) -> None:
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _write_file(
@@ -336,6 +539,7 @@ def _validate_manifest(manifest: object) -> list[dict[str, object]]:
         size = entry.get("size")
         kind = entry.get("kind")
         mode = entry.get("mode")
+        sqlite_user_version = entry.get("sqlite_user_version")
         if not isinstance(path, str):
             raise ValueError("State backup manifest path is invalid.")
         _validate_archive_path(path)
@@ -351,6 +555,13 @@ def _validate_manifest(manifest: object) -> list[dict[str, object]]:
             raise ValueError("State backup manifest size is invalid.")
         if kind not in {"file", "sqlite"}:
             raise ValueError("State backup manifest entry kind is invalid.")
+        if sqlite_user_version is not None and (
+            kind != "sqlite"
+            or not isinstance(sqlite_user_version, int)
+            or isinstance(sqlite_user_version, bool)
+            or sqlite_user_version < 0
+        ):
+            raise ValueError("State backup SQLite schema metadata is invalid.")
         if (
             not isinstance(mode, int)
             or isinstance(mode, bool)
@@ -374,7 +585,11 @@ def _validate_archive_path(value: str) -> None:
         raise ValueError("State backup contains an unsafe archive path.")
 
 
-def _result_for_archive(path: Path, manifest: dict[str, object]) -> StateBackupResult:
+def _result_for_archive(
+    path: Path,
+    manifest: dict[str, object],
+    runtime_schema_version: int | None,
+) -> StateBackupResult:
     entries = _validate_manifest(manifest)
     return StateBackupResult(
         schema_version=BACKUP_SCHEMA_VERSION,
@@ -382,6 +597,12 @@ def _result_for_archive(path: Path, manifest: dict[str, object]) -> StateBackupR
         file_count=len(entries),
         total_bytes=sum(int(entry["size"]) for entry in entries),
         sha256=_hash_file(path)[0],
+        runtime_schema_version=runtime_schema_version,
+        max_supported_runtime_schema_version=RUNTIME_SCHEMA_VERSION,
+        restore_compatible=(
+            runtime_schema_version is None
+            or runtime_schema_version <= RUNTIME_SCHEMA_VERSION
+        ),
     )
 
 

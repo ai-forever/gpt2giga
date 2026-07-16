@@ -2063,6 +2063,8 @@ installed package:
 ```bash
 giga state backup --output ../gpt2giga-harness-state.zip
 giga state verify ../gpt2giga-harness-state.zip --json
+# after stopping Harness, restore into an absent directory or confirm replacement
+giga state restore ../gpt2giga-harness-state.zip --replace --json
 ```
 
 The backup schema is versioned and content-addressed. Archive paths are
@@ -2084,8 +2086,17 @@ giga runtime export --output /tmp/harness-runtime.json
 `giga state backup` covers the configured Harness user data directory
 (`GPT2GIGA_HARNESS_DATA_DIR`, normally `~/.gpt2giga/harness`). Project-local
 `.giga/` directories remain outside that archive and belong in the project's
-own backup or version-control policy. This release does not provide automatic
-restore or state migration; those lifecycle contracts remain gated separately.
+own backup or version-control policy.
+
+`giga state restore` verifies the archive again, rejects a runtime schema newer
+than the installed Harness supports, stages retained modes and SQLite integrity
+checks in a private sibling directory, and only then publishes the restored
+directory. Restoring over an existing directory requires `--replace`; active
+lock/WAL/SHM markers or a concurrent destination change fail before the swap.
+An older runtime schema is upgraded only when the restored store is opened by
+the installed package. Reverse migrations are not supported: package rollback
+must restore the pre-upgrade archive created for that version. The command does
+not touch project-local `.giga/` state.
 
 ## Migration from the Combined Prerelease
 

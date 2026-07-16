@@ -184,6 +184,8 @@ upgrade or package rollback:
 ```sh
 giga state backup --output ../gpt2giga-harness-state.zip
 giga state verify ../gpt2giga-harness-state.zip --json
+# after stopping Harness, restore into an absent directory or confirm replacement
+giga state restore ../gpt2giga-harness-state.zip --replace --json
 ```
 
 The versioned archive preserves Harness-owned files and consistent SQLite
@@ -194,10 +196,17 @@ contain opt-in captured content, attachments, or managed configuration; treat
 it as private state, not as a support bundle. Project-local `.giga/` directories
 remain separate and should stay in the project backup or version-control plan.
 
+`giga state restore` verifies the archive again, rejects a runtime schema newer
+than the installed Harness supports, stages every file with its retained mode
+and SQLite integrity check, then publishes the directory through an offline
+sibling swap. An existing destination is never overwritten without
+`--replace`, and active lock/WAL/SHM markers or a concurrent state change fail
+before publication. Older runtime schemas are migrated only by the next normal
+Harness startup; there is no reverse migration. For rollback, restore the
+pre-upgrade archive after reinstalling the package version that created it.
+
 `giga runtime export` remains the redaction-safe coordination export for issue
-reports. Automated restore and stored-state migration are not part of this
-backup command yet; preserve the archive for the documented offline rollback
-procedure of the target release.
+reports.
 
 ## Upgrade from the combined prerelease
 

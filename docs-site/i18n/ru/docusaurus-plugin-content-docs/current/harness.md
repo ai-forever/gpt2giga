@@ -975,6 +975,8 @@ boundaries. Не объявляйте capability, которую не подтв
 ```bash
 giga state backup --output ../gpt2giga-harness-state.zip
 giga state verify ../gpt2giga-harness-state.zip --json
+# после остановки Harness восстановите отсутствующий каталог или подтвердите замену
+giga state restore ../gpt2giga-harness-state.zip --replace --json
 ```
 
 Backup использует versioned content-addressed schema: относительные пути,
@@ -996,8 +998,17 @@ giga runtime export --output /tmp/harness-runtime.json
 `giga state backup` охватывает настроенный Harness user data directory
 (`GPT2GIGA_HARNESS_DATA_DIR`, обычно `~/.gpt2giga/harness`). Project-local
 `.giga/` остаётся вне архива и должно входить в backup/version-control policy
-самого проекта. Автоматические restore и state migration в этот slice не
-входят и остаются отдельными lifecycle gates.
+самого проекта.
+
+`giga state restore` повторно проверяет архив, отклоняет runtime schema новее
+поддерживаемой установленным Harness, переносит retained modes и проверяет
+SQLite integrity в приватном sibling staging-каталоге, а затем публикует
+восстановленный каталог. Для существующего destination обязателен `--replace`;
+активные lock/WAL/SHM markers или параллельное изменение destination завершают
+операцию до swap. Более старая runtime schema обновляется только при следующем
+штатном открытии store установленным package. Reverse migrations не
+поддерживаются: для package rollback нужно восстановить pre-upgrade архив,
+созданный соответствующей версией. Команда не изменяет project-local `.giga/`.
 
 ## Миграция со старого combined prerelease
 

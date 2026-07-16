@@ -141,7 +141,11 @@ from gpt2giga_harness.sessions.models import (
 )
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import new_id, utc_now
-from gpt2giga_harness.state_backup import create_state_backup, verify_state_backup
+from gpt2giga_harness.state_backup import (
+    create_state_backup,
+    restore_state_backup,
+    verify_state_backup,
+)
 from gpt2giga_harness.types import (
     HarnessCapability,
     HarnessRequest,
@@ -319,6 +323,13 @@ def build_parser() -> argparse.ArgumentParser:
     state_verify.add_argument("archive")
     state_verify.add_argument("--json", action="store_true")
     state_verify.set_defaults(handler=_handle_state_verify)
+
+    state_restore = state_subparsers.add_parser("restore")
+    state_restore.add_argument("archive")
+    state_restore.add_argument("--destination", default=None)
+    state_restore.add_argument("--replace", action="store_true")
+    state_restore.add_argument("--json", action="store_true")
+    state_restore.set_defaults(handler=_handle_state_restore)
 
     worker = subparsers.add_parser("worker", parents=[common])
     worker_subparsers = worker.add_subparsers(dest="worker_command")
@@ -1053,6 +1064,22 @@ def _handle_state_verify(args: argparse.Namespace, config: HarnessConfig) -> int
         print(f"Verified Harness state backup: {Path(args.archive).expanduser()}")
         print(f"SHA-256: {result.sha256}")
         print(f"Files: {result.file_count}; bytes: {result.total_bytes}")
+    return 0
+
+
+def _handle_state_restore(args: argparse.Namespace, config: HarnessConfig) -> int:
+    destination = args.destination or config.data_dir
+    result = restore_state_backup(
+        args.archive,
+        destination,
+        replace=args.replace,
+    )
+    if args.json:
+        _print_json(result.to_dict())
+    else:
+        print(f"Restored Harness state to {Path(destination).expanduser()}")
+        print(f"SHA-256: {result.backup.sha256}")
+        print(f"Files: {result.backup.file_count}; bytes: {result.backup.total_bytes}")
     return 0
 
 
