@@ -544,7 +544,7 @@ def test_model_listing_can_be_strict_to_selected_api_mode(monkeypatch):
     assert called_urls == ["http://127.0.0.1:8090/v2/models"]
 
 
-def test_model_listing_only_includes_chat_models(monkeypatch):
+def test_model_listing_excludes_explicit_non_chat_models(monkeypatch):
     def fake_request_json(method, url, *, payload=None, api_key=None, timeout=60.0):
         return {
             "object": "list",
@@ -579,5 +579,5 @@ def test_model_listing_only_includes_chat_models(monkeypatch):
     )
 
     assert discovery.ok is True
-    assert discovery.models == ("GigaChat-3-Pro",)
+    assert discovery.models == ("GigaChat-3-Pro", "LegacyModel")
     assert discovery.source == "/v1/models"

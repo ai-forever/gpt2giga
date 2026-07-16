@@ -725,7 +725,8 @@ def _extract_model_ids(data: dict[str, Any]) -> list[str]:
     for item in raw_models:
         if not isinstance(item, dict):
             continue
-        if item.get("type") != "chat":
+        model_type = item.get("type")
+        if model_type is not None and model_type != "chat":
             continue
         model_id = item.get("id") or item.get("name") or item.get("model")
         if model_id:
