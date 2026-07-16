@@ -5,11 +5,18 @@ All notable changes to gpt2giga-harness are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0b1] - 2026-07-17
 
 ### Changed
+- **Native Automation**: Cockpit now creates and edits agents, workflows, and schedules through typed backend APIs, preserving optimistic revision checks and explicit operator actions instead of requiring copied YAML commands.
+- **Simultaneous Arena**: multi-harness comparison is rebuilt as independent chats with parallel startup, separate history, and per-participant follow-ups.
+- **Message rendering**: Cockpit now uses a standard Markdown pipeline with safe HTML, syntax highlighting, tables, task lists, and locally packaged KaTeX.
 - **Cockpit model settings**: default chat and session-title models can now be selected independently from the discovery list and persist in backend-owned Harness Settings; Workbench and headless runs consume the stored choices without a model ID hardcoded in the client or session runner.
 - **Cockpit V2 rollout**: the packaged React cockpit is now the default local UI, prior top-level deep links redirect to their canonical Workbench, Runs, Automation, Evaluation, or Integrations destinations, and `/legacy/**` remains available as a release-level rollback path without retained-state migration. New Cockpit streams start at the durable live tail while bounded snapshots own retained history, so opening a large completed run does not replay every stored event through the browser. Read-model ETags receive a fresh process namespace so a restart, data-dir switch, or rollback cannot reuse a stale browser snapshot with the same SQLite generation.
+
+### Fixed
+- **Codex continuity**: app-server resume preserves conversation history and subagent activity, including `output_text` from earlier turns, while Workbench displays the related events without flattening their structure.
+- **UI lifecycle**: selected-route readiness survives durable retries, the UI worker pool is explicitly configurable, and graceful shutdown is time-bounded.
 
 ### Added
 - **Base-install dependency policy**: clean wheel installs now run a versioned audit over the ten reviewed direct dependencies, a 64-distribution resolved ceiling, and explicit Office, remote-channel, external-client, and sandbox-provider exclusion families; optional providers remain separately installed integrations instead of hidden base dependencies.
@@ -24,9 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Asynchronous UI data plane**: all FastAPI routes now carry exhaustive workload, storage/execution owner, deadline, cancellation, idempotency, payload, cursor, and latency contracts; filesystem, SQLite, network, subprocess, durable-job, and SSE work uses workload-bounded offload, while content-free diagnostics expose event-loop lag, queue/DB/storage/handler/serialization timing, response bytes, and cancellation counts.
 - **Packaged Cockpit V2 shell**: added a pinned React/TypeScript/Vite frontend with five route-split product surfaces, lazy inspector boundaries, a deterministic content-hashed manifest, integrity-bound Brotli/gzip assets, CSP-safe same-origin loading, and Node-free wheel smoke coverage; the legacy cockpit remains an explicit recovery route.
 
-## [0.0.1a4] - 2026-07-15
-
-### Added
 - **Mutation policy conformance**: all unsafe-method Harness API routes now have one fail-closed semantic inventory covering effect class, enforcement control and owner, stable permission actions where applicable, and retained allow/ask/deny/stale/redaction evidence; app construction and CI reject unclassified routes.
 - **Cockpit performance budgets**: the packaged shell now publishes and enforces machine-readable budgets for critical asset weight, first-ready timing, large trace DOM size/rendering, cursor reconnect, and bounded diff/report previews; full retained report, copy, open, and apply actions remain explicit.
 - **Selected-run readiness**: CLI/API/UI preflight now reports redaction-safe `ready`/`degraded`/`blocked` checks and remediation before spawn only for the selected harness, invocation mode, route/model, workspace policy, and durable/synchronous path; unrelated failures do not block local Echo.
@@ -97,8 +101,7 @@ considered stable.
 
 ---
 
-[Unreleased]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a4...HEAD
-[0.0.1a4]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.0.1a4
+[0.1.0b1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.1.0b1
 [0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3
 [0.0.1a2]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a1...gpt2giga-harness-v0.0.1a2
 [0.0.1a1]: https://github.com/ai-forever/gpt2giga/releases/tag/gpt2giga-harness-v0.0.1a1

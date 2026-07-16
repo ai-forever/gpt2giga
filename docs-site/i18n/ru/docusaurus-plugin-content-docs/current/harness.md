@@ -1,8 +1,8 @@
 # Unified Harness
 
-:::warning[Альфа-превью — активная разработка]
+:::warning[Бета-превью — prerelease]
 
-Линейка `gpt2giga-harness` 0.0.x — ранняя версия для тестирования и обратной
+Линейка `gpt2giga-harness` 0.1.x — beta-preview для тестирования и обратной
 связи. UI, CLI, YAML-файлы проекта, схема runtime-хранилища и процесс обновления
 могут меняться. Используйте Harness локально, для контролируемой работы под
 наблюдением, а не как критичный production-сервис или удалённую multi-user
@@ -48,7 +48,7 @@ Approval в Harness относится к действиям, которыми H
 не обещает видеть каждое внутреннее действие непрозрачного Codex, Claude или
 Gemini subprocess.
 
-## Кому подходит альфа
+## Кому подходит бета
 
 Попробуйте preview, если хотите оценить локальный agent cockpit, сравнить
 несколько harness, собрать проверяемый workflow или повлиять на интерфейсы
@@ -60,7 +60,7 @@ Gemini subprocess.
 централизованное multi-user администрирование или полноценная security boundary
 вокруг произвольных действий стороннего CLI.
 
-Во время альфы:
+Во время беты:
 
 - перед обновлением читайте release notes и делайте резервную копию
   `~/.gpt2giga/harness` и важных определений из `.giga/`;
@@ -78,11 +78,11 @@ Gemini subprocess.
 
 ### 1. Получите preview
 
-Требуются Python 3.10–3.14 и `uv`. Текущий и всегда доступный путь для alpha —
+Требуются Python 3.10–3.14 и `uv`. Текущий и всегда доступный путь для beta —
 запуск из source checkout:
 
 ```bash
-git clone --branch feature/harness_enrichment \
+git clone --branch feature/productize_harness \
   https://github.com/ai-forever/gpt2giga.git
 cd gpt2giga
 uv sync --all-packages --all-extras --dev
@@ -104,6 +104,9 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
+Будущий дистрибутив `gpt2giga-harness==0.1.0b1` требует
+`gpt2giga>=0.2.4a1` и добавляет команды `giga` и `gpt2giga-harness`.
+
 Для Direct Chat понадобятся credentials из [быстрого старта gpt2giga](quickstart.md).
 Codex, Claude Code и Gemini — опциональные интеграции: соответствующий CLI
 executable должен быть в `PATH` или задан явным override, а локальный gateway —
@@ -113,7 +116,7 @@ executable должен быть в `PATH` или задан явным override
 #### Базовая установка и опциональные providers
 
 Базовый distribution содержит десять проверенных прямых runtime dependencies,
-включая точную совместимую версию `gpt2giga`. В release CI оба wheel
+включая совместимое требование к `gpt2giga`. В release CI оба wheel
 устанавливаются в чистые окружения Python 3.10 и 3.14, после чего versioned
 audit завершается ошибкой, если resolved environment превышает 64 distributions
 или содержит packages из следующих семейств опциональных интеграций:
@@ -1093,8 +1096,8 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-Текущая metadata `gpt2giga-harness==0.0.1a4` требует ровно
-`gpt2giga==0.2.3a2`. Старый import `gpt2giga.harness` больше не является
+Будущая metadata `gpt2giga-harness==0.1.0b1` требует
+`gpt2giga>=0.2.4a1`. Старый import `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
 перезаписывает `~/.gpt2giga/harness`, `.giga/` или vendor-owned CLI homes.
 

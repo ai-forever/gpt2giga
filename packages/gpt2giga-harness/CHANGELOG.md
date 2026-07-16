@@ -5,11 +5,18 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [0.1.0b1] - 2026-07-17
 
 ### Изменено
+- **Нативная Automation**: Cockpit теперь создаёт и редактирует agents, workflows и schedules через типизированные backend API, сохраняя optimistic revision checks и явные действия оператора вместо копирования YAML-команд вручную.
+- **Одновременная Arena**: сравнение нескольких harness перестроено как набор независимых чатов с параллельным стартом, отдельной историей и follow-up для каждого участника.
+- **Рендеринг сообщений**: Cockpit использует стандартный Markdown pipeline с безопасным HTML, подсветкой кода, таблицами, task lists и локально упакованным KaTeX.
 - **Настройки моделей Cockpit**: модели по умолчанию для чатов и генерации заголовков теперь выбираются независимо из discovery-списка и сохраняются в backend-owned Harness Settings; Workbench и headless run используют сохранённый выбор без model-id, зашитого в клиент или session runner.
 - **Rollout Cockpit V2**: пакетный React cockpit теперь открывается как локальный UI по умолчанию, прежние top-level deep links перенаправляются в канонические Workbench, Runs, Automation, Evaluation или Integrations, а `/legacy/**` остаётся release-level путём отката без миграции retained state. Новые Cockpit streams подключаются к durable live tail, а retained history остаётся в bounded snapshots, поэтому открытие большого завершённого run не прокручивает через браузер все сохранённые events. ETag read model получает новый process namespace, чтобы restart, смена data-dir или rollback не переиспользовали устаревший browser snapshot с тем же SQLite generation.
+
+### Исправлено
+- **Codex continuity**: app-server resume сохраняет историю разговора и активность subagents, включая `output_text` из предыдущих turns, а Workbench показывает связанные события без потери структуры.
+- **Lifecycle UI**: readiness выбранного route не теряется при durable retry, UI worker pool настраивается явно, а graceful shutdown ограничен по времени.
 
 ### Добавлено
 - **Политика зависимостей базовой установки**: clean wheel installs теперь запускают versioned audit для десяти проверенных прямых dependencies, лимита 64 resolved distributions и явных семейств исключений Office, remote channels, external clients и sandbox providers; optional providers остаются отдельно устанавливаемыми интеграциями, а не скрытыми базовыми зависимостями.
@@ -24,9 +31,6 @@
 - **Асинхронный UI data plane**: все FastAPI routes теперь имеют исчерпывающие контракты workload, storage/execution owner, deadline, cancellation, idempotency, payload, cursor и latency; filesystem, SQLite, network, subprocess, durable-job и SSE работа проходит через workload-bounded offload, а content-free диагностика показывает event-loop lag, queue/DB/storage/handler/serialization timing, response bytes и счётчики cancellation.
 - **Пакетный shell Cockpit V2**: добавлен закреплённый React/TypeScript/Vite frontend с пятью route-split поверхностями, ленивыми inspector-модулями, детерминированным content-hashed manifest, integrity-bound Brotli/gzip assets, CSP-safe same-origin загрузкой и wheel smoke без Node; legacy cockpit остаётся явным recovery route.
 
-## [0.0.1a4] - 2026-07-15
-
-### Добавлено
 - **Policy conformance для mutation-маршрутов**: все unsafe-method маршруты Harness API теперь входят в единый fail-closed semantic inventory с effect class, enforcement control и owner, стабильными permission actions там, где они применимы, и retained evidence для allow/ask/deny/stale/redaction; создание приложения и CI отклоняют неклассифицированные маршруты.
 - **Бюджеты производительности Cockpit**: packaged shell публикует и проверяет machine-readable бюджеты для веса critical assets, времени first-ready, размера/rendering большого trace DOM, cursor reconnect и ограниченных diff/report preview; полный retained report и явные copy, open и apply остаются доступны отдельно.
 - **Readiness выбранного запуска**: CLI/API/UI preflight до spawn показывает redaction-safe `ready`/`degraded`/`blocked` checks и remediation только для выбранных harness, invocation mode, route/model, workspace policy и durable/synchronous path; нерелевантные сбои не блокируют локальный Echo.
@@ -96,8 +100,7 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
-[Unreleased]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a4...HEAD
-[0.0.1a4]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.0.1a4
+[0.1.0b1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.1.0b1
 [0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3
 [0.0.1a2]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a1...gpt2giga-harness-v0.0.1a2
 [0.0.1a1]: https://github.com/ai-forever/gpt2giga/releases/tag/gpt2giga-harness-v0.0.1a1

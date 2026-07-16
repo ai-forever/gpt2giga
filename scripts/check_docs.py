@@ -187,6 +187,8 @@ def check_stale_instructions(root: Path, files: list[Path]) -> list[Issue]:
     """Reject known obsolete public installation instructions."""
     forbidden = {
         "feature/unified_harness": "use the current Harness preview branch",
+        "feature/harness_enrichment": "use the current Harness preview branch",
+        "gpt2giga-harness==0.0.1a4": "the next Harness release is 0.1.0b1",
         'gpt2giga==0.2.3a1"': "do not pin the previous gateway alpha in current install docs",
         'gpt2giga-harness==0.0.1"': "do not pin the pre-split Harness version",
     }

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.4a1] - 2026-07-16
 
 ### Fixed
+- **OpenAI Responses history**: `output_text` parts from earlier turns are now transformed alongside `input_text`, so Codex app-server continuity retains conversation and subagent context.
 - **Request-context CPU usage**: replaced expensive PBKDF2 for IP and API-key correlation fingerprints with fast keyed HMAC-SHA256 so middleware no longer blocks the event loop with two 100,000-iteration computations per request.
 - **Hidden DEBUG payload serialization**: payload preparation and redaction are now skipped entirely at the default `INFO` level, including response and streaming paths.
 - **`PASS_TOKEN` resources**: credential-specific GigaChat clients are reused through a bounded LRU pool, remain leased through stream completion, and close on eviction or shutdown.
@@ -494,6 +495,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.2.4a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a2...v0.2.4a1
 [0.2.3a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a1...v0.2.3a2
 [0.2.3a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.2a1...v0.2.3a1
 [0.2.2a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.1a1...v0.2.2a1

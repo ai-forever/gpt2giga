@@ -5,10 +5,10 @@ distribution provides the `giga` and `gpt2giga-harness` commands, the
 `gpt2giga_harness` Python namespace, a durable local worker, and the packaged
 Project Cockpit web UI.
 
-> **Alpha status:** `0.0.x` storage, API, adapter, and automation contracts may
-> change between releases. Use supervised local workflows first. The package
-> metadata in the current checkout is the source of truth for the exact gateway
-> dependency.
+> **Beta preview:** the `0.1.x` storage, API, adapter, and automation contracts
+> are stabilizing but may still change between prereleases. Use supervised local
+> workflows first. The package metadata in the current checkout is the source of
+> truth for the supported gateway requirement.
 
 ## Install the current preview
 
@@ -18,7 +18,7 @@ it from a source checkout:
 ```sh
 git clone https://github.com/ai-forever/gpt2giga.git
 cd gpt2giga
-git switch feature/harness_enrichment
+git switch feature/productize_harness
 uv sync --all-packages --all-extras --dev
 source .venv/bin/activate
 giga doctor
@@ -36,12 +36,12 @@ giga doctor
 giga ui
 ```
 
-The current `gpt2giga-harness==0.0.1a4` metadata depends exactly on
-`gpt2giga==0.2.3a2`. Installing only `gpt2giga` never adds Harness commands or
+The upcoming `gpt2giga-harness==0.1.0b1` metadata requires
+`gpt2giga>=0.2.4a1`. Installing only `gpt2giga` never adds Harness commands or
 the `gpt2giga_harness` namespace.
 
 The base Harness install is intentionally limited to ten reviewed direct
-runtime distributions, including the exact gateway dependency. A clean
+runtime distributions, including the compatible gateway dependency. A clean
 installed-artifact audit fails if the resolved environment grows beyond 64
 distributions or pulls in Office document libraries, remote-channel SDKs,
 external client frameworks, or sandbox-provider SDKs. Those capabilities must

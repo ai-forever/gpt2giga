@@ -1,8 +1,8 @@
 # Unified Harness
 
-:::warning[Alpha preview — under active development]
+:::warning[Beta preview — prerelease]
 
-The `gpt2giga-harness` 0.0.x line is an early preview for testing and feedback.
+The `gpt2giga-harness` 0.1.x line is a beta preview for testing and feedback.
 The UI, CLI, project YAML, runtime schema, and upgrade behavior can change while
 the product is being developed. Use it for local evaluation and supervised
 workflows, not as a production-critical or unattended multi-user service.
@@ -47,7 +47,7 @@ This separation matters: an approval shown by Unified Harness covers actions it
 owns, such as spawning a run or applying a captured patch. It cannot claim to
 observe every internal action performed by a black-box external CLI.
 
-## Is the alpha preview for you?
+## Is the beta preview for you?
 
 Try it now if you want to evaluate a local agent cockpit, compare harnesses,
 prototype reviewable workflows, or give feedback while the interfaces are
@@ -58,7 +58,7 @@ Wait for a later release if you need a stable automation API, guaranteed
 backward compatibility, high availability, central multi-user administration,
 or a security boundary around arbitrary behavior inside third-party CLIs.
 
-During the alpha:
+During the beta:
 
 - read release notes before upgrading and back up `~/.gpt2giga/harness` plus
   important project `.giga/` definitions;
@@ -75,10 +75,10 @@ During the alpha:
 
 ### 1. Get the preview and check the workstation
 
-The source checkout is the current, always-available alpha path:
+The source checkout is the current, always-available beta path:
 
 ```bash
-git clone --branch feature/harness_enrichment \
+git clone --branch feature/productize_harness \
   https://github.com/ai-forever/gpt2giga.git
 cd gpt2giga
 uv sync --all-packages --all-extras --dev
@@ -100,8 +100,8 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-The distribution installs the exact compatible gateway dependency declared in
-its package metadata and provides the `giga` and `gpt2giga-harness` commands.
+The upcoming `gpt2giga-harness==0.1.0b1` distribution requires
+`gpt2giga>=0.2.4a1` and provides the `giga` and `gpt2giga-harness` commands.
 
 Requirements are Python 3.10–3.14 and `uv`. Direct GigaChat runs also need the
 gateway credentials described in the [gpt2giga quickstart](quickstart.md).
@@ -113,7 +113,7 @@ Harness route. Unavailable CLIs stay disabled rather than breaking the cockpit.
 #### Base install and optional providers
 
 The base distribution has ten reviewed direct runtime dependencies, including
-the exact compatible `gpt2giga` version. Release CI installs both wheels into
+the compatible `gpt2giga` requirement. Release CI installs both wheels into
 clean Python 3.10 and 3.14 environments and runs a versioned audit that fails
 if the resolved environment exceeds 64 distributions or includes packages from
 these optional integration families:
@@ -2191,7 +2191,7 @@ Remove the old combined wheel before installing the split packages so stale
 
 ```bash
 python -m pip uninstall -y gpt2giga gpt2giga-harness
-python -m pip install gpt2giga-harness
+python -m pip install --pre gpt2giga-harness
 ```
 
 For `uv` tool installations, recreate both tool environments:
@@ -2200,8 +2200,11 @@ For `uv` tool installations, recreate both tool environments:
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
 uv tool install --prerelease allow gpt2giga
-uv tool install gpt2giga-harness
+uv tool install --prerelease allow gpt2giga-harness
 ```
+
+The upcoming `gpt2giga-harness==0.1.0b1` metadata requires
+`gpt2giga>=0.2.4a1`.
 
 This package migration does not move or rewrite Harness state. Existing
 `~/.gpt2giga/harness` data and project-local `.giga/` directories remain in

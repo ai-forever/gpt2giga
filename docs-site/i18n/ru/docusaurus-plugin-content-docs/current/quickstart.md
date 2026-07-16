@@ -65,12 +65,12 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Текущее альфа-превью Unified Harness запускается из source checkout по
-[руководству Unified Harness](harness.md). После появления отдельного пакета в
-вашем package index установите control plane так:
+Будущий Unified Harness `0.1.0b1` запускается как beta-preview из source
+checkout по [руководству Unified Harness](harness.md). После появления
+отдельного пакета в вашем package index установите control plane так:
 
 ```sh
-uv tool install gpt2giga-harness
+uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 giga ui
 ```
@@ -79,10 +79,10 @@ giga ui
 команды `giga` и `gpt2giga-harness`. Дистрибутив gateway добавляет только
 команду `gpt2giga`.
 
-:::warning[Альфа-превью]
+:::warning[Бета-превью]
 
 Unified Harness активно разрабатывается. Начните с локальных запусков под
-наблюдением и прочитайте [руководство по альфа-превью](harness.md), прежде чем
+наблюдением и прочитайте [руководство по бета-превью](harness.md), прежде чем
 включать режим редактирования, удалённый доступ или расписания.
 
 :::
