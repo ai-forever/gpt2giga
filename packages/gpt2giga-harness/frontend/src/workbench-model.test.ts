@@ -233,4 +233,58 @@ describe("workbench presentation model", () => {
       }),
     ]);
   });
+
+  it("labels Codex subagents with their name, role, task, and nested tools", () => {
+    const projection = projectWorkbenchStream(
+      [
+        {
+          id: "spawn-finish",
+          payload: {
+            arguments: {
+              prompt: "Inspect repository configuration",
+              subagents: [
+                { id: "thread-child", name: "Hypatia", role: "explorer" },
+              ],
+            },
+            name: "spawn_agent",
+            status: "completed",
+            tool_call_id: "spawn-1",
+          },
+          run_id: "run-one",
+          type: "tool_call_finished",
+        },
+        {
+          id: "child-finish",
+          payload: {
+            arguments: { command: "rg --files" },
+            name: "shell",
+            parent_tool_call_id: "spawn-1",
+            result: "pyproject.toml",
+            status: "completed",
+            tool_call_id: "thread-child:command-1",
+          },
+          run_id: "run-one",
+          type: "tool_call_finished",
+        },
+      ],
+      [],
+      "run-one",
+    );
+
+    expect(projection.toolActivities).toEqual([
+      expect.objectContaining({
+        detail: "explorer · Inspect repository configuration",
+        id: "spawn-1",
+        label: "Subagent Hypatia",
+        name: "spawn_agent",
+        children: [
+          expect.objectContaining({
+            id: "thread-child:command-1",
+            name: "shell",
+            parentId: "spawn-1",
+          }),
+        ],
+      }),
+    ]);
+  });
 });

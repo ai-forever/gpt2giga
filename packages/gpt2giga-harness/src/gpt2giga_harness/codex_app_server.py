@@ -223,7 +223,6 @@ class CodexAppServerSupervisor:
                         **_thread_identity_params(request),
                         "threadId": source_thread_id,
                         "lastTurnId": continuation.get("fork_turn_id"),
-                        "excludeTurns": True,
                     },
                     timeout=APP_SERVER_TIMEOUT_SECONDS,
                 )
@@ -262,7 +261,6 @@ class CodexAppServerSupervisor:
                         {
                             **_thread_identity_params(request),
                             "threadId": thread_id,
-                            "excludeTurns": True,
                         },
                         timeout=APP_SERVER_TIMEOUT_SECONDS,
                     )
@@ -365,6 +363,8 @@ class CodexAppServerSupervisor:
         final_text = ""
         deadline = time.monotonic() + max(context.timeout_seconds, 0.1)
         interrupt_sent = False
+        subagent_parents: dict[str, str] = {}
+        seen_subagent_events: set[tuple[str, str, str]] = set()
         while time.monotonic() < deadline:
             if _cancel_requested(request.cancel_event) and not interrupt_sent:
                 runtime.client.request(
@@ -394,11 +394,40 @@ class CodexAppServerSupervisor:
                 continue
             if params.get("turnId") not in {None, turn_id}:
                 continue
+            subagent_snapshots: tuple[dict[str, Any], ...] = ()
+            item = _mapping(params.get("item"))
+            if (
+                method in {"item/started", "item/completed"}
+                and str(item.get("type") or "") == "collabToolCall"
+            ):
+                subagent_snapshots = _read_collab_subagents(runtime.client, item)
+                if subagent_snapshots:
+                    enriched_item = {
+                        **item,
+                        "subagents": [
+                            _public_collab_subagent(snapshot)
+                            for snapshot in subagent_snapshots
+                        ],
+                    }
+                    params = {**params, "item": enriched_item}
+                    item = enriched_item
+                if _collab_tool(item) == "spawn_agent":
+                    parent_id = str(item.get("id") or "")
+                    for child_id in _collab_thread_ids(item):
+                        if parent_id:
+                            subagent_parents[child_id] = parent_id
             event, item_text = _normalize_notification(method, params)
             if item_text is not None:
                 final_text = item_text
             if event is not None:
                 _publish(request, collected, event)
+            if method == "item/completed" and subagent_snapshots:
+                for child_event in _collab_child_tool_events(
+                    subagent_snapshots,
+                    subagent_parents=subagent_parents,
+                    seen=seen_subagent_events,
+                ):
+                    _publish(request, collected, child_event)
             if method == "turn/completed":
                 turn = _mapping(params.get("turn"))
                 status = str(turn.get("status") or "failed")
@@ -903,6 +932,8 @@ def _tool_name(item: Mapping[str, Any]) -> str | None:
         return str(item.get("tool") or "dynamic_tool")
     if item_type == "webSearch":
         return "web_search"
+    if item_type == "collabToolCall":
+        return _collab_tool(item)
     return None
 
 
@@ -912,6 +943,11 @@ def _tool_arguments(item: Mapping[str, Any]) -> Any:
         return {"command": item.get("command"), "cwd": item.get("cwd")}
     if item_type == "webSearch":
         return {"query": item.get("query")}
+    if item_type == "collabToolCall":
+        return {
+            "prompt": item.get("prompt"),
+            "subagents": item.get("subagents") or _collab_agent_states(item),
+        }
     return item.get("arguments") or {}
 
 
@@ -940,6 +976,154 @@ def _tool_result(item: Mapping[str, Any]) -> Any:
         }
         return failure or {"error": "Tool failed without diagnostic output."}
     return None
+
+
+def _collab_tool(item: Mapping[str, Any]) -> str | None:
+    value = str(item.get("tool") or "").strip()
+    if not value:
+        return None
+    aliases = {
+        "spawnAgent": "spawn_agent",
+        "sendInput": "send_input",
+        "resumeAgent": "resume_agent",
+        "closeAgent": "close_agent",
+    }
+    return aliases.get(value, value)
+
+
+def _collab_thread_ids(item: Mapping[str, Any]) -> tuple[str, ...]:
+    values = item.get("receiverThreadIds") or item.get("receiver_thread_ids") or ()
+    if not isinstance(values, (list, tuple)):
+        values = (values,)
+    candidates = [
+        *values,
+        item.get("receiverThreadId"),
+        item.get("receiver_thread_id"),
+        item.get("newThreadId"),
+        item.get("new_thread_id"),
+    ]
+    return tuple(
+        dict.fromkeys(
+            text for value in candidates if (text := str(value or "").strip())
+        )
+    )
+
+
+def _collab_agent_states(item: Mapping[str, Any]) -> list[dict[str, Any]]:
+    states = _mapping(item.get("agentsStates") or item.get("agents_states"))
+    return [
+        {
+            "id": thread_id,
+            "status": _mapping(state).get("status"),
+            "message": _mapping(state).get("message"),
+        }
+        for thread_id, state in states.items()
+    ]
+
+
+def _read_collab_subagents(
+    client: AppServerClient,
+    item: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    states = {str(entry.get("id")): entry for entry in _collab_agent_states(item)}
+    snapshots: list[dict[str, Any]] = []
+    for thread_id in _collab_thread_ids(item):
+        try:
+            response = client.request(
+                "thread/read",
+                {"threadId": thread_id, "includeTurns": True},
+                timeout=APP_SERVER_TIMEOUT_SECONDS,
+            )
+        except (AppServerProtocolError, OSError, RuntimeError, ValueError):
+            thread = {}
+        else:
+            thread = _mapping(response.get("thread"))
+        state = states.get(thread_id, {})
+        snapshots.append(
+            {
+                "id": thread_id,
+                "name": (
+                    thread.get("agentNickname")
+                    or thread.get("agent_nickname")
+                    or thread_id[:8]
+                ),
+                "role": thread.get("agentRole") or thread.get("agent_role"),
+                "status": state.get("status")
+                or _mapping(thread.get("status")).get("type"),
+                "message": state.get("message"),
+                "prompt": item.get("prompt"),
+                "turns": thread.get("turns") or [],
+            }
+        )
+    return tuple(snapshots)
+
+
+def _public_collab_subagent(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: snapshot.get(key)
+        for key in ("id", "name", "role", "status", "message", "prompt")
+        if snapshot.get(key) is not None
+    }
+
+
+def _collab_child_tool_events(
+    snapshots: tuple[dict[str, Any], ...],
+    *,
+    subagent_parents: Mapping[str, str],
+    seen: set[tuple[str, str, str]],
+) -> tuple[HarnessEvent, ...]:
+    events: list[HarnessEvent] = []
+    for snapshot in snapshots:
+        child_id = str(snapshot.get("id") or "")
+        parent_id = subagent_parents.get(child_id)
+        if not child_id or not parent_id:
+            continue
+        for turn in snapshot.get("turns") or ():
+            if not isinstance(turn, Mapping):
+                continue
+            for item in turn.get("items") or ():
+                if not isinstance(item, Mapping):
+                    continue
+                name = _tool_name(item)
+                item_id = str(item.get("id") or "").strip()
+                if name is None or not item_id:
+                    continue
+                status = str(item.get("status") or "completed")
+                event_type = (
+                    HarnessEventType.TOOL_CALL_STARTED.value
+                    if status in {"inProgress", "in_progress", "running"}
+                    else HarnessEventType.TOOL_CALL_FINISHED.value
+                )
+                identity = (child_id, item_id, event_type)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                payload = {
+                    "tool_call_id": f"{child_id}:{item_id}",
+                    "parent_tool_call_id": parent_id,
+                    "name": name,
+                    "status": status,
+                    "arguments": _tool_arguments(item),
+                    "source": "codex-app-server-subagent",
+                    "subagent_id": child_id,
+                    "subagent_name": snapshot.get("name"),
+                    "subagent_role": snapshot.get("role"),
+                    "subagent_description": snapshot.get("prompt"),
+                }
+                result = _tool_result(item)
+                if (
+                    event_type == HarnessEventType.TOOL_CALL_FINISHED.value
+                    and result is not None
+                ):
+                    payload["result"] = result
+                events.append(
+                    HarnessEvent(
+                        type=event_type,
+                        message=f"Codex subagent {snapshot.get('name')} ran {name}.",
+                        payload=payload,
+                    )
+                )
+    return tuple(events)
 
 
 def _turn_text(turn: Mapping[str, Any]) -> str:

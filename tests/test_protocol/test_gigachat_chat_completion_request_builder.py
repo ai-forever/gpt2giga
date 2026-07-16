@@ -626,6 +626,38 @@ async def test_prepare_response_chat_completion_maps_function_call_output():
     assert result.result == {"result": 2}
 
 
+async def test_prepare_response_chat_completion_preserves_assistant_output_text():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_response_chat_completion(
+        {
+            "model": "GigaChat-3.5-432B-A28B",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Hello"}],
+                },
+                {
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Previous answer"}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Continue"}],
+                },
+            ],
+        }
+    )
+
+    assert [message.role for message in request.messages] == [
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert request.messages[1].content[0].text == "Previous answer"
+
+
 async def test_prepare_response_chat_completion_replays_function_call_with_tools_state_id():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)

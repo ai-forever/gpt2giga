@@ -21,6 +21,7 @@ export interface WorkbenchPlanItem {
 
 export interface WorkbenchToolActivity {
   children?: readonly WorkbenchToolActivity[];
+  detail?: string;
   id: string;
   label: string;
   name: string;
@@ -122,11 +123,13 @@ export function projectToolPayload(
     typeof payload.parent_tool_call_id === "string"
       ? payload.parent_tool_call_id
       : undefined;
+  const detail = toolDetail(name, payload.arguments);
   return {
     activity: {
       id,
       label: toolLabel(name, payload.arguments),
       name,
+      ...(detail === null ? {} : { detail }),
       ...(parentId === undefined ? {} : { parentId }),
       ...(payload.result === undefined ? {} : { result: payload.result }),
       status,
@@ -231,6 +234,13 @@ function parsePlan(value: unknown): readonly WorkbenchPlanItem[] {
 
 function toolLabel(name: string, value: unknown): string {
   const argumentsValue = isRecord(value) ? value : {};
+  if (name === "spawn_agent") {
+    const agent = firstSubagent(argumentsValue.subagents);
+    const agentName = firstText(agent?.name, agent?.nickname, agent?.id);
+    return agentName === null ? "Subagent" : `Subagent ${agentName}`;
+  }
+  if (name === "send_input") return "Message to subagent";
+  if (name === "wait" || name === "wait_agent") return "Waiting for subagent";
   const path = firstText(argumentsValue.path, argumentsValue.file, argumentsValue.filename);
   if (name.includes("read") && path !== null) return `Reading ${path}`;
   if (name === "web_search") {
@@ -245,6 +255,23 @@ function toolLabel(name: string, value: unknown): string {
     return path === null ? "Editing files" : `Editing ${path}`;
   }
   return name.replaceAll("_", " ");
+}
+
+function toolDetail(name: string, value: unknown): string | null {
+  if (name !== "spawn_agent") return null;
+  const argumentsValue = isRecord(value) ? value : {};
+  const agent = firstSubagent(argumentsValue.subagents);
+  const role = firstText(agent?.role, agent?.type);
+  const prompt = firstText(argumentsValue.prompt, agent?.prompt, agent?.description);
+  const parts = [role, prompt === null ? null : firstLine(prompt)].filter(
+    (item): item is string => item !== null,
+  );
+  return parts.length === 0 ? null : parts.join(" · ");
+}
+
+function firstSubagent(value: unknown): Readonly<Record<string, unknown>> | null {
+  if (!Array.isArray(value)) return null;
+  return value.find(isRecord) ?? null;
 }
 
 function firstText(...values: unknown[]): string | null {

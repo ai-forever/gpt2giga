@@ -1440,6 +1440,7 @@ function ToolActivityCard({
         <span aria-hidden="true">{complete ? "✓" : failed ? "!" : "◇"}</span>
         <div>
           <strong>{activity.label}</strong>
+          {activity.detail ? <span className="tool-activity-detail">{activity.detail}</span> : null}
           <small>{message(locale, "toolActivity")} · {activity.status}</small>
         </div>
       </div>

@@ -252,7 +252,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .tool-activity-card.failed { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .tool-activity-card.failed .tool-activity-heading > span { color: var(--danger); }
 .tool-activity-heading { min-width: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 8px; }.tool-activity-heading > span { color: var(--accent); font-size: 15px; }.tool-activity-heading > div { min-width: 0; display: grid; gap: 3px; }
-.tool-activity-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }.tool-activity-card small { color: var(--muted); font-size: 9px; text-transform: capitalize; }
+.tool-activity-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }.tool-activity-detail { color: var(--muted); font-size: 11px; line-height: 1.35; }.tool-activity-card small { color: var(--muted); font-size: 9px; text-transform: capitalize; }
 .tool-activity-card details { margin: 8px 0 0 30px; border-top: 1px solid var(--border); padding-top: 7px; }.tool-activity-card summary { cursor: pointer; color: var(--muted); font-size: 10px; font-weight: 700; }.tool-activity-card pre { max-height: 260px; overflow: auto; margin: 8px 0 0; border-radius: 7px; background: var(--surface); padding: 9px; color: var(--text); font: 10px/1.55 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .nested-tool-activities { display: grid; gap: 7px; margin: 10px 0 0 10px; border-left: 2px solid color-mix(in srgb, var(--accent) 34%, var(--border)); padding-left: 14px; }
 .nested-tool-activities > .tool-activity-card { width: 100%; margin: 0; background: color-mix(in srgb, var(--surface) 82%, var(--surface-muted)); }
@@ -489,7 +489,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .work-header-actions { align-items: flex-end; flex-direction: column; }
   .work-header-actions a { display: none; }
   .message-region { max-height: 38vh; padding-inline: 14px; }
-  .composer { position: sticky; bottom: 68px; z-index: 8; margin: 0 10px 10px; }
+  .composer { position: relative; bottom: auto; z-index: 8; margin: 0 10px 10px; }
   .composer-controls { align-items: center; flex-wrap: wrap; }
   .composer-footer { gap: 8px; }
   .compact-control { min-width: 88px; }

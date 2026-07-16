@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from gpt2giga_harness.codex_app_server import (
     CodexAppServerSupervisor,
+    _collab_child_tool_events,
     _normalize_notification,
     build_execution_snapshot,
 )
@@ -252,6 +253,91 @@ def test_reasoning_usage_and_tool_result_are_normalized_for_workbench():
     }
 
 
+def test_collab_tool_exposes_subagent_identity_and_prompt():
+    event, text = _normalize_notification(
+        "item/completed",
+        {
+            "item": {
+                "id": "spawn-1",
+                "type": "collabToolCall",
+                "tool": "spawnAgent",
+                "status": "completed",
+                "prompt": "Inspect the repository configuration",
+                "receiverThreadIds": ["thread-child"],
+                "subagents": [
+                    {
+                        "id": "thread-child",
+                        "name": "Hypatia",
+                        "role": "explorer",
+                        "status": "completed",
+                    }
+                ],
+            }
+        },
+    )
+
+    assert text is None
+    assert event is not None
+    assert event.type == "tool_call_finished"
+    assert event.payload["name"] == "spawn_agent"
+    assert event.payload["arguments"] == {
+        "prompt": "Inspect the repository configuration",
+        "subagents": [
+            {
+                "id": "thread-child",
+                "name": "Hypatia",
+                "role": "explorer",
+                "status": "completed",
+            }
+        ],
+    }
+
+
+def test_collab_child_tools_are_nested_under_spawn_call():
+    events = _collab_child_tool_events(
+        (
+            {
+                "id": "thread-child",
+                "name": "Hypatia",
+                "role": "explorer",
+                "prompt": "Inspect the repository configuration",
+                "turns": [
+                    {
+                        "items": [
+                            {
+                                "id": "command-1",
+                                "type": "commandExecution",
+                                "command": "rg --files",
+                                "cwd": "/workspace",
+                                "status": "completed",
+                                "aggregatedOutput": "pyproject.toml\n",
+                            }
+                        ]
+                    }
+                ],
+            },
+        ),
+        subagent_parents={"thread-child": "spawn-1"},
+        seen=set(),
+    )
+
+    assert len(events) == 1
+    assert events[0].type == "tool_call_finished"
+    assert events[0].payload == {
+        "tool_call_id": "thread-child:command-1",
+        "parent_tool_call_id": "spawn-1",
+        "name": "shell",
+        "status": "completed",
+        "arguments": {"command": "rg --files", "cwd": "/workspace"},
+        "source": "codex-app-server-subagent",
+        "subagent_id": "thread-child",
+        "subagent_name": "Hypatia",
+        "subagent_role": "explorer",
+        "subagent_description": "Inspect the repository configuration",
+        "result": "pyproject.toml\n",
+    }
+
+
 class _ApprovalAppServerClient(_FakeAppServerClient):
     def request(
         self, method: str, params: Mapping[str, Any], *, timeout: float
@@ -268,6 +354,86 @@ class _ApprovalAppServerClient(_FakeAppServerClient):
                         "command": "dangerous",
                     },
                 }
+            )
+        return result
+
+
+class _CollabAppServerClient(_FakeAppServerClient):
+    def request(
+        self, method: str, params: Mapping[str, Any], *, timeout: float
+    ) -> Mapping[str, Any]:
+        if method == "thread/read" and params.get("threadId") == "thread-child":
+            self.recorder.append((method, dict(params)))
+            return {
+                "thread": {
+                    "id": "thread-child",
+                    "agentNickname": "Hypatia",
+                    "agentRole": "explorer",
+                    "status": {"type": "idle"},
+                    "turns": [
+                        {
+                            "items": [
+                                {
+                                    "id": "child-command",
+                                    "type": "commandExecution",
+                                    "command": "rg --files",
+                                    "cwd": "/workspace",
+                                    "status": "completed",
+                                    "aggregatedOutput": "pyproject.toml\n",
+                                }
+                            ]
+                        }
+                    ],
+                }
+            }
+        result = super().request(method, params, timeout=timeout)
+        if method == "turn/start":
+            completed = self.messages.pop()
+            thread_id = str(params["threadId"])
+            turn_id = str(result["turn"]["id"])
+            shared = {
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "item": {
+                    "status": "completed",
+                    "receiverThreadIds": ["thread-child"],
+                    "agentsStates": {
+                        "thread-child": {
+                            "status": "completed",
+                            "message": "Repository inspected",
+                        }
+                    },
+                },
+            }
+            self.messages.extend(
+                (
+                    {
+                        "method": "item/completed",
+                        "params": {
+                            **shared,
+                            "item": {
+                                **shared["item"],
+                                "id": "spawn-1",
+                                "type": "collabToolCall",
+                                "tool": "spawnAgent",
+                                "prompt": "Inspect repository configuration",
+                            },
+                        },
+                    },
+                    {
+                        "method": "item/completed",
+                        "params": {
+                            **shared,
+                            "item": {
+                                **shared["item"],
+                                "id": "wait-1",
+                                "type": "collabToolCall",
+                                "tool": "wait",
+                            },
+                        },
+                    },
+                    completed,
+                )
             )
         return result
 
@@ -341,6 +507,53 @@ def test_two_prompts_share_one_app_server_thread_and_process(tmp_path):
     )
 
 
+def test_app_server_projects_named_subagent_with_nested_tools(tmp_path):
+    recorder: list[tuple[str, dict[str, Any]]] = []
+    supervisor = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=lambda **kwargs: _CollabAppServerClient(
+            recorder=recorder, **kwargs
+        ),
+    )
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+    )
+    request = _request(tmp_path, session_id="sess-collab")
+    snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
+
+    result = supervisor.run_turn(
+        request,
+        context,
+        resolution=_resolution(),
+        prompt="delegate",
+        continuation=_continuation(snapshot, prompt_id="msg-collab"),
+    )
+
+    assert result.ok is True
+    spawn = next(
+        event
+        for event in result.events
+        if event.payload.get("tool_call_id") == "spawn-1"
+    )
+    child = next(
+        event
+        for event in result.events
+        if event.payload.get("tool_call_id") == "thread-child:child-command"
+    )
+    assert spawn.payload["arguments"]["subagents"][0] == {
+        "id": "thread-child",
+        "name": "Hypatia",
+        "role": "explorer",
+        "status": "completed",
+        "message": "Repository inspected",
+        "prompt": "Inspect repository configuration",
+    }
+    assert child.payload["parent_tool_call_id"] == "spawn-1"
+    assert child.payload["subagent_name"] == "Hypatia"
+
+
 def test_owner_change_reads_and_resumes_persisted_thread(tmp_path):
     first_recorder: list[tuple[str, dict[str, Any]]] = []
     context = HarnessContext(
@@ -381,6 +594,10 @@ def test_owner_change_reads_and_resumes_persisted_thread(tmp_path):
         "thread/resume",
         "turn/start",
     ]
+    resume_params = next(
+        params for method, params in recovered_recorder if method == "thread/resume"
+    )
+    assert "excludeTurns" not in resume_params
     link = result.raw["app_server_thread"]
     assert link["thread_id"] == "thread-1"
     assert link["recovery_outcome"] == "resumed_after_owner_change"
@@ -422,6 +639,8 @@ def test_fork_uses_thread_fork_and_duplicate_prompt_is_rejected(tmp_path):
     assert first.raw["app_server_thread"]["forked_from_thread_id"] == "thread-source"
     assert duplicate.ok is False
     assert "already submitted" in str(duplicate.error)
+    fork_params = next(params for method, params in recorder if method == "thread/fork")
+    assert "excludeTurns" not in fork_params
     assert [method for method, _params in recorder].count("thread/fork") == 1
     assert [method for method, _params in recorder].count("turn/start") == 1
 

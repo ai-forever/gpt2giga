@@ -303,6 +303,44 @@ def test_codex_stream_parser_preserves_update_plan_payload():
     }
 
 
+def test_codex_stream_parser_preserves_collab_agent_identity_and_prompt():
+    events = _CodexStreamParser()(
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "spawn-1",
+                "type": "collab_tool_call",
+                "tool": "spawn_agent",
+                "sender_thread_id": "thread-parent",
+                "receiver_thread_ids": ["019f6cc0-2125-70e1-93bf-7c5bec2694a2"],
+                "prompt": "Inspect the repository configuration",
+                "agents_states": {
+                    "019f6cc0-2125-70e1-93bf-7c5bec2694a2": {
+                        "status": "completed",
+                        "message": "Found three files",
+                    }
+                },
+                "status": "completed",
+            },
+        }
+    )
+
+    assert len(events) == 1
+    assert events[0].type == "tool_call_finished"
+    assert events[0].payload["name"] == "spawn_agent"
+    assert events[0].payload["arguments"] == {
+        "prompt": "Inspect the repository configuration",
+        "subagents": [
+            {
+                "id": "019f6cc0-2125-70e1-93bf-7c5bec2694a2",
+                "name": "019f6cc0",
+                "status": "completed",
+                "message": "Found three files",
+            }
+        ],
+    }
+
+
 def test_codex_stream_parser_emits_explicit_test_artifact():
     events = _CodexStreamParser()(
         {

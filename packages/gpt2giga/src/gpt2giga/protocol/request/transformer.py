@@ -854,7 +854,7 @@ class RequestTransformer:
                         append = contents.append
                         for content_part in content:
                             ctype = content_part.get("type")
-                            if ctype == "input_text":
+                            if ctype in {"input_text", "output_text"}:
                                 append(
                                     {
                                         "type": "text",
