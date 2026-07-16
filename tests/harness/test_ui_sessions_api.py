@@ -566,6 +566,32 @@ def test_preflight_api_reports_large_attachment_warning(tmp_path):
     assert "exclude_attachment" in finding["actions"]
 
 
+def test_preview_execution_does_not_invoke_harness_or_create_run():
+    harness = _ArenaCaptureHarness("preview-capture")
+    registry = HarnessRegistry()
+    registry.register(harness)
+    store = InMemoryHarnessSessionStore()
+    client = _client(registry=registry, store=store)
+    session = store.create_session(default_harness_id="preview-capture")
+
+    response = client.post(
+        "/api/preflight/run",
+        json={
+            "session_id": session.id,
+            "harness_id": "preview-capture",
+            "capability": "chat_completions",
+            "dry_run": True,
+            "invocation_mode": "headless",
+            "prompt": "preview only",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["preflight"]["ok"] is True
+    assert harness.requests == []
+    assert store.list_runs(session.id) == ()
+
+
 def test_evals_api_lists_and_runs_project_eval(tmp_path):
     data_dir = tmp_path / "data"
     workspace = tmp_path / "workspace"

@@ -1862,6 +1862,32 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"attachment": _attachment_response(registry, attachment)}
 
+    @app.get("/api/sessions/{session_id}/attachments/workspace/search")
+    def search_session_workspace_attachments(
+        session_id: str,
+        q: str | None = Query(default=None),
+        limit: int = Query(default=20, ge=1, le=50),
+    ) -> dict[str, Any]:
+        """Return bounded safe attachment candidates for one session workspace."""
+        try:
+            session = store.get_session(session_id)
+            workspace_root = _attachment_workspace(session, {})
+            files = workspace_tree(
+                workspace_root,
+                query=q,
+                limits=_attachment_limits(session, workspace_root=workspace_root),
+                result_limit=limit,
+            )
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except (AttachmentValidationError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "q": _optional_text(q) or "",
+            "files": files,
+            "bounded": True,
+        }
+
     @app.get("/api/sessions/{session_id}/attachments")
     def session_attachments(session_id: str) -> dict[str, Any]:
         try:

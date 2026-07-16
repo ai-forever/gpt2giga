@@ -49,6 +49,7 @@ export interface RunSummary {
   capability?: string;
   mode?: string;
   invocation_mode?: string;
+  native_process_id?: string | null;
   created_at?: string;
   updated_at: string;
   started_at?: string | null;
@@ -236,6 +237,12 @@ export interface HarnessOption {
     supports_native_sessions?: boolean;
   };
   availability?: { status?: string; reason?: string | null };
+  compatibility?: {
+    compatible?: boolean;
+    status?: string;
+    version?: string | null;
+    warning?: string | null;
+  } | null;
 }
 
 export interface HarnessesResponse {
@@ -254,6 +261,7 @@ export interface ModelsResponse {
 export interface AttachmentSummary {
   id: string;
   filename: string;
+  workspace_path?: string | null;
   kind?: string;
   mime_type?: string | null;
   size_bytes: number;
@@ -266,6 +274,50 @@ export interface AttachmentsResponse {
 
 export interface AttachmentUploadResponse {
   attachment: AttachmentSummary;
+}
+
+export interface WorkspaceFileCandidate {
+  path: string;
+  name: string;
+  kind: string;
+  mime_type?: string | null;
+  size_bytes: number;
+}
+
+export interface WorkspaceFileSearchResponse {
+  q: string;
+  files: WorkspaceFileCandidate[];
+  bounded: true;
+}
+
+export interface NativeProcessProjection {
+  id: string;
+  status: string;
+  run_id?: string | null;
+  session_id?: string | null;
+}
+
+export interface NativeStartResponse {
+  process: NativeProcessProjection;
+  run: RunSummary;
+}
+
+export interface NativeOutputResponse {
+  cursor: number;
+  status?: string;
+  terminal?: boolean;
+  process?: NativeProcessProjection;
+  run?: RunSummary | null;
+}
+
+export interface RunPreflightResponse {
+  preflight: {
+    ok: boolean;
+    hard_block: boolean;
+    max_severity: string;
+    findings: Array<{ id: string; severity: string; message: string }>;
+    readiness?: { status?: string; findings?: unknown[] };
+  };
 }
 
 export interface EventProjection {

@@ -304,8 +304,13 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .advanced-config-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
 .advanced-config-grid label { min-width: 0; display: grid; gap: 4px; color: var(--muted); font-size: 9px; font-weight: 700; }
 .advanced-config-grid select { min-width: 0; height: 32px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); padding: 4px 6px; font-size: 10px; }
-.advanced-switches { display: flex; gap: 14px; margin: 10px 0; color: var(--text); font-size: 10px; font-weight: 650; }
-.advanced-switches label, .builtin-tool-choice { display: flex; align-items: center; gap: 6px; }
+.capability-summary { min-width: 0; display: grid; gap: 3px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 6px 8px; }
+.capability-summary > span { color: var(--muted); font-size: 9px; font-weight: 700; }.capability-summary strong { font-size: 11px; }.capability-summary small { color: var(--muted); font-size: 9px; line-height: 1.35; }
+.developer-options { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 10px 0; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.developer-options legend { color: var(--muted); padding: 0 4px; font-size: 9px; font-weight: 750; text-transform: uppercase; }
+.developer-options label { display: flex; align-items: flex-start; gap: 7px; color: var(--text); font-size: 10px; }
+.developer-options label > span { display: grid; gap: 2px; }.developer-options small { color: var(--muted); font-weight: 500; }
+.builtin-tool-choice { display: flex; align-items: center; gap: 6px; }
 .builtin-tools-panel { margin: 0; border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; }
 .builtin-tools-panel legend { color: var(--muted); padding: 0 4px; font-size: 9px; font-weight: 750; text-transform: uppercase; }
 .builtin-tools-panel > div { display: flex; flex-wrap: wrap; gap: 8px 14px; }
@@ -316,7 +321,13 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .attachment-chip > span:nth-child(2) { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
 .attachment-chip small { flex: none; font-size: 8px; }
 .attachment-chip button { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; padding: 0; }
+.preview-execution { display: grid; gap: 3px; border-bottom: 1px solid color-mix(in srgb, var(--success) 35%, var(--border)); background: color-mix(in srgb, var(--success) 8%, var(--surface)); padding: 9px 12px; color: var(--text); font-size: 11px; }
+.preview-execution.blocked { border-color: color-mix(in srgb, var(--danger) 42%, var(--border)); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }.preview-execution small { color: var(--muted); font-size: 9px; }
 .composer textarea { width: 100%; min-height: 82px; resize: vertical; border: 0; outline: 0; background: transparent; color: var(--text); padding: 14px 16px; font-size: 14px; line-height: 1.5; }
+.workspace-file-picker { max-height: 220px; overflow-y: auto; display: grid; gap: 2px; border-top: 1px solid var(--border); background: var(--surface); padding: 7px; }
+.workspace-file-picker > div { display: flex; justify-content: space-between; gap: 8px; padding: 4px 7px 6px; }.workspace-file-picker > div small { color: var(--muted); font-size: 9px; }
+.workspace-file-picker > button { width: 100%; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 0; background: transparent; padding: 7px 9px; text-align: left; }
+.workspace-file-picker > button:hover, .workspace-file-picker > button.selected { background: var(--accent-soft); color: var(--accent); }.workspace-file-picker > button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.workspace-file-picker > button small { flex: none; color: var(--muted); font-size: 9px; }
 .composer-footer { position: relative; z-index: 12; display: flex; align-items: end; justify-content: space-between; gap: 8px; padding: 8px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-muted) 45%, var(--surface)); }
 .composer-footer-left { min-width: 0; display: grid; flex: 1 1 auto; gap: 5px; }
 .stream-indicator { color: var(--muted); font-size: 11px; text-transform: capitalize; }
@@ -468,6 +479,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .timeline-row { grid-template-columns: 12px minmax(0, 1fr) auto; }
   .timeline-row > span, .timeline-row > time { display: none; }
   .reuse-form { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .advanced-config-grid { grid-template-columns: 1fr; }
+  .developer-options { display: grid; }
+  .workspace-file-picker > div, .workspace-file-picker > button { align-items: flex-start; flex-direction: column; gap: 3px; }
 }
 
 /* P2.5-07 remaining Cockpit surfaces */

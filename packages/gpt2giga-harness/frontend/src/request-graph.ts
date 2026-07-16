@@ -20,6 +20,7 @@ import {
   type SessionMessagesResponse,
   type SessionOverviewResponse,
   type SessionRunsResponse,
+  type WorkspaceFileSearchResponse,
   withQuery,
 } from "./api";
 
@@ -39,6 +40,8 @@ export const requestKeys = {
     [...requestKeys.sessionScope(sessionId), projection] as const,
   sessionAttachments: (sessionId: string) =>
     [...requestKeys.sessionScope(sessionId), "attachments"] as const,
+  workspaceFiles: (sessionId: string, query: string) =>
+    [...requestKeys.sessionScope(sessionId), "workspace-files", query] as const,
   harnesses: () => [...rootKey, "harnesses"] as const,
   models: (apiMode: string) => [...rootKey, "models", apiMode] as const,
   runsCenter: () => [...rootKey, "runs-center"] as const,
@@ -81,6 +84,21 @@ export function sessionAttachmentsOptions(sessionId: string) {
         signal,
       ),
     staleTime: 5_000,
+  });
+}
+
+export function workspaceFilesOptions(sessionId: string, query: string) {
+  return queryOptions({
+    queryKey: requestKeys.workspaceFiles(sessionId, query),
+    queryFn: ({ signal }) =>
+      fetchCockpit<WorkspaceFileSearchResponse>(
+        withQuery(
+          `/api/sessions/${encodeURIComponent(sessionId)}/attachments/workspace/search`,
+          { q: query, limit: 20 },
+        ),
+        signal,
+      ),
+    staleTime: 10_000,
   });
 }
 

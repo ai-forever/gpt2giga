@@ -179,6 +179,32 @@ def test_cockpit_message_projection_exposes_bounded_reasoning_and_usage(tmp_path
     assert projected["usage"] == {"input_tokens": 21, "output_tokens": 8}
 
 
+def test_cockpit_run_summary_exposes_only_native_process_identity(tmp_path):
+    app = _app(tmp_path)
+    store = app.state.harness_session_store
+    session = store.create_session(title="native reconnect")
+    run = _run(
+        store,
+        session.id,
+        metadata={
+            "native_process": {
+                "id": "native-process-1",
+                "display_command": "codex --secret token",
+            }
+        },
+    )
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/cockpit/sessions/{session.id}/runs")
+
+    assert response.status_code == 200
+    projected = response.json()["runs"][0]
+    assert projected["id"] == run.id
+    assert projected["native_process_id"] == "native-process-1"
+    assert "display_command" not in response.text
+    assert "secret" not in response.text
+
+
 def test_cockpit_run_artifacts_and_heavy_evidence_are_lazy_and_bounded(tmp_path):
     app = _app(tmp_path)
     store = app.state.harness_session_store

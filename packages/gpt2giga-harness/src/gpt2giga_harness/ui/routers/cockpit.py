@@ -592,6 +592,12 @@ def _message_projection(message: HarnessMessage) -> dict[str, Any]:
 
 
 def _run_summary(run: HarnessRun) -> dict[str, Any]:
+    native_process = run.metadata.get("native_process")
+    native_process_id = (
+        str(native_process.get("id"))
+        if isinstance(native_process, Mapping) and native_process.get("id")
+        else None
+    )
     return {
         "id": run.id,
         "session_id": run.session_id,
@@ -602,6 +608,7 @@ def _run_summary(run: HarnessRun) -> dict[str, Any]:
         "capability": run.capability.value,
         "mode": run.mode,
         "invocation_mode": run.invocation_mode.value,
+        "native_process_id": native_process_id,
         "created_at": run.created_at,
         "updated_at": run.updated_at,
         "started_at": run.started_at,

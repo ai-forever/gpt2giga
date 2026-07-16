@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type AttachmentUploadResponse,
@@ -9,7 +9,9 @@ import {
   type EventPayloadResponse,
   fetchCockpit,
   mutateCockpit,
+  type NativeStartResponse,
   patchCockpit,
+  type RunPreflightResponse,
   type RunStartResponse,
   type SessionSummary,
   type TokenUsageProjection,
@@ -31,7 +33,9 @@ import {
   sessionOverviewOptions,
   sessionRunsOptions,
   runsCenterOptions,
+  workspaceFilesOptions,
 } from "../request-graph";
+import { observeNativeProcess } from "../native-process-stream";
 import { observeSessionUpdates } from "../session-update-stream";
 import {
   formatTimestamp,
@@ -49,6 +53,13 @@ import {
   type WorkbenchToolActivity,
   workbenchRunActive,
 } from "../workbench-model";
+import {
+  activeAtQuery,
+  availableInvocationModes,
+  consumeAtQuery,
+  normalizeExecutionSelection,
+  type InvocationMode,
+} from "../workbench-execution";
 
 const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
 const runPreferencesKey = "gpt2giga.cockpit-v2.run-preferences.v1";
@@ -60,11 +71,15 @@ type ReasoningEffort = "high" | "low" | "medium";
 type AdvancedRunConfig = {
   capability: string;
   dryRun: boolean;
-  invocationMode: string;
+  invocationMode: InvocationMode;
   permissionProfile: string;
   stream: boolean;
   workspacePolicy: string;
 };
+
+type StartResult =
+  | { kind: "preview"; report: RunPreflightResponse["preflight"] }
+  | { kind: "run"; processId?: string; run: RunStartResponse["run"] };
 
 const builtinToolLabels: Record<string, string> = {
   code_interpreter: "Code interpreter",
@@ -119,7 +134,12 @@ export function WorkbenchSurface() {
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const [composerCaret, setComposerCaret] = useState(0);
+  const [atSelection, setAtSelection] = useState(0);
+  const [previewReport, setPreviewReport] = useState<RunPreflightResponse["preflight"] | null>(null);
   const [startedRuns, setStartedRuns] = useState<Record<string, string>>({});
+  const [startedNativeProcesses, setStartedNativeProcesses] = useState<Record<string, string>>({});
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => new Set());
   const [completionNotices, setCompletionNotices] = useState<CompletionNotice[]>([]);
   const previousRunStatuses = useRef(new Map<string, string>());
@@ -151,6 +171,12 @@ export function WorkbenchSurface() {
   const attachments = useQuery({
     ...sessionAttachmentsOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
+  });
+  const atQuery = activeAtQuery(prompt, composerCaret);
+  const deferredAtQuery = useDeferredValue(atQuery?.query ?? "");
+  const workspaceFiles = useQuery({
+    ...workspaceFilesOptions(sessionId ?? "pending", deferredAtQuery),
+    enabled: sessionId !== undefined && atQuery !== null,
   });
   const events = useQuery({
     ...sessionEventsOptions(sessionId ?? "pending"),
@@ -231,41 +257,72 @@ export function WorkbenchSurface() {
     },
   });
 
-  const startRun = useMutation({
-    mutationFn: () => {
+  const startRun = useMutation<StartResult>({
+    mutationFn: async () => {
       const session = overview.data?.session;
       if (sessionId === undefined || session === undefined) {
         throw new Error("Session is not selected");
       }
-      return mutateCockpit<RunStartResponse>(
-        `/api/sessions/${encodeURIComponent(sessionId)}/run/start`,
-        {
-          api_mode: runConfig.apiMode,
-          attachment_ids: attachments.data?.attachments.map((attachment) => attachment.id) ?? [],
-          builtin_tools: runConfig.apiMode === "v2" ? builtinTools : [],
-          capability: advancedConfig.capability,
-          dry_run: advancedConfig.dryRun,
-          extra: {
-            generate_session_title: session.title === "Untitled session",
-            session_title_model: sessionTitleModel,
-            ...(isReasoningModel(runConfig.model)
-              ? { agent_adapter_options: { reasoning_effort: reasoningEffort } }
-              : {}),
-          },
-          harness_id: runConfig.harnessId,
-          invocation_mode: advancedConfig.invocationMode,
-          mode: runConfig.mode,
-          model: runConfig.model.trim() || null,
-          permission_profile: advancedConfig.permissionProfile,
-          prompt: prompt.trim(),
-          stream: advancedConfig.stream,
-          workspace: session.workspace_bound ? undefined : ".",
-          workspace_policy: advancedConfig.workspacePolicy,
+      const payload = {
+        api_mode: runConfig.apiMode,
+        attachment_ids: attachments.data?.attachments.map((attachment) => attachment.id) ?? [],
+        builtin_tools: runConfig.apiMode === "v2" ? builtinTools : [],
+        capability: advancedConfig.capability,
+        extra: {
+          generate_session_title: session.title === "Untitled session",
+          session_title_model: sessionTitleModel,
+          ...(isReasoningModel(runConfig.model)
+            ? { agent_adapter_options: { reasoning_effort: reasoningEffort } }
+            : {}),
         },
+        harness_id: runConfig.harnessId,
+        invocation_mode: advancedConfig.invocationMode,
+        mode: runConfig.mode,
+        model: runConfig.model.trim() || null,
+        permission_profile: advancedConfig.permissionProfile,
+        prompt: prompt.trim(),
+        session_id: sessionId,
+        stream: advancedConfig.stream,
+        workspace: session.workspace_bound ? undefined : ".",
+        workspace_policy: advancedConfig.workspacePolicy,
+      };
+      if (advancedConfig.dryRun) {
+        const response = await mutateCockpit<RunPreflightResponse>("/api/preflight/run", {
+          ...payload,
+          dry_run: true,
+        });
+        return { kind: "preview", report: response.preflight };
+      }
+      if (advancedConfig.invocationMode === "native") {
+        const response = await mutateCockpit<NativeStartResponse>(
+          "/api/native/processes/start",
+          { ...payload, action: "start" },
+        );
+        if (response.run === undefined || response.process === undefined) {
+          throw new Error("Native execution requires approval before it can start.");
+        }
+        return { kind: "run", processId: response.process.id, run: response.run };
+      }
+      const response = await mutateCockpit<RunStartResponse>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/run/start`,
+        payload,
       );
+      return { kind: "run", run: response.run };
     },
-    onSuccess: async ({ run }) => {
+    onSuccess: async (result) => {
+      if (result.kind === "preview") {
+        setPreviewReport(result.report);
+        return;
+      }
+      const { run } = result;
+      setPreviewReport(null);
       setStartedRuns((current) => ({ ...current, [run.session_id]: run.id }));
+      if (result.processId !== undefined) {
+        setStartedNativeProcesses((current) => ({
+          ...current,
+          [run.id]: result.processId!,
+        }));
+      }
       previousRunStatuses.current.set(run.id, run.status);
       await refreshSessionAfterRunStart(queryClient, run.session_id);
       setPrompt("");
@@ -309,6 +366,26 @@ export function WorkbenchSurface() {
     },
   });
 
+  const attachWorkspaceFile = useMutation({
+    mutationFn: ({ path }: { path: string; token: { start: number; end: number } }) => {
+      if (sessionId === undefined) throw new Error("Session is not selected");
+      return mutateCockpit<AttachmentUploadResponse>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/attachments/workspace`,
+        { path },
+      );
+    },
+    onSuccess: async (_, { token }) => {
+      const nextPrompt = consumeAtQuery(prompt, token);
+      setPrompt(nextPrompt);
+      setComposerCaret(nextPrompt.length);
+      setAtSelection(0);
+      if (sessionId !== undefined) {
+        await queryClient.invalidateQueries({ queryKey: requestKeys.sessionAttachments(sessionId) });
+      }
+      requestAnimationFrame(() => composerRef.current?.focus());
+    },
+  });
+
   const removeAttachment = useMutation({
     mutationFn: (attachmentId: string) =>
       deleteCockpit(`/api/attachments/${encodeURIComponent(attachmentId)}`),
@@ -320,8 +397,10 @@ export function WorkbenchSurface() {
   });
 
   const cancelRun = useMutation({
-    mutationFn: (runId: string) =>
-      mutateCockpit(`/api/runs/${encodeURIComponent(runId)}/cancel`),
+    mutationFn: ({ nativeProcessId, runId }: { nativeProcessId?: string; runId: string }) =>
+      nativeProcessId === undefined
+        ? mutateCockpit(`/api/runs/${encodeURIComponent(runId)}/cancel`)
+        : deleteCockpit(`/api/native/processes/${encodeURIComponent(nativeProcessId)}`),
     onSuccess: async () => {
       if (sessionId !== undefined) {
         await queryClient.invalidateQueries({ queryKey: requestKeys.sessionScope(sessionId) });
@@ -376,6 +455,10 @@ export function WorkbenchSurface() {
   const selectedHarness = harnesses.data?.harnesses.find(
     (harness) => harness.spec.id === runConfig.harnessId,
   );
+  const invocationModes = availableInvocationModes(selectedHarness);
+  const capabilityCopy = advancedConfig.capability === "agent_cli"
+    ? { label: message(locale, "codingAgent"), detail: message(locale, "codingAgentHint") }
+    : { label: message(locale, "directChat"), detail: message(locale, "directChatHint") };
   const supportedBuiltinTools = selectedHarness?.spec.supported_builtin_tools ?? emptyStringList;
   const builtinToolsAvailable =
     runConfig.apiMode === "v2" &&
@@ -419,15 +502,47 @@ export function WorkbenchSurface() {
     locallyStartedRunId,
     streamPresentation.terminalEvent,
   );
+  const selectedRun = (runs.data?.runs ?? []).find((run) => run.id === selectedRunId);
+  const selectedNativeProcessId =
+    (selectedRunId === undefined ? undefined : startedNativeProcesses[selectedRunId]) ??
+    selectedRun?.native_process_id ??
+    undefined;
 
   useEffect(() => {
     const supported = new Set(supportedBuiltinTools);
     setBuiltinTools((current) => current.filter((tool) => supported.has(tool)));
-    const capabilities = selectedHarness?.spec.capabilities ?? [];
-    if (capabilities.length > 0 && !capabilities.includes(advancedConfig.capability)) {
-      setAdvancedConfig((current) => ({ ...current, capability: capabilities[0] ?? "chat_completions" }));
+    setAdvancedConfig((current) => ({
+      ...current,
+      ...normalizeExecutionSelection(selectedHarness, current),
+    }));
+  }, [runConfig.harnessId, selectedHarness, supportedBuiltinTools]);
+
+  useEffect(() => {
+    setAtSelection(0);
+  }, [deferredAtQuery]);
+
+  useEffect(() => {
+    if (
+      sessionId === undefined ||
+      selectedNativeProcessId === undefined ||
+      !selectedRunActive ||
+      typeof globalThis.EventSource !== "function"
+    ) {
+      return;
     }
-  }, [advancedConfig.capability, runConfig.harnessId, supportedBuiltinTools, selectedHarness?.spec.capabilities]);
+    let refreshScheduled = false;
+    return observeNativeProcess(selectedNativeProcessId, () => {
+      if (refreshScheduled) return;
+      refreshScheduled = true;
+      requestAnimationFrame(() => {
+        refreshScheduled = false;
+        void Promise.all([
+          queryClient.invalidateQueries({ queryKey: requestKeys.sessionScope(sessionId) }),
+          queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() }),
+        ]);
+      });
+    });
+  }, [queryClient, selectedNativeProcessId, selectedRunActive, sessionId]);
 
   useEffect(() => {
     if (sessionId !== undefined && streamPresentation.terminalEvent !== null) {
@@ -495,6 +610,11 @@ export function WorkbenchSurface() {
   ) => {
     setRunConfig((current) => ({ ...current, [key]: value }));
     if (persistKey !== undefined) saveRunConfig.mutate({ [persistKey]: value || null });
+  };
+  const workspaceFileCandidates = workspaceFiles.data?.files ?? [];
+  const chooseWorkspaceFile = (path: string) => {
+    if (atQuery === null || attachWorkspaceFile.isPending) return;
+    attachWorkspaceFile.mutate({ path, token: atQuery });
   };
 
   return (
@@ -756,12 +876,30 @@ export function WorkbenchSurface() {
                 if (prompt.trim() && !startRun.isPending) startRun.mutate();
               }}
             >
+              {previewReport === null ? null : (
+                <div
+                  className={previewReport.hard_block ? "preview-execution blocked" : "preview-execution"}
+                  role="status"
+                >
+                  <strong>{message(locale, "previewExecutionResult")}</strong>
+                  <span>
+                    {previewReport.hard_block
+                      ? message(locale, "previewExecutionBlocked")
+                      : message(locale, "previewExecutionReady")}
+                  </span>
+                  <small>
+                    {message(locale, "previewExecutionEvidence")} · {previewReport.findings.length} {message(locale, "previewFindings")}
+                  </small>
+                </div>
+              )}
               {attachments.data?.attachments.length ? (
                 <div className="attachment-chips" aria-label={message(locale, "attachedFiles")}>
                   {attachments.data.attachments.map((attachment) => (
                     <span className="attachment-chip" key={attachment.id}>
                       <span aria-hidden="true">{attachment.mime_type?.startsWith("image/") ? "▧" : "◇"}</span>
-                      <span title={attachment.filename}>{attachment.filename}</span>
+                      <span title={attachment.workspace_path ?? attachment.filename}>
+                        {attachment.workspace_path ? `@${attachment.workspace_path}` : attachment.filename}
+                      </span>
                       <small>{formatBytes(attachment.size_bytes)}</small>
                       <button
                         aria-label={`${message(locale, "removeAttachment")} ${attachment.filename}`}
@@ -775,9 +913,38 @@ export function WorkbenchSurface() {
               ) : null}
               <textarea
                 aria-label={message(locale, "composerPlaceholder")}
+                aria-controls={atQuery === null ? undefined : "workspace-file-picker"}
+                aria-expanded={atQuery !== null}
                 disabled={startRun.isPending}
-                onChange={(event) => setPrompt(event.target.value)}
+                onChange={(event) => {
+                  setPrompt(event.target.value);
+                  setComposerCaret(event.target.selectionStart);
+                  setPreviewReport(null);
+                }}
                 onKeyDown={(event) => {
+                  if (atQuery !== null && workspaceFileCandidates.length > 0) {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setAtSelection((current) => (current + 1) % workspaceFileCandidates.length);
+                      return;
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setAtSelection((current) => (current - 1 + workspaceFileCandidates.length) % workspaceFileCandidates.length);
+                      return;
+                    }
+                    if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) {
+                      event.preventDefault();
+                      const selected = workspaceFileCandidates[atSelection];
+                      if (selected !== undefined) chooseWorkspaceFile(selected.path);
+                      return;
+                    }
+                  }
+                  if (event.key === "Escape" && atQuery !== null) {
+                    event.preventDefault();
+                    setComposerCaret(atQuery.start);
+                    return;
+                  }
                   if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && prompt.trim()) {
                     event.preventDefault();
                     startRun.mutate();
@@ -788,9 +955,39 @@ export function WorkbenchSurface() {
                   if (files.length > 0) uploadFiles.mutate({ files, source: "paste" });
                 }}
                 placeholder={message(locale, "composerPlaceholder")}
+                ref={composerRef}
                 rows={4}
+                onSelect={(event) => setComposerCaret(event.currentTarget.selectionStart)}
                 value={prompt}
               />
+              {atQuery === null ? null : (
+                <div className="workspace-file-picker" id="workspace-file-picker" role="listbox">
+                  <div>
+                    <strong>{message(locale, "workspaceFiles")}</strong>
+                    <small>{message(locale, "workspaceFilesHint")}</small>
+                  </div>
+                  {workspaceFiles.isPending ? (
+                    <span className="muted-copy">{message(locale, "loading")}</span>
+                  ) : workspaceFiles.isError ? (
+                    <span className="error-state" role="alert">{String(workspaceFiles.error)}</span>
+                  ) : workspaceFileCandidates.length === 0 ? (
+                    <span className="muted-copy">{message(locale, "noWorkspaceFiles")}</span>
+                  ) : workspaceFileCandidates.map((file, index) => (
+                    <button
+                      aria-selected={index === atSelection}
+                      className={index === atSelection ? "selected" : ""}
+                      key={file.path}
+                      onClick={() => chooseWorkspaceFile(file.path)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      role="option"
+                      type="button"
+                    >
+                      <span>@{file.path}</span>
+                      <small>{file.kind} · {formatBytes(file.size_bytes)}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
               {modelMenuOpen && modelSuggestions.length > 0 ? (
                 <div
                   className="model-suggestions"
@@ -825,24 +1022,24 @@ export function WorkbenchSurface() {
                     <label>
                       <span>{message(locale, "invocation")}</span>
                       <select
-                        onChange={(event) => setAdvancedConfig((current) => ({ ...current, invocationMode: event.target.value }))}
+                        onChange={(event) => setAdvancedConfig((current) => ({
+                          ...current,
+                          invocationMode: event.target.value as InvocationMode,
+                        }))}
                         value={advancedConfig.invocationMode}
                       >
-                        <option value="headless">headless</option>
-                        <option disabled={selectedHarness?.spec.supports_native_sessions !== true} value="native">native</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>{message(locale, "capability")}</span>
-                      <select
-                        onChange={(event) => setAdvancedConfig((current) => ({ ...current, capability: event.target.value }))}
-                        value={advancedConfig.capability}
-                      >
-                        {(selectedHarness?.spec.capabilities ?? ["chat_completions"]).map((capability) => (
-                          <option key={capability} value={capability}>{capability}</option>
+                        {invocationModes.map((mode) => (
+                          <option key={mode} value={mode}>
+                            {mode === "native" ? message(locale, "nativeCli") : message(locale, "headlessApi")}
+                          </option>
                         ))}
                       </select>
                     </label>
+                    <div className="capability-summary">
+                      <span>{message(locale, "capability")}</span>
+                      <strong>{capabilityCopy.label}</strong>
+                      <small>{capabilityCopy.detail}</small>
+                    </div>
                     <label>
                       <span>{message(locale, "workspacePolicy")}</span>
                       <select
@@ -866,10 +1063,17 @@ export function WorkbenchSurface() {
                       </select>
                     </label>
                   </div>
-                  <div className="advanced-switches">
-                    <label><input checked={advancedConfig.dryRun} onChange={(event) => setAdvancedConfig((current) => ({ ...current, dryRun: event.target.checked }))} type="checkbox" /> dry run</label>
-                    <label><input checked={advancedConfig.stream} onChange={(event) => setAdvancedConfig((current) => ({ ...current, stream: event.target.checked }))} type="checkbox" /> stream</label>
-                  </div>
+                  <fieldset className="developer-options">
+                    <legend>{message(locale, "developerOptions")}</legend>
+                    <label>
+                      <input checked={advancedConfig.dryRun} onChange={(event) => setAdvancedConfig((current) => ({ ...current, dryRun: event.target.checked }))} type="checkbox" />
+                      <span><strong>{message(locale, "previewExecution")}</strong><small>{message(locale, "previewExecutionHint")}</small></span>
+                    </label>
+                    <label>
+                      <input checked={advancedConfig.stream} onChange={(event) => setAdvancedConfig((current) => ({ ...current, stream: event.target.checked }))} type="checkbox" />
+                      <span><strong>{message(locale, "streamResponse")}</strong></span>
+                    </label>
+                  </fieldset>
                   <fieldset className="builtin-tools-panel">
                     <legend>{message(locale, "builtinTools")}</legend>
                     <div>
@@ -1032,20 +1236,23 @@ export function WorkbenchSurface() {
                   <button
                     className="danger-button"
                     disabled={cancelRun.isPending}
-                    onClick={() => cancelRun.mutate(selectedRunId)}
+                    onClick={() => cancelRun.mutate({
+                      nativeProcessId: selectedNativeProcessId,
+                      runId: selectedRunId,
+                    })}
                     type="button"
                   >
                     {message(locale, "cancelRun")}
                   </button>
                 ) : (
                   <button className="primary-button" disabled={!prompt.trim() || startRun.isPending} type="submit">
-                    {message(locale, "runTask")}
+                    {message(locale, advancedConfig.dryRun ? "previewExecution" : "runTask")}
                   </button>
                 )}
               </div>
-              {startRun.isError || uploadFiles.isError || removeAttachment.isError || saveRunConfig.isError ? (
+              {startRun.isError || uploadFiles.isError || attachWorkspaceFile.isError || removeAttachment.isError || saveRunConfig.isError ? (
                 <div className="error-state" role="alert">
-                  {String(startRun.error ?? uploadFiles.error ?? removeAttachment.error ?? saveRunConfig.error)}
+                  {String(startRun.error ?? uploadFiles.error ?? attachWorkspaceFile.error ?? removeAttachment.error ?? saveRunConfig.error)}
                 </div>
               ) : null}
             </form>
