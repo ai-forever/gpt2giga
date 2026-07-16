@@ -592,6 +592,41 @@ def test_preview_execution_does_not_invoke_harness_or_create_run():
     assert store.list_runs(session.id) == ()
 
 
+def test_synchronous_route_preview_is_ready_with_not_checked_evidence(tmp_path):
+    data_dir = tmp_path / "data"
+    client = _client(
+        config=HarnessConfig(data_dir=str(data_dir)),
+        store=FilesystemHarnessSessionStore(data_dir),
+    )
+
+    response = client.post(
+        "/api/preflight/run",
+        json={
+            "api_mode": "v2",
+            "dry_run": True,
+            "durable": False,
+            "harness_id": "direct-chat",
+            "invocation_mode": "headless",
+            "mode": "plan",
+            "prompt": "Readiness check",
+            "workspace_policy": "auto",
+        },
+    )
+
+    assert response.status_code == 200
+    readiness = response.json()["preflight"]["readiness"]
+    assert readiness["plan"]["delivery"] == "synchronous"
+    assert readiness["status"] == "ready"
+    assert readiness["evidence_status"] == "not_checked"
+    assert readiness["summary"]["degraded"] == 0
+    assert readiness["summary"]["blocked"] == 0
+    route = next(
+        finding for finding in readiness["findings"] if finding["id"] == "route-v2"
+    )
+    assert route["status"] == "not_checked"
+    assert route["remediation"][0]["command"] == "giga doctor --json"
+
+
 def test_evals_api_lists_and_runs_project_eval(tmp_path):
     data_dir = tmp_path / "data"
     workspace = tmp_path / "workspace"

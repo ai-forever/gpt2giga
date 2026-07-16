@@ -29,6 +29,8 @@ def test_settings_read_model_is_bounded_and_never_exposes_secrets(
         "change_effect": "restart_required",
     }
     assert body["workspace"]["name"] == tmp_path.name
+    assert body["routes"]["default_api_mode_source"] == "built_in"
+    assert body["routes"]["default_model_source"] == "built_in"
     assert "root" not in body["workspace"]
     assert body["diagnostics"]["content_free"] is True
     serialized = str(body)

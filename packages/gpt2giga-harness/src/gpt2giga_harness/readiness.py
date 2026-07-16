@@ -20,7 +20,14 @@ from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.types import GigaChatApiMode
 from gpt2giga_harness.worktrees import WorkspacePolicy
 
-READINESS_SCHEMA_VERSION = 1
+READINESS_SCHEMA_VERSION = 2
+READINESS_STATUSES = (
+    "ready",
+    "not_checked",
+    "unknown",
+    "degraded",
+    "blocked",
+)
 _PROXY_HARNESSES = {"direct-chat", "codex-cli", "claude-code", "gemini-cli"}
 
 
@@ -110,10 +117,26 @@ def build_execution_readiness(
         checks = [_downgrade_for_dry_run(check) for check in checks]
     summary = {
         status: sum(check["status"] == status for check in checks)
-        for status in ("ready", "degraded", "blocked")
+        for status in READINESS_STATUSES
     }
+    operational_status = (
+        "blocked"
+        if summary["blocked"]
+        else "degraded"
+        if summary["degraded"]
+        else "ready"
+    )
+    evidence_status = (
+        "unknown"
+        if summary["unknown"]
+        else "not_checked"
+        if summary["not_checked"]
+        else "observed"
+    )
     report = {
         "schema_version": READINESS_SCHEMA_VERSION,
+        "status": operational_status,
+        "evidence_status": evidence_status,
         "ok": summary["blocked"] == 0,
         "blocked": summary["blocked"] > 0,
         "summary": summary,
@@ -187,7 +210,7 @@ def _selected_proxy_checks(
 def _dry_run_proxy_check(api_mode: GigaChatApiMode) -> dict[str, Any]:
     check = _check(
         f"route-{api_mode.value}",
-        "degraded",
+        "not_checked",
         (
             f"/{api_mode.value}/chat/completions readiness was not probed because "
             "this plan does not spawn a process."
@@ -344,11 +367,12 @@ def _check(
 def _downgrade_for_dry_run(check: Mapping[str, Any]) -> dict[str, Any]:
     downgraded = dict(check)
     if downgraded.get("status") == "blocked":
-        downgraded["status"] = "degraded"
+        downgraded["status"] = "unknown"
         downgraded["required"] = False
         downgraded["summary"] = (
             str(downgraded.get("summary") or "Readiness is blocked")
-            + " Dry-run inspection may continue without process spawn."
+            + " Preview inspection cannot establish execution readiness, but may "
+            "continue without process spawn."
         )
     return downgraded
 

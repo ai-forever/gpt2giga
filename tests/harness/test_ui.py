@@ -913,6 +913,8 @@ def test_ui_models_rejects_invalid_api_mode_non_fatally():
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is False
+    assert body["health"] == "unknown"
+    assert body["last_checked_at"]
     assert body["source"] == "fallback"
     assert body["models"][0] == "ConfiguredModel"
     assert "api_mode" in body["error"]
@@ -934,6 +936,10 @@ def test_ui_models_handles_discovery_exception_safely(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is False
+    assert body["api_mode"] == "v2"
+    assert body["health"] == "unknown"
+    assert body["route_path"] == "/v2/models"
+    assert body["last_checked_at"]
     assert body["source"] == "/v2/models"
     assert body["models"] == []
     assert body["error"] == "model discovery failed"
@@ -964,6 +970,10 @@ def test_ui_models_uses_selected_versioned_endpoint_only(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["models"] == ["v1-only-model"]
+    assert body["api_mode"] == "v1"
+    assert body["health"] == "ready"
+    assert body["route_path"] == "/v1/models"
+    assert body["last_checked_at"]
     assert body["source"] == "/v1/models"
     assert captured["mode"].value == "v1"
     assert captured["kwargs"] == {

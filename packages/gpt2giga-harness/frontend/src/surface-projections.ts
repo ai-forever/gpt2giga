@@ -71,8 +71,17 @@ export interface HarnessProjection {
 }
 
 export interface RouteProjection {
+  id: string;
   apiMode: string;
-  model: string;
+  chatEndpoint: string;
+  modelsEndpoint: string;
+  configuredDefault: boolean;
+  effectiveModel: string | null;
+  effectiveSource: string;
+  discoveredModels: string[];
+  discoverySource: string;
+  health: string;
+  lastCheckedAt: string | null;
 }
 
 export interface McpProjection {
@@ -102,6 +111,7 @@ export interface DoctorFindingProjection {
 export interface DoctorProjection {
   harnessId: string;
   status: "ready" | "degraded" | "blocked";
+  evidenceStatus: "observed" | "not_checked" | "unknown";
   findings: DoctorFindingProjection[];
   contentFree: true;
 }
@@ -240,10 +250,20 @@ export function projectEvaluation(
 
 export function projectIntegrations(
   harnessesResponse: unknown,
-  defaultsResponse: unknown,
+  settingsResponse: unknown,
+  modelsResponses: readonly unknown[],
   mcpResponse: unknown,
 ): IntegrationsProjection {
-  const defaults = record(defaultsResponse);
+  const routeSettings = record(record(settingsResponse).routes);
+  const defaultApiMode = text(routeSettings.default_api_mode) || "v2";
+  const defaultModel = nullableText(routeSettings.default_model);
+  const defaultModelSource = text(routeSettings.default_model_source) || "unknown";
+  const discoveryByMode = new Map(
+    modelsResponses.map((value) => {
+      const discovery = record(value);
+      return [text(discovery.api_mode), discovery] as const;
+    }),
+  );
   return {
     harnesses: array(record(harnessesResponse).harnesses)
       .slice(0, MAX_ROWS)
@@ -260,12 +280,23 @@ export function projectIntegrations(
         };
       })
       .filter((item) => item.id),
-    routes: [
-      {
-        apiMode: text(defaults.default_api_mode) || "v2",
-        model: text(defaults.default_model) || "GigaChat",
-      },
-    ],
+    routes: ["v1", "v2"].map((apiMode) => {
+      const discovery = discoveryByMode.get(apiMode) ?? {};
+      const configuredDefault = apiMode === defaultApiMode;
+      return {
+        id: apiMode,
+        apiMode,
+        chatEndpoint: `/${apiMode}/chat/completions`,
+        modelsEndpoint: text(discovery.route_path) || `/${apiMode}/models`,
+        configuredDefault,
+        effectiveModel: configuredDefault ? defaultModel : null,
+        effectiveSource: configuredDefault ? defaultModelSource : "not_selected",
+        discoveredModels: array(discovery.models).slice(0, MAX_ROWS).map(text).filter(Boolean),
+        discoverySource: text(discovery.source) || `/${apiMode}/models`,
+        health: text(discovery.health) || "unknown",
+        lastCheckedAt: nullableText(discovery.last_checked_at),
+      };
+    }),
     mcp: array(record(mcpResponse).servers)
       .slice(0, MAX_ROWS)
       .map((value) => {
@@ -291,15 +322,28 @@ export function projectDoctor(response: unknown): DoctorProjection {
   const report = record(readiness);
   const plan = record(report.plan);
   const summary = record(report.summary);
+  const reportedStatus = text(report.status);
   const status: DoctorProjection["status"] =
-    report.blocked === true || number(summary.blocked) > 0
+    reportedStatus === "ready" || reportedStatus === "degraded" || reportedStatus === "blocked"
+      ? reportedStatus
+      : report.blocked === true || number(summary.blocked) > 0
       ? "blocked"
       : number(summary.degraded) > 0
         ? "degraded"
         : "ready";
+  const reportedEvidence = text(report.evidence_status);
+  const evidenceStatus: DoctorProjection["evidenceStatus"] =
+    reportedEvidence === "not_checked" || reportedEvidence === "unknown"
+      ? reportedEvidence
+      : number(summary.unknown) > 0
+        ? "unknown"
+        : number(summary.not_checked) > 0
+          ? "not_checked"
+          : "observed";
   return {
     harnessId: text(plan.harness_id),
     status,
+    evidenceStatus,
     findings: array(report.findings)
       .slice(0, MAX_ROWS)
       .map((value) => {

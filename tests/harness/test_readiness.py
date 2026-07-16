@@ -50,7 +50,16 @@ def test_echo_readiness_ignores_proxy_and_worker_for_synchronous_run(
     )
 
     assert report["ok"] is True
-    assert report["summary"] == {"ready": 3, "degraded": 0, "blocked": 0}
+    assert report["schema_version"] == 2
+    assert report["status"] == "ready"
+    assert report["evidence_status"] == "observed"
+    assert report["summary"] == {
+        "ready": 3,
+        "not_checked": 0,
+        "unknown": 0,
+        "degraded": 0,
+        "blocked": 0,
+    }
     assert {finding["id"] for finding in report["findings"]} == {
         "harness-echo",
         "invocation-mode",
@@ -180,6 +189,37 @@ def test_selected_model_discovery_failure_becomes_redacted_block(monkeypatch, tm
     )
     assert route["status"] == "blocked"
     assert "readiness-secret-value" not in json.dumps(report)
+    assert route["remediation"][0]["command"] == "giga doctor --json"
+
+
+def test_dry_run_route_is_ready_with_explicit_not_checked_evidence(tmp_path):
+    registry = HarnessRegistry()
+    registry.register(_AgentHarness(available=True))
+
+    report = build_execution_readiness(
+        HarnessConfig(data_dir=str(tmp_path / "state")),
+        registry,
+        harness_id="codex-cli",
+        invocation_mode=HarnessInvocationMode.HEADLESS,
+        api_mode=GigaChatApiMode.V2,
+        model="GigaChat-2-Max",
+        mode="read",
+        workspace=str(tmp_path),
+        workspace_policy=WorkspacePolicy.CURRENT,
+        durable=False,
+        dry_run=True,
+    )
+
+    route = next(
+        finding for finding in report["findings"] if finding["id"] == "route-v2"
+    )
+    assert report["status"] == "ready"
+    assert report["evidence_status"] == "not_checked"
+    assert report["blocked"] is False
+    assert report["summary"]["degraded"] == 0
+    assert report["summary"]["not_checked"] == 1
+    assert route["status"] == "not_checked"
+    assert route["required"] is False
     assert route["remediation"][0]["command"] == "giga doctor --json"
 
 

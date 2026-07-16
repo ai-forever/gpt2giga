@@ -84,6 +84,8 @@ def settings_read_model(
         "routes": {
             "default_api_mode": defaults.default_api_mode,
             "default_model": defaults.default_model,
+            "default_api_mode_source": snapshot.sources["default_api_mode"],
+            "default_model_source": snapshot.sources["default_model"],
             "models": models,
             "models_source": "configured_default_and_fallbacks",
             "health": "not_checked",

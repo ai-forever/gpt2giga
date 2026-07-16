@@ -1,1 +1,0 @@
-import{t as e}from"./jsx-runtime-DUAcabCT.js";import{k as t}from"./index-CbU5lNCD.js";import{t as n}from"./InspectorFrame-ECkHp2wD.js";var r=e();function i({locale:e}){return(0,r.jsx)(n,{locale:e,title:t(e,`diff`),children:t(e,`diffDescription`)})}export{i as DiffInspector};

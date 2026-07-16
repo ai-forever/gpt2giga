@@ -53,11 +53,26 @@ describe("remaining Cockpit surface projections", () => {
   it("projects integration readiness without commands, urls, or secrets", () => {
     const projected = projectIntegrations(
       { harnesses: [{ spec: { id: "echo", title: "Echo", kind: "local", command: ["secret"] }, availability: { status: "ready", reason: "available" } }] },
-      { default_api_mode: "v2", default_model: "GigaChat", proxy_url: "http://private" },
+      { routes: { default_api_mode: "v2", default_model: "GigaChat-2-Max", default_model_source: "built_in" }, runtime: { proxy_url: "http://private" } },
+      [
+        { api_mode: "v1", health: "blocked", last_checked_at: "2026-07-16T18:00:00Z", models: [], route_path: "/v1/models", source: "/v1/models" },
+        { api_mode: "v2", health: "ready", last_checked_at: "2026-07-16T18:00:01Z", models: ["GigaChat-3", "GigaChat-2-Max"], route_path: "/v2/models", source: "/v2/models" },
+      ],
       { servers: [{ descriptor: { id: "docs", title: "Docs", transport: "stdio", enabled: true, trusted: true, command: ["secret"] }, latest_probe: { status: "healthy" } }] },
     );
 
     expect(projected.harnesses[0]).toMatchObject({ id: "echo", status: "ready" });
+    expect(projected.routes).toHaveLength(2);
+    expect(projected.routes[0]).toMatchObject({ apiMode: "v1", configuredDefault: false, effectiveModel: null, health: "blocked" });
+    expect(projected.routes[1]).toMatchObject({
+      apiMode: "v2",
+      chatEndpoint: "/v2/chat/completions",
+      configuredDefault: true,
+      effectiveModel: "GigaChat-2-Max",
+      effectiveSource: "built_in",
+      discoveredModels: ["GigaChat-3", "GigaChat-2-Max"],
+      health: "ready",
+    });
     expect(projected.mcp[0]).toMatchObject({ id: "docs", status: "healthy" });
     expect(JSON.stringify(projected)).not.toContain("secret");
     expect(JSON.stringify(projected)).not.toContain("http://private");
@@ -68,14 +83,17 @@ describe("remaining Cockpit surface projections", () => {
       preflight: {
         readiness: {
           blocked: false,
-          summary: { ready: 1, degraded: 1, blocked: 0 },
+          schema_version: 2,
+          status: "ready",
+          evidence_status: "not_checked",
+          summary: { ready: 1, not_checked: 1, unknown: 0, degraded: 0, blocked: 0 },
           plan: { harness_id: "echo", workspace: "/private/repo" },
-          findings: [{ id: "route-v2", status: "degraded", summary: "Not probed", remediation: [{ message: "Run doctor", command: "giga doctor --json" }] }],
+          findings: [{ id: "route-v2", status: "not_checked", summary: "Not probed", remediation: [{ message: "Run doctor", command: "giga doctor --json" }] }],
         },
       },
     });
 
-    expect(projected).toMatchObject({ harnessId: "echo", status: "degraded", contentFree: true });
+    expect(projected).toMatchObject({ harnessId: "echo", status: "ready", evidenceStatus: "not_checked", contentFree: true });
     expect(projected.findings.at(0)?.command).toBe("giga doctor --json");
     expect(JSON.stringify(projected)).not.toContain("/private/repo");
   });

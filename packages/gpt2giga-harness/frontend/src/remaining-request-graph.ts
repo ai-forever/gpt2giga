@@ -48,12 +48,14 @@ export function integrationsSurfaceOptions() {
   return queryOptions({
     queryKey: remainingRequestKeys.integrations(),
     queryFn: async ({ signal }) => {
-      const [harnesses, defaults, mcp] = await Promise.all([
+      const [harnesses, settings, modelsV1, modelsV2, mcp] = await Promise.all([
         fetchCockpit<unknown>("/api/harnesses", signal),
-        fetchCockpit<unknown>("/api/defaults", signal),
+        fetchCockpit<unknown>("/api/settings", signal),
+        fetchCockpit<unknown>(withQuery("/api/models", { api_mode: "v1" }), signal),
+        fetchCockpit<unknown>(withQuery("/api/models", { api_mode: "v2" }), signal),
         fetchCockpit<unknown>("/api/tool-servers", signal),
       ]);
-      return projectIntegrations(harnesses, defaults, mcp);
+      return projectIntegrations(harnesses, settings, [modelsV1, modelsV2], mcp);
     },
     staleTime: 15_000,
   });

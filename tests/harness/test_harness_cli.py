@@ -1067,6 +1067,15 @@ def test_cli_native_dry_run_prints_command_plan_without_headless_run(
     assert payload["ok"] is True
     assert payload["text"] == "native dry run"
     assert payload["raw"]["native_command_plan"]["metadata"]["managed"] is True
+    readiness = payload["raw"]["preflight"]["readiness"]
+    assert readiness["schema_version"] == 2
+    assert readiness["status"] in {"ready", "degraded"}
+    assert readiness["evidence_status"] in {"not_checked", "unknown"}
+    route = next(
+        finding for finding in readiness["findings"] if finding["id"] == "route-v2"
+    )
+    assert route["status"] == "not_checked"
+    assert route["remediation"][0]["command"] == "giga doctor --json"
     for item in forbidden:
         assert item not in command
     assert secret not in output

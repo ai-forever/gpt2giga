@@ -981,11 +981,17 @@ def create_app(
 
     @app.get("/api/models")
     def models(api_mode: str = Query(default="v2")) -> dict[str, Any]:
+        checked_at = datetime.now(timezone.utc).isoformat()
         try:
             mode = parse_api_mode(api_mode)
         except ValueError:
             return {
+                "schema_version": 1,
                 "ok": False,
+                "api_mode": None,
+                "route_path": None,
+                "health": "unknown",
+                "last_checked_at": checked_at,
                 "models": _fallback_models(config),
                 "source": "fallback",
                 "error": "invalid api_mode; expected v1 or v2",
@@ -1000,17 +1006,27 @@ def create_app(
             )
         except Exception:
             return {
+                "schema_version": 1,
                 "ok": False,
+                "api_mode": mode.value,
+                "route_path": f"/{mode.value}/models",
+                "health": "unknown",
+                "last_checked_at": checked_at,
                 "models": [],
                 "source": f"/{mode.value}/models",
                 "error": "model discovery failed",
                 "note": pass_model_env_note(),
             }
         return {
+            "schema_version": 1,
             "ok": discovery.ok,
-            "models": list(discovery.models),
+            "api_mode": mode.value,
+            "route_path": f"/{mode.value}/models",
+            "health": "ready" if discovery.ok else "blocked",
+            "last_checked_at": checked_at,
+            "models": list(discovery.models[:100]),
             "source": discovery.source,
-            "error": discovery.error,
+            "error": None if discovery.ok else "model discovery failed",
             "note": pass_model_env_note(),
         }
 
@@ -1031,14 +1047,17 @@ def create_app(
     def preflight_run(
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
+        durable = bool(
+            durable_dispatcher is not None
+            and str(payload.get("invocation_mode") or "headless") != "native"
+        )
+        if payload.get("durable") is False:
+            durable = False
         try:
             report = runner.preflight(
                 payload,
                 session_id=_optional_text(payload.get("session_id")),
-                durable=bool(
-                    durable_dispatcher is not None
-                    and str(payload.get("invocation_mode") or "headless") != "native"
-                ),
+                durable=durable,
             )
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
