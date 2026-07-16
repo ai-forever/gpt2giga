@@ -102,6 +102,14 @@ class DirectChatHarness(BaseHarness):
             "messages": _payload_messages(request),
             "stream": bool(request.stream),
         }
+        adapter_options = request.extra.get("agent_adapter_options")
+        reasoning_effort = (
+            adapter_options.get("reasoning_effort")
+            if isinstance(adapter_options, Mapping)
+            else None
+        )
+        if reasoning_effort in {"low", "medium", "high"}:
+            payload["reasoning_effort"] = reasoning_effort
         if request.builtin_tools:
             payload["tools"] = [{"type": tool.value} for tool in request.builtin_tools]
         api_key = context.api_key or proxy.cached_sidecar_api_key(context.proxy_url)

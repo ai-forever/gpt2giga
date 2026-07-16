@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from gpt2giga_harness import proxy
 from gpt2giga_harness.attachments import (
     AttachmentNotFoundError,
     FilesystemAttachmentStore,
@@ -80,6 +81,7 @@ from gpt2giga_harness.worktrees import (
 from gpt2giga_harness.workspace import resolve_workspace
 
 MAX_HISTORY_MESSAGES = 20
+DEFAULT_SESSION_TITLE_MODEL = "GigaChat-3-Lightning"
 
 
 @dataclass(frozen=True)
@@ -285,6 +287,7 @@ class HarnessSessionRunner:
             title=(
                 title_from_prompt(options["prompt"])
                 if session.title == "Untitled session"
+                and not _generate_session_title_requested(options["extra"])
                 else session.title
             ),
         )
@@ -346,6 +349,19 @@ class HarnessSessionRunner:
         project_memory_payload = (
             memory_entries_to_context(project_memory) if project_memory else None
         )
+        readiness: Mapping[str, Any] | None = None
+        if durable and existing_run_id is not None:
+            queued_run = self.store.get_run(existing_run_id)
+            queued_preflight = _mapping(queued_run.metadata).get("preflight")
+            if isinstance(queued_preflight, Mapping):
+                queued_readiness = queued_preflight.get("readiness")
+                if isinstance(queued_readiness, Mapping):
+                    # Durable submission already performed the route probe before
+                    # creating this queued run. Reuse that immutable admission
+                    # evidence instead of issuing a duplicate Chat Completions ping.
+                    readiness = dict(queued_readiness)
+        if readiness is None:
+            readiness = self._execution_readiness(options, durable=durable)
         preflight = build_preflight_report(
             prompt=options["prompt"],
             workspace=options["workspace"],
@@ -354,7 +370,7 @@ class HarnessSessionRunner:
             project_memory=project_memory,
             data_dir=self.config.data_dir,
             max_history_messages=MAX_HISTORY_MESSAGES,
-            readiness=self._execution_readiness(options, durable=durable),
+            readiness=readiness,
         )
         if preflight.hard_block:
             raise PreflightBlockedError(preflight)
@@ -799,7 +815,15 @@ class HarnessSessionRunner:
         if session_metadata:
             session_patch["metadata"] = session_metadata
         if session.title == "Untitled session":
-            session_patch["title"] = title_from_prompt(options["prompt"])
+            session_patch["title"] = (
+                _generate_session_title(
+                    self.config,
+                    options["prompt"],
+                    model=_optional_text(options["extra"].get("session_title_model")),
+                )
+                if _generate_session_title_requested(options["extra"])
+                else title_from_prompt(options["prompt"])
+            )
         updated_session = self.store.update_session(session.id, **session_patch)
         self._append_event(
             session.id,
@@ -1288,6 +1312,49 @@ def _prompt_with_project_memory(
     return (
         f"Project memory to honor for this run:\n{memory_text}\n\nUser task:\n{prompt}"
     )
+
+
+def _generate_session_title_requested(extra: Mapping[str, Any]) -> bool:
+    return bool(extra.get("generate_session_title"))
+
+
+def _generate_session_title(
+    config: HarnessConfig,
+    prompt: str,
+    *,
+    model: str | None,
+) -> str:
+    """Generate a compact title through the local proxy with a safe fallback."""
+    fallback = title_from_prompt(prompt)
+    selected_model = model or DEFAULT_SESSION_TITLE_MODEL
+    payload = {
+        "model": selected_model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Create a concise session title of 3 to 7 words in the user's "
+                    "language. Return only the title without quotes or punctuation."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "max_tokens": 32,
+    }
+    api_key = config.api_key or proxy.cached_sidecar_api_key(config.proxy_url)
+    try:
+        response = proxy.request_json(
+            "POST",
+            proxy.build_chat_completions_url(config.proxy_url, GigaChatApiMode.V2),
+            payload=payload,
+            api_key=api_key,
+            timeout=min(config.timeout_seconds, 15.0),
+        )
+    except (OSError, proxy.ProxyRequestError, ValueError):
+        return fallback
+    generated = proxy.extract_text(response).strip().strip("\"'`").strip()
+    return title_from_prompt(generated) if generated else fallback
 
 
 def _optional_text(value: Any) -> str | None:

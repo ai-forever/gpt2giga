@@ -343,6 +343,70 @@ def test_queued_turn_waits_for_preceding_assistant_in_request_history():
     ]
 
 
+def test_durable_worker_reuses_submission_readiness_without_second_probe(monkeypatch):
+    harness = _CaptureHarness()
+    runner = _runner(harness)
+    session = runner.create_session(default_harness_id="capture")
+    calls = 0
+
+    def readiness(_options, *, durable):
+        nonlocal calls
+        calls += 1
+        return {
+            "ok": True,
+            "blocked": False,
+            "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+            "plan": {"delivery": "durable" if durable else "synchronous"},
+            "findings": [],
+        }
+
+    monkeypatch.setattr(runner, "_execution_readiness", readiness)
+    payload = {"harness_id": "capture", "prompt": "only one readiness probe"}
+    queued = runner.enqueue_in_session(session.id, payload, run_id=new_id("run"))
+
+    runner.run_in_session(
+        session.id,
+        payload,
+        existing_run_id=queued.run.id,
+        user_message_id=queued.user_message.id,
+        durable=True,
+    )
+
+    assert calls == 1
+
+
+def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):
+    runner = _runner(_CaptureHarness())
+    session = runner.create_session(default_harness_id="capture")
+    captured = {}
+
+    def request_json(method, url, *, payload, api_key, timeout):
+        captured.update(
+            method=method, url=url, payload=payload, api_key=api_key, timeout=timeout
+        )
+        return {"choices": [{"message": {"content": "Починить стрим чата"}}]}
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.session_runner.proxy.request_json", request_json
+    )
+
+    result = runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "capture",
+            "prompt": "Почему чат не показывает поток ответа?",
+            "extra": {
+                "generate_session_title": True,
+                "session_title_model": "GigaChat-3-Lightning",
+            },
+        },
+    )
+
+    assert result.session.title == "Починить стрим чата"
+    assert captured["payload"]["model"] == "GigaChat-3-Lightning"
+    assert captured["url"].endswith("/v2/chat/completions")
+
+
 def test_session_runner_create_session_records_project_metadata(tmp_path):
     runner = _runner(_CaptureHarness(), data_dir=tmp_path / "data")
 

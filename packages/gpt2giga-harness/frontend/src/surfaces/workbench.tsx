@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type AttachmentUploadResponse,
   deleteCockpit,
+  type EventProjection,
   type EventPayloadResponse,
   fetchCockpit,
   mutateCockpit,
@@ -28,7 +29,6 @@ import {
   sessionRunsOptions,
 } from "../request-graph";
 import {
-  activeRun,
   formatTimestamp,
   latestRun,
   runStage,
@@ -37,10 +37,21 @@ import {
   type RunStage,
 } from "../surface-model";
 import { useRunEventStream } from "../stream-store";
+import {
+  projectToolPayload,
+  projectWorkbenchStream,
+  type WorkbenchPlanItem,
+  type WorkbenchToolActivity,
+  workbenchRunActive,
+} from "../workbench-model";
 
 const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
+const runPreferencesKey = "gpt2giga.cockpit-v2.run-preferences.v1";
+const sessionTitleModel = "GigaChat-3-Lightning";
+const reasoningModel = "GigaChat-2-Reasoning";
 type SessionAction = "archive" | "delete";
 type RunConfig = { apiMode: string; harnessId: string; mode: string; model: string };
+type ReasoningEffort = "high" | "low" | "medium";
 type AdvancedRunConfig = {
   capability: string;
   dryRun: boolean;
@@ -75,12 +86,11 @@ export function WorkbenchSurface() {
   const [leftWidth, setLeftWidth] = useState(() => loadWidth("left", 264));
   const [rightWidth, setRightWidth] = useState(() => loadWidth("right", 320));
   const [prompt, setPrompt] = useState("");
-  const [runConfig, setRunConfig] = useState<RunConfig>({
-    apiMode: "v2",
-    harnessId: "echo",
-    mode: "plan",
-    model: "",
-  });
+  const rememberedRunPreferences = useMemo(loadRunPreferences, []);
+  const [runConfig, setRunConfig] = useState<RunConfig>(rememberedRunPreferences.config);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
+    rememberedRunPreferences.reasoningEffort,
+  );
   const [advancedConfig, setAdvancedConfig] = useState<AdvancedRunConfig>({
     capability: "chat_completions",
     dryRun: false,
@@ -128,7 +138,11 @@ export function WorkbenchSurface() {
   const retainedLatestRun = latestRun(runs.data?.runs ?? []);
   const selectedRunId =
     startedRun?.sessionId === sessionId ? startedRun?.runId : retainedLatestRun?.id;
-  const stream = useRunEventStream(selectedRunId);
+  const locallyStartedRunSelected =
+    startedRun !== null &&
+    startedRun.sessionId === sessionId &&
+    startedRun.runId === selectedRunId;
+  const stream = useRunEventStream(selectedRunId, 0, !locallyStartedRunSelected);
 
   useEffect(() => {
     localStorage.setItem(
@@ -138,14 +152,21 @@ export function WorkbenchSurface() {
   }, [leftWidth, rightWidth]);
 
   useEffect(() => {
+    localStorage.setItem(
+      runPreferencesKey,
+      JSON.stringify({ ...runConfig, reasoningEffort }),
+    );
+  }, [reasoningEffort, runConfig]);
+
+  useEffect(() => {
     const session = overview.data?.session;
     if (session === undefined) return;
-    setRunConfig({
-      apiMode: session.default_api_mode ?? "v2",
-      harnessId: session.default_harness_id ?? "echo",
-      mode: session.default_mode ?? "plan",
-      model: session.default_model ?? "",
-    });
+    setRunConfig((current) => ({
+      apiMode: session.default_api_mode ?? current.apiMode,
+      harnessId: session.default_harness_id ?? current.harnessId,
+      mode: session.default_mode ?? current.mode,
+      model: session.default_model ?? current.model,
+    }));
   }, [
     overview.data?.session.default_api_mode,
     overview.data?.session.default_harness_id,
@@ -154,20 +175,31 @@ export function WorkbenchSurface() {
     overview.data?.session.id,
   ]);
 
+  useEffect(() => {
+    if (runConfig.model || models.isPending) return;
+    const selectedModel = models.isSuccess && models.data.models.length > 0
+      ? preferredModel(models.data.models)
+      : sessionTitleModel;
+    setRunConfig((current) => current.model ? current : { ...current, model: selectedModel });
+  }, [models.data?.models, models.isPending, models.isSuccess, runConfig.model]);
+
   const createSession = useMutation({
     mutationFn: () =>
       mutateCockpit<{ session: SessionSummary }>("/api/sessions", {
-        api_mode: "v2",
-        harness_id: "echo",
-        mode: "plan",
-        title: "New governed session",
+        api_mode: runConfig.apiMode,
+        harness_id: runConfig.harnessId,
+        mode: runConfig.mode,
+        model: runConfig.model || null,
       }),
-    onSuccess: async ({ session }) => {
-      await queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() });
-      await navigate({
+    onSuccess: ({ session }) => {
+      setStartedRun(null);
+      setPrompt("");
+      setBuiltinTools([]);
+      void navigate({
         params: { sessionId: session.id },
         to: "/cockpit-v2/work/$sessionId",
       });
+      void queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() });
     },
   });
 
@@ -185,6 +217,13 @@ export function WorkbenchSurface() {
           builtin_tools: runConfig.apiMode === "v2" ? builtinTools : [],
           capability: advancedConfig.capability,
           dry_run: advancedConfig.dryRun,
+          extra: {
+            generate_session_title: session.title === "Untitled session",
+            session_title_model: sessionTitleModel,
+            ...(runConfig.model === reasoningModel
+              ? { agent_adapter_options: { reasoning_effort: reasoningEffort } }
+              : {}),
+          },
           harness_id: runConfig.harnessId,
           invocation_mode: advancedConfig.invocationMode,
           mode: runConfig.mode,
@@ -304,9 +343,41 @@ export function WorkbenchSurface() {
   const modelSuggestions = (models.data?.models ?? []).filter((model) =>
     model.toLocaleLowerCase(locale).includes(runConfig.model.trim().toLocaleLowerCase(locale)),
   );
-  const streamedEventIds = new Set(stream.events.map((event) => event.id));
+  const streamPresentation = useMemo(
+    () => projectWorkbenchStream(
+      stream.events,
+      messages.data?.messages ?? [],
+      selectedRunId,
+    ),
+    [messages.data?.messages, selectedRunId, stream.events],
+  );
+  const streamedEventIds = new Set(
+    stream.events.map((event) => event.id),
+  );
   const retainedGeneratedEvents = (events.data?.events ?? []).filter(
     (event) => event.type === "generated_file" && !streamedEventIds.has(event.id),
+  );
+  const retainedPlanEvent = (events.data?.events ?? []).filter(
+    (event) => event.run_id === selectedRunId && event.type === "plan_updated",
+  ).at(-1);
+  const retainedToolEvents = (events.data?.events ?? []).filter(
+    (event) =>
+      event.run_id === selectedRunId &&
+      event.type === "tool_call_finished" &&
+      !streamedEventIds.has(event.id),
+  );
+  if (retainedPlanEvent !== undefined && !streamedEventIds.has(retainedPlanEvent.id)) {
+    retainedToolEvents.unshift(retainedPlanEvent);
+  }
+  const locallyStartedRunId =
+    startedRun !== null && startedRun.sessionId === sessionId
+      ? startedRun.runId
+      : undefined;
+  const selectedRunActive = workbenchRunActive(
+    retainedLatestRun,
+    selectedRunId,
+    locallyStartedRunId,
+    streamPresentation.terminalEvent,
   );
 
   useEffect(() => {
@@ -319,13 +390,14 @@ export function WorkbenchSurface() {
   }, [advancedConfig.capability, runConfig.harnessId, supportedBuiltinTools, selectedHarness?.spec.capabilities]);
 
   useEffect(() => {
-    if (sessionId !== undefined && stream.status === "closed") {
+    if (sessionId !== undefined && streamPresentation.terminalEvent !== null) {
       void Promise.all([
-        queryClient.invalidateQueries({ queryKey: requestKeys.sessionProjection(sessionId, "events") }),
-        queryClient.invalidateQueries({ queryKey: requestKeys.sessionProjection(sessionId, "messages") }),
+        queryClient.invalidateQueries({ queryKey: requestKeys.sessionScope(sessionId) }),
+        queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() }),
+        queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() }),
       ]);
     }
-  }, [queryClient, sessionId, stream.status]);
+  }, [queryClient, sessionId, streamPresentation.terminalEvent?.id]);
   const setConfig = <Key extends keyof RunConfig>(
     key: Key,
     value: RunConfig[Key],
@@ -354,7 +426,7 @@ export function WorkbenchSurface() {
           </div>
           <button
             className="new-session-button"
-            disabled={createSession.isPending}
+            disabled={createSession.isPending || !runConfig.model}
             onClick={() => createSession.mutate()}
             type="button"
           >
@@ -491,13 +563,23 @@ export function WorkbenchSurface() {
               {retainedGeneratedEvents.map((event) => (
                 <GeneratedFilePreview eventId={event.id} key={event.id} payloadUrl={event.payload_url} />
               ))}
-              {stream.events.map((event) => event.type === "generated_file" ? (
-                <GeneratedImageCard key={event.id} payload={event.payload} />
-              ) : (
-                <article className="message-entry event" key={event.id}>
-                  <div><strong>{event.type.replaceAll("_", " ")}</strong></div>
-                  <p>{event.message ?? String(event.payload?.delta ?? "")}</p>
+              {retainedToolEvents.map((event) => (
+                <RetainedToolActivity event={event} key={event.id} locale={locale} />
+              ))}
+              {streamPresentation.plan.length > 0 ? (
+                <PlanCard items={streamPresentation.plan} locale={locale} />
+              ) : null}
+              {streamPresentation.toolActivities.map((activity) => (
+                <ToolActivityCard activity={activity} key={activity.id} locale={locale} />
+              ))}
+              {streamPresentation.assistantText ? (
+                <article className="message-entry assistant" key={`live-${selectedRunId}`}>
+                  <div><strong>assistant</strong></div>
+                  <MessageMarkdown source={streamPresentation.assistantText} />
                 </article>
+              ) : null}
+              {streamPresentation.generatedFiles.map((event) => (
+                <GeneratedImageCard key={event.id} payload={event.payload} />
               ))}
             </section>
             <form
@@ -765,6 +847,20 @@ export function WorkbenchSurface() {
                         >⌄</button>
                       </div>
                     </div>
+                    {runConfig.model === reasoningModel ? (
+                      <label className="compact-control reasoning-control">
+                        <span>{message(locale, "reasoning")}</span>
+                        <select
+                          aria-label={message(locale, "reasoning")}
+                          onChange={(event) => setReasoningEffort(event.target.value as ReasoningEffort)}
+                          value={reasoningEffort}
+                        >
+                          <option value="low">low</option>
+                          <option value="medium">medium</option>
+                          <option value="high">high</option>
+                        </select>
+                      </label>
+                    ) : null}
                     <label className="compact-control mode-control">
                       <span>{message(locale, "mode")}</span>
                       <select
@@ -790,7 +886,7 @@ export function WorkbenchSurface() {
                     {uploadFiles.isPending ? message(locale, "uploadingFiles") : stream.status.replaceAll("_", " ")}
                   </span>
                 </div>
-                {activeRun(retainedLatestRun) && selectedRunId !== undefined ? (
+                {selectedRunActive && selectedRunId !== undefined ? (
                   <button
                     className="danger-button"
                     disabled={cancelRun.isPending}
@@ -881,6 +977,67 @@ export function WorkbenchSurface() {
   );
 }
 
+function RetainedToolActivity({
+  event,
+  locale,
+}: {
+  event: EventProjection;
+  locale: "en" | "ru";
+}) {
+  const payload = useQuery({
+    queryKey: [...requestKeys.root, "event-payload", event.id],
+    queryFn: ({ signal }) => fetchCockpit<EventPayloadResponse>(event.payload_url, signal),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  if (!payload.isSuccess || payload.data.hidden) return null;
+  const projection = projectToolPayload(payload.data.payload, event.id);
+  if (projection.plan.length > 0) return <PlanCard items={projection.plan} locale={locale} />;
+  return projection.activity === null
+    ? null
+    : <ToolActivityCard activity={projection.activity} locale={locale} />;
+}
+
+function ToolActivityCard({
+  activity,
+  locale,
+}: {
+  activity: WorkbenchToolActivity;
+  locale: "en" | "ru";
+}) {
+  const complete = ["completed", "succeeded", "success"].includes(activity.status.toLowerCase());
+  return (
+    <article className="tool-activity-card">
+      <span aria-hidden="true">{complete ? "✓" : "◇"}</span>
+      <div>
+        <strong>{activity.label}</strong>
+        <small>{message(locale, "toolActivity")} · {activity.status}</small>
+      </div>
+      <span aria-hidden="true">›</span>
+    </article>
+  );
+}
+
+function PlanCard({ items, locale }: { items: readonly WorkbenchPlanItem[]; locale: "en" | "ru" }) {
+  return (
+    <section className="live-plan-card">
+      <div>
+        <strong>{message(locale, "planProgress")}</strong>
+        <small>{items.filter((item) => item.status === "completed").length}/{items.length}</small>
+      </div>
+      <ol>
+        {items.map((item, index) => (
+          <li className={item.status} key={`${index}-${item.step}`}>
+            <span aria-hidden="true">
+              {item.status === "completed" ? "✓" : item.status === "in_progress" ? "●" : "○"}
+            </span>
+            <span>{item.step}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function GeneratedFilePreview({ eventId, payloadUrl }: { eventId: string; payloadUrl: string }) {
   const payload = useQuery({
     queryKey: [...requestKeys.root, "event-payload", eventId],
@@ -890,6 +1047,37 @@ function GeneratedFilePreview({ eventId, payloadUrl }: { eventId: string; payloa
   if (payload.isPending) return <div className="generated-image-skeleton skeleton-row" />;
   if (payload.isError || payload.data.hidden) return null;
   return <GeneratedImageCard payload={payload.data.payload} />;
+}
+
+function loadRunPreferences(): { config: RunConfig; reasoningEffort: ReasoningEffort } {
+  const fallback = {
+    config: { apiMode: "v2", harnessId: "codex-cli", mode: "plan", model: "" },
+    reasoningEffort: "medium" as const,
+  };
+  try {
+    const stored = JSON.parse(localStorage.getItem(runPreferencesKey) ?? "null") as unknown;
+    if (typeof stored !== "object" || stored === null || Array.isArray(stored)) return fallback;
+    const value = stored as Record<string, unknown>;
+    const effort = value.reasoningEffort;
+    return {
+      config: {
+        apiMode: typeof value.apiMode === "string" ? value.apiMode : fallback.config.apiMode,
+        harnessId: typeof value.harnessId === "string" ? value.harnessId : fallback.config.harnessId,
+        mode: typeof value.mode === "string" ? value.mode : fallback.config.mode,
+        model: typeof value.model === "string" ? value.model : fallback.config.model,
+      },
+      reasoningEffort:
+        effort === "low" || effort === "high" || effort === "medium"
+          ? effort
+          : fallback.reasoningEffort,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function preferredModel(models: readonly string[]): string {
+  return models.find((model) => model !== "GigaChat") ?? models[0] ?? sessionTitleModel;
 }
 
 function GeneratedImageCard({ payload }: { payload?: Readonly<Record<string, unknown>> }) {

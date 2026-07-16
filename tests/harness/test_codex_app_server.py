@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from gpt2giga_harness.codex_app_server import (
     CodexAppServerSupervisor,
+    _normalize_notification,
     build_execution_snapshot,
 )
 from gpt2giga_harness.executables import ExecutableResolution
@@ -144,6 +145,34 @@ class _FakeAppServerClient:
 
     def close(self) -> None:
         self._alive = False
+
+
+def test_turn_plan_update_is_normalized_for_workbench_rendering():
+    event, text = _normalize_notification(
+        "turn/plan/updated",
+        {
+            "turnId": "turn-1",
+            "plan": [
+                {"step": "Inspect stream", "status": "completed"},
+                {"step": "Render tools", "status": "inProgress"},
+            ],
+        },
+    )
+
+    assert text is None
+    assert event is not None
+    assert event.type == "plan_updated"
+    assert event.payload == {
+        "tool_call_id": "plan:turn-1",
+        "name": "update_plan",
+        "status": "running",
+        "arguments": {
+            "plan": [
+                {"step": "Inspect stream", "status": "completed"},
+                {"step": "Render tools", "status": "in_progress"},
+            ]
+        },
+    }
 
 
 class _ApprovalAppServerClient(_FakeAppServerClient):

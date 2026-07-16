@@ -66,6 +66,7 @@ const catalogs = {
     emptySessions: "No sessions yet. Create one to begin governed work.",
     evidence: "Evidence",
     executionPlan: "Execution plan",
+    planProgress: "Plan progress",
     fastApiAuthority: "FastAPI retains policy, approval, redaction, and durable ownership.",
     evaluationDetail:
       "Arena, evals, baselines, and scorecards remain server-authoritative while the new route boundary is proven.",
@@ -92,6 +93,7 @@ const catalogs = {
     migrationNote:
       "Shell boundary active · authoritative data remains in FastAPI · no surface migration yet",
     model: "Model",
+    reasoning: "Reasoning",
     mode: "Mode",
     moreComposerActions: "More composer actions",
     markRead: "Mark read",
@@ -145,6 +147,7 @@ const catalogs = {
     startReady: "Ready to start a governed run",
     targetId: "Target ID",
     timeline: "Timeline",
+    toolActivity: "Tool activity",
     worker: "Worker",
     worktree: "Worktree",
     workspacePolicy: "Workspace policy",
@@ -315,6 +318,7 @@ const catalogs = {
     emptySessions: "Сессий пока нет. Создайте первую для управляемой работы.",
     evidence: "Evidence",
     executionPlan: "План выполнения",
+    planProgress: "Ход выполнения плана",
     fastApiAuthority: "FastAPI сохраняет policy, approvals, redaction и durable ownership.",
     evaluationDetail:
       "Arena, evals, baselines и scorecards остаются под управлением сервера, пока проверяется новая граница маршрута.",
@@ -341,6 +345,7 @@ const catalogs = {
     migrationNote:
       "Граница shell активна · FastAPI сохраняет полномочия · миграция поверхностей ещё не началась",
     model: "Модель",
+    reasoning: "Ризонинг",
     mode: "Режим",
     moreComposerActions: "Дополнительные действия",
     markRead: "Отметить прочитанным",
@@ -394,6 +399,7 @@ const catalogs = {
     startReady: "Готово к управляемому запуску",
     targetId: "ID назначения",
     timeline: "Хронология",
+    toolActivity: "Действие инструмента",
     worker: "Воркер",
     worktree: "Worktree",
     workspacePolicy: "Политика workspace",

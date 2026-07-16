@@ -118,7 +118,7 @@ export class RunEventStreamStore {
 
   readonly getSnapshot = (): RunStreamSnapshot => this.snapshot;
 
-  connect(runId: string): () => void {
+  connect(runId: string, tailOnly = true): () => void {
     this.disconnect();
     this.seenIds.clear();
     this.pending = [];
@@ -130,7 +130,7 @@ export class RunEventStreamStore {
       resnapshotUrl: null,
     });
     const source = this.createEventSource(
-      `/api/runs/${encodeURIComponent(runId)}/events/stream?tail_only=true`,
+      `/api/runs/${encodeURIComponent(runId)}/events/stream?tail_only=${tailOnly}`,
     );
     this.source = source;
     source.onopen = () => {
@@ -234,6 +234,7 @@ export class RunEventStreamStore {
 export function useRunEventStream(
   runId: string | undefined,
   resetToken = 0,
+  tailOnly = true,
 ): RunStreamSnapshot {
   const storeRef = useRef<RunEventStreamStore | null>(null);
   if (storeRef.current === null) storeRef.current = new RunEventStreamStore();
@@ -243,8 +244,8 @@ export function useRunEventStream(
       store.disconnect();
       return;
     }
-    return store.connect(runId);
-  }, [resetToken, runId, store]);
+    return store.connect(runId, tailOnly);
+  }, [resetToken, runId, store, tailOnly]);
   return useSyncExternalStore(
     store.subscribe,
     store.getSnapshot,

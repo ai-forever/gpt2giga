@@ -128,4 +128,25 @@ describe("run event stream store", () => {
     cleanup();
     expect(close).toHaveBeenCalledOnce();
   });
+
+  it("replays stored deltas when connecting to a just-started run", () => {
+    let streamUrl = "";
+    const source = {
+      addEventListener: vi.fn(),
+      close: vi.fn(),
+      onerror: null,
+      onmessage: null,
+      onopen: null,
+    };
+    const store = new RunEventStreamStore({
+      createEventSource: (url) => {
+        streamUrl = url;
+        return source;
+      },
+    });
+
+    store.connect("new-run", false);
+
+    expect(streamUrl).toBe("/api/runs/new-run/events/stream?tail_only=false");
+  });
 });

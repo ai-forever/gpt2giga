@@ -99,6 +99,27 @@ def test_direct_chat_maps_selected_v2_builtin_tools(monkeypatch):
     ]
 
 
+def test_direct_chat_forwards_selected_reasoning_effort(monkeypatch):
+    captured = {}
+
+    def fake_request_json(method, url, *, payload, api_key, timeout):
+        captured["payload"] = payload
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(proxy, "request_json", fake_request_json)
+
+    DirectChatHarness().run(
+        HarnessRequest(
+            prompt="reason",
+            model="GigaChat-2-Reasoning",
+            extra={"agent_adapter_options": {"reasoning_effort": "medium"}},
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert captured["payload"]["reasoning_effort"] == "medium"
+
+
 def test_direct_chat_records_nonstream_builtin_tools(monkeypatch):
     monkeypatch.setattr(
         proxy,

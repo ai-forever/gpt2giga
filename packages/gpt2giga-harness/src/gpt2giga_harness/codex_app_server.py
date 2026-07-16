@@ -700,6 +700,33 @@ def _normalize_notification(
             ),
             None,
         )
+    if method == "turn/plan/updated":
+        plan = []
+        for item in params.get("plan") or ():
+            if not isinstance(item, Mapping):
+                continue
+            step = str(item.get("step") or "").strip()
+            if not step:
+                continue
+            status = {
+                "inProgress": "in_progress",
+                "completed": "completed",
+                "pending": "pending",
+            }.get(str(item.get("status") or ""), "pending")
+            plan.append({"step": step, "status": status})
+        return (
+            HarnessEvent(
+                type="plan_updated",
+                message="Codex app-server updated the execution plan.",
+                payload={
+                    "tool_call_id": f"plan:{params.get('turnId') or 'current'}",
+                    "name": "update_plan",
+                    "status": "running",
+                    "arguments": {"plan": plan},
+                },
+            ),
+            None,
+        )
     if method == "turn/completed":
         turn = _mapping(params.get("turn"))
         return (
