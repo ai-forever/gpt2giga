@@ -182,14 +182,18 @@ assert "/v1beta/models/{model}:generateContent" in paths
 
 HARNESS_SMOKE = """
 import importlib.metadata
+import json
 import os
 from pathlib import Path
+import stat
 
 from fastapi.testclient import TestClient
 
 import gpt2giga
 import gpt2giga_harness
+from gpt2giga_harness.cli import build_parser
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.doctor import write_doctor_support_report
 from gpt2giga_harness.state_backup import (
     create_state_backup,
     restore_state_backup,
@@ -216,6 +220,23 @@ assert scripts == {
     "giga": "gpt2giga_harness.cli:main",
     "gpt2giga-harness": "gpt2giga_harness.cli:main",
 }
+doctor_output = installed_root.parent / "doctor-support.json"
+doctor_args = build_parser().parse_args(
+    ["doctor", ".", "--json", "--output", str(doctor_output), "--fail-on", "degraded"]
+)
+assert doctor_args.output == str(doctor_output)
+assert doctor_args.fail_on == "degraded"
+write_doctor_support_report(
+    {
+        "schema_version": 1,
+        "kind": "gpt2giga_harness_doctor_report",
+        "summary": {"ready": 1, "degraded": 0, "blocked": 0},
+        "checks": [],
+    },
+    doctor_output,
+)
+assert json.loads(doctor_output.read_text(encoding="utf-8"))["schema_version"] == 1
+assert stat.S_IMODE(doctor_output.stat().st_mode) == 0o600
 assert "function boot()" in load_text_asset("app.js")
 assert ".app {" in load_text_asset("app.css")
 

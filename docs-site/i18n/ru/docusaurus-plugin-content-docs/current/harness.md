@@ -129,7 +129,20 @@ Harness-managed homes и managed MCP snapshots. Проверки получаю�
 `ready`, `degraded` или `blocked`; для degraded и blocked prerequisites отчёт
 предлагает remediation-команду. Secret values редактируются, абсолютный путь
 workspace не публикуется, а существующий runtime worker state читается без
-перезаписи.
+перезаписи. Отчёт также содержит стабильный kind, точные версии Harness/gateway,
+Python и platform metadata; совместимость внешних CLI берётся из тех же
+ограниченных capability probes, которые используются перед execution.
+
+Для CI порог задаётся явно. `--fail-on blocked` возвращает exit code 1 только
+при blocked checks, а `--fail-on degraded` — при degraded или blocked. Без
+`--fail-on` сохраняется интерактивный exit code 0. Для issue report флаг
+`--output` атомарно записывает тот же канонический redaction-safe JSON с mode
+`0600`, а stdout сохраняет выбранный human или JSON формат:
+
+```bash
+giga doctor . --json --fail-on blocked
+giga doctor . --json --output harness-doctor.json
+```
 
 `giga init` создаёт в `.giga/` non-secret конфигурацию, стартовые agent profiles,
 prompts, smoke eval и review workflow. Существующие файлы не заменяются без

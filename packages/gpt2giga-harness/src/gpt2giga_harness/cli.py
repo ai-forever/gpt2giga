@@ -29,7 +29,11 @@ from gpt2giga_harness.capability_matrix import (
 )
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
-from gpt2giga_harness.doctor import build_doctor_report, run_doctor
+from gpt2giga_harness.doctor import (
+    build_doctor_report,
+    format_doctor_report,
+    write_doctor_support_report,
+)
 from gpt2giga_harness.editor import (
     build_open_diff_plan,
     build_open_file_plan,
@@ -232,6 +236,17 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = subparsers.add_parser("doctor", parents=[common])
     doctor.add_argument("workspace", nargs="?", default=None)
     doctor.add_argument("--json", action="store_true")
+    doctor.add_argument(
+        "--output",
+        default=None,
+        help="Atomically write a private canonical JSON support report",
+    )
+    doctor.add_argument(
+        "--fail-on",
+        choices=("blocked", "degraded"),
+        default=None,
+        help="Return 1 when the selected CI readiness threshold is reached",
+    )
     doctor.set_defaults(handler=_handle_doctor)
 
     config_parser = subparsers.add_parser("config")
@@ -647,10 +662,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _handle_doctor(args: argparse.Namespace, config: HarnessConfig) -> int:
+    report = build_doctor_report(config, workspace=args.workspace)
+    if args.output is not None:
+        write_doctor_support_report(report, args.output)
     if args.json:
-        _print_json(build_doctor_report(config, workspace=args.workspace))
+        _print_json(report)
     else:
-        print(run_doctor(config, workspace=args.workspace))
+        print(format_doctor_report(report))
+    summary = report.get("summary") or {}
+    blocked = int(summary.get("blocked") or 0)
+    degraded = int(summary.get("degraded") or 0)
+    if args.fail_on == "blocked" and blocked:
+        return 1
+    if args.fail_on == "degraded" and (blocked or degraded):
+        return 1
     return 0
 
 

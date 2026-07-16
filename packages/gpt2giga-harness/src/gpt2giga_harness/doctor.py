@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from contextlib import closing
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 from pathlib import Path
 import platform
 import sqlite3
+import tempfile
 from typing import Any, Mapping
 
 from gpt2giga_harness import proxy
@@ -25,6 +27,7 @@ from gpt2giga_harness.runtime.store import RUNTIME_DB_NAME
 from gpt2giga_harness.types import AvailabilityStatus, redact_secrets
 
 DOCTOR_SCHEMA_VERSION = 1
+DOCTOR_REPORT_KIND = "gpt2giga_harness_doctor_report"
 _WORKER_STALE_AFTER_SECONDS = 30.0
 _MAX_SNAPSHOT_VALIDATIONS = 100
 _MAX_SNAPSHOT_BYTES = 1_000_000
@@ -85,6 +88,22 @@ def build_doctor_report(
     }
     report = {
         "schema_version": DOCTOR_SCHEMA_VERSION,
+        "kind": DOCTOR_REPORT_KIND,
+        "environment": {
+            "packages": {
+                "gpt2giga": _package_version("gpt2giga"),
+                "gpt2giga-harness": _package_version("gpt2giga-harness"),
+            },
+            "python": {
+                "implementation": platform.python_implementation(),
+                "version": platform.python_version(),
+            },
+            "platform": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "machine": platform.machine(),
+            },
+        },
         "ok": summary["blocked"] == 0,
         "summary": summary,
         "checks": checks,
@@ -102,6 +121,38 @@ def run_doctor(
     return format_doctor_report(
         build_doctor_report(config, registry, workspace=workspace)
     )
+
+
+def write_doctor_support_report(
+    report: Mapping[str, Any],
+    output: str | Path,
+) -> Path:
+    """Atomically write one canonical private JSON report for support."""
+    destination = Path(output).expanduser()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=destination.parent,
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+    )
+    temporary = Path(temporary_name)
+    payload = json.dumps(
+        _sanitize_report(dict(report)),
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(f"{payload}\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return destination
 
 
 def format_doctor_report(report: Mapping[str, Any]) -> str:
@@ -648,6 +699,13 @@ def _sanitize_report(value: Any) -> Any:
         home = str(Path.home())
         return value.replace(home, "~") if home else value
     return value
+
+
+def _package_version(distribution: str) -> str:
+    try:
+        return version(distribution)
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _health_text(health: proxy.ProxyHealth) -> str:

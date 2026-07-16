@@ -129,7 +129,21 @@ durable worker, Harness-managed homes, and managed MCP snapshots. Checks are
 classified as `ready`, `degraded`, or `blocked`; degraded and blocked
 prerequisites include a remediation command. The report redacts secret values,
 does not publish an absolute workspace path, and reads existing runtime worker
-state without rewriting it.
+state without rewriting it. It also carries a stable report kind plus exact
+Harness/gateway, Python, and platform metadata; external CLI compatibility is
+embedded from the same bounded capability probes used for execution.
+
+For CI, choose the failure threshold explicitly. `blocked` returns exit code 1
+only for blocked checks; `degraded` returns 1 for either degraded or blocked
+checks. Without `--fail-on`, doctor keeps its interactive exit-code-0 behavior.
+For an issue report, `--output` atomically writes the same canonical,
+redaction-safe JSON with mode `0600` while stdout keeps the selected human or
+JSON format:
+
+```bash
+giga doctor . --json --fail-on blocked
+giga doctor . --json --output harness-doctor.json
+```
 
 `giga init` creates non-secret starter configuration, agent profiles, prompts,
 an eval, and a review workflow under `.giga/`. Existing files are not replaced

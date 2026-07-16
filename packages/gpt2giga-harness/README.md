@@ -56,7 +56,11 @@ proxy and routes, configured models, adapter CLI versions, workspace and Git,
 the durable worker, Harness-managed homes, and managed MCP snapshots. JSON
 evidence is redacted and omits absolute workspace paths; every degraded or
 blocked first-run prerequisite includes a safe remediation command. Runtime
-worker state is inspected read-only.
+worker state is inspected read-only. The report also includes exact package,
+Python, and platform metadata. Use `--fail-on blocked` (or the stricter
+`--fail-on degraded`) for CI exit code 1, and `--output harness-doctor.json` to
+atomically write a canonical mode-0600 issue attachment while keeping stdout
+available.
 
 Every CLI/UI run preflight also projects those checks onto the selected
 execution plan before process spawn. Its redacted `readiness` section covers

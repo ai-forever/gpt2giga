@@ -195,6 +195,54 @@ def test_cli_doctor_json_passes_explicit_workspace(capsys, monkeypatch, tmp_path
     assert payload["ok"] is True
 
 
+def test_cli_doctor_exports_support_report_and_fails_ci_threshold(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    report = {
+        "schema_version": 1,
+        "kind": "gpt2giga_harness_doctor_report",
+        "ok": True,
+        "summary": {"ready": 2, "degraded": 1, "blocked": 0},
+        "checks": [],
+    }
+    monkeypatch.setattr(cli, "build_doctor_report", lambda *args, **kwargs: report)
+    output = tmp_path / "doctor.json"
+
+    assert (
+        cli.main(
+            [
+                "doctor",
+                "--json",
+                "--output",
+                str(output),
+                "--fail-on",
+                "degraded",
+            ]
+        )
+        == 1
+    )
+
+    assert json.loads(capsys.readouterr().out) == report
+    assert json.loads(output.read_text(encoding="utf-8")) == report
+
+
+def test_cli_doctor_ci_threshold_preserves_default_exit_code(capsys, monkeypatch):
+    report = {
+        "schema_version": 1,
+        "kind": "gpt2giga_harness_doctor_report",
+        "ok": False,
+        "summary": {"ready": 1, "degraded": 0, "blocked": 1},
+        "checks": [],
+    }
+    monkeypatch.setattr(cli, "build_doctor_report", lambda *args, **kwargs: report)
+
+    assert cli.main(["doctor", "--json"]) == 0
+    capsys.readouterr()
+    assert cli.main(["doctor", "--json", "--fail-on", "blocked"]) == 1
+
+
 def test_cli_harness_list_json_shows_native_metadata(capsys):
     exit_code = cli.main(["harness", "list", "--json"])
 

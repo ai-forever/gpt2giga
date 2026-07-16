@@ -1,8 +1,13 @@
 import json
+import stat
 
-from gpt2giga_harness import proxy
+from gpt2giga_harness import doctor, proxy
 from gpt2giga_harness.config import HarnessConfig
-from gpt2giga_harness.doctor import build_doctor_report, run_doctor
+from gpt2giga_harness.doctor import (
+    build_doctor_report,
+    run_doctor,
+    write_doctor_support_report,
+)
 from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 
@@ -125,6 +130,11 @@ def test_doctor_report_is_redacted_actionable_and_workspace_scoped(
     tmp_path,
 ):
     secret = "doctor-secret-value"
+    package_versions = {
+        "gpt2giga": "0.2.3a2",
+        "gpt2giga-harness": "0.0.1a4",
+    }
+    monkeypatch.setattr(doctor, "_package_version", package_versions.__getitem__)
     monkeypatch.setenv("GIGACHAT_CREDENTIALS", secret)
     monkeypatch.setattr(
         proxy,
@@ -168,6 +178,11 @@ def test_doctor_report_is_redacted_actionable_and_workspace_scoped(
     serialized = json.dumps(report)
     by_id = {check["id"]: check for check in report["checks"]}
     assert report["schema_version"] == 1
+    assert report["kind"] == "gpt2giga_harness_doctor_report"
+    assert report["environment"]["packages"] == {
+        "gpt2giga": "0.2.3a2",
+        "gpt2giga-harness": "0.0.1a4",
+    }
     assert report["ok"] is False
     assert secret not in serialized
     assert str(tmp_path) not in serialized
@@ -250,3 +265,27 @@ def test_doctor_reads_worker_status_without_rewriting_runtime_state(
         "total": 1,
     }
     assert runtime_path.stat().st_mtime_ns == before
+
+
+def test_doctor_support_report_is_canonical_private_and_replaceable(tmp_path):
+    output = tmp_path / "support" / "doctor.json"
+    report = {
+        "schema_version": 1,
+        "kind": "gpt2giga_harness_doctor_report",
+        "ok": False,
+        "summary": {"ready": 1, "degraded": 2, "blocked": 3},
+        "checks": [],
+    }
+
+    write_doctor_support_report(report, output)
+    first = output.read_bytes()
+    write_doctor_support_report(report, output)
+
+    assert output.read_bytes() == first
+    assert (
+        first
+        == (
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        ).encode()
+    )
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
