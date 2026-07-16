@@ -272,14 +272,24 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .message-markdown h1 strong, .message-markdown h2 strong, .message-markdown h3 strong, .message-markdown h4 strong, .message-markdown h5 strong, .message-markdown h6 strong { font-weight: inherit; }
 .message-markdown ul, .message-markdown ol { margin: 12px 0 14px; padding-left: 24px; }
 .message-markdown li { line-height: 1.62; }.message-markdown li + li { margin-top: 7px; }.message-markdown li::marker { color: color-mix(in srgb, var(--muted) 82%, var(--text)); }
+.message-markdown li > ul, .message-markdown li > ol { margin: 5px 0 3px; padding-left: 22px; }
+.message-markdown ul ul { list-style-type: circle; }.message-markdown ul ul ul { list-style-type: square; }.message-markdown ol ol { list-style-type: lower-alpha; }.message-markdown ol ol ol { list-style-type: lower-roman; }
 .message-markdown hr { height: 1px; margin: 18px 0; border: 0; background: color-mix(in srgb, var(--border) 82%, transparent); }
-.message-markdown blockquote { margin: 12px 0; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--accent-soft) 38%, transparent); padding: 10px 13px; color: var(--text); }
-.message-markdown blockquote > .message-markdown > :first-child { margin-top: 0; }.message-markdown cite { display: block; margin-top: 8px; color: var(--muted); font-size: .92em; font-style: normal; }
+.message-markdown blockquote { margin: 12px 0; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--accent-soft) 24%, transparent); padding: 10px 13px; color: var(--text); }
+.message-markdown blockquote > :first-child { margin-top: 0; }.message-markdown blockquote > :last-child { margin-bottom: 0; }
+.message-markdown blockquote blockquote { margin: 8px 0 2px; border-left-width: 2px; border-radius: 0; background: transparent; padding: 4px 0 4px 13px; }
+.message-markdown cite { display: block; margin-top: 8px; color: var(--muted); font-size: .92em; font-style: normal; }
 .message-markdown del { color: color-mix(in srgb, var(--text) 58%, var(--muted)); text-decoration-color: color-mix(in srgb, var(--muted) 78%, transparent); text-decoration-thickness: 1.5px; }
-.message-markdown a { color: var(--accent); text-underline-offset: 2px; }
+.message-markdown ins { text-decoration-color: color-mix(in srgb, var(--accent) 72%, var(--text)); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+.message-markdown mark { border-radius: 3px; background: color-mix(in srgb, #f6c453 34%, transparent); padding: .02em .2em; color: var(--text); }
+.message-markdown a { color: color-mix(in srgb, var(--accent) 86%, var(--text)); font-weight: 500; text-decoration-color: color-mix(in srgb, var(--accent) 52%, transparent); text-decoration-thickness: 1px; text-underline-offset: 3px; transition: color 120ms ease, text-decoration-color 120ms ease; }
+.message-markdown a:hover { color: var(--accent); text-decoration-color: currentColor; }
+.message-markdown .katex { font-size: 1.04em; }
+.message-markdown .katex-display { max-width: 100%; overflow-x: auto; margin: 14px 0 17px; border-block: 1px solid color-mix(in srgb, var(--border) 74%, transparent); padding: 14px 18px; color: var(--text); text-align: center; scrollbar-width: thin; }
+.markdown-loading { white-space: pre-wrap; }
 .message-markdown :not(pre) > code { border: 1px solid color-mix(in srgb, var(--border) 88%, var(--text)); border-radius: 5px; background: color-mix(in srgb, var(--surface) 62%, var(--surface-muted)); padding: 1px 5px; font-family: "SFMono-Regular", Consolas, monospace; font-size: .87em; letter-spacing: 0; line-height: 1.35; white-space: break-spaces; }
-.markdown-task-list { padding-left: 0 !important; list-style: none; }.markdown-task-item { display: grid; grid-template-columns: 17px minmax(0, 1fr); align-items: start; gap: 8px; }
-.markdown-task-checkbox { width: 16px; height: 16px; display: inline-grid; place-items: center; margin-top: 3px; border: 1px solid color-mix(in srgb, var(--muted) 72%, var(--border)); border-radius: 4px; color: #fff; font-size: 11px; font-weight: 800; line-height: 1; }
+.contains-task-list { padding-left: 0 !important; list-style: none; }.task-list-item { list-style: none; }
+.markdown-task-checkbox { width: 16px; height: 16px; display: inline-grid; place-items: center; margin: 0 8px 0 0; border: 1px solid color-mix(in srgb, var(--muted) 72%, var(--border)); border-radius: 4px; color: #fff; font-size: 11px; font-weight: 800; line-height: 1; vertical-align: -2px; }
 .markdown-task-checkbox[aria-checked="true"] { border-color: var(--accent); background: var(--accent); }
 .markdown-table-wrap { max-width: 100%; margin: 13px 0; overflow-x: auto; border: 1px solid var(--border); border-radius: 9px; background: color-mix(in srgb, var(--surface) 72%, var(--surface-muted)); scrollbar-width: thin; }
 .markdown-table-wrap table { width: 100%; min-width: 480px; border-collapse: collapse; font-size: 13px; line-height: 1.48; }

@@ -37,7 +37,15 @@ def test_cockpit_v2_manifest_binds_hashed_split_and_precompressed_assets():
     assert any(name.startswith("assets/raw-evidence-") for name in manifest.assets)
     assert all(
         asset.gzip_name is not None and asset.brotli_name is not None
-        for asset in manifest.assets.values()
+        for name, asset in manifest.assets.items()
+        if not name.endswith(".woff2")
+    )
+    assert all(
+        asset.media_type == "font/woff2"
+        and asset.gzip_name is None
+        and asset.brotli_name is None
+        for name, asset in manifest.assets.items()
+        if name.endswith(".woff2")
     )
     assert "/cockpit-v2/assets/" in load_cockpit_v2_shell()
 
@@ -155,6 +163,22 @@ def test_cockpit_v2_serves_negotiated_immutable_assets():
     assert len(identity.content) == manifest.assets[javascript].byte_count
     assert client.get(f"/cockpit-v2/assets/{javascript}.br").status_code == 404
     assert client.get("/cockpit-v2/assets/../manifest.json").status_code == 404
+
+
+def test_cockpit_v2_serves_uncompressed_fonts_when_browser_accepts_brotli():
+    client = _client()
+    manifest = load_cockpit_v2_manifest()
+    font = next(name for name in manifest.assets if name.endswith(".woff2"))
+
+    response = client.get(
+        f"/cockpit-v2/assets/{font}",
+        headers={"Accept-Encoding": "gzip, br"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "font/woff2"
+    assert "content-encoding" not in response.headers
+    assert len(response.content) == manifest.assets[font].byte_count
 
 
 def test_cockpit_v2_manifest_failure_is_clear_and_keeps_legacy_available(monkeypatch):

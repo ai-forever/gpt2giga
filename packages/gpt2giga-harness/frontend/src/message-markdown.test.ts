@@ -2,18 +2,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { MessageMarkdown, parseMarkdownBlocks, tokenizeCode } from "./message-markdown";
+import { MarkdownRenderer, normalizeModelMarkdown, tokenizeCode } from "./markdown-renderer";
 
-describe("MessageMarkdown", () => {
-  it("parses prose, lists and fenced code without treating code as HTML", () => {
-    expect(parseMarkdownBlocks("# Result\n\n- one\n- two\n\n```python\nprint('<ok>')\n```"))
-      .toEqual([
-        { content: "Result", kind: "heading", level: 1 },
-        { items: ["one", "two"], kind: "list", ordered: false },
-        { content: "print('<ok>')", kind: "code", language: "python" },
-      ]);
-  });
+function render(source: string) {
+  return renderToStaticMarkup(createElement(MarkdownRenderer, { source }));
+}
 
+describe("MarkdownRenderer", () => {
   it.each([
     ["python", "def answer():\n    return 42", "def"],
     ["go", "func main() { return }", "func"],
@@ -22,46 +17,85 @@ describe("MessageMarkdown", () => {
     expect(tokenizeCode(code, language)).toContainEqual({ content: keyword, kind: "keyword" });
   });
 
-  it("normalizes common language aliases", () => {
-    expect(parseMarkdownBlocks("```sh\necho ok\n```"))
-      .toEqual([{ content: "echo ok", kind: "code", language: "bash" }]);
-  });
-
-  it("parses GFM tables with column alignment and inline Markdown", () => {
-    expect(parseMarkdownBlocks(
-      "| Path | Purpose |\n| :--- | ---: |\n| `src/` | **Code** |",
-    )).toEqual([{
-      alignments: ["left", "right"],
-      headers: ["Path", "Purpose"],
-      kind: "table",
-      rows: [["`src/`", "**Code**"]],
-    }]);
-  });
-
-  it("renders thematic breaks, task lists, strikethrough and safe cite markup", () => {
-    const html = renderToStaticMarkup(createElement(MessageMarkdown, {
-      source: "---\n\n- [x] ~~Done~~\n- [ ] Review\n\n<cite>— Author</cite>",
-    }));
-    expect(html).toContain("<hr/>");
-    expect(html).toContain('class="markdown-task-list"');
+  it("renders GFM tables, tasks and multi-backtick code", () => {
+    const html = render([
+      "| Path | Purpose |",
+      "| :--- | ---: |",
+      "| `src/` | **Code** |",
+      "",
+      "- [x] ~~Done~~",
+      "- [ ] Review",
+      "",
+      "Use ``Ctrl + ` + Shift`` now",
+    ].join("\n"));
+    expect(html).toContain('class="markdown-table-wrap"');
     expect(html).toContain('aria-checked="true"');
     expect(html).toContain("<del>Done</del>");
-    expect(html).toContain("<cite>— Author</cite>");
-  });
-
-  it("supports multi-backtick inline code spans without leaking delimiters", () => {
-    const html = renderToStaticMarkup(createElement(MessageMarkdown, {
-      source: "Use ``Ctrl + ` + Shift`` now",
-    }));
     expect(html).toContain("<code>Ctrl + ` + Shift</code>");
-    expect(html).not.toContain("``Ctrl");
   });
 
-  it("keeps arbitrary inline HTML escaped", () => {
-    const html = renderToStaticMarkup(createElement(MessageMarkdown, {
-      source: "<script>alert('no')</script>",
-    }));
-    expect(html).toContain("&lt;script&gt;");
+  it("preserves nested unordered and ordered list structure", () => {
+    const html = render([
+      "- First",
+      "- Second",
+      "  - Nested 2.1",
+      "  - Nested 2.2",
+      "    1. Deep one",
+      "    2. Deep two",
+      "- Third",
+    ].join("\n"));
+    expect(html).toMatch(/<li>Second\s*<ul>/);
+    expect(html).toMatch(/<li>Nested 2\.2\s*<ol>/);
+    expect(html).toContain("<li>Deep one</li>");
+  });
+
+  it("renders inline and block LaTeX with KaTeX", () => {
+    const html = render("Energy: $E = mc^2$.\n\n\\[\n\\int_a^b f(x)\\,dx\n\\]");
+    expect(html).toContain('class="katex"');
+    expect(html).toContain('class="katex-display"');
+    expect(html).not.toContain("$E = mc^2$");
+  });
+
+  it("allows selected semantic HTML and removes unsafe HTML", () => {
+    const html = render([
+      "<ins>Underlined</ins> and <u>also underlined</u>.",
+      "",
+      "<mark>Highlighted</mark>.",
+      "",
+      "<cite>— Author</cite>",
+      "",
+      "<!-- hidden -->",
+      "",
+      "<script>alert('no')</script>",
+    ].join("\n"));
+    expect(html).toContain("<ins>Underlined</ins>");
+    expect(html).toContain("<ins>also underlined</ins>");
+    expect(html).toContain("<mark>Highlighted</mark>");
+    expect(html).toContain("<cite>— Author</cite>");
+    expect(html).not.toContain("hidden");
     expect(html).not.toContain("<script>");
+    expect(html).not.toContain("alert('no')");
+  });
+
+  it("resolves reference links once and blocks unsafe protocols", () => {
+    const html = render([
+      "Read [the guide][docs] and [bad][unsafe].",
+      "[docs]: https://example.com/guide \\\"Guide\\\"",
+      "[unsafe]: javascript:alert(1)",
+    ].join("\n"));
+    expect(html).toContain('href="https://example.com/guide"');
+    expect(html).toContain(">the guide</a>");
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("[docs]:");
+  });
+
+  it("does not normalize model-specific syntax inside fenced code", () => {
+    const source = "```text\n\\[\n[id]: https://example.com\n\\]\n```";
+    expect(normalizeModelMarkdown(source)).toBe(source);
+  });
+
+  it("renders nested quotes without flattening their hierarchy", () => {
+    const html = render("> First level\n>\n> > Second level\n> >\n> > > Third level");
+    expect(html.match(/<blockquote>/g)).toHaveLength(3);
   });
 });

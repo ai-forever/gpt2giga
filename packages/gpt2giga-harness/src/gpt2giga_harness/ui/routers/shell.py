@@ -167,7 +167,10 @@ def create_shell_router(security: HarnessUISecurity) -> APIRouter:
             "Vary": "Accept-Encoding",
             "X-Content-Type-Options": "nosniff",
         }
-        if encoding != "identity":
+        has_encoded_variant = (encoding == "br" and asset.brotli_name is not None) or (
+            encoding == "gzip" and asset.gzip_name is not None
+        )
+        if has_encoded_variant:
             headers["Content-Encoding"] = encoding
         return Response(
             content=content,

@@ -1,1 +1,0 @@
-import{n as e,t}from"./messages-Dv2pcm9R.js";import{t as n}from"./InspectorFrame-vooN2fi8.js";var r=e();function i({locale:e}){return(0,r.jsx)(n,{locale:e,title:t(e,`editor`),children:t(e,`editorDescription`)})}export{i as EditorInspector};

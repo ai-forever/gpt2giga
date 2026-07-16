@@ -219,11 +219,15 @@ def load_cockpit_v2_asset(
         raise CockpitV2AssetNotFoundError(name)
     if encoding == "identity":
         return _verified_identity(asset), asset
-    if encoding == "br" and asset.brotli_name is not None:
+    if encoding == "br" and asset.brotli_name is None:
+        return _verified_identity(asset), asset
+    if encoding == "gzip" and asset.gzip_name is None:
+        return _verified_identity(asset), asset
+    if encoding == "br":
         content = _read_packaged_file(asset.brotli_name)
         expected = asset.brotli_byte_count
         expected_digest = asset.brotli_sha256
-    elif encoding == "gzip" and asset.gzip_name is not None:
+    elif encoding == "gzip":
         content = _read_packaged_file(asset.gzip_name)
         expected = asset.gzip_byte_count
         expected_digest = asset.gzip_sha256

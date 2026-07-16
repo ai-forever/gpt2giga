@@ -21,8 +21,15 @@
   "dependencies": {
     "@tanstack/react-query": "5.101.2",
     "@tanstack/react-router": "1.170.17",
+    "katex": "0.16.22",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "react-markdown": "10.1.0",
+    "rehype-katex": "7.0.1",
+    "rehype-raw": "7.0.0",
+    "rehype-sanitize": "6.0.0",
+    "remark-gfm": "4.0.1",
+    "remark-math": "6.0.0"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
