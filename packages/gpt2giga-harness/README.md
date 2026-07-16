@@ -148,6 +148,14 @@ giga harness inspect codex-cli --json
 Configured paths take precedence over `PATH`, must be absolute, and are checked
 for executable capabilities before a native or headless run starts.
 
+External CLI execution is supported only when both the bounded help probe and
+the declared version window pass: Codex CLI `>=0.144.0,<0.145.0`, Claude Code
+`>=2.1.0,<2.2.0`, and Gemini CLI `>=0.46.0,<0.47.0`. Inspect
+`compatibility.version_contract` with `giga harness inspect <id> --json`.
+Older or capability-incomplete binaries are `unsupported`; newer or
+unparseable versions are `degraded` and remain fail-closed until their fixtures
+and support window are reviewed.
+
 ## Storage and safety boundaries
 
 - User-level coordination state: `~/.gpt2giga/harness/`;

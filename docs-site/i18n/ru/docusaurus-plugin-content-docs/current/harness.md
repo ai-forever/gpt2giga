@@ -672,6 +672,24 @@ cockpit. Для Gemini wrapper можно задать безопасный TOML
 Парсеры допускают неизвестные добавочные поля из versioned fixtures, но поток
 без единого распознанного обязательного event contract завершается ошибкой.
 
+Текущие окна поддержки внешних CLI намеренно ограничены minor-линиями,
+которые покрыты пакетными fixtures для headless-потока и native history:
+
+| Адаптер | Поддерживаемое окно версий |
+|---|---|
+| Codex CLI | `>=0.144.0,<0.145.0` |
+| Claude Code | `>=2.1.0,<2.2.0` |
+| Gemini CLI | `>=0.46.0,<0.47.0` |
+
+Должны одновременно пройти окно версии и probes обязательных capabilities.
+Версия ниже окна или binary без обязательного флага получает статус
+`unsupported`. Более новая версия со всеми обязательными флагами получает
+`degraded`: диагностика показывает `version_contract.status=above_window`, но
+запуск остаётся fail-closed до пересмотра fixtures и объявленного окна.
+Неразбираемый вывод версии обрабатывается так же со статусом
+`version_contract.status=unparsed`. JSON-контракт также публикует `minimum` и
+`maximum_exclusive`, поэтому CI и issue reports не должны разбирать warning.
+
 Headless-потоки и Codex app-server публикуют стабильные tool, command, file,
 usage, failure и lifecycle events только из capability-probed structured schema.
 Usage сохраняет доступные cached-input, reasoning-output и tool token details.

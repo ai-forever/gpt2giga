@@ -1130,6 +1130,24 @@ expose the redaction-safe version, event/history schema, proven flags, and any
 compatibility warning. Structured parsers ignore unknown additive fields, but a
 stream with no recognized required event contract fails explicitly.
 
+The current external CLI support windows are deliberately bounded to the
+minor lines covered by the packaged headless and native-history fixtures:
+
+| Adapter | Supported version window |
+|---|---|
+| Codex CLI | `>=0.144.0,<0.145.0` |
+| Claude Code | `>=2.1.0,<2.2.0` |
+| Gemini CLI | `>=0.46.0,<0.47.0` |
+
+Both the version window and required capability flags must pass. A version
+below its window or a binary missing a required flag is `unsupported`. A newer
+version with all required flags is `degraded`: diagnostics expose
+`version_contract.status=above_window`, but execution remains fail-closed until
+fixtures and the declared window are reviewed. Unparseable version output is
+handled the same way with `version_contract.status=unparsed`. The JSON contract
+also publishes `minimum` and `maximum_exclusive`, so CI and issue reports do not
+need to infer compatibility from warning text.
+
 Inspect one harness:
 
 ```bash
