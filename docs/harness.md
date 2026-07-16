@@ -101,7 +101,7 @@ giga doctor
 ```
 
 The upcoming `gpt2giga-harness==0.1.0b1` distribution requires
-`gpt2giga>=0.2.4a1` and provides the `giga` and `gpt2giga-harness` commands.
+`gpt2giga==0.2.4a1` and provides the `giga` and `gpt2giga-harness` commands.
 
 Requirements are Python 3.10–3.14 and `uv`. Direct GigaChat runs also need the
 gateway credentials described in the [gpt2giga quickstart](quickstart.md).
@@ -2204,7 +2204,7 @@ uv tool install --prerelease allow gpt2giga-harness
 ```
 
 The upcoming `gpt2giga-harness==0.1.0b1` metadata requires
-`gpt2giga>=0.2.4a1`.
+`gpt2giga==0.2.4a1`.
 
 This package migration does not move or rewrite Harness state. Existing
 `~/.gpt2giga/harness` data and project-local `.giga/` directories remain in

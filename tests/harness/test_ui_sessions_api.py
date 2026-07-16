@@ -1005,17 +1005,23 @@ def test_arena_retry_queues_one_durable_child_and_rejects_active_source(tmp_path
     config = HarnessConfig(data_dir=str(data_dir))
     store = FilesystemHarnessSessionStore(data_dir)
     runtime = RuntimeCoordinationStore(data_dir)
+    registry = HarnessRegistry()
+    registry.register(_ArenaCaptureHarness("arena-retry-a"))
+    registry.register(_ArenaCaptureHarness("arena-retry-b"))
     client = TestClient(
         create_app(
             config,
-            registry=create_default_registry(include_entry_points=False),
+            registry=registry,
             store=store,
             runtime_store=runtime,
         )
     )
     created = client.post(
         "/api/arena/runs",
-        json={"prompt": "durable retry", "harness_ids": ["echo", "direct-chat"]},
+        json={
+            "prompt": "durable retry",
+            "harness_ids": ["arena-retry-a", "arena-retry-b"],
+        },
     )
     assert created.status_code == 200
     arena = created.json()["arena"]

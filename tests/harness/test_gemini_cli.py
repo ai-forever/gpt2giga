@@ -242,11 +242,11 @@ def test_streaming_runner_polls_parser_side_channel():
             self.recognized_payloads += 1
             return ()
 
-        def poll_events(self):
+        def poll_events(self) -> list[HarnessEvent]:
             if self.emitted:
-                return ()
+                return []
             self.emitted = True
-            return (
+            return [
                 HarnessEvent(
                     type="tool_call_started",
                     message="Nested tool started.",
@@ -255,8 +255,8 @@ def test_streaming_runner_polls_parser_side_channel():
                         "parent_tool_call_id": "parent",
                         "name": "read_file",
                     },
-                ),
-            )
+                )
+            ]
 
     script = """
 import json

@@ -242,8 +242,8 @@ class SessionReadIndex:
     def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path, timeout=5)
         try:
-            connection.execute("PRAGMA journal_mode = WAL")
             connection.execute("PRAGMA busy_timeout = 5000")
+            connection.execute("PRAGMA journal_mode = WAL")
             with connection:
                 yield connection
         finally:

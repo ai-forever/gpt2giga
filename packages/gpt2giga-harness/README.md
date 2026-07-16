@@ -37,7 +37,7 @@ giga ui
 ```
 
 The upcoming `gpt2giga-harness==0.1.0b1` metadata requires
-`gpt2giga>=0.2.4a1`. Installing only `gpt2giga` never adds Harness commands or
+`gpt2giga==0.2.4a1`. Installing only `gpt2giga` never adds Harness commands or
 the `gpt2giga_harness` namespace.
 
 The base Harness install is intentionally limited to ten reviewed direct

@@ -105,7 +105,7 @@ giga doctor
 ```
 
 Будущий дистрибутив `gpt2giga-harness==0.1.0b1` требует
-`gpt2giga>=0.2.4a1` и добавляет команды `giga` и `gpt2giga-harness`.
+`gpt2giga==0.2.4a1` и добавляет команды `giga` и `gpt2giga-harness`.
 
 Для Direct Chat понадобятся credentials из [быстрого старта gpt2giga](quickstart.md).
 Codex, Claude Code и Gemini — опциональные интеграции: соответствующий CLI
@@ -1097,7 +1097,7 @@ giga doctor
 ```
 
 Будущая metadata `gpt2giga-harness==0.1.0b1` требует
-`gpt2giga>=0.2.4a1`. Старый import `gpt2giga.harness` больше не является
+`gpt2giga==0.2.4a1`. Старый import `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
 перезаписывает `~/.gpt2giga/harness`, `.giga/` или vendor-owned CLI homes.
 

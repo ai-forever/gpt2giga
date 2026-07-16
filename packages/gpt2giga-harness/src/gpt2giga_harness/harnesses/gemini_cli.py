@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from contextlib import suppress
 import json
 import tempfile
 from pathlib import Path
@@ -418,10 +419,8 @@ class _GeminiSubagentTrace:
     def register_finished(self, tool_call_id: str) -> None:
         if tool_call_id in self._active_parents:
             self._active_parents.remove(tool_call_id)
-        try:
+        with suppress(ValueError):
             self._pending_parents.remove(tool_call_id)
-        except ValueError:
-            pass
 
     def poll_events(self) -> tuple[HarnessEvent, ...]:
         events: list[HarnessEvent] = []

@@ -1,8 +1,9 @@
-import { brotliCompressSync, constants, gzipSync } from "node:zlib";
+import { brotliCompressSync, constants } from "node:zlib";
 import { createHash } from "node:crypto";
 import { readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, extname, join, relative, sep } from "node:path";
+import { gzipSync } from "fflate";
 
 const frontendRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const outputRoot = join(frontendRoot, "..", "src", "gpt2giga_harness", "ui", "cockpit_v2", "assets");
@@ -62,7 +63,7 @@ for (const absolute of await walk(outputRoot)) {
     sha256: sha256(content),
   };
   if ([".css", ".html", ".js", ".json", ".svg"].includes(extension)) {
-    const gzip = gzipSync(content, { level: constants.Z_BEST_COMPRESSION, mtime: 0 });
+    const gzip = gzipSync(new Uint8Array(content), { level: 9, mtime: 0 });
     const brotli = brotliCompressSync(content, {
       params: {
         [constants.BROTLI_PARAM_MODE]: constants.BROTLI_MODE_TEXT,

@@ -818,8 +818,10 @@ def test_cli_run_provenance_and_replay(capsys, tmp_path, monkeypatch):
     )
 
 
-def test_cli_chat_passes_api_mode_and_model(monkeypatch, capsys):
+def test_cli_chat_passes_api_mode_and_model(monkeypatch, capsys, tmp_path):
     captured = {}
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(cli, "build_execution_readiness", _ready_execution_readiness)
 
     def fake_run(self, request, context):
         captured["request"] = request

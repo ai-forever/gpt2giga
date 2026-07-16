@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import json
+from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 import pytest
@@ -116,6 +117,21 @@ def test_legacy_default_deep_links_redirect_locally(legacy_path, cockpit_path):
     assert response.status_code == 307
     assert response.headers["location"] == cockpit_path
     assert response.headers["cache-control"] == "no-cache"
+
+
+def test_legacy_selected_deep_link_cannot_set_redirect_authority():
+    response = _client().get(
+        "/workflows/%5C%5Cevil.example",
+        follow_redirects=False,
+    )
+
+    location = response.headers["location"]
+    parsed = urlparse(location)
+    assert response.status_code == 307
+    assert parsed.scheme == ""
+    assert parsed.netloc == ""
+    assert parsed.path == "/cockpit-v2/automation/workflows"
+    assert parsed.query == "selected=%5C%5Cevil.example"
 
 
 @pytest.mark.parametrize(

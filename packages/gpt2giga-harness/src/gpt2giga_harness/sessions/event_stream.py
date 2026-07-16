@@ -92,7 +92,7 @@ class RunEventSubscription:
         """Wait for a change signal, returning ``None`` for a heartbeat timeout."""
         try:
             signal = await asyncio.wait_for(self._queue.get(), timeout=timeout)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             return None
         if signal is StreamSignal.RESNAPSHOT_REQUIRED:
             self._resnapshot_pending = False

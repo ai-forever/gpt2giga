@@ -110,7 +110,7 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
     assert harness_metadata["name"] == "gpt2giga-harness"
     assert harness_metadata["version"]
     assert (
-        f"gpt2giga>={gateway_metadata['version']}" in harness_metadata["dependencies"]
+        f"gpt2giga=={gateway_metadata['version']}" in harness_metadata["dependencies"]
     )
     assert any(
         dependency.startswith("pyyaml")
@@ -278,7 +278,7 @@ def test_split_install_and_namespace_migration_are_documented():
 
     for guide in (readme, quickstart):
         assert "uv tool install --prerelease allow gpt2giga" in guide
-        assert "uv tool install gpt2giga-harness" in guide
+        assert "uv tool install --prerelease allow gpt2giga-harness" in guide
         assert "gpt2giga_harness" in guide
 
     assert "Migration from the Combined Prerelease" in harness_guide

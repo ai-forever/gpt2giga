@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict, deque
 from collections.abc import Callable
-from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
@@ -350,5 +349,7 @@ def _percentile(values: list[float], quantile: float) -> float:
 async def stop_monitor(task: asyncio.Task[Any]) -> None:
     """Cancel one lifespan-owned lag monitor without leaking its task."""
     task.cancel()
-    with suppress(asyncio.CancelledError):
+    try:
         await task
+    except asyncio.CancelledError:
+        return

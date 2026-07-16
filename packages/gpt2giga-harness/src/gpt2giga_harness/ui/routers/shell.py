@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -106,6 +106,19 @@ def _default_cockpit_path(spa_path: str) -> str:
     if not selected_id:
         return target
     return f"{target}?selected={quote(selected_id, safe='')}"
+
+
+def _validated_local_redirect(target: str) -> str:
+    """Require a relative Cockpit V2 redirect with no browser authority."""
+    parsed = urlparse(target)
+    if (
+        parsed.scheme
+        or parsed.netloc
+        or "\\" in target
+        or not parsed.path.startswith("/cockpit-v2/")
+    ):
+        raise ValueError("redirect target must stay within Cockpit V2")
+    return target
 
 
 def create_shell_router(security: HarnessUISecurity) -> APIRouter:
@@ -221,8 +234,9 @@ def create_shell_router(security: HarnessUISecurity) -> APIRouter:
         normalized = spa_path.strip("/")
         if normalized and _SPA_PATH.fullmatch(normalized) is None:
             raise HTTPException(status_code=404, detail="Not found")
+        target = _validated_local_redirect(_default_cockpit_path(normalized))
         return RedirectResponse(
-            _default_cockpit_path(normalized),
+            target,
             status_code=307,
             headers={"Cache-Control": "no-cache"},
         )

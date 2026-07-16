@@ -210,7 +210,7 @@ assert importlib.metadata.version("gpt2giga") == os.environ["EXPECTED_GATEWAY_VE
 harness_distribution = importlib.metadata.distribution("gpt2giga-harness")
 assert harness_distribution.version == os.environ["EXPECTED_HARNESS_VERSION"]
 assert (
-    f"gpt2giga>={os.environ['EXPECTED_GATEWAY_VERSION']}"
+    f"gpt2giga=={os.environ['EXPECTED_GATEWAY_VERSION']}"
     in (harness_distribution.requires or ())
 )
 scripts = {
