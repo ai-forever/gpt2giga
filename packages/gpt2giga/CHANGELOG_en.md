@@ -5,12 +5,12 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.4a2] - 2026-07-17
+## [0.2.4a1] - 2026-07-16
 
 ### Added
 - **LAR-1 semantic routing**: optional classifier for metadata.lar1 on POST /v1/chat/completions. The proxy automatically selects a GigaChat tier (gigachat-fast, gigachat-pro, local) based on confidence, evidence, and time signals from the agent. Disabled by default via LAR1_ENABLED=false. Includes lar1_router.py, lar1.py model, integration into openai/chat_completions.py, and lifecycle.
 
-## [0.2.4a1] - 2026-07-16
+### Fixed - 2026-07-16
 
 ### Fixed
 - **OpenAI Responses history**: `output_text` parts from earlier turns are now transformed alongside `input_text`, so Codex app-server continuity retains conversation and subagent context.

@@ -5,12 +5,12 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
-## [0.2.4a2] - 2026-07-17
+## [0.2.4a1] - 2026-07-16
 
 ### Добавлено
 - **LAR-1 семантическая маршрутизация**: опциональный классификатор metadata.lar1 для POST /v1/chat/completions. Прокси автоматически выбирает tier GigaChat (gigachat-fast, gigachat-pro, local) на основе confidence, evidence и time сигналов от агента. Отключается через LAR1_ENABLED=false. Включает lar1_router.py, lar1.py модель, интеграцию в openai/chat_completions.py и lifecycle.
 
-## [0.2.4a1] - 2026-07-16
+### Исправлено - 2026-07-16
 
 ### Исправлено
 - **История OpenAI Responses**: текстовые части `output_text` из предыдущих turns теперь преобразуются вместе с `input_text`, поэтому Codex app-server не теряет продолжение разговора и контекст subagents.
