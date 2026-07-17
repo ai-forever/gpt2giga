@@ -2102,12 +2102,18 @@ If discovery fails, the UI still accepts manual model input.
    ```
 
 3. Implement `spec()`, `availability()`, and `run()`.
-4. Register the class in `BUILTIN_HARNESSES` or expose a package entry point:
+4. Register the class in `BUILTIN_HARNESSES` or expose a package entry point
+   through the versioned provider-neutral group:
 
    ```toml
-   [project.entry-points."gpt2giga.harnesses"]
+   [project.entry-points."agent_workbench.harness_adapters.v1"]
    my-harness = "my_package.my_harness:MyHarness"
    ```
+
+   Existing packages using `gpt2giga.harnesses` remain discoverable. During
+   migration a package may publish the same target in both groups; equivalent
+   aliases are loaded once and conflicting IDs do not overwrite the first
+   adapter.
 
 5. Add tests that do not require live GigaChat credentials.
 6. Run:
@@ -2183,8 +2189,11 @@ from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga_harness.harnesses.base import BaseHarness
 ```
 
-The plugin entry-point group remains `gpt2giga.harnesses`; only entry-point
-targets and Python imports move to `gpt2giga_harness.*`.
+The historical plugin entry-point group remains supported as the
+`gpt2giga.harnesses` compatibility alias. New adapters use
+`agent_workbench.harness_adapters.v1`; entry-point targets and Python imports
+continue to live under `gpt2giga_harness.*` until a separately gated namespace
+migration.
 
 Remove the old combined wheel before installing the split packages so stale
 `gpt2giga/harness` files cannot mask a migration error:

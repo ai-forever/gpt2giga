@@ -195,13 +195,19 @@ and cleanup policies.
 
 ## Plugin contract
 
-Third-party adapters register through the `gpt2giga.harnesses` entry-point
-group, while import targets live outside the gateway namespace:
+Third-party adapters register through the versioned, provider-neutral
+`agent_workbench.harness_adapters.v1` entry-point group, while import targets
+live outside the gateway namespace:
 
 ```toml
-[project.entry-points."gpt2giga.harnesses"]
+[project.entry-points."agent_workbench.harness_adapters.v1"]
 my-harness = "my_package.my_harness:MyHarness"
 ```
+
+The legacy `gpt2giga.harnesses` group remains a compatibility alias. Packages
+may advertise the same target through both groups during migration; equivalent
+duplicates are loaded once, while conflicting adapter IDs fail without
+overwriting the first registration.
 
 Use `giga harness scaffold`, `giga harness validate`, and
 `giga harness inspect` to develop and diagnose an adapter.

@@ -30,6 +30,13 @@ claude-code = "gpt2giga_harness.harnesses.claude_code:ClaudeCodeHarness"
 gemini-cli = "gpt2giga_harness.harnesses.gemini_cli:GeminiCliHarness"
 echo = "gpt2giga_harness.harnesses.echo:EchoHarness"
 
+[project.entry-points."agent_workbench.harness_adapters.v1"]
+direct-chat = "gpt2giga_harness.harnesses.direct_chat:DirectChatHarness"
+codex-cli = "gpt2giga_harness.harnesses.codex_cli:CodexCliHarness"
+claude-code = "gpt2giga_harness.harnesses.claude_code:ClaudeCodeHarness"
+gemini-cli = "gpt2giga_harness.harnesses.gemini_cli:GeminiCliHarness"
+echo = "gpt2giga_harness.harnesses.echo:EchoHarness"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

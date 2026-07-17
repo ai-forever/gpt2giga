@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 GATEWAY_MEMBER = REPO_ROOT / "packages/gpt2giga"
 HARNESS_MEMBER = REPO_ROOT / "packages/gpt2giga-harness"
 HARNESS_SOURCE = HARNESS_MEMBER / "src/gpt2giga_harness"
+NEUTRAL_HARNESS_ENTRY_POINT_GROUP = "agent_workbench.harness_adapters.v1"
 
 
 def _project_version(member: Path) -> str:
@@ -222,6 +223,22 @@ assert scripts == {
     "giga": "gpt2giga_harness.cli:main",
     "gpt2giga-harness": "gpt2giga_harness.cli:main",
 }
+harness_entry_points = {
+    entry.group: entry.value
+    for entry in harness_distribution.entry_points
+    if entry.name == "echo"
+    and entry.group
+    in {
+        "agent_workbench.harness_adapters.v1",
+        "gpt2giga.harnesses",
+    }
+}
+assert harness_entry_points == {
+    "agent_workbench.harness_adapters.v1": (
+        "gpt2giga_harness.harnesses.echo:EchoHarness"
+    ),
+    "gpt2giga.harnesses": "gpt2giga_harness.harnesses.echo:EchoHarness",
+}
 doctor_output = installed_root.parent / "doctor-support.json"
 doctor_args = build_parser().parse_args(
     ["doctor", ".", "--json", "--output", str(doctor_output), "--fail-on", "degraded"]
@@ -269,6 +286,84 @@ assert (restored / "runtime.sqlite3").is_file()
 """
 
 
+NEUTRAL_PLUGIN_SMOKE = """
+import importlib.metadata
+
+from gpt2giga_harness.registry import create_default_registry
+
+distribution = importlib.metadata.distribution("neutral-harness-plugin")
+entry_points = {
+    entry.name: entry.value
+    for entry in distribution.entry_points
+    if entry.group == "agent_workbench.harness_adapters.v1"
+}
+assert entry_points == {
+    "neutral-wheel": "neutral_harness_plugin:NeutralWheelHarness"
+}
+
+registry = create_default_registry()
+assert registry.get("neutral-wheel").spec().title == "Neutral Wheel"
+assert registry.discovery_errors == []
+"""
+
+
+def _build_neutral_plugin(root: Path) -> Path:
+    project = root / "neutral-plugin"
+    package = project / "src" / "neutral_harness_plugin"
+    package.mkdir(parents=True)
+    (project / "pyproject.toml").write_text(
+        f"""[project]
+name = "neutral-harness-plugin"
+version = "1.0.0"
+requires-python = ">=3.10"
+
+[project.entry-points."{NEUTRAL_HARNESS_ENTRY_POINT_GROUP}"]
+neutral-wheel = "neutral_harness_plugin:NeutralWheelHarness"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neutral_harness_plugin"]
+""",
+        encoding="utf-8",
+    )
+    (package / "__init__.py").write_text(
+        """from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.types import (
+    Availability,
+    HarnessCapability,
+    HarnessRequest,
+    HarnessResult,
+    HarnessSpec,
+)
+
+
+class NeutralWheelHarness(BaseHarness):
+    @classmethod
+    def spec(cls):
+        return HarnessSpec(
+            id="neutral-wheel",
+            title="Neutral Wheel",
+            kind="custom",
+            description="Out-of-tree neutral registry smoke",
+            capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
+        )
+
+    def availability(self):
+        return Availability.available("isolated wheel")
+
+    def run(self, request: HarnessRequest, context):
+        return HarnessResult(ok=True, text=request.prompt)
+""",
+        encoding="utf-8",
+    )
+    output = root / "neutral-plugin-dist"
+    _run("uv", "build", "--wheel", "--out-dir", str(output), cwd=project)
+    return next(output.glob("neutral_harness_plugin-*.whl"))
+
+
 @pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])
 def test_gateway_artifact_is_isolated(
     built_artifacts: BuiltArtifacts, tmp_path, artifact_kind: str
@@ -296,6 +391,21 @@ def test_harness_artifact_resolves_gateway_without_repository_leakage(
     installed = tmp_path / "installed"
     _install_artifacts(installed, gateway_wheel, harness_wheel)
     _run_clean_python(installed, HARNESS_SMOKE)
+
+
+def test_neutral_third_party_wheel_registers_without_core_edits(
+    built_artifacts: BuiltArtifacts,
+    tmp_path,
+):
+    plugin_wheel = _build_neutral_plugin(tmp_path)
+    installed = tmp_path / "installed"
+    _install_artifacts(
+        installed,
+        built_artifacts.gateway_wheel,
+        built_artifacts.harness_wheel,
+        plugin_wheel,
+    )
+    _run_clean_python(installed, NEUTRAL_PLUGIN_SMOKE)
 
 
 def test_editable_workspace_members_resolve_to_member_sources():
