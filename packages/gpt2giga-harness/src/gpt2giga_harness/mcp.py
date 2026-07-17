@@ -22,11 +22,14 @@ from gpt2giga_harness.harnesses.agent_cli import build_safe_env
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import new_id, utc_now
-from gpt2giga_harness.tools import (
+from gpt2giga_harness.secrets import (
     SecretReference,
-    SecretReferenceKind,
-    SecretResolutionError,
     SecretResolver,
+    secret_reference_from_dict,
+    secret_reference_to_dict,
+)
+from gpt2giga_harness.tools import (
+    SecretResolutionError,
     ToolDescriptor,
     ToolExecutionPolicy,
     ToolRisk,
@@ -594,15 +597,7 @@ def _reference_mapping(
             reference_data = raw_value.get("secret_ref", raw_value)
             if not isinstance(reference_data, Mapping):
                 raise ValueError(f"invalid secret reference for {key}")
-            result[key] = SecretReference(
-                kind=SecretReferenceKind(
-                    str(reference_data.get("kind") or "environment")
-                ),
-                name=str(reference_data.get("name") or ""),
-                service=_optional_text(reference_data.get("service")),
-                account=_optional_text(reference_data.get("account")),
-                expires_at=_optional_text(reference_data.get("expires_at")),
-            )
+            result[key] = secret_reference_from_dict(reference_data)
         elif isinstance(raw_value, str):
             if reject_secret_literals and _is_sensitive_name(key):
                 raise ValueError(f"sensitive value {key} must use secret_ref")
@@ -619,15 +614,7 @@ def _safe_reference_mapping(
 ) -> dict[str, Any]:
     return {
         key: (
-            {
-                "secret_ref": {
-                    "kind": value.kind.value,
-                    "name": value.name,
-                    "service": value.service,
-                    "account": value.account,
-                    "expires_at": value.expires_at,
-                }
-            }
+            {"secret_ref": secret_reference_to_dict(value)}
             if isinstance(value, SecretReference)
             else "<configured>"
         )

@@ -1,8 +1,17 @@
+import json
+import stat
+
 from fastapi.testclient import TestClient
+import pytest
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.secrets import SecretReference, SecretReferenceKind
 from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga_harness.settings import (
+    SecretReferenceSettingsStore,
+    SettingsConflictError,
+)
 from gpt2giga_harness.ui.app import create_app
 
 
@@ -172,6 +181,44 @@ def test_settings_reject_stale_revision_without_overwriting(tmp_path):
     assert stale.json()["detail"]["code"] == "revision_conflict"
     read_back = client.get("/api/settings", params={"workspace": str(tmp_path)}).json()
     assert read_back["harness_defaults"]["workspace_policy"] == "current"
+
+
+def test_secret_reference_settings_round_trip_references_only(tmp_path):
+    canary = "n1-02-settings-secret-canary"
+    store = SecretReferenceSettingsStore(tmp_path / "data")
+    initial = store.load()
+    reference = SecretReference(
+        SecretReferenceKind.ENVIRONMENT,
+        "PROVIDER_TOKEN",
+        cache_ttl_seconds=30,
+    )
+
+    saved = store.save(
+        {"provider.default": reference},
+        expected_revision=initial.revision,
+    )
+
+    assert saved.references == {"provider.default": reference}
+    assert saved.revision != initial.revision
+    serialized = store.path.read_text(encoding="utf-8")
+    payload = json.loads(serialized)
+    assert payload["schema_version"] == 1
+    assert payload["references"]["provider.default"]["name"] == "PROVIDER_TOKEN"
+    assert "value" not in serialized
+    assert canary not in serialized
+    assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
+
+    with pytest.raises(SettingsConflictError, match="revision changed"):
+        store.save({}, expected_revision=initial.revision)
+    with pytest.raises(ValueError, match="test secret references"):
+        store.save(
+            {
+                "test.only": SecretReference(
+                    SecretReferenceKind.TEST,
+                    "TEST_TOKEN",
+                )
+            }
+        )
 
 
 def _client(data_dir, **overrides) -> TestClient:
