@@ -5,7 +5,7 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [0.2.4a2] - 2026-07-17
 
 ### Добавлено
 - **LAR-1 семантическая маршрутизация**: опциональный классификатор metadata.lar1 для POST /v1/chat/completions. Прокси автоматически выбирает tier GigaChat (gigachat-fast, gigachat-pro, local) на основе confidence, evidence и time сигналов от агента. Отключается через LAR1_ENABLED=false. Включает lar1_router.py, lar1.py модель, интеграцию в openai/chat_completions.py и lifecycle.
