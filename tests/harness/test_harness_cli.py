@@ -234,6 +234,61 @@ def test_cli_harness_run_json_includes_selected_execution_readiness(capsys):
     }
 
 
+def test_cli_session_application_flow_create_turn_events_and_approve(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+
+    assert cli.main(["session", "create", "--harness", "echo", "--json"]) == 0
+    session = json.loads(capsys.readouterr().out)["session"]
+
+    assert (
+        cli.main(
+            [
+                "session",
+                "turn",
+                session["id"],
+                "--prompt",
+                "shared CLI turn",
+                "--harness",
+                "echo",
+                "--permission-profile",
+                "review_every_action",
+                "--idempotency-key",
+                "cli-application-turn",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    submitted = json.loads(capsys.readouterr().out)
+    assert submitted["job"]["status"] == "waiting_approval"
+
+    assert cli.main(["session", "events", submitted["run"]["id"], "--json"]) == 0
+    events = json.loads(capsys.readouterr().out)["events"]
+    assert [event["type"] for event in events] == ["approval_requested"]
+    approval_id = events[0]["payload"]["approval_id"]
+
+    assert (
+        cli.main(
+            [
+                "session",
+                "approve",
+                approval_id,
+                "--decision",
+                "allow_once",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    approved = json.loads(capsys.readouterr().out)
+    assert approved["approval"]["status"] == "approved"
+    assert approved["job_status"] == "queued"
+
+
 def test_cli_doctor_json_passes_explicit_workspace(capsys, monkeypatch, tmp_path):
     captured = {}
 
