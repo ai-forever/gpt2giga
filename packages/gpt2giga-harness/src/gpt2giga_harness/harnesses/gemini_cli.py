@@ -195,7 +195,7 @@ class GeminiCliHarness(BaseHarness):
             or not probe.capabilities.get("--acp")
             or probe.parsed_version is None
         ):
-            raise GeminiAcpError("installed Gemini CLI ACP capability is unavailable")
+            raise ValueError("installed Gemini CLI ACP capability is unavailable")
         return AdapterCapabilitySnapshot(
             adapter_id="gemini-cli",
             adapter_version=_adapter_version(),

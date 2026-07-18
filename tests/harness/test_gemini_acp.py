@@ -38,6 +38,7 @@ from gpt2giga_harness.structured_sessions import (
     structured_session_link_to_dict,
 )
 from gpt2giga_harness.types import HarnessContext, HarnessRequest
+from gpt2giga_harness.workbench_execution import workbench_transport_projection
 
 
 FIXTURE_ROOT = Path("tests/fixtures/harness_cli/gemini/0.46")
@@ -418,6 +419,27 @@ def test_builtin_adapter_registers_probed_product_driver_without_runtime_admissi
     assert driver.cwd == str(workspace)
     assert scope.managed_home_id.startswith("gemini-acp-")
     assert driver.supervisor.state is StructuredProcessState.NEW
+
+
+def test_unavailable_cli_projects_blocked_structured_transport(monkeypatch):
+    harness = GeminiCliHarness()
+    monkeypatch.setattr(
+        harness,
+        "capability_probe",
+        lambda: SimpleNamespace(
+            compatible=False,
+            capabilities={},
+            parsed_version=None,
+        ),
+    )
+
+    projection = workbench_transport_projection(harness)
+
+    assert projection["default"] == "native_structured"
+    structured = projection["options"][0]
+    assert structured["status"] == "blocked"
+    assert structured["blocker"] == "structured_driver_unavailable"
+    assert structured["provider_native_continuity"] is False
 
 
 def test_idle_recycle_reauthenticates_and_loads_exact_uuid_without_replay(tmp_path):
