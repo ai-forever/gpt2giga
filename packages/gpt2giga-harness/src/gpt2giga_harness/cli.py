@@ -16,6 +16,15 @@ from typing import Any, Mapping
 import uvicorn
 import yaml
 
+from gpt2giga_harness.adapter_scaffold import (
+    render_adapter_module,
+    scaffold_adapter_package,
+)
+from gpt2giga_harness.adapter_sdk import (
+    adapter_conformance_report_to_dict,
+    load_installed_conformance_subject,
+    run_adapter_conformance,
+)
 from gpt2giga_harness.application import SessionApplicationService
 from gpt2giga_harness.agents import (
     agent_profile_to_dict,
@@ -720,7 +729,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     harness_scaffold = harness_subparsers.add_parser("scaffold")
     harness_scaffold.add_argument("harness_id")
+    harness_scaffold.add_argument("--output", type=Path, default=None)
     harness_scaffold.set_defaults(handler=_handle_harness_scaffold)
+
+    harness_conformance = harness_subparsers.add_parser("conformance")
+    harness_conformance.add_argument("harness_id")
+    harness_conformance.add_argument("--json", action="store_true")
+    harness_conformance.set_defaults(handler=_handle_harness_conformance)
 
     return parser
 
@@ -2205,66 +2220,36 @@ def _stop_ui_worker(process: subprocess.Popen[bytes]) -> None:
 
 
 def _handle_harness_scaffold(args: argparse.Namespace, config: HarnessConfig) -> int:
-    class_name = "".join(part.title() for part in args.harness_id.split("-"))
-    print(
-        f'''from gpt2giga_harness.harnesses.base import BaseHarness
-from gpt2giga_harness.types import (
-    Availability,
-    HarnessCapability,
-    HarnessContext,
-    HarnessRequest,
-    HarnessResult,
-    HarnessSpec,
-)
-
-
-class {class_name}Harness(BaseHarness):
-    @classmethod
-    def spec(cls) -> HarnessSpec:
-        return HarnessSpec(
-            id="{args.harness_id}",
-            title="{class_name}",
-            kind="custom",
-            description="Describe this harness",
-            capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
-            icon="plug",
-            supports_workspace=True,
-            supports_attachments=False,
-            tags=("plugin",),
-            config_schema={{
-                "type": "object",
-                "properties": {{
-                    "endpoint": {{
-                        "type": "string",
-                        "title": "Endpoint",
-                        "description": "Optional local service URL.",
-                    }},
-                    "dry_run": {{
-                        "type": "boolean",
-                        "title": "Dry run",
-                        "default": True,
-                    }},
-                }},
-                "additionalProperties": False,
-            }},
-            metadata={{
-                "package": "my-package",
-                "version": "0.1.0",
-            }},
-        )
-
-    def availability(self) -> Availability:
-        return Availability.available("custom harness")
-
-    def run(
-        self,
-        request: HarnessRequest,
-        context: HarnessContext,
-    ) -> HarnessResult:
-        return HarnessResult(ok=False, text="", error="not implemented")
-'''
-    )
+    if args.output is None:
+        print(render_adapter_module(args.harness_id), end="")
+        return 0
+    try:
+        result = scaffold_adapter_package(args.harness_id, args.output)
+    except FileExistsError as exc:
+        raise ValueError(str(exc)) from exc
+    print(f"Created adapter scaffold: {result.root}")
+    print(f"Package: {result.package_name}")
+    print(f"Files: {len(result.files)}")
     return 0
+
+
+def _handle_harness_conformance(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    subject = load_installed_conformance_subject(args.harness_id)
+    report = run_adapter_conformance(subject)
+    payload = adapter_conformance_report_to_dict(report)
+    if args.json:
+        _print_json(payload)
+    else:
+        print(
+            f"Adapter {report.adapter_id} {report.adapter_version}: "
+            f"{'passed' if report.ok else 'failed'}"
+        )
+        for result in report.results:
+            print(f"- {result.claim.value}: {result.status}")
+    return 0 if report.ok else 1
 
 
 def _run_harness(

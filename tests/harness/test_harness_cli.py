@@ -478,6 +478,19 @@ def test_cli_harness_scaffold_includes_plugin_metadata(capsys):
     assert "metadata={" in output
 
 
+def test_cli_harness_scaffold_writes_full_package(capsys, tmp_path):
+    output = tmp_path / "my-harness"
+
+    exit_code = cli.main(["harness", "scaffold", "my-harness", "--output", str(output)])
+
+    assert exit_code == 0
+    assert (output / "pyproject.toml").is_file()
+    assert (
+        output / "src" / "agent_workbench_my_harness" / "adapter_manifest.json"
+    ).is_file()
+    assert "Created adapter scaffold" in capsys.readouterr().out
+
+
 def test_cli_project_info_json_reports_workspace(capsys, tmp_path):
     exit_code = cli.main(["project", "info", "--workspace", str(tmp_path), "--json"])
 

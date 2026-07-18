@@ -210,7 +210,17 @@ duplicates are loaded once, while conflicting adapter IDs fail without
 overwriting the first registration.
 
 Use `giga harness scaffold`, `giga harness validate`, and
-`giga harness inspect` to develop and diagnose an adapter.
+`giga harness inspect` to develop and diagnose an adapter. Pass
+`--output <directory>` to scaffold a complete out-of-tree package with a
+versioned, content-free manifest, neutral entry points, a fake provider fixture,
+and a hermetic conformance test. After installing the package, run
+`giga harness conformance <adapter-id> --json`.
+
+SDK API v1 reports execution, sessions, approvals, attachments, integrations,
+recovery, history, telemetry, and packaging separately. A capability passes
+only when the manifest declares it and a corresponding behavioral probe passes;
+omitted claims remain `unsupported` and are never inferred from legacy adapter
+metadata.
 
 ## Back up user state
 
