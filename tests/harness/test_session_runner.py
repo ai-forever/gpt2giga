@@ -392,6 +392,30 @@ def test_durable_worker_reuses_submission_readiness_for_retry_without_second_pro
     assert runner.store.get_run(retry_run_id).status.value == "succeeded"
 
 
+def test_durable_runtime_identity_reaches_provider_driver_request():
+    harness = _CaptureHarness()
+    runner = _runner(harness)
+    session = runner.create_session(default_harness_id="capture")
+
+    runner.run_in_session(
+        session.id,
+        {"harness_id": "capture", "prompt": "durable identity"},
+        runtime_metadata={
+            "job_id": "job-1",
+            "attempt_id": "attempt-1",
+            "worker_id": "worker-1",
+        },
+        durable=True,
+    )
+
+    assert harness.last_request is not None
+    assert harness.last_request.extra["runtime"] == {
+        "job_id": "job-1",
+        "attempt_id": "attempt-1",
+        "worker_id": "worker-1",
+    }
+
+
 def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):
     runner = _runner(_CaptureHarness())
     session = runner.create_session(default_harness_id="capture")

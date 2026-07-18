@@ -1979,6 +1979,30 @@ class RuntimeCoordinationStore:
             raise KeyError(request_id)
         return _approval_request_from_row(row)
 
+    def find_approval_request_by_binding(
+        self,
+        approval_binding: str,
+    ) -> ApprovalRequest | None:
+        """Return the newest request bound to one exact external operation."""
+        binding_sha256 = approval_binding_digest(approval_binding)
+        now = _utc_now()
+        with self._connect() as connection, _transaction(connection):
+            _expire_approvals(connection, now)
+            rows = connection.execute(
+                """
+                SELECT * FROM approval_requests
+                WHERE preview_json LIKE ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 20
+                """,
+                (f"%{binding_sha256}%",),
+            ).fetchall()
+        for row in rows:
+            request = _approval_request_from_row(row)
+            if _approval_preview_binding(request.preview) == binding_sha256:
+                return request
+        return None
+
     def list_approval_requests(
         self,
         *,

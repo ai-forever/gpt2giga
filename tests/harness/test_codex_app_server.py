@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 import stat
 import threading
+import time
 from typing import Any, Mapping
 
 from gpt2giga_harness.codex_app_server import (
     CodexAppServerSupervisor,
+    _approval_contract,
+    _approval_response,
     _collab_child_tool_events,
     _normalize_notification,
     _structured_link_id,
@@ -17,8 +20,12 @@ from gpt2giga_harness.codex_app_server import (
     build_structured_execution_snapshot,
 )
 from gpt2giga_harness.executables import ExecutableResolution
+from gpt2giga_harness.runtime.models import ApprovalStatus
+from gpt2giga_harness.runtime.policy import ApprovalDecision, PermissionAction
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.structured_sessions import (
     StructuredSessionLinkStore,
+    StructuredTurnInput,
     structured_session_link_from_dict,
 )
 from gpt2giga_harness.types import (
@@ -347,6 +354,34 @@ def test_collab_child_tools_are_nested_under_spawn_call():
     }
 
 
+def test_codex_approval_families_map_to_exact_policy_and_response_shapes():
+    file_action, _reason, _preview = _approval_contract(
+        "item/fileChange/requestApproval",
+        {"itemId": "file-1", "grantRoot": "/workspace"},
+    )
+    permission_params = {
+        "permissions": {"network": {"enabled": True}},
+    }
+    permission_action, _reason, _preview = _approval_contract(
+        "item/permissions/requestApproval",
+        permission_params,
+    )
+
+    assert file_action is PermissionAction.WORKSPACE_WRITE
+    assert permission_action is PermissionAction.NETWORK_CONNECT
+    assert _approval_response("item/fileChange/requestApproval", "deny", {}) == {
+        "decision": "decline"
+    }
+    assert _approval_response(
+        "item/permissions/requestApproval",
+        "allow",
+        permission_params,
+    ) == {
+        "permissions": {"network": {"enabled": True}},
+        "scope": "turn",
+    }
+
+
 class _ApprovalAppServerClient(_FakeAppServerClient):
     def request(
         self, method: str, params: Mapping[str, Any], *, timeout: float
@@ -360,11 +395,70 @@ class _ApprovalAppServerClient(_FakeAppServerClient):
                     "params": {
                         "threadId": params["threadId"],
                         "turnId": result["turn"]["id"],
+                        "itemId": "tool-approval",
+                        "startedAtMs": 1,
                         "command": "dangerous",
                     },
                 }
             )
         return result
+
+
+class _DuplicateApprovalAppServerClient(_ApprovalAppServerClient):
+    def request(
+        self, method: str, params: Mapping[str, Any], *, timeout: float
+    ) -> Mapping[str, Any]:
+        result = super().request(method, params, timeout=timeout)
+        if method == "turn/start":
+            self.messages.insert(1, dict(self.messages[0]))
+        return result
+
+
+class _SteerAppServerClient(_FakeAppServerClient):
+    def request(
+        self, method: str, params: Mapping[str, Any], *, timeout: float
+    ) -> Mapping[str, Any]:
+        if method == "turn/steer":
+            self.recorder.append((method, dict(params)))
+            self.messages.append(
+                {
+                    "method": "turn/completed",
+                    "params": {
+                        "threadId": params["threadId"],
+                        "turn": {
+                            "id": params["expectedTurnId"],
+                            "status": "completed",
+                            "items": [],
+                        },
+                    },
+                }
+            )
+            return {}
+        result = super().request(method, params, timeout=timeout)
+        if method == "turn/start":
+            self.messages.clear()
+        return result
+
+
+class _LostOwnerAppServerClient(_FakeAppServerClient):
+    def next_message(self, *, timeout: float) -> Mapping[str, Any] | None:
+        del timeout
+        raise KeyboardInterrupt
+
+
+class _RecoveredTurnAppServerClient(_FakeAppServerClient):
+    def request(
+        self, method: str, params: Mapping[str, Any], *, timeout: float
+    ) -> Mapping[str, Any]:
+        if method == "thread/read" and params.get("includeTurns") is True:
+            self.recorder.append((method, dict(params)))
+            return {
+                "thread": {
+                    "id": params["threadId"],
+                    "turns": [{"id": "turn-1", "status": "completed"}],
+                }
+            }
+        return super().request(method, params, timeout=timeout)
 
 
 class _CollabAppServerClient(_FakeAppServerClient):
@@ -642,7 +736,9 @@ def test_app_server_uses_generic_driver_and_private_structured_link(tmp_path):
     assert link.config_snapshot.protocol == "codex-app-server-json-rpc-v2"
     assert link.config_snapshot.cli_sdk_version == "0.144.5"
     assert link.capability_snapshot.resume is True
-    assert link.capability_snapshot.live_approvals is False
+    assert link.capability_snapshot.live_approvals is True
+    assert link.capability_snapshot.durable_approval is True
+    assert link.capability_snapshot.steer is True
     stored = StructuredSessionLinkStore(tmp_path).load(
         _structured_link_id("sess-generic")
     )
@@ -1006,11 +1102,11 @@ def test_cancel_event_maps_to_turn_interrupt(tmp_path):
     assert [method for method, _params in recorder].count("turn/interrupt") == 1
 
 
-def test_unexpected_app_server_approval_is_declined_fail_closed(tmp_path):
+def test_app_server_approval_round_trips_through_durable_center(tmp_path):
     recorder: list[tuple[str, dict[str, Any]]] = []
 
     def factory(**kwargs):
-        return _ApprovalAppServerClient(recorder=recorder, **kwargs)
+        return _DuplicateApprovalAppServerClient(recorder=recorder, **kwargs)
 
     supervisor = CodexAppServerSupervisor(tmp_path, client_factory=factory)
     context = HarnessContext(
@@ -1018,25 +1114,344 @@ def test_unexpected_app_server_approval_is_declined_fail_closed(tmp_path):
         api_key="test-key",
         data_dir=str(tmp_path),
     )
-    request = _request(tmp_path, session_id="sess-approval")
+    request = replace(
+        _request(tmp_path, session_id="sess-approval"),
+        run_id="run-approval",
+    )
     snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
 
-    result = supervisor.run_turn(
+    outcome: dict[str, Any] = {}
+
+    def run_turn() -> None:
+        outcome["result"] = supervisor.run_turn(
+            request,
+            context,
+            resolution=_resolution(),
+            prompt="approval",
+            continuation=_continuation(snapshot, prompt_id="msg-approval"),
+        )
+
+    worker = threading.Thread(target=run_turn)
+    worker.start()
+    store = RuntimeCoordinationStore(tmp_path)
+    deadline = time.monotonic() + 2
+    pending = ()
+    while time.monotonic() < deadline:
+        pending = store.list_approval_requests(status=ApprovalStatus.PENDING)
+        if pending:
+            break
+        time.sleep(0.01)
+    assert len(pending) == 1
+    supervisor._active_driver("sess-approval").respond_to_approval(
+        "approval-1", "allow"
+    )
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    result = outcome["result"]
+
+    responses = [params for method, params in recorder if method == "response"]
+    assert len(responses) == 2
+    assert all(response["id"] == "approval-1" for response in responses)
+    assert all(response["result"] == {"decision": "accept"} for response in responses)
+    assert len(store.list_approval_requests()) == 1
+    assert [
+        event.type for event in result.events if event.type.startswith("approval_")
+    ] == [
+        "approval_requested",
+        "approval_decided",
+        "approval_requested",
+        "approval_decided",
+    ]
+    requested = [event for event in result.events if event.type == "approval_requested"]
+    assert [event.payload["reused"] for event in requested] == [False, True]
+    turn_start = next(params for method, params in recorder if method == "turn/start")
+    assert turn_start["approvalPolicy"] == "on-request"
+    assert turn_start["approvalsReviewer"] == "user"
+
+
+def test_app_server_durable_approval_denial_is_deterministic(tmp_path):
+    recorder: list[tuple[str, dict[str, Any]]] = []
+    supervisor = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=lambda **kwargs: _ApprovalAppServerClient(
+            recorder=recorder, **kwargs
+        ),
+    )
+    request = replace(
+        _request(tmp_path, session_id="sess-deny-approval"),
+        run_id="run-deny-approval",
+    )
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+        timeout_seconds=2,
+    )
+    snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
+    outcome: dict[str, Any] = {}
+    worker = threading.Thread(
+        target=lambda: outcome.setdefault(
+            "result",
+            supervisor.run_turn(
+                request,
+                context,
+                resolution=_resolution(),
+                prompt="approval",
+                continuation=_continuation(snapshot, prompt_id="msg-deny"),
+            ),
+        )
+    )
+    worker.start()
+    store = RuntimeCoordinationStore(tmp_path)
+    deadline = time.monotonic() + 2
+    pending = ()
+    while time.monotonic() < deadline:
+        pending = store.list_approval_requests(status=ApprovalStatus.PENDING)
+        if pending:
+            break
+        time.sleep(0.01)
+    assert len(pending) == 1
+    store.decide_approval_request(pending[0].id, ApprovalDecision.DENY)
+    worker.join(timeout=2)
+
+    assert outcome["result"].ok is True
+    response = next(params for method, params in recorder if method == "response")
+    assert response["result"] == {"decision": "decline"}
+
+
+def test_app_server_durable_approval_timeout_fails_closed(tmp_path):
+    recorder: list[tuple[str, dict[str, Any]]] = []
+    supervisor = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=lambda **kwargs: _ApprovalAppServerClient(
+            recorder=recorder, **kwargs
+        ),
+    )
+    request = replace(
+        _request(tmp_path, session_id="sess-timeout-approval"),
+        run_id="run-timeout-approval",
+    )
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+        timeout_seconds=0.15,
+    )
+
+    supervisor.run_turn(
         request,
         context,
         resolution=_resolution(),
         prompt="approval",
-        continuation=_continuation(snapshot, prompt_id="msg-approval"),
+        continuation=_continuation(
+            build_execution_snapshot(request, managed_home_id="apphome-test"),
+            prompt_id="msg-timeout",
+        ),
     )
 
     response = next(params for method, params in recorder if method == "response")
-    assert response["id"] == "approval-1"
     assert response["result"] == {"decision": "decline"}
+    approval = RuntimeCoordinationStore(tmp_path).list_approval_requests()[0]
+    assert approval.status is ApprovalStatus.EXPIRED
+
+
+def test_stale_app_server_approval_is_declined_without_durable_request(tmp_path):
+    recorder: list[tuple[str, dict[str, Any]]] = []
+
+    class StaleApprovalClient(_ApprovalAppServerClient):
+        def request(self, method, params, *, timeout):
+            result = super().request(method, params, timeout=timeout)
+            if method == "turn/start":
+                self.messages[0]["params"]["turnId"] = "stale-turn"
+            return result
+
+    supervisor = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=lambda **kwargs: StaleApprovalClient(
+            recorder=recorder, **kwargs
+        ),
+    )
+    request = _request(tmp_path, session_id="sess-stale-approval")
+    result = supervisor.run_turn(
+        request,
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            api_key="test-key",
+            data_dir=str(tmp_path),
+        ),
+        resolution=_resolution(),
+        prompt="approval",
+        continuation=_continuation(
+            build_execution_snapshot(request, managed_home_id="apphome-test"),
+            prompt_id="msg-stale-approval",
+        ),
+    )
+
+    response = next(params for method, params in recorder if method == "response")
+    assert response["result"] == {"decision": "decline"}
+    assert RuntimeCoordinationStore(tmp_path).list_approval_requests() == ()
     warning = next(event for event in result.events if event.type == "warning")
-    assert warning.payload == {
-        "method": "item/commandExecution/requestApproval",
-        "enforcement": "fail_closed",
+    assert warning.payload["enforcement"] == "fail_closed"
+
+
+def test_live_steer_uses_exact_active_turn_precondition(tmp_path):
+    recorder: list[tuple[str, dict[str, Any]]] = []
+    supervisor = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=lambda **kwargs: _SteerAppServerClient(
+            recorder=recorder, **kwargs
+        ),
+    )
+    request = _request(tmp_path, session_id="sess-steer")
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+        timeout_seconds=2,
+    )
+    snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
+    outcome: dict[str, Any] = {}
+    worker = threading.Thread(
+        target=lambda: outcome.setdefault(
+            "result",
+            supervisor.run_turn(
+                request,
+                context,
+                resolution=_resolution(),
+                prompt="start",
+                continuation=_continuation(snapshot, prompt_id="msg-start"),
+            ),
+        )
+    )
+    worker.start()
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and not any(
+        method == "turn/start" for method, _params in recorder
+    ):
+        time.sleep(0.01)
+    supervisor.steer_turn(
+        "sess-steer",
+        StructuredTurnInput("msg-steer", "change direction"),
+    )
+    worker.join(timeout=2)
+
+    assert outcome["result"].ok is True
+    steer = next(params for method, params in recorder if method == "turn/steer")
+    assert steer == {
+        "threadId": "thread-1",
+        "expectedTurnId": "turn-1",
+        "input": [{"type": "text", "text": "change direction"}],
+        "clientUserMessageId": "msg-steer",
     }
+
+
+def test_owner_loss_with_ambiguous_turn_refuses_duplicate_delivery(tmp_path):
+    first_recorder: list[tuple[str, dict[str, Any]]] = []
+    request = _request(tmp_path, session_id="sess-ambiguous")
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+    )
+    snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
+    first = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=lambda **kwargs: _LostOwnerAppServerClient(
+            recorder=first_recorder, **kwargs
+        ),
+    )
+    try:
+        first.run_turn(
+            request,
+            context,
+            resolution=_resolution(),
+            prompt="deliver once",
+            continuation=_continuation(snapshot, prompt_id="msg-once"),
+        )
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("simulated owner loss did not escape")
+
+    recovered_recorder: list[tuple[str, dict[str, Any]]] = []
+    recovered = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=_Factory(recovered_recorder, []),
+    ).run_turn(
+        request,
+        context,
+        resolution=_resolution(),
+        prompt="do not duplicate",
+        continuation=_continuation(
+            snapshot,
+            prompt_id="msg-next",
+            action="continue",
+        ),
+    )
+
+    assert recovered.ok is False
+    assert "outcome ambiguous" in str(recovered.error)
+    assert recovered.raw["app_server_thread"]["recovery_outcome"] == (
+        "ambiguous_after_owner_loss"
+    )
+    assert [method for method, _params in recovered_recorder] == ["thread/read"]
+
+
+def test_owner_loss_continues_only_after_provider_proves_terminal_turn(tmp_path):
+    first_recorder: list[tuple[str, dict[str, Any]]] = []
+    request = _request(tmp_path, session_id="sess-proven-recovery")
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+    )
+    snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
+    first = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=lambda **kwargs: _LostOwnerAppServerClient(
+            recorder=first_recorder, **kwargs
+        ),
+    )
+    try:
+        first.run_turn(
+            request,
+            context,
+            resolution=_resolution(),
+            prompt="deliver once",
+            continuation=_continuation(snapshot, prompt_id="msg-once"),
+        )
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("simulated owner loss did not escape")
+
+    recovered_recorder: list[tuple[str, dict[str, Any]]] = []
+    recovered = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=lambda **kwargs: _RecoveredTurnAppServerClient(
+            recorder=recovered_recorder, **kwargs
+        ),
+    ).run_turn(
+        request,
+        context,
+        resolution=_resolution(),
+        prompt="continue after proof",
+        continuation=_continuation(
+            snapshot,
+            prompt_id="msg-next",
+            action="continue",
+        ),
+    )
+
+    assert recovered.ok is True
+    assert [method for method, _params in recovered_recorder][:3] == [
+        "thread/read",
+        "thread/resume",
+        "turn/start",
+    ]
+    assert recovered.raw["app_server_thread"]["recovery_outcome"] == (
+        "resumed_after_terminal_completed"
+    )
 
 
 def _request(tmp_path, *, session_id: str) -> HarnessRequest:

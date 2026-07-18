@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta, timezone
 import hashlib
 from importlib import metadata
 import json
@@ -36,6 +37,15 @@ from gpt2giga_harness.managed_mcp import (
     materialize_headless_mcp_snapshot,
     write_startup_config,
 )
+from gpt2giga_harness.runtime.models import ApprovalStatus
+from gpt2giga_harness.runtime.policy import (
+    ApprovalDecision,
+    EnforcementLevel,
+    PermissionAction,
+    PolicyContext,
+    PolicyResolution,
+)
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.store import utc_now
 from gpt2giga_harness.structured_sessions import (
@@ -51,6 +61,7 @@ from gpt2giga_harness.structured_sessions import (
     UnsupportedSessionCapability,
     structured_session_link_to_dict,
 )
+from gpt2giga_harness.tools.policy import PolicyDecision
 from gpt2giga_harness.types import (
     HarnessContext,
     HarnessEvent,
@@ -67,6 +78,15 @@ APP_SERVER_TIMEOUT_SECONDS = 10.0
 APP_SERVER_MESSAGE_POLL_SECONDS = 0.1
 APP_SERVER_STDERR_CHARS = 8000
 APP_SERVER_DRIVER_PROTOCOL_VERSION = "2"
+APP_SERVER_APPROVAL_OWNER = "codex_app_server.approval"
+APP_SERVER_APPROVAL_POLL_SECONDS = 0.05
+_APPROVAL_METHODS = frozenset(
+    {
+        "item/commandExecution/requestApproval",
+        "item/fileChange/requestApproval",
+        "item/permissions/requestApproval",
+    }
+)
 
 
 class AppServerProtocolError(RuntimeError):
@@ -109,6 +129,14 @@ class _Runtime:
     client: AppServerClient
     loaded_threads: set[str] = field(default_factory=set)
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+@dataclass
+class _PendingApproval:
+    request_id: str | int
+    method: str
+    params: Mapping[str, Any]
+    durable_approval_id: str | None = None
 
 
 class CodexAppServerLinkStore:
@@ -154,9 +182,35 @@ class CodexAppServerSupervisor:
         self.data_dir = Path(data_dir).expanduser().resolve()
         self.link_store = CodexAppServerLinkStore(self.data_dir)
         self.structured_link_store = StructuredSessionLinkStore(self.data_dir)
+        self.runtime_store = RuntimeCoordinationStore(self.data_dir)
         self.client_factory = client_factory or _StdioJsonRpcClient
         self._runtimes: dict[str, _Runtime] = {}
         self._runtime_lock = threading.Lock()
+        self._active_drivers: dict[str, CodexAppServerDriver] = {}
+        self._active_driver_lock = threading.Lock()
+
+    def interrupt_turn(self, session_id: str) -> None:
+        """Interrupt the exact active provider turn for one Harness session."""
+        driver = self._active_driver(session_id)
+        turn_id = driver.active_turn_id
+        if turn_id is None:
+            raise StructuredSessionError("Codex session has no active turn")
+        driver.interrupt(turn_id)
+
+    def steer_turn(self, session_id: str, turn_input: StructuredTurnInput) -> None:
+        """Steer the exact active provider turn without transcript replay."""
+        driver = self._active_driver(session_id)
+        turn_id = driver.active_turn_id
+        if turn_id is None:
+            raise StructuredSessionError("Codex session has no active turn")
+        driver.steer(turn_id, turn_input)
+
+    def _active_driver(self, session_id: str) -> CodexAppServerDriver:
+        with self._active_driver_lock:
+            driver = self._active_drivers.get(session_id)
+        if driver is None:
+            raise StructuredSessionError("Codex session has no active driver")
+        return driver
 
     def run_turn(
         self,
@@ -296,12 +350,24 @@ class CodexAppServerSupervisor:
                 config_snapshot=config_snapshot,
                 existing_link=existing,
             )
-            structured_link, _turn = coordinator.start_turn(
-                structured_link,
-                StructuredTurnInput(prompt_id, prompt),
-                event_sink,
-                _reject_approval_bridge,
-            )
+            with self._active_driver_lock:
+                self._active_drivers[request.session_id] = driver
+            try:
+                structured_link, _turn = coordinator.start_turn(
+                    structured_link,
+                    StructuredTurnInput(prompt_id, prompt),
+                    event_sink,
+                    lambda provider_request: self._await_durable_approval(
+                        request,
+                        context,
+                        collected,
+                        provider_request,
+                    ),
+                )
+            finally:
+                with self._active_driver_lock:
+                    if self._active_drivers.get(request.session_id) is driver:
+                        self._active_drivers.pop(request.session_id, None)
             result = driver.result
             if result is None:
                 raise AppServerProtocolError(
@@ -341,6 +407,111 @@ class CodexAppServerSupervisor:
                 error=str(redact_secrets(str(exc))),
             )
 
+    def _await_durable_approval(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+        collected: list[HarnessEvent],
+        provider_request: Mapping[str, Any],
+    ) -> str:
+        """Persist one provider request and await its Approval Center decision."""
+        method = str(provider_request.get("method") or "")
+        params = _mapping(provider_request.get("params"))
+        request_id = provider_request.get("id")
+        action, reason, preview = _approval_contract(method, params)
+        approval_binding = _provider_approval_binding(method, request_id, params)
+        existing = self.runtime_store.find_approval_request_by_binding(approval_binding)
+        timeout_seconds = max(
+            min(
+                float(provider_request.get("timeout_seconds") or 0.0),
+                max(context.timeout_seconds, 0.1),
+            ),
+            0.1,
+        )
+        if existing is None:
+            runtime = _mapping(request.extra.get("runtime"))
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+            ).isoformat()
+            approval = self.runtime_store.create_approval_request(
+                PolicyResolution(
+                    action=action,
+                    decision=PolicyDecision.ASK,
+                    enforcement=EnforcementLevel.ENFORCED_BY_HARNESS,
+                    policy_source="codex_app_server:on_request",
+                ),
+                PolicyContext(
+                    project_id=_optional_text(request.extra.get("project_id")),
+                    session_id=request.session_id,
+                    run_id=request.run_id,
+                    job_id=_optional_text(runtime.get("job_id")),
+                    reason=reason,
+                    preview=preview,
+                    approval_binding=approval_binding,
+                    enforcement_owner=APP_SERVER_APPROVAL_OWNER,
+                ),
+                expires_at=expires_at,
+            )
+        else:
+            approval = existing
+        with self._active_driver_lock:
+            active_driver = (
+                self._active_drivers.get(request.session_id)
+                if request.session_id is not None
+                else None
+            )
+        if active_driver is not None:
+            active_driver.bind_durable_approval(str(request_id), approval.id)
+        _publish(
+            request,
+            collected,
+            HarnessEvent(
+                type="approval_requested",
+                message="Codex app-server is waiting for Approval Center.",
+                payload={
+                    "approval_id": approval.id,
+                    "action": approval.action.value,
+                    "method": method,
+                    "reused": existing is not None,
+                },
+            ),
+        )
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            current = self.runtime_store.get_approval_request(approval.id)
+            if current.status is ApprovalStatus.APPROVED:
+                decision = "accept"
+                break
+            if current.status in {
+                ApprovalStatus.DENIED,
+                ApprovalStatus.EXPIRED,
+                ApprovalStatus.CANCELED,
+            }:
+                decision = "decline"
+                break
+            if _cancel_requested(request.cancel_event):
+                decision = "cancel"
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                decision = "decline"
+                break
+            time.sleep(min(APP_SERVER_APPROVAL_POLL_SECONDS, remaining))
+        _publish(
+            request,
+            collected,
+            HarnessEvent(
+                type="approval_decided",
+                message="Codex app-server approval received a durable outcome.",
+                payload={
+                    "approval_id": approval.id,
+                    "action": approval.action.value,
+                    "decision": decision,
+                },
+            ),
+        )
+        return decision
+
     def _wait_for_turn(
         self,
         runtime: _Runtime,
@@ -351,6 +522,9 @@ class CodexAppServerSupervisor:
         turn_id: str,
         link: Mapping[str, Any],
         command_display: tuple[str, ...],
+        server_request_handler: Callable[
+            [Mapping[str, Any], HarnessRequest, list[HarnessEvent], float], None
+        ],
     ) -> HarnessResult:
         collected: list[HarnessEvent] = []
         final_text = ""
@@ -381,7 +555,12 @@ class CodexAppServerSupervisor:
             method = str(message.get("method") or "")
             params = _mapping(message.get("params"))
             if "id" in message:
-                _decline_server_request(runtime.client, message, collected, request)
+                server_request_handler(
+                    message,
+                    request,
+                    collected,
+                    max(deadline - time.monotonic(), 0.1),
+                )
                 continue
             if params.get("threadId") not in {None, thread_id}:
                 continue
@@ -545,6 +724,9 @@ class CodexAppServerDriver:
         self.thread_id: str | None = None
         self.active_turn_id: str | None = None
         self.result: HarnessResult | None = None
+        self._approval_bridge: Callable[[Mapping[str, Any]], str] | None = None
+        self._pending_approvals: dict[str, _PendingApproval] = {}
+        self._pending_approval_lock = threading.Lock()
 
     def probe(self) -> AdapterCapabilitySnapshot:
         """Project reviewed app-server v2 behavior into neutral capabilities."""
@@ -556,10 +738,10 @@ class CodexAppServerDriver:
             structured_events=True,
             partial_output=True,
             interactive_input=False,
-            live_approvals=False,
-            durable_approval=False,
+            live_approvals=True,
+            durable_approval=True,
             interrupt=True,
-            steer=False,
+            steer=True,
             resume=True,
             fork=True,
             session_list=False,
@@ -633,8 +815,14 @@ class CodexAppServerDriver:
                 != self.runtime.client.runtime_id
                 or thread_id not in self.runtime.loaded_threads
             ):
-                self._resume_thread(thread_id)
-                recovery_outcome = "resumed_after_owner_change"
+                previous_status = str(
+                    (self.legacy_link or {}).get("last_prompt_status") or ""
+                )
+                if previous_status == "submitted":
+                    recovery_outcome = self._resolve_inflight_owner_loss(thread_id)
+                else:
+                    self._resume_thread(thread_id)
+                    recovery_outcome = "resumed_after_owner_change"
         self.thread_id = thread_id
         self.runtime.loaded_threads.add(thread_id)
         now = utc_now()
@@ -675,9 +863,9 @@ class CodexAppServerDriver:
         approval_bridge: Callable[[Mapping[str, Any]], str],
     ) -> StructuredTurnResult:
         """Run one Codex turn and publish normalized events through the driver sink."""
-        del approval_bridge
         if self.thread_id is None or self.legacy_link is None:
             raise StructuredSessionError("Codex structured session is not open")
+        self._approval_bridge = approval_bridge
         response = self.runtime.client.request(
             "turn/start",
             {
@@ -686,7 +874,8 @@ class CodexAppServerDriver:
                 "clientUserMessageId": turn_input.id,
                 "model": self.request.model,
                 "cwd": self.request.workspace,
-                "approvalPolicy": "never",
+                "approvalPolicy": "on-request",
+                "approvalsReviewer": "user",
             },
             timeout=APP_SERVER_TIMEOUT_SECONDS,
         )
@@ -722,6 +911,7 @@ class CodexAppServerDriver:
             turn_id=turn_id,
             link=self.legacy_link,
             command_display=self.command_display,
+            server_request_handler=self._handle_server_request,
         )
         status = "completed" if self.result.ok else "failed"
         raw_link = _mapping(self.result.raw.get("app_server_thread"))
@@ -734,9 +924,30 @@ class CodexAppServerDriver:
         raise UnsupportedSessionCapability("interactive input is not supported")
 
     def respond_to_approval(self, request_id: str, decision: str) -> None:
-        """Reject approval bridging until N2-01 owns the durable round-trip."""
-        del request_id, decision
-        raise UnsupportedSessionCapability("approval response is not supported")
+        """Persist one exact pending decision for the blocked durable bridge."""
+        normalized = _normalize_provider_decision(decision)
+        with self._pending_approval_lock:
+            pending = self._pending_approvals.get(request_id)
+        if pending is None or pending.durable_approval_id is None:
+            raise StructuredSessionError("Codex approval request is stale or unknown")
+        self.supervisor.runtime_store.decide_approval_request(
+            pending.durable_approval_id,
+            (
+                ApprovalDecision.ALLOW_ONCE
+                if normalized == "accept"
+                else ApprovalDecision.DENY
+            ),
+        )
+
+    def bind_durable_approval(self, request_id: str, approval_id: str) -> None:
+        """Bind the provider callback to its persisted Approval Center item."""
+        with self._pending_approval_lock:
+            pending = self._pending_approvals.get(request_id)
+            if pending is None:
+                raise StructuredSessionError(
+                    "Codex approval request is stale or unknown"
+                )
+            pending.durable_approval_id = approval_id
 
     def interrupt(self, turn_id: str) -> None:
         """Interrupt an exact active Codex turn."""
@@ -745,6 +956,21 @@ class CodexAppServerDriver:
         self.runtime.client.request(
             "turn/interrupt",
             {"threadId": self.thread_id, "turnId": turn_id},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+
+    def steer(self, turn_id: str, turn_input: StructuredTurnInput) -> None:
+        """Steer the exact active turn through the reviewed v2 precondition."""
+        if self.thread_id is None or self.active_turn_id != turn_id:
+            raise StructuredSessionError("Codex turn is not active for steering")
+        self.runtime.client.request(
+            "turn/steer",
+            {
+                "threadId": self.thread_id,
+                "expectedTurnId": turn_id,
+                "input": [{"type": "text", "text": turn_input.content}],
+                "clientUserMessageId": turn_input.id,
+            },
             timeout=APP_SERVER_TIMEOUT_SECONDS,
         )
 
@@ -790,7 +1016,12 @@ class CodexAppServerDriver:
             {
                 **self.legacy_link,
                 "runtime_status": "interrupted",
-                "recovery_outcome": "owner_error",
+                "recovery_outcome": (
+                    self.legacy_link.get("recovery_outcome")
+                    if self.legacy_link.get("recovery_outcome")
+                    == "ambiguous_after_owner_loss"
+                    else "owner_error"
+                ),
                 "updated_at": utc_now(),
                 "last_prompt_status": (
                     "interrupted"
@@ -802,11 +1033,7 @@ class CodexAppServerDriver:
         return self.legacy_link
 
     def _resume_thread(self, thread_id: str) -> None:
-        self.runtime.client.request(
-            "thread/read",
-            {"threadId": thread_id, "includeTurns": False},
-            timeout=APP_SERVER_TIMEOUT_SECONDS,
-        )
+        self._read_thread(thread_id, include_turns=False)
         self.runtime.client.request(
             "thread/resume",
             {
@@ -814,6 +1041,133 @@ class CodexAppServerDriver:
                 "threadId": thread_id,
             },
             timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+
+    def _read_thread(
+        self,
+        thread_id: str,
+        *,
+        include_turns: bool,
+    ) -> Mapping[str, Any]:
+        response = self.runtime.client.request(
+            "thread/read",
+            {"threadId": thread_id, "includeTurns": include_turns},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+        return _mapping(response.get("thread"))
+
+    def _resolve_inflight_owner_loss(self, thread_id: str) -> str:
+        """Recover only a provider-proven terminal turn after owner loss."""
+        thread = self._read_thread(thread_id, include_turns=True)
+        latest_turn_id = _optional_text((self.legacy_link or {}).get("latest_turn_id"))
+        status = _matching_turn_status(thread, latest_turn_id)
+        if status not in {
+            "completed",
+            "failed",
+            "canceled",
+            "cancelled",
+            "interrupted",
+        }:
+            now = utc_now()
+            self.legacy_link = self.supervisor.link_store.save(
+                self.request.session_id or "",
+                {
+                    **(self.legacy_link or {}),
+                    "runtime_id": self.runtime.client.runtime_id,
+                    "runtime_status": "interrupted",
+                    "recovery_outcome": "ambiguous_after_owner_loss",
+                    "updated_at": now,
+                    "last_prompt_status": "ambiguous",
+                },
+            )
+            raise AppServerProtocolError(
+                "Codex owner loss left the active turn outcome ambiguous; "
+                "refusing duplicate delivery"
+            )
+        self.runtime.client.request(
+            "thread/resume",
+            {
+                **_thread_identity_params(self.request),
+                "threadId": thread_id,
+            },
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+        if self.legacy_link is not None:
+            self.legacy_link = {
+                **self.legacy_link,
+                "last_prompt_status": status,
+            }
+        return f"resumed_after_terminal_{status}"
+
+    def _handle_server_request(
+        self,
+        message: Mapping[str, Any],
+        request: HarnessRequest,
+        collected: list[HarnessEvent],
+        timeout_seconds: float,
+    ) -> None:
+        request_id = message.get("id")
+        method = str(message.get("method") or "")
+        params = _mapping(message.get("params"))
+        if (
+            method not in _APPROVAL_METHODS
+            or not isinstance(request_id, (str, int))
+            or self.thread_id is None
+            or self.active_turn_id is None
+            or params.get("threadId") != self.thread_id
+            or params.get("turnId") != self.active_turn_id
+        ):
+            _decline_server_request(
+                self.runtime.client,
+                message,
+                collected,
+                request,
+            )
+            return
+        key = str(request_id)
+        pending = _PendingApproval(request_id, method, params)
+        with self._pending_approval_lock:
+            if key in self._pending_approvals:
+                _decline_server_request(
+                    self.runtime.client,
+                    message,
+                    collected,
+                    request,
+                )
+                return
+            self._pending_approvals[key] = pending
+        try:
+            if self._approval_bridge is None:
+                raise UnsupportedSessionCapability(
+                    "Codex approval bridge is unavailable"
+                )
+            decision = self._approval_bridge(
+                {
+                    "id": request_id,
+                    "method": method,
+                    "params": params,
+                    "timeout_seconds": timeout_seconds,
+                }
+            )
+            normalized = _normalize_provider_decision(decision)
+        except Exception:
+            normalized = "decline"
+            _publish(
+                request,
+                collected,
+                HarnessEvent(
+                    type=HarnessEventType.WARNING.value,
+                    message="Codex approval bridge failed closed.",
+                    payload={"method": method, "enforcement": "fail_closed"},
+                ),
+            )
+        with self._pending_approval_lock:
+            current = self._pending_approvals.pop(key, None)
+        if current is None:
+            return
+        self.runtime.client.respond(
+            request_id,
+            result=_approval_response(method, normalized, params),
         )
 
 
@@ -1070,8 +1424,147 @@ def _thread_identity_params(request: HarnessRequest) -> dict[str, Any]:
         "model": request.model,
         "modelProvider": "gpt2giga_harness",
         "sandbox": "workspace-write" if request.mode == "edit" else "read-only",
-        "approvalPolicy": "never",
+        "approvalPolicy": "on-request",
     }
+
+
+def _approval_contract(
+    method: str,
+    params: Mapping[str, Any],
+) -> tuple[PermissionAction, str, dict[str, Any]]:
+    """Map a reviewed Codex request family to one bounded Harness decision."""
+    if method == "item/commandExecution/requestApproval":
+        network = bool(_mapping(params.get("networkApprovalContext")))
+        action = (
+            PermissionAction.NETWORK_CONNECT
+            if network
+            else PermissionAction.PROCESS_SPAWN
+        )
+        return (
+            action,
+            "Codex requested approval for a command execution.",
+            {
+                "provider_method": method,
+                "item_id": _bounded_text(params.get("itemId"), 256),
+                "command": _bounded_text(params.get("command"), 2048),
+                "cwd": _bounded_text(params.get("cwd"), 1024),
+                "network_access": network,
+            },
+        )
+    if method == "item/fileChange/requestApproval":
+        return (
+            PermissionAction.WORKSPACE_WRITE,
+            "Codex requested approval for a file change.",
+            {
+                "provider_method": method,
+                "item_id": _bounded_text(params.get("itemId"), 256),
+                "reason": _bounded_text(params.get("reason"), 1024),
+                "grant_root": _bounded_text(params.get("grantRoot"), 1024),
+            },
+        )
+    if method == "item/permissions/requestApproval":
+        permissions = _mapping(params.get("permissions"))
+        network = bool(_mapping(permissions.get("network")).get("enabled"))
+        return (
+            (
+                PermissionAction.NETWORK_CONNECT
+                if network
+                else PermissionAction.WORKSPACE_WRITE
+            ),
+            "Codex requested additional sandbox permissions.",
+            {
+                "provider_method": method,
+                "item_id": _bounded_text(params.get("itemId"), 256),
+                "network_access": network,
+                "permission_snapshot_sha256": _json_hash(permissions),
+            },
+        )
+    raise UnsupportedSessionCapability("Codex approval request method is unsupported")
+
+
+def _provider_approval_binding(
+    method: str,
+    request_id: Any,
+    params: Mapping[str, Any],
+) -> str:
+    """Build an ephemeral exact-operation binding; only its hash is persisted."""
+    return json.dumps(
+        {
+            "protocol": APP_SERVER_PROTOCOL,
+            "method": method,
+            "request_id": request_id,
+            "thread_id": params.get("threadId"),
+            "turn_id": params.get("turnId"),
+            "item_id": params.get("itemId"),
+            "params_sha256": _json_hash(params),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _approval_response(
+    method: str,
+    decision: str,
+    params: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project one normalized decision into the exact Codex response shape."""
+    normalized = _normalize_provider_decision(decision)
+    if method in {
+        "item/commandExecution/requestApproval",
+        "item/fileChange/requestApproval",
+    }:
+        return {"decision": normalized}
+    if method == "item/permissions/requestApproval":
+        return {
+            "permissions": (
+                _mapping(params.get("permissions")) if normalized == "accept" else {}
+            ),
+            "scope": "turn",
+        }
+    raise UnsupportedSessionCapability("Codex approval response method is unsupported")
+
+
+def _normalize_provider_decision(value: Any) -> str:
+    aliases = {
+        "accept": "accept",
+        "allow": "accept",
+        ApprovalDecision.ALLOW_ONCE.value: "accept",
+        "decline": "decline",
+        "deny": "decline",
+        ApprovalDecision.DENY.value: "decline",
+        "cancel": "cancel",
+        "timeout": "decline",
+    }
+    try:
+        return aliases[str(value)]
+    except KeyError as exc:
+        raise ValueError("Codex approval decision is invalid") from exc
+
+
+def _bounded_text(value: Any, limit: int) -> str | None:
+    text = _optional_text(value)
+    return text[:limit] if text is not None else None
+
+
+def _matching_turn_status(
+    thread: Mapping[str, Any],
+    turn_id: str | None,
+) -> str | None:
+    if turn_id is None:
+        return None
+    turns = thread.get("turns")
+    if not isinstance(turns, list):
+        return None
+    for item in reversed(turns):
+        turn = _mapping(item)
+        if str(turn.get("id") or "") != turn_id:
+            continue
+        status = str(turn.get("status") or "").strip().lower()
+        return status or None
+    return None
 
 
 def _normalize_notification(
@@ -1279,6 +1772,8 @@ def _decline_server_request(
         "item/fileChange/requestApproval",
     }:
         client.respond(request_id, result={"decision": "decline"})
+    elif method == "item/permissions/requestApproval":
+        client.respond(request_id, result={"permissions": {}, "scope": "turn"})
     elif method == "mcpServer/elicitation/request":
         client.respond(request_id, result={"action": "decline"})
     elif method == "item/tool/requestUserInput":
@@ -1867,13 +2362,6 @@ def _identity_value(value: Any, *, prefix: str) -> str:
     ):
         return text
     return f"{prefix}-{hashlib.sha256(text.encode('utf-8')).hexdigest()[:24]}"
-
-
-def _reject_approval_bridge(request: Mapping[str, Any]) -> str:
-    del request
-    raise UnsupportedSessionCapability(
-        "Codex approval bridging is deferred until N2-01"
-    )
 
 
 def _safe_id(value: str) -> str:

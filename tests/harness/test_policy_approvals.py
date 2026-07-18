@@ -214,13 +214,16 @@ def test_hash_bound_approval_cannot_be_broadened_or_rebound(tmp_path):
 
     assert duplicate.id == approval.id
     assert rebound.id != approval.id
+    assert store.find_approval_request_by_binding(binding) == approval
+    assert store.find_approval_request_by_binding("missing-binding") is None
     assert approval.preview["approval_binding_sha256"] == approval_binding_digest(
         binding
     )
     with pytest.raises(ValueError, match="only be allowed once"):
         store.decide_approval_request(approval.id, ApprovalDecision.ALLOW_RUN)
 
-    store.decide_approval_request(approval.id, ApprovalDecision.ALLOW_ONCE)
+    decided = store.decide_approval_request(approval.id, ApprovalDecision.ALLOW_ONCE)
+    assert store.find_approval_request_by_binding(binding) == decided
     assert not store.consume_matching_approval_grant(
         action=PermissionAction.GIT_APPLY,
         project_id="project_bound",

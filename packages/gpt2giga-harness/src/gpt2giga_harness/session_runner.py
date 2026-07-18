@@ -534,6 +534,8 @@ class HarnessSessionRunner:
             attachment_render_plan_payload,
         )
         request_extra["workspace_execution"] = workspace_execution.to_metadata()
+        if runtime_metadata:
+            request_extra["runtime"] = dict(runtime_metadata)
         if project_memory_payload:
             request_extra["project_memory"] = project_memory_payload
         request_extra["preflight"] = preflight_payload
