@@ -71,6 +71,7 @@ HANDOFF_ARTIFACT_TYPES = frozenset(
     }
 )
 TERMINAL_STEP_STATUSES = frozenset({"succeeded", "failed", "canceled", "skipped"})
+WORKFLOW_COORDINATION_OUTPUT = "_coordination"
 
 
 class WorkflowStepKind(str, Enum):
@@ -346,6 +347,7 @@ class WorkflowRepository:
         inputs: Mapping[str, Any],
         *,
         run_id: str | None = None,
+        coordination: Mapping[str, Any] | None = None,
     ) -> WorkflowRun:
         """Persist a run and immutable initial step snapshots atomically."""
         run_id = run_id or f"workflow_{uuid4().hex}"
@@ -359,8 +361,8 @@ class WorkflowRepository:
                     INSERT INTO workflow_runs (
                         id, workflow_id, definition_hash, schema_version, status,
                         project_id, project_root, session_id, definition_json,
-                        inputs_json, max_concurrency, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        inputs_json, outputs_json, max_concurrency, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -373,6 +375,11 @@ class WorkflowRepository:
                         session_id,
                         _json(definition_payload),
                         _json(inputs),
+                        _json(
+                            {WORKFLOW_COORDINATION_OUTPUT: dict(coordination)}
+                            if coordination
+                            else {}
+                        ),
                         definition.budgets.max_concurrency,
                         now,
                         now,
@@ -650,6 +657,10 @@ class WorkflowCoordinator:
             session.id,
             effective_inputs,
             run_id=run_id,
+            coordination={
+                "origin": self.origin,
+                "schedule_id": self.schedule_id,
+            },
         )
         return self.advance(run.id)
 
@@ -1048,6 +1059,17 @@ class WorkflowCoordinator:
             summary = summary[: MAX_HANDOFF_SUMMARY_CHARS - 1].rstrip() + "…"
         redacted = redact_for_storage(summary)
         return str(redacted) if redacted else None
+
+
+def workflow_coordination(run: WorkflowRun) -> tuple[str, str | None]:
+    """Return the persisted coordinator origin used after worker handoff."""
+    value = run.outputs.get(WORKFLOW_COORDINATION_OUTPUT)
+    coordination = value if isinstance(value, Mapping) else {}
+    origin = str(coordination.get("origin") or "manual")
+    schedule_id = _optional_text(coordination.get("schedule_id"))
+    if origin not in {"manual", "interactive", "scheduled"}:
+        return "manual", None
+    return origin, schedule_id
 
 
 class WorkflowHandoffManager:

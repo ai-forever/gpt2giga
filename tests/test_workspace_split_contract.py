@@ -121,20 +121,25 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
         for dependency in harness_metadata["dependencies"]
     )
     assert harness_metadata["scripts"] == {
-        "giga": "gpt2giga_harness.cli:main",
-        "gpt2giga-harness": "gpt2giga_harness.cli:main",
+        "giga": "gpt2giga_harness.entrypoint:main",
+        "gpt2giga-harness": "gpt2giga_harness.entrypoint:main",
     }
-    entry_points = harness_metadata["entry-points"]["gpt2giga.harnesses"]
-    assert set(entry_points) == {
-        "claude-code",
-        "codex-cli",
-        "direct-chat",
-        "echo",
-        "gemini-cli",
+    entry_point_groups = harness_metadata["entry-points"]
+    assert set(entry_point_groups) == {
+        "agent_workbench.harness_adapters.v1",
+        "gpt2giga.harnesses",
     }
-    assert all(
-        target.startswith("gpt2giga_harness.") for target in entry_points.values()
-    )
+    for entry_points in entry_point_groups.values():
+        assert set(entry_points) == {
+            "claude-code",
+            "codex-cli",
+            "direct-chat",
+            "echo",
+            "gemini-cli",
+        }
+        assert all(
+            target.startswith("gpt2giga_harness.") for target in entry_points.values()
+        )
 
     gateway_source = GATEWAY_MEMBER / "src/gpt2giga"
     harness_source = HARNESS_MEMBER / "src/gpt2giga_harness"

@@ -6,6 +6,10 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
+from gpt2giga_harness.application import (
+    DurableRuntimeUnavailableError,
+    SessionApplicationService,
+)
 from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.runtime.models import ApprovalStatus
 from gpt2giga_harness.runtime.policy import (
@@ -19,8 +23,6 @@ from gpt2giga_harness.runtime.store import (
     InvalidStateTransitionError,
     RuntimeCoordinationStore,
 )
-from gpt2giga_harness.sessions.models import HarnessStoredEvent
-from gpt2giga_harness.sessions.store import new_id, utc_now
 
 
 router = APIRouter(route_class=ConformantAPIRoute)
@@ -80,35 +82,21 @@ def decide_approval(
         decision = ApprovalDecision(str(payload.get("decision") or ""))
         expiry = payload.get("expires_in_seconds")
         project_expiry = float(expiry) if expiry is not None else None
-        decided = _runtime_store(request).decide_approval_request(
+        result = _session_service(request).decide_approval(
             approval_id,
             decision,
             project_expiry_seconds=project_expiry,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Approval not found") from exc
+    except DurableRuntimeUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (InvalidStateTransitionError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    _append_decision_event(request, decided)
-    job = _runtime_store(request).get_job(decided.job_id) if decided.job_id else None
-    session_store = getattr(request.app.state, "harness_session_store", None)
-    if (
-        job is not None
-        and job.status.value == "canceled"
-        and decided.run_id
-        and session_store is not None
-        and hasattr(session_store, "update_run")
-    ):
-        session_store.update_run(
-            decided.run_id,
-            status="canceled",
-            error="approval denied",
-            finished_at=utc_now(),
-        )
     return {
-        "approval": approval_request_to_dict(decided),
-        "job_status": job.status.value if job else None,
-        "retry_action": job is None and decision is not ApprovalDecision.DENY,
+        "approval": approval_request_to_dict(result.approval),
+        "job_status": result.job.status.value if result.job else None,
+        "retry_action": result.retry_action,
     }
 
 
@@ -119,31 +107,10 @@ def _runtime_store(request: Request) -> RuntimeCoordinationStore:
     return store
 
 
-def _append_decision_event(request: Request, approval: Any) -> None:
-    session_store = getattr(request.app.state, "harness_session_store", None)
-    if (
-        session_store is None
-        or not hasattr(session_store, "append_event")
-        or not approval.session_id
-    ):
-        return
-    session_store.append_event(
-        HarnessStoredEvent(
-            id=new_id("evt"),
-            session_id=approval.session_id,
-            run_id=approval.run_id,
-            type="approval_decided",
-            message=f"Approval {approval.status.value}: {approval.action.value}.",
-            payload={
-                "approval_id": approval.id,
-                "action": approval.action.value,
-                "decision": approval.decision.value if approval.decision else None,
-                "enforcement": approval.enforcement.value,
-            },
-            created_at=utc_now(),
-            trace_id=approval.job_id or approval.run_id,
-            job_id=approval.job_id,
-            span_kind="approval",
-            span_status=approval.status.value,
+def _session_service(request: Request) -> SessionApplicationService:
+    service = getattr(request.app.state, "harness_session_service", None)
+    if not isinstance(service, SessionApplicationService):
+        raise DurableRuntimeUnavailableError(
+            "Session application service is unavailable"
         )
-    )
+    return service

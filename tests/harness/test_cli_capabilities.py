@@ -51,10 +51,10 @@ def clear_probe_cache():
             "2.1.197 (Claude Code)",
             "--output-format stream-json --permission-mode "
             "--no-session-persistence --include-partial-messages --resume "
-            "--effort --allowedTools --disallowedTools",
+            "--effort --allowedTools --disallowedTools --remote-control",
             "claude-stream-json-v1",
             ("2.1.0", "2.2.0"),
-            5,
+            7,
         ),
         (
             "gemini-cli",
@@ -117,6 +117,9 @@ def test_probe_proves_required_contract_and_caches_by_command_version(
     assert len(calls) == expected_calls  # cached call only refreshes the version key
     if harness_id == "codex-cli":
         assert first.capabilities["app-server"] is True
+    if harness_id == "claude-code":
+        assert first.capabilities["--remote-control"] is True
+        assert first.capabilities["remote-control"] is True
     payload = cli_capability_snapshot_to_dict(first)
     assert payload["warning"] is None
     assert payload["version_contract"] == {
@@ -234,6 +237,43 @@ def test_missing_required_capability_remains_unsupported_above_window(monkeypatc
     assert snapshot.status == "unsupported"
     assert snapshot.version_window_status == "above_window"
     assert "missing required adapter capabilities" in (snapshot.warning or "")
+
+
+def test_claude_remote_control_auth_gate_proves_command_without_login(monkeypatch):
+    def fake_run(command, **kwargs):
+        if command[-1] == "--version":
+            return _Completed(stdout="2.1.212 (Claude Code)")
+        if "remote-control" in command:
+            return _Completed(
+                stderr="Error: You must be logged in to use Remote Control.",
+                returncode=1,
+            )
+        return _Completed(
+            stdout=(
+                "--output-format stream-json --permission-mode "
+                "--no-session-persistence --remote-control"
+            )
+        )
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.cli_capabilities.subprocess.run",
+        fake_run,
+    )
+    snapshot = probe_cli_capabilities(
+        ExecutableResolution(
+            harness_id="claude-code",
+            command_name="claude",
+            executable="/tmp/claude",
+            source="path",
+            argv=("/tmp/claude",),
+        ),
+        "claude-code",
+    )
+
+    assert snapshot.compatible is True
+    assert snapshot.capabilities["--remote-control"] is True
+    assert snapshot.capabilities["remote-control"] is True
+    assert "logged in" not in json.dumps(cli_capability_snapshot_to_dict(snapshot))
 
 
 @pytest.mark.parametrize(

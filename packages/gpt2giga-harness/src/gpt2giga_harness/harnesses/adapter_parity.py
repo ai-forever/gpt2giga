@@ -163,6 +163,12 @@ def claude_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
                 "capability-proven effort, allowed/disallowed tool restrictions, and "
                 "managed MCP tool ids; token limits remain unsupported before queueing.",
             ),
+            "provider_ui_handoff": _claim(
+                AdapterSupportLevel.SUPPORTED,
+                "Projects version-probed, documented Remote Control and Desktop "
+                "actions without claiming embedded control, durable ownership, "
+                "provider session identity, or a machine-readable provider URL.",
+            ),
         }
     )
     return contract
@@ -198,6 +204,13 @@ def gemini_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
                 "Applies model, mode, route, workspace, durable timeout/retry budgets, "
                 "and managed MCP tool ids; reasoning effort and token limits are "
                 "reported unsupported before queueing.",
+            ),
+            "structured_app_server": _claim(
+                AdapterSupportLevel.SUPPORTED,
+                "Uses version-probed Gemini ACP with isolated process scopes, exact "
+                "session UUID links, permission bridging, cancellation, and load-based "
+                "recovery; list, close, model switch, filesystem callbacks, and general "
+                "elicitation remain explicitly unsupported.",
             ),
         }
     )

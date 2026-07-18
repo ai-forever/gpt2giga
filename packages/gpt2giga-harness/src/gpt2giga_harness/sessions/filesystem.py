@@ -6,6 +6,7 @@ import json
 import hashlib
 import os
 import shutil
+import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -98,6 +99,7 @@ class FilesystemHarnessSessionStore:
         self._read_index: SessionReadIndex | None = (
             SessionReadIndex(read_index_path) if read_index_path.exists() else None
         )
+        self._read_index_lock = threading.RLock()
         self.event_broker = RunEventBroker()
 
     def create_session(
@@ -691,32 +693,35 @@ class FilesystemHarnessSessionStore:
         raise RunNotFoundError(run_id)
 
     def _ensure_read_index(self) -> None:
-        if not self._session_read_index().is_complete():
-            self._rebuild_read_index()
+        with self._read_index_lock:
+            if not self._session_read_index().is_complete():
+                self._rebuild_read_index()
 
     def _session_read_index(self) -> SessionReadIndex:
-        if self._read_index is None:
-            self._read_index = SessionReadIndex(self.sessions_dir / READ_INDEX_FILE)
-        return self._read_index
+        with self._read_index_lock:
+            if self._read_index is None:
+                self._read_index = SessionReadIndex(self.sessions_dir / READ_INDEX_FILE)
+            return self._read_index
 
     def _rebuild_read_index(self) -> None:
-        sessions: list[HarnessSession] = []
-        runs: list[tuple[HarnessRun, int]] = []
-        for session_id in self._index().keys():
-            try:
-                session_dir = self._session_dir(session_id)
-                sessions.append(
-                    session_from_dict(_read_json(session_dir / MANIFEST_FILE))
-                )
-                runs.extend(
-                    (run, index)
-                    for index, run in enumerate(
-                        _read_jsonl(session_dir / RUNS_FILE, run_from_dict)
+        with self._read_index_lock:
+            sessions: list[HarnessSession] = []
+            runs: list[tuple[HarnessRun, int]] = []
+            for session_id in self._index().keys():
+                try:
+                    session_dir = self._session_dir(session_id)
+                    sessions.append(
+                        session_from_dict(_read_json(session_dir / MANIFEST_FILE))
                     )
-                )
-            except (SessionNotFoundError, ValueError, OSError, KeyError):
-                continue
-        self._session_read_index().replace_all(sessions, runs)
+                    runs.extend(
+                        (run, index)
+                        for index, run in enumerate(
+                            _read_jsonl(session_dir / RUNS_FILE, run_from_dict)
+                        )
+                    )
+                except (SessionNotFoundError, ValueError, OSError, KeyError):
+                    continue
+            self._session_read_index().replace_all(sessions, runs)
 
     def _write_session(self, session: HarnessSession, session_dir: Path) -> None:
         _write_json_atomic(session_dir / MANIFEST_FILE, session_to_dict(session))

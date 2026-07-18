@@ -8,11 +8,16 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from gpt2giga_harness.execution import ExecutionTransport
+from gpt2giga_harness.runtime.structured import (
+    admitted_durable_structured_capabilities,
+    requested_execution_transport,
+)
+from gpt2giga_harness.runtime.worker import DurableJobDispatcher
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
 from gpt2giga_harness.session_runner import HarnessSessionRunner
-from gpt2giga_harness.runtime.worker import DurableJobDispatcher
 from gpt2giga_harness.sessions.models import HarnessRun
 from gpt2giga_harness.sessions.store import SessionNotFoundError
 from gpt2giga_harness.types import GigaChatApiMode, parse_api_mode
@@ -35,6 +40,7 @@ class HarnessArenaRequest:
     workspace: str | None = None
     attachment_ids: tuple[str, ...] = ()
     workspace_policy: str = "auto"
+    execution_transport: ExecutionTransport | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -66,6 +72,7 @@ class HarnessArenaRun:
     workspace: str | None
     attachment_ids: tuple[str, ...]
     workspace_policy: str
+    execution_transport: ExecutionTransport | None
     created_at: str
     updated_at: str
     child_runs: tuple[HarnessArenaChildRun, ...] = ()
@@ -99,6 +106,7 @@ class FilesystemHarnessArenaStore:
             workspace=request.workspace,
             attachment_ids=request.attachment_ids,
             workspace_policy=request.workspace_policy,
+            execution_transport=request.execution_transport,
             created_at=now,
             updated_at=now,
             metadata=_redacted_mapping(request.extra),
@@ -197,6 +205,8 @@ def run_arena(
 ) -> HarnessArenaRun:
     """Run a multi-harness comparison with isolated concurrent children."""
     request = arena_request_from_payload(payload)
+    if request.execution_transport is ExecutionTransport.NATIVE_STRUCTURED:
+        raise ValueError("native_structured Arena requires the durable runtime")
     session = (
         runner.store.get_session(session_id)
         if session_id is not None
@@ -245,6 +255,9 @@ def queue_arena(
 ) -> HarnessArenaRun:
     """Queue arena children as independent durable jobs."""
     request = arena_request_from_payload(payload)
+    if request.execution_transport is ExecutionTransport.NATIVE_STRUCTURED:
+        for harness_id in request.harness_ids:
+            admitted_durable_structured_capabilities(runner.registry.get(harness_id))
     session = (
         runner.store.get_session(session_id)
         if session_id is not None
@@ -294,6 +307,8 @@ def continue_arena(
     payload: Mapping[str, Any],
 ) -> HarnessArenaRun:
     """Fan one shared follow-up out to every isolated child concurrently."""
+    if arena.execution_transport is ExecutionTransport.NATIVE_STRUCTURED:
+        raise ValueError("native_structured Arena requires the durable runtime")
     request, turn_index = _follow_up_request(arena_store, arena, payload)
     children = _require_arena_children(arena_store.get(arena.id))
     for child in children:
@@ -396,7 +411,12 @@ def arena_request_from_payload(payload: Mapping[str, Any]) -> HarnessArenaReques
         mode=str(payload.get("mode") or "plan"),
         workspace=resolve_workspace(_optional_text(payload.get("workspace"))),
         attachment_ids=_text_tuple(payload.get("attachment_ids"), "attachment_ids"),
-        workspace_policy=str(payload.get("workspace_policy") or "auto"),
+        workspace_policy=_arena_workspace_policy(
+            str(payload.get("workspace_policy") or "auto"),
+            mode=str(payload.get("mode") or "plan"),
+            execution_transport=requested_execution_transport(payload),
+        ),
+        execution_transport=requested_execution_transport(payload),
         extra=dict(extra),
     )
 
@@ -415,6 +435,11 @@ def arena_to_dict(arena: HarnessArenaRun) -> dict[str, Any]:
         "workspace": arena.workspace,
         "attachment_ids": list(arena.attachment_ids),
         "workspace_policy": arena.workspace_policy,
+        "execution_transport": (
+            arena.execution_transport.value
+            if arena.execution_transport is not None
+            else None
+        ),
         "created_at": arena.created_at,
         "updated_at": arena.updated_at,
         "child_runs": [arena_child_to_dict(child) for child in arena.child_runs],
@@ -436,6 +461,7 @@ def arena_from_dict(data: Mapping[str, Any]) -> HarnessArenaRun:
         workspace=_optional_text(data.get("workspace")),
         attachment_ids=tuple(str(item) for item in data.get("attachment_ids", ())),
         workspace_policy=str(data.get("workspace_policy") or "auto"),
+        execution_transport=requested_execution_transport(data),
         created_at=str(data["created_at"]),
         updated_at=str(data.get("updated_at") or data["created_at"]),
         child_runs=tuple(
@@ -521,7 +547,16 @@ def _arena_child_payload(
         "workspace": request.workspace,
         "workspace_policy": request.workspace_policy,
         "attachment_ids": list(request.attachment_ids),
-        "invocation_mode": "headless",
+        "invocation_mode": (
+            "native"
+            if request.execution_transport is ExecutionTransport.NATIVE_STRUCTURED
+            else "headless"
+        ),
+        "execution_transport": (
+            request.execution_transport.value
+            if request.execution_transport is not None
+            else None
+        ),
         "extra": {
             **dict(request.extra),
             "arena": {
@@ -599,6 +634,7 @@ def _follow_up_request(
             workspace=arena.workspace,
             attachment_ids=attachment_ids,
             workspace_policy=arena.workspace_policy,
+            execution_transport=arena.execution_transport,
             extra={},
         ),
         turn_index,
@@ -685,6 +721,17 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _arena_workspace_policy(
+    requested: str,
+    *,
+    mode: str,
+    execution_transport: ExecutionTransport | None,
+) -> str:
+    if execution_transport is ExecutionTransport.NATIVE_STRUCTURED and mode == "edit":
+        return "worktree"
+    return requested
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:

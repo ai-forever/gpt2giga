@@ -4,10 +4,12 @@ import hashlib
 import json
 import sqlite3
 import threading
+import time
 
 import pytest
 
 from gpt2giga_harness import cli
+from gpt2giga_harness.sessions import filesystem as filesystem_sessions
 from gpt2giga_harness.harnesses.codex_cli import CodexCliHarness
 from gpt2giga_harness.harnesses.echo import EchoHarness
 from gpt2giga_harness.runtime.capabilities import negotiate_execution_capabilities
@@ -676,7 +678,18 @@ def test_reconciler_repairs_finished_run_to_terminal_job(tmp_path):
     assert runtime.get_attempt(attempt.id).status is JobAttemptStatus.SUCCEEDED
 
 
-def test_filesystem_run_rewrites_preserve_concurrent_patches(tmp_path):
+def test_filesystem_run_rewrites_preserve_concurrent_patches(tmp_path, monkeypatch):
+    real_read_index = filesystem_sessions.SessionReadIndex
+    initialization_paths = []
+    initialization_lock = threading.Lock()
+
+    def delayed_read_index(path):
+        with initialization_lock:
+            initialization_paths.append(path)
+        time.sleep(0.05)
+        return real_read_index(path)
+
+    monkeypatch.setattr(filesystem_sessions, "SessionReadIndex", delayed_read_index)
     sessions = FilesystemHarnessSessionStore(tmp_path)
     session = sessions.create_session(title="locked")
     run = _create_run(sessions, session.id, status=RunStatus.RUNNING)
@@ -694,6 +707,7 @@ def test_filesystem_run_rewrites_preserve_concurrent_patches(tmp_path):
         for future in futures:
             future.result()
 
+    assert initialization_paths == [tmp_path / "sessions" / "read_model.sqlite3"]
     reopened = FilesystemHarnessSessionStore(tmp_path).get_run(run.id)
     assert reopened.status is RunStatus.FAILED
     assert reopened.error == "boom"

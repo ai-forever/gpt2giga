@@ -16,6 +16,17 @@ from typing import Any, Mapping
 import uvicorn
 import yaml
 
+from gpt2giga_harness import __version__
+from gpt2giga_harness.adapter_scaffold import (
+    render_adapter_module,
+    scaffold_adapter_package,
+)
+from gpt2giga_harness.adapter_sdk import (
+    adapter_conformance_report_to_dict,
+    load_installed_conformance_subject,
+    run_adapter_conformance,
+)
+from gpt2giga_harness.application import SessionApplicationService
 from gpt2giga_harness.agents import (
     agent_profile_to_dict,
     agent_run_payload,
@@ -44,6 +55,7 @@ from gpt2giga_harness.editor import (
     execute_editor_plan,
     workspace_for_run,
 )
+from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.executables import (
     executable_resolution_to_dict,
     set_user_executable,
@@ -112,8 +124,13 @@ from gpt2giga_harness.provenance import (
 from gpt2giga_harness.readiness import build_execution_readiness
 from gpt2giga_harness.reviewed_evidence import reviewed_evidence_manifest
 from gpt2giga_harness.registry import UnknownHarnessError, create_default_registry
-from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga_harness.runtime.models import job_to_dict
 from gpt2giga_harness.runtime.payloads import DurableJobPayloadStore
+from gpt2giga_harness.runtime.policy import (
+    ApprovalDecision,
+    approval_request_to_dict,
+)
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.runtime.worker import (
     DurableJobDispatcher,
     DurableJobWorker,
@@ -133,6 +150,7 @@ from gpt2giga_harness.sessions import (
 )
 from gpt2giga_harness.sessions.models import (
     bundle_to_dict,
+    event_to_dict,
     run_to_dict,
     session_to_dict,
 )
@@ -150,6 +168,7 @@ from gpt2giga_harness.state_backup import (
     restore_state_backup,
     verify_state_backup,
 )
+from gpt2giga_harness.settings import HarnessSettingsStore
 from gpt2giga_harness.types import (
     HarnessCapability,
     HarnessRequest,
@@ -165,6 +184,7 @@ from gpt2giga_harness.worktrees import parse_workspace_policy
 from gpt2giga_harness.ui.app import create_app, validate_ui_bind
 from gpt2giga_harness.ui.security import is_loopback_host
 from gpt2giga_harness.workspace import resolve_workspace
+from gpt2giga_harness.workbench_execution import workbench_transport_projection
 from gpt2giga_harness.workflows import (
     WorkflowCoordinator,
     WorkflowRepository,
@@ -182,7 +202,7 @@ AGENT_ALIASES = {
     "gemini": "gemini-cli",
 }
 
-UI_WORKER_START_TIMEOUT_SECONDS = 5.0
+UI_WORKER_START_TIMEOUT_SECONDS = 10.0
 UI_WORKER_STOP_TIMEOUT_SECONDS = 3.0
 UI_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5
 MAX_UI_WORKER_COUNT = 32
@@ -233,6 +253,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser = argparse.ArgumentParser(prog="giga")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"gpt2giga-harness {__version__}",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     doctor = subparsers.add_parser("doctor", parents=[common])
@@ -323,6 +348,59 @@ def build_parser() -> argparse.ArgumentParser:
     session_show.add_argument("session_id")
     session_show.add_argument("--json", action="store_true")
     session_show.set_defaults(handler=_handle_session_show)
+
+    session_create = session_subparsers.add_parser("create", parents=[common])
+    session_create.add_argument("--title", default=None)
+    session_create.add_argument("--workspace", default=None)
+    session_create.add_argument("--harness", dest="harness_id", default=None)
+    session_create.add_argument("--model", default=None)
+    session_create.add_argument("--api-mode", choices=("v1", "v2"), default=None)
+    session_create.add_argument(
+        "--mode", choices=("plan", "read", "edit"), default=None
+    )
+    session_create.add_argument("--json", action="store_true")
+    session_create.set_defaults(handler=_handle_session_create)
+
+    session_turn = session_subparsers.add_parser("turn", parents=[common])
+    session_turn.add_argument("session_id")
+    session_turn.add_argument("--prompt", required=True)
+    session_turn.add_argument("--harness", dest="harness_id", default=None)
+    session_turn.add_argument("--model", default=None)
+    session_turn.add_argument("--api-mode", choices=("v1", "v2"), default=None)
+    session_turn.add_argument(
+        "--capability",
+        choices=tuple(capability.value for capability in HarnessCapability),
+        default=None,
+    )
+    session_turn.add_argument("--mode", choices=("plan", "read", "edit"), default=None)
+    session_turn.add_argument("--workspace", default=None)
+    session_turn.add_argument("--permission-profile", default="interactive")
+    session_turn.add_argument(
+        "--transport",
+        choices=("native_structured", "native_terminal", "one_shot"),
+        default=None,
+        help="Execution transport (default: backend Workbench setting)",
+    )
+    session_turn.add_argument("--idempotency-key", default=None)
+    session_turn.add_argument("--json", action="store_true")
+    session_turn.set_defaults(handler=_handle_session_turn)
+
+    session_events = session_subparsers.add_parser("events")
+    session_events.add_argument("run_id")
+    session_events.add_argument("--after-id", default=None)
+    session_events.add_argument("--json", action="store_true")
+    session_events.set_defaults(handler=_handle_session_events)
+
+    session_approve = session_subparsers.add_parser("approve")
+    session_approve.add_argument("approval_id")
+    session_approve.add_argument(
+        "--decision",
+        choices=tuple(decision.value for decision in ApprovalDecision),
+        required=True,
+    )
+    session_approve.add_argument("--expires-in-seconds", type=float, default=None)
+    session_approve.add_argument("--json", action="store_true")
+    session_approve.set_defaults(handler=_handle_session_approve)
 
     runtime = subparsers.add_parser("runtime")
     runtime_subparsers = runtime.add_subparsers(dest="runtime_command")
@@ -665,7 +743,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     harness_scaffold = harness_subparsers.add_parser("scaffold")
     harness_scaffold.add_argument("harness_id")
+    harness_scaffold.add_argument("--output", type=Path, default=None)
     harness_scaffold.set_defaults(handler=_handle_harness_scaffold)
+
+    harness_conformance = harness_subparsers.add_parser("conformance")
+    harness_conformance.add_argument("harness_id")
+    harness_conformance.add_argument("--json", action="store_true")
+    harness_conformance.set_defaults(handler=_handle_harness_conformance)
 
     return parser
 
@@ -756,6 +840,7 @@ def _handle_harness_list(args: argparse.Namespace, config: HarnessConfig) -> int
                 "status": availability.status.value,
                 "native": spec_payload["supports_native_sessions"],
                 "default_invocation_mode": spec_payload["default_invocation_mode"],
+                "workbench_transport": workbench_transport_projection(harness),
                 "description": spec_payload["description"],
                 "plugin_metadata": spec_payload["plugin_metadata"],
                 "validation": harness_validation_report_to_dict(validation),
@@ -820,6 +905,7 @@ def _handle_harness_inspect(args: argparse.Namespace, config: HarnessConfig) -> 
     payload = {
         "spec": spec_to_dict(spec),
         "availability": availability_to_dict(harness.availability()),
+        "workbench_transport": workbench_transport_projection(harness),
         "validation": harness_validation_report_to_dict(validation),
     }
     resolution = getattr(harness, "executable_resolution", None)
@@ -1043,6 +1129,122 @@ def _handle_session_show(args: argparse.Namespace, config: HarnessConfig) -> int
         print(f"Messages: {len(bundle['messages'])}")
         print(f"Runs: {len(bundle['runs'])}")
     return 0
+
+
+def _handle_session_create(args: argparse.Namespace, config: HarnessConfig) -> int:
+    payload = _defined_values(
+        title=args.title,
+        workspace=args.workspace,
+        harness_id=args.harness_id,
+        model=args.model,
+        api_mode=args.api_mode,
+        mode=args.mode,
+    )
+    session = _session_application_service(config).create_session(
+        payload,
+        validate_harness=args.harness_id is not None,
+    )
+    serialized = session_to_dict(session)
+    if args.json:
+        _print_json({"session": serialized})
+    else:
+        print(f"Created session: {session.id}")
+    return 0
+
+
+def _handle_session_turn(args: argparse.Namespace, config: HarnessConfig) -> int:
+    payload = _defined_values(
+        prompt=args.prompt,
+        harness_id=args.harness_id,
+        model=args.model,
+        api_mode=args.api_mode,
+        capability=args.capability,
+        mode=args.mode,
+        workspace=args.workspace,
+        permission_profile=args.permission_profile,
+        execution_transport=args.transport,
+    )
+    service = _session_application_service(config)
+    submission = service.submit_turn(
+        args.session_id,
+        payload,
+        idempotency_key=args.idempotency_key or f"cli_{new_id('submit')}",
+        origin="interactive",
+    )
+    response = {
+        "session": session_to_dict(submission.queued.session),
+        "run": run_to_dict(submission.queued.run),
+        "job": job_to_dict(submission.job),
+        "created": submission.created,
+    }
+    if args.json:
+        _print_json(response)
+    else:
+        print(f"Submitted turn: {submission.queued.run.id}")
+        print(f"Job: {submission.job.id} ({submission.job.status.value})")
+    return 0
+
+
+def _handle_session_events(args: argparse.Namespace, config: HarnessConfig) -> int:
+    service = _session_application_service(config)
+    run = service.get_run(args.run_id)
+    events = service.list_run_events(args.run_id, after_id=args.after_id)
+    payload = {
+        "run": run_to_dict(run),
+        "events": [event_to_dict(event) for event in events],
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        for event in events:
+            print(f"{event.created_at}  {event.type}  {event.message}")
+    return 0
+
+
+def _handle_session_approve(args: argparse.Namespace, config: HarnessConfig) -> int:
+    service = _session_application_service(config)
+    try:
+        result = service.decide_approval(
+            args.approval_id,
+            args.decision,
+            project_expiry_seconds=args.expires_in_seconds,
+        )
+    except KeyError as exc:
+        raise ValueError(f"Unknown approval: {exc.args[0]}") from exc
+    payload = {
+        "approval": approval_request_to_dict(result.approval),
+        "job_status": result.job.status.value if result.job else None,
+        "retry_action": result.retry_action,
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Approval {result.approval.id}: {result.approval.status.value}")
+        if result.job is not None:
+            print(f"Job: {result.job.id} ({result.job.status.value})")
+    return 0
+
+
+def _session_application_service(config: HarnessConfig) -> SessionApplicationService:
+    registry = create_default_registry()
+    store = FilesystemHarnessSessionStore(config.data_dir)
+    runner = HarnessSessionRunner(registry=registry, config=config, store=store)
+    runtime_store = RuntimeCoordinationStore(config.data_dir)
+    dispatcher = DurableJobDispatcher(
+        runtime_store=runtime_store,
+        payload_store=DurableJobPayloadStore(config.data_dir),
+        runner=runner,
+    )
+    return SessionApplicationService(
+        runner=runner,
+        settings_store=HarnessSettingsStore(config.data_dir, config),
+        runtime_store=runtime_store,
+        dispatcher=dispatcher,
+    )
+
+
+def _defined_values(**values: Any) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if value is not None}
 
 
 def _handle_runtime_inspect(args: argparse.Namespace, config: HarnessConfig) -> int:
@@ -2035,66 +2237,36 @@ def _stop_ui_worker(process: subprocess.Popen[bytes]) -> None:
 
 
 def _handle_harness_scaffold(args: argparse.Namespace, config: HarnessConfig) -> int:
-    class_name = "".join(part.title() for part in args.harness_id.split("-"))
-    print(
-        f'''from gpt2giga_harness.harnesses.base import BaseHarness
-from gpt2giga_harness.types import (
-    Availability,
-    HarnessCapability,
-    HarnessContext,
-    HarnessRequest,
-    HarnessResult,
-    HarnessSpec,
-)
-
-
-class {class_name}Harness(BaseHarness):
-    @classmethod
-    def spec(cls) -> HarnessSpec:
-        return HarnessSpec(
-            id="{args.harness_id}",
-            title="{class_name}",
-            kind="custom",
-            description="Describe this harness",
-            capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
-            icon="plug",
-            supports_workspace=True,
-            supports_attachments=False,
-            tags=("plugin",),
-            config_schema={{
-                "type": "object",
-                "properties": {{
-                    "endpoint": {{
-                        "type": "string",
-                        "title": "Endpoint",
-                        "description": "Optional local service URL.",
-                    }},
-                    "dry_run": {{
-                        "type": "boolean",
-                        "title": "Dry run",
-                        "default": True,
-                    }},
-                }},
-                "additionalProperties": False,
-            }},
-            metadata={{
-                "package": "my-package",
-                "version": "0.1.0",
-            }},
-        )
-
-    def availability(self) -> Availability:
-        return Availability.available("custom harness")
-
-    def run(
-        self,
-        request: HarnessRequest,
-        context: HarnessContext,
-    ) -> HarnessResult:
-        return HarnessResult(ok=False, text="", error="not implemented")
-'''
-    )
+    if args.output is None:
+        print(render_adapter_module(args.harness_id), end="")
+        return 0
+    try:
+        result = scaffold_adapter_package(args.harness_id, args.output)
+    except FileExistsError as exc:
+        raise ValueError(str(exc)) from exc
+    print(f"Created adapter scaffold: {result.root}")
+    print(f"Package: {result.package_name}")
+    print(f"Files: {len(result.files)}")
     return 0
+
+
+def _handle_harness_conformance(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    subject = load_installed_conformance_subject(args.harness_id)
+    report = run_adapter_conformance(subject)
+    payload = adapter_conformance_report_to_dict(report)
+    if args.json:
+        _print_json(payload)
+    else:
+        print(
+            f"Adapter {report.adapter_id} {report.adapter_version}: "
+            f"{'passed' if report.ok else 'failed'}"
+        )
+        for result in report.results:
+            print(f"- {result.claim.value}: {result.status}")
+    return 0 if report.ok else 1
 
 
 def _run_harness(
@@ -2118,6 +2290,9 @@ def _run_harness(
     invocation_mode = (
         HarnessInvocationMode.NATIVE if native else HarnessInvocationMode.HEADLESS
     )
+    execution_transport = (
+        ExecutionTransport.NATIVE_TERMINAL if native else ExecutionTransport.ONE_SHOT
+    )
     request = HarnessRequest(
         prompt=prompt,
         model=model,
@@ -2127,6 +2302,7 @@ def _run_harness(
         ),
         mode=mode,
         invocation_mode=invocation_mode,
+        execution_transport=execution_transport,
         workspace=resolve_workspace(workspace),
         extra=_run_extra(dry_run=dry_run, workspace_policy=workspace_policy),
     )
@@ -2139,6 +2315,7 @@ def _run_harness(
             registry,
             harness_id=harness_id,
             invocation_mode=invocation_mode,
+            execution_transport=execution_transport,
             api_mode=request.api_mode,
             model=request.model or config.default_model,
             mode=request.mode,

@@ -18,16 +18,16 @@ from gpt2giga_harness.ui.cockpit_v2 import (
 )
 
 
-def _client() -> TestClient:
+def _client(data_dir) -> TestClient:
     return TestClient(
         create_app(
-            HarnessConfig(),
+            HarnessConfig(data_dir=str(data_dir)),
             registry=create_default_registry(include_entry_points=False),
         )
     )
 
 
-def test_cockpit_v2_manifest_binds_hashed_split_and_precompressed_assets():
+def test_cockpit_v2_manifest_binds_hashed_split_identity_assets():
     manifest = load_cockpit_v2_manifest()
 
     assert manifest.entry == "index.html"
@@ -37,16 +37,8 @@ def test_cockpit_v2_manifest_binds_hashed_split_and_precompressed_assets():
     assert any(name.startswith("assets/markdown-") for name in manifest.assets)
     assert any(name.startswith("assets/raw-evidence-") for name in manifest.assets)
     assert all(
-        asset.gzip_name is not None and asset.brotli_name is not None
-        for name, asset in manifest.assets.items()
-        if not name.endswith(".woff2")
-    )
-    assert all(
-        asset.media_type == "font/woff2"
-        and asset.gzip_name is None
-        and asset.brotli_name is None
-        for name, asset in manifest.assets.items()
-        if name.endswith(".woff2")
+        asset.gzip_name is None and asset.brotli_name is None
+        for asset in manifest.assets.values()
     )
     assert "/cockpit-v2/assets/" in load_cockpit_v2_shell()
 
@@ -65,8 +57,8 @@ def test_cockpit_v2_loader_rejects_unknown_and_direct_compressed_paths():
         load_cockpit_v2_asset("../manifest.json")
 
 
-def test_cockpit_v2_is_default_and_legacy_remains_explicit_fallback():
-    client = _client()
+def test_cockpit_v2_is_default_and_legacy_remains_explicit_fallback(tmp_path):
+    client = _client(tmp_path)
 
     default_redirect = client.get("/", follow_redirects=False)
     cockpit_default = client.get("/")
@@ -111,16 +103,18 @@ def test_cockpit_v2_is_default_and_legacy_remains_explicit_fallback():
         ("/approvals", "/cockpit-v2/runs"),
     ),
 )
-def test_legacy_default_deep_links_redirect_locally(legacy_path, cockpit_path):
-    response = _client().get(legacy_path, follow_redirects=False)
+def test_legacy_default_deep_links_redirect_locally(
+    legacy_path, cockpit_path, tmp_path
+):
+    response = _client(tmp_path).get(legacy_path, follow_redirects=False)
 
     assert response.status_code == 307
     assert response.headers["location"] == cockpit_path
     assert response.headers["cache-control"] == "no-cache"
 
 
-def test_legacy_selected_deep_link_cannot_set_redirect_authority():
-    response = _client().get(
+def test_legacy_selected_deep_link_cannot_set_redirect_authority(tmp_path):
+    response = _client(tmp_path).get(
         "/workflows/%5C%5Cevil.example",
         follow_redirects=False,
     )
@@ -149,15 +143,15 @@ def test_legacy_selected_deep_link_cannot_set_redirect_authority():
         "/cockpit-v2/integrations/doctor",
     ),
 )
-def test_cockpit_v2_remaining_surface_deep_links_are_preserved(path):
-    response = _client().get(path)
+def test_cockpit_v2_remaining_surface_deep_links_are_preserved(path, tmp_path):
+    response = _client(tmp_path).get(path)
 
     assert response.status_code == 200
     assert "gpt2giga Harness — Cockpit V2" in response.text
 
 
-def test_cockpit_v2_serves_negotiated_immutable_assets():
-    client = _client()
+def test_cockpit_v2_serves_negotiated_immutable_assets(tmp_path):
+    client = _client(tmp_path)
     manifest = load_cockpit_v2_manifest()
     javascript = next(name for name in manifest.initial if name.endswith(".js"))
 
@@ -171,7 +165,7 @@ def test_cockpit_v2_serves_negotiated_immutable_assets():
     )
 
     assert response.status_code == 200
-    assert response.headers["content-encoding"] == "br"
+    assert response.headers["content-encoding"] == "gzip"
     assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert response.headers["vary"] == "Accept-Encoding"
     assert identity.status_code == 200
@@ -181,8 +175,8 @@ def test_cockpit_v2_serves_negotiated_immutable_assets():
     assert client.get("/cockpit-v2/assets/../manifest.json").status_code == 404
 
 
-def test_cockpit_v2_serves_uncompressed_fonts_when_browser_accepts_brotli():
-    client = _client()
+def test_cockpit_v2_serves_uncompressed_fonts_when_browser_accepts_brotli(tmp_path):
+    client = _client(tmp_path)
     manifest = load_cockpit_v2_manifest()
     font = next(name for name in manifest.assets if name.endswith(".woff2"))
 
@@ -197,7 +191,9 @@ def test_cockpit_v2_serves_uncompressed_fonts_when_browser_accepts_brotli():
     assert len(response.content) == manifest.assets[font].byte_count
 
 
-def test_cockpit_v2_manifest_failure_is_clear_and_keeps_legacy_available(monkeypatch):
+def test_cockpit_v2_manifest_failure_is_clear_and_keeps_legacy_available(
+    monkeypatch, tmp_path
+):
     from gpt2giga_harness.ui import routers
     from gpt2giga_harness.ui.cockpit_v2 import CockpitV2UnavailableError
 
@@ -205,7 +201,7 @@ def test_cockpit_v2_manifest_failure_is_clear_and_keeps_legacy_available(monkeyp
         raise CockpitV2UnavailableError("missing")
 
     monkeypatch.setattr(routers.shell, "load_cockpit_v2_shell", unavailable)
-    client = _client()
+    client = _client(tmp_path)
 
     failed = client.get("/cockpit-v2/work")
 

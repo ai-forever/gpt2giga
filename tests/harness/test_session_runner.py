@@ -16,6 +16,7 @@ from gpt2giga_harness.project_memory import FilesystemProjectMemoryStore
 from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga_harness.sessions.conversation import active_conversation_messages
 from gpt2giga_harness.sessions.models import HarnessMessage
 from gpt2giga_harness.sessions.store import new_id, utc_now
 from gpt2giga_harness.types import (
@@ -63,6 +64,41 @@ def test_session_runner_create_and_run_persists_success():
     assert result.run.metadata["preflight"]["ok"] is True
     assert result.run.metadata["preflight"]["context_budget"]["prompt_chars"] == 5
     assert bundle.raw_requests[0].payload["preflight"]["ok"] is True
+
+
+def test_session_runner_edits_latest_user_turn_without_replaying_old_answer():
+    harness = _CaptureHarness()
+    runner = _runner(harness)
+    session = runner.create_session(default_harness_id="capture")
+    runner.run_in_session(session.id, {"harness_id": "capture", "prompt": "first"})
+    runner.run_in_session(session.id, {"harness_id": "capture", "prompt": "old"})
+    retained = runner.store.list_messages(session.id)
+    edited = next(message for message in reversed(retained) if message.role == "user")
+
+    result = runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "capture",
+            "prompt": "replacement",
+            "extra": {"edit_message_id": edited.id},
+        },
+    )
+
+    active = active_conversation_messages(result.bundle.messages)
+    assert [message.content for message in active] == [
+        "first",
+        "answer: first",
+        "replacement",
+        "answer: replacement",
+    ]
+    assert len(result.bundle.messages) == 6
+    assert result.run.metadata["edited_from_message_id"] == edited.id
+    assert harness.last_request is not None
+    assert [message.content for message in harness.last_request.messages] == [
+        "first",
+        "answer: first",
+        "replacement",
+    ]
 
 
 def test_session_runner_blocks_private_key_before_harness_invocation():
@@ -116,6 +152,7 @@ def test_session_runner_persists_structured_thread_and_rejects_identity_change(
         "continue",
     ]
     assert harness.requests[1].extra["continuation"]["history_replayed"] is False
+    assert harness.requests[1].extra["continuation"]["cli_version"] == "unknown"
     assert second.session.metadata["app_server_thread"]["thread_id"] == "thread-1"
 
     with pytest.raises(ValueError, match="fork explicitly"):
@@ -131,6 +168,55 @@ def test_session_runner_persists_structured_thread_and_rejects_identity_change(
     assert len(harness.requests) == 2
     assert len(runner.store.list_runs(session.id)) == 2
     assert len(runner.store.list_messages(session.id)) == 4
+
+
+def test_session_runner_edit_forks_codex_before_the_replaced_turn(tmp_path):
+    harness = _StructuredThreadHarness()
+    runner = _runner(harness, data_dir=tmp_path / "data")
+    session = runner.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+        default_model="GigaChat-2-Max",
+    )
+    runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "codex-cli",
+            "prompt": "first",
+            "model": "GigaChat-2-Max",
+            "stream": True,
+        },
+    )
+    runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "codex-cli",
+            "prompt": "old second",
+            "model": "GigaChat-2-Max",
+            "stream": True,
+        },
+    )
+    edited = next(
+        message
+        for message in reversed(runner.store.list_messages(session.id))
+        if message.role == "user"
+    )
+
+    runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "codex-cli",
+            "prompt": "new second",
+            "model": "GigaChat-2-Max",
+            "stream": True,
+            "extra": {"edit_message_id": edited.id},
+        },
+    )
+
+    continuation = harness.requests[-1].extra["continuation"]
+    assert continuation["action"] == "fork"
+    assert continuation["fork_thread_id"] == "thread-1"
+    assert continuation["fork_turn_id"] == "turn-1"
 
 
 def test_session_runner_passes_and_records_selected_builtin_tools():
@@ -389,6 +475,30 @@ def test_durable_worker_reuses_submission_readiness_for_retry_without_second_pro
 
     assert calls == 1
     assert runner.store.get_run(retry_run_id).status.value == "succeeded"
+
+
+def test_durable_runtime_identity_reaches_provider_driver_request():
+    harness = _CaptureHarness()
+    runner = _runner(harness)
+    session = runner.create_session(default_harness_id="capture")
+
+    runner.run_in_session(
+        session.id,
+        {"harness_id": "capture", "prompt": "durable identity"},
+        runtime_metadata={
+            "job_id": "job-1",
+            "attempt_id": "attempt-1",
+            "worker_id": "worker-1",
+        },
+        durable=True,
+    )
+
+    assert harness.last_request is not None
+    assert harness.last_request.extra["runtime"] == {
+        "job_id": "job-1",
+        "attempt_id": "attempt-1",
+        "worker_id": "worker-1",
+    }
 
 
 def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):

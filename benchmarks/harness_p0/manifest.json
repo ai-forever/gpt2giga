@@ -4,7 +4,7 @@
   "comparison_id": "harness-omnigent-p0-2026-07-14-v1",
   "frozen_at": "2026-07-14T12:47:57Z",
   "specification": {
-    "path": "docs/internal/HARNESS_P0_COMPARATIVE_WORKFLOW_SPEC.md",
+    "path": "benchmarks/harness_p0/specification.md",
     "sha256": "f60059820bf31b1d96132c51d86c4d650d5832690183c2122065673ba2094225"
   },
   "fixture": {

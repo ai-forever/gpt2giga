@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-07-18",
+  "minimum_cli_version": "2.1.51",
+  "sources": {
+    "remote_control": {
+      "url": "https://code.claude.com/docs/en/remote-control",
+      "claims": [
+        "server_command",
+        "interactive_flag",
+        "attach_slash_command",
+        "disconnect_toggle",
+        "claude_ai_auth_required",
+        "api_keys_unsupported",
+        "provider_owned_local_process",
+        "provider_session_list_fallback",
+        "provider_url_not_machine_readable"
+      ]
+    },
+    "commands": {
+      "url": "https://code.claude.com/docs/en/commands",
+      "claims": [
+        "desktop_slash_command",
+        "exit_slash_command"
+      ]
+    }
+  }
+}

@@ -31,6 +31,7 @@ from gpt2giga_harness.arena import (
     queue_arena_follow_up,
     run_arena,
 )
+from gpt2giga_harness.application import SessionApplicationService
 from gpt2giga_harness import proxy
 from gpt2giga_harness.attachments import (
     AttachmentLimits,
@@ -81,6 +82,7 @@ from gpt2giga_harness.editor import (
     execute_editor_plan,
     workspace_for_run,
 )
+from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
     NativePromptDelivery,
@@ -213,6 +215,11 @@ from gpt2giga_harness.cli_capabilities import (
     CliCapabilitySnapshot,
     cli_capability_snapshot_to_dict,
 )
+from gpt2giga_harness.claude_handoff import (
+    ClaudeHandoffError,
+    claude_execution_surfaces_to_dict,
+    claude_handoff_capability_to_dict,
+)
 from gpt2giga_harness.types import (
     GigaChatApiMode,
     HarnessCapability,
@@ -241,6 +248,9 @@ from gpt2giga_harness.ui.routers.approvals import router as approvals_router
 from gpt2giga_harness.ui.routers.cockpit import router as cockpit_router
 from gpt2giga_harness.ui.routers.evaluate import router as evaluate_router
 from gpt2giga_harness.ui.routers.files import create_file_preview_router
+from gpt2giga_harness.ui.routers.provider_handoffs import (
+    create_provider_handoff_router,
+)
 from gpt2giga_harness.ui.routers.tools import router as tools_router
 from gpt2giga_harness.ui.routers.workflows import router as workflows_router
 from gpt2giga_harness.ui.routers.shell import create_shell_router
@@ -264,6 +274,7 @@ from gpt2giga_harness.workspace import (
     workspace_file_metadata,
     workspace_tree,
 )
+from gpt2giga_harness.workbench_execution import workbench_transport_projection
 
 
 NATIVE_SUBMIT_KEY_DELAY_SECONDS = 0.05
@@ -329,6 +340,12 @@ def create_app(
         and isinstance(store, FilesystemHarnessSessionStore)
         else None
     )
+    session_service = SessionApplicationService(
+        runner=runner,
+        settings_store=settings_store,
+        runtime_store=runtime_store,
+        dispatcher=durable_dispatcher,
+    )
     policy_engine = PolicyEngine(runtime_store)
     active_headless_runs: dict[str, _ActiveHeadlessRun] = {}
     async_diagnostics = AsyncExecutionDiagnostics()
@@ -364,6 +381,7 @@ def create_app(
     app.state.harness_runtime_store = runtime_store
     app.state.harness_runtime_reconciliation = reconciliation_report
     app.state.harness_session_runner = runner
+    app.state.harness_session_service = session_service
     app.state.harness_job_dispatcher = durable_dispatcher
     app.state.harness_policy_engine = policy_engine
     app.state.harness_attachment_store = attachment_store
@@ -476,6 +494,23 @@ def create_app(
                 spec
             )
             capability_probe = getattr(harness, "capability_probe", None)
+            provider_handoff_probe = getattr(
+                harness, "provider_handoff_capability", None
+            )
+            provider_handoff = None
+            execution_surfaces: list[dict[str, Any]] = []
+            if callable(provider_handoff_probe):
+                try:
+                    handoff_capability = provider_handoff_probe()
+                except ClaudeHandoffError:
+                    handoff_capability = None
+                if handoff_capability is not None:
+                    provider_handoff = claude_handoff_capability_to_dict(
+                        handoff_capability
+                    )
+                    execution_surfaces = claude_execution_surfaces_to_dict(
+                        handoff_capability
+                    )
             harness_items.append(
                 {
                     "spec": spec_to_dict(spec),
@@ -485,6 +520,9 @@ def create_app(
                         if callable(capability_probe)
                         else None
                     ),
+                    "provider_handoff": provider_handoff,
+                    "execution_surfaces": execution_surfaces,
+                    "workbench_transport": workbench_transport_projection(harness),
                     "validation": harness_validation_report_to_dict(validation),
                 }
             )
@@ -502,6 +540,7 @@ def create_app(
             "default_model": harness_defaults.default_model,
             "default_api_mode": harness_defaults.default_api_mode,
             "default_mode": harness_defaults.mode,
+            "execution_transport": harness_defaults.execution_transport,
             "invocation_mode": harness_defaults.invocation_mode,
             "workspace_policy": harness_defaults.workspace_policy,
             "permission_profile": harness_defaults.permission_profile,
@@ -945,6 +984,7 @@ def create_app(
                 api_mode=payload.get("api_mode"),
                 mode=_optional_text(payload.get("mode")),
                 workspace_policy=_optional_text(payload.get("workspace_policy")),
+                execution_transport=_optional_text(payload.get("execution_transport")),
                 dry_run=bool(payload.get("dry_run")),
                 repetitions=int(payload.get("repetitions") or 1),
                 **(
@@ -1056,8 +1096,12 @@ def create_app(
         if payload.get("durable") is False:
             durable = False
         try:
-            report = runner.preflight(
+            prepared = session_service.prepare_turn_payload(
                 payload,
+                session_id=_optional_text(payload.get("session_id")),
+            )
+            report = runner.preflight(
+                prepared,
                 session_id=_optional_text(payload.get("session_id")),
                 durable=durable,
             )
@@ -1132,24 +1176,8 @@ def create_app(
 
     @app.post("/api/sessions")
     def create_session(payload: dict[str, Any] = Body(default_factory=dict)):
-        harness_defaults = settings_store.load().defaults
         try:
-            session = runner.create_session(
-                title=_optional_text(payload.get("title")),
-                workspace=_optional_text(payload.get("workspace")),
-                default_harness_id=str(
-                    payload.get("harness_id") or harness_defaults.default_harness_id
-                ),
-                default_model=(
-                    _optional_text(payload.get("model"))
-                    if "model" in payload
-                    else harness_defaults.default_model
-                ),
-                default_api_mode=(
-                    payload.get("api_mode") or harness_defaults.default_api_mode
-                ),
-                default_mode=str(payload.get("mode") or harness_defaults.mode),
-            )
+            session = session_service.create_session(payload)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"session": _session_summary(store, session.id)}
@@ -2030,25 +2058,14 @@ def create_app(
         session_id: str,
         payload: Mapping[str, Any],
     ) -> HarnessRun:
-        effective_payload = dict(payload)
-        extra = _metadata_mapping(payload.get("extra"))
-        if (
-            bool(extra.get("generate_session_title"))
-            and _optional_text(extra.get("session_title_model")) is None
-        ):
-            settings_snapshot = await run_in_threadpool(settings_store.load)
-            title_model = settings_snapshot.defaults.default_title_model
-            if title_model is not None:
-                extra["session_title_model"] = title_model
-        effective_payload["extra"] = extra
         if durable_dispatcher is not None:
             idempotency_key = str(
-                effective_payload.get("idempotency_key") or f"ui_{new_id('submit')}"
+                payload.get("idempotency_key") or f"ui_{new_id('submit')}"
             )
             submission = await run_in_threadpool(
-                durable_dispatcher.submit,
+                session_service.submit_turn,
                 session_id,
-                effective_payload,
+                payload,
                 idempotency_key=idempotency_key,
                 origin="interactive",
             )
@@ -2058,9 +2075,9 @@ def create_app(
         cancel_event = threading.Event()
         task = asyncio.create_task(
             run_in_threadpool(
-                runner.run_in_session,
+                session_service.run_turn,
                 session_id,
-                effective_payload,
+                payload,
                 cancel_event=cancel_event,
             )
         )
@@ -2080,7 +2097,7 @@ def create_app(
         return run
 
     def _run_start_response(run: HarnessRun) -> dict[str, Any]:
-        events = store.list_events(run.session_id, run_id=run.id)
+        events = session_service.list_run_events(run.id)
         payload = {
             "session": _session_summary(store, run.session_id),
             "run": run_to_dict(run),
@@ -2088,7 +2105,7 @@ def create_app(
             "stream_url": f"/api/runs/{run.id}/events/stream",
             "cancel_url": f"/api/runs/{run.id}/cancel",
         }
-        job = runtime_store.find_job_for_run(run.id) if runtime_store else None
+        job = session_service.find_job_for_run(run.id)
         if job is not None:
             payload["job"] = job_to_dict(job)
         return payload
@@ -2111,27 +2128,11 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
-            settings_snapshot = await run_in_threadpool(settings_store.load)
-            harness_defaults = settings_snapshot.defaults
-            harness_id = str(
-                payload.get("harness_id") or harness_defaults.default_harness_id
-            )
-            registry.get(harness_id)
             session = await run_in_threadpool(
-                runner.create_session,
-                title=_optional_text(payload.get("title"))
-                or title_from_prompt(str(payload.get("prompt") or "")),
-                workspace=_optional_text(payload.get("workspace")),
-                default_harness_id=harness_id,
-                default_model=(
-                    _optional_text(payload.get("model"))
-                    if "model" in payload
-                    else harness_defaults.default_model
-                ),
-                default_api_mode=(
-                    payload.get("api_mode") or harness_defaults.default_api_mode
-                ),
-                default_mode=str(payload.get("mode") or harness_defaults.mode),
+                session_service.create_session,
+                payload,
+                title_from_turn=True,
+                validate_harness=True,
             )
             run = await _start_headless_run(session.id, payload)
         except KeyError as exc:
@@ -2168,7 +2169,7 @@ def create_app(
         last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
     ) -> StreamingResponse:
         try:
-            initial_run = await run_stream_offload(store.get_run, run_id)
+            initial_run = await run_stream_offload(session_service.get_run, run_id)
         except RunNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Run not found") from exc
         try:
@@ -2195,8 +2196,7 @@ def create_app(
                 while True:
                     try:
                         current_run, page = await run_stream_offload(
-                            _read_run_event_tail,
-                            store,
+                            session_service.read_run_event_tail,
                             run_id,
                             current_offset,
                         )
@@ -2446,6 +2446,59 @@ def create_app(
             )
             if "stream" in payload:
                 replay_payload["stream"] = bool(payload.get("stream"))
+            if (
+                replay_payload.get("execution_transport")
+                == ExecutionTransport.NATIVE_STRUCTURED.value
+            ):
+                if durable_dispatcher is None:
+                    raise ValueError(
+                        "native_structured replay requires the durable runtime"
+                    )
+                if run.mode == "edit":
+                    replay_payload["workspace_policy"] = "worktree"
+                replay_session = runner.create_session(
+                    title=f"Replay: {title_from_prompt(run.prompt)}",
+                    workspace=run.workspace,
+                    default_harness_id=run.harness_id,
+                    default_model=run.model,
+                    default_api_mode=run.api_mode,
+                    default_mode=run.mode,
+                )
+                replay_extra = replay_payload.get("extra")
+                replay_source_value = (
+                    replay_extra.get("replay_source")
+                    if isinstance(replay_extra, Mapping)
+                    else None
+                )
+                replay_source = (
+                    dict(replay_source_value)
+                    if isinstance(replay_source_value, Mapping)
+                    else {}
+                )
+                replay_session = store.update_session(
+                    replay_session.id,
+                    metadata={
+                        **dict(replay_session.metadata),
+                        "replay_source": replay_source,
+                    },
+                )
+                submission = durable_dispatcher.submit(
+                    replay_session.id,
+                    replay_payload,
+                    idempotency_key=f"replay:{run.id}:{replay_session.id}",
+                    origin="manual",
+                )
+                return {
+                    "session": session_to_dict(replay_session),
+                    "run": run_to_dict(submission.queued.run),
+                    "source_run": run_to_dict(run),
+                    "replay_request": replay_payload,
+                    "replay": {
+                        "source": replay_source,
+                        "destination_harness_session_id": replay_session.id,
+                        "provider_session_pending": True,
+                    },
+                }
             result = runner.run_in_session(run.session_id, replay_payload)
         except RunNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Run not found") from exc
@@ -2654,7 +2707,7 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
-            result = runner.create_and_run(payload)
+            result = session_service.create_and_run(payload)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
         except ValueError as exc:
@@ -2667,7 +2720,7 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
-            result = runner.run_in_session(session_id, payload)
+            result = session_service.run_turn(session_id, payload)
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except KeyError as exc:
@@ -2875,10 +2928,39 @@ def create_app(
                     "turn_index": max(int(arena.metadata.get("turn_count") or 0), 0),
                 },
             }
+            target_session_id = child.session_id
+            if (
+                replay_payload.get("execution_transport")
+                == ExecutionTransport.NATIVE_STRUCTURED.value
+            ):
+                if durable_dispatcher is None:
+                    raise ValueError(
+                        "native_structured Arena retry requires the durable runtime"
+                    )
+                if source_run.mode == "edit":
+                    replay_payload["workspace_policy"] = "worktree"
+                retry_session = runner.create_session(
+                    title=f"Arena retry: {title_from_prompt(source_run.prompt)}",
+                    workspace=source_run.workspace,
+                    default_harness_id=source_run.harness_id,
+                    default_model=source_run.model,
+                    default_api_mode=source_run.api_mode,
+                    default_mode=source_run.mode,
+                )
+                retry_session = store.update_session(
+                    retry_session.id,
+                    metadata={
+                        **dict(retry_session.metadata),
+                        "arena_retry_source_run_id": source_run.id,
+                        "arena_id": arena.id,
+                        "arena_child_index": child.index,
+                    },
+                )
+                target_session_id = retry_session.id
             if durable_dispatcher is not None:
                 submission = await run_in_threadpool(
                     durable_dispatcher.submit,
-                    child.session_id,
+                    target_session_id,
                     replay_payload,
                     idempotency_key=(
                         f"arena:{arena.id}:{child.index}:retry:{source_run.id}"
@@ -2888,18 +2970,18 @@ def create_app(
                 replacement = HarnessArenaChildRun(
                     harness_id=child.harness_id,
                     index=child.index,
-                    session_id=child.session_id,
+                    session_id=target_session_id,
                     run_id=submission.queued.run.id,
                     status="queued",
                 )
             else:
                 result = await run_in_threadpool(
-                    runner.run_in_session, child.session_id, replay_payload
+                    runner.run_in_session, target_session_id, replay_payload
                 )
                 replacement = HarnessArenaChildRun(
                     harness_id=child.harness_id,
                     index=child.index,
-                    session_id=child.session_id,
+                    session_id=target_session_id,
                     run_id=result.run.id,
                     status=result.run.status.value,
                     error=result.run.error,
@@ -3055,6 +3137,7 @@ def create_app(
     app.include_router(schedules_router)
     app.include_router(settings_router)
     app.include_router(create_file_preview_router(config.data_dir))
+    app.include_router(create_provider_handoff_router(registry))
     # The shell catch-all must remain last so unknown API and asset paths never
     # become HTML responses.
     app.include_router(create_shell_router(ui_security))
@@ -3149,6 +3232,7 @@ def _fork_session_from_run(
         "forked_from_run_id": run.id,
     }
     metadata.pop("app_server_thread", None)
+    metadata.pop("structured_session_link", None)
     metadata.pop("app_server_fork", None)
     if source_thread.get("thread_id"):
         metadata["app_server_fork"] = {
@@ -3279,25 +3363,6 @@ def _run_resnapshot_sse(run: HarnessRun, cursor: str) -> str:
     }
     data = json.dumps(payload, ensure_ascii=False)
     return f"event: resnapshot\nid: {cursor}\ndata: {data}\n\n"
-
-
-def _read_run_event_tail(
-    store: HarnessSessionStore,
-    run_id: str,
-    offset: int,
-):
-    run = store.get_run(run_id)
-    reader = getattr(store, "list_event_tail_page", None)
-    if not callable(reader):
-        raise ValueError("session store does not support durable event tails")
-    page = reader(
-        run.session_id,
-        run_id=run.id,
-        offset=offset,
-        limit=100,
-        max_bytes=1024 * 1024,
-    )
-    return run, page
 
 
 def _resolve_run_stream_cursor(

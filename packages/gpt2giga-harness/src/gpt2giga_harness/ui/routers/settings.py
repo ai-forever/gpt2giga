@@ -23,6 +23,7 @@ from gpt2giga_harness.settings import (
 )
 from gpt2giga_harness.types import parse_api_mode
 from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
+from gpt2giga_harness.workbench_execution import workbench_transport_projection
 
 
 router = APIRouter(route_class=ConformantAPIRoute)
@@ -56,6 +57,7 @@ def settings_read_model(
                 "title": spec.title,
                 "native_supported": spec.supports_native_sessions,
                 "status": availability.status.value,
+                "workbench_transport": workbench_transport_projection(harness),
             }
         )
     models = list(
@@ -217,6 +219,24 @@ def _validate_defaults(request: Request, values: Mapping[str, Any]) -> dict[str,
             errors["invocation_mode"] = (
                 "selected harness does not support native sessions"
             )
+    transport = values.get("execution_transport")
+    if transport not in {"native_structured", "native_terminal", "one_shot"}:
+        errors["execution_transport"] = (
+            "expected native_structured, native_terminal, or one_shot"
+        )
+    elif transport == "native_terminal" and harness is not None:
+        if not harness.spec().supports_native_sessions:
+            errors["execution_transport"] = (
+                "selected harness does not support native terminal sessions"
+            )
+    if transport == "native_terminal" and invocation != "native":
+        errors.setdefault(
+            "invocation_mode", "native_terminal requires native invocation"
+        )
+    elif transport in {"native_structured", "one_shot"} and invocation != "headless":
+        errors.setdefault(
+            "invocation_mode", f"{transport} requires headless invocation"
+        )
     if values.get("mode") not in {"plan", "act"}:
         errors["mode"] = "expected plan or act"
     if values.get("workspace_policy") not in {"auto", "current", "worktree"}:

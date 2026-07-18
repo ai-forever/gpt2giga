@@ -1,0 +1,31 @@
+{
+  "sdk_version": "0.2.122",
+  "system_cli_path": "/opt/homebrew/bin/claude",
+  "system_cli_version": "2.1.212 (Claude Code)",
+  "bundled_cli_path": "claude_agent_sdk/_bundled/claude",
+  "bundled_cli_version": "2.1.214 (Claude Code)",
+  "client_members": [
+    "connect",
+    "disconnect",
+    "get_mcp_status",
+    "interrupt",
+    "query",
+    "receive_response",
+    "reconnect_mcp_server",
+    "set_model",
+    "toggle_mcp_server"
+  ],
+  "option_fields": [
+    "can_use_tool",
+    "cli_path",
+    "env",
+    "fork_session",
+    "hooks",
+    "mcp_servers",
+    "resume",
+    "setting_sources",
+    "strict_mcp_config"
+  ],
+  "python_defer_shape": true,
+  "python_durable_defer_documented": false
+}

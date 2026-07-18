@@ -9,6 +9,7 @@ from typing import Any
 from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
 from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.runtime.capabilities import negotiate_execution_capabilities
+from gpt2giga_harness.runtime.structured import DurableStructuredHarness
 from gpt2giga_harness.types import AvailabilityStatus
 
 _CLI_BINARIES = {
@@ -30,6 +31,7 @@ def build_worker_fingerprint(registry: HarnessRegistry) -> dict[str, Any]:
         binary_path = resolution.executable if resolution is not None else None
         probe = _capability_probe(harness)
         profile_features = _agent_profile_features(spec.id, probe)
+        structured_features = _structured_features(harness)
         harnesses[spec.id] = {
             "available": availability.status is AvailabilityStatus.AVAILABLE,
             "kind": spec.kind,
@@ -41,12 +43,14 @@ def build_worker_fingerprint(registry: HarnessRegistry) -> dict[str, Any]:
             "compatibility": (
                 cli_capability_snapshot_to_dict(probe) if probe is not None else None
             ),
+            "structured_capability_hash": _structured_capability_hash(harness),
             "features": {
                 "structured_events": capabilities.structured_events,
                 "streaming": capabilities.streaming,
                 "cancellation": capabilities.cancellation,
                 "synchronous_fallback": capabilities.synchronous_fallback,
                 **profile_features,
+                **structured_features,
             },
         }
     return {
@@ -87,6 +91,33 @@ def _agent_profile_features(harness_id: str, probe: Any | None) -> dict[str, boo
             harness_id == "claude-code" and capabilities.get("--disallowedTools")
         ),
     }
+
+
+def _structured_features(harness: Any) -> dict[str, bool]:
+    if not isinstance(harness, DurableStructuredHarness):
+        return {"native_structured": False}
+    try:
+        capabilities = harness.durable_structured_capabilities()
+    except Exception:
+        return {"native_structured": False}
+    return {
+        "native_structured": bool(
+            capabilities.structured_events
+            and capabilities.interrupt
+            and capabilities.resume
+            and capabilities.recovery_after_process_loss
+            and (capabilities.live_approvals or capabilities.durable_approval)
+        )
+    }
+
+
+def _structured_capability_hash(harness: Any) -> str | None:
+    if not isinstance(harness, DurableStructuredHarness):
+        return None
+    try:
+        return harness.durable_structured_capabilities().snapshot_hash
+    except Exception:
+        return None
 
 
 def _distribution_version(distribution: str) -> str:
