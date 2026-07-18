@@ -71,6 +71,10 @@ def _ready_execution_readiness(*_args, **_kwargs):
     }
 
 
+def test_cli_ui_allows_cold_worker_fingerprint_startup():
+    assert cli.UI_WORKER_START_TIMEOUT_SECONDS == 10.0
+
+
 def test_cli_ui_starts_and_stops_worker_when_none_is_online(
     capsys,
     monkeypatch,
