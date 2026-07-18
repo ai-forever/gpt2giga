@@ -1,6 +1,6 @@
 [project]
 name = "gpt2giga-harness"
-version = "0.1.0b1"
+version = "0.2.0a1"
 description = "Local agentic control plane for gpt2giga"
 authors = [{ name = "Ruslan Yakupov", email = "rusyak1999@gmail.com" }]
 requires-python = ">=3.10,<4,<3.15"
@@ -20,8 +20,8 @@ dependencies = [
 ]
 
 [project.scripts]
-gpt2giga-harness = "gpt2giga_harness.cli:main"
-giga = "gpt2giga_harness.cli:main"
+gpt2giga-harness = "gpt2giga_harness.entrypoint:main"
+giga = "gpt2giga_harness.entrypoint:main"
 
 [project.entry-points."gpt2giga.harnesses"]
 direct-chat = "gpt2giga_harness.harnesses.direct_chat:DirectChatHarness"
@@ -30,18 +30,34 @@ claude-code = "gpt2giga_harness.harnesses.claude_code:ClaudeCodeHarness"
 gemini-cli = "gpt2giga_harness.harnesses.gemini_cli:GeminiCliHarness"
 echo = "gpt2giga_harness.harnesses.echo:EchoHarness"
 
+[project.entry-points."agent_workbench.harness_adapters.v1"]
+direct-chat = "gpt2giga_harness.harnesses.direct_chat:DirectChatHarness"
+codex-cli = "gpt2giga_harness.harnesses.codex_cli:CodexCliHarness"
+claude-code = "gpt2giga_harness.harnesses.claude_code:ClaudeCodeHarness"
+gemini-cli = "gpt2giga_harness.harnesses.gemini_cli:GeminiCliHarness"
+echo = "gpt2giga_harness.harnesses.echo:EchoHarness"
+
+[project.optional-dependencies]
+claude-sdk = [
+    "claude-agent-sdk>=0.2.122,<0.3",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
 artifacts = [
+    "src/gpt2giga_harness/evidence/**",
     "src/gpt2giga_harness/ui/assets/**",
     "src/gpt2giga_harness/ui/cockpit_v2/assets/**",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gpt2giga_harness"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/frontend"]
 
 [tool.uv.sources]
 gpt2giga = { workspace = true }

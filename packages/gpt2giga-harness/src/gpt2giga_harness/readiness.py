@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from gpt2giga_harness import proxy
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.doctor import (
     _gigachat_check,
     _harness_checks,
@@ -17,6 +18,10 @@ from gpt2giga_harness.doctor import (
 )
 from gpt2giga_harness.native.models import HarnessInvocationMode
 from gpt2giga_harness.registry import HarnessRegistry
+from gpt2giga_harness.runtime.structured import (
+    DurableStructuredAdmissionError,
+    admitted_durable_structured_capabilities,
+)
 from gpt2giga_harness.types import GigaChatApiMode
 from gpt2giga_harness.worktrees import WorkspacePolicy
 
@@ -43,6 +48,7 @@ def build_execution_readiness(
     workspace: str | None,
     workspace_policy: WorkspacePolicy,
     durable: bool,
+    execution_transport: ExecutionTransport | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Project doctor checks onto only the selected pre-spawn execution plan."""
@@ -108,7 +114,18 @@ def build_execution_readiness(
             )
         )
 
-    checks.append(_delivery_check(durable=durable, invocation_mode=invocation_mode))
+    checks.append(
+        _delivery_check(
+            durable=durable,
+            invocation_mode=invocation_mode,
+            execution_transport=execution_transport,
+        )
+    )
+    if execution_transport is ExecutionTransport.NATIVE_STRUCTURED:
+        checks.insert(
+            -1,
+            _structured_transport_check(harness, harness_id=harness_id),
+        )
     if durable:
         checks.append(_required_check(_worker_check(config)))
 
@@ -143,6 +160,11 @@ def build_execution_readiness(
         "plan": {
             "harness_id": harness_id,
             "invocation_mode": invocation_mode.value,
+            **(
+                {"execution_transport": execution_transport.value}
+                if execution_transport is not None
+                else {}
+            ),
             "api_mode": api_mode.value,
             "model": model,
             "mode": mode,
@@ -255,21 +277,75 @@ def _delivery_check(
     *,
     durable: bool,
     invocation_mode: HarnessInvocationMode,
+    execution_transport: ExecutionTransport | None,
 ) -> dict[str, Any]:
-    if durable and invocation_mode is HarnessInvocationMode.NATIVE:
+    if not durable and execution_transport is ExecutionTransport.NATIVE_STRUCTURED:
         return _check(
             "delivery",
             "blocked",
-            "Durable jobs currently support headless invocation only.",
+            "native_structured execution requires the durable worker runtime.",
             remediation=(
                 {
-                    "message": "Choose headless mode or use a synchronous native run.",
+                    "message": "Start a durable worker or choose an explicit fallback transport.",
+                    "command": "giga worker start",
+                },
+            ),
+        )
+    if (
+        durable
+        and invocation_mode is HarnessInvocationMode.NATIVE
+        and execution_transport is not ExecutionTransport.NATIVE_STRUCTURED
+    ):
+        return _check(
+            "delivery",
+            "blocked",
+            "Durable admission excludes native terminal execution.",
+            remediation=(
+                {
+                    "message": (
+                        "Use a synchronous native terminal or select a proven "
+                        "native_structured transport."
+                    ),
                     "command": "giga harness inspect --help",
                 },
             ),
         )
     delivery = "durable worker" if durable else "synchronous caller"
+    if durable and execution_transport is ExecutionTransport.NATIVE_STRUCTURED:
+        delivery = "durable structured-native worker"
     return _check("delivery", "ready", f"Run delivery uses the {delivery} path.")
+
+
+def _structured_transport_check(harness: Any, *, harness_id: str) -> dict[str, Any]:
+    try:
+        capabilities = admitted_durable_structured_capabilities(harness)
+    except (DurableStructuredAdmissionError, TypeError, ValueError):
+        return _check(
+            "native-structured",
+            "blocked",
+            f"{harness_id} has no proven durable native_structured driver.",
+            remediation=(
+                {
+                    "message": (
+                        "Inspect provider readiness, then choose one_shot or "
+                        "native_terminal explicitly if continuity is not required."
+                    ),
+                    "command": f"giga harness inspect {harness_id} --json",
+                },
+            ),
+        )
+    return {
+        **_check(
+            "native-structured",
+            "ready",
+            f"{harness_id} admits provider-native structured continuity.",
+        ),
+        "evidence": {
+            "protocol": capabilities.protocol,
+            "protocol_version": capabilities.protocol_version,
+            "capability_snapshot_hash": capabilities.snapshot_hash,
+        },
+    }
 
 
 def _workspace_policy_check(

@@ -13,7 +13,12 @@ from typing import Any, Mapping
 
 import yaml
 
+from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.project import HarnessProject
+from gpt2giga_harness.runtime.structured import (
+    admitted_durable_structured_capabilities,
+    requested_execution_transport,
+)
 from gpt2giga_harness.runtime.worker import DurableJobDispatcher
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.models import HarnessRun
@@ -125,6 +130,7 @@ class EvalCaseRunResult:
     target_type: str = "harness"
     target_id: str | None = None
     metrics: Mapping[str, Any] = field(default_factory=dict)
+    provenance: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -316,10 +322,16 @@ def run_eval(
     api_mode: GigaChatApiMode | str | None = None,
     mode: str | None = None,
     workspace_policy: str | None = None,
+    execution_transport: str | None = None,
     dry_run: bool = False,
     repetitions: int = 1,
 ) -> HarnessEvalRun:
     """Run a project eval spec against selected harnesses."""
+    if (
+        requested_execution_transport({"execution_transport": execution_transport})
+        is ExecutionTransport.NATIVE_STRUCTURED
+    ):
+        raise ValueError("native_structured eval requires the durable runtime")
     selected_harnesses = _selected_harnesses(
         harness_ids or spec.harnesses or DEFAULT_EVAL_HARNESSES
     )
@@ -373,6 +385,7 @@ def run_eval(
                 repetitions,
                 api_mode=effective_api_mode,
                 adapter_dimensions=adapter_dimensions,
+                execution_transport=None,
             ),
         },
     )
@@ -429,12 +442,16 @@ def queue_eval(
     api_mode: GigaChatApiMode | str | None = None,
     mode: str | None = None,
     workspace_policy: str | None = None,
+    execution_transport: str | None = None,
     dry_run: bool = False,
     repetitions: int = 1,
     origin: str = "manual",
     schedule_id: str | None = None,
 ) -> HarnessEvalRun:
     """Queue every eval case/harness pair as a durable job."""
+    selected_transport = requested_execution_transport(
+        {"execution_transport": execution_transport}
+    )
     selected_harnesses = _selected_harnesses(
         harness_ids or spec.harnesses or DEFAULT_EVAL_HARNESSES
     )
@@ -444,11 +461,21 @@ def queue_eval(
     )
     if not compatible_cells:
         raise ValueError("Eval matrix has no capability-compatible cells")
+    if selected_transport is ExecutionTransport.NATIVE_STRUCTURED:
+        for harness_id in dict.fromkeys(
+            harness_id for _, harness_id in compatible_cells
+        ):
+            admitted_durable_structured_capabilities(runner.registry.get(harness_id))
     effective_model = model or spec.model
     effective_api_mode = parse_api_mode(api_mode or spec.api_mode)
     effective_mode = mode or spec.mode
     effective_workspace_policy = workspace_policy or spec.workspace_policy
     if origin == "scheduled":
+        effective_workspace_policy = "worktree"
+    if (
+        selected_transport is ExecutionTransport.NATIVE_STRUCTURED
+        and effective_mode == "edit"
+    ):
         effective_workspace_policy = "worktree"
     adapter_dimensions = _adapter_eval_dimensions(
         runner.registry,
@@ -484,6 +511,9 @@ def queue_eval(
             "dry_run": dry_run,
             "durable": True,
             "repetitions": repetitions,
+            "execution_transport": (
+                selected_transport.value if selected_transport is not None else None
+            ),
             "adapter_dimensions": adapter_dimensions,
             "config_hash": _spec_config_hash(
                 spec,
@@ -491,6 +521,7 @@ def queue_eval(
                 repetitions,
                 api_mode=effective_api_mode,
                 adapter_dimensions=adapter_dimensions,
+                execution_transport=selected_transport,
             ),
         },
     )
@@ -498,6 +529,30 @@ def queue_eval(
     queued_results: list[EvalCaseRunResult] = []
     for case, harness_id in compatible_cells:
         for repetition in range(1, repetitions + 1):
+            evidence_binding = _eval_evidence_binding(
+                eval_run,
+                case=case,
+                harness_id=harness_id,
+                repetition=repetition,
+            )
+            cell_session = session
+            if selected_transport is ExecutionTransport.NATIVE_STRUCTURED:
+                cell_session = runner.create_session(
+                    title=f"Eval: {spec.name} / {case.id} / {harness_id}",
+                    workspace=project.root,
+                    default_harness_id=harness_id,
+                    default_model=effective_model,
+                    default_api_mode=effective_api_mode,
+                    default_mode=effective_mode,
+                )
+                cell_session = runner.store.update_session(
+                    cell_session.id,
+                    metadata={
+                        **dict(cell_session.metadata),
+                        "eval_source": dict(evidence_binding),
+                        "eval_parent_session_id": session.id,
+                    },
+                )
             payload = {
                 "harness_id": harness_id,
                 "prompt": case.prompt,
@@ -506,6 +561,14 @@ def queue_eval(
                 "mode": effective_mode,
                 "workspace": project.root,
                 "workspace_policy": effective_workspace_policy,
+                "invocation_mode": (
+                    "native"
+                    if selected_transport is ExecutionTransport.NATIVE_STRUCTURED
+                    else "headless"
+                ),
+                "execution_transport": (
+                    selected_transport.value if selected_transport is not None else None
+                ),
                 "dry_run": dry_run,
                 "permission_profile": "unattended" if origin == "scheduled" else None,
                 "schedule_id": schedule_id,
@@ -517,6 +580,7 @@ def queue_eval(
                     "eval_repetition": repetition,
                     "eval_target_type": "harness",
                     "eval_target_id": harness_id,
+                    "eval_evidence_binding": evidence_binding,
                     "eval_checks": [
                         {
                             "type": check.type,
@@ -529,7 +593,7 @@ def queue_eval(
                 },
             }
             submission = dispatcher.submit(
-                session.id,
+                cell_session.id,
                 payload,
                 idempotency_key=(
                     f"eval:{eval_run.id}:{case.id}:{harness_id}:{repetition}"
@@ -543,7 +607,7 @@ def queue_eval(
                     status="queued",
                     ok=False,
                     score=0.0,
-                    session_id=session.id,
+                    session_id=cell_session.id,
                     run_id=submission.queued.run.id,
                     repetition=repetition,
                     target_id=harness_id,
@@ -568,20 +632,41 @@ def sync_durable_eval_case(
     extra = payload.get("extra")
     if not isinstance(extra, Mapping) or not extra.get("eval_run_id"):
         return
+    eval_store = FilesystemHarnessEvalStore(data_dir)
     checks = _parse_checks(extra.get("eval_checks"))
+    evidence_error: str | None = None
+    try:
+        evidence_binding = _validated_eval_evidence_binding(
+            eval_store,
+            payload=payload,
+            run=run,
+        )
+    except (EvalRunNotFoundError, ValueError) as exc:
+        evidence_binding = _mapping(extra.get("eval_evidence_binding"))
+        evidence_error = _redacted_text(str(exc))
     check_results = (
-        evaluate_checks(checks, result_text) if run.status == "succeeded" else ()
+        evaluate_checks(checks, result_text)
+        if run.status == "succeeded" and evidence_error is None
+        else ()
     )
     passed = run.status == "succeeded" and all(item.passed for item in check_results)
+    if evidence_error is not None:
+        passed = False
     score = (
         sum(1 for item in check_results if item.passed) / len(check_results)
         if check_results
         else (1.0 if passed else 0.0)
     )
     status = (
-        "passed" if passed else ("failed" if run.status == "succeeded" else "error")
+        "passed"
+        if passed
+        else (
+            "error"
+            if evidence_error is not None or run.status != "succeeded"
+            else "failed"
+        )
     )
-    FilesystemHarnessEvalStore(data_dir).upsert_result(
+    eval_store.upsert_result(
         str(extra["eval_run_id"]),
         EvalCaseRunResult(
             case_id=str(extra.get("eval_case_id") or "case"),
@@ -593,11 +678,20 @@ def sync_durable_eval_case(
             session_id=run.session_id,
             run_id=run.id,
             output_text=_redacted_text(result_text),
-            error=(None if passed else run.error or "One or more checks failed."),
+            error=(
+                None
+                if passed
+                else evidence_error or run.error or "One or more checks failed."
+            ),
             repetition=_positive_int(extra.get("eval_repetition"), 1),
             target_type=str(extra.get("eval_target_type") or "harness"),
             target_id=str(extra.get("eval_target_id") or run.harness_id),
             metrics=_run_metrics(run),
+            provenance=_eval_result_provenance(
+                run,
+                evidence_binding=evidence_binding,
+                output_text=result_text,
+            ),
         ),
     )
 
@@ -746,6 +840,7 @@ def eval_case_result_to_dict(result: EvalCaseRunResult) -> dict[str, Any]:
         "target_type": result.target_type,
         "target_id": result.target_id or result.harness_id,
         "metrics": dict(redact_for_storage(dict(result.metrics))),
+        "provenance": dict(redact_for_storage(dict(result.provenance))),
     }
 
 
@@ -768,6 +863,7 @@ def eval_case_result_from_dict(data: Mapping[str, Any]) -> EvalCaseRunResult:
         target_type=str(data.get("target_type") or "harness"),
         target_id=_optional_text(data.get("target_id")) or str(data["harness_id"]),
         metrics=_mapping(data.get("metrics")),
+        provenance=_mapping(data.get("provenance")),
     )
 
 
@@ -1359,6 +1455,113 @@ def _positive_int(value: Any, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
+def _eval_evidence_binding(
+    eval_run: HarnessEvalRun,
+    *,
+    case: EvalCaseSpec,
+    harness_id: str,
+    repetition: int,
+) -> dict[str, Any]:
+    checks = [
+        {
+            "type": check.type,
+            "value": check.value,
+            "name": check.name,
+            "case_sensitive": check.case_sensitive,
+        }
+        for check in case.checks
+    ]
+    payload = {
+        "schema_version": 1,
+        "eval_run_id": eval_run.id,
+        "config_hash": _eval_config_hash(eval_run),
+        "case_id": case.id,
+        "harness_id": harness_id,
+        "repetition": repetition,
+        "prompt_sha256": _canonical_hash(redact_for_storage(case.prompt)),
+        "checks_sha256": _canonical_hash(redact_for_storage(checks)),
+    }
+    return {**payload, "binding_hash": _canonical_hash(payload)}
+
+
+def _validated_eval_evidence_binding(
+    eval_store: FilesystemHarnessEvalStore,
+    *,
+    payload: Mapping[str, Any],
+    run: HarnessRun,
+) -> Mapping[str, Any]:
+    extra = _mapping(payload.get("extra"))
+    binding = _mapping(extra.get("eval_evidence_binding"))
+    if not binding:
+        if payload.get("execution_transport") != "native_structured":
+            return {
+                "schema_version": 0,
+                "status": "legacy_unbound",
+                "eval_run_id": _optional_text(extra.get("eval_run_id")),
+                "case_id": _optional_text(extra.get("eval_case_id")),
+                "harness_id": run.harness_id,
+                "repetition": _positive_int(extra.get("eval_repetition"), 1),
+            }
+        raise ValueError("eval evidence binding is missing")
+    supplied_hash = _optional_text(binding.get("binding_hash"))
+    canonical = {key: binding[key] for key in binding if key != "binding_hash"}
+    if supplied_hash != _canonical_hash(canonical):
+        raise ValueError("eval evidence binding hash mismatch")
+    expected = {
+        "eval_run_id": _optional_text(extra.get("eval_run_id")),
+        "case_id": _optional_text(extra.get("eval_case_id")),
+        "harness_id": run.harness_id,
+        "repetition": _positive_int(extra.get("eval_repetition"), 1),
+        "prompt_sha256": _canonical_hash(
+            redact_for_storage(str(payload.get("prompt") or ""))
+        ),
+        "checks_sha256": _canonical_hash(
+            redact_for_storage(list(extra.get("eval_checks") or ()))
+        ),
+    }
+    changed = sorted(
+        key for key, value in expected.items() if binding.get(key) != value
+    )
+    if changed:
+        raise ValueError("eval evidence changed: " + ", ".join(changed))
+    eval_run = eval_store.get_any(str(binding["eval_run_id"]))
+    if binding.get("config_hash") != _eval_config_hash(eval_run):
+        raise ValueError("eval config evidence changed after submission")
+    return binding
+
+
+def _eval_result_provenance(
+    run: HarnessRun,
+    *,
+    evidence_binding: Mapping[str, Any],
+    output_text: str,
+) -> dict[str, Any]:
+    link = _mapping(run.metadata.get("structured_session_link"))
+    return {
+        "source_evidence": dict(evidence_binding),
+        "evaluator_input": {
+            "run_id": run.id,
+            "output_sha256": _canonical_hash(_redacted_text(output_text) or ""),
+        },
+        "native_session": (
+            {
+                "harness_session_id": run.session_id,
+                "structured_session_link_id": link.get("id"),
+                "structured_session_link_hash": link.get("link_hash"),
+                "external_session_id": link.get("external_session_id"),
+            }
+            if link
+            else None
+        ),
+    }
+
+
+def _canonical_hash(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
 def _spec_config_hash(
     spec: HarnessEvalSpec,
     harness_ids: tuple[str, ...],
@@ -1366,6 +1569,7 @@ def _spec_config_hash(
     *,
     api_mode: GigaChatApiMode | None = None,
     adapter_dimensions: list[dict[str, Any]] | None = None,
+    execution_transport: ExecutionTransport | None = None,
 ) -> str:
     payload = {
         "spec": eval_spec_to_dict(spec),
@@ -1374,6 +1578,8 @@ def _spec_config_hash(
         "api_mode": (api_mode or spec.api_mode).value,
         "adapter_dimensions": adapter_dimensions or [],
     }
+    if execution_transport is not None:
+        payload["execution_transport"] = execution_transport.value
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

@@ -12,7 +12,12 @@ from typing import Any, Mapping
 import yaml
 
 from gpt2giga_harness.authoring import ProjectAuthoringService, ProjectFileDraft
+from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.runtime.policy import permission_profile
+from gpt2giga_harness.runtime.structured import (
+    DurableStructuredAdmissionError,
+    admitted_durable_structured_capabilities,
+)
 from gpt2giga_harness.safe_paths import resolve_operator_path, resolve_path_within
 from gpt2giga_harness.types import parse_api_mode, redact_secrets
 
@@ -438,16 +443,34 @@ def build_agent_execution_plan(
             detail="Agent runs are submitted through the durable headless worker.",
         )
     else:
-        message = "AgentProfile durable runs do not support native invocation mode."
-        errors.append(message)
-        add(
-            "invocation_mode",
-            status=AgentOptionStatus.UNSUPPORTED,
-            requested=profile.invocation_mode,
-            effective=None,
-            source="unsupported",
-            detail=message,
-        )
+        try:
+            capabilities = admitted_durable_structured_capabilities(harness)
+        except DurableStructuredAdmissionError as exc:
+            message = str(exc)
+            errors.append(message)
+            add(
+                "invocation_mode",
+                status=AgentOptionStatus.UNSUPPORTED,
+                requested=profile.invocation_mode,
+                effective=None,
+                source="structured_capability_admission",
+                detail=message,
+            )
+        else:
+            adapter_options["execution_transport"] = (
+                ExecutionTransport.NATIVE_STRUCTURED.value
+            )
+            add(
+                "invocation_mode",
+                status=AgentOptionStatus.EFFECTIVE,
+                requested=profile.invocation_mode,
+                effective=ExecutionTransport.NATIVE_STRUCTURED.value,
+                source="structured_capability_admission",
+                detail=(
+                    "The durable worker uses the capability-proven structured "
+                    f"{capabilities.protocol} driver."
+                ),
+            )
     for name, requested, effective, source, detail in (
         (
             "mode",
@@ -777,7 +800,7 @@ def agent_run_payload(
     effective_prompt = (
         f"Agent role instructions:\n{profile.instructions}\n\nTask:\n{prompt.strip()}"
     )
-    return {
+    payload = {
         "prompt": effective_prompt,
         "harness_id": profile.harness_id,
         "model": profile.model,
@@ -815,6 +838,10 @@ def agent_run_payload(
             "expected_artifact": profile.expected_artifact,
         },
     }
+    execution_transport = execution_plan.adapter_options.get("execution_transport")
+    if execution_transport is not None:
+        payload["execution_transport"] = execution_transport
+    return payload
 
 
 def apply_agent_run_overrides(

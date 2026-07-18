@@ -14,7 +14,7 @@ from gpt2giga_harness.evals import (
 )
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.project import resolve_project
-from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.runtime.payloads import DurableJobPayloadStore
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.runtime.worker import DurableJobDispatcher, DurableJobWorker
@@ -149,7 +149,7 @@ def test_reviewed_patch_example_runs_in_isolation_and_verifies_retained_patch(
         proxy_url="http://127.0.0.1:9",
         auto_start_proxy=False,
     )
-    registry = create_default_registry(include_entry_points=False)
+    registry = HarnessRegistry()
     harness = _ExampleCodexHarness()
     registry.register(harness)
     session_store = FilesystemHarnessSessionStore(config.data_dir)

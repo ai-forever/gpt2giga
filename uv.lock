@@ -606,6 +606,25 @@ wheels = [
 ]
 
 [[package]]
+name = "claude-agent-sdk"
+version = "0.2.122"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "mcp" },
+    { name = "sniffio" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ab/1f/6f7db7a18fc69ad01aa3f142301b5a24e8eb1c8c3da723245d8ec13c7b08/claude_agent_sdk-0.2.122.tar.gz", hash = "sha256:7cc655eaabf110f30acec393953f7f0f201e63e292cfaa0f14033d7c9d1b0b20", size = 297013, upload-time = "2026-07-18T01:32:19.358Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/86/77/bf6168aa383dd8ba8457c8ce6ebaaa4597a29d3fd879a6a836b29c53e8a3/claude_agent_sdk-0.2.122-py3-none-macosx_11_0_arm64.whl", hash = "sha256:392ff72a1251de069074d47e7e84d5d6eeea2148569f448dea695e8d586ec99e", size = 72505019, upload-time = "2026-07-18T01:32:24.825Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/6c/ac5c58e774c9b014987f01819d0a5b07690ac63051cfaa1c712035ba010b/claude_agent_sdk-0.2.122-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:4a56140880681fd619079eabd2bdb54a2030b2deca6bf220a064706e572f3494", size = 77500875, upload-time = "2026-07-18T01:32:31.237Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/db/18cbe44509f36afefcd356fbf0f59c0c6ca0d48b7d8cf18df102991b9a8b/claude_agent_sdk-0.2.122-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:5e6d095d44db99b153a3da9f4fc463f514c49a3e444147482e2817980225464c", size = 82346677, upload-time = "2026-07-18T01:32:37.734Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/49/6e0ab95c7303e60ff6796e327d22246c65f9736871b3b5f8df75989bd012/claude_agent_sdk-0.2.122-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:645f4467044424913895fe96b4462adff46c11ec21050c28ddbf050604749ece", size = 83409979, upload-time = "2026-07-18T01:32:44.25Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/41/000fd610b455d77496bd97cd4b7d6a56b6b8cf62857fc40e97a3f19cbb93/claude_agent_sdk-0.2.122-py3-none-win_amd64.whl", hash = "sha256:6146d6c26c64633efdff7d908c52f2e25ddfc83fc8e1f4faeaa899223b4e07c5", size = 82882851, upload-time = "2026-07-18T01:32:50.528Z" },
+]
+
+[[package]]
 name = "click"
 version = "8.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1121,7 +1140,7 @@ provides-extras = ["postgres", "opensearch", "phoenix"]
 
 [[package]]
 name = "gpt2giga-harness"
-version = "0.1.0b1"
+version = "0.2.0a1"
 source = { editable = "packages/gpt2giga-harness" }
 dependencies = [
     { name = "anyio" },
@@ -1136,9 +1155,15 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
+[package.optional-dependencies]
+claude-sdk = [
+    { name = "claude-agent-sdk" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.10,<5" },
+    { name = "claude-agent-sdk", marker = "extra == 'claude-sdk'", specifier = ">=0.2.122,<0.3" },
     { name = "fastapi", specifier = ">=0.133.0,<1" },
     { name = "gigachat", specifier = ">=0.2.2a1,<0.3.0" },
     { name = "gpt2giga", editable = "packages/gpt2giga" },
@@ -1149,6 +1174,7 @@ requires-dist = [
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0,<3" },
     { name = "uvicorn", specifier = ">=0.41.0,<1" },
 ]
+provides-extras = ["claude-sdk"]
 
 [[package]]
 name = "greenlet"

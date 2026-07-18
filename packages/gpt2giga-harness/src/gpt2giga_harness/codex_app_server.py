@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta, timezone
 import hashlib
+from importlib import metadata
 import json
 import os
 from pathlib import Path
@@ -16,14 +18,50 @@ from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
 
 from gpt2giga_harness.executables import ExecutableResolution
+from gpt2giga_harness.execution import (
+    EMPTY_EXTENSION_SNAPSHOT_HASH,
+    ExecutionClassification,
+    ExecutionClassificationStatus,
+    ExecutionSnapshot,
+    ExecutionTransport,
+    InteractionMode,
+    ProviderRef,
+    RouteRef,
+    RuntimeOwnership,
+    SnapshotEvidenceRef,
+    create_execution_snapshot,
+)
 from gpt2giga_harness.harnesses.agent_cli import build_safe_env
 from gpt2giga_harness.managed_mcp import (
     clear_headless_mcp_materialization,
     materialize_headless_mcp_snapshot,
     write_startup_config,
 )
+from gpt2giga_harness.runtime.models import ApprovalStatus
+from gpt2giga_harness.runtime.policy import (
+    ApprovalDecision,
+    EnforcementLevel,
+    PermissionAction,
+    PolicyContext,
+    PolicyResolution,
+)
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.store import utc_now
+from gpt2giga_harness.structured_sessions import (
+    AdapterCapabilitySnapshot,
+    StructuredSessionConfigSnapshot,
+    StructuredSessionCoordinator,
+    StructuredSessionError,
+    StructuredSessionLink,
+    StructuredSessionLinkStore,
+    StructuredSessionState,
+    StructuredTurnInput,
+    StructuredTurnResult,
+    UnsupportedSessionCapability,
+    structured_session_link_to_dict,
+)
+from gpt2giga_harness.tools.policy import PolicyDecision
 from gpt2giga_harness.types import (
     HarnessContext,
     HarnessEvent,
@@ -38,7 +76,18 @@ APP_SERVER_PROTOCOL = "codex-app-server-json-rpc-v2"
 APP_SERVER_LINK_SCHEMA_VERSION = 1
 APP_SERVER_TIMEOUT_SECONDS = 10.0
 APP_SERVER_MESSAGE_POLL_SECONDS = 0.1
+APP_SERVER_ROLLOUT_POLL_SECONDS = 0.25
 APP_SERVER_STDERR_CHARS = 8000
+APP_SERVER_DRIVER_PROTOCOL_VERSION = "2"
+APP_SERVER_APPROVAL_OWNER = "codex_app_server.approval"
+APP_SERVER_APPROVAL_POLL_SECONDS = 0.05
+_APPROVAL_METHODS = frozenset(
+    {
+        "item/commandExecution/requestApproval",
+        "item/fileChange/requestApproval",
+        "item/permissions/requestApproval",
+    }
+)
 
 
 class AppServerProtocolError(RuntimeError):
@@ -83,6 +132,14 @@ class _Runtime:
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
+@dataclass
+class _PendingApproval:
+    request_id: str | int
+    method: str
+    params: Mapping[str, Any]
+    durable_approval_id: str | None = None
+
+
 class CodexAppServerLinkStore:
     """Persist redaction-safe thread links and prompt delivery state atomically."""
 
@@ -125,9 +182,36 @@ class CodexAppServerSupervisor:
     ) -> None:
         self.data_dir = Path(data_dir).expanduser().resolve()
         self.link_store = CodexAppServerLinkStore(self.data_dir)
+        self.structured_link_store = StructuredSessionLinkStore(self.data_dir)
+        self.runtime_store = RuntimeCoordinationStore(self.data_dir)
         self.client_factory = client_factory or _StdioJsonRpcClient
         self._runtimes: dict[str, _Runtime] = {}
         self._runtime_lock = threading.Lock()
+        self._active_drivers: dict[str, CodexAppServerDriver] = {}
+        self._active_driver_lock = threading.Lock()
+
+    def interrupt_turn(self, session_id: str) -> None:
+        """Interrupt the exact active provider turn for one Harness session."""
+        driver = self._active_driver(session_id)
+        turn_id = driver.active_turn_id
+        if turn_id is None:
+            raise StructuredSessionError("Codex session has no active turn")
+        driver.interrupt(turn_id)
+
+    def steer_turn(self, session_id: str, turn_input: StructuredTurnInput) -> None:
+        """Steer the exact active provider turn without transcript replay."""
+        driver = self._active_driver(session_id)
+        turn_id = driver.active_turn_id
+        if turn_id is None:
+            raise StructuredSessionError("Codex session has no active turn")
+        driver.steer(turn_id, turn_input)
+
+    def _active_driver(self, session_id: str) -> CodexAppServerDriver:
+        with self._active_driver_lock:
+            driver = self._active_drivers.get(session_id)
+        if driver is None:
+            raise StructuredSessionError("Codex session has no active driver")
+        return driver
 
     def run_turn(
         self,
@@ -153,7 +237,16 @@ class CodexAppServerSupervisor:
         command = resolution.command
         if not command:
             raise ValueError("Codex app-server executable is unavailable")
-        scope_id = _scope_id(command, snapshot)
+        scope_id = _scope_id(
+            command,
+            {
+                **snapshot,
+                "cli_version": _driver_version(
+                    continuation.get("cli_version")
+                    or continuation.get("adapter_version")
+                ),
+            },
+        )
         runtime = self._runtime_for(
             scope_id,
             command=command,
@@ -163,7 +256,7 @@ class CodexAppServerSupervisor:
         )
         command_display = (*command, "app-server", "--stdio", "--strict-config")
         with runtime.turn_lock:
-            return self._run_locked(
+            return self._run_through_driver(
                 runtime,
                 request,
                 context,
@@ -174,7 +267,7 @@ class CodexAppServerSupervisor:
                 command_display=command_display,
             )
 
-    def _run_locked(
+    def _run_through_driver(
         self,
         runtime: _Runtime,
         request: HarnessRequest,
@@ -204,149 +297,221 @@ class CodexAppServerSupervisor:
                     ),
                 )
 
-        action = str(continuation.get("action") or "start")
-        recovery_outcome = "not_required"
+        adapter_version = _adapter_version()
+        cli_version = _driver_version(
+            continuation.get("cli_version") or continuation.get("adapter_version")
+        )
+        execution_snapshot = build_structured_execution_snapshot(
+            snapshot,
+            adapter_version=adapter_version,
+            cli_version=cli_version,
+        )
+        config_snapshot = StructuredSessionConfigSnapshot(
+            adapter_id="codex-cli",
+            adapter_version=adapter_version,
+            protocol=APP_SERVER_PROTOCOL,
+            protocol_version=APP_SERVER_DRIVER_PROTOCOL_VERSION,
+            cli_sdk_version=cli_version,
+            managed_home_id=_optional_text(snapshot.get("managed_home_id")),
+        )
+        driver = CodexAppServerDriver(
+            supervisor=self,
+            runtime=runtime,
+            request=request,
+            context=context,
+            command_display=command_display,
+            continuation=continuation,
+            legacy_snapshot=snapshot,
+            legacy_link=link,
+            adapter_version=adapter_version,
+        )
+        coordinator = StructuredSessionCoordinator(
+            driver,
+            self.structured_link_store,
+            owner_id=runtime.client.runtime_id,
+        )
+        link_id = _structured_link_id(request.session_id)
+        existing = self.structured_link_store.load(link_id)
+        collected: list[HarnessEvent] = []
+
+        def event_sink(event: Mapping[str, Any]) -> None:
+            normalized = HarnessEvent(
+                type=str(event.get("type") or "unknown"),
+                message=str(event.get("message") or ""),
+                payload=_mapping(event.get("payload")),
+            )
+            _publish(request, collected, normalized)
+
         try:
-            if action == "fork":
-                source_thread_id = str(
-                    continuation.get("fork_thread_id")
-                    or _mapping(continuation.get("fork")).get("thread_id")
-                    or ""
-                ).strip()
-                if not source_thread_id:
-                    raise ValueError(
-                        "Codex app-server fork requires a source thread id"
-                    )
-                response = runtime.client.request(
-                    "thread/fork",
-                    {
-                        **_thread_identity_params(request),
-                        "threadId": source_thread_id,
-                        "lastTurnId": continuation.get("fork_turn_id"),
-                    },
-                    timeout=APP_SERVER_TIMEOUT_SECONDS,
+            structured_link = coordinator.open_or_resume(
+                link_id=link_id,
+                harness_session_id=request.session_id,
+                harness_run_id=request.run_id or f"run-{_safe_id(prompt_id)}",
+                execution_snapshot=execution_snapshot,
+                config_snapshot=config_snapshot,
+                existing_link=existing,
+            )
+            with self._active_driver_lock:
+                self._active_drivers[request.session_id] = driver
+            try:
+                structured_link, _turn = coordinator.start_turn(
+                    structured_link,
+                    StructuredTurnInput(prompt_id, prompt),
+                    event_sink,
+                    lambda provider_request: self._await_durable_approval(
+                        request,
+                        context,
+                        collected,
+                        provider_request,
+                    ),
                 )
-                thread_id = _thread_id(response)
-                forked_from = source_thread_id
-                recovery_outcome = "forked"
-            elif link is None:
-                response = runtime.client.request(
-                    "thread/start",
-                    {
-                        **_thread_identity_params(request),
-                        "ephemeral": False,
-                    },
-                    timeout=APP_SERVER_TIMEOUT_SECONDS,
+            finally:
+                with self._active_driver_lock:
+                    if self._active_drivers.get(request.session_id) is driver:
+                        self._active_drivers.pop(request.session_id, None)
+            result = driver.result
+            if result is None:
+                raise AppServerProtocolError(
+                    "Codex app-server driver returned no turn result"
                 )
-                thread_id = _thread_id(response)
-                forked_from = None
-            else:
-                thread_id = str(link.get("thread_id") or "").strip()
-                if not thread_id:
-                    raise AppServerProtocolError(
-                        "Codex app-server link has no thread identity"
-                    )
-                forked_from = _optional_text(link.get("forked_from_thread_id"))
-                if (
-                    str(link.get("runtime_id") or "") != runtime.client.runtime_id
-                    or thread_id not in runtime.loaded_threads
-                ):
-                    runtime.client.request(
-                        "thread/read",
-                        {"threadId": thread_id, "includeTurns": False},
-                        timeout=APP_SERVER_TIMEOUT_SECONDS,
-                    )
-                    runtime.client.request(
-                        "thread/resume",
-                        {
-                            **_thread_identity_params(request),
-                            "threadId": thread_id,
-                        },
-                        timeout=APP_SERVER_TIMEOUT_SECONDS,
-                    )
-                    recovery_outcome = "resumed_after_owner_change"
-            runtime.loaded_threads.add(thread_id)
-            now = utc_now()
-            link = self.link_store.save(
-                request.session_id,
-                {
-                    "schema_version": APP_SERVER_LINK_SCHEMA_VERSION,
-                    "protocol": APP_SERVER_PROTOCOL,
-                    "runtime_id": runtime.client.runtime_id,
-                    "thread_id": thread_id,
-                    "latest_turn_id": link.get("latest_turn_id") if link else None,
-                    "forked_from_thread_id": forked_from,
-                    "snapshot": dict(snapshot),
-                    "snapshot_hash": snapshot["snapshot_hash"],
-                    "runtime_status": "loaded",
-                    "recovery_outcome": recovery_outcome,
-                    "created_at": link.get("created_at") if link else now,
-                    "resumed_at": now
-                    if recovery_outcome.startswith("resumed")
-                    else None,
-                    "updated_at": now,
-                    "last_prompt_id": link.get("last_prompt_id") if link else None,
-                    "last_prompt_status": link.get("last_prompt_status")
-                    if link
-                    else None,
+            return replace(
+                result,
+                raw={
+                    **dict(result.raw),
+                    "structured_session_link": structured_session_link_to_dict(
+                        structured_link
+                    ),
+                    "structured_session_driver": "codex-app-server",
                 },
-            )
-            turn_response = runtime.client.request(
-                "turn/start",
-                {
-                    "threadId": thread_id,
-                    "input": [{"type": "text", "text": prompt}],
-                    "clientUserMessageId": prompt_id,
-                    "model": request.model,
-                    "cwd": request.workspace,
-                    "approvalPolicy": "never",
-                },
-                timeout=APP_SERVER_TIMEOUT_SECONDS,
-            )
-            turn_id = _turn_id(turn_response)
-            link = self.link_store.save(
-                request.session_id,
-                {
-                    **link,
-                    "latest_turn_id": turn_id,
-                    "runtime_status": "turn_running",
-                    "updated_at": utc_now(),
-                    "last_prompt_id": prompt_id,
-                    "last_prompt_status": "submitted",
-                },
-            )
-            return self._wait_for_turn(
-                runtime,
-                request,
-                context,
-                thread_id=thread_id,
-                turn_id=turn_id,
-                link=link,
-                command_display=command_display,
+                events=tuple(collected),
             )
         except Exception as exc:
-            if link is not None:
-                link = self.link_store.save(
-                    request.session_id,
-                    {
-                        **link,
-                        "runtime_status": "interrupted",
-                        "recovery_outcome": "owner_error",
-                        "updated_at": utc_now(),
-                        "last_prompt_status": (
-                            "interrupted"
-                            if link.get("last_prompt_id") == prompt_id
-                            else link.get("last_prompt_status")
-                        ),
-                    },
-                )
+            link = driver.mark_interrupted(prompt_id)
             return HarnessResult(
                 ok=False,
                 text="",
-                raw={"app_server_thread": _public_link(link)} if link else {},
+                raw={
+                    "app_server_thread": _public_link(link),
+                    **(
+                        {
+                            "structured_session_link": structured_session_link_to_dict(
+                                current
+                            )
+                        }
+                        if (current := self.structured_link_store.load(link_id))
+                        is not None
+                        else {}
+                    ),
+                },
+                events=tuple(collected),
                 command=command_display,
                 error=str(redact_secrets(str(exc))),
             )
+
+    def _await_durable_approval(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+        collected: list[HarnessEvent],
+        provider_request: Mapping[str, Any],
+    ) -> str:
+        """Persist one provider request and await its Approval Center decision."""
+        method = str(provider_request.get("method") or "")
+        params = _mapping(provider_request.get("params"))
+        request_id = provider_request.get("id")
+        action, reason, preview = _approval_contract(method, params)
+        approval_binding = _provider_approval_binding(method, request_id, params)
+        existing = self.runtime_store.find_approval_request_by_binding(approval_binding)
+        timeout_seconds = max(
+            min(
+                float(provider_request.get("timeout_seconds") or 0.0),
+                max(context.timeout_seconds, 0.1),
+            ),
+            0.1,
+        )
+        if existing is None:
+            runtime = _mapping(request.extra.get("runtime"))
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+            ).isoformat()
+            approval = self.runtime_store.create_approval_request(
+                PolicyResolution(
+                    action=action,
+                    decision=PolicyDecision.ASK,
+                    enforcement=EnforcementLevel.ENFORCED_BY_HARNESS,
+                    policy_source="codex_app_server:on_request",
+                ),
+                PolicyContext(
+                    project_id=_optional_text(request.extra.get("project_id")),
+                    session_id=request.session_id,
+                    run_id=request.run_id,
+                    job_id=_optional_text(runtime.get("job_id")),
+                    reason=reason,
+                    preview=preview,
+                    approval_binding=approval_binding,
+                    enforcement_owner=APP_SERVER_APPROVAL_OWNER,
+                ),
+                expires_at=expires_at,
+            )
+        else:
+            approval = existing
+        with self._active_driver_lock:
+            active_driver = (
+                self._active_drivers.get(request.session_id)
+                if request.session_id is not None
+                else None
+            )
+        if active_driver is not None:
+            active_driver.bind_durable_approval(str(request_id), approval.id)
+        _publish(
+            request,
+            collected,
+            HarnessEvent(
+                type="approval_requested",
+                message="Codex app-server is waiting for Approval Center.",
+                payload={
+                    "approval_id": approval.id,
+                    "action": approval.action.value,
+                    "method": method,
+                    "reused": existing is not None,
+                },
+            ),
+        )
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            current = self.runtime_store.get_approval_request(approval.id)
+            if current.status is ApprovalStatus.APPROVED:
+                decision = "accept"
+                break
+            if current.status in {
+                ApprovalStatus.DENIED,
+                ApprovalStatus.EXPIRED,
+                ApprovalStatus.CANCELED,
+            }:
+                decision = "decline"
+                break
+            if _cancel_requested(request.cancel_event):
+                decision = "cancel"
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                decision = "decline"
+                break
+            time.sleep(min(APP_SERVER_APPROVAL_POLL_SECONDS, remaining))
+        _publish(
+            request,
+            collected,
+            HarnessEvent(
+                type="approval_decided",
+                message="Codex app-server approval received a durable outcome.",
+                payload={
+                    "approval_id": approval.id,
+                    "action": approval.action.value,
+                    "decision": decision,
+                },
+            ),
+        )
+        return decision
 
     def _wait_for_turn(
         self,
@@ -358,6 +523,9 @@ class CodexAppServerSupervisor:
         turn_id: str,
         link: Mapping[str, Any],
         command_display: tuple[str, ...],
+        server_request_handler: Callable[
+            [Mapping[str, Any], HarnessRequest, list[HarnessEvent], float], None
+        ],
     ) -> HarnessResult:
         collected: list[HarnessEvent] = []
         final_text = ""
@@ -365,7 +533,31 @@ class CodexAppServerSupervisor:
         interrupt_sent = False
         subagent_parents: dict[str, str] = {}
         seen_subagent_events: set[tuple[str, str, str]] = set()
+        seen_rollout_events: set[tuple[str, str]] = set()
+        next_rollout_poll = 0.0
+        rollout_tail: _RolloutMultiAgentTail | None = None
         while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now >= next_rollout_poll:
+                if rollout_tail is None:
+                    rollout_path = _rollout_path_for_thread(
+                        runtime.client,
+                        home=(
+                            self.data_dir / "app_server" / "homes" / runtime.scope_id
+                        ),
+                        thread_id=thread_id,
+                    )
+                    if rollout_path is not None:
+                        rollout_tail = _RolloutMultiAgentTail(rollout_path, turn_id)
+                if rollout_tail is not None:
+                    for rollout_event in _rollout_multi_agent_events(
+                        runtime.client,
+                        tail=rollout_tail,
+                        seen=seen_rollout_events,
+                        child_seen=seen_subagent_events,
+                    ):
+                        _publish(request, collected, rollout_event)
+                next_rollout_poll = now + APP_SERVER_ROLLOUT_POLL_SECONDS
             if _cancel_requested(request.cancel_event) and not interrupt_sent:
                 runtime.client.request(
                     "turn/interrupt",
@@ -388,7 +580,12 @@ class CodexAppServerSupervisor:
             method = str(message.get("method") or "")
             params = _mapping(message.get("params"))
             if "id" in message:
-                _decline_server_request(runtime.client, message, collected, request)
+                server_request_handler(
+                    message,
+                    request,
+                    collected,
+                    max(deadline - time.monotonic(), 0.1),
+                )
                 continue
             if params.get("threadId") not in {None, thread_id}:
                 continue
@@ -416,25 +613,23 @@ class CodexAppServerSupervisor:
                     for child_id in _collab_thread_ids(item):
                         if parent_id:
                             subagent_parents[child_id] = parent_id
-            if method == "turn/completed":
-                emitted_tool_ids = {
-                    str(event.payload.get("tool_call_id") or "")
-                    for event in collected
-                    if event.payload.get("tool_call_id")
-                }
+            if method == "turn/completed" and rollout_tail is not None:
                 for rollout_event in _rollout_multi_agent_events(
                     runtime.client,
-                    home=self.data_dir / "app_server" / "homes" / runtime.scope_id,
-                    thread_id=thread_id,
-                    turn_id=turn_id,
-                    seen_tool_call_ids=emitted_tool_ids,
+                    tail=rollout_tail,
+                    seen=seen_rollout_events,
+                    child_seen=seen_subagent_events,
                 ):
                     _publish(request, collected, rollout_event)
             event, item_text = _normalize_notification(method, params)
             if item_text is not None:
                 final_text = item_text
             if event is not None:
-                _publish(request, collected, event)
+                identity = _tool_event_identity(event)
+                if identity is None or identity not in seen_rollout_events:
+                    if identity is not None:
+                        seen_rollout_events.add(identity)
+                    _publish(request, collected, event)
             if method == "item/completed" and subagent_snapshots:
                 for child_event in _collab_child_tool_events(
                     subagent_snapshots,
@@ -522,6 +717,481 @@ class CodexAppServerSupervisor:
             runtime = _Runtime(scope_id=scope_id, client=client)
             self._runtimes[scope_id] = runtime
             return runtime
+
+
+class CodexAppServerDriver:
+    """Adapt Codex app-server thread/turn continuity to the generic driver."""
+
+    def __init__(
+        self,
+        *,
+        supervisor: CodexAppServerSupervisor,
+        runtime: _Runtime,
+        request: HarnessRequest,
+        context: HarnessContext,
+        command_display: tuple[str, ...],
+        continuation: Mapping[str, Any],
+        legacy_snapshot: Mapping[str, Any],
+        legacy_link: Mapping[str, Any] | None,
+        adapter_version: str,
+    ) -> None:
+        self.supervisor = supervisor
+        self.runtime = runtime
+        self.request = request
+        self.context = context
+        self.command_display = command_display
+        self.continuation = dict(continuation)
+        self.legacy_snapshot = dict(legacy_snapshot)
+        self.legacy_link = dict(legacy_link) if legacy_link is not None else None
+        self.adapter_version = adapter_version
+        self.thread_id: str | None = None
+        self.active_turn_id: str | None = None
+        self.result: HarnessResult | None = None
+        self._approval_bridge: Callable[[Mapping[str, Any]], str] | None = None
+        self._pending_approvals: dict[str, _PendingApproval] = {}
+        self._pending_approval_lock = threading.Lock()
+
+    def probe(self) -> AdapterCapabilitySnapshot:
+        """Project reviewed app-server v2 behavior into neutral capabilities."""
+        return AdapterCapabilitySnapshot(
+            adapter_id="codex-cli",
+            adapter_version=self.adapter_version,
+            protocol=APP_SERVER_PROTOCOL,
+            protocol_version=APP_SERVER_DRIVER_PROTOCOL_VERSION,
+            structured_events=True,
+            partial_output=True,
+            interactive_input=False,
+            live_approvals=True,
+            durable_approval=True,
+            interrupt=True,
+            steer=True,
+            resume=True,
+            fork=True,
+            session_list=False,
+            session_close=False,
+            native_auth=False,
+            provider_ui_handoff=False,
+            dynamic_model=False,
+            dynamic_mcp=False,
+            recovery_after_process_loss=True,
+        )
+
+    def open_or_resume(
+        self,
+        execution_snapshot: ExecutionSnapshot,
+        session_link: StructuredSessionLink | None,
+    ) -> StructuredSessionState:
+        """Start, import, resume, or explicitly fork one provider thread."""
+        del execution_snapshot
+        action = str(self.continuation.get("action") or "start")
+        recovery_outcome = "not_required"
+        forked_from: str | None = None
+        if action == "fork":
+            source_thread_id = str(
+                self.continuation.get("fork_thread_id")
+                or _mapping(self.continuation.get("fork")).get("thread_id")
+                or ""
+            ).strip()
+            if not source_thread_id:
+                raise ValueError("Codex app-server fork requires a source thread id")
+            response = self.runtime.client.request(
+                "thread/fork",
+                {
+                    **_thread_identity_params(self.request),
+                    "threadId": source_thread_id,
+                    "lastTurnId": self.continuation.get("fork_turn_id"),
+                },
+                timeout=APP_SERVER_TIMEOUT_SECONDS,
+            )
+            thread_id = _thread_id(response)
+            forked_from = source_thread_id
+            recovery_outcome = "forked"
+        else:
+            legacy_thread_id = _optional_text((self.legacy_link or {}).get("thread_id"))
+            generic_thread_id = (
+                session_link.external_session_id if session_link is not None else None
+            )
+            if (
+                legacy_thread_id is not None
+                and generic_thread_id is not None
+                and legacy_thread_id != generic_thread_id
+            ):
+                raise StructuredSessionError(
+                    "Codex compatibility and structured links disagree"
+                )
+            thread_id = generic_thread_id or legacy_thread_id
+            forked_from = _optional_text(
+                (self.legacy_link or {}).get("forked_from_thread_id")
+            )
+            if thread_id is None:
+                response = self.runtime.client.request(
+                    "thread/start",
+                    {
+                        **_thread_identity_params(self.request),
+                        "ephemeral": False,
+                    },
+                    timeout=APP_SERVER_TIMEOUT_SECONDS,
+                )
+                thread_id = _thread_id(response)
+            elif (
+                str((self.legacy_link or {}).get("runtime_id") or "")
+                != self.runtime.client.runtime_id
+                or thread_id not in self.runtime.loaded_threads
+            ):
+                previous_status = str(
+                    (self.legacy_link or {}).get("last_prompt_status") or ""
+                )
+                if previous_status == "submitted":
+                    recovery_outcome = self._resolve_inflight_owner_loss(thread_id)
+                else:
+                    self._resume_thread(thread_id)
+                    recovery_outcome = "resumed_after_owner_change"
+        self.thread_id = thread_id
+        self.runtime.loaded_threads.add(thread_id)
+        now = utc_now()
+        previous = self.legacy_link or {}
+        self.legacy_link = self.supervisor.link_store.save(
+            self.request.session_id or "",
+            {
+                "schema_version": APP_SERVER_LINK_SCHEMA_VERSION,
+                "protocol": APP_SERVER_PROTOCOL,
+                "runtime_id": self.runtime.client.runtime_id,
+                "thread_id": thread_id,
+                "latest_turn_id": (
+                    session_link.latest_external_turn_id
+                    if session_link is not None
+                    else previous.get("latest_turn_id")
+                ),
+                "forked_from_thread_id": forked_from,
+                "snapshot": dict(self.legacy_snapshot),
+                "snapshot_hash": self.legacy_snapshot["snapshot_hash"],
+                "runtime_status": "loaded",
+                "recovery_outcome": recovery_outcome,
+                "created_at": previous.get("created_at") or now,
+                "resumed_at": (now if recovery_outcome.startswith("resumed") else None),
+                "updated_at": now,
+                "last_prompt_id": previous.get("last_prompt_id"),
+                "last_prompt_status": previous.get("last_prompt_status"),
+            },
+        )
+        return StructuredSessionState(
+            thread_id,
+            _optional_text(self.legacy_link.get("latest_turn_id")),
+        )
+
+    def start_turn(
+        self,
+        turn_input: StructuredTurnInput,
+        event_sink: Callable[[Mapping[str, Any]], None],
+        approval_bridge: Callable[[Mapping[str, Any]], str],
+    ) -> StructuredTurnResult:
+        """Run one Codex turn and publish normalized events through the driver sink."""
+        if self.thread_id is None or self.legacy_link is None:
+            raise StructuredSessionError("Codex structured session is not open")
+        self._approval_bridge = approval_bridge
+        response = self.runtime.client.request(
+            "turn/start",
+            {
+                "threadId": self.thread_id,
+                "input": [{"type": "text", "text": turn_input.content}],
+                "clientUserMessageId": turn_input.id,
+                "model": self.request.model,
+                "cwd": self.request.workspace,
+                "approvalPolicy": "on-request",
+                "approvalsReviewer": "user",
+            },
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+        turn_id = _turn_id(response)
+        self.active_turn_id = turn_id
+        self.legacy_link = self.supervisor.link_store.save(
+            self.request.session_id or "",
+            {
+                **self.legacy_link,
+                "latest_turn_id": turn_id,
+                "runtime_status": "turn_running",
+                "updated_at": utc_now(),
+                "last_prompt_id": turn_input.id,
+                "last_prompt_status": "submitted",
+            },
+        )
+
+        def publish(event: HarnessEvent) -> None:
+            event_sink(
+                {
+                    "type": event.type,
+                    "message": event.message,
+                    "payload": dict(event.payload),
+                }
+            )
+
+        request = replace(self.request, event_sink=publish)
+        self.result = self.supervisor._wait_for_turn(
+            self.runtime,
+            request,
+            self.context,
+            thread_id=self.thread_id,
+            turn_id=turn_id,
+            link=self.legacy_link,
+            command_display=self.command_display,
+            server_request_handler=self._handle_server_request,
+        )
+        status = "completed" if self.result.ok else "failed"
+        raw_link = _mapping(self.result.raw.get("app_server_thread"))
+        status = str(raw_link.get("last_prompt_status") or status)
+        return StructuredTurnResult(turn_id, status)
+
+    def respond_to_input(self, request_id: str, answer: str) -> None:
+        """Reject unproven provider input requests in the N2-00 driver."""
+        del request_id, answer
+        raise UnsupportedSessionCapability("interactive input is not supported")
+
+    def respond_to_approval(self, request_id: str, decision: str) -> None:
+        """Persist one exact pending decision for the blocked durable bridge."""
+        normalized = _normalize_provider_decision(decision)
+        with self._pending_approval_lock:
+            pending = self._pending_approvals.get(request_id)
+        if pending is None or pending.durable_approval_id is None:
+            raise StructuredSessionError("Codex approval request is stale or unknown")
+        self.supervisor.runtime_store.decide_approval_request(
+            pending.durable_approval_id,
+            (
+                ApprovalDecision.ALLOW_ONCE
+                if normalized == "accept"
+                else ApprovalDecision.DENY
+            ),
+        )
+
+    def bind_durable_approval(self, request_id: str, approval_id: str) -> None:
+        """Bind the provider callback to its persisted Approval Center item."""
+        with self._pending_approval_lock:
+            pending = self._pending_approvals.get(request_id)
+            if pending is None:
+                raise StructuredSessionError(
+                    "Codex approval request is stale or unknown"
+                )
+            pending.durable_approval_id = approval_id
+
+    def interrupt(self, turn_id: str) -> None:
+        """Interrupt an exact active Codex turn."""
+        if self.thread_id is None:
+            raise StructuredSessionError("Codex structured session is not open")
+        self.runtime.client.request(
+            "turn/interrupt",
+            {"threadId": self.thread_id, "turnId": turn_id},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+
+    def steer(self, turn_id: str, turn_input: StructuredTurnInput) -> None:
+        """Steer the exact active turn through the reviewed v2 precondition."""
+        if self.thread_id is None or self.active_turn_id != turn_id:
+            raise StructuredSessionError("Codex turn is not active for steering")
+        self.runtime.client.request(
+            "turn/steer",
+            {
+                "threadId": self.thread_id,
+                "expectedTurnId": turn_id,
+                "input": [{"type": "text", "text": turn_input.content}],
+                "clientUserMessageId": turn_input.id,
+            },
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+
+    def recover(self, session_link: StructuredSessionLink) -> StructuredSessionState:
+        """Recover the same provider thread without replaying normalized history."""
+        self._resume_thread(session_link.external_session_id)
+        self.thread_id = session_link.external_session_id
+        self.runtime.loaded_threads.add(self.thread_id)
+        return StructuredSessionState(
+            self.thread_id,
+            session_link.latest_external_turn_id,
+        )
+
+    def fork(
+        self,
+        session_link: StructuredSessionLink,
+        turn_id: str | None,
+    ) -> StructuredSessionState:
+        """Create one provider-native fork without transcript replay."""
+        response = self.runtime.client.request(
+            "thread/fork",
+            {
+                **_thread_identity_params(self.request),
+                "threadId": session_link.external_session_id,
+                "lastTurnId": turn_id,
+            },
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+        thread_id = _thread_id(response)
+        self.thread_id = thread_id
+        self.runtime.loaded_threads.add(thread_id)
+        return StructuredSessionState(thread_id)
+
+    def close(self) -> None:
+        """Leave the shared supervised runtime available for other sessions."""
+
+    def mark_interrupted(self, prompt_id: str) -> dict[str, Any] | None:
+        """Persist a bounded compatibility outcome after one driver failure."""
+        if self.legacy_link is None or self.thread_id is None:
+            return self.legacy_link
+        self.legacy_link = self.supervisor.link_store.save(
+            self.request.session_id or "",
+            {
+                **self.legacy_link,
+                "runtime_status": "interrupted",
+                "recovery_outcome": (
+                    self.legacy_link.get("recovery_outcome")
+                    if self.legacy_link.get("recovery_outcome")
+                    == "ambiguous_after_owner_loss"
+                    else "owner_error"
+                ),
+                "updated_at": utc_now(),
+                "last_prompt_status": (
+                    "interrupted"
+                    if self.legacy_link.get("last_prompt_id") == prompt_id
+                    else self.legacy_link.get("last_prompt_status")
+                ),
+            },
+        )
+        return self.legacy_link
+
+    def _resume_thread(self, thread_id: str) -> None:
+        self._read_thread(thread_id, include_turns=False)
+        self.runtime.client.request(
+            "thread/resume",
+            {
+                **_thread_identity_params(self.request),
+                "threadId": thread_id,
+            },
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+
+    def _read_thread(
+        self,
+        thread_id: str,
+        *,
+        include_turns: bool,
+    ) -> Mapping[str, Any]:
+        response = self.runtime.client.request(
+            "thread/read",
+            {"threadId": thread_id, "includeTurns": include_turns},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+        return _mapping(response.get("thread"))
+
+    def _resolve_inflight_owner_loss(self, thread_id: str) -> str:
+        """Recover only a provider-proven terminal turn after owner loss."""
+        thread = self._read_thread(thread_id, include_turns=True)
+        latest_turn_id = _optional_text((self.legacy_link or {}).get("latest_turn_id"))
+        status = _matching_turn_status(thread, latest_turn_id)
+        if status not in {
+            "completed",
+            "failed",
+            "canceled",
+            "cancelled",
+            "interrupted",
+        }:
+            now = utc_now()
+            self.legacy_link = self.supervisor.link_store.save(
+                self.request.session_id or "",
+                {
+                    **(self.legacy_link or {}),
+                    "runtime_id": self.runtime.client.runtime_id,
+                    "runtime_status": "interrupted",
+                    "recovery_outcome": "ambiguous_after_owner_loss",
+                    "updated_at": now,
+                    "last_prompt_status": "ambiguous",
+                },
+            )
+            raise AppServerProtocolError(
+                "Codex owner loss left the active turn outcome ambiguous; "
+                "refusing duplicate delivery"
+            )
+        self.runtime.client.request(
+            "thread/resume",
+            {
+                **_thread_identity_params(self.request),
+                "threadId": thread_id,
+            },
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+        if self.legacy_link is not None:
+            self.legacy_link = {
+                **self.legacy_link,
+                "last_prompt_status": status,
+            }
+        return f"resumed_after_terminal_{status}"
+
+    def _handle_server_request(
+        self,
+        message: Mapping[str, Any],
+        request: HarnessRequest,
+        collected: list[HarnessEvent],
+        timeout_seconds: float,
+    ) -> None:
+        request_id = message.get("id")
+        method = str(message.get("method") or "")
+        params = _mapping(message.get("params"))
+        if (
+            method not in _APPROVAL_METHODS
+            or not isinstance(request_id, (str, int))
+            or self.thread_id is None
+            or self.active_turn_id is None
+            or params.get("threadId") != self.thread_id
+            or params.get("turnId") != self.active_turn_id
+        ):
+            _decline_server_request(
+                self.runtime.client,
+                message,
+                collected,
+                request,
+            )
+            return
+        key = str(request_id)
+        pending = _PendingApproval(request_id, method, params)
+        with self._pending_approval_lock:
+            if key in self._pending_approvals:
+                _decline_server_request(
+                    self.runtime.client,
+                    message,
+                    collected,
+                    request,
+                )
+                return
+            self._pending_approvals[key] = pending
+        try:
+            if self._approval_bridge is None:
+                raise UnsupportedSessionCapability(
+                    "Codex approval bridge is unavailable"
+                )
+            decision = self._approval_bridge(
+                {
+                    "id": request_id,
+                    "method": method,
+                    "params": params,
+                    "timeout_seconds": timeout_seconds,
+                }
+            )
+            normalized = _normalize_provider_decision(decision)
+        except Exception:
+            normalized = "decline"
+            _publish(
+                request,
+                collected,
+                HarnessEvent(
+                    type=HarnessEventType.WARNING.value,
+                    message="Codex approval bridge failed closed.",
+                    payload={"method": method, "enforcement": "fail_closed"},
+                ),
+            )
+        with self._pending_approval_lock:
+            current = self._pending_approvals.pop(key, None)
+        if current is None:
+            return
+        self.runtime.client.respond(
+            request_id,
+            result=_approval_response(method, normalized, params),
+        )
 
 
 class _StdioJsonRpcClient:
@@ -701,14 +1371,223 @@ def build_execution_snapshot(
     return {**content, "snapshot_hash": _json_hash(content)}
 
 
+def build_structured_execution_snapshot(
+    legacy_snapshot: Mapping[str, Any],
+    *,
+    adapter_version: str,
+    cli_version: str | None = None,
+) -> ExecutionSnapshot:
+    """Project one verified Codex continuity snapshot into the neutral contract."""
+    snapshot = dict(legacy_snapshot)
+    supplied_hash = str(snapshot.pop("snapshot_hash", ""))
+    if supplied_hash != _json_hash(snapshot):
+        raise ValueError("Codex app-server execution snapshot hash mismatch")
+    if snapshot.get("harness_id") != "codex-cli":
+        raise ValueError("Codex structured snapshot has the wrong adapter identity")
+    api_mode = str(snapshot.get("api_mode") or "unknown")
+    model = str(snapshot.get("model") or "unknown")
+    route_revision = _json_hash({"api_mode": api_mode, "model": model})
+    provider = ProviderRef(
+        "gpt2giga-harness",
+        _identity_value(f"api-{api_mode}", prefix="provider"),
+    )
+    route = RouteRef(
+        f"route-{route_revision[:24]}",
+        route_revision,
+        provider,
+    )
+    source_workspace = str(
+        snapshot.get("source_workspace") or snapshot.get("workspace") or "unknown"
+    )
+    effective_workspace = str(snapshot.get("workspace") or source_workspace)
+    workspace_id = f"workspace-{_json_hash({'path': source_workspace})[:24]}"
+    worktree_id = (
+        f"worktree-{_json_hash({'path': effective_workspace})[:24]}"
+        if effective_workspace != source_workspace
+        else None
+    )
+    extension_hash = str(snapshot.get("tool_snapshot_hash") or "")
+    if len(extension_hash) != 64:
+        extension_hash = EMPTY_EXTENSION_SNAPSHOT_HASH
+    capability_evidence = (
+        SnapshotEvidenceRef(
+            "codex-app-server",
+            cli_version or adapter_version,
+            "supported",
+            "codex-cli-probe",
+        ),
+    )
+    return create_execution_snapshot(
+        provider=provider,
+        route=route,
+        harness_id="codex-cli",
+        harness_version=adapter_version,
+        transport=ExecutionTransport.NATIVE_STRUCTURED,
+        interaction_mode=InteractionMode.INTERACTIVE,
+        runtime_ownership=RuntimeOwnership.DURABLE,
+        workspace_id=workspace_id,
+        worktree_id=worktree_id,
+        permission_profile=_identity_value(
+            snapshot.get("permission_mode"),
+            prefix="permission",
+        ),
+        extension_snapshot_hash=extension_hash,
+        capability_evidence=capability_evidence,
+        classification=ExecutionClassification(
+            status=ExecutionClassificationStatus.EXPLICIT,
+            source="codex_app_server_driver",
+            evidence=(f"snapshot-{supplied_hash[:24]}",),
+        ),
+    )
+
+
 def _thread_identity_params(request: HarnessRequest) -> dict[str, Any]:
     return {
         "cwd": request.workspace,
         "model": request.model,
         "modelProvider": "gpt2giga_harness",
         "sandbox": "workspace-write" if request.mode == "edit" else "read-only",
-        "approvalPolicy": "never",
+        "approvalPolicy": "on-request",
     }
+
+
+def _approval_contract(
+    method: str,
+    params: Mapping[str, Any],
+) -> tuple[PermissionAction, str, dict[str, Any]]:
+    """Map a reviewed Codex request family to one bounded Harness decision."""
+    if method == "item/commandExecution/requestApproval":
+        network = bool(_mapping(params.get("networkApprovalContext")))
+        action = (
+            PermissionAction.NETWORK_CONNECT
+            if network
+            else PermissionAction.PROCESS_SPAWN
+        )
+        return (
+            action,
+            "Codex requested approval for a command execution.",
+            {
+                "provider_method": method,
+                "item_id": _bounded_text(params.get("itemId"), 256),
+                "command": _bounded_text(params.get("command"), 2048),
+                "cwd": _bounded_text(params.get("cwd"), 1024),
+                "network_access": network,
+            },
+        )
+    if method == "item/fileChange/requestApproval":
+        return (
+            PermissionAction.WORKSPACE_WRITE,
+            "Codex requested approval for a file change.",
+            {
+                "provider_method": method,
+                "item_id": _bounded_text(params.get("itemId"), 256),
+                "reason": _bounded_text(params.get("reason"), 1024),
+                "grant_root": _bounded_text(params.get("grantRoot"), 1024),
+            },
+        )
+    if method == "item/permissions/requestApproval":
+        permissions = _mapping(params.get("permissions"))
+        network = bool(_mapping(permissions.get("network")).get("enabled"))
+        return (
+            (
+                PermissionAction.NETWORK_CONNECT
+                if network
+                else PermissionAction.WORKSPACE_WRITE
+            ),
+            "Codex requested additional sandbox permissions.",
+            {
+                "provider_method": method,
+                "item_id": _bounded_text(params.get("itemId"), 256),
+                "network_access": network,
+                "permission_snapshot_sha256": _json_hash(permissions),
+            },
+        )
+    raise UnsupportedSessionCapability("Codex approval request method is unsupported")
+
+
+def _provider_approval_binding(
+    method: str,
+    request_id: Any,
+    params: Mapping[str, Any],
+) -> str:
+    """Build an ephemeral exact-operation binding; only its hash is persisted."""
+    return json.dumps(
+        {
+            "protocol": APP_SERVER_PROTOCOL,
+            "method": method,
+            "request_id": request_id,
+            "thread_id": params.get("threadId"),
+            "turn_id": params.get("turnId"),
+            "item_id": params.get("itemId"),
+            "params_sha256": _json_hash(params),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _approval_response(
+    method: str,
+    decision: str,
+    params: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project one normalized decision into the exact Codex response shape."""
+    normalized = _normalize_provider_decision(decision)
+    if method in {
+        "item/commandExecution/requestApproval",
+        "item/fileChange/requestApproval",
+    }:
+        return {"decision": normalized}
+    if method == "item/permissions/requestApproval":
+        return {
+            "permissions": (
+                _mapping(params.get("permissions")) if normalized == "accept" else {}
+            ),
+            "scope": "turn",
+        }
+    raise UnsupportedSessionCapability("Codex approval response method is unsupported")
+
+
+def _normalize_provider_decision(value: Any) -> str:
+    aliases = {
+        "accept": "accept",
+        "allow": "accept",
+        ApprovalDecision.ALLOW_ONCE.value: "accept",
+        "decline": "decline",
+        "deny": "decline",
+        ApprovalDecision.DENY.value: "decline",
+        "cancel": "cancel",
+        "timeout": "decline",
+    }
+    try:
+        return aliases[str(value)]
+    except KeyError as exc:
+        raise ValueError("Codex approval decision is invalid") from exc
+
+
+def _bounded_text(value: Any, limit: int) -> str | None:
+    text = _optional_text(value)
+    return text[:limit] if text is not None else None
+
+
+def _matching_turn_status(
+    thread: Mapping[str, Any],
+    turn_id: str | None,
+) -> str | None:
+    if turn_id is None:
+        return None
+    turns = thread.get("turns")
+    if not isinstance(turns, list):
+        return None
+    for item in reversed(turns):
+        turn = _mapping(item)
+        if str(turn.get("id") or "") != turn_id:
+            continue
+        status = str(turn.get("status") or "").strip().lower()
+        return status or None
+    return None
 
 
 def _normalize_notification(
@@ -916,6 +1795,8 @@ def _decline_server_request(
         "item/fileChange/requestApproval",
     }:
         client.respond(request_id, result={"decision": "decline"})
+    elif method == "item/permissions/requestApproval":
+        client.respond(request_id, result={"permissions": {}, "scope": "turn"})
     elif method == "mcpServer/elicitation/request":
         client.respond(request_id, result={"action": "decline"})
     elif method == "item/tool/requestUserInput":
@@ -1143,30 +2024,15 @@ def _collab_child_tool_events(
 def _rollout_multi_agent_events(
     client: AppServerClient,
     *,
-    home: Path,
-    thread_id: str,
-    turn_id: str,
-    seen_tool_call_ids: set[str],
+    tail: _RolloutMultiAgentTail,
+    seen: set[tuple[str, str]],
+    child_seen: set[tuple[str, str, str]],
 ) -> tuple[HarnessEvent, ...]:
-    """Recover multi-agent calls omitted from Codex app-server thread items."""
-    try:
-        response = client.request(
-            "thread/read",
-            {"threadId": thread_id, "includeTurns": True},
-            timeout=APP_SERVER_TIMEOUT_SECONDS,
-        )
-    except (AppServerProtocolError, OSError, RuntimeError, ValueError):
-        return ()
-    thread = _mapping(response.get("thread"))
-    rollout_path = _managed_rollout_path(home, thread.get("path"))
-    if rollout_path is None:
-        return ()
-
+    """Live-tail multi-agent calls omitted from Codex app-server notifications."""
     events: list[HarnessEvent] = []
-    child_seen: set[tuple[str, str, str]] = set()
-    for call in _read_rollout_multi_agent_calls(rollout_path, turn_id=turn_id):
+    for call in tail.poll():
         call_id = str(call.get("call_id") or call.get("id") or "").strip()
-        if not call_id or call_id in seen_tool_call_ids:
+        if not call_id:
             continue
         name = str(call.get("name") or "").strip()
         arguments = _json_value(call.get("arguments"), fallback={})
@@ -1202,23 +2068,35 @@ def _rollout_multi_agent_events(
                         ],
                     }
                 )
+        finished = "output" in call
+        event_type = (
+            HarnessEventType.TOOL_CALL_FINISHED.value
+            if finished
+            else HarnessEventType.TOOL_CALL_STARTED.value
+        )
         payload: dict[str, Any] = {
             "tool_call_id": call_id,
             "name": name,
-            "status": "completed",
+            "status": "completed" if finished else "inProgress",
             "arguments": public_arguments,
             "source": "codex-app-server-rollout",
         }
-        if result not in (None, "", (), [], {}):
+        if finished and result not in (None, "", (), [], {}):
             payload["result"] = result
-        events.append(
-            HarnessEvent(
-                type=HarnessEventType.TOOL_CALL_FINISHED.value,
-                message=f"Codex app-server finished {name}.",
-                payload=payload,
+        identity = (call_id, event_type)
+        if identity not in seen:
+            seen.add(identity)
+            events.append(
+                HarnessEvent(
+                    type=event_type,
+                    message=(
+                        f"Codex app-server finished {name}."
+                        if finished
+                        else f"Codex app-server started {name}."
+                    ),
+                    payload=payload,
+                )
             )
-        )
-        seen_tool_call_ids.add(call_id)
         if child_snapshots:
             child_id = str(child_snapshots[0].get("id") or "")
             events.extend(
@@ -1229,6 +2107,34 @@ def _rollout_multi_agent_events(
                 )
             )
     return tuple(events)
+
+
+def _rollout_path_for_thread(
+    client: AppServerClient,
+    *,
+    home: Path,
+    thread_id: str,
+) -> Path | None:
+    try:
+        response = client.request(
+            "thread/read",
+            {"threadId": thread_id, "includeTurns": True},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+    except (AppServerProtocolError, OSError, RuntimeError, ValueError):
+        return None
+    thread = _mapping(response.get("thread"))
+    return _managed_rollout_path(home, thread.get("path"))
+
+
+def _tool_event_identity(event: HarnessEvent) -> tuple[str, str] | None:
+    if event.type not in {
+        HarnessEventType.TOOL_CALL_STARTED.value,
+        HarnessEventType.TOOL_CALL_FINISHED.value,
+    }:
+        return None
+    call_id = str(event.payload.get("tool_call_id") or "").strip()
+    return (call_id, event.type) if call_id else None
 
 
 def _managed_rollout_path(home: Path, value: Any) -> Path | None:
@@ -1250,57 +2156,78 @@ def _read_rollout_multi_agent_calls(
     *,
     turn_id: str,
 ) -> tuple[dict[str, Any], ...]:
-    calls: dict[str, dict[str, Any]] = {}
+    return _RolloutMultiAgentTail(path, turn_id).poll()
+
+
+@dataclass
+class _RolloutMultiAgentTail:
+    path: Path
+    turn_id: str
+    offset: int = 0
     active_turn_id: str | None = None
-    try:
-        lines = path.open(encoding="utf-8")
-    except OSError:
-        return ()
-    try:
-        with lines:
-            for line in lines:
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(record, Mapping):
-                    continue
-                record_type = str(record.get("type") or "")
-                payload = _mapping(record.get("payload"))
-                if record_type == "event_msg" and payload.get("type") == "task_started":
-                    active_turn_id = str(payload.get("turn_id") or "") or None
-                    continue
-                if record_type == "turn_context":
-                    active_turn_id = str(payload.get("turn_id") or "") or active_turn_id
-                    continue
-                if record_type != "response_item":
-                    continue
-                metadata = _mapping(
-                    payload.get("internal_chat_message_metadata_passthrough")
+    calls: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def poll(self) -> tuple[dict[str, Any], ...]:
+        """Read only complete JSONL records appended since the previous poll."""
+        try:
+            size = self.path.stat().st_size
+            if size < self.offset:
+                self.offset = 0
+                self.active_turn_id = None
+                self.calls.clear()
+            with self.path.open("rb") as lines:
+                lines.seek(self.offset)
+                content = lines.read()
+        except OSError:
+            return tuple(self.calls.values())
+        final_newline = content.rfind(b"\n")
+        if final_newline < 0:
+            return tuple(self.calls.values())
+        complete = content[: final_newline + 1]
+        self.offset += len(complete)
+        for raw_line in complete.splitlines():
+            try:
+                record = json.loads(raw_line)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(record, Mapping):
+                continue
+            record_type = str(record.get("type") or "")
+            payload = _mapping(record.get("payload"))
+            if record_type == "event_msg" and payload.get("type") == "task_started":
+                self.active_turn_id = str(payload.get("turn_id") or "") or None
+                continue
+            if record_type == "turn_context":
+                self.active_turn_id = (
+                    str(payload.get("turn_id") or "") or self.active_turn_id
                 )
-                payload_turn_id = str(metadata.get("turn_id") or active_turn_id or "")
-                if payload_turn_id != turn_id:
+                continue
+            if record_type != "response_item":
+                continue
+            metadata = _mapping(
+                payload.get("internal_chat_message_metadata_passthrough")
+            )
+            payload_turn_id = str(metadata.get("turn_id") or self.active_turn_id or "")
+            if payload_turn_id != self.turn_id:
+                continue
+            payload_type = str(payload.get("type") or "")
+            call_id = str(payload.get("call_id") or "").strip()
+            if payload_type == "function_call":
+                if str(payload.get("namespace") or "") != "multi_agent_v1":
                     continue
-                payload_type = str(payload.get("type") or "")
-                call_id = str(payload.get("call_id") or "").strip()
-                if payload_type == "function_call":
-                    if str(payload.get("namespace") or "") != "multi_agent_v1":
-                        continue
-                    if not call_id:
-                        call_id = str(payload.get("id") or "").strip()
-                    if not call_id:
-                        continue
-                    calls[call_id] = {
-                        "id": payload.get("id"),
-                        "call_id": call_id,
-                        "name": _multi_agent_tool_name(payload.get("name")),
-                        "arguments": payload.get("arguments"),
-                    }
-                elif payload_type == "function_call_output" and call_id in calls:
-                    calls[call_id]["output"] = payload.get("output")
-    except OSError:
-        return ()
-    return tuple(calls.values())
+                if not call_id:
+                    call_id = str(payload.get("id") or "").strip()
+                if not call_id:
+                    continue
+                self.calls[call_id] = {
+                    "id": payload.get("id"),
+                    "call_id": call_id,
+                    "name": _multi_agent_tool_name(payload.get("name")),
+                    "arguments": payload.get("arguments"),
+                }
+            elif payload_type == "function_call_output" and call_id in self.calls:
+                self.calls[call_id]["output"] = payload.get("output")
+        return tuple(self.calls.values())
 
 
 def _multi_agent_tool_name(value: Any) -> str:
@@ -1415,6 +2342,7 @@ def _public_link(link: Mapping[str, Any] | None) -> dict[str, Any]:
 def _scope_id(command: tuple[str, ...], snapshot: Mapping[str, Any]) -> str:
     value = {
         "command": list(command),
+        "cli_version": snapshot.get("cli_version"),
         "api_mode": snapshot.get("api_mode"),
         "managed_home_id": snapshot.get("managed_home_id"),
         "tool_snapshot_hash": snapshot.get("tool_snapshot_hash"),
@@ -1472,6 +2400,37 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _structured_link_id(session_id: str) -> str:
+    return f"codex-link-{hashlib.sha256(session_id.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _adapter_version() -> str:
+    try:
+        value = metadata.version("gpt2giga-harness")
+    except metadata.PackageNotFoundError:
+        value = "unknown"
+    return _driver_version(value)
+
+
+def _driver_version(value: Any) -> str:
+    return _identity_value(value or "unknown", prefix="version")
+
+
+def _identity_value(value: Any, *, prefix: str) -> str:
+    text = str(value or "").strip()
+    allowed = frozenset(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:@+~-"
+    )
+    if (
+        text
+        and len(text) <= 256
+        and text[0].isalnum()
+        and all(character in allowed for character in text)
+    ):
+        return text
+    return f"{prefix}-{hashlib.sha256(text.encode('utf-8')).hexdigest()[:24]}"
 
 
 def _safe_id(value: str) -> str:

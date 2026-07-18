@@ -15,8 +15,24 @@ from gpt2giga_harness.harnesses import (
 )
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.plugins import HarnessValidationReport, validate_harness_spec
+from gpt2giga_harness.registries import (
+    EntryPointFamily,
+    RegistrationOutcome,
+    RegistryCollisionError,
+    VersionedRegistryKernel,
+)
+from gpt2giga_harness.types import redact_secrets
 
 ENTRY_POINT_GROUP = "gpt2giga.harnesses"
+NEUTRAL_ENTRY_POINT_GROUP = "agent_workbench.harness_adapters.v1"
+HARNESS_ADAPTER_ENTRY_POINTS = EntryPointFamily(
+    registry_id="harness_adapter",
+    api_version=1,
+    primary_group=NEUTRAL_ENTRY_POINT_GROUP,
+    compatibility_groups=(ENTRY_POINT_GROUP,),
+)
+MAX_DISCOVERY_ERRORS = 20
+MAX_DISCOVERY_ERROR_CHARS = 400
 BUILTIN_HARNESSES = (
     DirectChatHarness,
     CodexCliHarness,
@@ -34,33 +50,57 @@ class HarnessRegistry:
     """Store and discover harness implementations."""
 
     def __init__(self) -> None:
-        self._harnesses: dict[str, BaseHarness] = {}
+        self._kernel = VersionedRegistryKernel[BaseHarness](
+            HARNESS_ADAPTER_ENTRY_POINTS
+        )
         self.validation_reports: dict[str, HarnessValidationReport] = {}
         self.discovery_errors: list[str] = []
 
     def register(self, harness: BaseHarness) -> None:
         """Register one harness instance."""
+        self._register(
+            harness,
+            identity=_implementation_identity(type(harness)),
+            source=f"runtime:{type(harness).__module__}.{type(harness).__qualname__}",
+        )
+
+    def _register(
+        self,
+        harness: BaseHarness,
+        *,
+        identity: str,
+        source: str,
+        allow_equivalent_duplicate: bool = False,
+    ) -> RegistrationOutcome:
         spec = harness.spec()
         report = validate_harness_spec(spec)
         if not report.harness_id:
             raise ValueError("Harness id is required.")
-        self._harnesses[report.harness_id] = harness
-        self.validation_reports[report.harness_id] = report
+        outcome = self._kernel.register(
+            item_id=report.harness_id,
+            item=harness,
+            identity=identity,
+            source=source,
+            allow_equivalent_duplicate=allow_equivalent_duplicate,
+        )
+        if outcome is RegistrationOutcome.ADDED:
+            self.validation_reports[report.harness_id] = report
+        return outcome
 
     def get(self, harness_id: str) -> BaseHarness:
         """Return a registered harness by id."""
-        try:
-            return self._harnesses[harness_id]
-        except KeyError as exc:
-            raise UnknownHarnessError(harness_id) from exc
+        harness = self._kernel.get(harness_id)
+        if harness is None:
+            raise UnknownHarnessError(harness_id)
+        return harness
 
     def list(self) -> tuple[BaseHarness, ...]:
         """Return registered harnesses in registration order."""
-        return tuple(self._harnesses.values())
+        return self._kernel.values()
 
     def ids(self) -> tuple[str, ...]:
         """Return registered harness ids."""
-        return tuple(sorted(self._harnesses))
+        return self._kernel.ids()
 
     def validation_report(self, harness_id: str) -> HarnessValidationReport | None:
         """Return the last validation report for a registered harness."""
@@ -98,19 +138,49 @@ class HarnessRegistry:
     ) -> None:
         """Load third-party harnesses from package entry points."""
         try:
-            selected = _select_entry_points()
+            all_entry_points = entry_points()
         except Exception as exc:  # pragma: no cover - defensive importlib path
-            self.discovery_errors.append(str(exc))
+            self._record_discovery_error(
+                "Harness entry-point discovery failed: "
+                f"{type(exc).__name__} (details omitted)."
+            )
             return
-        for entry_point in selected:
-            try:
-                harness = _load_entry_point_harness(
-                    entry_point.load(),
-                    executable_resolver=executable_resolver,
-                )
-                self.register(harness)
-            except Exception as exc:  # pragma: no cover - plugin failure path
-                self.discovery_errors.append(f"{entry_point.name}: {exc}")
+        for group in HARNESS_ADAPTER_ENTRY_POINTS.groups:
+            selected = sorted(
+                _select_entry_points(all_entry_points, group),
+                key=_entry_point_sort_key,
+            )
+            for entry_point in selected:
+                entry_name = str(getattr(entry_point, "name", "<unnamed>"))
+                source = f"entry-point:{group}:{entry_name}"
+                try:
+                    loaded = entry_point.load()
+                    harness = _load_entry_point_harness(
+                        loaded,
+                        executable_resolver=executable_resolver,
+                    )
+                    self._register(
+                        harness,
+                        identity=_entry_point_identity(entry_point, loaded),
+                        source=source,
+                        allow_equivalent_duplicate=True,
+                    )
+                except RegistryCollisionError as exc:
+                    self._record_discovery_error(
+                        "Harness id collision for "
+                        f"{exc.item_id!r}: keeping {exc.existing_source}; "
+                        f"rejected {exc.incoming_source}."
+                    )
+                except Exception as exc:  # pragma: no cover - plugin failure path
+                    self._record_discovery_error(
+                        f"{source}: {type(exc).__name__} (details omitted)."
+                    )
+
+    def _record_discovery_error(self, message: str) -> None:
+        if len(self.discovery_errors) >= MAX_DISCOVERY_ERRORS:
+            return
+        safe_message = str(redact_secrets(message))
+        self.discovery_errors.append(safe_message[:MAX_DISCOVERY_ERROR_CHARS])
 
 
 def create_default_registry(
@@ -127,11 +197,36 @@ def create_default_registry(
     return registry
 
 
-def _select_entry_points():
-    all_entry_points = entry_points()
+def _select_entry_points(all_entry_points, group: str):
     if hasattr(all_entry_points, "select"):
-        return all_entry_points.select(group=ENTRY_POINT_GROUP)
-    return all_entry_points.get(ENTRY_POINT_GROUP, ())
+        return all_entry_points.select(group=group)
+    return all_entry_points.get(group, ())
+
+
+def _entry_point_sort_key(entry_point) -> tuple[str, str]:
+    return (
+        str(getattr(entry_point, "name", "")),
+        str(getattr(entry_point, "value", "")),
+    )
+
+
+def _entry_point_identity(entry_point, loaded) -> str:
+    value = getattr(entry_point, "value", None)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return _implementation_identity(loaded)
+
+
+def _implementation_identity(implementation) -> str:
+    if isinstance(implementation, BaseHarness):
+        implementation = type(implementation)
+    module = getattr(implementation, "__module__", type(implementation).__module__)
+    qualname = getattr(
+        implementation,
+        "__qualname__",
+        type(implementation).__qualname__,
+    )
+    return f"{module}:{qualname}"
 
 
 def _load_entry_point_harness(

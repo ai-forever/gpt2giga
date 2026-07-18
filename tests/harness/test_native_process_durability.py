@@ -90,6 +90,39 @@ def test_native_process_timeout_is_supervised_and_persisted(tmp_path):
     manager.close()
 
 
+def test_native_process_timeout_intent_wins_concurrent_status_refresh(tmp_path):
+    script = _write_waiting_cli(tmp_path)
+    sessions = InMemoryHarnessSessionStore()
+    session = sessions.create_session(title="Racing native timeout")
+    runtime = RuntimeCoordinationStore(tmp_path / "data")
+    manager = NativeProcessManager(
+        session_store=sessions,
+        runtime_store=runtime,
+        use_pty=False,
+    )
+    ref = manager.start(_plan(script, tmp_path), session_id=session.id)
+    _wait_for_text(manager, ref.id, "ready")
+    terminate_process = manager._terminate_process
+    observed = []
+
+    def terminate_and_refresh(process):
+        terminate_process(process)
+        observed.append(manager.status(ref.id).status)
+
+    manager._terminate_process = terminate_and_refresh
+
+    timed_out = manager._terminate_owned(
+        ref.id,
+        status=NativeProcessStatus.TIMED_OUT,
+        recovery_outcome="timeout_expired",
+    )
+
+    assert observed == [NativeProcessStatus.TIMED_OUT]
+    assert timed_out.status is NativeProcessStatus.TIMED_OUT
+    assert runtime.get_native_process(ref.id).status == "timed_out"
+    manager.close()
+
+
 def test_native_process_restart_marks_live_expired_owner_interrupted(tmp_path):
     script = _write_waiting_cli(tmp_path)
     sessions = InMemoryHarnessSessionStore()

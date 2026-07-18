@@ -1,8 +1,8 @@
 # Unified Harness
 
-:::warning[Beta preview — prerelease]
+:::warning[Alpha preview — prerelease]
 
-The `gpt2giga-harness` 0.1.x line is a beta preview for testing and feedback.
+The `gpt2giga-harness` 0.2.x line is an alpha preview for testing and feedback.
 The UI, CLI, project YAML, runtime schema, and upgrade behavior can change while
 the product is being developed. Use it for local evaluation and supervised
 workflows, not as a production-critical or unattended multi-user service.
@@ -47,7 +47,7 @@ This separation matters: an approval shown by Unified Harness covers actions it
 owns, such as spawning a run or applying a captured patch. It cannot claim to
 observe every internal action performed by a black-box external CLI.
 
-## Is the beta preview for you?
+## Is the prerelease preview for you?
 
 Try it now if you want to evaluate a local agent cockpit, compare harnesses,
 prototype reviewable workflows, or give feedback while the interfaces are
@@ -58,7 +58,7 @@ Wait for a later release if you need a stable automation API, guaranteed
 backward compatibility, high availability, central multi-user administration,
 or a security boundary around arbitrary behavior inside third-party CLIs.
 
-During the beta:
+During the prerelease:
 
 - read release notes before upgrading and back up `~/.gpt2giga/harness` plus
   important project `.giga/` definitions;
@@ -75,7 +75,7 @@ During the beta:
 
 ### 1. Get the preview and check the workstation
 
-The source checkout is the current, always-available beta path:
+The source checkout is the current, always-available preview path:
 
 ```bash
 git clone --branch feature/productize_harness \
@@ -84,6 +84,7 @@ cd gpt2giga
 uv sync --all-packages --all-extras --dev
 source .venv/bin/activate
 giga doctor
+giga --version
 giga harness list
 ```
 
@@ -100,7 +101,7 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-The upcoming `gpt2giga-harness==0.1.0b1` distribution requires
+The upcoming `gpt2giga-harness==0.2.0a1` distribution requires
 `gpt2giga==0.2.4a1` and provides the `giga` and `gpt2giga-harness` commands.
 
 Requirements are Python 3.10–3.14 and `uv`. Direct GigaChat runs also need the
@@ -294,6 +295,14 @@ Then open `http://127.0.0.1:8091/`. A useful first tour is:
 Cockpit V2 is the default local UI. The previous no-build cockpit remains at
 `http://127.0.0.1:8091/legacy` for one release-level rollback window; switching
 between the two does not migrate or rewrite Harness runtime state.
+
+For a retained assistant response, **Copy** fetches and copies the full text
+even when the feed shows only a bounded preview. For structured and one-shot
+runs, the pencil appears only on the latest user message. Editing and
+resubmitting it replaces that active chat turn and removes its following
+assistant response from the conversation; the superseded run remains available
+in Runs as append-only audit evidence. Native terminal sessions do not expose
+the pencil because a retained interactive process cannot be rewound safely.
 
 `giga ui` starts a local durable worker automatically when no online worker is
 registered. Use `giga ui --no-start-worker` when a separately supervised worker
@@ -2102,12 +2111,18 @@ If discovery fails, the UI still accepts manual model input.
    ```
 
 3. Implement `spec()`, `availability()`, and `run()`.
-4. Register the class in `BUILTIN_HARNESSES` or expose a package entry point:
+4. Register the class in `BUILTIN_HARNESSES` or expose a package entry point
+   through the versioned provider-neutral group:
 
    ```toml
-   [project.entry-points."gpt2giga.harnesses"]
+   [project.entry-points."agent_workbench.harness_adapters.v1"]
    my-harness = "my_package.my_harness:MyHarness"
    ```
+
+   Existing packages using `gpt2giga.harnesses` remain discoverable. During
+   migration a package may publish the same target in both groups; equivalent
+   aliases are loaded once and conflicting IDs do not overwrite the first
+   adapter.
 
 5. Add tests that do not require live GigaChat credentials.
 6. Run:
@@ -2183,8 +2198,11 @@ from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga_harness.harnesses.base import BaseHarness
 ```
 
-The plugin entry-point group remains `gpt2giga.harnesses`; only entry-point
-targets and Python imports move to `gpt2giga_harness.*`.
+The historical plugin entry-point group remains supported as the
+`gpt2giga.harnesses` compatibility alias. New adapters use
+`agent_workbench.harness_adapters.v1`; entry-point targets and Python imports
+continue to live under `gpt2giga_harness.*` until a separately gated namespace
+migration.
 
 Remove the old combined wheel before installing the split packages so stale
 `gpt2giga/harness` files cannot mask a migration error:
@@ -2203,7 +2221,7 @@ uv tool install --prerelease allow gpt2giga
 uv tool install --prerelease allow gpt2giga-harness
 ```
 
-The upcoming `gpt2giga-harness==0.1.0b1` metadata requires
+The upcoming `gpt2giga-harness==0.2.0a1` metadata requires
 `gpt2giga==0.2.4a1`.
 
 This package migration does not move or rewrite Harness state. Existing

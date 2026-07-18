@@ -1,4 +1,10 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type UseMutationResult,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
@@ -8,6 +14,7 @@ import {
   type EventProjection,
   type EventPayloadResponse,
   fetchCockpit,
+  type FullMessageResponse,
   mutateCockpit,
   type NativeStartResponse,
   patchCockpit,
@@ -15,9 +22,18 @@ import {
   type RunStartResponse,
   type SessionSummary,
   type TokenUsageProjection,
+  withQuery,
 } from "../api";
 import { MessageMarkdown } from "../message-markdown";
 import { generatedImageProjection } from "../generated-image";
+import {
+  latestEditableUserMessageId,
+  projectActiveMessageTimeline,
+  resolveMessageAction,
+  timelineWhileEditing,
+  type MessageActionKind,
+  type ResolvedMessageAction,
+} from "../message-actions";
 import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
 import {
@@ -57,22 +73,24 @@ import {
 } from "../workbench-model";
 import {
   activeAtQuery,
-  availableInvocationModes,
+  availableExecutionTransports,
   consumeAtQuery,
+  type ExecutionTransport,
+  invocationModeForTransport,
   normalizeExecutionSelection,
-  type InvocationMode,
 } from "../workbench-execution";
 
 const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
 const runPreferencesKey = "gpt2giga.cockpit-v2.run-preferences.v1";
 const reasoningModel = "GigaChat-2-Reasoning";
 type SessionAction = "archive" | "delete";
+type MessageAction = { kind: MessageActionKind; messageId: string };
 type RunConfig = { apiMode: string; harnessId: string; mode: string; model: string };
 type ReasoningEffort = "high" | "low" | "medium";
 type AdvancedRunConfig = {
   capability: string;
   dryRun: boolean;
-  invocationMode: InvocationMode;
+  executionTransport: ExecutionTransport;
   permissionProfile: string;
   stream: boolean;
   workspacePolicy: string;
@@ -100,6 +118,14 @@ type CompletionNotice = {
   title: string;
 };
 
+type ProviderHandoffPreview = {
+  handoff: {
+    command: string[];
+    instruction: string;
+    status: string;
+  };
+};
+
 export function WorkbenchSurface() {
   const params = useParams({ strict: false });
   const sessionId =
@@ -116,6 +142,7 @@ export function WorkbenchSurface() {
   const [leftWidth, setLeftWidth] = useState(() => loadWidth("left", 264));
   const [rightWidth, setRightWidth] = useState(() => loadWidth("right", 320));
   const [prompt, setPrompt] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string>();
   const rememberedRunPreferences = useMemo(loadRunPreferences, []);
   const [runConfig, setRunConfig] = useState<RunConfig>(rememberedRunPreferences.config);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
@@ -124,7 +151,7 @@ export function WorkbenchSurface() {
   const [advancedConfig, setAdvancedConfig] = useState<AdvancedRunConfig>({
     capability: "chat_completions",
     dryRun: false,
-    invocationMode: "headless",
+    executionTransport: "native_structured",
     permissionProfile: "interactive",
     stream: true,
     workspacePolicy: "auto",
@@ -182,6 +209,21 @@ export function WorkbenchSurface() {
     ...sessionEventsOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
   });
+  const activeMessages = useMemo(
+    () => projectActiveMessageTimeline(messages.data?.messages ?? []),
+    [messages.data?.messages],
+  );
+  const latestUserMessageId = advancedConfig.executionTransport === "native_terminal"
+    ? undefined
+    : latestEditableUserMessageId(activeMessages);
+  const visibleMessages = useMemo(
+    () => timelineWhileEditing(activeMessages, editingMessageId),
+    [activeMessages, editingMessageId],
+  );
+
+  useEffect(() => {
+    setEditingMessageId(undefined);
+  }, [sessionId]);
 
   useEffect(() => {
     if (sessionId !== undefined || settings.data === undefined || settingsDefaultsApplied.current) return;
@@ -195,7 +237,7 @@ export function WorkbenchSurface() {
     });
     setAdvancedConfig((current) => ({
       ...current,
-      invocationMode: defaults.invocation_mode as InvocationMode,
+      executionTransport: defaults.execution_transport as ExecutionTransport,
       permissionProfile: defaults.permission_profile,
       stream: defaults.stream,
       workspacePolicy: defaults.workspace_policy,
@@ -303,6 +345,7 @@ export function WorkbenchSurface() {
         builtin_tools: runConfig.apiMode === "v2" ? builtinTools : [],
         capability: advancedConfig.capability,
         extra: {
+          ...(editingMessageId === undefined ? {} : { edit_message_id: editingMessageId }),
           generate_session_title: session.title === "Untitled session",
           session_title_model:
             settings.data?.harness_defaults.default_title_model
@@ -312,7 +355,8 @@ export function WorkbenchSurface() {
             : {}),
         },
         harness_id: runConfig.harnessId,
-        invocation_mode: advancedConfig.invocationMode,
+        execution_transport: advancedConfig.executionTransport,
+        invocation_mode: invocationModeForTransport(advancedConfig.executionTransport),
         mode: runConfig.mode,
         model: runConfig.model.trim() || null,
         permission_profile: advancedConfig.permissionProfile,
@@ -329,7 +373,10 @@ export function WorkbenchSurface() {
         });
         return { kind: "preview", report: response.preflight };
       }
-      if (advancedConfig.invocationMode === "native") {
+      if (advancedConfig.executionTransport === "native_terminal") {
+        if (editingMessageId !== undefined) {
+          throw new Error("Editing retained messages is unavailable for native terminal sessions.");
+        }
         const response = await mutateCockpit<NativeStartResponse>(
           "/api/native/processes/start",
           { ...payload, action: "start" },
@@ -361,8 +408,48 @@ export function WorkbenchSurface() {
       }
       previousRunStatuses.current.set(run.id, run.status);
       await refreshSessionAfterRunStart(queryClient, run.session_id);
+      setEditingMessageId(undefined);
       setPrompt("");
     },
+  });
+  const messageAction = useMutation({
+    mutationFn: async ({ kind, messageId }: MessageAction) => {
+      if (sessionId === undefined) throw new Error("Session is not selected");
+      return resolveMessageAction(
+        kind,
+        async () => {
+          const response = await fetchCockpit<FullMessageResponse>(
+            `/api/cockpit/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/content`,
+          );
+          return response.content;
+        },
+        async (content) => {
+          if (typeof navigator.clipboard?.writeText !== "function") {
+            throw new Error("Clipboard API is unavailable");
+          }
+          await navigator.clipboard.writeText(content);
+        },
+      );
+    },
+    onSuccess: ({ content, kind }, variables) => {
+      if (kind !== "edit") return;
+      setEditingMessageId(variables.messageId);
+      setPrompt(content);
+      setComposerCaret(content.length);
+      setPreviewReport(null);
+      requestAnimationFrame(() => {
+        const composer = composerRef.current;
+        composer?.focus();
+        composer?.setSelectionRange(content.length, content.length);
+        composer?.scrollIntoView({ block: "nearest" });
+      });
+    },
+  });
+  const openInProvider = useMutation({
+    mutationFn: () => fetchCockpit<ProviderHandoffPreview>(withQuery(
+      `/api/provider-handoffs/${encodeURIComponent(runConfig.harnessId)}/preview`,
+      { action: "open_provider_ui", workspace: "." },
+    )),
   });
 
   const saveRunConfig = useMutation({
@@ -491,14 +578,21 @@ export function WorkbenchSurface() {
   const selectedHarness = harnesses.data?.harnesses.find(
     (harness) => harness.spec.id === runConfig.harnessId,
   );
-  const invocationModes = availableInvocationModes(selectedHarness);
+  const executionTransports = availableExecutionTransports(selectedHarness);
+  const selectedTransport = selectedHarness?.workbench_transport?.options.find(
+    (option) => option.id === advancedConfig.executionTransport,
+  );
+  const providerHandoffActions = [
+    ...(selectedHarness?.provider_handoff?.available_actions ?? []),
+    ...(selectedHarness?.provider_handoff?.degraded_actions ?? []),
+  ];
   const capabilityCopy = advancedConfig.capability === "agent_cli"
     ? { label: message(locale, "codingAgent"), detail: message(locale, "codingAgentHint") }
     : { label: message(locale, "directChat"), detail: message(locale, "directChatHint") };
   const supportedBuiltinTools = selectedHarness?.spec.supported_builtin_tools ?? emptyStringList;
   const builtinToolsAvailable =
     runConfig.apiMode === "v2" &&
-    advancedConfig.invocationMode === "headless" &&
+    advancedConfig.executionTransport === "one_shot" &&
     supportedBuiltinTools.length > 0;
   const modelSuggestions = models.data?.models ?? [];
   const streamPresentation = useMemo(
@@ -817,10 +911,10 @@ export function WorkbenchSurface() {
             <section className="message-region" aria-label={message(locale, "sessionMessages")}>
               {messages.isPending ? <ListSkeleton rows={4} /> : null}
               {messages.isError ? <ReadError locale={locale} /> : null}
-              {messages.data?.messages.length === 0 ? (
+              {messages.data !== undefined && visibleMessages.length === 0 ? (
                 <div className="empty-state">{message(locale, "emptyMessages")}</div>
               ) : null}
-              {messages.data?.messages.map((item) => (
+              {visibleMessages.map((item) => (
                 <Fragment key={item.id}>
                   {(item.role === "assistant" || item.role === "error") && item.run_id
                     ? (
@@ -849,6 +943,14 @@ export function WorkbenchSurface() {
                       <span className="message-header-meta">
                         <TokenUsage usage={item.usage} />
                         <time>{formatTimestamp(item.created_at, locale)}</time>
+                        {item.role === "assistant" || item.id === latestUserMessageId ? (
+                          <MessageActionButton
+                            action={item.role === "assistant" ? "copy" : "edit"}
+                            locale={locale}
+                            messageId={item.id}
+                            mutation={messageAction}
+                          />
+                        ) : null}
                       </span>
                     </header>
                     {item.reasoning?.text ? (
@@ -859,6 +961,21 @@ export function WorkbenchSurface() {
                   </article>
                 </Fragment>
               ))}
+              {messageAction.isError ? (
+                <span className="error-state" role="alert">
+                  {message(locale, "messageActionFailed")}
+                </span>
+              ) : null}
+              <span className="sr-only" aria-live="polite">
+                {messageAction.isSuccess
+                  ? message(
+                      locale,
+                      messageAction.data.kind === "copy"
+                        ? "assistantMessageCopied"
+                        : "userMessageLoaded",
+                    )
+                  : ""}
+              </span>
               {retainedGeneratedEvents.map((event) => (
                 <GeneratedFilePreview eventId={event.id} key={event.id} payloadUrl={event.payload_url} />
               ))}
@@ -1057,20 +1174,32 @@ export function WorkbenchSurface() {
                   </div>
                   <div className="advanced-config-grid">
                     <label>
-                      <span>{message(locale, "invocation")}</span>
+                      <span>{message(locale, "executionTransport")}</span>
                       <select
-                        onChange={(event) => setAdvancedConfig((current) => ({
-                          ...current,
-                          invocationMode: event.target.value as InvocationMode,
-                        }))}
-                        value={advancedConfig.invocationMode}
+                        onChange={(event) => {
+                          const executionTransport = event.target.value as ExecutionTransport;
+                          setAdvancedConfig((current) => ({
+                            ...current,
+                            executionTransport,
+                          }));
+                          if (executionTransport === "native_terminal") {
+                            setEditingMessageId(undefined);
+                          }
+                        }}
+                        value={advancedConfig.executionTransport}
                       >
-                        {invocationModes.map((mode) => (
-                          <option key={mode} value={mode}>
-                            {mode === "native" ? message(locale, "nativeCli") : message(locale, "headlessApi")}
+                        {executionTransports.map((transport) => (
+                          <option key={transport} value={transport}>
+                            {message(locale, transport === "native_structured" ? "nativeStructured" : transport === "native_terminal" ? "nativeTerminal" : "oneShot")}
                           </option>
                         ))}
                       </select>
+                      {selectedTransport?.blocker ? (
+                        <small className="transport-remediation">
+                          <span>{selectedTransport.detail}</span>
+                          {selectedTransport.remediation ? <code>{selectedTransport.remediation}</code> : null}
+                        </small>
+                      ) : null}
                     </label>
                     <div className="capability-summary">
                       <span>{message(locale, "capability")}</span>
@@ -1312,9 +1441,12 @@ export function WorkbenchSurface() {
               </div>
               <button aria-label={message(locale, "collapse")} onClick={() => setRightOpen(false)} type="button">×</button>
             </div>
-            <div className="readiness-callout success">
-              <strong>{message(locale, "ready")}</strong>
-              <span>{message(locale, "fastApiAuthority")}</span>
+            <div className={selectedTransport?.status === "blocked" || previewReport?.hard_block ? "readiness-callout blocked" : "readiness-callout success"}>
+              <strong>{message(locale, selectedTransport?.status === "blocked" || previewReport?.hard_block ? "blocked" : "ready")}</strong>
+              <span>{selectedTransport?.detail ?? message(locale, "fastApiAuthority")}</span>
+              {selectedTransport?.status === "blocked" && selectedTransport.remediation ? (
+                <code>{selectedTransport.remediation}</code>
+              ) : null}
             </div>
             <section className="inspector-section">
               <h3>{message(locale, "executionPlan")}</h3>
@@ -1323,8 +1455,20 @@ export function WorkbenchSurface() {
                 <div><dt>{message(locale, "workspacePolicy")}</dt><dd>{message(locale, "workspacePolicyValue")}</dd></div>
                 <div><dt>{message(locale, "route")}</dt><dd>{runConfig.model || "GigaChat"} · /{runConfig.apiMode}</dd></div>
                 <div><dt>{message(locale, "harness")}</dt><dd>{runConfig.harnessId}</dd></div>
+                <div><dt>{message(locale, "executionTransport")}</dt><dd>{advancedConfig.executionTransport}</dd></div>
               </dl>
             </section>
+            {selectedRun?.provider_session ? (
+              <section className="inspector-section provider-session-card">
+                <h3>{message(locale, "providerSession")}</h3>
+                <dl className="plan-fields">
+                  <div><dt>{message(locale, "structuredLink")}</dt><dd>{shortId(selectedRun.provider_session.link_id ?? "-")}</dd></div>
+                  <div><dt>{message(locale, "session")}</dt><dd>{shortId(selectedRun.provider_session.external_session_id ?? "-")}</dd></div>
+                  <div><dt>{message(locale, "status")}</dt><dd>{selectedRun.provider_session.recovery_state ?? "active"}</dd></div>
+                  <div><dt>{message(locale, "connection")}</dt><dd>{selectedRun.provider_session.protocol ?? "structured"}</dd></div>
+                </dl>
+              </section>
+            ) : null}
             <Progression current={stage} locale={locale} />
             <section className="inspector-section next-actions">
               <h3>{message(locale, "nextActions")}</h3>
@@ -1338,6 +1482,18 @@ export function WorkbenchSurface() {
                   <Link params={{ runId: selectedRunId }} to="/cockpit-v2/runs/$runId">{message(locale, "promote")} <span>›</span></Link>
                 </>
               )}
+              {providerHandoffActions.includes("open_provider_ui") ? (
+                <button disabled={openInProvider.isPending} onClick={() => openInProvider.mutate()} type="button">
+                  {message(locale, "openProviderUi")} <span>↗</span>
+                </button>
+              ) : null}
+              {openInProvider.data ? (
+                <div className="provider-handoff-instruction" role="status">
+                  <span>{openInProvider.data.handoff.instruction}</span>
+                  {openInProvider.data.handoff.command.length > 0 ? <code>{openInProvider.data.handoff.command.join(" ")}</code> : null}
+                </div>
+              ) : null}
+              {openInProvider.isError ? <span className="mutation-error">{openInProvider.error.message}</span> : null}
             </section>
           </aside>
         </>
@@ -1458,6 +1614,61 @@ function ToolActivityCard({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function MessageActionButton({
+  action,
+  locale,
+  messageId,
+  mutation,
+}: {
+  action: MessageActionKind;
+  locale: "en" | "ru";
+  messageId: string;
+  mutation: UseMutationResult<ResolvedMessageAction, Error, MessageAction>;
+}) {
+  const active = mutation.isPending && mutation.variables?.messageId === messageId;
+  const succeeded = mutation.isSuccess
+    && mutation.variables?.messageId === messageId
+    && mutation.data.kind === action;
+  const label = message(
+    locale,
+    action === "copy" ? "copyAssistantMessage" : "editUserMessage",
+  );
+  return (
+    <span className="message-actions">
+      <button
+        aria-label={label}
+        className={`message-action${succeeded ? " success" : ""}`}
+        disabled={mutation.isPending}
+        onClick={() => mutation.mutate({ kind: action, messageId })}
+        title={label}
+        type="button"
+      >
+        {active ? <span aria-hidden="true">…</span> : succeeded ? (
+          <span aria-hidden="true">✓</span>
+        ) : action === "copy" ? <CopyIcon /> : <EditIcon />}
+      </button>
+    </span>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <rect x="8" y="8" width="11" height="11" rx="2" />
+      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+    </svg>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="m4 20 4.2-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z" />
+      <path d="m13.8 7.4 2.8 2.8" />
+    </svg>
   );
 }
 

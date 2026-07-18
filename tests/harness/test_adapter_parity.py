@@ -68,6 +68,7 @@ EXPECTED_SUPPORT = {
         "interactive_approvals": "delegated",
         "external_history": "partial",
         "structured_app_server": "unsupported",
+        "provider_ui_handoff": "supported",
         "agent_profile_options": "partial",
     },
     "gemini-cli": {
@@ -88,7 +89,7 @@ EXPECTED_SUPPORT = {
         "managed_mcp_headless": "supported",
         "interactive_approvals": "delegated",
         "external_history": "partial",
-        "structured_app_server": "unsupported",
+        "structured_app_server": "supported",
         "agent_profile_options": "partial",
     },
 }

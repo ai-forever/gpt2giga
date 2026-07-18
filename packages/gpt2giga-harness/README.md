@@ -5,7 +5,7 @@ distribution provides the `giga` and `gpt2giga-harness` commands, the
 `gpt2giga_harness` Python namespace, a durable local worker, and the packaged
 Project Cockpit web UI.
 
-> **Beta preview:** the `0.1.x` storage, API, adapter, and automation contracts
+> **Alpha preview:** the `0.2.x` storage, API, adapter, and automation contracts
 > are stabilizing but may still change between prereleases. Use supervised local
 > workflows first. The package metadata in the current checkout is the source of
 > truth for the supported gateway requirement.
@@ -33,10 +33,11 @@ After publication, the installation will be:
 ```sh
 uv tool install --prerelease allow gpt2giga-harness
 giga doctor
+giga --version
 giga ui
 ```
 
-The upcoming `gpt2giga-harness==0.1.0b1` metadata requires
+The upcoming `gpt2giga-harness==0.2.0a1` metadata requires
 `gpt2giga==0.2.4a1`. Installing only `gpt2giga` never adds Harness commands or
 the `gpt2giga_harness` namespace.
 
@@ -130,6 +131,14 @@ operator actions. An eligible successful run exposes its existing provenance
 and promotion state under Reuse. Promotion preview/apply and later scheduling
 remain separate explicit actions.
 
+Retained assistant messages expose a Copy action that fetches the complete
+stored response instead of copying a bounded read-model preview. For structured
+and one-shot runs, only the latest retained user message exposes a pencil
+action. Resubmitting that edit replaces the active turn and its following
+assistant response in Workbench, while the superseded run remains retained in
+Runs for audit. Native terminal sessions do not expose the pencil because a
+retained interactive process cannot be rewound safely.
+
 Useful orientation commands:
 
 ```sh
@@ -195,16 +204,32 @@ and cleanup policies.
 
 ## Plugin contract
 
-Third-party adapters register through the `gpt2giga.harnesses` entry-point
-group, while import targets live outside the gateway namespace:
+Third-party adapters register through the versioned, provider-neutral
+`agent_workbench.harness_adapters.v1` entry-point group, while import targets
+live outside the gateway namespace:
 
 ```toml
-[project.entry-points."gpt2giga.harnesses"]
+[project.entry-points."agent_workbench.harness_adapters.v1"]
 my-harness = "my_package.my_harness:MyHarness"
 ```
 
+The legacy `gpt2giga.harnesses` group remains a compatibility alias. Packages
+may advertise the same target through both groups during migration; equivalent
+duplicates are loaded once, while conflicting adapter IDs fail without
+overwriting the first registration.
+
 Use `giga harness scaffold`, `giga harness validate`, and
-`giga harness inspect` to develop and diagnose an adapter.
+`giga harness inspect` to develop and diagnose an adapter. Pass
+`--output <directory>` to scaffold a complete out-of-tree package with a
+versioned, content-free manifest, neutral entry points, a fake provider fixture,
+and a hermetic conformance test. After installing the package, run
+`giga harness conformance <adapter-id> --json`.
+
+SDK API v1 reports execution, sessions, approvals, attachments, integrations,
+recovery, history, telemetry, and packaging separately. A capability passes
+only when the manifest declares it and a corresponding behavioral probe passes;
+omitted claims remain `unsupported` and are never inferred from legacy adapter
+metadata.
 
 ## Back up user state
 

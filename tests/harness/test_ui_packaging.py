@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import zipfile
 
 
@@ -77,3 +78,31 @@ assert "gpt2giga Harness — Cockpit V2" in load_cockpit_v2_shell()
         capture_output=True,
         text=True,
     )
+
+
+def test_harness_sdist_omits_frontend_build_toolchain(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    dist_dir = tmp_path / "dist"
+    subprocess.run(
+        [
+            "uv",
+            "build",
+            "--package",
+            "gpt2giga-harness",
+            "--sdist",
+            "--no-sources",
+            "--out-dir",
+            str(dist_dir),
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    archive = next(dist_dir.glob("gpt2giga_harness-*.tar.gz"))
+
+    with tarfile.open(archive, "r:gz") as source:
+        members = source.getnames()
+
+    assert not any("/frontend/" in name for name in members)
+    assert any("/ui/cockpit_v2/assets/manifest.json" in name for name in members)

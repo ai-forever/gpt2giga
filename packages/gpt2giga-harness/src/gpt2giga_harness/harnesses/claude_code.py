@@ -7,6 +7,14 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
 
+from gpt2giga_harness.claude_handoff import (
+    ClaudeHandoffAction,
+    ClaudeHandoffCapability,
+    ClaudeHandoffLaunchMode,
+    ClaudeHandoffPlan,
+    plan_claude_handoff,
+    probe_claude_handoff,
+)
 from gpt2giga_harness.cli_capabilities import (
     CliCapabilitySnapshot,
     cli_probe_availability,
@@ -143,6 +151,25 @@ class ClaudeCodeHarness(BaseHarness):
     def capability_probe(self) -> CliCapabilitySnapshot:
         """Return cached, version-aware Claude adapter evidence."""
         return probe_cli_capabilities(self.executable_resolution(), self.spec().id)
+
+    def provider_handoff_capability(self) -> ClaudeHandoffCapability:
+        """Return provider-owned Remote Control and Desktop capability truth."""
+        return probe_claude_handoff(self.capability_probe())
+
+    def provider_handoff_preview(
+        self,
+        *,
+        action: ClaudeHandoffAction,
+        workspace: str,
+        launch_mode: ClaudeHandoffLaunchMode,
+    ) -> ClaudeHandoffPlan:
+        """Preview one documented handoff without opening a process or UI."""
+        return plan_claude_handoff(
+            self.capability_probe(),
+            action=action,
+            workspace=workspace,
+            launch_mode=launch_mode,
+        )
 
     def executable_resolution(self) -> ExecutableResolution:
         """Return the configured or PATH-discovered Claude executable."""

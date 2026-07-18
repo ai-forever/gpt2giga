@@ -270,6 +270,32 @@ def cockpit_messages(
     )
 
 
+@router.get("/api/cockpit/sessions/{session_id}/messages/{message_id}/content")
+def cockpit_message_content(
+    session_id: str,
+    message_id: str,
+    request: Request,
+) -> Response:
+    """Return one complete retained message after an explicit user action."""
+    try:
+        retained = _store(request).list_messages(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+    selected = next((item for item in retained if item.id == message_id), None)
+    if selected is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    content = selected.content
+    return JSONResponse(
+        {
+            "message_id": selected.id,
+            "role": selected.role,
+            "content": content,
+            "byte_count": len(content.encode("utf-8")),
+        },
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @router.get("/api/cockpit/sessions/{session_id}/runs")
 def cockpit_session_runs(
     session_id: str,
@@ -565,6 +591,9 @@ def _message_projection(message: HarnessMessage) -> dict[str, Any]:
     metadata = payload.pop("metadata", {})
     payload["content"] = _text_projection(content, _ITEM_TEXT_BYTES)
     if isinstance(metadata, Mapping):
+        edited_from_message_id = metadata.get("edited_from_message_id")
+        if isinstance(edited_from_message_id, str) and edited_from_message_id:
+            payload["edited_from_message_id"] = edited_from_message_id
         usage = metadata.get("usage")
         if isinstance(usage, Mapping):
             projected_usage = {
@@ -598,6 +627,7 @@ def _run_summary(run: HarnessRun) -> dict[str, Any]:
         if isinstance(native_process, Mapping) and native_process.get("id")
         else None
     )
+    metadata = dict(run.metadata)
     return {
         "id": run.id,
         "session_id": run.session_id,
@@ -608,6 +638,12 @@ def _run_summary(run: HarnessRun) -> dict[str, Any]:
         "capability": run.capability.value,
         "mode": run.mode,
         "invocation_mode": run.invocation_mode.value,
+        "execution_transport": (
+            str(metadata.get("execution_transport"))
+            if metadata.get("execution_transport")
+            else None
+        ),
+        "provider_session": _provider_session_projection(metadata),
         "native_process_id": native_process_id,
         "created_at": run.created_at,
         "updated_at": run.updated_at,
@@ -615,6 +651,24 @@ def _run_summary(run: HarnessRun) -> dict[str, Any]:
         "finished_at": run.finished_at,
         "error": _text_projection(run.error or "", 4096) if run.error else None,
         "artifacts": _artifact_metadata(run),
+    }
+
+
+def _provider_session_projection(metadata: Mapping[str, Any]) -> dict[str, Any] | None:
+    link = metadata.get("structured_session_link")
+    if not isinstance(link, Mapping):
+        return None
+    config = link.get("config_snapshot")
+    config = config if isinstance(config, Mapping) else {}
+    return {
+        "link_id": link.get("id"),
+        "external_session_id": link.get("external_session_id"),
+        "latest_external_turn_id": link.get("latest_external_turn_id"),
+        "recovery_state": link.get("recovery_state"),
+        "protocol": config.get("protocol"),
+        "protocol_version": config.get("protocol_version"),
+        "link_hash": link.get("link_hash"),
+        "content_free": True,
     }
 
 

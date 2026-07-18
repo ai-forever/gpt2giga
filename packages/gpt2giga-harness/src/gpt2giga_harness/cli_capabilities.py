@@ -91,6 +91,7 @@ CLI_PROBE_CONTRACTS = {
             "--effort",
             "--allowedTools",
             "--disallowedTools",
+            "--remote-control",
         ),
         minimum_version="2.1.0",
         maximum_version_exclusive="2.2.0",
@@ -107,7 +108,12 @@ CLI_PROBE_CONTRACTS = {
             "--approval-mode",
             "--skip-trust",
         ),
-        optional_tokens=("--prompt-interactive", "--list-sessions", "--resume"),
+        optional_tokens=(
+            "--acp",
+            "--prompt-interactive",
+            "--list-sessions",
+            "--resume",
+        ),
         minimum_version="0.46.0",
         maximum_version_exclusive="0.47.0",
         event_schema="gemini-stream-json-v1",
@@ -175,6 +181,15 @@ def probe_cli_capabilities(
                 app_server_run[0] == "ok"
                 and "stdio://" in app_server_output
                 and "generate-json-schema" in app_server_output
+            )
+        elif harness_id == "claude-code":
+            remote_control_run = _run_probe(
+                command + ("remote-control", "--help"), harness_id
+            )
+            capabilities["remote-control"] = (
+                remote_control_run[0] == "ok"
+                or remote_control_run[1]
+                == "Error: You must be logged in to use Remote Control."
             )
         missing = [
             token for token in contract.required_tokens if not capabilities[token]

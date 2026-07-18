@@ -194,7 +194,74 @@ def test_cockpit_message_projection_exposes_bounded_reasoning_and_usage(tmp_path
     assert projected["usage"] == {"input_tokens": 21, "output_tokens": 8}
 
 
-def test_cockpit_run_summary_exposes_only_native_process_identity(tmp_path):
+def test_cockpit_message_content_returns_complete_explicit_copy_payload(tmp_path):
+    app = _app(tmp_path)
+    store = app.state.harness_session_store
+    session = store.create_session(title="complete message")
+    run = _run(store, session.id)
+    full_content = f"prefix\n{'я' * 40_000}\nsuffix"
+    store.append_message(
+        HarnessMessage(
+            id="msg_complete",
+            session_id=session.id,
+            run_id=run.id,
+            role="assistant",
+            content=full_content,
+            created_at=utc_now(),
+        )
+    )
+
+    with TestClient(app) as client:
+        page = client.get(f"/api/cockpit/sessions/{session.id}/messages")
+        complete = client.get(
+            f"/api/cockpit/sessions/{session.id}/messages/msg_complete/content"
+        )
+        missing = client.get(
+            f"/api/cockpit/sessions/{session.id}/messages/missing/content"
+        )
+
+    assert page.json()["messages"][0]["content"]["truncated"] is True
+    assert complete.status_code == 200
+    assert complete.headers["cache-control"] == "private, no-store"
+    assert complete.json() == {
+        "message_id": "msg_complete",
+        "role": "assistant",
+        "content": full_content,
+        "byte_count": len(full_content.encode("utf-8")),
+    }
+    assert missing.status_code == 404
+
+
+def test_cockpit_message_projection_exposes_content_free_edit_branch_marker(tmp_path):
+    app = _app(tmp_path)
+    store = app.state.harness_session_store
+    session = store.create_session(title="edited branch")
+    run = _run(store, session.id)
+    store.append_message(
+        HarnessMessage(
+            id="msg_replacement",
+            session_id=session.id,
+            run_id=run.id,
+            role="user",
+            content="replacement",
+            created_at=utc_now(),
+            metadata={
+                "edited_from_message_id": "msg_original",
+                "private": "not projected",
+            },
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/cockpit/sessions/{session.id}/messages")
+
+    assert response.status_code == 200
+    projected = response.json()["messages"][0]
+    assert projected["edited_from_message_id"] == "msg_original"
+    assert "private" not in projected
+
+
+def test_cockpit_run_summary_exposes_bounded_native_and_provider_identity(tmp_path):
     app = _app(tmp_path)
     store = app.state.harness_session_store
     session = store.create_session(title="native reconnect")
@@ -202,10 +269,23 @@ def test_cockpit_run_summary_exposes_only_native_process_identity(tmp_path):
         store,
         session.id,
         metadata={
+            "execution_transport": "native_structured",
             "native_process": {
                 "id": "native-process-1",
                 "display_command": "codex --secret token",
-            }
+            },
+            "structured_session_link": {
+                "id": "link-1",
+                "external_session_id": "provider-session-1",
+                "latest_external_turn_id": "provider-turn-1",
+                "recovery_state": "active",
+                "link_hash": "a" * 64,
+                "supervisor_owner": "worker-secret-owner",
+                "config_snapshot": {
+                    "protocol": "codex-app-server-json-rpc-v2",
+                    "protocol_version": "2",
+                },
+            },
         },
     )
 
@@ -216,8 +296,20 @@ def test_cockpit_run_summary_exposes_only_native_process_identity(tmp_path):
     projected = response.json()["runs"][0]
     assert projected["id"] == run.id
     assert projected["native_process_id"] == "native-process-1"
+    assert projected["execution_transport"] == "native_structured"
+    assert projected["provider_session"] == {
+        "link_id": "link-1",
+        "external_session_id": "provider-session-1",
+        "latest_external_turn_id": "provider-turn-1",
+        "recovery_state": "active",
+        "protocol": "codex-app-server-json-rpc-v2",
+        "protocol_version": "2",
+        "link_hash": "a" * 64,
+        "content_free": True,
+    }
     assert "display_command" not in response.text
     assert "secret" not in response.text
+    assert "supervisor_owner" not in response.text
 
 
 def test_cockpit_run_artifacts_and_heavy_evidence_are_lazy_and_bounded(tmp_path):

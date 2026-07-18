@@ -848,6 +848,11 @@ class NativeProcessManager:
             record = self._records.get(process_id)
             if record is None:
                 raise NativeProcessNotFoundError(process_id)
+            record.ref = replace(
+                record.ref,
+                status=status,
+                recovery_outcome=recovery_outcome,
+            )
             process = record.process
             running = process.poll() is None
         if running:

@@ -98,6 +98,10 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/cockpit/sessions/{session_id}/artifacts"),
         ("GET", "/api/cockpit/sessions/{session_id}/events"),
         ("GET", "/api/cockpit/sessions/{session_id}/messages"),
+        (
+            "GET",
+            "/api/cockpit/sessions/{session_id}/messages/{message_id}/content",
+        ),
         ("GET", "/api/cockpit/sessions/{session_id}/runs"),
         ("GET", "/api/cockpit/sessions/{session_id}/updates/stream"),
         ("GET", "/api/defaults"),
@@ -121,6 +125,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/project/memory"),
         ("GET", "/api/project/presets"),
         ("GET", "/api/project/state"),
+        ("GET", "/api/provider-handoffs/{harness_id}/preview"),
         ("GET", "/api/runs"),
         ("GET", "/api/runs/updates/stream"),
         ("GET", "/api/runs/{run_id}"),

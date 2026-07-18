@@ -1,9 +1,12 @@
 import json
+from importlib.metadata import version
 import signal
+import sys
 
 import pytest
 
 from gpt2giga_harness import cli, proxy
+from gpt2giga_harness import entrypoint
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga_harness.harnesses.codex_cli import CodexCliHarness
@@ -69,6 +72,33 @@ def _ready_execution_readiness(*_args, **_kwargs):
         "summary": {"ready": 1, "degraded": 0, "blocked": 0},
         "findings": [],
     }
+
+
+def test_cli_ui_allows_cold_worker_fingerprint_startup():
+    assert cli.UI_WORKER_START_TIMEOUT_SECONDS == 10.0
+
+
+def test_cli_version_reports_distribution_version(capsys):
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--version"])
+
+    assert raised.value.code == 0
+    assert (
+        capsys.readouterr().out == f"gpt2giga-harness {version('gpt2giga-harness')}\n"
+    )
+
+
+def test_console_entrypoint_reports_version_without_importing_full_cli(
+    capsys, monkeypatch
+):
+    monkeypatch.delitem(sys.modules, "gpt2giga_harness.cli", raising=False)
+
+    assert entrypoint.main(["--version"]) == 0
+
+    assert "gpt2giga_harness.cli" not in sys.modules
+    assert (
+        capsys.readouterr().out == f"gpt2giga-harness {version('gpt2giga-harness')}\n"
+    )
 
 
 def test_cli_ui_starts_and_stops_worker_when_none_is_online(
@@ -219,6 +249,7 @@ def test_cli_harness_run_json_includes_selected_execution_readiness(capsys):
     assert readiness["plan"] == {
         "harness_id": "echo",
         "invocation_mode": "headless",
+        "execution_transport": "one_shot",
         "api_mode": "v2",
         "model": None,
         "mode": "plan",
@@ -232,6 +263,64 @@ def test_cli_harness_run_json_includes_selected_execution_readiness(capsys):
         "invocation-mode",
         "delivery",
     }
+
+
+def test_cli_session_application_flow_create_turn_events_and_approve(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+
+    assert cli.main(["session", "create", "--harness", "echo", "--json"]) == 0
+    session = json.loads(capsys.readouterr().out)["session"]
+
+    assert (
+        cli.main(
+            [
+                "session",
+                "turn",
+                session["id"],
+                "--prompt",
+                "shared CLI turn",
+                "--harness",
+                "echo",
+                "--permission-profile",
+                "review_every_action",
+                "--transport",
+                "one_shot",
+                "--idempotency-key",
+                "cli-application-turn",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    submitted = json.loads(capsys.readouterr().out)
+    assert submitted["job"]["status"] == "waiting_approval"
+    assert submitted["run"]["metadata"]["execution_transport"] == "one_shot"
+
+    assert cli.main(["session", "events", submitted["run"]["id"], "--json"]) == 0
+    events = json.loads(capsys.readouterr().out)["events"]
+    assert [event["type"] for event in events] == ["approval_requested"]
+    approval_id = events[0]["payload"]["approval_id"]
+
+    assert (
+        cli.main(
+            [
+                "session",
+                "approve",
+                approval_id,
+                "--decision",
+                "allow_once",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    approved = json.loads(capsys.readouterr().out)
+    assert approved["approval"]["status"] == "approved"
+    assert approved["job_status"] == "queued"
 
 
 def test_cli_doctor_json_passes_explicit_workspace(capsys, monkeypatch, tmp_path):
@@ -421,6 +510,19 @@ def test_cli_harness_scaffold_includes_plugin_metadata(capsys):
     assert "config_schema" in output
     assert "HarnessCapability.CHAT_COMPLETIONS" in output
     assert "metadata={" in output
+
+
+def test_cli_harness_scaffold_writes_full_package(capsys, tmp_path):
+    output = tmp_path / "my-harness"
+
+    exit_code = cli.main(["harness", "scaffold", "my-harness", "--output", str(output)])
+
+    assert exit_code == 0
+    assert (output / "pyproject.toml").is_file()
+    assert (
+        output / "src" / "agent_workbench_my_harness" / "adapter_manifest.json"
+    ).is_file()
+    assert "Created adapter scaffold" in capsys.readouterr().out
 
 
 def test_cli_project_info_json_reports_workspace(capsys, tmp_path):

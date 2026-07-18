@@ -16,7 +16,7 @@ http://localhost:8090
 | Поддерживаемые маршруты OpenAI, Anthropic, Gemini и LiteLLM | [Совместимость API](api-compatibility.md) |
 | Поведение `extra_headers`, `extra_query`, `extra_body` и необязательных полей | [Параметры клиентов](client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и их сопоставление с OpenAI/Anthropic/Gemini | [Встроенные инструменты](builtin-tools.md) |
-| Бета-превью локального cockpit для запусков, сравнений, approvals и workflows | [Unified Harness](harness.md) |
+| Альфа-превью локального cockpit для запусков, сравнений, approvals и workflows | [Unified Harness](harness.md) |
 | Компоненты Unified Harness, поток выполнения, хранение и API управляющего слоя | [Архитектура Harness](architecture/harness.md) |
 | Переменные окружения, аутентификация, лимиты, метрики, наблюдаемость | [Конфигурация](configuration.md) |
 | Профили Compose, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развёртывание](deployment.md) |

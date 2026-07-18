@@ -521,13 +521,14 @@ class ScheduleService:
     def tick(self) -> int:
         """Dispatch all currently due definitions; called by the local worker."""
         self._sync_occurrences()
+        recovered = self._recover_dispatching_occurrences()
         now = _utc_now()
         with self.runtime_store._connect() as connection:  # noqa: SLF001
             rows = connection.execute(
                 "SELECT * FROM schedule_states WHERE enabled = 1 AND status = 'active' AND next_run_at <= ? ORDER BY next_run_at",
                 (now,),
             ).fetchall()
-        dispatched = 0
+        dispatched = recovered
         for state in rows:
             try:
                 project = resolve_project(
@@ -597,6 +598,58 @@ class ScheduleService:
             except Exception as exc:
                 self._mark_attention(str(state["schedule_key"]), str(exc))
         return dispatched
+
+    def _recover_dispatching_occurrences(self) -> int:
+        """Resume schedule dispatch after owner loss without duplicating child state."""
+        with self.runtime_store._connect() as connection:  # noqa: SLF001
+            rows = connection.execute(
+                """
+                SELECT schedule_occurrences.*, schedule_states.project_id,
+                       schedule_states.project_root
+                FROM schedule_occurrences
+                JOIN schedule_states USING (schedule_key)
+                WHERE schedule_occurrences.status = 'dispatching'
+                ORDER BY schedule_occurrences.created_at, schedule_occurrences.id
+                """
+            ).fetchall()
+        recovered = 0
+        for row in rows:
+            occurrence = _occurrence_from_row(row)
+            try:
+                project = resolve_project(
+                    str(row["project_root"]), data_dir=self.eval_store.data_dir
+                )
+                if project.id != str(row["project_id"]):
+                    raise ScheduleError(
+                        "scheduled project identity changed; refusing recovery"
+                    )
+                definition = load_schedule(project.root, occurrence.schedule_id)
+                if definition.source_hash != occurrence.definition_hash:
+                    raise ScheduleError(
+                        "schedule definition changed during dispatch recovery"
+                    )
+                if definition.target_kind not in {"agent", "preset", "workflow"}:
+                    raise ScheduleError(
+                        "scheduled-start recovery is not proven for this target kind"
+                    )
+                result, job_id, run_id, session_id = self._dispatch_target(
+                    project,
+                    definition,
+                    occurrence,
+                    dry_run=occurrence.trigger == "test",
+                )
+                del result
+                self._finish_occurrence(
+                    occurrence.id,
+                    "queued",
+                    job_id=job_id,
+                    run_id=run_id,
+                    session_id=session_id,
+                )
+                recovered += 1
+            except Exception as exc:
+                self._finish_occurrence(occurrence.id, "failed", error=str(exc))
+        return recovered
 
     def worker_health(self) -> dict[str, Any]:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=15)
@@ -906,6 +959,7 @@ class ScheduleService:
                 "prompt": prompt,
                 "model": snapshot.get("model"),
                 "api_mode": snapshot.get("api_mode") or "v2",
+                "invocation_mode": snapshot.get("invocation_mode") or "headless",
                 "mode": mode,
                 "workspace": project.root,
                 "workspace_policy": "worktree",
@@ -924,6 +978,8 @@ class ScheduleService:
                     "history_cutoff": occurrence.history_cutoff,
                 },
             }
+            if payload["invocation_mode"] == "native":
+                payload["execution_transport"] = "native_structured"
             submission = self.dispatcher.submit(
                 session.id,
                 payload,
@@ -949,7 +1005,10 @@ class ScheduleService:
                 schedule_id=definition.id,
             )
             run = coordinator.start(
-                workflow, inputs=dict(definition.inputs or {}), prompt=definition.prompt
+                workflow,
+                inputs=dict(definition.inputs or {}),
+                prompt=definition.prompt,
+                idempotency_key=f"schedule:{definition.id}:{occurrence.id}",
             )
             return (
                 workflow_run_to_dict(run, coordinator.repository.list_steps(run.id)),

@@ -14,12 +14,15 @@ from typing import Any, Callable, Mapping, Sequence
 from gpt2giga_harness.mcp import MCPTransport, ToolServerDescriptor
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.store import utc_now
+from gpt2giga_harness.secrets import (
+    SecretReference,
+    SecretResolver,
+    secret_reference_from_dict,
+    secret_reference_to_dict,
+)
 from gpt2giga_harness.tools import (
     CompositeSecretResolver,
     EnvironmentSecretResolver,
-    SecretReference,
-    SecretReferenceKind,
-    SecretResolver,
 )
 
 
@@ -783,15 +786,7 @@ def _values_to_snapshot(
 ) -> dict[str, Any]:
     return {
         key: (
-            {
-                "secret_ref": {
-                    "kind": value.kind.value,
-                    "name": value.name,
-                    "service": value.service,
-                    "account": value.account,
-                    "expires_at": value.expires_at,
-                }
-            }
+            {"secret_ref": secret_reference_to_dict(value)}
             if isinstance(value, SecretReference)
             else {"literal": value}
         )
@@ -809,25 +804,7 @@ def _values_from_snapshot(value: Any) -> dict[str, str | SecretReference]:
             raise ValueError("Managed MCP snapshot value is invalid")
         reference = raw_item.get("secret_ref")
         if isinstance(reference, Mapping):
-            result[key] = SecretReference(
-                kind=SecretReferenceKind(str(reference.get("kind") or "environment")),
-                name=str(reference.get("name") or ""),
-                service=(
-                    str(reference["service"])
-                    if reference.get("service") is not None
-                    else None
-                ),
-                account=(
-                    str(reference["account"])
-                    if reference.get("account") is not None
-                    else None
-                ),
-                expires_at=(
-                    str(reference["expires_at"])
-                    if reference.get("expires_at") is not None
-                    else None
-                ),
-            )
+            result[key] = secret_reference_from_dict(reference)
         elif "literal" in raw_item and isinstance(raw_item["literal"], str):
             result[key] = raw_item["literal"]
         else:

@@ -124,6 +124,43 @@ def test_descriptor_requires_secret_references_for_sensitive_headers():
     assert build_mcp_inventory({"args": unsafe_args})[0] == ()
 
 
+def test_missing_secret_fails_before_mcp_subprocess_spawn(monkeypatch):
+    descriptor = descriptor_from_profile(
+        "blocked",
+        ProjectToolProfile(
+            enabled=True,
+            title="Blocked",
+            config={
+                "transport": "stdio",
+                "command": "must-not-spawn",
+                "trusted": True,
+                "env": {
+                    "TOKEN": {
+                        "secret_ref": {
+                            "kind": "environment",
+                            "name": "MISSING_TOKEN",
+                        }
+                    }
+                },
+            },
+        ),
+    )
+    spawned = False
+
+    def unexpected_spawn(*args, **kwargs):
+        nonlocal spawned
+        spawned = True
+        raise AssertionError("MCP subprocess must not start")
+
+    monkeypatch.setattr("gpt2giga_harness.mcp._probe_stdio", unexpected_spawn)
+
+    result = probe_mcp_server(descriptor, EnvironmentSecretResolver({}))
+
+    assert result.status is MCPProbeStatus.BLOCKED
+    assert spawned is False
+    assert result.error == "environment reference is missing: MISSING_TOKEN"
+
+
 def test_streamable_http_discovery_accepts_json_and_session_header(monkeypatch):
     calls = []
 

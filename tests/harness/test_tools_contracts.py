@@ -192,10 +192,12 @@ def test_reference_serialization_contains_only_pointer_metadata() -> None:
     payload = secret_reference_to_dict(reference)
 
     assert payload == {
+        "schema_version": 1,
         "kind": "keychain",
         "name": "github-token",
         "service": "gpt2giga",
         "account": "octocat",
         "expires_at": "2099-01-01T00:00:00+00:00",
+        "cache_ttl_seconds": 0,
     }
     assert "value" not in json.dumps(payload)

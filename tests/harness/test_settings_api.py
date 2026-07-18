@@ -1,8 +1,17 @@
+import json
+import stat
+
 from fastapi.testclient import TestClient
+import pytest
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.secrets import SecretReference, SecretReferenceKind
 from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga_harness.settings import (
+    SecretReferenceSettingsStore,
+    SettingsConflictError,
+)
 from gpt2giga_harness.ui.app import create_app
 
 
@@ -33,6 +42,7 @@ def test_settings_read_model_is_bounded_and_never_exposes_secrets(
     assert body["routes"]["default_model_source"] == "built_in"
     assert body["harness_defaults"]["default_model"] == "GigaChat-3.5-432B-A28B"
     assert body["harness_defaults"]["default_title_model"] == "GigaChat-3-Lightning"
+    assert body["harness_defaults"]["execution_transport"] == "native_structured"
     assert "root" not in body["workspace"]
     assert body["diagnostics"]["content_free"] is True
     serialized = str(body)
@@ -57,6 +67,7 @@ def test_settings_defaults_persist_read_back_and_seed_new_sessions(tmp_path):
                 "default_title_model": "GigaChat-3-Lightning",
                 "default_api_mode": "v2",
                 "mode": "act",
+                "execution_transport": "one_shot",
                 "invocation_mode": "headless",
                 "workspace_policy": "current",
                 "permission_profile": "review_every_action",
@@ -70,6 +81,7 @@ def test_settings_defaults_persist_read_back_and_seed_new_sessions(tmp_path):
     assert body["saved"] is True
     assert body["defaults"]["default_harness_id"] == "direct-chat"
     assert body["defaults"]["default_title_model"] == "GigaChat-3-Lightning"
+    assert body["defaults"]["execution_transport"] == "one_shot"
     assert body["sources"]["default_harness_id"] == "harness_settings"
     assert body["change_effect"] == "new_runs"
     stored = tmp_path / "data" / "settings" / "defaults.json"
@@ -112,6 +124,29 @@ def test_settings_reject_invalid_harness_invocation_before_persistence(tmp_path)
         "invocation_mode": "selected harness does not support native sessions"
     }
     assert not (tmp_path / "data" / "settings" / "defaults.json").exists()
+
+
+def test_settings_reject_native_terminal_for_non_native_harness(tmp_path):
+    client = _client(tmp_path)
+
+    response = client.patch(
+        "/api/settings/defaults",
+        json={
+            "defaults": {
+                "default_harness_id": "direct-chat",
+                "execution_transport": "native_terminal",
+                "invocation_mode": "native",
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["field_errors"] == {
+        "execution_transport": (
+            "selected harness does not support native terminal sessions"
+        ),
+        "invocation_mode": "selected harness does not support native sessions",
+    }
 
 
 def test_settings_reject_invalid_title_model_before_persistence(tmp_path):
@@ -172,6 +207,44 @@ def test_settings_reject_stale_revision_without_overwriting(tmp_path):
     assert stale.json()["detail"]["code"] == "revision_conflict"
     read_back = client.get("/api/settings", params={"workspace": str(tmp_path)}).json()
     assert read_back["harness_defaults"]["workspace_policy"] == "current"
+
+
+def test_secret_reference_settings_round_trip_references_only(tmp_path):
+    canary = "n1-02-settings-secret-canary"
+    store = SecretReferenceSettingsStore(tmp_path / "data")
+    initial = store.load()
+    reference = SecretReference(
+        SecretReferenceKind.ENVIRONMENT,
+        "PROVIDER_TOKEN",
+        cache_ttl_seconds=30,
+    )
+
+    saved = store.save(
+        {"provider.default": reference},
+        expected_revision=initial.revision,
+    )
+
+    assert saved.references == {"provider.default": reference}
+    assert saved.revision != initial.revision
+    serialized = store.path.read_text(encoding="utf-8")
+    payload = json.loads(serialized)
+    assert payload["schema_version"] == 1
+    assert payload["references"]["provider.default"]["name"] == "PROVIDER_TOKEN"
+    assert "value" not in serialized
+    assert canary not in serialized
+    assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
+
+    with pytest.raises(SettingsConflictError, match="revision changed"):
+        store.save({}, expected_revision=initial.revision)
+    with pytest.raises(ValueError, match="test secret references"):
+        store.save(
+            {
+                "test.only": SecretReference(
+                    SecretReferenceKind.TEST,
+                    "TEST_TOKEN",
+                )
+            }
+        )
 
 
 def _client(data_dir, **overrides) -> TestClient:

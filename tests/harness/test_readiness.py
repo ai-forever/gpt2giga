@@ -2,6 +2,7 @@ import json
 
 from gpt2giga_harness import proxy, readiness
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.native.models import HarnessInvocationMode
 from gpt2giga_harness.preflight import (
@@ -221,6 +222,39 @@ def test_dry_run_route_is_ready_with_explicit_not_checked_evidence(tmp_path):
     assert route["status"] == "not_checked"
     assert route["required"] is False
     assert route["remediation"][0]["command"] == "giga doctor --json"
+
+
+def test_native_structured_readiness_blocks_with_actionable_driver_reason(
+    monkeypatch, tmp_path
+):
+    registry = HarnessRegistry()
+    registry.register(_AgentHarness(available=True))
+    _ready_proxy(monkeypatch)
+
+    report = build_execution_readiness(
+        HarnessConfig(data_dir=str(tmp_path / "state")),
+        registry,
+        harness_id="codex-cli",
+        invocation_mode=HarnessInvocationMode.HEADLESS,
+        execution_transport=ExecutionTransport.NATIVE_STRUCTURED,
+        api_mode=GigaChatApiMode.V2,
+        model="GigaChat-2-Max",
+        mode="read",
+        workspace=str(tmp_path),
+        workspace_policy=WorkspacePolicy.CURRENT,
+        durable=True,
+    )
+
+    structured = next(
+        finding
+        for finding in report["findings"]
+        if finding["id"] == "native-structured"
+    )
+    assert report["blocked"] is True
+    assert structured["status"] == "blocked"
+    assert structured["remediation"][0]["command"] == (
+        "giga harness inspect codex-cli --json"
+    )
 
 
 def test_preflight_combines_readiness_block_with_content_safety_report():
