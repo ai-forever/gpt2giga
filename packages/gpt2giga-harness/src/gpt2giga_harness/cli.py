@@ -106,6 +106,11 @@ from gpt2giga_harness.project_memory import (
     ProjectMemoryNotFoundError,
     memory_entry_to_dict,
 )
+from gpt2giga_harness.provider_settings import (
+    ProviderRegistryConflict,
+    ProviderSettingsNotFoundError,
+    ProviderSettingsService,
+)
 from gpt2giga_harness.preflight import (
     build_preflight_report,
     format_preflight_block_message,
@@ -233,6 +238,12 @@ def main(argv: list[str] | None = None) -> int:
     except ProjectMemoryNotFoundError as exc:
         print(f"Unknown memory: {exc.args[0]}", file=sys.stderr)
         return 2
+    except ProviderSettingsNotFoundError as exc:
+        print(f"Unknown provider: {exc.args[0]}", file=sys.stderr)
+        return 2
+    except ProviderRegistryConflict as exc:
+        print(f"Provider registry conflict: {exc}", file=sys.stderr)
+        return 2
     except EvalSpecNotFoundError as exc:
         print(f"Unknown eval: {exc.args[0]}", file=sys.stderr)
         return 2
@@ -287,6 +298,67 @@ def build_parser() -> argparse.ArgumentParser:
     config_unset = config_subparsers.add_parser("unset")
     config_unset.add_argument("key")
     config_unset.set_defaults(handler=_handle_config_unset)
+
+    provider = subparsers.add_parser("provider")
+    provider_subparsers = provider.add_subparsers(dest="provider_command")
+    provider_list = provider_subparsers.add_parser("list")
+    provider_list.add_argument("--json", action="store_true")
+    provider_list.set_defaults(handler=_handle_provider_list)
+    provider_show = provider_subparsers.add_parser("show")
+    provider_show.add_argument("provider_id")
+    provider_show.add_argument("--json", action="store_true")
+    provider_show.set_defaults(handler=_handle_provider_show)
+    provider_add = provider_subparsers.add_parser("add")
+    provider_add.add_argument("provider_id")
+    provider_add.add_argument("--name", required=True)
+    provider_add.add_argument(
+        "--protocol",
+        required=True,
+        choices=("openai_compatible", "anthropic_compatible", "gemini_compatible"),
+    )
+    provider_add.add_argument("--dialect", default=None)
+    provider_add.add_argument("--base-url", required=True)
+    provider_add.add_argument("--route-prefix", default=None)
+    _add_provider_auth_arguments(provider_add, optional=False)
+    _add_provider_model_arguments(provider_add)
+    provider_add.add_argument("--offline", action="store_true")
+    provider_add.add_argument("--disabled", action="store_true")
+    provider_add.add_argument("--json", action="store_true")
+    provider_add.set_defaults(handler=_handle_provider_add)
+    provider_edit = provider_subparsers.add_parser("edit")
+    provider_edit.add_argument("provider_id")
+    provider_edit.add_argument("--expected-revision", type=int, required=True)
+    provider_edit.add_argument("--name", default=None)
+    provider_edit.add_argument(
+        "--protocol",
+        choices=("openai_compatible", "anthropic_compatible", "gemini_compatible"),
+        default=None,
+    )
+    provider_edit.add_argument("--dialect", default=None)
+    provider_edit.add_argument("--base-url", default=None)
+    provider_edit.add_argument("--route-prefix", default=None)
+    _add_provider_auth_arguments(provider_edit, optional=True)
+    _add_provider_model_arguments(provider_edit)
+    provider_edit.add_argument(
+        "--enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    provider_edit.add_argument(
+        "--offline",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    provider_edit.add_argument("--json", action="store_true")
+    provider_edit.set_defaults(handler=_handle_provider_edit)
+    for command, handler in (
+        ("test", _handle_provider_test),
+        ("discover", _handle_provider_discover),
+    ):
+        provider_probe = provider_subparsers.add_parser(command)
+        provider_probe.add_argument("provider_id")
+        provider_probe.add_argument("--json", action="store_true")
+        provider_probe.set_defaults(handler=handler)
 
     init = subparsers.add_parser("init")
     init.add_argument("--workspace", default=None)
@@ -893,6 +965,167 @@ def _handle_config_unset(args: argparse.Namespace, config: HarnessConfig) -> int
     else:
         print(f"No override configured for {args.key} in {path}")
     return 0
+
+
+def _handle_provider_list(args: argparse.Namespace, config: HarnessConfig) -> int:
+    payload = ProviderSettingsService(config.data_dir).list()
+    if args.json:
+        _print_json(payload)
+    else:
+        _print_provider_table(payload["providers"])
+    return 0
+
+
+def _handle_provider_show(args: argparse.Namespace, config: HarnessConfig) -> int:
+    provider = ProviderSettingsService(config.data_dir).get(args.provider_id)
+    if args.json:
+        _print_json(provider)
+    else:
+        _print_provider_detail(provider)
+    return 0
+
+
+def _handle_provider_add(args: argparse.Namespace, config: HarnessConfig) -> int:
+    service = ProviderSettingsService(config.data_dir)
+    result = service.create(
+        args.provider_id,
+        _provider_payload_from_args(args, create=True),
+    )
+    if args.json:
+        _print_json(
+            {"saved": True, "provider": result.provider, "effects": result.effects}
+        )
+    else:
+        _print_provider_detail(result.provider)
+    return 0
+
+
+def _handle_provider_edit(args: argparse.Namespace, config: HarnessConfig) -> int:
+    service = ProviderSettingsService(config.data_dir)
+    result = service.update(
+        args.provider_id,
+        _provider_payload_from_args(args, create=False),
+        expected_revision=args.expected_revision,
+    )
+    if args.json:
+        _print_json(
+            {"saved": True, "provider": result.provider, "effects": result.effects}
+        )
+    else:
+        _print_provider_detail(result.provider)
+    return 0
+
+
+def _handle_provider_test(args: argparse.Namespace, config: HarnessConfig) -> int:
+    return _handle_provider_probe(args, config, discover_models=False)
+
+
+def _handle_provider_discover(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    return _handle_provider_probe(args, config, discover_models=True)
+
+
+def _handle_provider_probe(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+    *,
+    discover_models: bool,
+) -> int:
+    payload = ProviderSettingsService(config.data_dir).check(
+        args.provider_id,
+        discover_models=discover_models,
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        health = payload["health"]
+        print(f"Provider: {payload['provider_id']}")
+        print(f"Health: {health['status']}")
+        print(f"Discovery: {health['discovery_status']}")
+        if health["failure_kind"]:
+            print(
+                f"Failure: {health['failure_kind']} ({health['reason_code']})",
+                file=sys.stderr,
+            )
+        for model in health["models"]:
+            print(f"- {model['model']} [{model['source']}]")
+    return 0 if payload["health"]["status"] == "ready" else 1
+
+
+def _provider_payload_from_args(
+    args: argparse.Namespace,
+    *,
+    create: bool,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for argument, field in (
+        ("name", "display_name"),
+        ("protocol", "protocol"),
+        ("dialect", "dialect"),
+        ("base_url", "base_url"),
+        ("route_prefix", "route_prefix"),
+    ):
+        value = getattr(args, argument, None)
+        if value is not None:
+            payload[field] = value
+    authentication = getattr(args, "authentication", None)
+    auth_values = {
+        "ownership": authentication,
+        "reference_kind": getattr(args, "secret_reference_kind", None),
+        "reference_name": getattr(args, "secret_reference_name", None),
+        "service": getattr(args, "keychain_service", None),
+        "account": getattr(args, "keychain_account", None),
+    }
+    if create or any(value is not None for value in auth_values.values()):
+        payload["authentication"] = {
+            key: value for key, value in auth_values.items() if value is not None
+        }
+    defaults = {
+        purpose: getattr(args, f"{purpose}_model", None)
+        for purpose in ("coding", "title", "evaluation", "fallback")
+    }
+    if any(value is not None for value in defaults.values()):
+        payload["default_models"] = {
+            purpose: value for purpose, value in defaults.items() if value is not None
+        }
+    if create:
+        payload["enabled"] = not args.disabled
+        payload["offline"] = args.offline
+    else:
+        if args.enabled is not None:
+            payload["enabled"] = args.enabled
+        if args.offline is not None:
+            payload["offline"] = args.offline
+    return payload
+
+
+def _add_provider_auth_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    optional: bool,
+) -> None:
+    parser.add_argument(
+        "--authentication",
+        choices=("secret_reference", "provider_native", "none"),
+        default=None if optional else "secret_reference",
+    )
+    parser.add_argument(
+        "--secret-reference-kind",
+        choices=("environment", "keychain"),
+        default=None if optional else "environment",
+    )
+    parser.add_argument("--secret-reference-name", default=None)
+    parser.add_argument("--keychain-service", default=None)
+    parser.add_argument("--keychain-account", default=None)
+
+
+def _add_provider_model_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--coding-model", default=None)
+    parser.add_argument("--title-model", default=None)
+    parser.add_argument("--evaluation-model", default=None)
+    parser.add_argument("--fallback-model", default=None)
 
 
 def _handle_harness_inspect(args: argparse.Namespace, config: HarnessConfig) -> int:
@@ -2452,6 +2685,32 @@ def _print_table(rows: list[dict[str, Any]]) -> None:
             f"{row['id']:<16}{row['kind']:<14}{row['status']:<12}"
             f"{native:<8}{row['description']}"
         )
+
+
+def _print_provider_table(rows: list[dict[str, Any]]) -> None:
+    print(f"{'ID':<24}{'Protocol':<24}{'Status':<16}Name")
+    for row in rows:
+        health = row.get("health") or {}
+        status = "disabled" if not row["enabled"] else health.get("status", "unchecked")
+        print(
+            f"{row['id'][:23]:<24}{row['protocol'][:23]:<24}"
+            f"{status[:15]:<16}{row['display_name']}"
+        )
+
+
+def _print_provider_detail(provider: Mapping[str, Any]) -> None:
+    print(f"Provider: {provider['display_name']} ({provider['id']})")
+    print(f"Protocol: {provider['protocol']} / {provider['dialect']}")
+    print(f"Endpoint: {provider['effective_base_url']}")
+    print(f"Source: {provider['source']}")
+    print(
+        "Authentication: "
+        f"{provider['authentication']['ownership']} "
+        f"({provider['authentication']['reference_kind'] or 'provider-owned'})"
+    )
+    print(f"Registry revision: {provider['registry_revision']}")
+    for purpose, model in provider["default_models"].items():
+        print(f"- {purpose}: {model}")
 
 
 def _print_preset_table(rows: list[dict[str, Any]]) -> None:

@@ -27,17 +27,26 @@ describe("backend-owned Settings contract", () => {
     expect(source).toContain("execution_transport");
     expect(source).toContain('message(locale, "chatModel")');
     expect(source).toContain('message(locale, "titleModel")');
+    expect(source).toContain('mutateCockpit<ProviderMutationResponse>("/api/providers"');
+    expect(source).toContain('/test`');
+    expect(source).toContain('/discover`');
+    expect(source).toContain("fork_or_new_session_required");
+    expect(source).toContain("providerFieldErrors(saveProvider.error)");
   });
 
   it("never creates browser fields for credentials, tokens, or certificates", () => {
     expect(source).not.toMatch(/type=["']password["']/u);
     expect(source).not.toMatch(/name=["'](?:api_key|token|certificate)["']/u);
+    expect(source).not.toMatch(/type=["']file["']/u);
+    expect(source).not.toContain("credential_value");
     expect(source).toContain('message(locale, "backendOnly")');
+    expect(source).toContain("reference_name");
   });
 
   it("labels new-run and restart effects instead of implying live persistence", () => {
     expect(source).toContain('effect="new_runs"');
     expect(source).toContain("data.runtime.change_effect");
-    expect(source).toContain("data.provider.change_effect");
+    expect(source).toContain("selectedProvider.effects.managed_homes");
+    expect(source).toContain('effect="fork_or_new_session_required"');
   });
 });

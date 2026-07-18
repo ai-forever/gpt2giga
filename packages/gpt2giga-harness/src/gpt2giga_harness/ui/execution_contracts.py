@@ -125,6 +125,8 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/project/memory"),
         ("GET", "/api/project/presets"),
         ("GET", "/api/project/state"),
+        ("GET", "/api/providers"),
+        ("GET", "/api/providers/{provider_id}"),
         ("GET", "/api/provider-handoffs/{harness_id}/preview"),
         ("GET", "/api/runs"),
         ("GET", "/api/runs/updates/stream"),
@@ -191,6 +193,8 @@ _NETWORK = frozenset(
     {
         ("GET", "/api/health"),
         ("GET", "/api/models"),
+        ("POST", "/api/providers/{provider_id}/discover"),
+        ("POST", "/api/providers/{provider_id}/test"),
     }
 )
 _SQLITE_PREFIXES = (

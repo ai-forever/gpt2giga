@@ -483,6 +483,85 @@ def test_cli_config_rejects_non_executable_key(capsys):
     assert "executables.<harness-id>" in capsys.readouterr().err
 
 
+def test_cli_provider_commands_share_authoritative_reference_only_registry(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    assert (
+        cli.main(
+            [
+                "provider",
+                "add",
+                "team-openai",
+                "--name",
+                "Team OpenAI",
+                "--protocol",
+                "openai_compatible",
+                "--dialect",
+                "openai-responses-v1",
+                "--base-url",
+                "https://models.example.test",
+                "--route-prefix",
+                "/v1",
+                "--secret-reference-name",
+                "TEAM_OPENAI_KEY",
+                "--coding-model",
+                "coding-model",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    created = json.loads(capsys.readouterr().out)["provider"]
+    assert created["authentication"]["reference_name"] == "TEAM_OPENAI_KEY"
+    assert created["authentication"]["value_readable"] is False
+
+    assert cli.main(["provider", "list", "--json"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert [item["id"] for item in listed["providers"]] == ["team-openai"]
+    assert listed["secret_contract"]["values_accepted"] is False
+
+    assert (
+        cli.main(
+            [
+                "provider",
+                "edit",
+                "team-openai",
+                "--expected-revision",
+                str(created["registry_revision"]),
+                "--title-model",
+                "title-model",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    updated = json.loads(capsys.readouterr().out)["provider"]
+    assert updated["default_models"] == {
+        "coding": "coding-model",
+        "title": "title-model",
+    }
+    assert updated["effects"]["structured_sessions"] == ("fork_or_new_session_required")
+
+    assert (
+        cli.main(
+            [
+                "provider",
+                "edit",
+                "team-openai",
+                "--expected-revision",
+                str(created["registry_revision"]),
+                "--name",
+                "stale",
+            ]
+        )
+        == 2
+    )
+    assert "Provider registry conflict" in capsys.readouterr().err
+
+
 def test_cli_harness_validate_json_reports_invalid_plugin(
     capsys,
     monkeypatch,

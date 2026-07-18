@@ -134,6 +134,23 @@ CONFORMANCE_EVIDENCE = {
             ),
         ),
         ConformanceEvidence(
+            id="provider.settings",
+            behaviors=frozenset(
+                {
+                    ConformanceBehavior.AUTHENTICATION,
+                    ConformanceBehavior.ALLOW,
+                    ConformanceBehavior.DENY,
+                    ConformanceBehavior.STALE_OR_REBOUND,
+                    ConformanceBehavior.REDACTION,
+                }
+            ),
+            test_nodes=(
+                "tests/harness/test_settings_api.py::test_provider_settings_api_crud_is_reference_only_and_optimistic",
+                "tests/harness/test_settings_api.py::test_provider_settings_api_returns_field_errors_before_persistence",
+                "tests/harness/test_settings_api.py::test_provider_settings_api_probe_is_explicit_bounded_and_content_free",
+            ),
+        ),
+        ConformanceEvidence(
             id="external.editor",
             behaviors=frozenset(
                 {
@@ -258,6 +275,7 @@ _EXTERNAL = (*_AUTH, "external.selected_plan")
 _EDITOR = (*_AUTH, "external.editor")
 _NATIVE_CONTROL = (*_AUTH, "external.native_control")
 _POLICY = (*_AUTH, "policy.lifecycle")
+_PROVIDER_SETTINGS = (*_AUTH, "provider.settings")
 
 
 def _route(
@@ -338,6 +356,22 @@ MUTATION_ROUTE_CONTRACTS = (
         EnforcementControl.AUTHENTICATED_LOCAL_STATE,
         "local_state.patch",
         evidence=_LOCAL,
+    ),
+    _route(
+        "POST",
+        "/api/providers",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "provider_settings.create",
+        evidence=_PROVIDER_SETTINGS,
+    ),
+    _route(
+        "PATCH",
+        "/api/providers/{provider_id}",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "provider_settings.update",
+        evidence=_PROVIDER_SETTINGS,
     ),
     *_many(
         "DELETE",
@@ -452,6 +486,18 @@ MUTATION_ROUTE_CONTRACTS = (
         EnforcementControl.EXPLICIT_OPERATOR_ACTION,
         "native_process.control",
         evidence=_NATIVE_CONTROL,
+    ),
+    *_many(
+        "POST",
+        (
+            "/api/providers/{provider_id}/test",
+            "/api/providers/{provider_id}/discover",
+        ),
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.EXPLICIT_OPERATOR_ACTION,
+        "provider_settings.probe",
+        actions=(PermissionAction.NETWORK_CONNECT,),
+        evidence=_PROVIDER_SETTINGS,
     ),
     _route(
         "DELETE",

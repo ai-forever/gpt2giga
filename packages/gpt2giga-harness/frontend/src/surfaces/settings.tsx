@@ -3,8 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   fetchCockpit,
+  mutateCockpit,
   patchCockpit,
   type ModelsResponse,
+  type ProviderCheckResponse,
+  type ProviderMutationResponse,
+  type ProviderProjection,
+  type ProviderSettingsResponse,
   type SettingsResponse,
   type SettingsSaveResponse,
   withQuery,
@@ -13,7 +18,7 @@ import { LazyInspector, type InspectorKind } from "../inspectors/LazyInspector";
 import { message } from "../messages";
 import type { LocalePreference, ThemePreference } from "../preferences";
 import { usePreferences } from "../preferences-context";
-import { requestKeys, settingsOptions } from "../request-graph";
+import { providersOptions, requestKeys, settingsOptions } from "../request-graph";
 
 type DefaultsDraft = {
   default_api_mode: string;
@@ -26,6 +31,27 @@ type DefaultsDraft = {
   permission_profile: string;
   stream: boolean;
   workspace_policy: string;
+};
+
+type ProviderDraft = {
+  id: string;
+  display_name: string;
+  protocol: string;
+  dialect: string;
+  base_url: string;
+  route_prefix: string;
+  authentication_ownership: string;
+  reference_kind: string;
+  reference_name: string;
+  reference_service: string;
+  reference_account: string;
+  coding_model: string;
+  title_model: string;
+  evaluation_model: string;
+  fallback_model: string;
+  enabled: boolean;
+  offline: boolean;
+  registry_revision: number | null;
 };
 
 const categories = [
@@ -44,13 +70,27 @@ export function SettingsSurface() {
   const locale = preferences.locale;
   const queryClient = useQueryClient();
   const settings = useQuery(settingsOptions());
+  const providers = useQuery(providersOptions());
   const [draft, setDraft] = useState<DefaultsDraft | null>(null);
+  const [providerDraft, setProviderDraft] = useState<ProviderDraft | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (settings.data === undefined) return;
     setDraft(toDraft(settings.data));
   }, [settings.data?.revision]);
+
+  useEffect(() => {
+    if (providers.data === undefined || providerDraft !== null) return;
+    const selected = providers.data.providers[0];
+    if (selected !== undefined) {
+      setSelectedProviderId(selected.id);
+      setProviderDraft(providerToDraft(selected));
+      return;
+    }
+    setProviderDraft(emptyProviderDraft(providers.data.templates[0]));
+  }, [providers.data, providerDraft]);
 
   const save = useMutation({
     mutationFn: (next: DefaultsDraft) =>
@@ -70,6 +110,41 @@ export function SettingsSurface() {
   const runtimeCheck = useMutation({
     mutationFn: () => fetchCockpit<Record<string, unknown>>("/api/health"),
   });
+  const saveProvider = useMutation({
+    mutationFn: (next: ProviderDraft) => {
+      const body = providerDraftPayload(next);
+      return next.registry_revision === null
+        ? mutateCockpit<ProviderMutationResponse>("/api/providers", { id: next.id, ...body })
+        : patchCockpit<ProviderMutationResponse>(
+            `/api/providers/${encodeURIComponent(next.id)}`,
+            { expected_revision: next.registry_revision, ...body },
+          );
+    },
+    onSuccess: (response) => {
+      setProviderDraft(providerToDraft(response.provider));
+      setSelectedProviderId(response.provider.id);
+      void queryClient.invalidateQueries({ queryKey: requestKeys.providers() });
+      void queryClient.invalidateQueries({ queryKey: requestKeys.settings() });
+    },
+  });
+  const providerTest = useMutation({
+    mutationFn: (providerId: string) =>
+      mutateCockpit<ProviderCheckResponse>(
+        `/api/providers/${encodeURIComponent(providerId)}/test`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: requestKeys.providers() });
+    },
+  });
+  const providerDiscovery = useMutation({
+    mutationFn: (providerId: string) =>
+      mutateCockpit<ProviderCheckResponse>(
+        `/api/providers/${encodeURIComponent(providerId)}/discover`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: requestKeys.providers() });
+    },
+  });
   const modelDiscovery = useMutation({
     mutationFn: () =>
       fetchCockpit<ModelsResponse>(
@@ -88,13 +163,16 @@ export function SettingsSurface() {
     settings.data?.routes.models,
   ]);
 
-  if (settings.isPending || draft === null) {
+  if (settings.isPending || providers.isPending || draft === null || providerDraft === null) {
     return <div className="settings-loading" aria-busy="true">{message(locale, "loading")}</div>;
   }
-  if (settings.isError || settings.data === undefined) {
+  if (settings.isError || providers.isError || settings.data === undefined || providers.data === undefined) {
     return <div className="error-state">{message(locale, "settingsUnavailable")}</div>;
   }
   const data = settings.data;
+  const providerData = providers.data;
+  const selectedProvider = providerData.providers.find((item) => item.id === selectedProviderId);
+  const providerErrors = providerFieldErrors(saveProvider.error);
   const locked = new Set(data.harness_defaults.locked_fields);
   const selectedHarness = data.harness_defaults.harnesses.find(
     (item) => item.id === draft.default_harness_id,
@@ -160,15 +238,163 @@ export function SettingsSurface() {
           </SettingsSection>
 
           <SettingsSection id="provider" title={message(locale, "provider")} description={message(locale, "providerHint")}>
-            <dl className="settings-facts">
-              <Fact label={message(locale, "configuration")} value={data.provider.configured ? "configured" : "not configured"} />
-              <Fact label={message(locale, "source")} value={data.provider.source} />
-              <Fact label={message(locale, "credentialValues")} value={message(locale, "backendOnly")} />
-            </dl>
-            <Boundary source={data.provider.source} effect={data.provider.change_effect} />
+            <div className="provider-toolbar">
+              <select
+                aria-label={message(locale, "providerTemplate")}
+                onChange={(event) => {
+                  const template = providerData.templates.find((item) => item.id === event.target.value);
+                  if (template !== undefined) setProviderDraft(emptyProviderDraft(template));
+                  setSelectedProviderId(null);
+                }}
+                value=""
+              >
+                <option value="">{message(locale, "chooseProviderTemplate")}</option>
+                {providerData.templates.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+              </select>
+              <button
+                onClick={() => {
+                  setSelectedProviderId(null);
+                  setProviderDraft(emptyProviderDraft(providerData.templates[0]));
+                }}
+                type="button"
+              >
+                {message(locale, "addProvider")}
+              </button>
+            </div>
+            {providerData.providers.length === 0 ? (
+              <p className="empty-state">{message(locale, "noProviders")}</p>
+            ) : (
+              <div className="provider-list" role="list">
+                {providerData.providers.map((item) => (
+                  <button
+                    className={selectedProviderId === item.id ? "selected" : ""}
+                    key={item.id}
+                    onClick={() => {
+                      setSelectedProviderId(item.id);
+                      setProviderDraft(providerToDraft(item));
+                    }}
+                    role="listitem"
+                    type="button"
+                  >
+                    <span><strong>{item.display_name}</strong><small>{item.protocol} · {item.dialect}</small></span>
+                    <span className={`status-label ${item.health?.status === "ready" ? "success" : ""}`}>
+                      {!item.enabled ? "disabled" : item.health?.status ?? "not checked"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="settings-field-grid provider-form">
+              <ProviderField label={message(locale, "providerId")} error={providerErrors.provider_id}>
+                <input disabled={providerDraft.registry_revision !== null} value={providerDraft.id} onChange={(event) => setProviderDraft({ ...providerDraft, id: event.target.value })} />
+              </ProviderField>
+              <ProviderField label={message(locale, "providerName")} error={providerErrors.display_name}>
+                <input value={providerDraft.display_name} onChange={(event) => setProviderDraft({ ...providerDraft, display_name: event.target.value })} />
+              </ProviderField>
+              <ProviderField label={message(locale, "protocol")} error={providerErrors.protocol}>
+                <select value={providerDraft.protocol} onChange={(event) => {
+                  const protocol = event.target.value;
+                  setProviderDraft({ ...providerDraft, protocol, dialect: dialectsFor(protocol)[0] ?? "" });
+                }}>
+                  <option value="openai_compatible">OpenAI compatible</option>
+                  <option value="anthropic_compatible">Anthropic compatible</option>
+                  <option value="gemini_compatible">Gemini compatible</option>
+                </select>
+              </ProviderField>
+              <ProviderField label={message(locale, "dialect")} error={providerErrors.dialect}>
+                <select value={providerDraft.dialect} onChange={(event) => setProviderDraft({ ...providerDraft, dialect: event.target.value })}>
+                  {dialectsFor(providerDraft.protocol).map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </ProviderField>
+              <ProviderField label={message(locale, "baseUrl")} error={providerErrors.base_url ?? providerErrors.provider}>
+                <input value={providerDraft.base_url} onChange={(event) => setProviderDraft({ ...providerDraft, base_url: event.target.value })} />
+              </ProviderField>
+              <ProviderField label={message(locale, "routePrefix")} error={providerErrors.route_prefix}>
+                <input placeholder="/v1" value={providerDraft.route_prefix} onChange={(event) => setProviderDraft({ ...providerDraft, route_prefix: event.target.value })} />
+              </ProviderField>
+              <ProviderField label={message(locale, "authentication")} error={providerErrors["authentication.ownership"] ?? providerErrors.authentication}>
+                <select value={providerDraft.authentication_ownership} onChange={(event) => setProviderDraft({ ...providerDraft, authentication_ownership: event.target.value })}>
+                  <option value="secret_reference">Secret reference</option>
+                  <option value="provider_native">Provider native</option>
+                  <option value="none">None</option>
+                </select>
+              </ProviderField>
+              {providerDraft.authentication_ownership === "secret_reference" ? <>
+                <ProviderField label={message(locale, "secretReferenceKind")} error={providerErrors["authentication.reference_kind"]}>
+                  <select value={providerDraft.reference_kind} onChange={(event) => setProviderDraft({ ...providerDraft, reference_kind: event.target.value })}>
+                    <option value="environment">Environment</option><option value="keychain">Keychain</option>
+                  </select>
+                </ProviderField>
+                <ProviderField label={message(locale, "secretReferenceName")} error={providerErrors["authentication.reference_name"]}>
+                  <input value={providerDraft.reference_name} onChange={(event) => setProviderDraft({ ...providerDraft, reference_name: event.target.value })} />
+                </ProviderField>
+                {providerDraft.reference_kind === "keychain" ? <>
+                  <ProviderField label={message(locale, "keychainService")} error={providerErrors["authentication.reference_name"]}>
+                    <input value={providerDraft.reference_service} onChange={(event) => setProviderDraft({ ...providerDraft, reference_service: event.target.value })} />
+                  </ProviderField>
+                  <ProviderField label={message(locale, "keychainAccount")} error={providerErrors["authentication.reference_name"]}>
+                    <input value={providerDraft.reference_account} onChange={(event) => setProviderDraft({ ...providerDraft, reference_account: event.target.value })} />
+                  </ProviderField>
+                </> : null}
+              </> : null}
+              <label className="settings-checkbox"><input checked={providerDraft.enabled} onChange={(event) => setProviderDraft({ ...providerDraft, enabled: event.target.checked })} type="checkbox" />{message(locale, "providerEnabled")}</label>
+              <label className="settings-checkbox"><input checked={providerDraft.offline} onChange={(event) => setProviderDraft({ ...providerDraft, offline: event.target.checked })} type="checkbox" />{message(locale, "offlineMode")}</label>
+            </div>
+            <p className="muted-copy">{selectedProvider?.authentication.explanation ?? message(locale, "referenceOnlyAuth")}</p>
+            <div className="provider-actions">
+              <button disabled={saveProvider.isPending} onClick={() => saveProvider.mutate(providerDraft)} type="button">
+                {saveProvider.isPending ? message(locale, "saving") : message(locale, "saveProvider")}
+              </button>
+              <button disabled={providerDraft.registry_revision === null || providerTest.isPending} onClick={() => providerTest.mutate(providerDraft.id)} type="button">
+                {message(locale, "testConnection")}
+              </button>
+            </div>
+            {providerTest.data ? <p className="settings-action-result" role="status">
+              {providerTest.data.health.status}
+              {providerTest.data.health.failure_kind ? ` · ${providerTest.data.health.failure_kind}: ${providerTest.data.health.reason_code}` : ""}
+            </p> : null}
+            {selectedProvider ? <>
+              <dl className="settings-facts provider-evidence">
+                <Fact label={message(locale, "source")} value={selectedProvider.source} />
+                <Fact label={message(locale, "health")} value={providerTest.data?.health.status ?? selectedProvider.health?.status ?? "not checked"} />
+                <Fact label={message(locale, "credentialValues")} value={message(locale, "backendOnly")} />
+                <Fact label={message(locale, "compatibility")} value={`${selectedProvider.compatibility.length} reviewed`} />
+              </dl>
+              <p className="muted-copy">{selectedProvider.compatibility_explanation}</p>
+              <Boundary source={selectedProvider.source} effect={selectedProvider.effects.managed_homes ?? "restart_required"} />
+            </> : <Boundary source="user_registry" effect="new_session_required" />}
+            {saveProvider.isError ? <p className="mutation-error" role="alert">{message(locale, "providerValidationFailed")}</p> : null}
+            {saveProvider.isSuccess ? <p className="mutation-success" role="status">{message(locale, "providerSaved")}</p> : null}
           </SettingsSection>
 
           <SettingsSection id="routesModels" title={message(locale, "routesModels")} description={message(locale, "routesModelsHint")}>
+            <h3 className="settings-subheading">{message(locale, "providerPurposeDefaults")}</h3>
+            <div className="settings-field-grid">
+              <ProviderField label={message(locale, "codingModel")} error={providerErrors["default_models.coding"]}>
+                <input value={providerDraft.coding_model} onChange={(event) => setProviderDraft({ ...providerDraft, coding_model: event.target.value })} />
+              </ProviderField>
+              <ProviderField label={message(locale, "titleModel")} error={providerErrors["default_models.title"]}>
+                <input value={providerDraft.title_model} onChange={(event) => setProviderDraft({ ...providerDraft, title_model: event.target.value })} />
+              </ProviderField>
+              <ProviderField label={message(locale, "evaluationModel")} error={providerErrors["default_models.evaluation"]}>
+                <input value={providerDraft.evaluation_model} onChange={(event) => setProviderDraft({ ...providerDraft, evaluation_model: event.target.value })} />
+              </ProviderField>
+              <ProviderField label={message(locale, "fallbackModel")} error={providerErrors["default_models.fallback"]}>
+                <input value={providerDraft.fallback_model} onChange={(event) => setProviderDraft({ ...providerDraft, fallback_model: event.target.value })} />
+              </ProviderField>
+            </div>
+            <div className="provider-actions">
+              <button disabled={saveProvider.isPending} onClick={() => saveProvider.mutate(providerDraft)} type="button">{message(locale, "saveRoutes")}</button>
+              <button disabled={providerDraft.registry_revision === null || providerDiscovery.isPending} onClick={() => providerDiscovery.mutate(providerDraft.id)} type="button">{message(locale, "discoverModels")}</button>
+            </div>
+            {providerDiscovery.data ? <p className="settings-action-result" role="status">
+              {providerDiscovery.data.health.discovery_status} · {providerDiscovery.data.health.models.length} {message(locale, "modelsFound")}
+            </p> : null}
+            {selectedProvider?.routes.length ? <div className="provider-route-list">
+              {selectedProvider.routes.map((route) => <div key={route.id}><strong>{route.purpose}</strong><span>{route.model}</span><small>{route.id}</small></div>)}
+            </div> : <p className="empty-state">{message(locale, "noProviderRoutes")}</p>}
+            <Boundary source={selectedProvider?.source ?? "user_registry"} effect="fork_or_new_session_required" />
+            <h3 className="settings-subheading">{message(locale, "workbenchFallbackDefaults")}</h3>
             <div className="settings-field-grid">
               <label>{message(locale, "apiMode")}
                 <select disabled={locked.has("default_api_mode")} value={draft.default_api_mode} onChange={(event) => setDraft({ ...draft, default_api_mode: event.target.value })}>
@@ -189,7 +415,7 @@ export function SettingsSurface() {
               </label>
             </div>
             <button disabled={modelDiscovery.isPending} onClick={() => modelDiscovery.mutate()} type="button">
-              {message(locale, "discoverModels")}
+              {message(locale, "discoverLegacyModels")}
             </button>
             {modelDiscovery.data ? <p className="settings-action-result" role="status">{modelDiscovery.data.ok ? `${modelDiscovery.data.models.length} ${message(locale, "modelsFound")}` : modelDiscovery.data.error}</p> : null}
             <Boundary source={data.harness_defaults.sources.default_model ?? "built_in"} effect={data.routes.change_effect} />
@@ -285,6 +511,114 @@ function Fact({ label, mono = false, value }: { label: string; mono?: boolean; v
 
 function Boundary({ effect, source }: { effect: string; source: string }) {
   return <div className="settings-boundary"><span>{source}</span><span>{effect.replaceAll("_", " ")}</span></div>;
+}
+
+function ProviderField({ children, error, label }: { children: React.ReactNode; error?: string; label: string }) {
+  return <label>{label}{children}{error ? <span className="settings-field-error">{error}</span> : null}</label>;
+}
+
+function emptyProviderDraft(template: ProviderSettingsResponse["templates"][number] | undefined): ProviderDraft {
+  return {
+    id: "",
+    display_name: template?.title ?? "",
+    protocol: template?.protocol ?? "openai_compatible",
+    dialect: template?.dialect ?? "openai-responses-v1",
+    base_url: template?.base_url ?? "",
+    route_prefix: template?.route_prefix ?? "",
+    authentication_ownership: template?.authentication ?? "secret_reference",
+    reference_kind: "environment",
+    reference_name: template?.secret_reference_name ?? "",
+    reference_service: "",
+    reference_account: "",
+    coding_model: "",
+    title_model: "",
+    evaluation_model: "",
+    fallback_model: "",
+    enabled: true,
+    offline: false,
+    registry_revision: null,
+  };
+}
+
+function providerToDraft(provider: ProviderProjection): ProviderDraft {
+  return {
+    id: provider.id,
+    display_name: provider.display_name,
+    protocol: provider.protocol,
+    dialect: provider.dialect,
+    base_url: provider.base_url,
+    route_prefix: provider.route_prefix ?? "",
+    authentication_ownership: provider.authentication.ownership,
+    reference_kind: provider.authentication.reference_kind ?? "environment",
+    reference_name: provider.authentication.reference_name ?? "",
+    reference_service: provider.authentication.service ?? "",
+    reference_account: provider.authentication.account ?? "",
+    coding_model: provider.default_models.coding ?? "",
+    title_model: provider.default_models.title ?? "",
+    evaluation_model: provider.default_models.evaluation ?? "",
+    fallback_model: provider.default_models.fallback ?? "",
+    enabled: provider.enabled,
+    offline: provider.offline,
+    registry_revision: provider.registry_revision,
+  };
+}
+
+function providerDraftPayload(draft: ProviderDraft): Readonly<Record<string, unknown>> {
+  const authentication = draft.authentication_ownership === "secret_reference"
+    ? {
+        ownership: draft.authentication_ownership,
+        reference_kind: draft.reference_kind,
+        reference_name: draft.reference_name.trim(),
+        ...(draft.reference_kind === "keychain" ? {
+          service: draft.reference_service.trim() || null,
+          account: draft.reference_account.trim() || null,
+        } : {}),
+      }
+    : { ownership: draft.authentication_ownership };
+  const defaultModels = Object.fromEntries(Object.entries({
+    coding: draft.coding_model,
+    title: draft.title_model,
+    evaluation: draft.evaluation_model,
+    fallback: draft.fallback_model,
+  }).flatMap(([purpose, model]) => model.trim() ? [[purpose, model.trim()]] : []));
+  return {
+    display_name: draft.display_name.trim(),
+    protocol: draft.protocol,
+    dialect: draft.dialect,
+    base_url: draft.base_url.trim(),
+    route_prefix: draft.route_prefix.trim() || null,
+    authentication,
+    default_models: defaultModels,
+    enabled: draft.enabled,
+    offline: draft.offline,
+  };
+}
+
+function dialectsFor(protocol: string): string[] {
+  if (protocol === "anthropic_compatible") {
+    return [
+      "anthropic-messages-v1",
+      "anthropic-bedrock-v1",
+      "anthropic-vertex-v1",
+      "anthropic-foundry-v1",
+    ];
+  }
+  if (protocol === "gemini_compatible") {
+    return ["gemini-generate-content-v1beta", "gemini-vertex-v1"];
+  }
+  return ["openai-responses-v1", "openai-chat-completions-v1"];
+}
+
+function providerFieldErrors(error: Error | null): Record<string, string> {
+  if (error === null) return {};
+  try {
+    const payload = JSON.parse(error.message) as {
+      detail?: { field_errors?: Record<string, string> };
+    };
+    return payload.detail?.field_errors ?? {};
+  } catch {
+    return {};
+  }
 }
 
 function toDraft(data: SettingsResponse): DefaultsDraft {

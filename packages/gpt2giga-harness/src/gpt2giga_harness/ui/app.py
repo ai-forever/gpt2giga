@@ -144,6 +144,7 @@ from gpt2giga_harness.preflight import (
     format_preflight_block_message,
     preflight_report_to_dict,
 )
+from gpt2giga_harness.provider_settings import ProviderSettingsService
 from gpt2giga_harness.pr_artifacts import (
     build_pr_artifact,
     create_pr_branch,
@@ -296,6 +297,7 @@ def create_app(
     native_index_store: NativeSessionIndexStore | None = None,
     native_process_manager: NativeProcessManager | None = None,
     runtime_store: RuntimeCoordinationStore | None = None,
+    provider_settings_service: ProviderSettingsService | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
@@ -323,6 +325,9 @@ def create_app(
     eval_store = FilesystemHarnessEvalStore(config.data_dir)
     memory_store = FilesystemProjectMemoryStore()
     settings_store = HarnessSettingsStore(config.data_dir, config)
+    provider_settings_service = provider_settings_service or ProviderSettingsService(
+        config.data_dir
+    )
     runner = HarnessSessionRunner(
         registry=registry,
         config=config,
@@ -404,6 +409,7 @@ def create_app(
     app.state.harness_async_diagnostics = async_diagnostics
     app.state.harness_run_event_broker = run_event_broker
     app.state.harness_settings_store = settings_store
+    app.state.harness_provider_settings_service = provider_settings_service
 
     def _approval_gate(
         action: PermissionAction,

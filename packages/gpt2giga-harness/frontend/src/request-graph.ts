@@ -11,6 +11,7 @@ import {
   fetchCockpit,
   type HarnessesResponse,
   type ModelsResponse,
+  type ProviderSettingsResponse,
   type RunCenterSummaryResponse,
   type RunOverviewResponse,
   type RunTraceResponse,
@@ -46,6 +47,7 @@ export const requestKeys = {
   harnesses: () => [...rootKey, "harnesses"] as const,
   models: (apiMode: string) => [...rootKey, "models", apiMode] as const,
   settings: () => [...rootKey, "settings"] as const,
+  providers: () => [...rootKey, "providers"] as const,
   runsCenter: () => [...rootKey, "runs-center"] as const,
   approvals: () => [...rootKey, "approvals"] as const,
   attention: () => [...rootKey, "attention"] as const,
@@ -81,6 +83,15 @@ export function settingsOptions() {
   return queryOptions({
     queryKey: requestKeys.settings(),
     queryFn: ({ signal }) => fetchCockpit<SettingsResponse>("/api/settings", signal),
+    staleTime: 10_000,
+  });
+}
+
+export function providersOptions() {
+  return queryOptions({
+    queryKey: requestKeys.providers(),
+    queryFn: ({ signal }) =>
+      fetchCockpit<ProviderSettingsResponse>("/api/providers", signal),
     staleTime: 10_000,
   });
 }
