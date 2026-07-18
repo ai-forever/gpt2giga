@@ -630,7 +630,11 @@ class DurableJobWorker:
         if not job.workflow_id:
             return
         from gpt2giga_harness.project import resolve_project
-        from gpt2giga_harness.workflows import WorkflowCoordinator, WorkflowRepository
+        from gpt2giga_harness.workflows import (
+            WorkflowCoordinator,
+            WorkflowRepository,
+            workflow_coordination,
+        )
 
         try:
             workflow_run = WorkflowRepository(self.runtime_store).get_run(
@@ -646,11 +650,14 @@ class DurableJobWorker:
             payload_store=self.payload_store,
             runner=self.runner,
         )
+        origin, schedule_id = workflow_coordination(workflow_run)
         WorkflowCoordinator(
             project=project,
             runtime_store=self.runtime_store,
             runner=self.runner,
             dispatcher=dispatcher,
+            origin=origin,
+            schedule_id=schedule_id,
         ).advance(job.workflow_id)
 
 

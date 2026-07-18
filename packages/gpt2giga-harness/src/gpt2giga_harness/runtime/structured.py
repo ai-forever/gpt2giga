@@ -97,12 +97,7 @@ def prepare_durable_structured_admission(
                 "native_terminal remains synchronous and is not durable-admitted"
             )
         return dict(payload)
-    if not isinstance(harness, DurableStructuredHarness):
-        raise DurableStructuredAdmissionError(
-            "selected harness has no proven durable native_structured driver"
-        )
-    capabilities = harness.durable_structured_capabilities()
-    _validate_capabilities(capabilities)
+    capabilities = admitted_durable_structured_capabilities(harness)
     retry_class = (
         "structured_recoverable"
         if capabilities.durable_approval and capabilities.recovery_after_process_loss
@@ -116,6 +111,19 @@ def prepare_durable_structured_admission(
     prepared = dict(payload)
     prepared[DURABLE_STRUCTURED_ADMISSION_FIELD] = admission.to_dict()
     return prepared
+
+
+def admitted_durable_structured_capabilities(
+    harness: Any,
+) -> AdapterCapabilitySnapshot:
+    """Return the validated capability snapshot used by durable admission."""
+    if not isinstance(harness, DurableStructuredHarness):
+        raise DurableStructuredAdmissionError(
+            "selected harness has no proven durable native_structured driver"
+        )
+    capabilities = harness.durable_structured_capabilities()
+    _validate_capabilities(capabilities)
+    return capabilities
 
 
 def structured_admission(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
