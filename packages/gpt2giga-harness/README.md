@@ -5,7 +5,7 @@ distribution provides the `giga` and `gpt2giga-harness` commands, the
 `gpt2giga_harness` Python namespace, a durable local worker, and the packaged
 Project Cockpit web UI.
 
-> **Beta preview:** the `0.1.x` storage, API, adapter, and automation contracts
+> **Alpha preview:** the `0.2.x` storage, API, adapter, and automation contracts
 > are stabilizing but may still change between prereleases. Use supervised local
 > workflows first. The package metadata in the current checkout is the source of
 > truth for the supported gateway requirement.
@@ -33,10 +33,11 @@ After publication, the installation will be:
 ```sh
 uv tool install --prerelease allow gpt2giga-harness
 giga doctor
+giga --version
 giga ui
 ```
 
-The upcoming `gpt2giga-harness==0.1.0b1` metadata requires
+The upcoming `gpt2giga-harness==0.2.0a1` metadata requires
 `gpt2giga==0.2.4a1`. Installing only `gpt2giga` never adds Harness commands or
 the `gpt2giga_harness` namespace.
 
@@ -129,6 +130,12 @@ opens that run's diff while apply and approval remain separate explicit
 operator actions. An eligible successful run exposes its existing provenance
 and promotion state under Reuse. Promotion preview/apply and later scheduling
 remain separate explicit actions.
+
+Retained assistant messages expose a Copy action that fetches the complete
+stored response instead of copying a bounded read-model preview. Retained user
+messages expose a pencil action that loads the complete prompt into the
+composer, where it can be edited and submitted as a new turn without rewriting
+history.
 
 Useful orientation commands:
 

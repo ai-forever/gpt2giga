@@ -16,6 +16,7 @@ from typing import Any, Mapping
 import uvicorn
 import yaml
 
+from gpt2giga_harness import __version__
 from gpt2giga_harness.adapter_scaffold import (
     render_adapter_module,
     scaffold_adapter_package,
@@ -252,6 +253,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser = argparse.ArgumentParser(prog="giga")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"gpt2giga-harness {__version__}",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     doctor = subparsers.add_parser("doctor", parents=[common])

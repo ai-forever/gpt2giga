@@ -1,8 +1,8 @@
 # Unified Harness
 
-:::warning[Бета-превью — prerelease]
+:::warning[Альфа-превью — prerelease]
 
-Линейка `gpt2giga-harness` 0.1.x — beta-preview для тестирования и обратной
+Линейка `gpt2giga-harness` 0.2.x — alpha-preview для тестирования и обратной
 связи. UI, CLI, YAML-файлы проекта, схема runtime-хранилища и процесс обновления
 могут меняться. Используйте Harness локально, для контролируемой работы под
 наблюдением, а не как критичный production-сервис или удалённую multi-user
@@ -48,7 +48,7 @@ Approval в Harness относится к действиям, которыми H
 не обещает видеть каждое внутреннее действие непрозрачного Codex, Claude или
 Gemini subprocess.
 
-## Кому подходит бета
+## Кому подходит prerelease
 
 Попробуйте preview, если хотите оценить локальный agent cockpit, сравнить
 несколько harness, собрать проверяемый workflow или повлиять на интерфейсы
@@ -60,7 +60,7 @@ Gemini subprocess.
 централизованное multi-user администрирование или полноценная security boundary
 вокруг произвольных действий стороннего CLI.
 
-Во время беты:
+Во время prerelease:
 
 - перед обновлением читайте release notes и делайте резервную копию
   `~/.gpt2giga/harness` и важных определений из `.giga/`;
@@ -78,7 +78,7 @@ Gemini subprocess.
 
 ### 1. Получите preview
 
-Требуются Python 3.10–3.14 и `uv`. Текущий и всегда доступный путь для beta —
+Требуются Python 3.10–3.14 и `uv`. Текущий и всегда доступный путь для preview —
 запуск из source checkout:
 
 ```bash
@@ -88,6 +88,7 @@ cd gpt2giga
 uv sync --all-packages --all-extras --dev
 source .venv/bin/activate
 giga doctor
+giga --version
 giga harness list
 ```
 
@@ -104,7 +105,7 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-Будущий дистрибутив `gpt2giga-harness==0.1.0b1` требует
+Будущий дистрибутив `gpt2giga-harness==0.2.0a1` требует
 `gpt2giga==0.2.4a1` и добавляет команды `giga` и `gpt2giga-harness`.
 
 Для Direct Chat понадобятся credentials из [быстрого старта gpt2giga](quickstart.md).
@@ -280,6 +281,11 @@ Cockpit V2 является локальным UI по умолчанию. Пр�
 остаётся доступен по адресу `http://127.0.0.1:8091/legacy` на release-level
 период отката; переключение между ними не мигрирует и не переписывает runtime
 state Harness.
+
+У сохранённого ответа assistant кнопка Copy запрашивает и копирует полный
+текст, даже если в ленте показан ограниченный preview. Карандаш у сообщения
+user загружает полный исходный prompt в composer: его можно изменить и
+отправить как новый turn, не переписывая историю сессии.
 
 Если worker уже запущен отдельно или UI нужен только для просмотра состояния:
 
@@ -1096,7 +1102,7 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-Будущая metadata `gpt2giga-harness==0.1.0b1` требует
+Будущая metadata `gpt2giga-harness==0.2.0a1` требует
 `gpt2giga==0.2.4a1`. Старый import `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
 перезаписывает `~/.gpt2giga/harness`, `.giga/` или vendor-owned CLI homes.

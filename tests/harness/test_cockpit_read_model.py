@@ -194,6 +194,44 @@ def test_cockpit_message_projection_exposes_bounded_reasoning_and_usage(tmp_path
     assert projected["usage"] == {"input_tokens": 21, "output_tokens": 8}
 
 
+def test_cockpit_message_content_returns_complete_explicit_copy_payload(tmp_path):
+    app = _app(tmp_path)
+    store = app.state.harness_session_store
+    session = store.create_session(title="complete message")
+    run = _run(store, session.id)
+    full_content = f"prefix\n{'я' * 40_000}\nsuffix"
+    store.append_message(
+        HarnessMessage(
+            id="msg_complete",
+            session_id=session.id,
+            run_id=run.id,
+            role="assistant",
+            content=full_content,
+            created_at=utc_now(),
+        )
+    )
+
+    with TestClient(app) as client:
+        page = client.get(f"/api/cockpit/sessions/{session.id}/messages")
+        complete = client.get(
+            f"/api/cockpit/sessions/{session.id}/messages/msg_complete/content"
+        )
+        missing = client.get(
+            f"/api/cockpit/sessions/{session.id}/messages/missing/content"
+        )
+
+    assert page.json()["messages"][0]["content"]["truncated"] is True
+    assert complete.status_code == 200
+    assert complete.headers["cache-control"] == "private, no-store"
+    assert complete.json() == {
+        "message_id": "msg_complete",
+        "role": "assistant",
+        "content": full_content,
+        "byte_count": len(full_content.encode("utf-8")),
+    }
+    assert missing.status_code == 404
+
+
 def test_cockpit_run_summary_exposes_bounded_native_and_provider_identity(tmp_path):
     app = _app(tmp_path)
     store = app.state.harness_session_store

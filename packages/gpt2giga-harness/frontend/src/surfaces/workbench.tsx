@@ -1,4 +1,10 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type UseMutationResult,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
@@ -8,6 +14,7 @@ import {
   type EventProjection,
   type EventPayloadResponse,
   fetchCockpit,
+  type FullMessageResponse,
   mutateCockpit,
   type NativeStartResponse,
   patchCockpit,
@@ -19,6 +26,11 @@ import {
 } from "../api";
 import { MessageMarkdown } from "../message-markdown";
 import { generatedImageProjection } from "../generated-image";
+import {
+  resolveMessageAction,
+  type MessageActionKind,
+  type ResolvedMessageAction,
+} from "../message-actions";
 import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
 import {
@@ -69,6 +81,7 @@ const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
 const runPreferencesKey = "gpt2giga.cockpit-v2.run-preferences.v1";
 const reasoningModel = "GigaChat-2-Reasoning";
 type SessionAction = "archive" | "delete";
+type MessageAction = { kind: MessageActionKind; messageId: string };
 type RunConfig = { apiMode: string; harnessId: string; mode: string; model: string };
 type ReasoningEffort = "high" | "low" | "medium";
 type AdvancedRunConfig = {
@@ -373,6 +386,38 @@ export function WorkbenchSurface() {
       previousRunStatuses.current.set(run.id, run.status);
       await refreshSessionAfterRunStart(queryClient, run.session_id);
       setPrompt("");
+    },
+  });
+  const messageAction = useMutation({
+    mutationFn: async ({ kind, messageId }: MessageAction) => {
+      if (sessionId === undefined) throw new Error("Session is not selected");
+      return resolveMessageAction(
+        kind,
+        async () => {
+          const response = await fetchCockpit<FullMessageResponse>(
+            `/api/cockpit/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/content`,
+          );
+          return response.content;
+        },
+        async (content) => {
+          if (typeof navigator.clipboard?.writeText !== "function") {
+            throw new Error("Clipboard API is unavailable");
+          }
+          await navigator.clipboard.writeText(content);
+        },
+      );
+    },
+    onSuccess: ({ content, kind }) => {
+      if (kind !== "edit") return;
+      setPrompt(content);
+      setComposerCaret(content.length);
+      setPreviewReport(null);
+      requestAnimationFrame(() => {
+        const composer = composerRef.current;
+        composer?.focus();
+        composer?.setSelectionRange(content.length, content.length);
+        composer?.scrollIntoView({ block: "nearest" });
+      });
     },
   });
   const openInProvider = useMutation({
@@ -873,6 +918,14 @@ export function WorkbenchSurface() {
                       <span className="message-header-meta">
                         <TokenUsage usage={item.usage} />
                         <time>{formatTimestamp(item.created_at, locale)}</time>
+                        {item.role === "assistant" || item.role === "user" ? (
+                          <MessageActionButton
+                            action={item.role === "assistant" ? "copy" : "edit"}
+                            locale={locale}
+                            messageId={item.id}
+                            mutation={messageAction}
+                          />
+                        ) : null}
                       </span>
                     </header>
                     {item.reasoning?.text ? (
@@ -883,6 +936,21 @@ export function WorkbenchSurface() {
                   </article>
                 </Fragment>
               ))}
+              {messageAction.isError ? (
+                <span className="error-state" role="alert">
+                  {message(locale, "messageActionFailed")}
+                </span>
+              ) : null}
+              <span className="sr-only" aria-live="polite">
+                {messageAction.isSuccess
+                  ? message(
+                      locale,
+                      messageAction.data.kind === "copy"
+                        ? "assistantMessageCopied"
+                        : "userMessageLoaded",
+                    )
+                  : ""}
+              </span>
               {retainedGeneratedEvents.map((event) => (
                 <GeneratedFilePreview eventId={event.id} key={event.id} payloadUrl={event.payload_url} />
               ))}
@@ -1515,6 +1583,61 @@ function ToolActivityCard({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function MessageActionButton({
+  action,
+  locale,
+  messageId,
+  mutation,
+}: {
+  action: MessageActionKind;
+  locale: "en" | "ru";
+  messageId: string;
+  mutation: UseMutationResult<ResolvedMessageAction, Error, MessageAction>;
+}) {
+  const active = mutation.isPending && mutation.variables?.messageId === messageId;
+  const succeeded = mutation.isSuccess
+    && mutation.variables?.messageId === messageId
+    && mutation.data.kind === action;
+  const label = message(
+    locale,
+    action === "copy" ? "copyAssistantMessage" : "editUserMessage",
+  );
+  return (
+    <span className="message-actions">
+      <button
+        aria-label={label}
+        className={`message-action${succeeded ? " success" : ""}`}
+        disabled={mutation.isPending}
+        onClick={() => mutation.mutate({ kind: action, messageId })}
+        title={label}
+        type="button"
+      >
+        {active ? <span aria-hidden="true">…</span> : succeeded ? (
+          <span aria-hidden="true">✓</span>
+        ) : action === "copy" ? <CopyIcon /> : <EditIcon />}
+      </button>
+    </span>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <rect x="8" y="8" width="11" height="11" rx="2" />
+      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+    </svg>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="m4 20 4.2-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z" />
+      <path d="m13.8 7.4 2.8 2.8" />
+    </svg>
   );
 }
 

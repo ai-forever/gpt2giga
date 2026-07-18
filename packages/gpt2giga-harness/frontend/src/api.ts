@@ -30,6 +30,13 @@ export interface MessageProjection {
   usage?: TokenUsageProjection;
 }
 
+export interface FullMessageResponse {
+  message_id: string;
+  role: string;
+  content: string;
+  byte_count: number;
+}
+
 export interface TokenUsageProjection {
   input_tokens?: number;
   output_tokens?: number;

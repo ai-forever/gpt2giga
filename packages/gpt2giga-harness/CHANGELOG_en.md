@@ -5,6 +5,23 @@ All notable changes to gpt2giga-harness are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0a1] - 2026-07-18
+
+### Added
+- **Provider-neutral execution contracts**: added strict content-free provider/route references, execution-boundary-only `SecretRef` resolution, immutable execution snapshots, versioned structured session links, and a bounded JSON-RPC supervisor with generation isolation, backpressure, and an approval bridge.
+- **Native structured providers**: Codex app-server, Gemini ACP, and Claude provider handoff now have testable lifecycle contracts; durable runs, workflows, schedules, Arena, and Eval can use structured native transports without merging provider-owned and Harness-owned state.
+- **Adapter SDK conformance kit**: external adapter packages can validate entry points, metadata, capabilities, redaction, and offline lifecycle behavior before installation into Harness.
+- **Message actions**: Copy fetches and copies the complete retained assistant response even when the read model displays a bounded preview; the pencil action loads the complete user prompt into the composer for editing and rerunning.
+- **CLI version**: `giga --version` and `gpt2giga-harness --version` print the installed distribution version.
+
+### Changed
+- **Structured Workbench by default**: supported coding harnesses now prefer `native_structured` execution while keeping explicit one-shot and native-terminal choices where available.
+- **Clean source distribution**: the PyPI sdist no longer contains TypeScript sources, frontend tests, Vite/ESLint configuration, or the npm lockfile; deterministically built content-addressed Cockpit assets remain in both sdist and wheel.
+
+### Fixed
+- **Cockpit layout**: the Workbench label is centered in the narrow primary rail, while Codex subagent result disclosures and long details no longer shift or clip under focus and wrapping.
+- **Read-model and UI lifecycle**: session read-index initialization is serialized, and the embedded UI worker cold-start timeout now allows realistic startup latency.
+
 ## [0.1.0b1] - 2026-07-17
 
 ### Changed
@@ -101,6 +118,7 @@ considered stable.
 
 ---
 
+[0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.1.0b1...gpt2giga-harness-v0.2.0a1
 [0.1.0b1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.1.0b1
 [0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3
 [0.0.1a2]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a1...gpt2giga-harness-v0.0.1a2

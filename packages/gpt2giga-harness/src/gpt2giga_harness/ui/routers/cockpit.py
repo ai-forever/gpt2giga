@@ -270,6 +270,32 @@ def cockpit_messages(
     )
 
 
+@router.get("/api/cockpit/sessions/{session_id}/messages/{message_id}/content")
+def cockpit_message_content(
+    session_id: str,
+    message_id: str,
+    request: Request,
+) -> Response:
+    """Return one complete retained message after an explicit user action."""
+    try:
+        retained = _store(request).list_messages(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+    selected = next((item for item in retained if item.id == message_id), None)
+    if selected is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    content = selected.content
+    return JSONResponse(
+        {
+            "message_id": selected.id,
+            "role": selected.role,
+            "content": content,
+            "byte_count": len(content.encode("utf-8")),
+        },
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @router.get("/api/cockpit/sessions/{session_id}/runs")
 def cockpit_session_runs(
     session_id: str,

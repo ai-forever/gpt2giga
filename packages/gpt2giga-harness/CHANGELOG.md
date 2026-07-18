@@ -5,6 +5,23 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.2.0a1] - 2026-07-18
+
+### Добавлено
+- **Provider-neutral execution contracts**: добавлены строгие content-free ссылки providers/routes, разрешение `SecretRef` только на границе исполнения, неизменяемые execution snapshots, versioned structured session links и ограниченный JSON-RPC supervisor с generation isolation, backpressure и approval bridge.
+- **Нативные structured providers**: Codex app-server, Gemini ACP и Claude provider handoff получили проверяемые lifecycle-контракты; durable runs, workflows, schedules, Arena и Eval могут использовать структурированные native transports без смешивания provider-owned и Harness-owned state.
+- **Adapter SDK conformance kit**: внешний adapter package может проверить entry points, metadata, capabilities, redaction и offline lifecycle до установки в Harness.
+- **Действия с сообщениями**: кнопка Copy загружает и копирует полный сохранённый ответ assistant, даже если read model показывает bounded preview; карандаш загружает полный user prompt в composer для изменения и повторного запуска.
+- **Версия CLI**: `giga --version` и `gpt2giga-harness --version` печатают версию установленного дистрибутива.
+
+### Изменено
+- **Structured Workbench по умолчанию**: поддерживаемые coding harness используют `native_structured` как основной execution transport, сохраняя явный выбор one-shot и native terminal там, где они доступны.
+- **Чистый source distribution**: PyPI sdist больше не включает TypeScript sources, frontend-тесты, Vite/ESLint configs и npm lockfile; детерминированно собранные content-addressed Cockpit assets остаются в sdist и wheel.
+
+### Исправлено
+- **Разметка Cockpit**: подпись «Рабочая область» центрирована в узком primary rail, а disclosure результата и длинные детали Codex subagents больше не смещаются и не обрезаются при focus/wrapping.
+- **Read-model и UI lifecycle**: инициализация session read index сериализована, а cold-start timeout встроенного UI worker увеличен до реалистичного значения.
+
 ## [0.1.0b1] - 2026-07-17
 
 ### Изменено
@@ -100,6 +117,7 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
+[0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.1.0b1...gpt2giga-harness-v0.2.0a1
 [0.1.0b1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.1.0b1
 [0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3
 [0.0.1a2]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a1...gpt2giga-harness-v0.0.1a2
