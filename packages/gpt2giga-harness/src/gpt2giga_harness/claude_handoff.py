@@ -207,7 +207,7 @@ def probe_claude_handoff(
     available: list[ClaudeHandoffAction] = []
     degraded: list[ClaudeHandoffAction] = []
     if blocker is None:
-        for action in ClaudeHandoffAction:
+        for action in ClaudeHandoffAction.__members__.values():
             if (
                 action is ClaudeHandoffAction.OPEN_PROVIDER_UI
                 and platform not in _DESKTOP_PLATFORMS

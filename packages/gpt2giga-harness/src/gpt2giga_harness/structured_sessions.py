@@ -30,6 +30,10 @@ _HASH_RE = re.compile(r"[0-9a-f]{64}\Z")
 _IDENTITY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+~-]{0,255}\Z")
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 class StructuredSessionError(RuntimeError):
     """Base error for provider-neutral structured-session operations."""
 
@@ -176,8 +180,8 @@ class StructuredSessionLink:
     forked_from_link_id: str | None = None
     forked_from_external_turn_id: str | None = None
     degradation_evidence: tuple[SnapshotEvidenceRef, ...] = ()
-    created_at: str = field(default_factory=lambda: _utc_now())
-    updated_at: str = field(default_factory=lambda: _utc_now())
+    created_at: str = field(default_factory=_utc_now)
+    updated_at: str = field(default_factory=_utc_now)
     revision: int = 1
     schema_version: int = STRUCTURED_SESSION_LINK_SCHEMA_VERSION
     link_hash: str = field(init=False)
@@ -1203,7 +1207,3 @@ def _canonical_hash(value: Mapping[str, Any]) -> str:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

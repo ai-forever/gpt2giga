@@ -825,6 +825,7 @@ class StructuredProcessSupervisor:
                 transport.kill()
                 transport.wait(self.stop_timeout_seconds)
             except StructuredProcessError:
+                # Closing is best-effort after pending work has already failed.
                 pass
         self._events.put(
             NormalizedStructuredEvent(

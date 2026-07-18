@@ -343,7 +343,7 @@ def run_adapter_conformance(
         AdapterConformanceClaim.PACKAGING_ENTRY_POINT: _probe_packaging,
     }
     results: list[AdapterConformanceResult] = []
-    for claim in AdapterConformanceClaim:
+    for claim in AdapterConformanceClaim.__members__.values():
         category = _CLAIM_CATEGORIES[claim]
         if not manifest.supports(claim):
             results.append(
