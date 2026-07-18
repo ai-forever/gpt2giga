@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import dataclass, replace
 import json
 from pathlib import Path
+import stat
 import threading
 from typing import Any, Mapping
 
@@ -11,9 +12,15 @@ from gpt2giga_harness.codex_app_server import (
     CodexAppServerSupervisor,
     _collab_child_tool_events,
     _normalize_notification,
+    _structured_link_id,
     build_execution_snapshot,
+    build_structured_execution_snapshot,
 )
 from gpt2giga_harness.executables import ExecutableResolution
+from gpt2giga_harness.structured_sessions import (
+    StructuredSessionLinkStore,
+    structured_session_link_from_dict,
+)
 from gpt2giga_harness.types import (
     GigaChatApiMode,
     HarnessContext,
@@ -597,6 +604,183 @@ def test_two_prompts_share_one_app_server_thread_and_process(tmp_path):
         "first prompt" not in item.read_text(encoding="utf-8")
         for item in tmp_path.rglob("*.json")
     )
+
+
+def test_app_server_uses_generic_driver_and_private_structured_link(tmp_path):
+    recorder: list[tuple[str, dict[str, Any]]] = []
+    supervisor = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=_Factory(recorder, []),
+    )
+    request = replace(_request(tmp_path, session_id="sess-generic"), run_id="run-1")
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+    )
+    snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
+    continuation = _continuation(snapshot, prompt_id="msg-generic")
+    continuation["cli_version"] = "0.144.5"
+
+    result = supervisor.run_turn(
+        request,
+        context,
+        resolution=_resolution(),
+        prompt="generic driver prompt",
+        continuation=continuation,
+    )
+
+    assert result.ok is True
+    assert result.raw["structured_session_driver"] == "codex-app-server"
+    link = structured_session_link_from_dict(result.raw["structured_session_link"])
+    assert link.harness_session_id == "sess-generic"
+    assert link.harness_run_id == "run-1"
+    assert link.external_session_id == "thread-1"
+    assert link.latest_external_turn_id == "turn-1"
+    assert link.execution_snapshot.transport.value == "native_structured"
+    assert link.execution_snapshot.runtime_ownership.value == "durable"
+    assert link.config_snapshot.protocol == "codex-app-server-json-rpc-v2"
+    assert link.config_snapshot.cli_sdk_version == "0.144.5"
+    assert link.capability_snapshot.resume is True
+    assert link.capability_snapshot.live_approvals is False
+    stored = StructuredSessionLinkStore(tmp_path).load(
+        _structured_link_id("sess-generic")
+    )
+    assert stored == link
+    link_path = next((tmp_path / "structured_sessions" / "links").glob("*.json"))
+    assert stat.S_IMODE(link_path.stat().st_mode) == 0o600
+    assert "generic driver prompt" not in link_path.read_text(encoding="utf-8")
+
+
+def test_existing_app_server_link_migrates_without_history_replay(tmp_path):
+    recorder: list[tuple[str, dict[str, Any]]] = []
+    supervisor = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=_Factory(recorder, []),
+    )
+    request = _request(tmp_path, session_id="sess-legacy")
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+    )
+    snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
+    supervisor.link_store.save(
+        "sess-legacy",
+        {
+            "schema_version": 1,
+            "protocol": "codex-app-server-json-rpc-v2",
+            "runtime_id": "old-runtime",
+            "thread_id": "thread-legacy",
+            "latest_turn_id": "turn-old",
+            "forked_from_thread_id": None,
+            "snapshot": snapshot,
+            "snapshot_hash": snapshot["snapshot_hash"],
+            "runtime_status": "loaded",
+            "recovery_outcome": "not_required",
+            "created_at": "2026-07-17T00:00:00+00:00",
+            "resumed_at": None,
+            "updated_at": "2026-07-17T00:00:00+00:00",
+            "last_prompt_id": "msg-old",
+            "last_prompt_status": "completed",
+        },
+    )
+
+    result = supervisor.run_turn(
+        request,
+        context,
+        resolution=_resolution(),
+        prompt="new prompt only",
+        continuation=_continuation(
+            snapshot,
+            prompt_id="msg-new",
+            action="continue",
+        ),
+    )
+
+    assert result.ok is True
+    methods = [method for method, _params in recorder]
+    assert methods[:3] == ["thread/read", "thread/resume", "turn/start"]
+    assert "thread/start" not in methods
+    turn_start = next(params for method, params in recorder if method == "turn/start")
+    assert turn_start["threadId"] == "thread-legacy"
+    assert turn_start["input"] == [{"type": "text", "text": "new prompt only"}]
+    assert "old" not in str(turn_start["input"])
+    migrated = structured_session_link_from_dict(result.raw["structured_session_link"])
+    assert migrated.external_session_id == "thread-legacy"
+    assert migrated.latest_external_turn_id == "turn-1"
+    assert result.raw["app_server_thread"]["recovery_outcome"] == (
+        "resumed_after_owner_change"
+    )
+
+
+def test_structured_snapshot_hashes_workspace_without_persisting_path(tmp_path):
+    source = tmp_path / "source"
+    worktree = tmp_path / "private-worktree"
+    request = replace(
+        _request(tmp_path, session_id="sess-worktree"),
+        workspace=str(worktree),
+        extra={"workspace_execution": {"source_workspace": str(source)}},
+    )
+    legacy = build_execution_snapshot(request, managed_home_id="apphome-test")
+
+    snapshot = build_structured_execution_snapshot(
+        legacy,
+        adapter_version="0.144.5",
+    )
+
+    serialized = json.dumps(snapshot, default=str)
+    assert snapshot.workspace_id.startswith("workspace-")
+    assert snapshot.worktree_id is not None
+    assert str(source) not in serialized
+    assert str(worktree) not in serialized
+
+
+def test_driver_version_change_fails_before_provider_protocol_request(tmp_path):
+    first_recorder: list[tuple[str, dict[str, Any]]] = []
+    request = _request(tmp_path, session_id="sess-version")
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+    )
+    snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
+    first_continuation = _continuation(snapshot, prompt_id="msg-1")
+    first_continuation["cli_version"] = "0.144.5"
+    first = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=_Factory(first_recorder, []),
+    )
+    assert first.run_turn(
+        request,
+        context,
+        resolution=_resolution(),
+        prompt="first",
+        continuation=first_continuation,
+    ).ok
+
+    second_recorder: list[tuple[str, dict[str, Any]]] = []
+    second_continuation = _continuation(
+        snapshot,
+        prompt_id="msg-2",
+        action="continue",
+    )
+    second_continuation["cli_version"] = "0.145.0"
+    second = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=_Factory(second_recorder, []),
+    ).run_turn(
+        request,
+        context,
+        resolution=_resolution(),
+        prompt="second",
+        continuation=second_continuation,
+    )
+
+    assert second.ok is False
+    assert "snapshot changed" in str(second.error).lower()
+    assert second_recorder == []
+    assert second.raw["app_server_thread"]["runtime_status"] == "loaded"
 
 
 def test_app_server_projects_named_subagent_with_nested_tools(tmp_path):

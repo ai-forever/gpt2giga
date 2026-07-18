@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
+from importlib import metadata
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,19 @@ from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
 
 from gpt2giga_harness.executables import ExecutableResolution
+from gpt2giga_harness.execution import (
+    EMPTY_EXTENSION_SNAPSHOT_HASH,
+    ExecutionClassification,
+    ExecutionClassificationStatus,
+    ExecutionSnapshot,
+    ExecutionTransport,
+    InteractionMode,
+    ProviderRef,
+    RouteRef,
+    RuntimeOwnership,
+    SnapshotEvidenceRef,
+    create_execution_snapshot,
+)
 from gpt2giga_harness.harnesses.agent_cli import build_safe_env
 from gpt2giga_harness.managed_mcp import (
     clear_headless_mcp_materialization,
@@ -24,6 +38,19 @@ from gpt2giga_harness.managed_mcp import (
 )
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.store import utc_now
+from gpt2giga_harness.structured_sessions import (
+    AdapterCapabilitySnapshot,
+    StructuredSessionConfigSnapshot,
+    StructuredSessionCoordinator,
+    StructuredSessionError,
+    StructuredSessionLink,
+    StructuredSessionLinkStore,
+    StructuredSessionState,
+    StructuredTurnInput,
+    StructuredTurnResult,
+    UnsupportedSessionCapability,
+    structured_session_link_to_dict,
+)
 from gpt2giga_harness.types import (
     HarnessContext,
     HarnessEvent,
@@ -39,6 +66,7 @@ APP_SERVER_LINK_SCHEMA_VERSION = 1
 APP_SERVER_TIMEOUT_SECONDS = 10.0
 APP_SERVER_MESSAGE_POLL_SECONDS = 0.1
 APP_SERVER_STDERR_CHARS = 8000
+APP_SERVER_DRIVER_PROTOCOL_VERSION = "2"
 
 
 class AppServerProtocolError(RuntimeError):
@@ -125,6 +153,7 @@ class CodexAppServerSupervisor:
     ) -> None:
         self.data_dir = Path(data_dir).expanduser().resolve()
         self.link_store = CodexAppServerLinkStore(self.data_dir)
+        self.structured_link_store = StructuredSessionLinkStore(self.data_dir)
         self.client_factory = client_factory or _StdioJsonRpcClient
         self._runtimes: dict[str, _Runtime] = {}
         self._runtime_lock = threading.Lock()
@@ -153,7 +182,16 @@ class CodexAppServerSupervisor:
         command = resolution.command
         if not command:
             raise ValueError("Codex app-server executable is unavailable")
-        scope_id = _scope_id(command, snapshot)
+        scope_id = _scope_id(
+            command,
+            {
+                **snapshot,
+                "cli_version": _driver_version(
+                    continuation.get("cli_version")
+                    or continuation.get("adapter_version")
+                ),
+            },
+        )
         runtime = self._runtime_for(
             scope_id,
             command=command,
@@ -163,7 +201,7 @@ class CodexAppServerSupervisor:
         )
         command_display = (*command, "app-server", "--stdio", "--strict-config")
         with runtime.turn_lock:
-            return self._run_locked(
+            return self._run_through_driver(
                 runtime,
                 request,
                 context,
@@ -174,7 +212,7 @@ class CodexAppServerSupervisor:
                 command_display=command_display,
             )
 
-    def _run_locked(
+    def _run_through_driver(
         self,
         runtime: _Runtime,
         request: HarnessRequest,
@@ -204,146 +242,101 @@ class CodexAppServerSupervisor:
                     ),
                 )
 
-        action = str(continuation.get("action") or "start")
-        recovery_outcome = "not_required"
+        adapter_version = _adapter_version()
+        cli_version = _driver_version(
+            continuation.get("cli_version") or continuation.get("adapter_version")
+        )
+        execution_snapshot = build_structured_execution_snapshot(
+            snapshot,
+            adapter_version=adapter_version,
+            cli_version=cli_version,
+        )
+        config_snapshot = StructuredSessionConfigSnapshot(
+            adapter_id="codex-cli",
+            adapter_version=adapter_version,
+            protocol=APP_SERVER_PROTOCOL,
+            protocol_version=APP_SERVER_DRIVER_PROTOCOL_VERSION,
+            cli_sdk_version=cli_version,
+            managed_home_id=_optional_text(snapshot.get("managed_home_id")),
+        )
+        driver = CodexAppServerDriver(
+            supervisor=self,
+            runtime=runtime,
+            request=request,
+            context=context,
+            command_display=command_display,
+            continuation=continuation,
+            legacy_snapshot=snapshot,
+            legacy_link=link,
+            adapter_version=adapter_version,
+        )
+        coordinator = StructuredSessionCoordinator(
+            driver,
+            self.structured_link_store,
+            owner_id=runtime.client.runtime_id,
+        )
+        link_id = _structured_link_id(request.session_id)
+        existing = self.structured_link_store.load(link_id)
+        collected: list[HarnessEvent] = []
+
+        def event_sink(event: Mapping[str, Any]) -> None:
+            normalized = HarnessEvent(
+                type=str(event.get("type") or "unknown"),
+                message=str(event.get("message") or ""),
+                payload=_mapping(event.get("payload")),
+            )
+            _publish(request, collected, normalized)
+
         try:
-            if action == "fork":
-                source_thread_id = str(
-                    continuation.get("fork_thread_id")
-                    or _mapping(continuation.get("fork")).get("thread_id")
-                    or ""
-                ).strip()
-                if not source_thread_id:
-                    raise ValueError(
-                        "Codex app-server fork requires a source thread id"
-                    )
-                response = runtime.client.request(
-                    "thread/fork",
-                    {
-                        **_thread_identity_params(request),
-                        "threadId": source_thread_id,
-                        "lastTurnId": continuation.get("fork_turn_id"),
-                    },
-                    timeout=APP_SERVER_TIMEOUT_SECONDS,
+            structured_link = coordinator.open_or_resume(
+                link_id=link_id,
+                harness_session_id=request.session_id,
+                harness_run_id=request.run_id or f"run-{_safe_id(prompt_id)}",
+                execution_snapshot=execution_snapshot,
+                config_snapshot=config_snapshot,
+                existing_link=existing,
+            )
+            structured_link, _turn = coordinator.start_turn(
+                structured_link,
+                StructuredTurnInput(prompt_id, prompt),
+                event_sink,
+                _reject_approval_bridge,
+            )
+            result = driver.result
+            if result is None:
+                raise AppServerProtocolError(
+                    "Codex app-server driver returned no turn result"
                 )
-                thread_id = _thread_id(response)
-                forked_from = source_thread_id
-                recovery_outcome = "forked"
-            elif link is None:
-                response = runtime.client.request(
-                    "thread/start",
-                    {
-                        **_thread_identity_params(request),
-                        "ephemeral": False,
-                    },
-                    timeout=APP_SERVER_TIMEOUT_SECONDS,
-                )
-                thread_id = _thread_id(response)
-                forked_from = None
-            else:
-                thread_id = str(link.get("thread_id") or "").strip()
-                if not thread_id:
-                    raise AppServerProtocolError(
-                        "Codex app-server link has no thread identity"
-                    )
-                forked_from = _optional_text(link.get("forked_from_thread_id"))
-                if (
-                    str(link.get("runtime_id") or "") != runtime.client.runtime_id
-                    or thread_id not in runtime.loaded_threads
-                ):
-                    runtime.client.request(
-                        "thread/read",
-                        {"threadId": thread_id, "includeTurns": False},
-                        timeout=APP_SERVER_TIMEOUT_SECONDS,
-                    )
-                    runtime.client.request(
-                        "thread/resume",
-                        {
-                            **_thread_identity_params(request),
-                            "threadId": thread_id,
-                        },
-                        timeout=APP_SERVER_TIMEOUT_SECONDS,
-                    )
-                    recovery_outcome = "resumed_after_owner_change"
-            runtime.loaded_threads.add(thread_id)
-            now = utc_now()
-            link = self.link_store.save(
-                request.session_id,
-                {
-                    "schema_version": APP_SERVER_LINK_SCHEMA_VERSION,
-                    "protocol": APP_SERVER_PROTOCOL,
-                    "runtime_id": runtime.client.runtime_id,
-                    "thread_id": thread_id,
-                    "latest_turn_id": link.get("latest_turn_id") if link else None,
-                    "forked_from_thread_id": forked_from,
-                    "snapshot": dict(snapshot),
-                    "snapshot_hash": snapshot["snapshot_hash"],
-                    "runtime_status": "loaded",
-                    "recovery_outcome": recovery_outcome,
-                    "created_at": link.get("created_at") if link else now,
-                    "resumed_at": now
-                    if recovery_outcome.startswith("resumed")
-                    else None,
-                    "updated_at": now,
-                    "last_prompt_id": link.get("last_prompt_id") if link else None,
-                    "last_prompt_status": link.get("last_prompt_status")
-                    if link
-                    else None,
+            return replace(
+                result,
+                raw={
+                    **dict(result.raw),
+                    "structured_session_link": structured_session_link_to_dict(
+                        structured_link
+                    ),
+                    "structured_session_driver": "codex-app-server",
                 },
-            )
-            turn_response = runtime.client.request(
-                "turn/start",
-                {
-                    "threadId": thread_id,
-                    "input": [{"type": "text", "text": prompt}],
-                    "clientUserMessageId": prompt_id,
-                    "model": request.model,
-                    "cwd": request.workspace,
-                    "approvalPolicy": "never",
-                },
-                timeout=APP_SERVER_TIMEOUT_SECONDS,
-            )
-            turn_id = _turn_id(turn_response)
-            link = self.link_store.save(
-                request.session_id,
-                {
-                    **link,
-                    "latest_turn_id": turn_id,
-                    "runtime_status": "turn_running",
-                    "updated_at": utc_now(),
-                    "last_prompt_id": prompt_id,
-                    "last_prompt_status": "submitted",
-                },
-            )
-            return self._wait_for_turn(
-                runtime,
-                request,
-                context,
-                thread_id=thread_id,
-                turn_id=turn_id,
-                link=link,
-                command_display=command_display,
+                events=tuple(collected),
             )
         except Exception as exc:
-            if link is not None:
-                link = self.link_store.save(
-                    request.session_id,
-                    {
-                        **link,
-                        "runtime_status": "interrupted",
-                        "recovery_outcome": "owner_error",
-                        "updated_at": utc_now(),
-                        "last_prompt_status": (
-                            "interrupted"
-                            if link.get("last_prompt_id") == prompt_id
-                            else link.get("last_prompt_status")
-                        ),
-                    },
-                )
+            link = driver.mark_interrupted(prompt_id)
             return HarnessResult(
                 ok=False,
                 text="",
-                raw={"app_server_thread": _public_link(link)} if link else {},
+                raw={
+                    "app_server_thread": _public_link(link),
+                    **(
+                        {
+                            "structured_session_link": structured_session_link_to_dict(
+                                current
+                            )
+                        }
+                        if (current := self.structured_link_store.load(link_id))
+                        is not None
+                        else {}
+                    ),
+                },
+                events=tuple(collected),
                 command=command_display,
                 error=str(redact_secrets(str(exc))),
             )
@@ -524,6 +517,306 @@ class CodexAppServerSupervisor:
             return runtime
 
 
+class CodexAppServerDriver:
+    """Adapt Codex app-server thread/turn continuity to the generic driver."""
+
+    def __init__(
+        self,
+        *,
+        supervisor: CodexAppServerSupervisor,
+        runtime: _Runtime,
+        request: HarnessRequest,
+        context: HarnessContext,
+        command_display: tuple[str, ...],
+        continuation: Mapping[str, Any],
+        legacy_snapshot: Mapping[str, Any],
+        legacy_link: Mapping[str, Any] | None,
+        adapter_version: str,
+    ) -> None:
+        self.supervisor = supervisor
+        self.runtime = runtime
+        self.request = request
+        self.context = context
+        self.command_display = command_display
+        self.continuation = dict(continuation)
+        self.legacy_snapshot = dict(legacy_snapshot)
+        self.legacy_link = dict(legacy_link) if legacy_link is not None else None
+        self.adapter_version = adapter_version
+        self.thread_id: str | None = None
+        self.active_turn_id: str | None = None
+        self.result: HarnessResult | None = None
+
+    def probe(self) -> AdapterCapabilitySnapshot:
+        """Project reviewed app-server v2 behavior into neutral capabilities."""
+        return AdapterCapabilitySnapshot(
+            adapter_id="codex-cli",
+            adapter_version=self.adapter_version,
+            protocol=APP_SERVER_PROTOCOL,
+            protocol_version=APP_SERVER_DRIVER_PROTOCOL_VERSION,
+            structured_events=True,
+            partial_output=True,
+            interactive_input=False,
+            live_approvals=False,
+            durable_approval=False,
+            interrupt=True,
+            steer=False,
+            resume=True,
+            fork=True,
+            session_list=False,
+            session_close=False,
+            native_auth=False,
+            provider_ui_handoff=False,
+            dynamic_model=False,
+            dynamic_mcp=False,
+            recovery_after_process_loss=True,
+        )
+
+    def open_or_resume(
+        self,
+        execution_snapshot: ExecutionSnapshot,
+        session_link: StructuredSessionLink | None,
+    ) -> StructuredSessionState:
+        """Start, import, resume, or explicitly fork one provider thread."""
+        del execution_snapshot
+        action = str(self.continuation.get("action") or "start")
+        recovery_outcome = "not_required"
+        forked_from: str | None = None
+        if action == "fork":
+            source_thread_id = str(
+                self.continuation.get("fork_thread_id")
+                or _mapping(self.continuation.get("fork")).get("thread_id")
+                or ""
+            ).strip()
+            if not source_thread_id:
+                raise ValueError("Codex app-server fork requires a source thread id")
+            response = self.runtime.client.request(
+                "thread/fork",
+                {
+                    **_thread_identity_params(self.request),
+                    "threadId": source_thread_id,
+                    "lastTurnId": self.continuation.get("fork_turn_id"),
+                },
+                timeout=APP_SERVER_TIMEOUT_SECONDS,
+            )
+            thread_id = _thread_id(response)
+            forked_from = source_thread_id
+            recovery_outcome = "forked"
+        else:
+            legacy_thread_id = _optional_text((self.legacy_link or {}).get("thread_id"))
+            generic_thread_id = (
+                session_link.external_session_id if session_link is not None else None
+            )
+            if (
+                legacy_thread_id is not None
+                and generic_thread_id is not None
+                and legacy_thread_id != generic_thread_id
+            ):
+                raise StructuredSessionError(
+                    "Codex compatibility and structured links disagree"
+                )
+            thread_id = generic_thread_id or legacy_thread_id
+            forked_from = _optional_text(
+                (self.legacy_link or {}).get("forked_from_thread_id")
+            )
+            if thread_id is None:
+                response = self.runtime.client.request(
+                    "thread/start",
+                    {
+                        **_thread_identity_params(self.request),
+                        "ephemeral": False,
+                    },
+                    timeout=APP_SERVER_TIMEOUT_SECONDS,
+                )
+                thread_id = _thread_id(response)
+            elif (
+                str((self.legacy_link or {}).get("runtime_id") or "")
+                != self.runtime.client.runtime_id
+                or thread_id not in self.runtime.loaded_threads
+            ):
+                self._resume_thread(thread_id)
+                recovery_outcome = "resumed_after_owner_change"
+        self.thread_id = thread_id
+        self.runtime.loaded_threads.add(thread_id)
+        now = utc_now()
+        previous = self.legacy_link or {}
+        self.legacy_link = self.supervisor.link_store.save(
+            self.request.session_id or "",
+            {
+                "schema_version": APP_SERVER_LINK_SCHEMA_VERSION,
+                "protocol": APP_SERVER_PROTOCOL,
+                "runtime_id": self.runtime.client.runtime_id,
+                "thread_id": thread_id,
+                "latest_turn_id": (
+                    session_link.latest_external_turn_id
+                    if session_link is not None
+                    else previous.get("latest_turn_id")
+                ),
+                "forked_from_thread_id": forked_from,
+                "snapshot": dict(self.legacy_snapshot),
+                "snapshot_hash": self.legacy_snapshot["snapshot_hash"],
+                "runtime_status": "loaded",
+                "recovery_outcome": recovery_outcome,
+                "created_at": previous.get("created_at") or now,
+                "resumed_at": (now if recovery_outcome.startswith("resumed") else None),
+                "updated_at": now,
+                "last_prompt_id": previous.get("last_prompt_id"),
+                "last_prompt_status": previous.get("last_prompt_status"),
+            },
+        )
+        return StructuredSessionState(
+            thread_id,
+            _optional_text(self.legacy_link.get("latest_turn_id")),
+        )
+
+    def start_turn(
+        self,
+        turn_input: StructuredTurnInput,
+        event_sink: Callable[[Mapping[str, Any]], None],
+        approval_bridge: Callable[[Mapping[str, Any]], str],
+    ) -> StructuredTurnResult:
+        """Run one Codex turn and publish normalized events through the driver sink."""
+        del approval_bridge
+        if self.thread_id is None or self.legacy_link is None:
+            raise StructuredSessionError("Codex structured session is not open")
+        response = self.runtime.client.request(
+            "turn/start",
+            {
+                "threadId": self.thread_id,
+                "input": [{"type": "text", "text": turn_input.content}],
+                "clientUserMessageId": turn_input.id,
+                "model": self.request.model,
+                "cwd": self.request.workspace,
+                "approvalPolicy": "never",
+            },
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+        turn_id = _turn_id(response)
+        self.active_turn_id = turn_id
+        self.legacy_link = self.supervisor.link_store.save(
+            self.request.session_id or "",
+            {
+                **self.legacy_link,
+                "latest_turn_id": turn_id,
+                "runtime_status": "turn_running",
+                "updated_at": utc_now(),
+                "last_prompt_id": turn_input.id,
+                "last_prompt_status": "submitted",
+            },
+        )
+
+        def publish(event: HarnessEvent) -> None:
+            event_sink(
+                {
+                    "type": event.type,
+                    "message": event.message,
+                    "payload": dict(event.payload),
+                }
+            )
+
+        request = replace(self.request, event_sink=publish)
+        self.result = self.supervisor._wait_for_turn(
+            self.runtime,
+            request,
+            self.context,
+            thread_id=self.thread_id,
+            turn_id=turn_id,
+            link=self.legacy_link,
+            command_display=self.command_display,
+        )
+        status = "completed" if self.result.ok else "failed"
+        raw_link = _mapping(self.result.raw.get("app_server_thread"))
+        status = str(raw_link.get("last_prompt_status") or status)
+        return StructuredTurnResult(turn_id, status)
+
+    def respond_to_input(self, request_id: str, answer: str) -> None:
+        """Reject unproven provider input requests in the N2-00 driver."""
+        del request_id, answer
+        raise UnsupportedSessionCapability("interactive input is not supported")
+
+    def respond_to_approval(self, request_id: str, decision: str) -> None:
+        """Reject approval bridging until N2-01 owns the durable round-trip."""
+        del request_id, decision
+        raise UnsupportedSessionCapability("approval response is not supported")
+
+    def interrupt(self, turn_id: str) -> None:
+        """Interrupt an exact active Codex turn."""
+        if self.thread_id is None:
+            raise StructuredSessionError("Codex structured session is not open")
+        self.runtime.client.request(
+            "turn/interrupt",
+            {"threadId": self.thread_id, "turnId": turn_id},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+
+    def recover(self, session_link: StructuredSessionLink) -> StructuredSessionState:
+        """Recover the same provider thread without replaying normalized history."""
+        self._resume_thread(session_link.external_session_id)
+        self.thread_id = session_link.external_session_id
+        self.runtime.loaded_threads.add(self.thread_id)
+        return StructuredSessionState(
+            self.thread_id,
+            session_link.latest_external_turn_id,
+        )
+
+    def fork(
+        self,
+        session_link: StructuredSessionLink,
+        turn_id: str | None,
+    ) -> StructuredSessionState:
+        """Create one provider-native fork without transcript replay."""
+        response = self.runtime.client.request(
+            "thread/fork",
+            {
+                **_thread_identity_params(self.request),
+                "threadId": session_link.external_session_id,
+                "lastTurnId": turn_id,
+            },
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+        thread_id = _thread_id(response)
+        self.thread_id = thread_id
+        self.runtime.loaded_threads.add(thread_id)
+        return StructuredSessionState(thread_id)
+
+    def close(self) -> None:
+        """Leave the shared supervised runtime available for other sessions."""
+
+    def mark_interrupted(self, prompt_id: str) -> dict[str, Any] | None:
+        """Persist a bounded compatibility outcome after one driver failure."""
+        if self.legacy_link is None or self.thread_id is None:
+            return self.legacy_link
+        self.legacy_link = self.supervisor.link_store.save(
+            self.request.session_id or "",
+            {
+                **self.legacy_link,
+                "runtime_status": "interrupted",
+                "recovery_outcome": "owner_error",
+                "updated_at": utc_now(),
+                "last_prompt_status": (
+                    "interrupted"
+                    if self.legacy_link.get("last_prompt_id") == prompt_id
+                    else self.legacy_link.get("last_prompt_status")
+                ),
+            },
+        )
+        return self.legacy_link
+
+    def _resume_thread(self, thread_id: str) -> None:
+        self.runtime.client.request(
+            "thread/read",
+            {"threadId": thread_id, "includeTurns": False},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+        self.runtime.client.request(
+            "thread/resume",
+            {
+                **_thread_identity_params(self.request),
+                "threadId": thread_id,
+            },
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+
+
 class _StdioJsonRpcClient:
     """Own one app-server stdio process and demultiplex JSON-RPC messages."""
 
@@ -699,6 +992,76 @@ def build_execution_snapshot(
         "tool_snapshot_hash": managed_mcp.get("snapshot_hash"),
     }
     return {**content, "snapshot_hash": _json_hash(content)}
+
+
+def build_structured_execution_snapshot(
+    legacy_snapshot: Mapping[str, Any],
+    *,
+    adapter_version: str,
+    cli_version: str | None = None,
+) -> ExecutionSnapshot:
+    """Project one verified Codex continuity snapshot into the neutral contract."""
+    snapshot = dict(legacy_snapshot)
+    supplied_hash = str(snapshot.pop("snapshot_hash", ""))
+    if supplied_hash != _json_hash(snapshot):
+        raise ValueError("Codex app-server execution snapshot hash mismatch")
+    if snapshot.get("harness_id") != "codex-cli":
+        raise ValueError("Codex structured snapshot has the wrong adapter identity")
+    api_mode = str(snapshot.get("api_mode") or "unknown")
+    model = str(snapshot.get("model") or "unknown")
+    route_revision = _json_hash({"api_mode": api_mode, "model": model})
+    provider = ProviderRef(
+        "gpt2giga-harness",
+        _identity_value(f"api-{api_mode}", prefix="provider"),
+    )
+    route = RouteRef(
+        f"route-{route_revision[:24]}",
+        route_revision,
+        provider,
+    )
+    source_workspace = str(
+        snapshot.get("source_workspace") or snapshot.get("workspace") or "unknown"
+    )
+    effective_workspace = str(snapshot.get("workspace") or source_workspace)
+    workspace_id = f"workspace-{_json_hash({'path': source_workspace})[:24]}"
+    worktree_id = (
+        f"worktree-{_json_hash({'path': effective_workspace})[:24]}"
+        if effective_workspace != source_workspace
+        else None
+    )
+    extension_hash = str(snapshot.get("tool_snapshot_hash") or "")
+    if len(extension_hash) != 64:
+        extension_hash = EMPTY_EXTENSION_SNAPSHOT_HASH
+    capability_evidence = (
+        SnapshotEvidenceRef(
+            "codex-app-server",
+            cli_version or adapter_version,
+            "supported",
+            "codex-cli-probe",
+        ),
+    )
+    return create_execution_snapshot(
+        provider=provider,
+        route=route,
+        harness_id="codex-cli",
+        harness_version=adapter_version,
+        transport=ExecutionTransport.NATIVE_STRUCTURED,
+        interaction_mode=InteractionMode.INTERACTIVE,
+        runtime_ownership=RuntimeOwnership.DURABLE,
+        workspace_id=workspace_id,
+        worktree_id=worktree_id,
+        permission_profile=_identity_value(
+            snapshot.get("permission_mode"),
+            prefix="permission",
+        ),
+        extension_snapshot_hash=extension_hash,
+        capability_evidence=capability_evidence,
+        classification=ExecutionClassification(
+            status=ExecutionClassificationStatus.EXPLICIT,
+            source="codex_app_server_driver",
+            evidence=(f"snapshot-{supplied_hash[:24]}",),
+        ),
+    )
 
 
 def _thread_identity_params(request: HarnessRequest) -> dict[str, Any]:
@@ -1415,6 +1778,7 @@ def _public_link(link: Mapping[str, Any] | None) -> dict[str, Any]:
 def _scope_id(command: tuple[str, ...], snapshot: Mapping[str, Any]) -> str:
     value = {
         "command": list(command),
+        "cli_version": snapshot.get("cli_version"),
         "api_mode": snapshot.get("api_mode"),
         "managed_home_id": snapshot.get("managed_home_id"),
         "tool_snapshot_hash": snapshot.get("tool_snapshot_hash"),
@@ -1472,6 +1836,44 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _structured_link_id(session_id: str) -> str:
+    return f"codex-link-{hashlib.sha256(session_id.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _adapter_version() -> str:
+    try:
+        value = metadata.version("gpt2giga-harness")
+    except metadata.PackageNotFoundError:
+        value = "unknown"
+    return _driver_version(value)
+
+
+def _driver_version(value: Any) -> str:
+    return _identity_value(value or "unknown", prefix="version")
+
+
+def _identity_value(value: Any, *, prefix: str) -> str:
+    text = str(value or "").strip()
+    allowed = frozenset(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:@+~-"
+    )
+    if (
+        text
+        and len(text) <= 256
+        and text[0].isalnum()
+        and all(character in allowed for character in text)
+    ):
+        return text
+    return f"{prefix}-{hashlib.sha256(text.encode('utf-8')).hexdigest()[:24]}"
+
+
+def _reject_approval_bridge(request: Mapping[str, Any]) -> str:
+    del request
+    raise UnsupportedSessionCapability(
+        "Codex approval bridging is deferred until N2-01"
+    )
 
 
 def _safe_id(value: str) -> str:

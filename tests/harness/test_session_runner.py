@@ -116,6 +116,7 @@ def test_session_runner_persists_structured_thread_and_rejects_identity_change(
         "continue",
     ]
     assert harness.requests[1].extra["continuation"]["history_replayed"] is False
+    assert harness.requests[1].extra["continuation"]["cli_version"] == "unknown"
     assert second.session.metadata["app_server_thread"]["thread_id"] == "thread-1"
 
     with pytest.raises(ValueError, match="fork explicitly"):

@@ -3113,6 +3113,7 @@ def _fork_session_from_run(
         "forked_from_run_id": run.id,
     }
     metadata.pop("app_server_thread", None)
+    metadata.pop("structured_session_link", None)
     metadata.pop("app_server_fork", None)
     if source_thread.get("thread_id"):
         metadata["app_server_fork"] = {

@@ -759,8 +759,11 @@ class HarnessSessionRunner:
         )
         metadata = dict(run_metadata)
         app_server_thread = _mapping(result.raw).get("app_server_thread")
+        structured_session_link = _mapping(result.raw).get("structured_session_link")
         if isinstance(app_server_thread, Mapping) and app_server_thread:
             metadata["app_server_thread"] = dict(app_server_thread)
+        if isinstance(structured_session_link, Mapping) and structured_session_link:
+            metadata["structured_session_link"] = dict(structured_session_link)
         if latest_usage:
             metadata["usage"] = dict(latest_usage)
         if options["mode"] == "edit":
@@ -836,6 +839,8 @@ class HarnessSessionRunner:
         if isinstance(app_server_thread, Mapping) and app_server_thread:
             session_metadata["app_server_thread"] = dict(app_server_thread)
             session_metadata.pop("app_server_fork", None)
+        if isinstance(structured_session_link, Mapping) and structured_session_link:
+            session_metadata["structured_session_link"] = dict(structured_session_link)
         if session_metadata:
             session_patch["metadata"] = session_metadata
         if (
@@ -1283,6 +1288,7 @@ def _continuation_plan(
             "fork_thread_id": fork.get("thread_id"),
             "fork_turn_id": fork.get("turn_id"),
             "protocol": "codex-app-server-json-rpc-v2",
+            "cli_version": str(getattr(snapshot, "version", None) or "unknown"),
             "normalized_history_canonical": True,
             "history_replayed": False,
         }
