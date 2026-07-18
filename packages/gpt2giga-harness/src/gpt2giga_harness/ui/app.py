@@ -82,6 +82,7 @@ from gpt2giga_harness.editor import (
     execute_editor_plan,
     workspace_for_run,
 )
+from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
     NativePromptDelivery,
@@ -980,6 +981,7 @@ def create_app(
                 api_mode=payload.get("api_mode"),
                 mode=_optional_text(payload.get("mode")),
                 workspace_policy=_optional_text(payload.get("workspace_policy")),
+                execution_transport=_optional_text(payload.get("execution_transport")),
                 dry_run=bool(payload.get("dry_run")),
                 repetitions=int(payload.get("repetitions") or 1),
                 **(
@@ -2437,6 +2439,59 @@ def create_app(
             )
             if "stream" in payload:
                 replay_payload["stream"] = bool(payload.get("stream"))
+            if (
+                replay_payload.get("execution_transport")
+                == ExecutionTransport.NATIVE_STRUCTURED.value
+            ):
+                if durable_dispatcher is None:
+                    raise ValueError(
+                        "native_structured replay requires the durable runtime"
+                    )
+                if run.mode == "edit":
+                    replay_payload["workspace_policy"] = "worktree"
+                replay_session = runner.create_session(
+                    title=f"Replay: {title_from_prompt(run.prompt)}",
+                    workspace=run.workspace,
+                    default_harness_id=run.harness_id,
+                    default_model=run.model,
+                    default_api_mode=run.api_mode,
+                    default_mode=run.mode,
+                )
+                replay_extra = replay_payload.get("extra")
+                replay_source_value = (
+                    replay_extra.get("replay_source")
+                    if isinstance(replay_extra, Mapping)
+                    else None
+                )
+                replay_source = (
+                    dict(replay_source_value)
+                    if isinstance(replay_source_value, Mapping)
+                    else {}
+                )
+                replay_session = store.update_session(
+                    replay_session.id,
+                    metadata={
+                        **dict(replay_session.metadata),
+                        "replay_source": replay_source,
+                    },
+                )
+                submission = durable_dispatcher.submit(
+                    replay_session.id,
+                    replay_payload,
+                    idempotency_key=f"replay:{run.id}:{replay_session.id}",
+                    origin="manual",
+                )
+                return {
+                    "session": session_to_dict(replay_session),
+                    "run": run_to_dict(submission.queued.run),
+                    "source_run": run_to_dict(run),
+                    "replay_request": replay_payload,
+                    "replay": {
+                        "source": replay_source,
+                        "destination_harness_session_id": replay_session.id,
+                        "provider_session_pending": True,
+                    },
+                }
             result = runner.run_in_session(run.session_id, replay_payload)
         except RunNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Run not found") from exc
@@ -2866,10 +2921,39 @@ def create_app(
                     "turn_index": max(int(arena.metadata.get("turn_count") or 0), 0),
                 },
             }
+            target_session_id = child.session_id
+            if (
+                replay_payload.get("execution_transport")
+                == ExecutionTransport.NATIVE_STRUCTURED.value
+            ):
+                if durable_dispatcher is None:
+                    raise ValueError(
+                        "native_structured Arena retry requires the durable runtime"
+                    )
+                if source_run.mode == "edit":
+                    replay_payload["workspace_policy"] = "worktree"
+                retry_session = runner.create_session(
+                    title=f"Arena retry: {title_from_prompt(source_run.prompt)}",
+                    workspace=source_run.workspace,
+                    default_harness_id=source_run.harness_id,
+                    default_model=source_run.model,
+                    default_api_mode=source_run.api_mode,
+                    default_mode=source_run.mode,
+                )
+                retry_session = store.update_session(
+                    retry_session.id,
+                    metadata={
+                        **dict(retry_session.metadata),
+                        "arena_retry_source_run_id": source_run.id,
+                        "arena_id": arena.id,
+                        "arena_child_index": child.index,
+                    },
+                )
+                target_session_id = retry_session.id
             if durable_dispatcher is not None:
                 submission = await run_in_threadpool(
                     durable_dispatcher.submit,
-                    child.session_id,
+                    target_session_id,
                     replay_payload,
                     idempotency_key=(
                         f"arena:{arena.id}:{child.index}:retry:{source_run.id}"
@@ -2879,18 +2963,18 @@ def create_app(
                 replacement = HarnessArenaChildRun(
                     harness_id=child.harness_id,
                     index=child.index,
-                    session_id=child.session_id,
+                    session_id=target_session_id,
                     run_id=submission.queued.run.id,
                     status="queued",
                 )
             else:
                 result = await run_in_threadpool(
-                    runner.run_in_session, child.session_id, replay_payload
+                    runner.run_in_session, target_session_id, replay_payload
                 )
                 replacement = HarnessArenaChildRun(
                     harness_id=child.harness_id,
                     index=child.index,
-                    session_id=child.session_id,
+                    session_id=target_session_id,
                     run_id=result.run.id,
                     status=result.run.status.value,
                     error=result.run.error,

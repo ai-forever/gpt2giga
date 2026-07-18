@@ -133,6 +133,17 @@ def build_replay_request(
     extra = _safe_extra(_mapping(payload.get("extra")))
     extra["isolated_history"] = True
     extra["replay_of_run_id"] = run.id
+    execution_transport = _execution_transport(run, payload)
+    if execution_transport == "native_structured":
+        source_link = _mapping(run.metadata.get("structured_session_link"))
+        extra["replay_source"] = {
+            "schema_version": 1,
+            "run_id": run.id,
+            "harness_session_id": run.session_id,
+            "structured_session_link_id": source_link.get("id"),
+            "structured_session_link_hash": source_link.get("link_hash"),
+            "external_session_id": source_link.get("external_session_id"),
+        }
     if reviewed_evidence is not None:
         extra["source_reviewed_evidence"] = dict(reviewed_evidence)
     replay = {
@@ -143,6 +154,7 @@ def build_replay_request(
         "capability": run.capability.value,
         "mode": run.mode,
         "invocation_mode": run.invocation_mode.value,
+        "execution_transport": execution_transport,
         "stream": bool(payload.get("stream")),
         "workspace": run.workspace,
         "workspace_policy": _workspace_policy(run, payload),
@@ -174,6 +186,7 @@ def _request_provenance(
         "capability": run.capability.value,
         "mode": run.mode,
         "invocation_mode": run.invocation_mode.value,
+        "execution_transport": _execution_transport(run, raw_request_payload),
         "stream": bool(raw_request_payload.get("stream")),
         "workspace": run.workspace,
         "effective_workspace": _optional_text(
@@ -197,6 +210,7 @@ def _execution_provenance(
 ) -> dict[str, Any]:
     raw = _mapping(raw_response_payload.get("raw"))
     workspace_execution = _mapping(run.metadata.get("workspace_execution"))
+    structured_session_link = _mapping(run.metadata.get("structured_session_link"))
     managed_mcp_snapshot = _mapping(raw.get("managed_mcp_snapshot")) or _mapping(
         run.metadata.get("managed_mcp_snapshot")
     )
@@ -208,6 +222,7 @@ def _execution_provenance(
         "command": list(run.command),
         "env": _mapping(raw.get("env")),
         "workspace_execution": workspace_execution or None,
+        "structured_session_link": structured_session_link or None,
         "managed_mcp_snapshot": managed_mcp_snapshot or None,
         "native_session_id": run.native_session_id,
         "native": _native_execution(run),
@@ -358,6 +373,16 @@ def _workspace_policy(
         return value
     execution = _mapping(run.metadata.get("workspace_execution"))
     return _optional_text(execution.get("policy"))
+
+
+def _execution_transport(
+    run: HarnessRun,
+    raw_request_payload: Mapping[str, Any],
+) -> str | None:
+    value = _optional_text(raw_request_payload.get("execution_transport"))
+    if value is not None:
+        return value
+    return _optional_text(_mapping(run.metadata).get("execution_transport"))
 
 
 def _safe_extra(extra: Mapping[str, Any]) -> dict[str, Any]:
