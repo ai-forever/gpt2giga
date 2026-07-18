@@ -199,6 +199,13 @@ def gemini_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
                 "and managed MCP tool ids; reasoning effort and token limits are "
                 "reported unsupported before queueing.",
             ),
+            "structured_app_server": _claim(
+                AdapterSupportLevel.SUPPORTED,
+                "Uses version-probed Gemini ACP with isolated process scopes, exact "
+                "session UUID links, permission bridging, cancellation, and load-based "
+                "recovery; list, close, model switch, filesystem callbacks, and general "
+                "elicitation remain explicitly unsupported.",
+            ),
         }
     )
     return contract

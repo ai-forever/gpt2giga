@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from contextlib import suppress
+from importlib import metadata
 import json
 import tempfile
 from pathlib import Path
@@ -39,6 +40,14 @@ from gpt2giga_harness.harnesses.attachment_plan import (
 from gpt2giga_harness.harnesses.adapter_parity import gemini_adapter_capabilities
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
+from gpt2giga_harness.gemini_acp import (
+    AuthProvider,
+    GeminiAcpDriver,
+    GeminiAcpError,
+    GeminiAcpStdioScope,
+    McpProvider,
+    create_gemini_acp_stdio_scope,
+)
 from gpt2giga_harness.native import HarnessInvocationMode
 from gpt2giga_harness.managed_mcp import (
     materialize_headless_mcp_snapshot,
@@ -141,6 +150,48 @@ class GeminiCliHarness(BaseHarness):
     def executable_resolution(self) -> ExecutableResolution:
         """Return the configured or PATH-discovered Gemini executable."""
         return self.executable_resolver.resolve(self.spec().id, "gemini")
+
+    def create_acp_driver(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+        *,
+        scope_id: str,
+        auth_provider: AuthProvider,
+        mcp_provider: McpProvider | None = None,
+    ) -> tuple[GeminiAcpDriver, GeminiAcpStdioScope]:
+        """Create the product ACP driver without admitting it to durable runtime."""
+        capability = self.capability_probe()
+        if not capability.compatible or not capability.capabilities.get("--acp"):
+            raise GeminiAcpError("installed Gemini CLI ACP capability is unavailable")
+        if capability.parsed_version is None:
+            raise GeminiAcpError("installed Gemini CLI version is unavailable")
+        resolution = self.executable_resolution()
+        if not resolution.command:
+            raise GeminiAcpError("installed Gemini CLI command is unavailable")
+        if request.workspace is None:
+            raise GeminiAcpError("Gemini ACP requires an explicit workspace")
+        if context.data_dir is None:
+            raise GeminiAcpError("Gemini ACP requires a Harness data directory")
+        scope = create_gemini_acp_stdio_scope(
+            command=resolution.command,
+            env=self.build_env(request, context),
+            workspace=request.workspace,
+            data_dir=context.data_dir,
+            scope_id=scope_id,
+        )
+        driver = GeminiAcpDriver(
+            scope.transport_factory,
+            cli_help="--acp",
+            cli_version=capability.parsed_version,
+            adapter_version=_adapter_version(),
+            cwd=request.workspace,
+            auth_provider=auth_provider,
+            mcp_provider=mcp_provider,
+            request_timeout_seconds=min(context.timeout_seconds, 30.0),
+            prompt_timeout_seconds=context.timeout_seconds,
+        )
+        return driver, scope
 
     def build_command(
         self,
@@ -302,6 +353,15 @@ def _write_gemini_settings(home: Path) -> None:
 def _managed_mcp_reference(request: HarnessRequest) -> Mapping[str, Any] | None:
     value = request.extra.get("managed_mcp_snapshot")
     return dict(value) if isinstance(value, Mapping) else None
+
+
+def _adapter_version() -> str:
+    try:
+        value = metadata.version("gpt2giga-harness")
+    except metadata.PackageNotFoundError:
+        value = "unknown"
+    normalized = str(value).strip()
+    return normalized if normalized else "unknown"
 
 
 class _GeminiStreamParser:

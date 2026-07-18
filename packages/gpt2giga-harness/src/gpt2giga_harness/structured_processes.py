@@ -426,6 +426,11 @@ class StructuredRequestHandle:
         """Return the transport generation that owns this request."""
         return self._pending.generation
 
+    @property
+    def done(self) -> bool:
+        """Return whether a response, cancellation, timeout, or loss completed it."""
+        return self._pending.event.is_set()
+
     def result(self, timeout: float) -> Mapping[str, Any]:
         """Wait for the correlated result with a bounded caller deadline."""
         return self._supervisor._wait_request(self.id, self._pending, timeout)

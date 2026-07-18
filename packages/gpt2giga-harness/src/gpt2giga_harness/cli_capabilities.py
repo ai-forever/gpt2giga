@@ -107,7 +107,12 @@ CLI_PROBE_CONTRACTS = {
             "--approval-mode",
             "--skip-trust",
         ),
-        optional_tokens=("--prompt-interactive", "--list-sessions", "--resume"),
+        optional_tokens=(
+            "--acp",
+            "--prompt-interactive",
+            "--list-sessions",
+            "--resume",
+        ),
         minimum_version="0.46.0",
         maximum_version_exclusive="0.47.0",
         event_schema="gemini-stream-json-v1",
