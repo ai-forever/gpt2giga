@@ -495,6 +495,10 @@ class ProviderCompatibilityRegistry:
             codex_openai_compatibility,
             direct_chat_openai_compatibility,
         )
+        from gpt2giga_harness.gemini_compatible import (
+            gemini_cli_api_compatibility,
+            gemini_cli_vertex_compatibility,
+        )
 
         factories = (
             *_BUILTIN_COMPATIBILITY_FACTORIES,
@@ -502,6 +506,8 @@ class ProviderCompatibilityRegistry:
             codex_openai_compatibility,
             claude_code_anthropic_api_compatibility,
             claude_code_anthropic_cloud_compatibility,
+            gemini_cli_api_compatibility,
+            gemini_cli_vertex_compatibility,
         )
         for factory in factories:
             registry._register(

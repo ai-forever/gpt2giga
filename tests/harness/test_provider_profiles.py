@@ -333,6 +333,8 @@ def test_installed_builtin_provider_entry_points_deduplicate():
     assert [item.id for item in registry.list()] == [
         "anthropic-cloud-claude-code",
         "anthropic-compatible-claude-code",
+        "gemini-compatible-gemini-cli",
+        "gemini-vertex-gemini-cli",
         "legacy-gpt2giga-claude-code",
         "legacy-gpt2giga-codex-cli",
         "legacy-gpt2giga-direct-chat",
