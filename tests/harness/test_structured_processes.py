@@ -401,6 +401,27 @@ def test_request_timeout_cancel_response_race_and_remote_errors_are_bounded():
     supervisor.close()
 
 
+def test_notification_is_uncorrelated_bounded_and_generation_bound():
+    supervisor, factory = _supervisor(max_frame_bytes=128)
+    supervisor.start()
+    transport = factory.transports[0]
+    _next_type(supervisor, "process_started")
+
+    supervisor.notify("session/cancel", {"sessionId": "session-1"})
+
+    assert transport.sent == [
+        {
+            "jsonrpc": "2.0",
+            "method": "session/cancel",
+            "params": {"sessionId": "session-1"},
+        }
+    ]
+    assert supervisor.pending_request_count == 0
+    with pytest.raises(ValueError, match="size limit"):
+        supervisor.notify("session/cancel", {"value": "x" * 256})
+    supervisor.close()
+
+
 def test_process_loss_fails_pending_work_and_restart_is_generation_isolated():
     supervisor, factory = _supervisor()
     assert supervisor.start() == 1

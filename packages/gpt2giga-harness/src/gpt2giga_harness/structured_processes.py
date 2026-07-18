@@ -681,6 +681,30 @@ class StructuredProcessSupervisor:
         """Send and synchronously await one correlated response."""
         return self.begin_request(method, params).result(timeout)
 
+    def notify(self, method: str, params: Mapping[str, Any]) -> None:
+        """Send one generation-bound notification without inventing a response."""
+        _validate_method(method)
+        if not isinstance(params, Mapping):
+            raise ValueError("structured notification params must be a mapping")
+        safe_params = _json_mapping(
+            params,
+            field_name="structured notification params",
+            max_bytes=self.max_frame_bytes,
+        )
+        with self._lock:
+            transport, generation = self._require_running_locked()
+        try:
+            transport.send(
+                {
+                    "jsonrpc": "2.0",
+                    "method": method,
+                    "params": safe_params,
+                }
+            )
+        except Exception as exc:
+            self._mark_lost(generation, "send_failed")
+            raise StructuredProcessLost("structured transport was lost") from exc
+
     def cancel_request(self, request_id: str, generation: int) -> bool:
         """Cancel a pending request when cancellation wins the response race."""
         with self._lock:
