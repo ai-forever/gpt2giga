@@ -126,6 +126,55 @@ describe("workbench presentation model", () => {
     ]);
   });
 
+  it("labels Gemini read_file results as reading when result events omit arguments", () => {
+    const projection = projectWorkbenchStream(
+      [
+        {
+          id: "read-finish",
+          payload: {
+            name: "read_file",
+            result: { output: "# Repository" },
+            status: "completed",
+            tool_call_id: "read_file__call-1",
+          },
+          run_id: "run-one",
+          type: "tool_call_finished",
+        },
+      ],
+      [],
+      "run-one",
+    );
+
+    expect(projection.toolActivities).toEqual([
+      expect.objectContaining({
+        label: "Reading files",
+        name: "read_file",
+      }),
+    ]);
+  });
+
+  it("uses Gemini file_path arguments in read_file labels", () => {
+    const projection = projectWorkbenchStream(
+      [
+        {
+          id: "read-start",
+          payload: {
+            arguments: { file_path: "/workspace/README.md" },
+            name: "read_file",
+            status: "running",
+            tool_call_id: "read_file__call-1",
+          },
+          run_id: "run-one",
+          type: "tool_call_started",
+        },
+      ],
+      [],
+      "run-one",
+    );
+
+    expect(projection.toolActivities[0]?.label).toBe("Reading /workspace/README.md");
+  });
+
   it("projects reasoning, usage, and an inspectable tool result", () => {
     const projection = projectWorkbenchStream(
       [

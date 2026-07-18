@@ -26,11 +26,14 @@ flowchart LR
     Worker --> Runner["HarnessSessionRunner"]
 
     Runner --> Direct["Адаптер Direct Chat"]
-    Runner --> AgentCLI["Headless-адаптеры Codex / Claude / Gemini"]
+    Runner --> Structured["Драйверы Codex app-server / Gemini ACP"]
+    Runner --> OneShot["One-shot compatibility adapters"]
     Control --> Native["Управляемые native terminal-процессы"]
+    Control --> Handoff["Preview provider handoff Claude"]
 
     Direct --> Gateway["Шлюз совместимости gpt2giga :8090"]
-    AgentCLI --> Gateway
+    Structured --> Gateway
+    OneShot --> Gateway
     Native --> Gateway
     Gateway --> GigaChat["GigaChat"]
 
@@ -51,7 +54,8 @@ flowchart LR
 | --- | --- | --- |
 | `ui/app.py` и `ui/routers/` | Композиция FastAPI, аутентификация, JSON/SSE API, встроенный статический UI | Дают CLI и браузеру единую локальную поверхность управления. |
 | `registry.py`, `plugins.py`, `harnesses/` | Обнаружение встроенных адаптеров и адаптеров из entry points | Позволяют расширять набор исполнителей без хардкода каждого из них во frontend. |
-| `session_runner.py` | Валидация запроса, сбор контекста, вызов адаптера, нормализованное сохранение | Даёт всем headless-адаптерам общий контракт session/run/event. |
+| `execution.py`, `structured_sessions.py`, `structured_processes.py` | Provider-neutral execution identity, structured-session links, ограниченный JSON-RPC supervision | Явно разделяют transport, interaction mode, runtime ownership, provider identity и recovery evidence. |
+| `session_runner.py`, `runtime/structured.py` | Валидация запроса, capability-based durable admission, вызов адаптера, нормализованное сохранение | Даёт structured и one-shot адаптерам общих владельцев session/run/event, не выдавая terminal или handoff за structured execution. |
 | `sessions/` | Сессии, запуски, сообщения, события, raw records, маскирование | Сохраняет пригодную для проверки историю после перезапуска браузера или сервера. |
 | `runtime/` | Durable jobs, attempts, leases, workers, retries, cancellation, approvals | Отделяет отправленную задачу от HTTP-запроса браузера, который её создал. |
 | `native/` | Обнаружение native history и жизненный цикл принадлежащих Harness PTY-процессов | Сохраняет продолжение native CLI-сессий, не изменяя пользовательские vendor homes. |
@@ -61,12 +65,13 @@ flowchart LR
 | `tools/`, `mcp.py`, `managed_mcp.py` | Tool profiles, разрешение секретов, MCP discovery, managed CLI config | Подключает инструменты без записи секретов в публичные записи или vendor homes. |
 | `agents.py`, `workflows.py`, `schedules.py`, `evals.py` | Переиспользуемые профили и высокоуровневая оркестрация | Строит повторяемую автоматизацию поверх того же durable run-примитива. |
 
-## Поток headless-выполнения
+## Поток durable-выполнения
 
-Обычная кнопка Run в браузере использует асинхронный маршрут `/start`.
-Синхронные маршруты `/run` полезны для коротких CLI-подобных вызовов, но
-связывают время жизни HTTP-запроса со временем выполнения и не являются
-основным путём UI.
+Обычная кнопка Run в Workbench и `giga session turn` используют асинхронный
+durable path. Для совместимых Codex и Gemini Workbench по умолчанию выбирает
+`native_structured`; `one_shot` остаётся явным compatibility-вариантом.
+Синхронные `/run` и прямая команда `giga harness run` полезны для коротких
+probes, но не получают durable structured-session owner.
 
 ```mermaid
 sequenceDiagram
@@ -79,14 +84,14 @@ sequenceDiagram
     participant A as Адаптер или внешний CLI
     participant S as Session store
 
-    U->>API: POST /api/sessions/{id}/run/start
-    API->>P: проверка проекта, route, capability и policy
+    U->>API: POST /api/sessions/{session_id}/run/start
+    API->>P: проверка проекта, route, transport, capability и policy
     P->>S: queued HarnessRun и начальные события
     P->>DB: идемпотентный durable job
     API-->>U: run id, stream URL, cancel URL
     W->>DB: lease и новый attempt
     W->>R: выполнение сохранённого payload
-    R->>A: direct chat или structured headless-команда
+    R->>A: допущенный structured turn или явный one-shot
     A-->>R: нормализованные события и результат
     R->>S: маскированные сообщения, события и артефакты
     W->>DB: завершение attempt и job
@@ -100,9 +105,17 @@ Job, attempt и run намеренно являются разными запи�
 - **job** — durable-запись планирования и отмены;
 - **attempt** — одна worker lease этого job, сохраняющая историю retry.
 
+Неизменяемый execution snapshot хранит `native_structured`, `native_terminal`
+или `one_shot` независимо от interactive/batch mode и request-bound/durable
+ownership. Durable admission требует reviewed structured driver с событиями,
+interrupt, resume, recovery после потери процесса и approval path. Ошибка
+admission не переключает transport. Codex использует app-server JSON-RPC v2,
+совместимый Gemini — ACP; Claude embedded structured execution остаётся blocked.
+
 ## Поток native terminal
 
-Native mode отделён от headless-выполнения. Harness владеет PTY-процессом и его
+`native_terminal` отделён от structured и one-shot execution. Harness владеет
+PTY-процессом и его
 маскированным потоком байтов, но внутренним поведением TUI владеет CLI. Новая или
 возобновляемая сессия проходит capability checks и route-aware preflight шлюза.
 Вывод доступен через polling по cursor и SSE. `Last-Event-ID` или `after_seq`
@@ -122,6 +135,16 @@ flowchart TD
     Events --> SSE["SSE с replay после reconnect"]
     PTY --> Record["Durable process и run metadata"]
 ```
+
+## Provider-owned handoff
+
+Claude Remote Control/Desktop handoff — отдельная поверхность, а не
+`ExecutionTransport`. `GET /api/provider-handoffs/{harness_id}/preview`
+возвращает только content-free launch instruction после capability, platform и
+workspace checks. Handoff требует provider login, может открыть provider-owned
+process/UI и явно не является durable, queueable или resumable через Harness
+structured-session link. Отклонённый embedded Claude SDK path остаётся blocked,
+а не переименовывается в handoff или terminal execution.
 
 ## Границы состояния и безопасности
 
@@ -159,6 +182,7 @@ JSON-схема FastAPI доступна по `/openapi.json`; Swagger и ReDoc 
 | `POST /auth/session` | Меняет настроенный remote bootstrap bearer token на cookie браузерной сессии в памяти. |
 | `GET /api/health` | Возвращает аутентифицированному UI расширенную готовность cockpit, proxy, runtime и reconciliation. |
 | `GET /api/defaults` | Передаёт UI безопасные начальные значения model, API mode, timeout и других настроек. |
+| `GET /api/settings`<br />`PATCH /api/settings/defaults` | Читают backend-owned Workbench defaults или валидируемо обновляют default harness, route/model, canonical execution transport, compatibility invocation field, mode и workspace policy. |
 | `GET /api/harnesses` | Перечисляет встроенные и plugin-адаптеры, их availability, capabilities, native support и compatibility evidence. |
 | `GET /api/models` | Даёт model picker безопасный список моделей, не заставляя браузер обращаться к шлюзу напрямую. |
 | `POST /api/preflight/run` | Проверяет prompt, workspace, attachments, route, executable и блокирующие условия до отправки. |
@@ -185,8 +209,13 @@ JSON-схема FastAPI доступна по `/openapi.json`; Swagger и ReDoc 
 | `POST /api/sessions/run`<br />`POST /api/sessions/{session_id}/run` | Синхронные create-and-run/run-in-session пути совместимости для коротких вызовов. |
 | `POST /api/sessions/run/start`<br />`POST /api/sessions/{session_id}/run/start` | Основные асинхронные пути: сразу возвращают durable run, stream и cancel identifiers. |
 | `GET /api/sessions/{session_id}/events` | Читает сохранённые маскированные события после refresh или без streaming. |
+| `GET /api/cockpit/sessions`<br />`GET /api/cockpit/sessions/{session_id}` | Возвращают ограниченные indexed summaries и лёгкий Workbench overview вместо полного retained bundle. |
+| `GET /api/cockpit/sessions/{session_id}/messages`<br />`GET /api/cockpit/sessions/{session_id}/runs`<br />`GET /api/cockpit/sessions/{session_id}/events`<br />`GET /api/cockpit/sessions/{session_id}/artifacts` | Независимо читают bounded projections, чтобы большая история не раздувала initial UI state. |
+| `GET /api/cockpit/sessions/{session_id}/messages/{message_id}/content` | Загружает полный retained message только для явных copy/edit actions; list projection остаётся ограниченным. |
+| `GET /api/cockpit/sessions/{session_id}/updates/stream` | Передаёт content-free revisions по SSE и требует resnapshot при backpressure. |
 | `POST /api/sessions/{session_id}/attachments`<br />`POST /api/sessions/{session_id}/attachments/workspace` | Добавляют загруженные bytes или проверенную workspace-ссылку. |
 | `GET /api/sessions/{session_id}/attachments` | Перечисляет attachment metadata для следующих запусков session. |
+| `GET /api/sessions/{session_id}/attachments/workspace/search` | Ищет bounded safe-path candidates для attachment picker без выдачи содержимого файлов. |
 | `GET /api/attachments/{attachment_id}/metadata`<br />`GET /api/attachments/{attachment_id}`<br />`DELETE /api/attachments/{attachment_id}` | Разделяют дешёвое metadata-чтение, ограниченную выдачу blob и удаление данных Harness. |
 | `GET /api/files/preview`<br />`GET /api/files/generated/{run_key}/{filename}` | Отдают разрешённые local previews и generated artifacts без раскрытия произвольных путей. |
 
@@ -203,12 +232,15 @@ network effects.
 | Маршруты | Зачем нужны |
 | --- | --- |
 | `GET /api/runs` | Возвращает Runs Center с cursor pagination по durable jobs, attempts, status groups и workers. |
+| `GET /api/runs/updates/stream` | Публикует content-free revisions Runs Center по SSE без full-list polling. |
 | `GET /api/runs/{run_id}`<br />`GET /api/runs/{run_id}/summary` | Разрешают run в полный persisted bundle или лёгкую durable summary. |
+| `GET /api/cockpit/runs/{run_id}`<br />`GET /api/cockpit/runs/{run_id}/raw`<br />`GET /api/cockpit/runs/{run_id}/diff`<br />`GET /api/cockpit/runs/{run_id}/report` | Сначала загружают bounded Cockpit overview, а raw/diff/report projection — только по явному открытию. |
 | `GET /api/runs/{run_id}/trace`<br />`GET /api/runs/{run_id}/events/{event_id}` | Держат trace list лёгким и загружают уже маскированный payload только при раскрытии события. |
 | `GET /api/runs/{run_id}/events/stream` | Передаёт сохранённые события через SSE, поддерживает resume по cursor и завершается после `run_finished`. |
 | `POST /api/runs/{run_id}/cancel` | Сохраняет намерение отмены, чтобы worker остановился и после отключения браузера. |
 | `POST /api/runs/{run_id}/retry` | Повторно ставит в очередь только failed job с retry-safe idempotency class последнего attempt. |
 | `GET /api/runs/{run_id}/provenance` | Возвращает adapter, route, binary/schema evidence, request hashes и безопасные metadata для воспроизводимости. |
+| `GET /api/runs/{run_id}/support-bundle` | Возвращает content-free redaction-safe diagnostics одного run; это не формат private state backup. |
 | `POST /api/runs/{run_id}/replay`<br />`POST /api/runs/{run_id}/fork` | Повторяет безопасно сохранённый запрос в той же session или отделяет историю в новую session. |
 | `GET /api/runs/{run_id}/diff`<br />`GET /api/runs/{run_id}/patch`<br />`GET /api/runs/{run_id}/pr` | Показывают isolated edit как structured diff, raw patch или PR-ready artifact. |
 | `POST /api/runs/{run_id}/apply`<br />`POST /api/runs/{run_id}/branch` | Применяют reviewed patch или создают local branch только после approval и Git safety checks. |
@@ -229,6 +261,7 @@ network effects.
 | `GET /api/native/processes/{process_id}/output` | Читает маскированный terminal output по cursor и остаётся fallback при недоступном EventSource. |
 | `GET /api/native/processes/{process_id}/output/stream` | Передаёт terminal events, keepalives и replay после reconnect через SSE. |
 | `POST /api/native/processes/{process_id}/resize` | Валидирует rows/columns и синхронизирует размер TUI с viewport браузера. |
+| `GET /api/provider-handoffs/{harness_id}/preview` | Показывает ограниченную provider-owned handoff instruction без открытия provider state и без заявления durable Harness continuity. |
 
 ### Arena, policies, approvals и attention
 
@@ -236,6 +269,7 @@ network effects.
 | --- | --- |
 | `GET /api/arena/runs`<br />`POST /api/arena/runs`<br />`GET /api/arena/runs/{arena_id}` | Перечисляют, создают и читают comparison parent, чьи children являются обычными независимыми durable runs. |
 | `GET /api/arena/runs/{arena_id}/events/stream` | Объединяет события child runs в один SSE comparison stream. |
+| `POST /api/arena/runs/{arena_id}/turns`<br />`POST /api/arena/runs/{arena_id}/children/{child_index}/retry` | Ставят follow-up turns или retry одного child в очередь, сохраняя explicit transport и structured-session evidence. |
 | `GET /api/policy/profiles` | Показывает неизменяемые встроенные решения для interactive, review-every-action и unattended contexts. |
 | `GET /api/approvals`<br />`POST /api/approvals/{approval_id}/decision` | Перечисляют durable approval requests и сохраняют allow/deny, после чего job requeue или cancel. |
 | `GET /api/attention`<br />`POST /api/attention/read` | Собирают approvals, failed schedules и другие actionable items, сохраняя исходный audit record. |
@@ -282,11 +316,14 @@ network effects.
 ## Расширение архитектуры
 
 Новый backend выполнения добавляется как адаптер в `harnesses/` и регистрируется
-через entry-point group `gpt2giga.harnesses`. Native continuity следует добавлять
-только когда connector способен честно реализовать discovery/resume semantics.
-Новые семейства API должны жить в `ui/routers/`; `ui/app.py` следует оставлять
-композицией и ядром session/run flow. Любой новый путь сохранения обязан
-маскировать данные до записи, а любая мутация — явно указывать policy boundary.
+через provider-neutral entry-point group
+`agent_workbench.harness_adapters.v1`; `gpt2giga.harnesses` остаётся
+compatibility alias. Structured или terminal continuity следует объявлять
+только когда versioned SDK manifest и conformance evidence доказывают нужный
+lifecycle. Новые семейства API должны жить в `ui/routers/`; `ui/app.py` следует
+оставлять композицией и ядром session/run flow. Любой новый путь сохранения
+обязан маскировать данные до записи, а любая мутация — явно указывать policy
+boundary.
 
 Пользовательская настройка и поведение функций описаны в
 [руководстве Unified Harness](../harness.md).

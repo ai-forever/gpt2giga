@@ -18,7 +18,6 @@ it from a source checkout:
 ```sh
 git clone https://github.com/ai-forever/gpt2giga.git
 cd gpt2giga
-git switch feature/productize_harness
 uv sync --all-packages --all-extras --dev
 source .venv/bin/activate
 giga doctor
@@ -28,7 +27,7 @@ giga ui
 Keep that environment active when you `cd` to the project you want to manage.
 On Windows PowerShell, activate `.venv\Scripts\Activate.ps1` instead.
 
-After publication, the installation will be:
+If the standalone package is available in your package index, install it with:
 
 ```sh
 uv tool install --prerelease allow gpt2giga-harness
@@ -37,7 +36,7 @@ giga --version
 giga ui
 ```
 
-The upcoming `gpt2giga-harness==0.2.0a1` metadata requires
+The current `gpt2giga-harness==0.2.0a1` metadata requires
 `gpt2giga==0.2.4a1`. Installing only `gpt2giga` never adds Harness commands or
 the `gpt2giga_harness` namespace.
 
@@ -154,10 +153,25 @@ giga worker status
 ## Built-in adapters
 
 - Direct Chat through the local gateway;
-- Codex CLI;
-- Claude Code;
-- Gemini CLI;
+- Codex CLI through durable `native_structured` app-server sessions, a managed
+  native terminal, or an explicit one-shot compatibility run;
+- Gemini CLI through durable `native_structured` ACP sessions, a managed native
+  terminal, or an explicit one-shot compatibility run;
+- Claude Code through an explicit one-shot run or managed native terminal,
+  plus a separate provider-owned Remote Control/Desktop handoff preview;
 - Echo for deterministic smoke tests.
+
+Workbench and `giga session turn` use the canonical transport names
+`native_structured`, `native_terminal`, and `one_shot`. Codex and compatible
+Gemini installations default to structured durable sessions. Claude embedded
+structured execution remains unavailable; its provider handoff is explicitly
+non-durable and does not become a Harness-owned session. Inspect the exact
+capability and blocker before execution:
+
+```sh
+giga harness inspect gemini-cli --json
+giga session turn <session-id> --transport native_structured --prompt "Inspect"
+```
 
 External CLIs are discovered on `PATH`. Non-standard absolute paths belong in
 the user-owned `~/.gpt2giga/harness/config.toml`:
@@ -178,7 +192,8 @@ giga harness inspect codex-cli --json
 ```
 
 Configured paths take precedence over `PATH`, must be absolute, and are checked
-for executable capabilities before a native or headless run starts.
+for executable capabilities before a structured, terminal, or one-shot run
+starts.
 
 External CLI execution is supported only when both the bounded help probe and
 the declared version window pass: Codex CLI `>=0.144.0,<0.145.0`, Claude Code

@@ -65,9 +65,9 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Будущий Unified Harness `0.2.0a1` запускается как alpha-preview из source
-checkout по [руководству Unified Harness](harness.md). После появления
-отдельного пакета в вашем package index установите control plane так:
+Текущая alpha-preview линия Unified Harness — `0.2.0a1`; она всегда доступна
+из source checkout по [руководству Unified Harness](harness.md). Если отдельный
+пакет доступен в вашем package index, установите control plane так:
 
 ```sh
 uv tool install --prerelease allow gpt2giga-harness

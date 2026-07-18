@@ -82,8 +82,7 @@ Gemini subprocess.
 запуск из source checkout:
 
 ```bash
-git clone --branch feature/productize_harness \
-  https://github.com/ai-forever/gpt2giga.git
+git clone https://github.com/ai-forever/gpt2giga.git
 cd gpt2giga
 uv sync --all-packages --all-extras --dev
 source .venv/bin/activate
@@ -97,7 +96,7 @@ giga harness list
 проект: команды `giga` и `gpt2giga` продолжат запускаться из checkout. В Windows
 используйте `.venv\Scripts\Activate.ps1`.
 
-После появления отдельного preview-пакета в вашем package index будет доступен
+Если отдельный preview-пакет доступен в вашем package index, используйте
 короткий вариант:
 
 ```bash
@@ -105,14 +104,15 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-Будущий дистрибутив `gpt2giga-harness==0.2.0a1` требует
+Текущий дистрибутив `gpt2giga-harness==0.2.0a1` требует
 `gpt2giga==0.2.4a1` и добавляет команды `giga` и `gpt2giga-harness`.
 
 Для Direct Chat понадобятся credentials из [быстрого старта gpt2giga](quickstart.md).
 Codex, Claude Code и Gemini — опциональные интеграции: соответствующий CLI
 executable должен быть в `PATH` или задан явным override, а локальный gateway —
-настроен и доступен. Для описанного Harness route отдельный vendor login не
-нужен. Отсутствующий CLI будет недоступен, но не сломает остальной cockpit.
+настроен и доступен. Для proxy-backed execution отдельный vendor login не
+нужен; самостоятельный provider-owned handoff Claude требует его. Отсутствующий
+CLI будет недоступен, но не сломает остальной cockpit.
 
 #### Базовая установка и опциональные providers
 
@@ -331,12 +331,16 @@ provenance-only selectors дают явное предупреждение.
 `max_concurrency` больше 1 относится к coordinator уровня Workflow или
 Schedule. `tool_ids` должны ссылаться на enabled, trusted и совместимые с
 адаптером project MCP profiles. До queueing они замораживаются в неизменяемый
-snapshot и materialize только в активный временный headless home. Prompt files,
-skills и context/memory selectors пока сохраняются как явно unsupported
-provenance. Профиль не принимает произвольные CLI flags или secret literals.
+snapshot и materialize только в активный временный execution home. Structured
+driver может отклонить параметр, projection которого ещё не доказан: например,
+Gemini ACP сейчас блокирует managed MCP projection вместо fallback в one-shot.
+Prompt files, skills и context/memory selectors пока сохраняются как явно
+unsupported provenance. Профиль не принимает произвольные CLI flags или secret
+literals.
 
-Для headless run публичные metadata содержат только descriptor-free identity;
-полный безопасный snapshot проверяется по content hash внутри Harness data dir.
+Для process-backed run публичные metadata содержат только descriptor-free
+identity; полный безопасный snapshot проверяется по content hash внутри Harness
+data dir.
 Replay повторно использует тот же snapshot даже после изменения project TOML.
 Secret refs разрешаются только на границе создания subprocess config, а точная
 конфигурация записывается во временный Codex/Claude/Gemini home и удаляется после
@@ -533,28 +537,58 @@ configuration. Export по умолчанию не содержит raw task pay
 | Адаптер | Назначение | Continuation |
 | --- | --- | --- |
 | `direct-chat` | Прямой Chat Completions через gateway | structured replay |
-| `codex-cli` | Headless Codex или managed native terminal | app-server thread при доказанном контракте; иначе degraded replay |
-| `claude-code` | Headless Claude Code или managed native terminal | one-shot headless; native resume зависит от CLI evidence |
-| `gemini-cli` | Headless Gemini CLI или managed native terminal | one-shot headless; native resume зависит от CLI evidence |
+| `codex-cli` | Structured app-server, managed native terminal или one-shot | durable app-server thread при доказанном контракте |
+| `claude-code` | One-shot, managed native terminal или отдельный provider handoff | embedded structured blocked; handoff недолговечен и provider-owned |
+| `gemini-cli` | Structured ACP, managed native terminal или one-shot | durable ACP session при доказанном `--acp` |
 | `echo` | Deterministic smoke без credentials и сети | stateless |
 
 `giga harness list` показывает только реально доступные adapters, а
 `giga harness inspect <id> --json` — capability evidence, transport
 attachments, policy ownership и причины degraded/disabled state.
 
+Workbench, Settings, session API и `giga session turn` используют канонические
+transport-значения `native_structured`, `native_terminal` и `one_shot`.
+Structured transport означает provider-owned session под управлением
+проверенного протокола; terminal означает managed PTY без видимости внутренних
+семантик TUI; one-shot не обещает native continuity. Transport,
+interactive/batch mode и request-bound/durable ownership сохраняются в
+execution snapshot независимо. Заблокированный structured-запрос не
+переключается молча на terminal или one-shot.
+
+Codex и совместимый Gemini по умолчанию используют `native_structured` в
+Workbench. Для Claude structured-вариант остаётся явно blocked, потому что
+граница embedded SDK/auth не была принята. Remote Control/Desktop handoff —
+отдельный `provider_owned`, non-durable и non-queueable preview, а не Harness
+session continuity.
+
+```bash
+giga harness inspect gemini-cli --json
+giga session turn <session-id> \
+  --transport native_structured \
+  --prompt "Проверь этот репозиторий"
+```
+
 ### Codex CLI
 
-Harness предпочитает reviewed `codex app-server` JSON-RPC для headless
-multi-turn continuity. Если contract не доказан, используется
-`codex exec --ephemeral --json` с явным `degraded_replay`. Native mode запускает
+Для durable `native_structured` continuity Harness предпочитает reviewed
+`codex app-server` JSON-RPC. Если contract не доказан, structured transport
+блокируется; явный one-shot compatibility path использует
+`codex exec --ephemeral --json` с `degraded_replay`. Native terminal запускает
 TUI в managed PTY; это другой transport и другой уровень наблюдаемости.
 
 ### Claude Code
 
-Headless run использует capability-probed flags для model, permission mode,
+One-shot run использует capability-probed flags для model, permission mode,
 effort и allowed/disallowed tools. Managed MCP config материализуется только во
-временном home. Native output может содержать структурированную tool activity,
-но внутренние prompts и approvals CLI остаются delegated.
+временном home. Native terminal output может содержать структурированную tool
+activity, но внутренние prompts и approvals CLI остаются delegated.
+
+Embedded Claude Agent SDK execution не productized: проверенный auth surface не
+удовлетворяет принятой subscription-native границе. На поддерживаемом macOS
+Integrations может показать content-free preview отдельного Remote Control или
+Desktop handoff через `GET /api/provider-handoffs/claude-code/preview`. Он
+требует full-scope provider login, может открыть provider-owned process/UI и не
+является durable, queueable или Harness-owned continuity.
 
 ### Gemini CLI
 
@@ -562,6 +596,13 @@ effort и allowed/disallowed tools. Managed MCP config материализуе�
 доставлен ровно один раз. Wrapper argv задаётся TOML-массивом без `shell=True`.
 Неизвестный или несовместимый event stream завершается явной ошибкой вместо
 догадок по terminal text.
+
+Для durable Workbench или `giga session turn --transport native_structured`
+совместимый Gemini запускается через reviewed ACP stdio driver, а не prompt-mode
+command. Harness требует versioned capability `--acp`, сохраняет content-free
+structured-session link, нормализует ACP updates, передаёт live approvals,
+поддерживает interrupt/resume и recovery после потери процесса. Managed MCP
+projection в ACP пока blocked и не подменяется другим transport.
 
 ## CLI истории и native sessions
 
@@ -676,9 +717,9 @@ token только операторам, которым допустимы эт�
 
 ## Ограничения preview
 
-- Поведение Codex, Claude и Gemini зависит от поддержки custom endpoints,
-  headless mode, native resume и формата local history в установленной версии
-  CLI.
+- Поведение Codex, Claude и Gemini зависит от versioned structured capabilities,
+  custom endpoints, one-shot/headless mode, native resume и формата local
+  history в установленной версии CLI.
 - Часть действий внутри внешнего CLI непрозрачна; policy enforcement может быть
   delegated или advisory.
 - MCP-раздел ориентирован на discovery и управляемую конфигурацию; это не
@@ -737,7 +778,8 @@ cockpit. Для Gemini wrapper можно задать безопасный TOML
 без единого распознанного обязательного event contract завершается ошибкой.
 
 Текущие окна поддержки внешних CLI намеренно ограничены minor-линиями,
-которые покрыты пакетными fixtures для headless-потока и native history:
+которые покрыты пакетными fixtures для one-shot, structured, terminal и native
+history:
 
 | Адаптер | Поддерживаемое окно версий |
 |---|---|
@@ -754,8 +796,9 @@ cockpit. Для Gemini wrapper можно задать безопасный TOML
 `version_contract.status=unparsed`. JSON-контракт также публикует `minimum` и
 `maximum_exclusive`, поэтому CI и issue reports не должны разбирать warning.
 
-Headless-потоки и Codex app-server публикуют стабильные tool, command, file,
-usage, failure и lifecycle events только из capability-probed structured schema.
+One-shot-потоки, Codex app-server и Gemini ACP публикуют стабильные tool,
+command, file, usage, failure и lifecycle events только из capability-probed
+schema.
 Usage сохраняет доступные cached-input, reasoning-output и tool token details.
 Нативные TUI Codex, Claude и Gemini остаются редактированным потоком
 `raw-terminal-v1` с явными ограничениями `tool_lifecycle_opaque`,
@@ -774,7 +817,7 @@ GPT2GIGA_RUN_CLI_COMPAT_MATRIX=1 GPT2GIGA_COMPAT_API_MODE=v2 \
   uv run pytest -q tests/live/test_adapter_compatibility_matrix.py
 ```
 
-### Headless continuity Codex
+### Structured continuity Codex
 
 Для Codex main chat Harness дополнительно проверяет контракт
 `codex app-server --help`. Если доступен reviewed stdio JSON-RPC v2, первая
@@ -794,18 +837,20 @@ Route, model, managed home identity, source/effective workspace, permission mode
 и PID app-server не попадают в browser. `turn/*`, `item/*`, tool, file-change и
 assistant delta преобразуются в обычные normalized Run events.
 
-App-server запускает headless turns с reviewed sandbox и
-`approvalPolicy=never`. Неожиданный server-side approval или elicitation
-отклоняется fail-closed и фиксируется warning. MCP secret refs разрешаются
-только на границе запуска owning process, после initialize удаляются из
-Harness-owned config, а durable metadata хранит только snapshot id/hash.
+Structured app-server turns используют `approvalPolicy=on-request` и передают
+поддержанные command/file-change requests в durable Approval Center. Deny,
+timeout, unsupported request family и stale binding завершаются fail-closed;
+approval не выводится из скрытого user input. MCP secret refs разрешаются только
+на границе запуска owning process, после initialize удаляются из Harness-owned
+config, а durable metadata хранит только snapshot id/hash.
 
-Если app-server contract не доказан, Codex сохраняет совместимый
-`codex exec --ephemeral --json`, но full-history replay явно помечается
-`degraded_replay`, а не resume того же Codex thread. Direct Chat использует
-`structured_replay`. Headless continuation Claude Code и Gemini CLI пока
-`unsupported`: ограничение публикуется до их one-shot процесса. Plugins по
-умолчанию остаются `one_shot`, пока не объявят отдельный проверенный contract.
+Если app-server contract не доказан, запрошенный `native_structured` блокируется.
+Явный compatibility command сохраняет `codex exec --ephemeral --json`, но
+full-history replay помечается `degraded_replay`, а не resume того же Codex
+thread. Direct Chat использует `structured_replay`. Gemini имеет отдельный
+durable ACP contract; Claude embedded structured остаётся blocked. Plugins по
+умолчанию остаются `one_shot`, пока versioned SDK manifest и conformance evidence
+не объявят другой проверенный contract.
 
 ### Native session continuity
 
@@ -1028,13 +1073,18 @@ giga runtime export --output /tmp/harness-runtime.json
 
 ## Добавление собственного Harness
 
-Plugin использует entry-point group `gpt2giga.harnesses`, но его import target
-не должен находиться в gateway namespace:
+Новый plugin использует versioned provider-neutral entry-point group
+`agent_workbench.harness_adapters.v1`; его import target не должен находиться в
+gateway namespace:
 
 ```toml
-[project.entry-points."gpt2giga.harnesses"]
+[project.entry-points."agent_workbench.harness_adapters.v1"]
 my-harness = "my_package.my_harness:MyHarness"
 ```
+
+`gpt2giga.harnesses` остаётся compatibility alias. Во время миграции пакет может
+публиковать одинаковый target в обеих группах; эквивалентные aliases загружаются
+один раз, а конфликтующие adapter IDs не перезаписывают первый.
 
 Начните со scaffold, затем проверьте metadata/capabilities и dry-run:
 
@@ -1042,6 +1092,7 @@ my-harness = "my_package.my_harness:MyHarness"
 giga harness scaffold my-harness
 giga harness validate my-harness --json
 giga harness inspect my-harness --json
+giga harness conformance my-harness --json
 ```
 
 Adapter обязан явно описать execution modes, continuation, event schema,
@@ -1105,7 +1156,7 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-Будущая metadata `gpt2giga-harness==0.2.0a1` требует
+Текущая metadata `gpt2giga-harness==0.2.0a1` требует
 `gpt2giga==0.2.4a1`. Старый import `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
 перезаписывает `~/.gpt2giga/harness`, `.giga/` или vendor-owned CLI homes.
@@ -1136,6 +1187,8 @@ model. Для Claude/Gemini через Harness выбранная upstream model
 
 Alpha не обещает stable API/SQLite/YAML contracts, high availability,
 multi-tenant isolation, полный контроль действий black-box CLI или rich
-attachments для любого adapter. Headless continuation Claude/Gemini остаётся
-ограниченным до появления проверенного resume contract. Всегда ориентируйтесь
-на `giga harness inspect --json`, а не на название установленного CLI.
+attachments для любого adapter. Codex app-server и Gemini ACP поддерживают
+capability-proven durable structured continuity; Claude embedded structured
+execution остаётся blocked, а provider handoff не считается continuity. Всегда
+ориентируйтесь на `giga harness inspect --json`, а не на название
+установленного CLI.
