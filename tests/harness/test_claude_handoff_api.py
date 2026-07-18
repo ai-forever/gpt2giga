@@ -98,6 +98,7 @@ def test_handoff_preview_api_degrades_unknown_harness_and_platform(
 
 
 def _install_ready_claude_probe(registry, monkeypatch):
+    monkeypatch.setattr("gpt2giga_harness.claude_handoff.sys.platform", "darwin")
     harness = registry.get("claude-code")
     snapshot = CliCapabilitySnapshot(
         harness_id="claude-code",
