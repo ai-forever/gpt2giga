@@ -10,6 +10,7 @@ from gpt2giga_harness.runtime.worker import DurableJobDispatcher, DurableJobWork
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.settings import HarnessSettingsStore
+from gpt2giga_harness.structured_sessions import AdapterCapabilitySnapshot
 from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
@@ -125,6 +126,37 @@ class _StructuredNativeHarness(BaseHarness):
 
     def availability(self) -> Availability:
         return Availability.available("hermetic structured fixture")
+
+    def durable_structured_capabilities(self) -> AdapterCapabilitySnapshot:
+        return AdapterCapabilitySnapshot(
+            adapter_id="codex-cli",
+            adapter_version="0.144.5",
+            protocol="codex-app-server-json-rpc-v2",
+            protocol_version="2",
+            structured_events=True,
+            partial_output=True,
+            interactive_input=False,
+            live_approvals=True,
+            durable_approval=True,
+            interrupt=True,
+            steer=False,
+            resume=True,
+            fork=False,
+            session_list=False,
+            session_close=False,
+            native_auth=False,
+            provider_ui_handoff=False,
+            dynamic_model=False,
+            dynamic_mcp=False,
+            recovery_after_process_loss=True,
+        )
+
+    def run_durable_structured(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        return self.run(request, context)
 
     def run(
         self,

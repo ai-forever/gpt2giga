@@ -54,6 +54,7 @@ from gpt2giga_harness.editor import (
     execute_editor_plan,
     workspace_for_run,
 )
+from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.executables import (
     executable_resolution_to_dict,
     set_user_executable,
@@ -182,6 +183,7 @@ from gpt2giga_harness.worktrees import parse_workspace_policy
 from gpt2giga_harness.ui.app import create_app, validate_ui_bind
 from gpt2giga_harness.ui.security import is_loopback_host
 from gpt2giga_harness.workspace import resolve_workspace
+from gpt2giga_harness.workbench_execution import workbench_transport_projection
 from gpt2giga_harness.workflows import (
     WorkflowCoordinator,
     WorkflowRepository,
@@ -367,6 +369,12 @@ def build_parser() -> argparse.ArgumentParser:
     session_turn.add_argument("--mode", choices=("plan", "read", "edit"), default=None)
     session_turn.add_argument("--workspace", default=None)
     session_turn.add_argument("--permission-profile", default="interactive")
+    session_turn.add_argument(
+        "--transport",
+        choices=("native_structured", "native_terminal", "one_shot"),
+        default=None,
+        help="Execution transport (default: backend Workbench setting)",
+    )
     session_turn.add_argument("--idempotency-key", default=None)
     session_turn.add_argument("--json", action="store_true")
     session_turn.set_defaults(handler=_handle_session_turn)
@@ -826,6 +834,7 @@ def _handle_harness_list(args: argparse.Namespace, config: HarnessConfig) -> int
                 "status": availability.status.value,
                 "native": spec_payload["supports_native_sessions"],
                 "default_invocation_mode": spec_payload["default_invocation_mode"],
+                "workbench_transport": workbench_transport_projection(harness),
                 "description": spec_payload["description"],
                 "plugin_metadata": spec_payload["plugin_metadata"],
                 "validation": harness_validation_report_to_dict(validation),
@@ -890,6 +899,7 @@ def _handle_harness_inspect(args: argparse.Namespace, config: HarnessConfig) -> 
     payload = {
         "spec": spec_to_dict(spec),
         "availability": availability_to_dict(harness.availability()),
+        "workbench_transport": workbench_transport_projection(harness),
         "validation": harness_validation_report_to_dict(validation),
     }
     resolution = getattr(harness, "executable_resolution", None)
@@ -1146,6 +1156,7 @@ def _handle_session_turn(args: argparse.Namespace, config: HarnessConfig) -> int
         mode=args.mode,
         workspace=args.workspace,
         permission_profile=args.permission_profile,
+        execution_transport=args.transport,
     )
     service = _session_application_service(config)
     submission = service.submit_turn(
@@ -2273,6 +2284,9 @@ def _run_harness(
     invocation_mode = (
         HarnessInvocationMode.NATIVE if native else HarnessInvocationMode.HEADLESS
     )
+    execution_transport = (
+        ExecutionTransport.NATIVE_TERMINAL if native else ExecutionTransport.ONE_SHOT
+    )
     request = HarnessRequest(
         prompt=prompt,
         model=model,
@@ -2282,6 +2296,7 @@ def _run_harness(
         ),
         mode=mode,
         invocation_mode=invocation_mode,
+        execution_transport=execution_transport,
         workspace=resolve_workspace(workspace),
         extra=_run_extra(dry_run=dry_run, workspace_policy=workspace_policy),
     )
@@ -2294,6 +2309,7 @@ def _run_harness(
             registry,
             harness_id=harness_id,
             invocation_mode=invocation_mode,
+            execution_transport=execution_transport,
             api_mode=request.api_mode,
             model=request.model or config.default_model,
             mode=request.mode,

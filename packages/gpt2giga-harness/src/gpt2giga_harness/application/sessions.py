@@ -21,6 +21,8 @@ from gpt2giga_harness.sessions.models import (
 )
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
 from gpt2giga_harness.settings import HarnessSettingsStore
+from gpt2giga_harness.execution import ExecutionTransport
+from gpt2giga_harness.workbench_execution import effective_workbench_transport
 
 
 class DurableRuntimeUnavailableError(RuntimeError):
@@ -81,15 +83,40 @@ class SessionApplicationService:
             default_mode=str(payload.get("mode") or defaults.mode),
         )
 
-    def prepare_turn_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def prepare_turn_payload(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """Apply backend-only turn defaults without changing public input fields."""
         effective_payload = dict(payload)
+        defaults = self.settings_store.load().defaults
+        session = self.store.get_session(session_id) if session_id is not None else None
+        harness_id = str(
+            payload.get("harness_id")
+            or (session.default_harness_id if session is not None else None)
+            or defaults.default_harness_id
+        )
+        harness = self.runner.registry.get(harness_id)
+        transport = effective_workbench_transport(
+            harness,
+            payload,
+            configured_default=defaults.execution_transport,
+        )
+        effective_payload["execution_transport"] = transport.value
+        if "invocation_mode" not in effective_payload:
+            effective_payload["invocation_mode"] = (
+                "native"
+                if transport is ExecutionTransport.NATIVE_TERMINAL
+                else "headless"
+            )
         extra = _mapping(payload.get("extra"))
         if (
             bool(extra.get("generate_session_title"))
             and _optional_text(extra.get("session_title_model")) is None
         ):
-            title_model = self.settings_store.load().defaults.default_title_model
+            title_model = defaults.default_title_model
             if title_model is not None:
                 extra["session_title_model"] = title_model
         effective_payload["extra"] = extra
@@ -110,7 +137,7 @@ class SessionApplicationService:
             )
         return self.dispatcher.submit(
             session_id,
-            self.prepare_turn_payload(payload),
+            self.prepare_turn_payload(payload, session_id=session_id),
             idempotency_key=idempotency_key,
             origin=origin,
         )
@@ -125,7 +152,7 @@ class SessionApplicationService:
         """Run one request-bound compatibility turn through the existing runner."""
         return self.runner.run_in_session(
             session_id,
-            self.prepare_turn_payload(payload),
+            self.prepare_turn_payload(payload, session_id=session_id),
             cancel_event=cancel_event,
         )
 

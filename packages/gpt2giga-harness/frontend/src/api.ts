@@ -49,6 +49,17 @@ export interface RunSummary {
   capability?: string;
   mode?: string;
   invocation_mode?: string;
+  execution_transport?: string | null;
+  provider_session?: {
+    link_id?: string | null;
+    external_session_id?: string | null;
+    latest_external_turn_id?: string | null;
+    recovery_state?: string | null;
+    protocol?: string | null;
+    protocol_version?: string | null;
+    link_hash?: string | null;
+    content_free: true;
+  } | null;
   native_process_id?: string | null;
   created_at?: string;
   updated_at: string;
@@ -261,6 +272,18 @@ export interface HarnessOption {
     durable: false;
     content_free: true;
   } | null;
+  workbench_transport?: {
+    default: "native_structured" | "native_terminal" | "one_shot";
+    options: Array<{
+      id: "native_structured" | "native_terminal" | "one_shot";
+      status: string;
+      detail: string;
+      blocker?: string | null;
+      remediation?: string | null;
+      durable: boolean;
+      provider_native_continuity: boolean;
+    }>;
+  };
 }
 
 export interface HarnessesResponse {
@@ -308,6 +331,7 @@ export interface SettingsResponse {
     default_title_model: string | null;
     default_api_mode: string;
     mode: string;
+    execution_transport: string;
     invocation_mode: string;
     workspace_policy: string;
     permission_profile: string;
@@ -317,6 +341,7 @@ export interface SettingsResponse {
       title: string;
       native_supported: boolean;
       status: string;
+      workbench_transport: NonNullable<HarnessOption["workbench_transport"]>;
     }>;
     sources: Record<string, string>;
     locked_fields: string[];

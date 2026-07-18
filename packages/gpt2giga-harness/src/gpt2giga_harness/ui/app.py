@@ -274,6 +274,7 @@ from gpt2giga_harness.workspace import (
     workspace_file_metadata,
     workspace_tree,
 )
+from gpt2giga_harness.workbench_execution import workbench_transport_projection
 
 
 NATIVE_SUBMIT_KEY_DELAY_SECONDS = 0.05
@@ -521,6 +522,7 @@ def create_app(
                     ),
                     "provider_handoff": provider_handoff,
                     "execution_surfaces": execution_surfaces,
+                    "workbench_transport": workbench_transport_projection(harness),
                     "validation": harness_validation_report_to_dict(validation),
                 }
             )
@@ -538,6 +540,7 @@ def create_app(
             "default_model": harness_defaults.default_model,
             "default_api_mode": harness_defaults.default_api_mode,
             "default_mode": harness_defaults.mode,
+            "execution_transport": harness_defaults.execution_transport,
             "invocation_mode": harness_defaults.invocation_mode,
             "workspace_policy": harness_defaults.workspace_policy,
             "permission_profile": harness_defaults.permission_profile,
@@ -1093,8 +1096,12 @@ def create_app(
         if payload.get("durable") is False:
             durable = False
         try:
-            report = runner.preflight(
+            prepared = session_service.prepare_turn_payload(
                 payload,
+                session_id=_optional_text(payload.get("session_id")),
+            )
+            report = runner.preflight(
+                prepared,
                 session_id=_optional_text(payload.get("session_id")),
                 durable=durable,
             )

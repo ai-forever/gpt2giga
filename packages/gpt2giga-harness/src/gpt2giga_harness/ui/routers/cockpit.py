@@ -598,6 +598,7 @@ def _run_summary(run: HarnessRun) -> dict[str, Any]:
         if isinstance(native_process, Mapping) and native_process.get("id")
         else None
     )
+    metadata = dict(run.metadata)
     return {
         "id": run.id,
         "session_id": run.session_id,
@@ -608,6 +609,12 @@ def _run_summary(run: HarnessRun) -> dict[str, Any]:
         "capability": run.capability.value,
         "mode": run.mode,
         "invocation_mode": run.invocation_mode.value,
+        "execution_transport": (
+            str(metadata.get("execution_transport"))
+            if metadata.get("execution_transport")
+            else None
+        ),
+        "provider_session": _provider_session_projection(metadata),
         "native_process_id": native_process_id,
         "created_at": run.created_at,
         "updated_at": run.updated_at,
@@ -615,6 +622,24 @@ def _run_summary(run: HarnessRun) -> dict[str, Any]:
         "finished_at": run.finished_at,
         "error": _text_projection(run.error or "", 4096) if run.error else None,
         "artifacts": _artifact_metadata(run),
+    }
+
+
+def _provider_session_projection(metadata: Mapping[str, Any]) -> dict[str, Any] | None:
+    link = metadata.get("structured_session_link")
+    if not isinstance(link, Mapping):
+        return None
+    config = link.get("config_snapshot")
+    config = config if isinstance(config, Mapping) else {}
+    return {
+        "link_id": link.get("id"),
+        "external_session_id": link.get("external_session_id"),
+        "latest_external_turn_id": link.get("latest_external_turn_id"),
+        "recovery_state": link.get("recovery_state"),
+        "protocol": config.get("protocol"),
+        "protocol_version": config.get("protocol_version"),
+        "link_hash": link.get("link_hash"),
+        "content_free": True,
     }
 
 

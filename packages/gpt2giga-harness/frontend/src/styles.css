@@ -393,6 +393,13 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .readiness-callout, .context-callout { display: grid; gap: 6px; margin: 10px 0 18px; border: 1px solid var(--border); border-left: 3px solid var(--success); border-radius: 7px; padding: 13px; font-size: 12px; }
 .readiness-callout span, .context-callout span { color: var(--muted); line-height: 1.45; }
 .readiness-callout.warning, .context-callout.warning { border-left-color: var(--warning); background: color-mix(in srgb, var(--warning) 5%, var(--surface)); }
+.readiness-callout.blocked { border-left-color: var(--danger); background: color-mix(in srgb, var(--danger) 5%, var(--surface)); }
+.readiness-callout code { overflow-wrap: anywhere; color: var(--text); }
+.transport-remediation { display: grid; gap: 4px; }
+.transport-remediation code { overflow-wrap: anywhere; color: var(--text); }
+.provider-session-card dd { overflow-wrap: anywhere; }
+.provider-handoff-instruction { display: grid; gap: 6px; border-left: 2px solid var(--accent); padding: 7px 9px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.provider-handoff-instruction code { overflow-wrap: anywhere; color: var(--text); }
 .inspector-section { padding: 15px 0; border-top: 1px solid var(--border); }
 .inspector-section h3, .run-context-panel h3 { margin: 0 0 11px; font-size: 13px; }
 .plan-fields, .compact-fields { margin: 0; }

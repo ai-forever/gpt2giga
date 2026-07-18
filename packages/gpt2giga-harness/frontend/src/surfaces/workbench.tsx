@@ -15,6 +15,7 @@ import {
   type RunStartResponse,
   type SessionSummary,
   type TokenUsageProjection,
+  withQuery,
 } from "../api";
 import { MessageMarkdown } from "../message-markdown";
 import { generatedImageProjection } from "../generated-image";
@@ -57,10 +58,11 @@ import {
 } from "../workbench-model";
 import {
   activeAtQuery,
-  availableInvocationModes,
+  availableExecutionTransports,
   consumeAtQuery,
+  type ExecutionTransport,
+  invocationModeForTransport,
   normalizeExecutionSelection,
-  type InvocationMode,
 } from "../workbench-execution";
 
 const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
@@ -72,7 +74,7 @@ type ReasoningEffort = "high" | "low" | "medium";
 type AdvancedRunConfig = {
   capability: string;
   dryRun: boolean;
-  invocationMode: InvocationMode;
+  executionTransport: ExecutionTransport;
   permissionProfile: string;
   stream: boolean;
   workspacePolicy: string;
@@ -100,6 +102,14 @@ type CompletionNotice = {
   title: string;
 };
 
+type ProviderHandoffPreview = {
+  handoff: {
+    command: string[];
+    instruction: string;
+    status: string;
+  };
+};
+
 export function WorkbenchSurface() {
   const params = useParams({ strict: false });
   const sessionId =
@@ -124,7 +134,7 @@ export function WorkbenchSurface() {
   const [advancedConfig, setAdvancedConfig] = useState<AdvancedRunConfig>({
     capability: "chat_completions",
     dryRun: false,
-    invocationMode: "headless",
+    executionTransport: "native_structured",
     permissionProfile: "interactive",
     stream: true,
     workspacePolicy: "auto",
@@ -195,7 +205,7 @@ export function WorkbenchSurface() {
     });
     setAdvancedConfig((current) => ({
       ...current,
-      invocationMode: defaults.invocation_mode as InvocationMode,
+      executionTransport: defaults.execution_transport as ExecutionTransport,
       permissionProfile: defaults.permission_profile,
       stream: defaults.stream,
       workspacePolicy: defaults.workspace_policy,
@@ -312,7 +322,8 @@ export function WorkbenchSurface() {
             : {}),
         },
         harness_id: runConfig.harnessId,
-        invocation_mode: advancedConfig.invocationMode,
+        execution_transport: advancedConfig.executionTransport,
+        invocation_mode: invocationModeForTransport(advancedConfig.executionTransport),
         mode: runConfig.mode,
         model: runConfig.model.trim() || null,
         permission_profile: advancedConfig.permissionProfile,
@@ -329,7 +340,7 @@ export function WorkbenchSurface() {
         });
         return { kind: "preview", report: response.preflight };
       }
-      if (advancedConfig.invocationMode === "native") {
+      if (advancedConfig.executionTransport === "native_terminal") {
         const response = await mutateCockpit<NativeStartResponse>(
           "/api/native/processes/start",
           { ...payload, action: "start" },
@@ -363,6 +374,12 @@ export function WorkbenchSurface() {
       await refreshSessionAfterRunStart(queryClient, run.session_id);
       setPrompt("");
     },
+  });
+  const openInProvider = useMutation({
+    mutationFn: () => fetchCockpit<ProviderHandoffPreview>(withQuery(
+      `/api/provider-handoffs/${encodeURIComponent(runConfig.harnessId)}/preview`,
+      { action: "open_provider_ui", workspace: "." },
+    )),
   });
 
   const saveRunConfig = useMutation({
@@ -491,14 +508,21 @@ export function WorkbenchSurface() {
   const selectedHarness = harnesses.data?.harnesses.find(
     (harness) => harness.spec.id === runConfig.harnessId,
   );
-  const invocationModes = availableInvocationModes(selectedHarness);
+  const executionTransports = availableExecutionTransports(selectedHarness);
+  const selectedTransport = selectedHarness?.workbench_transport?.options.find(
+    (option) => option.id === advancedConfig.executionTransport,
+  );
+  const providerHandoffActions = [
+    ...(selectedHarness?.provider_handoff?.available_actions ?? []),
+    ...(selectedHarness?.provider_handoff?.degraded_actions ?? []),
+  ];
   const capabilityCopy = advancedConfig.capability === "agent_cli"
     ? { label: message(locale, "codingAgent"), detail: message(locale, "codingAgentHint") }
     : { label: message(locale, "directChat"), detail: message(locale, "directChatHint") };
   const supportedBuiltinTools = selectedHarness?.spec.supported_builtin_tools ?? emptyStringList;
   const builtinToolsAvailable =
     runConfig.apiMode === "v2" &&
-    advancedConfig.invocationMode === "headless" &&
+    advancedConfig.executionTransport === "one_shot" &&
     supportedBuiltinTools.length > 0;
   const modelSuggestions = models.data?.models ?? [];
   const streamPresentation = useMemo(
@@ -1057,20 +1081,26 @@ export function WorkbenchSurface() {
                   </div>
                   <div className="advanced-config-grid">
                     <label>
-                      <span>{message(locale, "invocation")}</span>
+                      <span>{message(locale, "executionTransport")}</span>
                       <select
                         onChange={(event) => setAdvancedConfig((current) => ({
                           ...current,
-                          invocationMode: event.target.value as InvocationMode,
+                          executionTransport: event.target.value as ExecutionTransport,
                         }))}
-                        value={advancedConfig.invocationMode}
+                        value={advancedConfig.executionTransport}
                       >
-                        {invocationModes.map((mode) => (
-                          <option key={mode} value={mode}>
-                            {mode === "native" ? message(locale, "nativeCli") : message(locale, "headlessApi")}
+                        {executionTransports.map((transport) => (
+                          <option key={transport} value={transport}>
+                            {message(locale, transport === "native_structured" ? "nativeStructured" : transport === "native_terminal" ? "nativeTerminal" : "oneShot")}
                           </option>
                         ))}
                       </select>
+                      {selectedTransport?.blocker ? (
+                        <small className="transport-remediation">
+                          <span>{selectedTransport.detail}</span>
+                          {selectedTransport.remediation ? <code>{selectedTransport.remediation}</code> : null}
+                        </small>
+                      ) : null}
                     </label>
                     <div className="capability-summary">
                       <span>{message(locale, "capability")}</span>
@@ -1312,9 +1342,12 @@ export function WorkbenchSurface() {
               </div>
               <button aria-label={message(locale, "collapse")} onClick={() => setRightOpen(false)} type="button">×</button>
             </div>
-            <div className="readiness-callout success">
-              <strong>{message(locale, "ready")}</strong>
-              <span>{message(locale, "fastApiAuthority")}</span>
+            <div className={selectedTransport?.status === "blocked" || previewReport?.hard_block ? "readiness-callout blocked" : "readiness-callout success"}>
+              <strong>{message(locale, selectedTransport?.status === "blocked" || previewReport?.hard_block ? "blocked" : "ready")}</strong>
+              <span>{selectedTransport?.detail ?? message(locale, "fastApiAuthority")}</span>
+              {selectedTransport?.status === "blocked" && selectedTransport.remediation ? (
+                <code>{selectedTransport.remediation}</code>
+              ) : null}
             </div>
             <section className="inspector-section">
               <h3>{message(locale, "executionPlan")}</h3>
@@ -1323,8 +1356,20 @@ export function WorkbenchSurface() {
                 <div><dt>{message(locale, "workspacePolicy")}</dt><dd>{message(locale, "workspacePolicyValue")}</dd></div>
                 <div><dt>{message(locale, "route")}</dt><dd>{runConfig.model || "GigaChat"} · /{runConfig.apiMode}</dd></div>
                 <div><dt>{message(locale, "harness")}</dt><dd>{runConfig.harnessId}</dd></div>
+                <div><dt>{message(locale, "executionTransport")}</dt><dd>{advancedConfig.executionTransport}</dd></div>
               </dl>
             </section>
+            {selectedRun?.provider_session ? (
+              <section className="inspector-section provider-session-card">
+                <h3>{message(locale, "providerSession")}</h3>
+                <dl className="plan-fields">
+                  <div><dt>{message(locale, "structuredLink")}</dt><dd>{shortId(selectedRun.provider_session.link_id ?? "-")}</dd></div>
+                  <div><dt>{message(locale, "session")}</dt><dd>{shortId(selectedRun.provider_session.external_session_id ?? "-")}</dd></div>
+                  <div><dt>{message(locale, "status")}</dt><dd>{selectedRun.provider_session.recovery_state ?? "active"}</dd></div>
+                  <div><dt>{message(locale, "connection")}</dt><dd>{selectedRun.provider_session.protocol ?? "structured"}</dd></div>
+                </dl>
+              </section>
+            ) : null}
             <Progression current={stage} locale={locale} />
             <section className="inspector-section next-actions">
               <h3>{message(locale, "nextActions")}</h3>
@@ -1338,6 +1383,18 @@ export function WorkbenchSurface() {
                   <Link params={{ runId: selectedRunId }} to="/cockpit-v2/runs/$runId">{message(locale, "promote")} <span>›</span></Link>
                 </>
               )}
+              {providerHandoffActions.includes("open_provider_ui") ? (
+                <button disabled={openInProvider.isPending} onClick={() => openInProvider.mutate()} type="button">
+                  {message(locale, "openProviderUi")} <span>↗</span>
+                </button>
+              ) : null}
+              {openInProvider.data ? (
+                <div className="provider-handoff-instruction" role="status">
+                  <span>{openInProvider.data.handoff.instruction}</span>
+                  {openInProvider.data.handoff.command.length > 0 ? <code>{openInProvider.data.handoff.command.join(" ")}</code> : null}
+                </div>
+              ) : null}
+              {openInProvider.isError ? <span className="mutation-error">{openInProvider.error.message}</span> : null}
             </section>
           </aside>
         </>

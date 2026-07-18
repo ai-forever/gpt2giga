@@ -194,7 +194,7 @@ def test_cockpit_message_projection_exposes_bounded_reasoning_and_usage(tmp_path
     assert projected["usage"] == {"input_tokens": 21, "output_tokens": 8}
 
 
-def test_cockpit_run_summary_exposes_only_native_process_identity(tmp_path):
+def test_cockpit_run_summary_exposes_bounded_native_and_provider_identity(tmp_path):
     app = _app(tmp_path)
     store = app.state.harness_session_store
     session = store.create_session(title="native reconnect")
@@ -202,10 +202,23 @@ def test_cockpit_run_summary_exposes_only_native_process_identity(tmp_path):
         store,
         session.id,
         metadata={
+            "execution_transport": "native_structured",
             "native_process": {
                 "id": "native-process-1",
                 "display_command": "codex --secret token",
-            }
+            },
+            "structured_session_link": {
+                "id": "link-1",
+                "external_session_id": "provider-session-1",
+                "latest_external_turn_id": "provider-turn-1",
+                "recovery_state": "active",
+                "link_hash": "a" * 64,
+                "supervisor_owner": "worker-secret-owner",
+                "config_snapshot": {
+                    "protocol": "codex-app-server-json-rpc-v2",
+                    "protocol_version": "2",
+                },
+            },
         },
     )
 
@@ -216,8 +229,20 @@ def test_cockpit_run_summary_exposes_only_native_process_identity(tmp_path):
     projected = response.json()["runs"][0]
     assert projected["id"] == run.id
     assert projected["native_process_id"] == "native-process-1"
+    assert projected["execution_transport"] == "native_structured"
+    assert projected["provider_session"] == {
+        "link_id": "link-1",
+        "external_session_id": "provider-session-1",
+        "latest_external_turn_id": "provider-turn-1",
+        "recovery_state": "active",
+        "protocol": "codex-app-server-json-rpc-v2",
+        "protocol_version": "2",
+        "link_hash": "a" * 64,
+        "content_free": True,
+    }
     assert "display_command" not in response.text
     assert "secret" not in response.text
+    assert "supervisor_owner" not in response.text
 
 
 def test_cockpit_run_artifacts_and_heavy_evidence_are_lazy_and_bounded(tmp_path):

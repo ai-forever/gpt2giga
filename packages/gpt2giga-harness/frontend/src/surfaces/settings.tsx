@@ -20,6 +20,7 @@ type DefaultsDraft = {
   default_harness_id: string;
   default_model: string;
   default_title_model: string;
+  execution_transport: string;
   invocation_mode: string;
   mode: string;
   permission_profile: string;
@@ -197,14 +198,34 @@ export function SettingsSurface() {
           <SettingsSection id="harnessDefaults" title={message(locale, "harnessDefaults")} description={message(locale, "harnessDefaultsHint")}>
             <div className="settings-field-grid">
               <label>{message(locale, "harness")}
-                <select value={draft.default_harness_id} onChange={(event) => setDraft({ ...draft, default_harness_id: event.target.value })}>
+                <select value={draft.default_harness_id} onChange={(event) => {
+                  const harness = data.harness_defaults.harnesses.find((item) => item.id === event.target.value);
+                  const transport = harness?.workbench_transport.default ?? "one_shot";
+                  setDraft({
+                    ...draft,
+                    default_harness_id: event.target.value,
+                    execution_transport: transport,
+                    invocation_mode: transport === "native_terminal" ? "native" : "headless",
+                  });
+                }}>
                   {data.harness_defaults.harnesses.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.status}</option>)}
                 </select>
               </label>
-              <label>{message(locale, "invocation")}
-                <select value={draft.invocation_mode} onChange={(event) => setDraft({ ...draft, invocation_mode: event.target.value })}>
-                  <option value="headless">{message(locale, "headlessApi")}</option>
-                  <option disabled={!selectedHarness?.native_supported} value="native">{message(locale, "nativeCli")}</option>
+              <label>{message(locale, "executionTransport")}
+                <select value={draft.execution_transport} onChange={(event) => {
+                  const transport = event.target.value;
+                  setDraft({
+                    ...draft,
+                    execution_transport: transport,
+                    invocation_mode: transport === "native_terminal" ? "native" : "headless",
+                  });
+                }}>
+                  {selectedHarness?.workbench_transport.options.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {message(locale, option.id === "native_structured" ? "nativeStructured" : option.id === "native_terminal" ? "nativeTerminal" : "oneShot")}
+                      {option.status === "blocked" ? ` · ${message(locale, "blocked")}` : ""}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label>{message(locale, "mode")}
@@ -273,6 +294,7 @@ function toDraft(data: SettingsResponse): DefaultsDraft {
     default_harness_id: current.default_harness_id,
     default_model: current.default_model ?? "",
     default_title_model: current.default_title_model ?? "",
+    execution_transport: current.execution_transport,
     invocation_mode: current.invocation_mode,
     mode: current.mode,
     permission_profile: current.permission_profile,

@@ -1,38 +1,44 @@
 import type { HarnessOption } from "./api";
 
 export type InvocationMode = "headless" | "native";
+export type ExecutionTransport = "native_structured" | "native_terminal" | "one_shot";
 
 export interface WorkbenchExecutionSelection {
   capability: string;
-  invocationMode: InvocationMode;
+  executionTransport: ExecutionTransport;
 }
 
-export function availableInvocationModes(
+export function availableExecutionTransports(
   harness: HarnessOption | undefined,
-): readonly InvocationMode[] {
-  if (
-    harness?.spec.supports_native_sessions === true &&
-    harness.compatibility?.compatible === true
-  ) {
-    return ["headless", "native"];
-  }
-  return ["headless"];
+): readonly ExecutionTransport[] {
+  const projected = harness?.workbench_transport?.options.map((option) => option.id);
+  if (projected?.length) return projected;
+  return harness?.spec.supports_native_sessions === true
+    ? ["one_shot", "native_terminal"]
+    : ["one_shot"];
 }
 
 export function normalizeExecutionSelection(
   harness: HarnessOption | undefined,
   current: WorkbenchExecutionSelection,
 ): WorkbenchExecutionSelection {
-  const modes = availableInvocationModes(harness);
+  const transports = availableExecutionTransports(harness);
   const capabilities = harness?.spec.capabilities ?? [];
+  const preferred = harness?.workbench_transport?.default ?? transports[0] ?? "one_shot";
   return {
-    invocationMode: modes.includes(current.invocationMode)
-      ? current.invocationMode
-      : modes[0] ?? "headless",
+    executionTransport: transports.includes(current.executionTransport)
+      ? current.executionTransport
+      : preferred,
     capability: capabilities.includes(current.capability)
       ? current.capability
       : capabilities[0] ?? "chat_completions",
   };
+}
+
+export function invocationModeForTransport(
+  transport: ExecutionTransport,
+): InvocationMode {
+  return transport === "native_terminal" ? "native" : "headless";
 }
 
 export function capabilityPresentation(capability: string): {

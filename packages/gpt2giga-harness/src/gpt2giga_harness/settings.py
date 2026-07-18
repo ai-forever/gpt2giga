@@ -33,6 +33,7 @@ SETTINGS_FIELDS = frozenset(
         "default_harness_id",
         "default_model",
         "default_title_model",
+        "execution_transport",
         "invocation_mode",
         "mode",
         "permission_profile",
@@ -51,6 +52,7 @@ class HarnessDefaults:
     default_title_model: str | None = DEFAULT_TITLE_MODEL
     default_api_mode: str = "v2"
     mode: str = "plan"
+    execution_transport: str = "native_structured"
     invocation_mode: str = "headless"
     workspace_policy: str = "auto"
     permission_profile: str = "interactive"

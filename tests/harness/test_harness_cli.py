@@ -219,6 +219,7 @@ def test_cli_harness_run_json_includes_selected_execution_readiness(capsys):
     assert readiness["plan"] == {
         "harness_id": "echo",
         "invocation_mode": "headless",
+        "execution_transport": "one_shot",
         "api_mode": "v2",
         "model": None,
         "mode": "plan",
@@ -256,6 +257,8 @@ def test_cli_session_application_flow_create_turn_events_and_approve(
                 "echo",
                 "--permission-profile",
                 "review_every_action",
+                "--transport",
+                "one_shot",
                 "--idempotency-key",
                 "cli-application-turn",
                 "--json",
@@ -265,6 +268,7 @@ def test_cli_session_application_flow_create_turn_events_and_approve(
     )
     submitted = json.loads(capsys.readouterr().out)
     assert submitted["job"]["status"] == "waiting_approval"
+    assert submitted["run"]["metadata"]["execution_transport"] == "one_shot"
 
     assert cli.main(["session", "events", submitted["run"]["id"], "--json"]) == 0
     events = json.loads(capsys.readouterr().out)["events"]

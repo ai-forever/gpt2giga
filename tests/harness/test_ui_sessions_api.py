@@ -229,6 +229,7 @@ def test_sessions_api_start_run_returns_stream_urls_and_sse_replay():
     assert started.status_code == 200
     body = started.json()
     assert body["run"]["id"].startswith("run_")
+    assert body["run"]["metadata"]["execution_transport"] == "one_shot"
     assert body["stream_url"] == f"/api/runs/{body['run']['id']}/events/stream"
     assert body["cancel_url"] == f"/api/runs/{body['run']['id']}/cancel"
 
@@ -584,6 +585,7 @@ def test_preflight_api_reports_large_attachment_warning(tmp_path):
     preflight = response.json()["preflight"]
     assert preflight["hard_block"] is False
     assert preflight["readiness"]["plan"]["harness_id"] == "echo"
+    assert preflight["readiness"]["plan"]["execution_transport"] == "one_shot"
     assert preflight["readiness"]["plan"]["delivery"] == "durable"
     assert {item["id"] for item in preflight["readiness"]["findings"]} == {
         "harness-echo",
