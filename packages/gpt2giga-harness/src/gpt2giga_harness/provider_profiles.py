@@ -487,7 +487,17 @@ class ProviderCompatibilityRegistry:
     def with_builtins(cls) -> "ProviderCompatibilityRegistry":
         """Create a registry with conservative legacy compatibility evidence."""
         registry = cls()
-        for factory in _BUILTIN_COMPATIBILITY_FACTORIES:
+        from gpt2giga_harness.openai_compatible import (
+            codex_openai_compatibility,
+            direct_chat_openai_compatibility,
+        )
+
+        factories = (
+            *_BUILTIN_COMPATIBILITY_FACTORIES,
+            direct_chat_openai_compatibility,
+            codex_openai_compatibility,
+        )
+        for factory in factories:
             registry._register(
                 factory(),
                 identity=_implementation_identity(factory),

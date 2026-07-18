@@ -335,6 +335,8 @@ def test_installed_builtin_provider_entry_points_deduplicate():
         "legacy-gpt2giga-codex-cli",
         "legacy-gpt2giga-direct-chat",
         "legacy-gpt2giga-gemini-cli",
+        "openai-compatible-codex-cli",
+        "openai-compatible-direct-chat",
     ]
     assert registry.discovery_errors == []
 
