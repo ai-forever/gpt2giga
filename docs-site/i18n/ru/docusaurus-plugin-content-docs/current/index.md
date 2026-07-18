@@ -48,7 +48,7 @@ OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подг
 3. Запустите `docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d`.
 4. Проверьте `curl http://localhost:8090/health`.
 5. Подключите SDK к `http://localhost:8090/v1` или `http://localhost:8090/v2` для явного контракта бэкенда, либо к `http://localhost:8090`, если корень должен следовать `GPT2GIGA_GIGACHAT_API_MODE`.
-6. Чтобы попробовать локальный project cockpit в статусе бета-превью,
+6. Чтобы попробовать локальный project cockpit в статусе альфа-превью,
    следуйте [руководству Unified Harness](harness.md), запустите `giga doctor`
    и `giga ui`, затем откройте `http://127.0.0.1:8091/`.
 
