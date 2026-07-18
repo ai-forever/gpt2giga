@@ -243,6 +243,24 @@ export interface HarnessOption {
     version?: string | null;
     warning?: string | null;
   } | null;
+  execution_surfaces?: Array<{
+    id: string;
+    status: string;
+    ownership: string;
+    queueable: boolean;
+    detail: string;
+    blocker?: string | null;
+  }>;
+  provider_handoff?: {
+    status: string;
+    provider_ui_handoff: boolean;
+    available_actions: string[];
+    degraded_actions: string[];
+    blocker?: string | null;
+    queueable: false;
+    durable: false;
+    content_free: true;
+  } | null;
 }
 
 export interface HarnessesResponse {

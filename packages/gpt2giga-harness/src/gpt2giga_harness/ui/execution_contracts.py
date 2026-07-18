@@ -121,6 +121,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/project/memory"),
         ("GET", "/api/project/presets"),
         ("GET", "/api/project/state"),
+        ("GET", "/api/provider-handoffs/{harness_id}/preview"),
         ("GET", "/api/runs"),
         ("GET", "/api/runs/updates/stream"),
         ("GET", "/api/runs/{run_id}"),

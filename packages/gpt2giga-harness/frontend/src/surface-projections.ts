@@ -71,6 +71,15 @@ export interface HarnessProjection {
   kind: string;
   status: string;
   reason: string;
+  executionSurfaces: Array<{
+    id: string;
+    status: string;
+    ownership: string;
+    queueable: boolean;
+    detail: string;
+    blocker: string | null;
+  }>;
+  handoffActions: string[];
 }
 
 export interface RouteProjection {
@@ -284,12 +293,30 @@ export function projectIntegrations(
         const item = record(value);
         const spec = record(item.spec);
         const availability = record(item.availability);
+        const providerHandoff = record(item.provider_handoff);
         return {
           id: text(spec.id),
           title: text(spec.title) || text(spec.id),
           kind: text(spec.kind),
           status: text(availability.status) || "unknown",
           reason: text(availability.reason) || text(availability.detail),
+          executionSurfaces: array(item.execution_surfaces)
+            .map((value) => {
+              const surface = record(value);
+              return {
+                id: text(surface.id),
+                status: text(surface.status) || "unknown",
+                ownership: text(surface.ownership) || "unknown",
+                queueable: surface.queueable === true,
+                detail: text(surface.detail),
+                blocker: nullableText(surface.blocker),
+              };
+            })
+            .filter((surface) => surface.id),
+          handoffActions: [
+            ...array(providerHandoff.available_actions),
+            ...array(providerHandoff.degraded_actions),
+          ].map(text).filter((action, index, actions) => Boolean(action) && actions.indexOf(action) === index),
         };
       })
       .filter((item) => item.id),

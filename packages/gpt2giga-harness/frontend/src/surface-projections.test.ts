@@ -54,7 +54,7 @@ describe("remaining Cockpit surface projections", () => {
 
   it("projects integration readiness without commands, urls, or secrets", () => {
     const projected = projectIntegrations(
-      { harnesses: [{ spec: { id: "echo", title: "Echo", kind: "local", command: ["secret"] }, availability: { status: "ready", reason: "available" } }] },
+      { harnesses: [{ spec: { id: "claude-code", title: "Claude Code", kind: "agent-cli", command: ["secret"] }, availability: { status: "ready", reason: "available" }, execution_surfaces: [{ id: "provider_handoff", status: "degraded", ownership: "provider_owned", queueable: false, detail: "Claude owns the session", blocker: null }, { id: "native_structured_embedded", status: "blocked", ownership: "unavailable", queueable: false, detail: "Embedding unavailable", blocker: "approval_not_accepted" }], provider_handoff: { available_actions: ["launch_new", "attach_current"], degraded_actions: ["open_provider_ui"] } }] },
       { routes: { default_api_mode: "v2", default_model: "GigaChat-2-Max", default_model_source: "built_in" }, runtime: { proxy_url: "http://private" } },
       [
         { api_mode: "v1", health: "blocked", last_checked_at: "2026-07-16T18:00:00Z", models: [], route_path: "/v1/models", source: "/v1/models" },
@@ -63,7 +63,15 @@ describe("remaining Cockpit surface projections", () => {
       { servers: [{ descriptor: { id: "docs", title: "Docs", transport: "stdio", enabled: true, trusted: true, command: ["secret"] }, latest_probe: { status: "healthy" } }] },
     );
 
-    expect(projected.harnesses[0]).toMatchObject({ id: "echo", status: "ready" });
+    expect(projected.harnesses[0]).toMatchObject({
+      id: "claude-code",
+      status: "ready",
+      handoffActions: ["launch_new", "attach_current", "open_provider_ui"],
+      executionSurfaces: [
+        { id: "provider_handoff", ownership: "provider_owned", queueable: false },
+        { id: "native_structured_embedded", status: "blocked", blocker: "approval_not_accepted" },
+      ],
+    });
     expect(projected.routes).toHaveLength(2);
     expect(projected.routes[0]).toMatchObject({ apiMode: "v1", configuredDefault: false, effectiveModel: null, health: "blocked" });
     expect(projected.routes[1]).toMatchObject({

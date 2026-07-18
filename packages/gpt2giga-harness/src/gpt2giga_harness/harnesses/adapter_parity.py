@@ -163,6 +163,12 @@ def claude_adapter_capabilities() -> dict[str, AdapterCapabilitySupport]:
                 "capability-proven effort, allowed/disallowed tool restrictions, and "
                 "managed MCP tool ids; token limits remain unsupported before queueing.",
             ),
+            "provider_ui_handoff": _claim(
+                AdapterSupportLevel.SUPPORTED,
+                "Projects version-probed, documented Remote Control and Desktop "
+                "actions without claiming embedded control, durable ownership, "
+                "provider session identity, or a machine-readable provider URL.",
+            ),
         }
     )
     return contract

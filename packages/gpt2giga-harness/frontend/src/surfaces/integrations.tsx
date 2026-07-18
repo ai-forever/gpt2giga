@@ -2,7 +2,7 @@ import { useMutation, useQuery, type UseQueryResult } from "@tanstack/react-quer
 import { useRouterState, useSearch } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
-import { mutateCockpit } from "../api";
+import { fetchCockpit, mutateCockpit } from "../api";
 import {
   LoadingRows,
   OperationalRowLink,
@@ -13,7 +13,26 @@ import {
 import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
 import { integrationsSurfaceOptions } from "../remaining-request-graph";
-import { projectDoctor, type DoctorProjection, type IntegrationsProjection } from "../surface-projections";
+import { projectDoctor, type DoctorProjection, type HarnessProjection, type IntegrationsProjection } from "../surface-projections";
+
+interface HandoffPreviewResponse {
+  handoff: {
+    action: string;
+    status: string;
+    surface: string;
+    command: string[];
+    workspace: string;
+    ownership: string;
+    auth_prerequisite: string;
+    observability_limits: string[];
+    external_process_may_open: boolean;
+    external_ui_may_open: boolean;
+    instruction: string;
+    blocker: string | null;
+    queueable: false;
+    durable: false;
+  };
+}
 
 const tabs: readonly OperationalTab[] = [
   { id: "harnesses", labelKey: "harnesses", href: "/cockpit-v2/integrations/harnesses" },
@@ -85,8 +104,73 @@ function IntegrationDetail({ section, selectedId }: { section: "harnesses" | "mo
   });
   if (section === "doctor") return <div className="definition-detail"><span className="section-kicker">{message(locale, "doctor")}</span><h2>{message(locale, "selectedPlanReadiness")}</h2><label className="field-control">{message(locale, "harness")}<select value={doctorHarness} onChange={(event) => setDoctorHarness(event.target.value)}>{query.data?.harnesses.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><button className="primary-button" disabled={doctorMutation.isPending} onClick={() => doctorMutation.mutate()} type="button">{message(locale, "runDoctor")}</button>{doctor === null ? null : <div className="doctor-result" role="status"><StatusBadge status={doctor.status} /><p><strong>{doctor.status === "ready" ? message(locale, "ready") : doctor.status}</strong> · {doctorEvidenceLabel(locale, doctor.evidenceStatus)}</p><p>{doctor.harnessId}</p>{doctor.findings.filter((item) => item.status !== "ready").map((item) => <div className="doctor-finding" key={item.id}><strong>{item.summary}</strong>{item.remedy ? <span>{item.remedy}</span> : null}{item.command ? <code>{item.command}</code> : null}</div>)}</div>}{doctorMutation.isError ? <p className="mutation-error" role="alert">{doctorMutation.error.message}</p> : null}</div>;
   if (selected === undefined) return <div className="detail-empty"><span className="section-kicker">{message(locale, "selectedIntegration")}</span><h2>{message(locale, "selectIntegration")}</h2><p>{message(locale, "integrationSelectionHint")}</p></div>;
+  if (section === "harnesses" && "executionSurfaces" in selected) return <HarnessDetail harness={selected} key={selected.id} />;
   if (section === "models" && "chatEndpoint" in selected) return <div className="definition-detail"><span className="section-kicker">{message(locale, "selectedIntegration")}</span><h2>{selected.chatEndpoint}</h2><dl className="compact-fields"><div><dt>{message(locale, "apiMode")}</dt><dd>{selected.apiMode}</dd></div><div><dt>{message(locale, "configuredDefault")}</dt><dd>{selected.configuredDefault ? message(locale, "yes") : message(locale, "no")}</dd></div><div><dt>{message(locale, "effectiveSelection")}</dt><dd>{selected.effectiveModel ?? message(locale, "notSelected")}</dd></div><div><dt>{message(locale, "source")}</dt><dd>{routeSourceLabel(locale, selected.effectiveSource)}</dd></div><div><dt>{message(locale, "modelsEndpoint")}</dt><dd>{selected.modelsEndpoint}</dd></div><div><dt>{message(locale, "discoveredModels")}</dt><dd>{selected.discoveredModels.join(", ") || message(locale, "noDiscoveredModels")}</dd></div><div><dt>{message(locale, "discoverySource")}</dt><dd>{selected.discoverySource}</dd></div><div><dt>{message(locale, "lastChecked")}</dt><dd>{selected.lastCheckedAt ?? message(locale, "notChecked")}</dd></div></dl></div>;
   return <div className="definition-detail"><span className="section-kicker">{message(locale, "selectedIntegration")}</span><h2>{"title" in selected ? selected.title : `/${selected.apiMode}`}</h2><dl className="compact-fields">{Object.entries(selected).slice(0, 7).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl>{section === "mcp" ? <button disabled={probeMutation.isPending || !("enabled" in selected) || !selected.enabled} onClick={() => probeMutation.mutate()} type="button">{message(locale, "probeMcp")}</button> : null}{probeMutation.isError ? <p className="mutation-error" role="alert">{probeMutation.error.message}</p> : null}{probeMutation.isSuccess ? <p className="mutation-success" role="status">{message(locale, "operationAccepted")}</p> : null}</div>;
+}
+
+function HarnessDetail({ harness }: { harness: HarnessProjection }) {
+  const { preferences } = usePreferences();
+  const locale = preferences.locale;
+  const [action, setAction] = useState(harness.handoffActions[0] ?? "launch_new");
+  const preview = useMutation({
+    mutationFn: () => fetchCockpit<HandoffPreviewResponse>(
+      `/api/provider-handoffs/${encodeURIComponent(harness.id)}/preview?action=${encodeURIComponent(action)}&workspace=.`,
+    ),
+  });
+  return <div className="definition-detail harness-execution-detail">
+    <span className="section-kicker">{message(locale, "selectedIntegration")}</span>
+    <h2>{harness.title}</h2>
+    <p>{harness.reason}</p>
+    <h3>{message(locale, "executionSurfaces")}</h3>
+    <div className="execution-surface-list">
+      {harness.executionSurfaces.map((surface) => <div className="execution-surface-card" key={surface.id}>
+        <div><strong>{executionSurfaceLabel(locale, surface.id)}</strong><StatusBadge status={surface.status} /></div>
+        <p>{surface.detail}</p>
+        <small>{surface.ownership} · {surface.queueable ? message(locale, "queueable") : message(locale, "notQueueable")}</small>
+        {surface.blocker ? <code>{surface.blocker}</code> : null}
+      </div>)}
+    </div>
+    {harness.handoffActions.length === 0 ? null : <section className="handoff-preview-panel">
+      <h3>{message(locale, "providerHandoff")}</h3>
+      <p>{message(locale, "handoffDescription")}</p>
+      <label className="field-control">{message(locale, "handoffAction")}
+        <select value={action} onChange={(event) => { setAction(event.target.value); preview.reset(); }}>
+          {harness.handoffActions.map((item) => <option key={item} value={item}>{handoffActionLabel(locale, item)}</option>)}
+        </select>
+      </label>
+      <button className="primary-button" disabled={preview.isPending} onClick={() => preview.mutate()} type="button">{message(locale, "previewHandoff")}</button>
+      {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
+      {preview.data ? <div className="handoff-preview-result" role="status">
+        <StatusBadge status={preview.data.handoff.status} />
+        <p>{preview.data.handoff.instruction}</p>
+        {preview.data.handoff.command.length > 0 ? <code>{preview.data.handoff.command.join(" ")}</code> : null}
+        <dl className="compact-fields">
+          <div><dt>{message(locale, "workspace")}</dt><dd>{preview.data.handoff.workspace}</dd></div>
+          <div><dt>{message(locale, "ownership")}</dt><dd>{preview.data.handoff.ownership}</dd></div>
+          <div><dt>{message(locale, "authentication")}</dt><dd>{preview.data.handoff.auth_prerequisite}</dd></div>
+          <div><dt>{message(locale, "durable")}</dt><dd>{message(locale, "no")}</dd></div>
+        </dl>
+      </div> : null}
+    </section>}
+  </div>;
+}
+
+function executionSurfaceLabel(locale: "en" | "ru", id: string) {
+  if (id === "one_shot") return message(locale, "oneShot");
+  if (id === "native_terminal") return message(locale, "nativeTerminal");
+  if (id === "provider_handoff") return message(locale, "providerHandoff");
+  if (id === "native_structured_embedded") return message(locale, "embeddedStructured");
+  return id;
+}
+
+function handoffActionLabel(locale: "en" | "ru", action: string) {
+  if (action === "launch_new") return message(locale, "launchNew");
+  if (action === "attach_current") return message(locale, "attachCurrent");
+  if (action === "open_provider_ui") return message(locale, "openProviderUi");
+  if (action === "disconnect") return message(locale, "disconnect");
+  if (action === "stop") return message(locale, "stop");
+  return action;
 }
 
 function routeSourceLabel(locale: "en" | "ru", source: string) {

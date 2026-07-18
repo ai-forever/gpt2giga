@@ -214,6 +214,11 @@ from gpt2giga_harness.cli_capabilities import (
     CliCapabilitySnapshot,
     cli_capability_snapshot_to_dict,
 )
+from gpt2giga_harness.claude_handoff import (
+    ClaudeHandoffError,
+    claude_execution_surfaces_to_dict,
+    claude_handoff_capability_to_dict,
+)
 from gpt2giga_harness.types import (
     GigaChatApiMode,
     HarnessCapability,
@@ -242,6 +247,9 @@ from gpt2giga_harness.ui.routers.approvals import router as approvals_router
 from gpt2giga_harness.ui.routers.cockpit import router as cockpit_router
 from gpt2giga_harness.ui.routers.evaluate import router as evaluate_router
 from gpt2giga_harness.ui.routers.files import create_file_preview_router
+from gpt2giga_harness.ui.routers.provider_handoffs import (
+    create_provider_handoff_router,
+)
 from gpt2giga_harness.ui.routers.tools import router as tools_router
 from gpt2giga_harness.ui.routers.workflows import router as workflows_router
 from gpt2giga_harness.ui.routers.shell import create_shell_router
@@ -484,6 +492,23 @@ def create_app(
                 spec
             )
             capability_probe = getattr(harness, "capability_probe", None)
+            provider_handoff_probe = getattr(
+                harness, "provider_handoff_capability", None
+            )
+            provider_handoff = None
+            execution_surfaces: list[dict[str, Any]] = []
+            if callable(provider_handoff_probe):
+                try:
+                    handoff_capability = provider_handoff_probe()
+                except ClaudeHandoffError:
+                    handoff_capability = None
+                if handoff_capability is not None:
+                    provider_handoff = claude_handoff_capability_to_dict(
+                        handoff_capability
+                    )
+                    execution_surfaces = claude_execution_surfaces_to_dict(
+                        handoff_capability
+                    )
             harness_items.append(
                 {
                     "spec": spec_to_dict(spec),
@@ -493,6 +518,8 @@ def create_app(
                         if callable(capability_probe)
                         else None
                     ),
+                    "provider_handoff": provider_handoff,
+                    "execution_surfaces": execution_surfaces,
                     "validation": harness_validation_report_to_dict(validation),
                 }
             )
@@ -3019,6 +3046,7 @@ def create_app(
     app.include_router(schedules_router)
     app.include_router(settings_router)
     app.include_router(create_file_preview_router(config.data_dir))
+    app.include_router(create_provider_handoff_router(registry))
     # The shell catch-all must remain last so unknown API and asset paths never
     # become HTML responses.
     app.include_router(create_shell_router(ui_security))

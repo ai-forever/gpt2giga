@@ -35,7 +35,7 @@ def _app(tmp_path):
 def test_all_ui_routes_have_complete_async_execution_contract(tmp_path):
     app = _app(tmp_path)
 
-    assert len(ROUTE_EXECUTION_CONTRACTS) == 161
+    assert len(ROUTE_EXECUTION_CONTRACTS) == 162
     assert route_identities(app.routes) == {
         contract.identity for contract in ROUTE_EXECUTION_CONTRACTS
     }
