@@ -241,7 +241,15 @@ function toolLabel(name: string, value: unknown): string {
   }
   if (name === "send_input") return "Message to subagent";
   if (name === "wait" || name === "wait_agent") return "Waiting for subagent";
-  const path = firstText(argumentsValue.path, argumentsValue.file, argumentsValue.filename);
+  const path = firstText(
+    argumentsValue.path,
+    argumentsValue.file,
+    argumentsValue.file_path,
+    argumentsValue.filename,
+  );
+  if (name === "read_file") {
+    return path === null ? "Reading files" : `Reading ${path}`;
+  }
   if (name.includes("read") && path !== null) return `Reading ${path}`;
   if (name === "web_search") {
     const query = firstText(argumentsValue.query);

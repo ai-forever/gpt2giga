@@ -65,9 +65,10 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-The upcoming Unified Harness `0.2.0a1` alpha runs from the source checkout
-described in the [Unified Harness guide](harness.md). After the standalone
-package appears in your package index, install the local control plane with:
+The current Unified Harness alpha line is `0.2.0a1` and always runs from the
+source checkout described in the [Unified Harness guide](harness.md). If the
+standalone package is available in your package index, install the local
+control plane with:
 
 ```sh
 uv tool install --prerelease allow gpt2giga-harness

@@ -52,9 +52,9 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Unified Harness готовится как alpha-preview `0.2.0a1`. Текущий
-способ запуска — [из source checkout](./docs/harness.md#quickstart). После
-появления отдельного пакета в вашем package index он подтянет совместимую
+Текущая alpha-preview линия Unified Harness — `0.2.0a1`. Её всегда можно
+запустить [из source checkout](./docs/harness.md#quickstart). Если отдельный
+пакет уже доступен в вашем package index, он подтянет совместимую
 gateway-версию и добавит команды `giga` и `gpt2giga-harness`:
 
 ```sh

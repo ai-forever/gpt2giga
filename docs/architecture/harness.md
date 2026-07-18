@@ -25,11 +25,14 @@ flowchart LR
     Worker --> Runner["HarnessSessionRunner"]
 
     Runner --> Direct["Direct Chat adapter"]
-    Runner --> AgentCLI["Codex / Claude / Gemini headless adapters"]
+    Runner --> Structured["Codex app-server / Gemini ACP drivers"]
+    Runner --> OneShot["One-shot compatibility adapters"]
     Control --> Native["Managed native terminal processes"]
+    Control --> Handoff["Claude provider-handoff preview"]
 
     Direct --> Gateway["gpt2giga compatibility gateway :8090"]
-    AgentCLI --> Gateway
+    Structured --> Gateway
+    OneShot --> Gateway
     Native --> Gateway
     Gateway --> GigaChat["GigaChat"]
 
@@ -50,7 +53,8 @@ permission decisions made inside an opaque third-party terminal UI.
 | --- | --- | --- |
 | `ui/app.py` and `ui/routers/` | FastAPI composition, authentication, JSON/SSE API, packaged static UI | Gives CLI and browser clients one local control-plane surface. |
 | `registry.py`, `plugins.py`, `harnesses/` | Built-in and entry-point harness discovery | Keeps adapter selection extensible without hard-coding every adapter in the UI. |
-| `session_runner.py` | Request validation, context assembly, adapter invocation, normalized persistence | Gives all headless adapters the same session/run/event contract. |
+| `execution.py`, `structured_sessions.py`, `structured_processes.py` | Provider-neutral execution identity, structured-session links, bounded JSON-RPC process supervision | Keeps transport, interaction mode, runtime ownership, provider identity, and recovery evidence explicit. |
+| `session_runner.py`, `runtime/structured.py` | Request validation, capability-based durable admission, adapter invocation, normalized persistence | Gives structured and one-shot adapters the same session/run/event owners without admitting terminal or handoff paths as structured work. |
 | `sessions/` | Sessions, runs, messages, events, raw records, redaction | Preserves inspectable history across browser and server restarts. |
 | `runtime/` | Durable jobs, attempts, leases, workers, retries, cancellation, approvals | Separates a submitted task from the browser request that created it. |
 | `native/` | Native history discovery plus owned PTY process lifecycle | Supports continuity with native CLI sessions without mutating vendor-owned homes. |
@@ -60,11 +64,14 @@ permission decisions made inside an opaque third-party terminal UI.
 | `tools/`, `mcp.py`, `managed_mcp.py` | Tool profiles, secret resolution, MCP discovery, managed CLI config | Connects tools without writing secrets into public records or vendor homes. |
 | `agents.py`, `workflows.py`, `schedules.py`, `evals.py` | Reusable profiles and higher-level orchestration | Builds repeatable automation on top of the same durable run primitive. |
 
-## Headless execution flow
+## Durable execution flow
 
-The normal browser Run action uses the asynchronous `/start` route. Synchronous
-`/run` routes remain useful for small CLI-style calls, but they bind request
-lifetime to execution and are not the primary UI path.
+The normal Workbench Run action and `giga session turn` use the asynchronous
+durable path. Workbench defaults compatible Codex and Gemini adapters to
+`native_structured`; `one_shot` remains an explicit compatibility choice.
+Synchronous `/run` routes and the direct `giga harness run` command remain useful
+for small probes, but they bind execution to the caller and do not acquire a
+durable structured-session owner.
 
 ```mermaid
 sequenceDiagram
@@ -77,14 +84,14 @@ sequenceDiagram
     participant A as Adapter or external CLI
     participant S as Session store
 
-    U->>API: POST /api/sessions/{id}/run/start
-    API->>P: validate project, route, capability and policy
+    U->>API: POST /api/sessions/{session_id}/run/start
+    API->>P: validate project, route, transport, capability and policy
     P->>S: create queued HarnessRun and initial events
     P->>DB: create idempotent durable job
     API-->>U: run id, stream URL, cancel URL
     W->>DB: acquire lease and create attempt
     W->>R: execute persisted payload
-    R->>A: direct chat or structured headless command
+    R->>A: admitted structured turn or explicit one-shot
     A-->>R: normalized events and result
     R->>S: append redacted messages, events and artifacts
     W->>DB: finish attempt and job
@@ -98,11 +105,20 @@ The job, attempt, and run are deliberately different records:
 - a **job** is the durable scheduling and cancellation record;
 - an **attempt** is one worker lease of that job, so retry history is not lost.
 
+The immutable execution snapshot records `native_structured`,
+`native_terminal`, or `one_shot` independently from interactive/batch behavior
+and request-bound/durable ownership. Durable admission requires a reviewed
+structured driver with events, interrupt, resume, process-loss recovery, and an
+approval path. A failed admission never falls back to a different transport.
+Codex uses app-server JSON-RPC v2; compatible Gemini uses ACP. Claude embedded
+structured execution remains blocked.
+
 ## Native terminal flow
 
-Native mode is separate from headless execution. Harness owns the PTY process and
-its redacted byte stream, but the CLI owns its internal TUI behavior. New and
-resumed sessions go through capability checks and route-aware proxy preflight.
+`native_terminal` is separate from structured and one-shot execution. Harness
+owns the PTY process and its redacted byte stream, but the CLI owns its internal
+TUI behavior. New and resumed sessions go through capability checks and
+route-aware proxy preflight.
 Output is available through cursor polling and an SSE stream; `Last-Event-ID` or
 `after_seq` allows bounded replay after reconnect. Resize and input are explicit
 operations because they mutate a live terminal.
@@ -120,6 +136,16 @@ flowchart TD
     Events --> SSE["SSE with reconnect replay"]
     PTY --> Record["Durable process and run metadata"]
 ```
+
+## Provider-owned handoff
+
+Claude Remote Control/Desktop handoff is a fourth, separate surface rather than
+an `ExecutionTransport`. `GET /api/provider-handoffs/{harness_id}/preview`
+returns a content-free launch instruction only after capability, platform, and
+workspace checks. It requires provider login, may open a provider-owned process
+or UI, and is explicitly non-durable, non-queueable, and not resumable through a
+Harness structured-session link. The rejected embedded Claude SDK path remains
+visible as blocked instead of being relabeled as handoff or terminal execution.
 
 ## State and security boundaries
 
@@ -157,6 +183,7 @@ are intentionally disabled.
 | `POST /auth/session` | Exchanges a configured remote bootstrap bearer token for an in-memory browser-session cookie. |
 | `GET /api/health` | Returns richer cockpit readiness, proxy, runtime, and reconciliation state for the authenticated UI. |
 | `GET /api/defaults` | Supplies UI defaults such as model, API mode, timeout, and safe initial choices. |
+| `GET /api/settings`<br />`PATCH /api/settings/defaults` | Reads backend-owned Workbench defaults or updates the default harness, route/model, canonical execution transport, invocation compatibility field, mode, and workspace policy with optimistic validation. |
 | `GET /api/harnesses` | Lists built-in and plugin adapters with availability, capabilities, native support, and compatibility evidence. |
 | `GET /api/models` | Proxies a safe model inventory for the model picker without making the browser call the gateway directly. |
 | `POST /api/preflight/run` | Checks prompt size, workspace, attachments, route, executable, and other blockers before submission. |
@@ -183,8 +210,13 @@ are intentionally disabled.
 | `POST /api/sessions/run`<br />`POST /api/sessions/{session_id}/run` | Synchronous create-and-run or run-in-existing-session compatibility paths for short callers. |
 | `POST /api/sessions/run/start`<br />`POST /api/sessions/{session_id}/run/start` | Primary asynchronous submission paths; return immediately with durable run, stream, and cancellation identifiers. |
 | `GET /api/sessions/{session_id}/events` | Reads persisted redacted events after a refresh or for non-streaming inspection. |
+| `GET /api/cockpit/sessions`<br />`GET /api/cockpit/sessions/{session_id}` | Returns bounded indexed session summaries and one lightweight Workbench overview instead of loading complete retained bundles. |
+| `GET /api/cockpit/sessions/{session_id}/messages`<br />`GET /api/cockpit/sessions/{session_id}/runs`<br />`GET /api/cockpit/sessions/{session_id}/events`<br />`GET /api/cockpit/sessions/{session_id}/artifacts` | Pages bounded projections independently so large histories do not inflate initial UI state. |
+| `GET /api/cockpit/sessions/{session_id}/messages/{message_id}/content` | Fetches the complete already-retained message only for explicit copy/edit actions; list projections stay bounded. |
+| `GET /api/cockpit/sessions/{session_id}/updates/stream` | Signals content-free session revisions over SSE and requests a resnapshot under backpressure. |
 | `POST /api/sessions/{session_id}/attachments`<br />`POST /api/sessions/{session_id}/attachments/workspace` | Adds uploaded bytes or a validated workspace reference to a session. |
 | `GET /api/sessions/{session_id}/attachments` | Lists attachment metadata available to subsequent runs in the session. |
+| `GET /api/sessions/{session_id}/attachments/workspace/search` | Searches bounded safe-path workspace candidates for the attachment picker without returning file contents. |
 | `GET /api/attachments/{attachment_id}/metadata`<br />`GET /api/attachments/{attachment_id}`<br />`DELETE /api/attachments/{attachment_id}` | Separates cheap metadata, bounded blob download, and deletion of Harness-owned attachment data. |
 | `GET /api/files/preview`<br />`GET /api/files/generated/{run_key}/{filename}` | Serves allow-listed local previews and generated artifacts without exposing arbitrary paths. |
 
@@ -200,12 +232,15 @@ arbitrary edit, shell, filesystem, or network effects retry-safe.
 | Routes | Why they exist |
 | --- | --- |
 | `GET /api/runs` | Returns a cursor-paged Runs Center projection of durable jobs, attempts, status groups, and workers. |
+| `GET /api/runs/updates/stream` | Publishes content-free Runs Center revisions over SSE so the client invalidates bounded queries without full-list polling. |
 | `GET /api/runs/{run_id}`<br />`GET /api/runs/{run_id}/summary` | Resolves a run to either the complete persisted bundle or a lightweight durable summary. |
+| `GET /api/cockpit/runs/{run_id}`<br />`GET /api/cockpit/runs/{run_id}/raw`<br />`GET /api/cockpit/runs/{run_id}/diff`<br />`GET /api/cockpit/runs/{run_id}/report` | Loads the bounded Cockpit run overview first and fetches raw, diff, or report projections only when the operator opens them. |
 | `GET /api/runs/{run_id}/trace`<br />`GET /api/runs/{run_id}/events/{event_id}` | Keeps trace lists light and fetches one already-redacted event payload only when expanded. |
 | `GET /api/runs/{run_id}/events/stream` | Streams persisted events over SSE, supports cursor resume, and terminates after `run_finished`. |
 | `POST /api/runs/{run_id}/cancel` | Persists cancellation intent so the worker can stop cooperatively even after the browser disconnects. |
 | `POST /api/runs/{run_id}/retry` | Requeues only a failed durable job whose latest attempt declares a retry-safe idempotency class. |
 | `GET /api/runs/{run_id}/provenance` | Returns the reproducibility envelope: adapter, route, binary/schema evidence, request hashes, and environment-safe metadata. |
+| `GET /api/runs/{run_id}/support-bundle` | Returns a content-free, redaction-safe diagnostic bundle for one run; it is not the private state backup format. |
 | `POST /api/runs/{run_id}/replay`<br />`POST /api/runs/{run_id}/fork` | Re-executes a captured safe request in the same session, or branches history into a new session. |
 | `GET /api/runs/{run_id}/diff`<br />`GET /api/runs/{run_id}/patch`<br />`GET /api/runs/{run_id}/pr` | Presents an isolated edit as structured diff metadata, raw patch text, or a PR-ready artifact. |
 | `POST /api/runs/{run_id}/apply`<br />`POST /api/runs/{run_id}/branch` | Applies the reviewed patch or creates a local branch only after policy approval and Git safety checks. |
@@ -226,6 +261,7 @@ arbitrary edit, shell, filesystem, or network effects retry-safe.
 | `GET /api/native/processes/{process_id}/output` | Cursor-polls redacted terminal output and remains the fallback when EventSource is unavailable. |
 | `GET /api/native/processes/{process_id}/output/stream` | Streams terminal events with keepalives and reconnect replay through SSE. |
 | `POST /api/native/processes/{process_id}/resize` | Validates and applies terminal rows/columns so the managed TUI tracks the browser viewport. |
+| `GET /api/provider-handoffs/{harness_id}/preview` | Previews a bounded provider-owned handoff instruction without opening provider state or claiming durable Harness continuity. |
 
 ### Arena, policy, approvals, and attention
 
@@ -233,6 +269,7 @@ arbitrary edit, shell, filesystem, or network effects retry-safe.
 | --- | --- |
 | `GET /api/arena/runs`<br />`POST /api/arena/runs`<br />`GET /api/arena/runs/{arena_id}` | Lists, creates, and inspects a parent comparison whose children are ordinary independent durable runs. |
 | `GET /api/arena/runs/{arena_id}/events/stream` | Multiplexes child run events into one comparison SSE stream. |
+| `POST /api/arena/runs/{arena_id}/turns`<br />`POST /api/arena/runs/{arena_id}/children/{child_index}/retry` | Queues follow-up turns or retries one child while preserving its explicit execution transport and structured-session evidence. |
 | `GET /api/policy/profiles` | Shows immutable built-in decisions for interactive, review-every-action, and unattended contexts. |
 | `GET /api/approvals`<br />`POST /api/approvals/{approval_id}/decision` | Lists durable approval requests and records allow/deny decisions that requeue or cancel the gated job. |
 | `GET /api/attention`<br />`POST /api/attention/read` | Aggregates approvals, failed schedules, and other actionable items while retaining source audit records. |
@@ -279,11 +316,13 @@ arbitrary edit, shell, filesystem, or network effects retry-safe.
 ## Extending the architecture
 
 Add a new execution backend as a harness adapter under `harnesses/` and register
-it through the `gpt2giga.harnesses` entry-point group. Add native continuity only
-when a connector can provide truthful discovery/resume semantics. New API
-families belong in `ui/routers/`; keep `ui/app.py` focused on composition and the
-core session/run flow. Every new persistence path must redact before storage,
-and every mutation must state which policy boundary enforces it.
+it through the provider-neutral `agent_workbench.harness_adapters.v1`
+entry-point group. `gpt2giga.harnesses` remains a compatibility alias. Claim
+structured or terminal continuity only when the versioned SDK manifest and
+conformance evidence prove the corresponding lifecycle. New API families belong
+in `ui/routers/`; keep `ui/app.py` focused on composition and the core
+session/run flow. Every new persistence path must redact before storage, and
+every mutation must state which policy boundary enforces it.
 
 For user-facing setup and feature behavior, continue with the
 [Unified Harness guide](../harness.md).

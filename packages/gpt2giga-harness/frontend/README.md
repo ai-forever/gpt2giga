@@ -18,6 +18,7 @@ budgets. Generated content-hashed assets are committed under
 Node.js and npm are build/CI inputs only; installed Harness wheels do not need
 them.
 
-The legacy cockpit remains the default. Cockpit V2 is explicitly selectable at
-`/cockpit-v2/**`, with `/legacy/**` retained as the recovery route. Do not move
-backend ownership or surface migration into this frontend package.
+Cockpit V2 is the default UI at `/` and `/cockpit-v2/**`. The previous no-build
+cockpit remains available under `/legacy/**` as the release-level recovery
+route. Do not move backend ownership or surface migration into this frontend
+package.
