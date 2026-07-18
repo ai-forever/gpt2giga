@@ -23,6 +23,7 @@ export interface SessionSummary {
 export interface MessageProjection {
   id: string;
   run_id?: string | null;
+  edited_from_message_id?: string;
   role: string;
   created_at: string;
   content: TextProjection;

@@ -27,7 +27,10 @@ import {
 import { MessageMarkdown } from "../message-markdown";
 import { generatedImageProjection } from "../generated-image";
 import {
+  latestEditableUserMessageId,
+  projectActiveMessageTimeline,
   resolveMessageAction,
+  timelineWhileEditing,
   type MessageActionKind,
   type ResolvedMessageAction,
 } from "../message-actions";
@@ -139,6 +142,7 @@ export function WorkbenchSurface() {
   const [leftWidth, setLeftWidth] = useState(() => loadWidth("left", 264));
   const [rightWidth, setRightWidth] = useState(() => loadWidth("right", 320));
   const [prompt, setPrompt] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string>();
   const rememberedRunPreferences = useMemo(loadRunPreferences, []);
   const [runConfig, setRunConfig] = useState<RunConfig>(rememberedRunPreferences.config);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
@@ -205,6 +209,21 @@ export function WorkbenchSurface() {
     ...sessionEventsOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
   });
+  const activeMessages = useMemo(
+    () => projectActiveMessageTimeline(messages.data?.messages ?? []),
+    [messages.data?.messages],
+  );
+  const latestUserMessageId = advancedConfig.executionTransport === "native_terminal"
+    ? undefined
+    : latestEditableUserMessageId(activeMessages);
+  const visibleMessages = useMemo(
+    () => timelineWhileEditing(activeMessages, editingMessageId),
+    [activeMessages, editingMessageId],
+  );
+
+  useEffect(() => {
+    setEditingMessageId(undefined);
+  }, [sessionId]);
 
   useEffect(() => {
     if (sessionId !== undefined || settings.data === undefined || settingsDefaultsApplied.current) return;
@@ -326,6 +345,7 @@ export function WorkbenchSurface() {
         builtin_tools: runConfig.apiMode === "v2" ? builtinTools : [],
         capability: advancedConfig.capability,
         extra: {
+          ...(editingMessageId === undefined ? {} : { edit_message_id: editingMessageId }),
           generate_session_title: session.title === "Untitled session",
           session_title_model:
             settings.data?.harness_defaults.default_title_model
@@ -354,6 +374,9 @@ export function WorkbenchSurface() {
         return { kind: "preview", report: response.preflight };
       }
       if (advancedConfig.executionTransport === "native_terminal") {
+        if (editingMessageId !== undefined) {
+          throw new Error("Editing retained messages is unavailable for native terminal sessions.");
+        }
         const response = await mutateCockpit<NativeStartResponse>(
           "/api/native/processes/start",
           { ...payload, action: "start" },
@@ -385,6 +408,7 @@ export function WorkbenchSurface() {
       }
       previousRunStatuses.current.set(run.id, run.status);
       await refreshSessionAfterRunStart(queryClient, run.session_id);
+      setEditingMessageId(undefined);
       setPrompt("");
     },
   });
@@ -407,8 +431,9 @@ export function WorkbenchSurface() {
         },
       );
     },
-    onSuccess: ({ content, kind }) => {
+    onSuccess: ({ content, kind }, variables) => {
       if (kind !== "edit") return;
+      setEditingMessageId(variables.messageId);
       setPrompt(content);
       setComposerCaret(content.length);
       setPreviewReport(null);
@@ -886,10 +911,10 @@ export function WorkbenchSurface() {
             <section className="message-region" aria-label={message(locale, "sessionMessages")}>
               {messages.isPending ? <ListSkeleton rows={4} /> : null}
               {messages.isError ? <ReadError locale={locale} /> : null}
-              {messages.data?.messages.length === 0 ? (
+              {messages.data !== undefined && visibleMessages.length === 0 ? (
                 <div className="empty-state">{message(locale, "emptyMessages")}</div>
               ) : null}
-              {messages.data?.messages.map((item) => (
+              {visibleMessages.map((item) => (
                 <Fragment key={item.id}>
                   {(item.role === "assistant" || item.role === "error") && item.run_id
                     ? (
@@ -918,7 +943,7 @@ export function WorkbenchSurface() {
                       <span className="message-header-meta">
                         <TokenUsage usage={item.usage} />
                         <time>{formatTimestamp(item.created_at, locale)}</time>
-                        {item.role === "assistant" || item.role === "user" ? (
+                        {item.role === "assistant" || item.id === latestUserMessageId ? (
                           <MessageActionButton
                             action={item.role === "assistant" ? "copy" : "edit"}
                             locale={locale}
@@ -1151,10 +1176,16 @@ export function WorkbenchSurface() {
                     <label>
                       <span>{message(locale, "executionTransport")}</span>
                       <select
-                        onChange={(event) => setAdvancedConfig((current) => ({
-                          ...current,
-                          executionTransport: event.target.value as ExecutionTransport,
-                        }))}
+                        onChange={(event) => {
+                          const executionTransport = event.target.value as ExecutionTransport;
+                          setAdvancedConfig((current) => ({
+                            ...current,
+                            executionTransport,
+                          }));
+                          if (executionTransport === "native_terminal") {
+                            setEditingMessageId(undefined);
+                          }
+                        }}
                         value={advancedConfig.executionTransport}
                       >
                         {executionTransports.map((transport) => (

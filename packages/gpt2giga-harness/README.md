@@ -132,10 +132,12 @@ and promotion state under Reuse. Promotion preview/apply and later scheduling
 remain separate explicit actions.
 
 Retained assistant messages expose a Copy action that fetches the complete
-stored response instead of copying a bounded read-model preview. Retained user
-messages expose a pencil action that loads the complete prompt into the
-composer, where it can be edited and submitted as a new turn without rewriting
-history.
+stored response instead of copying a bounded read-model preview. For structured
+and one-shot runs, only the latest retained user message exposes a pencil
+action. Resubmitting that edit replaces the active turn and its following
+assistant response in Workbench, while the superseded run remains retained in
+Runs for audit. Native terminal sessions do not expose the pencil because a
+retained interactive process cannot be rewound safely.
 
 Useful orientation commands:
 

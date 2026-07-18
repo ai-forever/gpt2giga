@@ -232,6 +232,35 @@ def test_cockpit_message_content_returns_complete_explicit_copy_payload(tmp_path
     assert missing.status_code == 404
 
 
+def test_cockpit_message_projection_exposes_content_free_edit_branch_marker(tmp_path):
+    app = _app(tmp_path)
+    store = app.state.harness_session_store
+    session = store.create_session(title="edited branch")
+    run = _run(store, session.id)
+    store.append_message(
+        HarnessMessage(
+            id="msg_replacement",
+            session_id=session.id,
+            run_id=run.id,
+            role="user",
+            content="replacement",
+            created_at=utc_now(),
+            metadata={
+                "edited_from_message_id": "msg_original",
+                "private": "not projected",
+            },
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/cockpit/sessions/{session.id}/messages")
+
+    assert response.status_code == 200
+    projected = response.json()["messages"][0]
+    assert projected["edited_from_message_id"] == "msg_original"
+    assert "private" not in projected
+
+
 def test_cockpit_run_summary_exposes_bounded_native_and_provider_identity(tmp_path):
     app = _app(tmp_path)
     store = app.state.harness_session_store

@@ -48,6 +48,11 @@ from gpt2giga_harness.runtime.structured import (
     DurableStructuredHarness,
     requested_execution_transport,
 )
+from gpt2giga_harness.sessions.conversation import (
+    active_conversation_messages,
+    edited_message_metadata,
+    history_before_edited_message,
+)
 from gpt2giga_harness.sessions.models import (
     HarnessMessage,
     HarnessRun,
@@ -158,12 +163,14 @@ class HarnessSessionRunner:
         """Build a pre-run safety report without invoking a harness."""
         session = self.store.get_session(session_id) if session_id is not None else None
         options = self._run_options(payload, session=session)
-        previous_messages = (
-            ()
-            if session is None
-            or bool(_mapping(options["extra"]).get("isolated_history"))
-            else self.store.list_messages(session.id)
-        )
+        previous_messages = ()
+        if session is not None and not bool(
+            _mapping(options["extra"]).get("isolated_history")
+        ):
+            previous_messages = _previous_messages_for_turn(
+                self.store.list_messages(session.id),
+                edit_message_id=_edit_message_id(options),
+            )
         if options["attachment_ids"] and session is None:
             raise ValueError("session_id is required for attachment preflight")
         attachments = (
@@ -280,6 +287,7 @@ class HarnessSessionRunner:
                     if managed_mcp_snapshot is not None
                     else {}
                 ),
+                **edited_message_metadata(_edit_message_id(options)),
                 **_agent_metadata(options),
             },
         )
@@ -294,6 +302,7 @@ class HarnessSessionRunner:
                 harness_id=options["harness_id"],
                 model=options["model"],
                 api_mode=options["api_mode"],
+                metadata=edited_message_metadata(_edit_message_id(options)),
             )
         )
         updated_session = self.store.update_session(
@@ -333,16 +342,17 @@ class HarnessSessionRunner:
         options = self._run_options(payload, session=session)
         harness = self.registry.get(options["harness_id"])
         logical_user_message_id = user_message_id or new_id("msg")
-        previous_messages = (
-            ()
-            if bool(_mapping(options["extra"]).get("isolated_history"))
-            else tuple(
+        previous_messages = ()
+        if not bool(_mapping(options["extra"]).get("isolated_history")):
+            previous_messages = tuple(
                 message
-                for message in self.store.list_messages(session.id)
-                if message.id != user_message_id
-                and message.run_id not in excluded_history_run_ids
+                for message in _previous_messages_for_turn(
+                    self.store.list_messages(session.id),
+                    edit_message_id=_edit_message_id(options),
+                    current_user_message_id=user_message_id,
+                )
+                if message.run_id not in excluded_history_run_ids
             )
-        )
         attachments = self._load_attachments(
             session.id,
             options["attachment_ids"],
@@ -429,6 +439,9 @@ class HarnessSessionRunner:
             ),
             **_agent_metadata(options),
         }
+        edit_message_id = _edit_message_id(options)
+        if edit_message_id is not None:
+            run_metadata["edited_from_message_id"] = edit_message_id
         if options["builtin_tools"]:
             run_metadata["builtin_tools"] = [
                 tool.value for tool in options["builtin_tools"]
@@ -513,7 +526,10 @@ class HarnessSessionRunner:
                     harness_id=options["harness_id"],
                     model=options["model"],
                     api_mode=options["api_mode"],
-                    metadata=_message_attachment_metadata(attachment_payloads),
+                    metadata={
+                        **_message_attachment_metadata(attachment_payloads),
+                        **edited_message_metadata(edit_message_id),
+                    },
                 )
             )
         self._append_event(
@@ -607,6 +623,11 @@ class HarnessSessionRunner:
             session=session,
             previous_messages=previous_messages,
             prompt_id=logical_user_message_id,
+            edit_source=_edit_continuation_source(
+                self.store,
+                edit_message_id=edit_message_id,
+                previous_messages=previous_messages,
+            ),
         )
         request_extra["continuation"] = continuation
         request = replace(request, extra=request_extra)
@@ -1257,6 +1278,60 @@ def _validate_continuation_identity(
         )
 
 
+def _edit_message_id(options: Mapping[str, Any]) -> str | None:
+    return _optional_text(_mapping(options.get("extra")).get("edit_message_id"))
+
+
+def _previous_messages_for_turn(
+    messages: tuple[HarnessMessage, ...],
+    *,
+    edit_message_id: str | None,
+    current_user_message_id: str | None = None,
+) -> tuple[HarnessMessage, ...]:
+    active = active_conversation_messages(messages)
+    if current_user_message_id is not None:
+        current = next(
+            (message for message in active if message.id == current_user_message_id),
+            None,
+        )
+        if current is not None:
+            edited_from = _optional_text(current.metadata.get("edited_from_message_id"))
+            if edit_message_id is not None and edited_from != edit_message_id:
+                raise ValueError("Edited user message branch does not match its source")
+            return tuple(
+                message for message in active if message.id != current_user_message_id
+            )
+    if edit_message_id is not None:
+        return history_before_edited_message(active, edit_message_id)
+    return active
+
+
+def _edit_continuation_source(
+    store: HarnessSessionStore,
+    *,
+    edit_message_id: str | None,
+    previous_messages: tuple[HarnessMessage, ...],
+) -> Mapping[str, Any] | None:
+    if edit_message_id is None:
+        return None
+    for message in reversed(previous_messages):
+        if message.run_id is None:
+            continue
+        try:
+            run = store.get_run(message.run_id)
+        except KeyError:
+            continue
+        link = _mapping(run.metadata.get("app_server_thread"))
+        if link.get("thread_id"):
+            return {
+                "action": "fork",
+                "link": link,
+                "thread_id": link["thread_id"],
+                "turn_id": link.get("latest_turn_id"),
+            }
+    return {"action": "start"}
+
+
 def _continuation_plan(
     request: HarnessRequest,
     *,
@@ -1264,6 +1339,7 @@ def _continuation_plan(
     session: HarnessSession,
     previous_messages: tuple[HarnessMessage, ...],
     prompt_id: str,
+    edit_source: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Select one truthful, machine-readable headless continuation strategy."""
     if (
@@ -1274,9 +1350,15 @@ def _continuation_plan(
             "strategy": ExecutionTransport.NATIVE_STRUCTURED.value,
             "supported": True,
             "continuity_proven": True,
-            "action": "continue" if previous_messages else "start",
+            "action": (
+                "start"
+                if edit_source is not None
+                else "continue"
+                if previous_messages
+                else "start"
+            ),
             "prompt_id": prompt_id,
-            "history_replayed": False,
+            "history_replayed": edit_source is not None and bool(previous_messages),
         }
     if (
         request.invocation_mode.value != "headless"
@@ -1328,6 +1410,16 @@ def _continuation_plan(
         )
         link = _mapping(session.metadata.get("app_server_thread"))
         fork = _mapping(session.metadata.get("app_server_fork"))
+        if edit_source is not None:
+            link = _mapping(edit_source.get("link"))
+            fork = (
+                {
+                    "thread_id": edit_source.get("thread_id"),
+                    "turn_id": edit_source.get("turn_id"),
+                }
+                if edit_source.get("action") == "fork"
+                else {}
+            )
         if link:
             expected = str(link.get("snapshot_hash") or "")
             if expected != execution_snapshot["snapshot_hash"]:
@@ -1578,6 +1670,7 @@ def _request_extra(
     attachment_render_plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = dict(extra)
+    payload.pop("edit_message_id", None)
     if attachments:
         payload["attachment_ids"] = [
             str(attachment["id"]) for attachment in attachments

@@ -297,9 +297,12 @@ Cockpit V2 is the default local UI. The previous no-build cockpit remains at
 between the two does not migrate or rewrite Harness runtime state.
 
 For a retained assistant response, **Copy** fetches and copies the full text
-even when the feed shows only a bounded preview. The pencil action on a user
-message loads the full original prompt into the composer so it can be edited
-and sent as a new turn without rewriting session history.
+even when the feed shows only a bounded preview. For structured and one-shot
+runs, the pencil appears only on the latest user message. Editing and
+resubmitting it replaces that active chat turn and removes its following
+assistant response from the conversation; the superseded run remains available
+in Runs as append-only audit evidence. Native terminal sessions do not expose
+the pencil because a retained interactive process cannot be rewound safely.
 
 `giga ui` starts a local durable worker automatically when no online worker is
 registered. Use `giga ui --no-start-worker` when a separately supervised worker

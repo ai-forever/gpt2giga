@@ -591,6 +591,9 @@ def _message_projection(message: HarnessMessage) -> dict[str, Any]:
     metadata = payload.pop("metadata", {})
     payload["content"] = _text_projection(content, _ITEM_TEXT_BYTES)
     if isinstance(metadata, Mapping):
+        edited_from_message_id = metadata.get("edited_from_message_id")
+        if isinstance(edited_from_message_id, str) and edited_from_message_id:
+            payload["edited_from_message_id"] = edited_from_message_id
         usage = metadata.get("usage")
         if isinstance(usage, Mapping):
             projected_usage = {
