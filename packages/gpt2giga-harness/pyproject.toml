@@ -37,6 +37,12 @@ claude-code = "gpt2giga_harness.harnesses.claude_code:ClaudeCodeHarness"
 gemini-cli = "gpt2giga_harness.harnesses.gemini_cli:GeminiCliHarness"
 echo = "gpt2giga_harness.harnesses.echo:EchoHarness"
 
+[project.entry-points."agent_workbench.provider_adapters.v1"]
+direct-chat-legacy = "gpt2giga_harness.provider_profiles:direct_chat_legacy_compatibility"
+codex-legacy = "gpt2giga_harness.provider_profiles:codex_legacy_compatibility"
+claude-legacy = "gpt2giga_harness.provider_profiles:claude_legacy_compatibility"
+gemini-legacy = "gpt2giga_harness.provider_profiles:gemini_legacy_compatibility"
+
 [project.optional-dependencies]
 claude-sdk = [
     "claude-agent-sdk>=0.2.122,<0.3",
