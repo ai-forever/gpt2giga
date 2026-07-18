@@ -40,7 +40,9 @@ from gpt2giga_harness.provider_profiles import (
     ProviderProtocol,
     RouteProfile,
 )
+from gpt2giga_harness.provider_migration import provider_migration_aliases
 from gpt2giga_harness.provider_registry import (
+    LayeredProviderRegistry,
     ProviderCompatibilityFailure,
     ProviderHealthService,
     ProviderHealthSnapshot,
@@ -168,6 +170,9 @@ class ProviderSettingsService:
         compatibility_registry: ProviderCompatibilityRegistry | None = None,
     ) -> None:
         self.store = ProviderRegistryStore(data_dir, ProviderOwnership.USER)
+        self.migrated_store = ProviderRegistryStore(
+            data_dir, ProviderOwnership.MIGRATED_LEGACY
+        )
         self.health_store = ProviderHealthStore(data_dir)
         self.compatibility = (
             compatibility_registry or ProviderCompatibilityRegistry.with_builtins()
@@ -183,7 +188,7 @@ class ProviderSettingsService:
 
     def list(self) -> dict[str, Any]:
         """Return a bounded reference-only registry projection."""
-        entries = self.store.list()
+        entries = self._effective_entries()
         return {
             "providers": [self._entry_projection(item) for item in entries],
             "templates": [dict(item) for item in PROVIDER_TEMPLATES],
@@ -195,6 +200,7 @@ class ProviderSettingsService:
                 "filesystem_paths_accepted": False,
             },
             "discovery_errors": list(self.compatibility.discovery_errors),
+            "compatibility_aliases": provider_migration_aliases(),
         }
 
     def get(self, provider_id: str) -> dict[str, Any]:
@@ -251,12 +257,26 @@ class ProviderSettingsService:
 
     def _require(self, provider_id: str) -> ProviderRegistryEntry:
         try:
-            entry = self.store.get(provider_id)
+            effective = LayeredProviderRegistry(
+                {
+                    ProviderOwnership.USER: self.store.list(),
+                    ProviderOwnership.MIGRATED_LEGACY: self.migrated_store.list(),
+                }
+            ).get(provider_id)
         except ValueError as exc:
             raise ProviderSettingsValidationError({"provider_id": str(exc)}) from exc
-        if entry is None:
+        if effective is None:
             raise ProviderSettingsNotFoundError(provider_id)
-        return entry
+        return effective.entry
+
+    def _effective_entries(self) -> tuple[ProviderRegistryEntry, ...]:
+        layered = LayeredProviderRegistry(
+            {
+                ProviderOwnership.USER: self.store.list(),
+                ProviderOwnership.MIGRATED_LEGACY: self.migrated_store.list(),
+            }
+        )
+        return tuple(item.entry for item in layered.list())
 
     def _entry_projection(self, entry: ProviderRegistryEntry) -> dict[str, Any]:
         profile = entry.profile
@@ -284,6 +304,7 @@ class ProviderSettingsService:
             "route_prefix": profile.route_prefix,
             "effective_base_url": profile.effective_base_url,
             "source": profile.ownership.value,
+            "editable": profile.ownership is ProviderOwnership.USER,
             "enabled": entry.enabled,
             "offline": profile.offline,
             "registry_revision": entry.revision,

@@ -111,6 +111,7 @@ from gpt2giga_harness.provider_settings import (
     ProviderSettingsNotFoundError,
     ProviderSettingsService,
 )
+from gpt2giga_harness.provider_migration import ProviderMigrationService
 from gpt2giga_harness.preflight import (
     build_preflight_report,
     format_preflight_block_message,
@@ -359,6 +360,13 @@ def build_parser() -> argparse.ArgumentParser:
         provider_probe.add_argument("provider_id")
         provider_probe.add_argument("--json", action="store_true")
         provider_probe.set_defaults(handler=handler)
+    provider_migrate = provider_subparsers.add_parser(
+        "migrate-legacy", aliases=("migrate",)
+    )
+    provider_migrate.add_argument("--backup", default=None)
+    provider_migrate.add_argument("--dry-run", action="store_true")
+    provider_migrate.add_argument("--json", action="store_true")
+    provider_migrate.set_defaults(handler=_handle_provider_migrate)
 
     init = subparsers.add_parser("init")
     init.add_argument("--workspace", default=None)
@@ -504,6 +512,11 @@ def build_parser() -> argparse.ArgumentParser:
     state_restore.add_argument("--replace", action="store_true")
     state_restore.add_argument("--json", action="store_true")
     state_restore.set_defaults(handler=_handle_state_restore)
+    state_migrate_providers = state_subparsers.add_parser("migrate-providers")
+    state_migrate_providers.add_argument("--backup", default=None)
+    state_migrate_providers.add_argument("--dry-run", action="store_true")
+    state_migrate_providers.add_argument("--json", action="store_true")
+    state_migrate_providers.set_defaults(handler=_handle_provider_migrate)
 
     worker = subparsers.add_parser("worker", parents=[common])
     worker_subparsers = worker.add_subparsers(dest="worker_command")
@@ -1052,6 +1065,29 @@ def _handle_provider_probe(
         for model in health["models"]:
             print(f"- {model['model']} [{model['source']}]")
     return 0 if payload["health"]["status"] == "ready" else 1
+
+
+def _handle_provider_migrate(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    service = ProviderMigrationService(config.data_dir, config)
+    if args.dry_run:
+        payload = service.plan().to_dict()
+    else:
+        if args.backup is None:
+            raise ValueError("provider migration requires --backup or --dry-run")
+        payload = service.migrate(args.backup).to_dict()
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Provider migration: {payload['status']}")
+        print(f"Providers: {', '.join(payload['provider_ids'])}")
+        print(f"Routes: {payload['route_count']}")
+        if payload.get("applied"):
+            print(f"Pre-upgrade backup SHA-256: {payload['backup_sha256']}")
+        print("Rollback: stop Harness and restore the verified pre-upgrade archive.")
+    return 0
 
 
 def _provider_payload_from_args(

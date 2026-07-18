@@ -239,6 +239,22 @@ class ProviderRegistryStore:
             self._write_unlocked(entries)
         return cloned
 
+    def initialize(self, entries: Iterable[ProviderRegistryEntry]) -> None:
+        """Atomically initialize an empty ownership layer from reviewed entries."""
+        normalized = tuple(entries)
+        indexed: dict[str, ProviderRegistryEntry] = {}
+        for entry in normalized:
+            if not isinstance(entry, ProviderRegistryEntry):
+                raise TypeError("provider registry initialization entry is invalid")
+            self._require_ownership(entry.profile)
+            if entry.profile.id in indexed:
+                raise ValueError("provider registry initialization ids must be unique")
+            indexed[entry.profile.id] = entry
+        with exclusive_file_lock(self.lock_path):
+            if self.path.exists():
+                raise ProviderRegistryConflict("provider registry already exists")
+            self._write_unlocked(indexed)
+
     def _require_ownership(self, profile: ProviderProfile) -> None:
         if profile.ownership is not self.ownership:
             raise ProviderRegistryOwnershipError(

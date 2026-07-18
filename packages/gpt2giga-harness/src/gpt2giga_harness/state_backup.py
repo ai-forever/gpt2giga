@@ -12,7 +12,7 @@ import shutil
 import sqlite3
 import stat
 from tempfile import TemporaryDirectory, mkdtemp
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, Iterator, Mapping
 from zipfile import ZIP_STORED, BadZipFile, ZipFile, ZipInfo
 
 from gpt2giga_harness.runtime.store import RUNTIME_SCHEMA_VERSION
@@ -20,11 +20,20 @@ from gpt2giga_harness.runtime.store import RUNTIME_SCHEMA_VERSION
 
 BACKUP_KIND = "gpt2giga_harness_state_backup"
 BACKUP_MANIFEST = "manifest.json"
-BACKUP_SCHEMA_VERSION = 1
+BACKUP_SCHEMA_VERSION = 2
+LEGACY_BACKUP_SCHEMA_VERSION = 1
+STATE_LAYOUT_VERSION = 1
+MINIMUM_READER_SCHEMA_VERSION = 2
 _CHUNK_SIZE = 1024 * 1024
 _FIXED_ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 _SQLITE_SUFFIX = ".sqlite3"
 _TRANSIENT_SUFFIXES = ("-shm", "-wal")
+_SUPPORTED_COMPONENT_SCHEMA_VERSIONS = {
+    "providers.migration": 1,
+    "providers.registry": 1,
+    "settings.defaults": 1,
+    "settings.secret_refs": 1,
+}
 
 
 @dataclass(frozen=True)
@@ -38,9 +47,13 @@ class StateBackupResult:
     sha256: str
     runtime_schema_version: int | None
     max_supported_runtime_schema_version: int
+    state_layout_version: int | None
+    component_schema_versions: Mapping[str, int]
+    minimum_reader_schema_version: int | None
+    migration_journal_sha256: str | None
     restore_compatible: bool
 
-    def to_dict(self) -> dict[str, bool | int | str | None]:
+    def to_dict(self) -> dict[str, object]:
         """Serialize the stable result without exposing a local path."""
         return {
             "schema_version": self.schema_version,
@@ -52,6 +65,10 @@ class StateBackupResult:
             "max_supported_runtime_schema_version": (
                 self.max_supported_runtime_schema_version
             ),
+            "state_layout_version": self.state_layout_version,
+            "component_schema_versions": dict(self.component_schema_versions),
+            "minimum_reader_schema_version": self.minimum_reader_schema_version,
+            "migration_journal_sha256": self.migration_journal_sha256,
             "restore_compatible": self.restore_compatible,
         }
 
@@ -63,7 +80,7 @@ class StateRestoreResult:
     backup: StateBackupResult
     replaced_existing: bool
 
-    def to_dict(self) -> dict[str, bool | int | str | None]:
+    def to_dict(self) -> dict[str, object]:
         """Serialize restore evidence without exposing local paths."""
         return {
             **self.backup.to_dict(),
@@ -170,6 +187,7 @@ def verify_state_backup(archive: str | Path) -> StateBackupResult:
                             )
                         if entry["path"] == "runtime.sqlite3":
                             runtime_schema_version = user_version
+            _verify_component_metadata(bundle, manifest)
     except BadZipFile as exc:
         raise ValueError("State backup is not a valid ZIP archive.") from exc
     return _result_for_archive(path, manifest, runtime_schema_version)
@@ -197,9 +215,9 @@ def restore_state_backup(
     verified = verify_state_backup(source)
     if not verified.restore_compatible:
         raise ValueError(
-            "State backup runtime schema is newer than this Harness supports: "
-            f"archive={verified.runtime_schema_version}, "
-            f"supported={verified.max_supported_runtime_schema_version}."
+            "State backup contains a schema newer than this Harness supports: "
+            f"runtime={verified.runtime_schema_version}, "
+            f"components={dict(verified.component_schema_versions)}."
         )
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -265,6 +283,10 @@ def _write_archive(source: Path, output: Path, temp_dir: Path) -> dict[str, obje
             "harness_version": _harness_version(),
             "source_layout": "harness_user_data_dir",
             "restore_policy": "offline_replace_only",
+            "state_layout_version": STATE_LAYOUT_VERSION,
+            "component_schema_versions": _component_schema_versions(source),
+            "minimum_reader_schema_version": MINIMUM_READER_SCHEMA_VERSION,
+            "migration_journal_sha256": _migration_journal_hash(source),
             "entries": entries,
         }
         payload = _canonical_json(manifest)
@@ -322,6 +344,84 @@ def _is_transient(path: Path) -> bool:
     )
 
 
+def _component_schema_versions(source: Path) -> dict[str, int]:
+    versions: dict[str, int] = {}
+    candidates = (
+        (source / "settings" / "defaults.json", "settings.defaults"),
+        (source / "settings" / "secret_refs.json", "settings.secret_refs"),
+        (
+            source / "migrations" / "provider_registry.json",
+            "providers.migration",
+        ),
+    )
+    for path, component in candidates:
+        if path.is_file():
+            versions[component] = _json_schema_version(path.read_bytes(), component)
+    provider_root = source / "providers"
+    if provider_root.is_dir():
+        provider_versions = [
+            _json_schema_version(path.read_bytes(), "providers.registry")
+            for path in sorted(provider_root.glob("*.json"))
+            if path.is_file()
+        ]
+        if provider_versions:
+            if len(set(provider_versions)) != 1:
+                raise ValueError("provider registry component schemas disagree")
+            versions["providers.registry"] = provider_versions[0]
+    return dict(sorted(versions.items()))
+
+
+def _migration_journal_hash(source: Path) -> str | None:
+    path = source / "migrations" / "provider_registry.json"
+    return _hash_file(path)[0] if path.is_file() else None
+
+
+def _json_schema_version(payload: bytes, component: str) -> int:
+    try:
+        value = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{component} component metadata is unreadable") from exc
+    version = value.get("schema_version") if isinstance(value, dict) else None
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ValueError(f"{component} component schema_version is invalid")
+    return version
+
+
+def _verify_component_metadata(bundle: ZipFile, manifest: Mapping[str, object]) -> None:
+    if manifest.get("schema_version") == LEGACY_BACKUP_SCHEMA_VERSION:
+        return
+    expected: dict[str, int] = {}
+    candidates = (
+        ("settings/defaults.json", "settings.defaults"),
+        ("settings/secret_refs.json", "settings.secret_refs"),
+        ("migrations/provider_registry.json", "providers.migration"),
+    )
+    names = set(bundle.namelist())
+    for name, component in candidates:
+        if name in names:
+            expected[component] = _json_schema_version(bundle.read(name), component)
+    provider_versions = [
+        _json_schema_version(bundle.read(name), "providers.registry")
+        for name in sorted(names)
+        if name.startswith("providers/") and name.endswith(".json")
+    ]
+    if provider_versions:
+        if len(set(provider_versions)) != 1:
+            raise ValueError("provider registry component schemas disagree")
+        expected["providers.registry"] = provider_versions[0]
+    declared = manifest.get("component_schema_versions")
+    if declared != dict(sorted(expected.items())):
+        raise ValueError("State backup component schema metadata is invalid.")
+    journal_hash = manifest.get("migration_journal_sha256")
+    actual_journal_hash = (
+        sha256(bundle.read("migrations/provider_registry.json")).hexdigest()
+        if "migrations/provider_registry.json" in names
+        else None
+    )
+    if journal_hash != actual_journal_hash:
+        raise ValueError("State backup migration journal metadata is invalid.")
+
+
 def _snapshot_sqlite(source: Path, destination: Path) -> int:
     try:
         source_uri = f"{source.resolve().as_uri()}?mode=ro"
@@ -365,11 +465,41 @@ def _assert_restore_destination_quiescent(destination: Path) -> None:
                     "safely."
                 )
         for name in files:
-            if name.endswith((*_TRANSIENT_SUFFIXES, ".lock")):
+            path = root_path / name
+            if name.endswith(_TRANSIENT_SUFFIXES) or (
+                name.endswith(".lock") and _lock_file_is_active(path)
+            ):
                 raise ValueError(
                     "Harness state has active lock/WAL/SHM markers; stop the UI, "
                     "workers, and active runs before restore."
                 )
+
+
+def _lock_file_is_active(path: Path) -> bool:
+    descriptor = os.open(path, os.O_RDWR)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            if os.fstat(descriptor).st_size == 0:
+                os.write(descriptor, b"0")
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            try:
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            except OSError:
+                return True
+            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            return False
+        import fcntl
+
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(descriptor)
 
 
 def _extract_archive(archive: Path, destination: Path) -> None:
@@ -515,7 +645,8 @@ def _hash_zip_entry(bundle: ZipFile, name: str) -> tuple[str, int]:
 def _validate_manifest(manifest: object) -> list[dict[str, object]]:
     if not isinstance(manifest, dict):
         raise ValueError("State backup manifest must be an object.")
-    if manifest.get("schema_version") != BACKUP_SCHEMA_VERSION:
+    schema_version = manifest.get("schema_version")
+    if schema_version not in {LEGACY_BACKUP_SCHEMA_VERSION, BACKUP_SCHEMA_VERSION}:
         raise ValueError("State backup schema version is unsupported.")
     if manifest.get("kind") != BACKUP_KIND:
         raise ValueError("State backup kind is unsupported.")
@@ -526,6 +657,34 @@ def _validate_manifest(manifest: object) -> list[dict[str, object]]:
     harness_version = manifest.get("harness_version")
     if not isinstance(harness_version, str) or not harness_version:
         raise ValueError("State backup Harness version is invalid.")
+    if schema_version == BACKUP_SCHEMA_VERSION:
+        if manifest.get("state_layout_version") != STATE_LAYOUT_VERSION:
+            raise ValueError("State backup layout version is unsupported.")
+        minimum_reader = manifest.get("minimum_reader_schema_version")
+        if (
+            isinstance(minimum_reader, bool)
+            or not isinstance(minimum_reader, int)
+            or minimum_reader < 1
+        ):
+            raise ValueError("State backup minimum reader is invalid.")
+        components = manifest.get("component_schema_versions")
+        if not isinstance(components, dict):
+            raise ValueError("State backup component schemas are invalid.")
+        for component, version_value in components.items():
+            if (
+                component not in _SUPPORTED_COMPONENT_SCHEMA_VERSIONS
+                or isinstance(version_value, bool)
+                or not isinstance(version_value, int)
+                or version_value < 1
+            ):
+                raise ValueError("State backup component schema is invalid.")
+        journal_hash = manifest.get("migration_journal_sha256")
+        if journal_hash is not None and (
+            not isinstance(journal_hash, str)
+            or len(journal_hash) != 64
+            or any(character not in "0123456789abcdef" for character in journal_hash)
+        ):
+            raise ValueError("State backup migration journal digest is invalid.")
     entries = manifest.get("entries")
     if not isinstance(entries, list):
         raise ValueError("State backup manifest entries are invalid.")
@@ -591,17 +750,50 @@ def _result_for_archive(
     runtime_schema_version: int | None,
 ) -> StateBackupResult:
     entries = _validate_manifest(manifest)
+    schema_version = int(manifest.get("schema_version") or 0)
+    raw_components = manifest.get("component_schema_versions")
+    components = (
+        {str(key): int(value) for key, value in raw_components.items()}
+        if isinstance(raw_components, dict)
+        else {}
+    )
+    minimum_reader = manifest.get("minimum_reader_schema_version")
+    components_compatible = all(
+        version_value <= _SUPPORTED_COMPONENT_SCHEMA_VERSIONS.get(component, -1)
+        for component, version_value in components.items()
+    )
     return StateBackupResult(
-        schema_version=BACKUP_SCHEMA_VERSION,
+        schema_version=schema_version,
         harness_version=str(manifest.get("harness_version") or "unknown"),
         file_count=len(entries),
         total_bytes=sum(int(entry["size"]) for entry in entries),
         sha256=_hash_file(path)[0],
         runtime_schema_version=runtime_schema_version,
         max_supported_runtime_schema_version=RUNTIME_SCHEMA_VERSION,
+        state_layout_version=(
+            int(manifest["state_layout_version"])
+            if schema_version == BACKUP_SCHEMA_VERSION
+            else None
+        ),
+        component_schema_versions=components,
+        minimum_reader_schema_version=(
+            int(minimum_reader) if isinstance(minimum_reader, int) else None
+        ),
+        migration_journal_sha256=(
+            str(manifest["migration_journal_sha256"])
+            if manifest.get("migration_journal_sha256") is not None
+            else None
+        ),
         restore_compatible=(
-            runtime_schema_version is None
-            or runtime_schema_version <= RUNTIME_SCHEMA_VERSION
+            (
+                runtime_schema_version is None
+                or runtime_schema_version <= RUNTIME_SCHEMA_VERSION
+            )
+            and components_compatible
+            and (
+                not isinstance(minimum_reader, int)
+                or minimum_reader <= BACKUP_SCHEMA_VERSION
+            )
         ),
     )
 
