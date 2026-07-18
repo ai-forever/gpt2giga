@@ -183,20 +183,30 @@ assert "/v1beta/models/{model}:generateContent" in paths
 """
 
 
-HARNESS_SMOKE = """
+HARNESS_BASE_SMOKE = """
 import importlib.metadata
 import json
 import os
 from pathlib import Path
 import stat
+import sys
 
 from fastapi.testclient import TestClient
 
-import gpt2giga
+class BlockPresetImports:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".", 1)[0] in {"gpt2giga", "gigachat"}:
+            raise ModuleNotFoundError(fullname)
+        return None
+
+
+sys.meta_path.insert(0, BlockPresetImports())
+
 import gpt2giga_harness
 from gpt2giga_harness.cli import build_parser
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.doctor import write_doctor_support_report
+from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.state_backup import (
     create_state_backup,
     restore_state_backup,
@@ -204,15 +214,23 @@ from gpt2giga_harness.state_backup import (
 )
 from gpt2giga_harness.ui.app import create_app
 from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
+from gpt2giga_harness.types import HarnessContext, HarnessRequest
 
-assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
 assert Path(gpt2giga_harness.__file__).resolve().is_relative_to(installed_root)
-assert importlib.metadata.version("gpt2giga") == os.environ["EXPECTED_GATEWAY_VERSION"]
+assert "gpt2giga" not in sys.modules
+assert "gigachat" not in sys.modules
 harness_distribution = importlib.metadata.distribution("gpt2giga-harness")
 assert harness_distribution.version == os.environ["EXPECTED_HARNESS_VERSION"]
-assert (
-    f"gpt2giga=={os.environ['EXPECTED_GATEWAY_VERSION']}"
-    in (harness_distribution.requires or ())
+requirements = harness_distribution.requires or ()
+assert not any(
+    requirement.startswith(("gpt2giga", "gigachat"))
+    and "extra ==" not in requirement
+    for requirement in requirements
+)
+assert any(
+    requirement.startswith(f"gpt2giga=={os.environ['EXPECTED_GATEWAY_VERSION']}")
+    and "extra ==" in requirement
+    for requirement in requirements
 )
 scripts = {
     entry.name: entry.value
@@ -239,6 +257,13 @@ assert harness_entry_points == {
     ),
     "gpt2giga.harnesses": "gpt2giga_harness.harnesses.echo:EchoHarness",
 }
+registry = create_default_registry(include_entry_points=False)
+echo = registry.get("echo").run(
+    HarnessRequest(prompt="provider-neutral smoke"),
+    HarnessContext(proxy_url="http://127.0.0.1:9"),
+)
+assert echo.ok is True
+assert echo.text == "provider-neutral smoke"
 doctor_output = installed_root.parent / "doctor-support.json"
 doctor_args = build_parser().parse_args(
     ["doctor", ".", "--json", "--output", str(doctor_output), "--fail-on", "degraded"]
@@ -283,6 +308,24 @@ restore_result = restore_state_backup(backup, restored)
 assert restore_result.backup == created
 assert restore_result.replaced_existing is False
 assert (restored / "runtime.sqlite3").is_file()
+"""
+
+
+GPT2GIGA_PRESET_SMOKE = """
+import importlib.metadata
+import os
+from pathlib import Path
+
+import gpt2giga
+import gpt2giga_harness
+from gpt2giga_harness.gpt2giga_preset import require_gpt2giga_preset
+
+assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
+assert Path(gpt2giga_harness.__file__).resolve().is_relative_to(installed_root)
+assert importlib.metadata.version("gpt2giga") == os.environ["EXPECTED_GATEWAY_VERSION"]
+runtime = require_gpt2giga_preset()
+assert runtime.client_type.__module__.split(".", 1)[0] == "gigachat"
+assert runtime.load_config.__module__ == "gpt2giga.cli"
 """
 
 
@@ -379,18 +422,36 @@ def test_gateway_artifact_is_isolated(
 
 
 @pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])
-def test_harness_artifact_resolves_gateway_without_repository_leakage(
+def test_harness_base_artifact_runs_without_provider_preset(
     built_artifacts: BuiltArtifacts, tmp_path, artifact_kind: str
 ):
-    if artifact_kind == "wheel":
-        gateway_wheel = built_artifacts.gateway_wheel
-        harness_wheel = built_artifacts.harness_wheel
-    else:
-        gateway_wheel = built_artifacts.gateway_sdist
-        harness_wheel = built_artifacts.harness_sdist
+    harness_artifact = (
+        built_artifacts.harness_wheel
+        if artifact_kind == "wheel"
+        else built_artifacts.harness_sdist
+    )
     installed = tmp_path / "installed"
-    _install_artifacts(installed, gateway_wheel, harness_wheel)
-    _run_clean_python(installed, HARNESS_SMOKE)
+    _install_artifacts(installed, harness_artifact)
+    _run_clean_python(installed, HARNESS_BASE_SMOKE)
+
+
+@pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])
+def test_gpt2giga_preset_artifacts_restore_gateway_runtime(
+    built_artifacts: BuiltArtifacts, tmp_path, artifact_kind: str
+):
+    gateway_artifact = (
+        built_artifacts.gateway_wheel
+        if artifact_kind == "wheel"
+        else built_artifacts.gateway_sdist
+    )
+    harness_artifact = (
+        built_artifacts.harness_wheel
+        if artifact_kind == "wheel"
+        else built_artifacts.harness_sdist
+    )
+    installed = tmp_path / "installed"
+    _install_artifacts(installed, gateway_artifact, harness_artifact)
+    _run_clean_python(installed, GPT2GIGA_PRESET_SMOKE)
 
 
 def test_neutral_third_party_wheel_registers_without_core_edits(
@@ -430,6 +491,17 @@ def _declared_distribution_names(metadata: dict) -> set[str]:
     return names
 
 
+def _all_declared_distribution_names(metadata: dict) -> set[str]:
+    names = _declared_distribution_names(metadata)
+    for requirements in metadata["project"].get("optional-dependencies", {}).values():
+        for requirement in requirements:
+            name = requirement.split(";", 1)[0].strip()
+            for separator in ("<", ">", "=", "!", "~", "["):
+                name = name.split(separator, 1)[0]
+            names.add(name.strip().lower())
+    return names
+
+
 def _external_import_roots(source_root: Path, own_package: str) -> set[str]:
     roots: set[str] = set()
     for path in source_root.rglob("*.py"):
@@ -453,7 +525,7 @@ def _external_import_roots(source_root: Path, own_package: str) -> set[str]:
 
 def test_harness_imports_only_declared_distributions():
     with (HARNESS_MEMBER / "pyproject.toml").open("rb") as file:
-        declared = _declared_distribution_names(tomllib.load(file))
+        declared = _all_declared_distribution_names(tomllib.load(file))
     imported = _external_import_roots(HARNESS_SOURCE, "gpt2giga_harness")
     unknown_roots = imported - IMPORT_DISTRIBUTIONS.keys()
     assert unknown_roots == set()
@@ -476,7 +548,11 @@ def test_optional_and_development_dependencies_stay_with_their_owner():
         "postgres",
     }
     assert harness_metadata["project"]["optional-dependencies"] == {
-        "claude-sdk": ["claude-agent-sdk>=0.2.122,<0.3"]
+        "claude-sdk": ["claude-agent-sdk>=0.2.122,<0.3"],
+        "gpt2giga": [
+            f"gpt2giga=={GATEWAY_VERSION}",
+            "gigachat>=0.2.2a1,<0.3.0",
+        ],
     }
     assert _declared_distribution_names(harness_metadata) == set(
         BASE_DIRECT_DISTRIBUTIONS
@@ -497,11 +573,7 @@ def test_harness_gateway_imports_stay_within_the_reviewed_boundary():
                     for alias in node.names
                     if alias.name == "gpt2giga" or alias.name.startswith("gpt2giga.")
                 )
-    assert gateway_imports == {
-        "gpt2giga.cli",
-        "gpt2giga.protocols.normalized",
-        "gpt2giga.protocols.normalized.models",
-    }
+    assert gateway_imports == set()
     proxy_source = (HARNESS_SOURCE / "proxy.py").read_text(encoding="utf-8")
     assert "from gpt2giga import run; run()" in proxy_source
 

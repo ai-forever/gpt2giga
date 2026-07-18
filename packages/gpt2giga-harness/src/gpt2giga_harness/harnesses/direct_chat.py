@@ -6,8 +6,6 @@ import json
 import time
 from typing import Any, Mapping
 
-from gigachat import GigaChat
-from gpt2giga.cli import load_config
 from gpt2giga_harness import proxy
 from gpt2giga_harness.generated_files import (
     GeneratedFileError,
@@ -20,6 +18,14 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     request_render_plan,
 )
 from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.gpt2giga_preset import (
+    Gpt2GigaPresetUnavailableError,
+    require_gpt2giga_preset,
+)
+from gpt2giga_harness.protocols.normalized import (
+    NormalizedStreamEvent,
+    NormalizedToolCall,
+)
 from gpt2giga_harness.types import (
     AttachmentTransportSupport,
     Availability,
@@ -35,7 +41,6 @@ from gpt2giga_harness.types import (
     HarnessSpec,
     emit_event,
 )
-from gpt2giga.protocols.normalized import NormalizedStreamEvent, NormalizedToolCall
 from gpt2giga_harness.protocols.openai.stream_accumulator import (
     OpenAIChatCompletionStreamAccumulator,
     openai_usage_to_normalized_usage,
@@ -1082,8 +1087,12 @@ def _fetch_generated_image_file(
 
 def _download_gigachat_image(file_id: str) -> str:
     """Download a generated image with the same config as the local proxy."""
-    settings = load_config().gigachat_settings
-    client = GigaChat(**settings.model_dump())
+    try:
+        runtime = require_gpt2giga_preset()
+    except Gpt2GigaPresetUnavailableError as exc:
+        raise GeneratedFileError(str(exc)) from exc
+    settings = runtime.load_config().gigachat_settings
+    client = runtime.client_type(**settings.model_dump())
     try:
         image = client.get_image(file_id)
         content = getattr(image, "content", None)

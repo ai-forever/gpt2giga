@@ -623,10 +623,12 @@ def test_generated_image_download_uses_local_proxy_gigachat_config(monkeypatch):
 
     monkeypatch.setattr(
         direct_chat_module,
-        "load_config",
-        lambda: SimpleNamespace(gigachat_settings=FakeSettings()),
+        "require_gpt2giga_preset",
+        lambda: SimpleNamespace(
+            client_type=FakeClient,
+            load_config=lambda: SimpleNamespace(gigachat_settings=FakeSettings()),
+        ),
     )
-    monkeypatch.setattr(direct_chat_module, "GigaChat", FakeClient)
 
     assert direct_chat_module._download_gigachat_image("image-file-1") == (
         "encoded-image"
