@@ -32,6 +32,11 @@ from gpt2giga_harness.runtime.policy import (
 )
 from gpt2giga_harness.runtime.reconcile import RuntimeReconciler
 from gpt2giga_harness.runtime.side_effects import HarnessSideEffectExecutor
+from gpt2giga_harness.runtime.structured import (
+    DURABLE_STRUCTURED_ADMISSION_FIELD,
+    prepare_durable_structured_admission,
+    structured_admission,
+)
 from gpt2giga_harness.runtime.store import (
     RuntimeCoordinationStore,
     SideEffectBlockedError,
@@ -87,6 +92,11 @@ class DurableJobDispatcher:
     ) -> DurableSubmission:
         """Submit a durable job through the selected permission profile."""
         payload = _prepare_durable_payload(payload)
+        session = self.runner.store.get_session(session_id)
+        harness_id = str(payload.get("harness_id") or session.default_harness_id)
+        payload = prepare_durable_structured_admission(
+            self.runner.registry.get(harness_id), payload
+        )
         selected_profile = permission_profile(
             payload.get("permission_profile"), origin=origin
         )
@@ -679,6 +689,9 @@ def worker_status(
 
 
 def _idempotency_class(payload: Mapping[str, Any]) -> str:
+    admission = structured_admission(payload)
+    if admission is not None:
+        return str(admission.get("retry_class") or "structured_ambiguous")
     mode = str(payload.get("mode") or "plan")
     return "read_only" if mode in {"plan", "read"} else "external_write"
 
@@ -686,6 +699,7 @@ def _idempotency_class(payload: Mapping[str, Any]) -> str:
 def _prepare_durable_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Replace an optional opaque side-effect token with a persisted digest."""
     prepared = dict(payload)
+    prepared.pop(DURABLE_STRUCTURED_ADMISSION_FIELD, None)
     prepared.pop(RECOVERY_MARKER_IDENTITY_FIELD, None)
     supplied = prepared.pop("side_effect_token", None)
     if supplied is None:

@@ -21,6 +21,7 @@ from gpt2giga_harness.attachments import (
 )
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.codex_app_server import build_execution_snapshot
+from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.managed_mcp import HeadlessManagedMCPSnapshotStore
 from gpt2giga_harness.mcp import build_mcp_inventory
 from gpt2giga_harness.native.models import parse_invocation_mode
@@ -43,6 +44,10 @@ from gpt2giga_harness.provenance import (
 )
 from gpt2giga_harness.readiness import build_execution_readiness
 from gpt2giga_harness.registry import HarnessRegistry
+from gpt2giga_harness.runtime.structured import (
+    DurableStructuredHarness,
+    requested_execution_transport,
+)
 from gpt2giga_harness.sessions.models import (
     HarnessMessage,
     HarnessRun,
@@ -234,8 +239,15 @@ class HarnessSessionRunner:
         """Prepare one durable headless run without executing its harness."""
         session = self.store.get_session(session_id)
         options = self._run_options(payload, session=session)
-        if options["invocation_mode"].value != "headless":
-            raise ValueError("durable jobs currently support headless runs only")
+        if (
+            options["invocation_mode"].value != "headless"
+            and options["execution_transport"]
+            is not ExecutionTransport.NATIVE_STRUCTURED
+        ):
+            raise ValueError(
+                "durable jobs exclude native terminal execution without a proven "
+                "native_structured transport"
+            )
         report = self.preflight(payload, session_id=session_id, durable=True)
         if report.hard_block:
             raise PreflightBlockedError(report)
@@ -256,6 +268,11 @@ class HarnessSessionRunner:
             invocation_mode=options["invocation_mode"],
             metadata={
                 "invocation_mode": options["invocation_mode"].value,
+                "execution_transport": (
+                    options["execution_transport"].value
+                    if options["execution_transport"] is not None
+                    else None
+                ),
                 "preflight": preflight_report_to_dict(report),
                 "durable": True,
                 **(
@@ -398,6 +415,11 @@ class HarnessSessionRunner:
         )
         run_metadata: dict[str, Any] = {
             "invocation_mode": options["invocation_mode"].value,
+            "execution_transport": (
+                options["execution_transport"].value
+                if options["execution_transport"] is not None
+                else None
+            ),
             "native_resume": _native_resume_metadata(options["harness_id"]),
             "preflight": preflight_payload,
             **(
@@ -564,6 +586,7 @@ class HarnessSessionRunner:
             capability=options["capability"],
             mode=options["mode"],
             invocation_mode=options["invocation_mode"],
+            execution_transport=options["execution_transport"],
             stream=options["stream"],
             workspace=workspace_execution.request_workspace,
             messages=request_messages,
@@ -612,6 +635,11 @@ class HarnessSessionRunner:
             "capability": options["capability"].value,
             "mode": options["mode"],
             "invocation_mode": options["invocation_mode"].value,
+            "execution_transport": (
+                options["execution_transport"].value
+                if options["execution_transport"] is not None
+                else None
+            ),
             "stream": options["stream"],
             "workspace": options["workspace"],
             "effective_workspace": workspace_execution.request_workspace,
@@ -665,11 +693,22 @@ class HarnessSessionRunner:
                 },
             )
         try:
-            result = (
-                HarnessResult(ok=False, text="", error="Harness run canceled.")
-                if _cancel_requested(cancel_event)
-                else harness.run(request, self.config.to_context())
-            )
+            if _cancel_requested(cancel_event):
+                result = HarnessResult(ok=False, text="", error="Harness run canceled.")
+            elif (
+                durable
+                and options["execution_transport"]
+                is ExecutionTransport.NATIVE_STRUCTURED
+            ):
+                if not isinstance(harness, DurableStructuredHarness):
+                    raise ValueError(
+                        "durable structured admission changed after submission"
+                    )
+                result = harness.run_durable_structured(
+                    request, self.config.to_context()
+                )
+            else:
+                result = harness.run(request, self.config.to_context())
         except Exception as exc:
             result = HarnessResult(ok=False, text="", error=str(exc))
         if _cancel_requested(cancel_event):
@@ -919,6 +958,7 @@ class HarnessSessionRunner:
         )
         mode = str(payload.get("mode") or (session.default_mode if session else "plan"))
         invocation_mode = parse_invocation_mode(payload.get("invocation_mode"))
+        execution_transport = requested_execution_transport(payload)
         workspace = _optional_text(payload.get("workspace"))
         if workspace is None and session is not None:
             workspace = session.workspace
@@ -943,6 +983,7 @@ class HarnessSessionRunner:
             "capability": capability,
             "mode": mode,
             "invocation_mode": invocation_mode,
+            "execution_transport": execution_transport,
             "workspace": workspace,
             "stream": bool(payload.get("stream")),
             "extra": extra,
@@ -987,6 +1028,7 @@ class HarnessSessionRunner:
             self.registry,
             harness_id=str(options["harness_id"]),
             invocation_mode=options["invocation_mode"],
+            execution_transport=options["execution_transport"],
             api_mode=options["api_mode"],
             model=options["model"],
             mode=str(options["mode"]),
@@ -1224,7 +1266,22 @@ def _continuation_plan(
     prompt_id: str,
 ) -> dict[str, Any]:
     """Select one truthful, machine-readable headless continuation strategy."""
-    if request.invocation_mode.value != "headless":
+    if (
+        request.execution_transport is ExecutionTransport.NATIVE_STRUCTURED
+        and harness.spec().id != "codex-cli"
+    ):
+        return {
+            "strategy": ExecutionTransport.NATIVE_STRUCTURED.value,
+            "supported": True,
+            "continuity_proven": True,
+            "action": "continue" if previous_messages else "start",
+            "prompt_id": prompt_id,
+            "history_replayed": False,
+        }
+    if (
+        request.invocation_mode.value != "headless"
+        and request.execution_transport is not ExecutionTransport.NATIVE_STRUCTURED
+    ):
         return {
             "strategy": HeadlessContinuationStrategy.NATIVE_CLI_RESUME.value,
             "supported": bool(request.native_session_id),

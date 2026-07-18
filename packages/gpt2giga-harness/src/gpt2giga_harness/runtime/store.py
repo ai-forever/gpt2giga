@@ -3496,7 +3496,11 @@ def _fingerprint_matches(
         actual = worker_harnesses.get(str(harness_id))
         if not isinstance(expected, Mapping) or not isinstance(actual, Mapping):
             return False
-        for key in ("distribution", "binary_version"):
+        for key in (
+            "distribution",
+            "binary_version",
+            "structured_capability_hash",
+        ):
             value = expected.get(key)
             if value is not None and value != actual.get(key):
                 return False
@@ -3514,4 +3518,9 @@ def _fingerprint_matches(
 
 
 def _retry_safe(value: str) -> bool:
-    return value in {"read_only", "safe_retry", "deterministic"}
+    return value in {
+        "read_only",
+        "safe_retry",
+        "deterministic",
+        "structured_recoverable",
+    }

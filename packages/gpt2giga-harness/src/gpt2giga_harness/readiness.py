@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from gpt2giga_harness import proxy
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.doctor import (
     _gigachat_check,
     _harness_checks,
@@ -43,6 +44,7 @@ def build_execution_readiness(
     workspace: str | None,
     workspace_policy: WorkspacePolicy,
     durable: bool,
+    execution_transport: ExecutionTransport | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Project doctor checks onto only the selected pre-spawn execution plan."""
@@ -108,7 +110,13 @@ def build_execution_readiness(
             )
         )
 
-    checks.append(_delivery_check(durable=durable, invocation_mode=invocation_mode))
+    checks.append(
+        _delivery_check(
+            durable=durable,
+            invocation_mode=invocation_mode,
+            execution_transport=execution_transport,
+        )
+    )
     if durable:
         checks.append(_required_check(_worker_check(config)))
 
@@ -143,6 +151,11 @@ def build_execution_readiness(
         "plan": {
             "harness_id": harness_id,
             "invocation_mode": invocation_mode.value,
+            **(
+                {"execution_transport": execution_transport.value}
+                if execution_transport is not None
+                else {}
+            ),
             "api_mode": api_mode.value,
             "model": model,
             "mode": mode,
@@ -255,20 +268,30 @@ def _delivery_check(
     *,
     durable: bool,
     invocation_mode: HarnessInvocationMode,
+    execution_transport: ExecutionTransport | None,
 ) -> dict[str, Any]:
-    if durable and invocation_mode is HarnessInvocationMode.NATIVE:
+    if (
+        durable
+        and invocation_mode is HarnessInvocationMode.NATIVE
+        and execution_transport is not ExecutionTransport.NATIVE_STRUCTURED
+    ):
         return _check(
             "delivery",
             "blocked",
-            "Durable jobs currently support headless invocation only.",
+            "Durable admission excludes native terminal execution.",
             remediation=(
                 {
-                    "message": "Choose headless mode or use a synchronous native run.",
+                    "message": (
+                        "Use a synchronous native terminal or select a proven "
+                        "native_structured transport."
+                    ),
                     "command": "giga harness inspect --help",
                 },
             ),
         )
     delivery = "durable worker" if durable else "synchronous caller"
+    if durable and execution_transport is ExecutionTransport.NATIVE_STRUCTURED:
+        delivery = "durable structured-native worker"
     return _check("delivery", "ready", f"Run delivery uses the {delivery} path.")
 
 

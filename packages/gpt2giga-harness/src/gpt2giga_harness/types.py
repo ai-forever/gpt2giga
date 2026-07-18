@@ -9,6 +9,7 @@ import re
 from typing import Any, Callable, Mapping
 
 from gpt2giga_harness.native.models import HarnessInvocationMode
+from gpt2giga_harness.execution import ExecutionTransport
 
 
 class HarnessCapability(str, Enum):
@@ -205,6 +206,7 @@ class HarnessRequest:
     capability: HarnessCapability = HarnessCapability.CHAT_COMPLETIONS
     mode: str = "plan"
     invocation_mode: HarnessInvocationMode = HarnessInvocationMode.HEADLESS
+    execution_transport: ExecutionTransport | None = None
     stream: bool = False
     workspace: str | None = None
     messages: tuple[HarnessChatMessage, ...] = ()

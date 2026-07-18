@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from collections import deque
 from contextlib import suppress
+from datetime import datetime, timedelta, timezone
 from importlib import metadata
+import hashlib
 import json
 import tempfile
 from pathlib import Path
+import threading
+import time
 from typing import Any, Mapping
 from urllib.parse import quote
 
@@ -41,6 +45,8 @@ from gpt2giga_harness.harnesses.adapter_parity import gemini_adapter_capabilitie
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.gemini_acp import (
+    GEMINI_ACP_PROTOCOL,
+    GEMINI_ACP_PROTOCOL_VERSION,
     AuthProvider,
     GeminiAcpDriver,
     GeminiAcpError,
@@ -49,6 +55,36 @@ from gpt2giga_harness.gemini_acp import (
     create_gemini_acp_stdio_scope,
 )
 from gpt2giga_harness.native import HarnessInvocationMode
+from gpt2giga_harness.execution import (
+    EMPTY_EXTENSION_SNAPSHOT_HASH,
+    ExecutionClassification,
+    ExecutionClassificationStatus,
+    ExecutionSnapshot,
+    ExecutionTransport,
+    InteractionMode,
+    ProviderRef,
+    RouteRef,
+    RuntimeOwnership,
+    SnapshotEvidenceRef,
+    create_execution_snapshot,
+)
+from gpt2giga_harness.runtime.models import ApprovalStatus
+from gpt2giga_harness.runtime.policy import (
+    EnforcementLevel,
+    PermissionAction,
+    PolicyContext,
+    PolicyDecision,
+    PolicyResolution,
+)
+from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
+from gpt2giga_harness.structured_sessions import (
+    AdapterCapabilitySnapshot,
+    StructuredSessionConfigSnapshot,
+    StructuredSessionCoordinator,
+    StructuredSessionLinkStore,
+    StructuredTurnInput,
+    structured_session_link_to_dict,
+)
 from gpt2giga_harness.managed_mcp import (
     materialize_headless_mcp_snapshot,
     write_startup_config,
@@ -150,6 +186,179 @@ class GeminiCliHarness(BaseHarness):
     def executable_resolution(self) -> ExecutableResolution:
         """Return the configured or PATH-discovered Gemini executable."""
         return self.executable_resolver.resolve(self.spec().id, "gemini")
+
+    def durable_structured_capabilities(self) -> AdapterCapabilitySnapshot:
+        """Return conservative reviewed ACP admission evidence."""
+        probe = self.capability_probe()
+        if (
+            not probe.compatible
+            or not probe.capabilities.get("--acp")
+            or probe.parsed_version is None
+        ):
+            raise GeminiAcpError("installed Gemini CLI ACP capability is unavailable")
+        return AdapterCapabilitySnapshot(
+            adapter_id="gemini-cli",
+            adapter_version=_adapter_version(),
+            protocol=GEMINI_ACP_PROTOCOL,
+            protocol_version=str(GEMINI_ACP_PROTOCOL_VERSION),
+            structured_events=True,
+            partial_output=True,
+            interactive_input=False,
+            live_approvals=True,
+            durable_approval=False,
+            interrupt=True,
+            steer=False,
+            resume=True,
+            fork=False,
+            session_list=False,
+            session_close=False,
+            native_auth=True,
+            provider_ui_handoff=False,
+            dynamic_model=False,
+            dynamic_mcp=True,
+            recovery_after_process_loss=True,
+            attachment_kinds=("audio", "embedded-context", "image"),
+            attachment_transports=("acp-inline", "acp-resource"),
+        )
+
+    def run_durable_structured(
+        self, request: HarnessRequest, context: HarnessContext
+    ) -> HarnessResult:
+        """Run one durable turn through the product Gemini ACP driver."""
+        if (
+            context.data_dir is None
+            or request.session_id is None
+            or request.run_id is None
+        ):
+            return HarnessResult(
+                ok=False, text="", error="Gemini ACP durable identity is incomplete."
+            )
+        if _managed_mcp_reference(request) is not None:
+            return HarnessResult(
+                ok=False,
+                text="",
+                error="Gemini ACP durable managed MCP projection is not yet proven.",
+            )
+        resolution = self.executable_resolution()
+        command = (
+            (*resolution.command, "--acp")
+            if resolution.command
+            else ("gemini", "--acp")
+        )
+        prepared_context, proxy_events, proxy_error = prepare_proxy_for_agent(
+            request,
+            context,
+            harness_id="gemini-cli",
+            command=command,
+        )
+        if proxy_error is not None:
+            return proxy_error
+        scope_id = (
+            "durable-"
+            + hashlib.sha256(request.session_id.encode("utf-8")).hexdigest()[:24]
+        )
+        driver, scope = self.create_acp_driver(
+            request,
+            prepared_context,
+            scope_id=scope_id,
+            auth_provider=lambda: (
+                "gateway",
+                {
+                    "gateway": {
+                        "baseUrl": prepared_context.api_base_url(request.api_mode)
+                    }
+                },
+            ),
+        )
+        coordinator = StructuredSessionCoordinator(
+            driver,
+            StructuredSessionLinkStore(context.data_dir),
+            owner_id=_structured_owner(request),
+        )
+        link_id = (
+            "gemini-link-"
+            + hashlib.sha256(request.session_id.encode("utf-8")).hexdigest()[:24]
+        )
+        existing = coordinator.store.load(link_id)
+        collected: list[HarnessEvent] = list(proxy_events)
+        text_parts: list[str] = []
+
+        def event_sink(event: Mapping[str, Any]) -> None:
+            payload = event.get("payload")
+            safe_payload = dict(payload) if isinstance(payload, Mapping) else {}
+            normalized = HarnessEvent(
+                type=str(event.get("type") or "session_state"),
+                message="Gemini ACP emitted a structured event.",
+                payload=safe_payload,
+            )
+            collected.append(normalized)
+            if request.event_sink is not None:
+                request.event_sink(normalized)
+            content = safe_payload.get("content")
+            if isinstance(content, Mapping) and isinstance(content.get("text"), str):
+                text_parts.append(str(content["text"]))
+
+        try:
+            link = coordinator.open_or_resume(
+                link_id=link_id,
+                harness_session_id=request.session_id,
+                harness_run_id=request.run_id,
+                execution_snapshot=_gemini_execution_snapshot(request),
+                config_snapshot=StructuredSessionConfigSnapshot(
+                    adapter_id="gemini-cli",
+                    adapter_version=_adapter_version(),
+                    protocol=GEMINI_ACP_PROTOCOL,
+                    protocol_version=str(GEMINI_ACP_PROTOCOL_VERSION),
+                    cli_sdk_version=str(self.capability_probe().parsed_version),
+                    managed_home_id=scope.managed_home_id,
+                ),
+                existing_link=existing,
+            )
+            turn_finished = threading.Event()
+
+            def monitor_cancel() -> None:
+                while not turn_finished.wait(0.05):
+                    if (
+                        request.cancel_event is None
+                        or not request.cancel_event.is_set()
+                    ):
+                        continue
+                    turn_id = driver.active_turn_id
+                    if turn_id is not None:
+                        with suppress(Exception):
+                            coordinator.interrupt(link, turn_id)
+                    return
+
+            cancel_monitor = threading.Thread(
+                target=monitor_cancel,
+                name=f"gemini-acp-cancel-{request.run_id}",
+                daemon=True,
+            )
+            cancel_monitor.start()
+            try:
+                link, turn = coordinator.start_turn(
+                    link,
+                    StructuredTurnInput(request.run_id, request.prompt),
+                    event_sink,
+                    _durable_approval_bridge(request, context),
+                )
+            finally:
+                turn_finished.set()
+                cancel_monitor.join(timeout=0.2)
+            ok = turn.status == "completed"
+            return HarnessResult(
+                ok=ok,
+                text="".join(text_parts),
+                raw={
+                    "structured_session_link": structured_session_link_to_dict(link),
+                    "structured_session_driver": "gemini-acp",
+                },
+                events=tuple(collected),
+                command=command,
+                error=None if ok else f"Gemini ACP turn ended as {turn.status}.",
+            )
+        finally:
+            driver.close()
 
     def create_acp_driver(
         self,
@@ -348,6 +557,129 @@ def _write_gemini_settings(home: Path) -> None:
         home,
         {"security": {"auth": {"selectedType": "gemini-api-key"}}},
     )
+
+
+def _structured_owner(request: HarnessRequest) -> str:
+    runtime = request.extra.get("runtime")
+    worker_id = runtime.get("worker_id") if isinstance(runtime, Mapping) else None
+    return str(worker_id or "durable-worker")
+
+
+def _gemini_execution_snapshot(request: HarnessRequest) -> ExecutionSnapshot:
+    api_mode = request.api_mode.value
+    model = request.model or "unknown"
+    route_revision = hashlib.sha256(f"{api_mode}\0{model}".encode("utf-8")).hexdigest()
+    provider = ProviderRef("gpt2giga-harness", f"api-{api_mode}")
+    workspace_execution = request.extra.get("workspace_execution")
+    workspace_execution = (
+        workspace_execution if isinstance(workspace_execution, Mapping) else {}
+    )
+    workspace = str(
+        workspace_execution.get("source_workspace") or request.workspace or "unknown"
+    )
+    effective_workspace = str(request.workspace or workspace)
+    workspace_id = (
+        "workspace-" + hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:24]
+    )
+    return create_execution_snapshot(
+        provider=provider,
+        route=RouteRef(f"route-{route_revision[:24]}", route_revision, provider),
+        harness_id="gemini-cli",
+        harness_version=_adapter_version(),
+        transport=ExecutionTransport.NATIVE_STRUCTURED,
+        interaction_mode=InteractionMode.INTERACTIVE,
+        runtime_ownership=RuntimeOwnership.DURABLE,
+        workspace_id=workspace_id,
+        worktree_id=(
+            "worktree-"
+            + hashlib.sha256(effective_workspace.encode("utf-8")).hexdigest()[:24]
+            if effective_workspace != workspace
+            else None
+        ),
+        permission_profile=str(request.mode or "plan"),
+        extension_snapshot_hash=EMPTY_EXTENSION_SNAPSHOT_HASH,
+        capability_evidence=(
+            SnapshotEvidenceRef(
+                "gemini-acp",
+                "reviewed-v1",
+                "supported",
+                "gemini-cli-probe",
+            ),
+        ),
+        classification=ExecutionClassification(
+            status=ExecutionClassificationStatus.EXPLICIT,
+            source="gemini_acp_driver",
+        ),
+    )
+
+
+def _durable_approval_bridge(request: HarnessRequest, context: HarnessContext):
+    if context.data_dir is None:
+        raise GeminiAcpError("durable approval requires a Harness data directory")
+    store = RuntimeCoordinationStore(context.data_dir)
+
+    def approve(contract: Mapping[str, Any]) -> str:
+        binding = str(contract.get("binding_hash") or "")
+        if len(binding) != 64:
+            raise GeminiAcpError("Gemini ACP approval binding is invalid")
+        approval = store.find_approval_request_by_binding(binding)
+        if approval is None:
+            runtime = request.extra.get("runtime")
+            runtime = runtime if isinstance(runtime, Mapping) else {}
+            timeout = max(float(context.timeout_seconds), 0.1)
+            approval = store.create_approval_request(
+                PolicyResolution(
+                    action=PermissionAction.MCP_TOOL_CALL,
+                    decision=PolicyDecision.ASK,
+                    enforcement=EnforcementLevel.ENFORCED_BY_HARNESS,
+                    policy_source="gemini_acp:request_permission",
+                ),
+                PolicyContext(
+                    session_id=request.session_id,
+                    run_id=request.run_id,
+                    job_id=str(runtime.get("job_id") or "") or None,
+                    reason="Gemini ACP requested permission for a tool call.",
+                    preview={
+                        "provider": "gemini-acp",
+                        "tool_call_id": contract.get("tool_call_id"),
+                        "option_kinds": [
+                            item.get("kind")
+                            for item in contract.get("options", ())
+                            if isinstance(item, Mapping)
+                        ],
+                    },
+                    approval_binding=binding,
+                    enforcement_owner="gemini_acp.request_permission",
+                ),
+                expires_at=(
+                    datetime.now(timezone.utc) + timedelta(seconds=timeout)
+                ).isoformat(),
+            )
+        if request.event_sink is not None:
+            request.event_sink(
+                HarnessEvent(
+                    type="approval_requested",
+                    message="Gemini ACP is waiting for Approval Center.",
+                    payload={"approval_id": approval.id},
+                )
+            )
+        deadline = time.monotonic() + max(float(context.timeout_seconds), 0.1)
+        while time.monotonic() < deadline:
+            current = store.get_approval_request(approval.id)
+            if current.status is ApprovalStatus.APPROVED:
+                return "allow"
+            if current.status in {
+                ApprovalStatus.DENIED,
+                ApprovalStatus.EXPIRED,
+                ApprovalStatus.CANCELED,
+            }:
+                return "deny"
+            if request.cancel_event is not None and request.cancel_event.is_set():
+                return "cancel"
+            time.sleep(0.05)
+        return "deny"
+
+    return approve
 
 
 def _managed_mcp_reference(request: HarnessRequest) -> Mapping[str, Any] | None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import metadata
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping
@@ -37,6 +38,7 @@ from gpt2giga_harness.harnesses.adapter_parity import codex_adapter_capabilities
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.native import HarnessInvocationMode
+from gpt2giga_harness.structured_sessions import AdapterCapabilitySnapshot
 from gpt2giga_harness.managed_mcp import (
     materialize_headless_mcp_snapshot,
     write_startup_config,
@@ -141,6 +143,51 @@ class CodexCliHarness(BaseHarness):
     def executable_resolution(self) -> ExecutableResolution:
         """Return the configured or PATH-discovered Codex executable."""
         return self.executable_resolver.resolve(self.spec().id, "codex")
+
+    def durable_structured_capabilities(self) -> AdapterCapabilitySnapshot:
+        """Return reviewed Codex app-server durable admission evidence."""
+        probe = self.capability_probe()
+        if not probe.compatible or not probe.capabilities.get("app-server"):
+            raise ValueError("installed Codex app-server capability is unavailable")
+        return AdapterCapabilitySnapshot(
+            adapter_id="codex-cli",
+            adapter_version=_adapter_version(),
+            protocol="codex-app-server-json-rpc-v2",
+            protocol_version="2",
+            structured_events=True,
+            partial_output=True,
+            interactive_input=False,
+            live_approvals=True,
+            durable_approval=True,
+            interrupt=True,
+            steer=True,
+            resume=True,
+            fork=True,
+            session_list=False,
+            session_close=False,
+            native_auth=False,
+            provider_ui_handoff=False,
+            dynamic_model=False,
+            dynamic_mcp=False,
+            recovery_after_process_loss=True,
+        )
+
+    def run_durable_structured(
+        self, request: HarnessRequest, context: HarnessContext
+    ) -> HarnessResult:
+        """Run the admitted turn through the existing generic app-server driver."""
+        continuation = request.extra.get("continuation")
+        if (
+            not isinstance(continuation, Mapping)
+            or continuation.get("strategy")
+            != HeadlessContinuationStrategy.STRUCTURED_THREAD.value
+        ):
+            return HarnessResult(
+                ok=False,
+                text="",
+                error="Codex durable structured continuation is not proven.",
+            )
+        return self.run(request, context)
 
     def build_command(
         self,
@@ -704,3 +751,11 @@ def _first_present(value: Mapping[str, Any], *keys: str) -> Any:
         if value.get(key) is not None:
             return value[key]
     return None
+
+
+def _adapter_version() -> str:
+    try:
+        value = metadata.version("gpt2giga-harness")
+    except metadata.PackageNotFoundError:
+        value = "unknown"
+    return str(value).strip() or "unknown"
