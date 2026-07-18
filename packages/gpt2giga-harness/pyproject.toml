@@ -37,6 +37,11 @@ claude-code = "gpt2giga_harness.harnesses.claude_code:ClaudeCodeHarness"
 gemini-cli = "gpt2giga_harness.harnesses.gemini_cli:GeminiCliHarness"
 echo = "gpt2giga_harness.harnesses.echo:EchoHarness"
 
+[project.optional-dependencies]
+claude-sdk = [
+    "claude-agent-sdk>=0.2.122,<0.3",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

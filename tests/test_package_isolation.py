@@ -475,7 +475,9 @@ def test_optional_and_development_dependencies_stay_with_their_owner():
         "phoenix",
         "postgres",
     }
-    assert "optional-dependencies" not in harness_metadata["project"]
+    assert harness_metadata["project"]["optional-dependencies"] == {
+        "claude-sdk": ["claude-agent-sdk>=0.2.122,<0.3"]
+    }
     assert _declared_distribution_names(harness_metadata) == set(
         BASE_DIRECT_DISTRIBUTIONS
     )
