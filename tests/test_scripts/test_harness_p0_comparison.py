@@ -39,10 +39,20 @@ def _run(*argv: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str
 
 
 def test_frozen_manifest_matches_fixture_and_comparison_contract() -> None:
-    summary = comparison.validate_manifest()
     manifest = comparison._load_json(comparison.DEFAULT_MANIFEST)
     targets = {item["id"]: item for item in manifest["targets"]}
+    specification_path = REPO_ROOT / manifest["specification"]["path"]
 
+    assert manifest["specification"] == {
+        "path": "benchmarks/harness_p0/specification.md",
+        "sha256": "f60059820bf31b1d96132c51d86c4d650d5832690183c2122065673ba2094225",
+    }
+    assert specification_path.is_file()
+    assert (
+        comparison._sha256_file(specification_path)
+        == (manifest["specification"]["sha256"])
+    )
+    summary = comparison.validate_manifest()
     assert summary == {
         "comparison_id": "harness-omnigent-p0-2026-07-14-v1",
         "fixture_archive_sha256": "11e42c70954db1e9e0998c3e7b1a94e041044ac2a4d7032748230c273dbff3e6",
