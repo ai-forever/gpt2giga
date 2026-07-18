@@ -121,8 +121,8 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
         for dependency in harness_metadata["dependencies"]
     )
     assert harness_metadata["scripts"] == {
-        "giga": "gpt2giga_harness.cli:main",
-        "gpt2giga-harness": "gpt2giga_harness.cli:main",
+        "giga": "gpt2giga_harness.entrypoint:main",
+        "gpt2giga-harness": "gpt2giga_harness.entrypoint:main",
     }
     entry_point_groups = harness_metadata["entry-points"]
     assert set(entry_point_groups) == {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import gzip
 import hashlib
 from importlib import resources
 import json
@@ -27,7 +28,7 @@ class CockpitV2AssetNotFoundError(FileNotFoundError):
 
 @dataclass(frozen=True)
 class CockpitV2Asset:
-    """One integrity-bound identity asset and its precompressed variants."""
+    """One integrity-bound identity asset and optional legacy variants."""
 
     name: str
     media_type: str
@@ -39,6 +40,14 @@ class CockpitV2Asset:
     brotli_name: str | None = None
     brotli_byte_count: int | None = None
     brotli_sha256: str | None = None
+
+    @property
+    def compressible(self) -> bool:
+        """Return whether on-demand gzip is useful for this media type."""
+        return self.media_type.startswith("text/") or self.media_type in {
+            "application/json; charset=utf-8",
+            "image/svg+xml",
+        }
 
 
 @dataclass(frozen=True)
@@ -197,6 +206,11 @@ def _verified_identity(asset: CockpitV2Asset) -> bytes:
     return content
 
 
+@lru_cache(maxsize=128)
+def _gzip_identity(asset: CockpitV2Asset) -> bytes:
+    return gzip.compress(_verified_identity(asset), compresslevel=6, mtime=0)
+
+
 def load_cockpit_v2_shell() -> str:
     """Return the integrity-verified UTF-8 V2 shell document."""
     manifest = load_cockpit_v2_manifest()
@@ -222,6 +236,8 @@ def load_cockpit_v2_asset(
     if encoding == "br" and asset.brotli_name is None:
         return _verified_identity(asset), asset
     if encoding == "gzip" and asset.gzip_name is None:
+        if asset.compressible:
+            return _gzip_identity(asset), asset
         return _verified_identity(asset), asset
     if encoding == "br":
         content = _read_packaged_file(asset.brotli_name)

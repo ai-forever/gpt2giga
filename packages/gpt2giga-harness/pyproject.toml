@@ -20,8 +20,8 @@ dependencies = [
 ]
 
 [project.scripts]
-gpt2giga-harness = "gpt2giga_harness.cli:main"
-giga = "gpt2giga_harness.cli:main"
+gpt2giga-harness = "gpt2giga_harness.entrypoint:main"
+giga = "gpt2giga_harness.entrypoint:main"
 
 [project.entry-points."gpt2giga.harnesses"]
 direct-chat = "gpt2giga_harness.harnesses.direct_chat:DirectChatHarness"

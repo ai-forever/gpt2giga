@@ -220,8 +220,8 @@ scripts = {
     if entry.group == "console_scripts"
 }
 assert scripts == {
-    "giga": "gpt2giga_harness.cli:main",
-    "gpt2giga-harness": "gpt2giga_harness.cli:main",
+    "giga": "gpt2giga_harness.entrypoint:main",
+    "gpt2giga-harness": "gpt2giga_harness.entrypoint:main",
 }
 harness_entry_points = {
     entry.group: entry.value

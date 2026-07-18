@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from gpt2giga_harness.codex_app_server import (
     CodexAppServerSupervisor,
+    _RolloutMultiAgentTail,
     _approval_contract,
     _approval_response,
     _collab_child_tool_events,
@@ -543,9 +544,20 @@ class _CollabAppServerClient(_FakeAppServerClient):
 
 class _RolloutFunctionCallAppServerClient(_FakeAppServerClient):
     def __init__(self, **kwargs) -> None:
+        self.timeline = kwargs.pop("timeline", None)
         self.home = Path(kwargs["env"]["CODEX_HOME"])
         self.rollout_path = self.home / "sessions" / "parent.jsonl"
         super().__init__(**kwargs)
+
+    def next_message(self, *, timeout: float) -> Mapping[str, Any] | None:
+        message = super().next_message(timeout=timeout)
+        if (
+            self.timeline is not None
+            and message is not None
+            and message.get("method") == "turn/completed"
+        ):
+            self.timeline.append("turn/completed")
+        return message
 
     def request(
         self, method: str, params: Mapping[str, Any], *, timeout: float
@@ -977,6 +989,75 @@ def test_app_server_backfills_rollout_function_calls_omitted_from_thread_items(
     ]
     assert child.payload["parent_tool_call_id"] == "call-spawn"
     assert child.payload["subagent_name"] == "Hilbert"
+
+
+def test_app_server_publishes_rollout_subagent_call_before_turn_completion(tmp_path):
+    timeline: list[str] = []
+    supervisor = CodexAppServerSupervisor(
+        tmp_path,
+        client_factory=lambda **kwargs: _RolloutFunctionCallAppServerClient(
+            recorder=[], timeline=timeline, **kwargs
+        ),
+    )
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="test-key",
+        data_dir=str(tmp_path),
+    )
+    request = _request(tmp_path, session_id="sess-live-rollout-collab")
+    request = replace(
+        request,
+        event_sink=lambda event: timeline.append(
+            str(event.payload.get("tool_call_id") or event.type)
+        ),
+    )
+    snapshot = build_execution_snapshot(request, managed_home_id="apphome-test")
+
+    result = supervisor.run_turn(
+        request,
+        context,
+        resolution=_resolution(),
+        prompt="delegate",
+        continuation=_continuation(snapshot, prompt_id="msg-live-rollout-collab"),
+    )
+
+    assert result.ok is True
+    assert timeline.index("call-spawn") < timeline.index("turn/completed")
+    assert timeline.index("thread-child:child-command") < timeline.index(
+        "turn/completed"
+    )
+
+
+def test_rollout_tail_waits_for_complete_jsonl_record(tmp_path):
+    rollout_path = tmp_path / "rollout.jsonl"
+    first_record = {
+        "type": "event_msg",
+        "payload": {"type": "task_started", "turn_id": "turn-1"},
+    }
+    function_call = {
+        "type": "response_item",
+        "payload": {
+            "type": "function_call",
+            "namespace": "multi_agent_v1",
+            "name": "spawn_agent",
+            "call_id": "call-spawn",
+            "arguments": "{}",
+        },
+    }
+    encoded_call = json.dumps(function_call).encode()
+    rollout_path.write_bytes(
+        json.dumps(first_record).encode() + b"\n" + encoded_call[:20]
+    )
+    tail = _RolloutMultiAgentTail(rollout_path, "turn-1")
+
+    assert tail.poll() == ()
+
+    with rollout_path.open("ab") as output:
+        output.write(encoded_call[20:] + b"\n")
+
+    calls = tail.poll()
+    assert len(calls) == 1
+    assert calls[0]["call_id"] == "call-spawn"
 
 
 def test_owner_change_reads_and_resumes_persisted_thread(tmp_path):

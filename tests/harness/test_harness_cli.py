@@ -1,10 +1,12 @@
 import json
 from importlib.metadata import version
 import signal
+import sys
 
 import pytest
 
 from gpt2giga_harness import cli, proxy
+from gpt2giga_harness import entrypoint
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga_harness.harnesses.codex_cli import CodexCliHarness
@@ -81,6 +83,19 @@ def test_cli_version_reports_distribution_version(capsys):
         cli.main(["--version"])
 
     assert raised.value.code == 0
+    assert (
+        capsys.readouterr().out == f"gpt2giga-harness {version('gpt2giga-harness')}\n"
+    )
+
+
+def test_console_entrypoint_reports_version_without_importing_full_cli(
+    capsys, monkeypatch
+):
+    monkeypatch.delitem(sys.modules, "gpt2giga_harness.cli", raising=False)
+
+    assert entrypoint.main(["--version"]) == 0
+
+    assert "gpt2giga_harness.cli" not in sys.modules
     assert (
         capsys.readouterr().out == f"gpt2giga-harness {version('gpt2giga-harness')}\n"
     )

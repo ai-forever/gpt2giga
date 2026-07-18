@@ -76,6 +76,7 @@ APP_SERVER_PROTOCOL = "codex-app-server-json-rpc-v2"
 APP_SERVER_LINK_SCHEMA_VERSION = 1
 APP_SERVER_TIMEOUT_SECONDS = 10.0
 APP_SERVER_MESSAGE_POLL_SECONDS = 0.1
+APP_SERVER_ROLLOUT_POLL_SECONDS = 0.25
 APP_SERVER_STDERR_CHARS = 8000
 APP_SERVER_DRIVER_PROTOCOL_VERSION = "2"
 APP_SERVER_APPROVAL_OWNER = "codex_app_server.approval"
@@ -532,7 +533,31 @@ class CodexAppServerSupervisor:
         interrupt_sent = False
         subagent_parents: dict[str, str] = {}
         seen_subagent_events: set[tuple[str, str, str]] = set()
+        seen_rollout_events: set[tuple[str, str]] = set()
+        next_rollout_poll = 0.0
+        rollout_tail: _RolloutMultiAgentTail | None = None
         while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now >= next_rollout_poll:
+                if rollout_tail is None:
+                    rollout_path = _rollout_path_for_thread(
+                        runtime.client,
+                        home=(
+                            self.data_dir / "app_server" / "homes" / runtime.scope_id
+                        ),
+                        thread_id=thread_id,
+                    )
+                    if rollout_path is not None:
+                        rollout_tail = _RolloutMultiAgentTail(rollout_path, turn_id)
+                if rollout_tail is not None:
+                    for rollout_event in _rollout_multi_agent_events(
+                        runtime.client,
+                        tail=rollout_tail,
+                        seen=seen_rollout_events,
+                        child_seen=seen_subagent_events,
+                    ):
+                        _publish(request, collected, rollout_event)
+                next_rollout_poll = now + APP_SERVER_ROLLOUT_POLL_SECONDS
             if _cancel_requested(request.cancel_event) and not interrupt_sent:
                 runtime.client.request(
                     "turn/interrupt",
@@ -588,25 +613,23 @@ class CodexAppServerSupervisor:
                     for child_id in _collab_thread_ids(item):
                         if parent_id:
                             subagent_parents[child_id] = parent_id
-            if method == "turn/completed":
-                emitted_tool_ids = {
-                    str(event.payload.get("tool_call_id") or "")
-                    for event in collected
-                    if event.payload.get("tool_call_id")
-                }
+            if method == "turn/completed" and rollout_tail is not None:
                 for rollout_event in _rollout_multi_agent_events(
                     runtime.client,
-                    home=self.data_dir / "app_server" / "homes" / runtime.scope_id,
-                    thread_id=thread_id,
-                    turn_id=turn_id,
-                    seen_tool_call_ids=emitted_tool_ids,
+                    tail=rollout_tail,
+                    seen=seen_rollout_events,
+                    child_seen=seen_subagent_events,
                 ):
                     _publish(request, collected, rollout_event)
             event, item_text = _normalize_notification(method, params)
             if item_text is not None:
                 final_text = item_text
             if event is not None:
-                _publish(request, collected, event)
+                identity = _tool_event_identity(event)
+                if identity is None or identity not in seen_rollout_events:
+                    if identity is not None:
+                        seen_rollout_events.add(identity)
+                    _publish(request, collected, event)
             if method == "item/completed" and subagent_snapshots:
                 for child_event in _collab_child_tool_events(
                     subagent_snapshots,
@@ -2001,30 +2024,15 @@ def _collab_child_tool_events(
 def _rollout_multi_agent_events(
     client: AppServerClient,
     *,
-    home: Path,
-    thread_id: str,
-    turn_id: str,
-    seen_tool_call_ids: set[str],
+    tail: _RolloutMultiAgentTail,
+    seen: set[tuple[str, str]],
+    child_seen: set[tuple[str, str, str]],
 ) -> tuple[HarnessEvent, ...]:
-    """Recover multi-agent calls omitted from Codex app-server thread items."""
-    try:
-        response = client.request(
-            "thread/read",
-            {"threadId": thread_id, "includeTurns": True},
-            timeout=APP_SERVER_TIMEOUT_SECONDS,
-        )
-    except (AppServerProtocolError, OSError, RuntimeError, ValueError):
-        return ()
-    thread = _mapping(response.get("thread"))
-    rollout_path = _managed_rollout_path(home, thread.get("path"))
-    if rollout_path is None:
-        return ()
-
+    """Live-tail multi-agent calls omitted from Codex app-server notifications."""
     events: list[HarnessEvent] = []
-    child_seen: set[tuple[str, str, str]] = set()
-    for call in _read_rollout_multi_agent_calls(rollout_path, turn_id=turn_id):
+    for call in tail.poll():
         call_id = str(call.get("call_id") or call.get("id") or "").strip()
-        if not call_id or call_id in seen_tool_call_ids:
+        if not call_id:
             continue
         name = str(call.get("name") or "").strip()
         arguments = _json_value(call.get("arguments"), fallback={})
@@ -2060,23 +2068,35 @@ def _rollout_multi_agent_events(
                         ],
                     }
                 )
+        finished = "output" in call
+        event_type = (
+            HarnessEventType.TOOL_CALL_FINISHED.value
+            if finished
+            else HarnessEventType.TOOL_CALL_STARTED.value
+        )
         payload: dict[str, Any] = {
             "tool_call_id": call_id,
             "name": name,
-            "status": "completed",
+            "status": "completed" if finished else "inProgress",
             "arguments": public_arguments,
             "source": "codex-app-server-rollout",
         }
-        if result not in (None, "", (), [], {}):
+        if finished and result not in (None, "", (), [], {}):
             payload["result"] = result
-        events.append(
-            HarnessEvent(
-                type=HarnessEventType.TOOL_CALL_FINISHED.value,
-                message=f"Codex app-server finished {name}.",
-                payload=payload,
+        identity = (call_id, event_type)
+        if identity not in seen:
+            seen.add(identity)
+            events.append(
+                HarnessEvent(
+                    type=event_type,
+                    message=(
+                        f"Codex app-server finished {name}."
+                        if finished
+                        else f"Codex app-server started {name}."
+                    ),
+                    payload=payload,
+                )
             )
-        )
-        seen_tool_call_ids.add(call_id)
         if child_snapshots:
             child_id = str(child_snapshots[0].get("id") or "")
             events.extend(
@@ -2087,6 +2107,34 @@ def _rollout_multi_agent_events(
                 )
             )
     return tuple(events)
+
+
+def _rollout_path_for_thread(
+    client: AppServerClient,
+    *,
+    home: Path,
+    thread_id: str,
+) -> Path | None:
+    try:
+        response = client.request(
+            "thread/read",
+            {"threadId": thread_id, "includeTurns": True},
+            timeout=APP_SERVER_TIMEOUT_SECONDS,
+        )
+    except (AppServerProtocolError, OSError, RuntimeError, ValueError):
+        return None
+    thread = _mapping(response.get("thread"))
+    return _managed_rollout_path(home, thread.get("path"))
+
+
+def _tool_event_identity(event: HarnessEvent) -> tuple[str, str] | None:
+    if event.type not in {
+        HarnessEventType.TOOL_CALL_STARTED.value,
+        HarnessEventType.TOOL_CALL_FINISHED.value,
+    }:
+        return None
+    call_id = str(event.payload.get("tool_call_id") or "").strip()
+    return (call_id, event.type) if call_id else None
 
 
 def _managed_rollout_path(home: Path, value: Any) -> Path | None:
@@ -2108,57 +2156,78 @@ def _read_rollout_multi_agent_calls(
     *,
     turn_id: str,
 ) -> tuple[dict[str, Any], ...]:
-    calls: dict[str, dict[str, Any]] = {}
+    return _RolloutMultiAgentTail(path, turn_id).poll()
+
+
+@dataclass
+class _RolloutMultiAgentTail:
+    path: Path
+    turn_id: str
+    offset: int = 0
     active_turn_id: str | None = None
-    try:
-        lines = path.open(encoding="utf-8")
-    except OSError:
-        return ()
-    try:
-        with lines:
-            for line in lines:
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(record, Mapping):
-                    continue
-                record_type = str(record.get("type") or "")
-                payload = _mapping(record.get("payload"))
-                if record_type == "event_msg" and payload.get("type") == "task_started":
-                    active_turn_id = str(payload.get("turn_id") or "") or None
-                    continue
-                if record_type == "turn_context":
-                    active_turn_id = str(payload.get("turn_id") or "") or active_turn_id
-                    continue
-                if record_type != "response_item":
-                    continue
-                metadata = _mapping(
-                    payload.get("internal_chat_message_metadata_passthrough")
+    calls: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def poll(self) -> tuple[dict[str, Any], ...]:
+        """Read only complete JSONL records appended since the previous poll."""
+        try:
+            size = self.path.stat().st_size
+            if size < self.offset:
+                self.offset = 0
+                self.active_turn_id = None
+                self.calls.clear()
+            with self.path.open("rb") as lines:
+                lines.seek(self.offset)
+                content = lines.read()
+        except OSError:
+            return tuple(self.calls.values())
+        final_newline = content.rfind(b"\n")
+        if final_newline < 0:
+            return tuple(self.calls.values())
+        complete = content[: final_newline + 1]
+        self.offset += len(complete)
+        for raw_line in complete.splitlines():
+            try:
+                record = json.loads(raw_line)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(record, Mapping):
+                continue
+            record_type = str(record.get("type") or "")
+            payload = _mapping(record.get("payload"))
+            if record_type == "event_msg" and payload.get("type") == "task_started":
+                self.active_turn_id = str(payload.get("turn_id") or "") or None
+                continue
+            if record_type == "turn_context":
+                self.active_turn_id = (
+                    str(payload.get("turn_id") or "") or self.active_turn_id
                 )
-                payload_turn_id = str(metadata.get("turn_id") or active_turn_id or "")
-                if payload_turn_id != turn_id:
+                continue
+            if record_type != "response_item":
+                continue
+            metadata = _mapping(
+                payload.get("internal_chat_message_metadata_passthrough")
+            )
+            payload_turn_id = str(metadata.get("turn_id") or self.active_turn_id or "")
+            if payload_turn_id != self.turn_id:
+                continue
+            payload_type = str(payload.get("type") or "")
+            call_id = str(payload.get("call_id") or "").strip()
+            if payload_type == "function_call":
+                if str(payload.get("namespace") or "") != "multi_agent_v1":
                     continue
-                payload_type = str(payload.get("type") or "")
-                call_id = str(payload.get("call_id") or "").strip()
-                if payload_type == "function_call":
-                    if str(payload.get("namespace") or "") != "multi_agent_v1":
-                        continue
-                    if not call_id:
-                        call_id = str(payload.get("id") or "").strip()
-                    if not call_id:
-                        continue
-                    calls[call_id] = {
-                        "id": payload.get("id"),
-                        "call_id": call_id,
-                        "name": _multi_agent_tool_name(payload.get("name")),
-                        "arguments": payload.get("arguments"),
-                    }
-                elif payload_type == "function_call_output" and call_id in calls:
-                    calls[call_id]["output"] = payload.get("output")
-    except OSError:
-        return ()
-    return tuple(calls.values())
+                if not call_id:
+                    call_id = str(payload.get("id") or "").strip()
+                if not call_id:
+                    continue
+                self.calls[call_id] = {
+                    "id": payload.get("id"),
+                    "call_id": call_id,
+                    "name": _multi_agent_tool_name(payload.get("name")),
+                    "arguments": payload.get("arguments"),
+                }
+            elif payload_type == "function_call_output" and call_id in self.calls:
+                self.calls[call_id]["output"] = payload.get("output")
+        return tuple(self.calls.values())
 
 
 def _multi_agent_tool_name(value: Any) -> str:

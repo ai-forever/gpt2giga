@@ -17,8 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Structured Workbench by default**: supported coding harnesses now prefer `native_structured` execution while keeping explicit one-shot and native-terminal choices where available.
 - **Clean source distribution**: the PyPI sdist no longer contains TypeScript sources, frontend tests, Vite/ESLint configuration, or the npm lockfile; deterministically built content-addressed Cockpit assets remain in both sdist and wheel.
+- **Compact Cockpit assets**: duplicate `.br`/`.gz` files are no longer stored in the repository or wheel; integrity-bound identity assets are gzip-compressed in memory when served locally.
 
 ### Fixed
+- **Live Codex subagent events**: the fallback rollout is tailed during an active turn, so calls and nested tool activity appear immediately instead of only after completion or cancellation.
+- **Fast version output**: the console entry point handles `giga --version` before importing FastAPI, providers, UI, and runtime modules.
 - **Cockpit layout**: the Workbench label is centered in the narrow primary rail, while Codex subagent result disclosures and long details no longer shift or clip under focus and wrapping.
 - **Read-model and UI lifecycle**: session read-index initialization is serialized, and the embedded UI worker cold-start timeout now allows realistic startup latency.
 

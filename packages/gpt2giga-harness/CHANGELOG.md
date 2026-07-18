@@ -17,8 +17,11 @@
 ### Изменено
 - **Structured Workbench по умолчанию**: поддерживаемые coding harness используют `native_structured` как основной execution transport, сохраняя явный выбор one-shot и native terminal там, где они доступны.
 - **Чистый source distribution**: PyPI sdist больше не включает TypeScript sources, frontend-тесты, Vite/ESLint configs и npm lockfile; детерминированно собранные content-addressed Cockpit assets остаются в sdist и wheel.
+- **Компактные Cockpit assets**: дублирующие `.br`/`.gz` больше не хранятся в репозитории и wheel; integrity-bound identity assets сжимаются gzip в памяти при локальной отдаче.
 
 ### Исправлено
+- **Live-события Codex subagents**: fallback rollout теперь читается во время активного turn, поэтому вызовы и вложенная tool activity появляются сразу, а не только после завершения или отмены.
+- **Быстрый вывод версии**: console entrypoint обрабатывает `giga --version` до импорта FastAPI, providers, UI и runtime.
 - **Разметка Cockpit**: подпись «Рабочая область» центрирована в узком primary rail, а disclosure результата и длинные детали Codex subagents больше не смещаются и не обрезаются при focus/wrapping.
 - **Read-model и UI lifecycle**: инициализация session read index сериализована, а cold-start timeout встроенного UI worker увеличен до реалистичного значения.
 

@@ -54,7 +54,7 @@ _LEGACY_ROUTE_REDIRECTS = {
 
 
 def _accepted_encoding(value: str | None) -> str:
-    """Select a supported precompressed variant, honoring explicit q=0."""
+    """Select supported on-demand gzip while honoring explicit q=0."""
     qualities: dict[str, float] = {}
     for item in (value or "").split(","):
         token, *parameters = item.strip().lower().split(";")
@@ -69,10 +69,7 @@ def _accepted_encoding(value: str | None) -> str:
                 except ValueError:
                     quality = 0.0
         qualities[token] = quality
-    brotli_quality = qualities.get("br", qualities.get("*", 0.0))
     gzip_quality = qualities.get("gzip", qualities.get("*", 0.0))
-    if brotli_quality > 0 and brotli_quality >= gzip_quality:
-        return "br"
     if gzip_quality > 0:
         return "gzip"
     return "identity"
@@ -181,7 +178,7 @@ def create_shell_router(security: HarnessUISecurity) -> APIRouter:
             "X-Content-Type-Options": "nosniff",
         }
         has_encoded_variant = (encoding == "br" and asset.brotli_name is not None) or (
-            encoding == "gzip" and asset.gzip_name is not None
+            encoding == "gzip" and (asset.gzip_name is not None or asset.compressible)
         )
         if has_encoded_variant:
             headers["Content-Encoding"] = encoding

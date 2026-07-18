@@ -1,9 +1,7 @@
-import { brotliCompressSync, constants } from "node:zlib";
 import { createHash } from "node:crypto";
 import { readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, extname, join, relative, sep } from "node:path";
-import { gzipSync } from "fflate";
 
 const frontendRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const outputRoot = join(frontendRoot, "..", "src", "gpt2giga_harness", "ui", "cockpit_v2", "assets");
@@ -27,7 +25,11 @@ async function walk(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    if (entry.name === ".vite" || entry.name === "manifest.json" || entry.name.endsWith(".br") || entry.name.endsWith(".gz")) {
+    if (entry.name.endsWith(".br") || entry.name.endsWith(".gz")) {
+      await rm(join(directory, entry.name));
+      continue;
+    }
+    if (entry.name === ".vite" || entry.name === "manifest.json") {
       continue;
     }
     const absolute = join(directory, entry.name);
@@ -62,24 +64,6 @@ for (const absolute of await walk(outputRoot)) {
     media_type: mediaType,
     sha256: sha256(content),
   };
-  if ([".css", ".html", ".js", ".json", ".svg"].includes(extension)) {
-    const gzip = gzipSync(new Uint8Array(content), { level: 9, mtime: 0 });
-    const brotli = brotliCompressSync(content, {
-      params: {
-        [constants.BROTLI_PARAM_MODE]: constants.BROTLI_MODE_TEXT,
-        [constants.BROTLI_PARAM_QUALITY]: 11,
-        [constants.BROTLI_PARAM_SIZE_HINT]: content.byteLength,
-      },
-    });
-    await writeFile(`${absolute}.gz`, gzip);
-    await writeFile(`${absolute}.br`, brotli);
-    record.gzip = `${name}.gz`;
-    record.gzip_bytes = gzip.byteLength;
-    record.gzip_sha256 = sha256(gzip);
-    record.brotli = `${name}.br`;
-    record.brotli_bytes = brotli.byteLength;
-    record.brotli_sha256 = sha256(brotli);
-  }
   assets[name] = record;
 }
 
