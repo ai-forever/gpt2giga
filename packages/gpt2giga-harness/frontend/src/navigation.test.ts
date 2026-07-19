@@ -61,6 +61,20 @@ describe("Cockpit V2 route contract", () => {
     }
   });
 
+  it("keeps workspace utilities in the rail without a static connection banner", () => {
+    const shellSource = readFileSync(
+      fileURLToPath(new URL("./AppShell.tsx", import.meta.url)),
+      "utf8",
+    );
+
+    expect(shellSource).toContain('className="rail-utility-actions"');
+    expect(shellSource).toContain("<ApprovalIcon />");
+    expect(shellSource).toContain("<AttentionIcon />");
+    expect(shellSource).toContain("<SettingsIcon />");
+    expect(shellSource).not.toContain('className="cockpit-header"');
+    expect(shellSource).not.toContain('message(preferences.locale, "connected")');
+  });
+
   it("labels intentional full-document authoring transitions as legacy", () => {
     for (const surface of ["automation", "evaluation"]) {
       const source = readFileSync(

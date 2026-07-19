@@ -54,6 +54,7 @@ import {
 } from "../request-graph";
 import { observeNativeProcess } from "../native-process-stream";
 import { observeSessionUpdates } from "../session-update-stream";
+import { sessionCreationPayload, type SessionCreationIntent } from "../session-creation";
 import {
   formatTimestamp,
   latestRun,
@@ -172,6 +173,7 @@ export function WorkbenchSurface() {
   const [completionNotices, setCompletionNotices] = useState<CompletionNotice[]>([]);
   const previousRunStatuses = useRef(new Map<string, string>());
   const settingsDefaultsApplied = useRef(false);
+  const automaticSessionRequested = useRef(false);
   const [sessionConfirmation, setSessionConfirmation] = useState<{
     action: SessionAction;
     id: string;
@@ -226,15 +228,17 @@ export function WorkbenchSurface() {
   }, [sessionId]);
 
   useEffect(() => {
-    if (sessionId !== undefined || settings.data === undefined || settingsDefaultsApplied.current) return;
+    if (settings.data === undefined || settingsDefaultsApplied.current) return;
     settingsDefaultsApplied.current = true;
     const defaults = settings.data.harness_defaults;
-    setRunConfig({
-      apiMode: defaults.default_api_mode,
-      harnessId: defaults.default_harness_id,
-      mode: defaults.mode,
-      model: defaults.default_model ?? "",
-    });
+    if (sessionId === undefined) {
+      setRunConfig({
+        apiMode: defaults.default_api_mode,
+        harnessId: defaults.default_harness_id,
+        mode: defaults.mode,
+        model: defaults.default_model ?? "",
+      });
+    }
     setAdvancedConfig((current) => ({
       ...current,
       executionTransport: defaults.execution_transport as ExecutionTransport,
@@ -314,14 +318,11 @@ export function WorkbenchSurface() {
   ]);
 
   const createSession = useMutation({
-    mutationFn: () =>
-      mutateCockpit<{ session: SessionSummary }>("/api/sessions", {
-        api_mode: runConfig.apiMode,
-        harness_id: runConfig.harnessId,
-        mode: runConfig.mode,
-        model: runConfig.model || null,
-        workspace: ".",
-      }),
+    mutationFn: (intent: SessionCreationIntent) =>
+      mutateCockpit<{ session: SessionSummary }>(
+        "/api/sessions",
+        sessionCreationPayload(intent),
+      ),
     onSuccess: ({ session }) => {
       setPrompt("");
       setBuiltinTools([]);
@@ -332,6 +333,22 @@ export function WorkbenchSurface() {
       void queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() });
     },
   });
+  const createSessionMutate = createSession.mutate;
+
+  useEffect(() => {
+    if (
+      sessionId !== undefined
+      || automaticSessionRequested.current
+    ) return;
+    automaticSessionRequested.current = true;
+    createSessionMutate({ kind: "backend-defaults" });
+  }, [createSessionMutate, sessionId]);
+
+  useEffect(() => {
+    if (sessionId === undefined || !overview.isSuccess) return;
+    const frame = requestAnimationFrame(() => composerRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [overview.isSuccess, sessionId]);
 
   const startRun = useMutation<StartResult>({
     mutationFn: async () => {
@@ -767,7 +784,7 @@ export function WorkbenchSurface() {
           <button
             className="new-session-button"
             disabled={createSession.isPending || !runConfig.model}
-            onClick={() => createSession.mutate()}
+            onClick={() => createSession.mutate({ config: runConfig, kind: "configured" })}
             type="button"
           >
             <span aria-hidden="true">＋</span>
@@ -854,8 +871,16 @@ export function WorkbenchSurface() {
       <main className="work-canvas">
         {sessionId === undefined ? (
           <div className="empty-work-canvas">
-            <h1>{message(locale, "workbench")}</h1>
-            <p>{message(locale, "selectSession")}</p>
+            <span className="opening-session-spinner" aria-hidden="true" />
+            <h1>{message(locale, "openingSession")}</h1>
+            {createSession.isError ? (
+              <button
+                onClick={() => createSession.mutate({ kind: "backend-defaults" })}
+                type="button"
+              >
+                {message(locale, "retry")}
+              </button>
+            ) : null}
           </div>
         ) : overview.isPending ? (
           <ListSkeleton rows={5} />

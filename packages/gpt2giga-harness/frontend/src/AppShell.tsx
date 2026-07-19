@@ -35,6 +35,15 @@ function AttentionIcon() {
   );
 }
 
+function SettingsIcon() {
+  return (
+    <svg className="action-icon" aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.1A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.1 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2V9.6h.4A1.7 1.7 0 0 0 4.1 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.56 3.7l.06.06A1.7 1.7 0 0 0 8.5 4.1a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2h4v.4A1.7 1.7 0 0 0 15 4.1a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8.5a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.9v4h-.9a1.7 1.7 0 0 0-1.7 1.1Z" />
+    </svg>
+  );
+}
+
 export function AppShell() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const activeSurface = surfaceForPath(pathname);
@@ -95,43 +104,47 @@ export function AppShell() {
             </Link>
           ))}
         </nav>
-        <div className="rail-footer">
-          <span className="connection-dot" aria-hidden="true" />
-          <span>{message(preferences.locale, "connected")}</span>
-        </div>
-      </aside>
-      <div className="cockpit-main">
-        <header className="cockpit-header">
-          <div>
-            <p className="project-label">{message(preferences.locale, "project")}</p>
-            <strong>gpt2giga</strong>
-          </div>
-          <div className="header-actions">
-            <button
-              aria-label={message(preferences.locale, "approvals")}
-              type="button"
-              onClick={() => setInbox("approvals")}
-            >
+        <div className="rail-utility-actions" aria-label={message(preferences.locale, "workspaceUtilities")}>
+          <button
+            aria-label={message(preferences.locale, "approvals")}
+            className="rail-utility-control"
+            type="button"
+            onClick={() => setInbox("approvals")}
+          >
+            <span className="rail-utility-symbol">
               <ApprovalIcon />
-              <span className="action-label">{message(preferences.locale, "approvals")}</span>
               {(approvals.data?.pending_count ?? 0) > 0 ? (
                 <span className="count-badge">{approvals.data?.pending_count}</span>
               ) : null}
-            </button>
-            <button
-              aria-label={message(preferences.locale, "attention")}
-              type="button"
-              onClick={() => setInbox("attention")}
-            >
+            </span>
+            <span className="rail-utility-label">{message(preferences.locale, "approvals")}</span>
+          </button>
+          <button
+            aria-label={message(preferences.locale, "attention")}
+            className="rail-utility-control"
+            type="button"
+            onClick={() => setInbox("attention")}
+          >
+            <span className="rail-utility-symbol">
               <AttentionIcon />
-              <span className="action-label">{message(preferences.locale, "attention")}</span>
               {(attention.data?.unread ?? 0) > 0 ? (
                 <span className="count-badge attention">{attention.data?.unread}</span>
               ) : null}
-            </button>
-            <Link className="settings-link" to="/cockpit-v2/settings">{message(preferences.locale, "settings")}</Link>
-          </div>
-        </header>
+            </span>
+            <span className="rail-utility-label">{message(preferences.locale, "attention")}</span>
+          </button>
+          <Link
+            activeOptions={{ exact: true }}
+            aria-label={message(preferences.locale, "settings")}
+            className="rail-utility-control"
+            to="/cockpit-v2/settings"
+          >
+            <span className="rail-utility-symbol"><SettingsIcon /></span>
+            <span className="rail-utility-label">{message(preferences.locale, "settings")}</span>
+          </Link>
+        </div>
+      </aside>
+      <div className="cockpit-main">
         {migratedSurface ? null : (
           <div className="shell-notice">
             <span>{message(preferences.locale, "shellNotice")}</span>
@@ -143,7 +156,6 @@ export function AppShell() {
         </main>
       </div>
       {inbox === null ? null : <InboxDrawer kind={inbox} onClose={() => setInbox(null)} />}
-      <span className="sr-only" aria-live="polite">{message(preferences.locale, "connection")}</span>
       </div>
     </PreferencesContext.Provider>
   );
