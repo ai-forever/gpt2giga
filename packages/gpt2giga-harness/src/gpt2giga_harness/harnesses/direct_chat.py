@@ -9,8 +9,8 @@ from typing import Any, Mapping
 from gpt2giga_harness import proxy
 from gpt2giga_harness.generated_files import (
     GeneratedFileError,
-    generated_image_metadata,
-    persist_generated_image,
+    generated_file_metadata,
+    persist_generated_file,
 )
 from gpt2giga_harness.harnesses.attachment_plan import (
     attachment_raw_metadata,
@@ -1012,75 +1012,104 @@ def _generated_file_events(
     context: HarnessContext,
     seen: set[str] | None = None,
 ) -> tuple[HarnessEvent, ...]:
-    """Fetch GigaChat-generated images and expose safe Harness preview events."""
+    """Fetch GigaChat-generated files and expose safe Harness file events."""
     seen = seen if seen is not None else set()
     events = []
-    for choice in payload.get("choices") or ():
-        if not isinstance(choice, Mapping):
+    for file_data in _generated_file_items(payload):
+        metadata = generated_file_metadata(file_data)
+        if metadata is None:
             continue
-        for message_key in ("delta", "message"):
-            message = choice.get(message_key)
-            if not isinstance(message, Mapping):
-                continue
-            for file_data in message.get("files") or ():
-                if not isinstance(file_data, Mapping):
-                    continue
-                metadata = generated_image_metadata(file_data)
-                if metadata is None:
-                    continue
-                file_id, mime_type = metadata
-                if file_id in seen:
-                    continue
-                seen.add(file_id)
-                try:
-                    generated = _fetch_generated_image_file(
-                        file_data,
-                        request=request,
-                        context=context,
-                        file_id=file_id,
-                        mime_type=mime_type,
-                    )
-                except Exception as exc:
-                    events.append(
-                        HarnessEvent(
-                            type=HarnessEventType.WARNING.value,
-                            message="Generated image could not be fetched.",
-                            payload={
-                                "file_id": file_id,
-                                "error_type": type(exc).__name__,
-                                "source": "direct-chat",
-                            },
-                        )
-                    )
-                    continue
-                events.append(
-                    HarnessEvent(
-                        type=HarnessEventType.GENERATED_FILE.value,
-                        message="Generated image is ready.",
-                        payload={**generated, "source": "direct-chat"},
-                    )
+        file_id, mime_type, target = metadata
+        if file_id in seen:
+            continue
+        seen.add(file_id)
+        try:
+            generated = _fetch_generated_file(
+                file_data,
+                request=request,
+                context=context,
+                file_id=file_id,
+                mime_type=mime_type,
+                target=target,
+            )
+        except Exception as exc:
+            events.append(
+                HarnessEvent(
+                    type=HarnessEventType.WARNING.value,
+                    message="Generated file could not be fetched.",
+                    payload={
+                        "file_id": file_id,
+                        "error_type": type(exc).__name__,
+                        "source": "direct-chat",
+                    },
                 )
+            )
+            continue
+        events.append(
+            HarnessEvent(
+                type=HarnessEventType.GENERATED_FILE.value,
+                message="Generated file is ready.",
+                payload={**generated, "source": "direct-chat"},
+            )
+        )
     return tuple(events)
 
 
-def _fetch_generated_image_file(
+def _generated_file_items(payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+    messages: list[Mapping[str, Any]] = []
+    for choice in payload.get("choices") or ():
+        if not isinstance(choice, Mapping):
+            continue
+        messages.extend(
+            message
+            for message_key in ("delta", "message")
+            if isinstance((message := choice.get(message_key)), Mapping)
+        )
+    messages.extend(
+        message
+        for message in payload.get("messages") or ()
+        if isinstance(message, Mapping)
+    )
+    files: list[Mapping[str, Any]] = []
+    for message in messages:
+        files.extend(
+            item for item in message.get("files") or () if isinstance(item, Mapping)
+        )
+        for content_part in message.get("content") or ():
+            if not isinstance(content_part, Mapping):
+                continue
+            files.extend(
+                item
+                for item in content_part.get("files") or ()
+                if isinstance(item, Mapping)
+            )
+    return tuple(files)
+
+
+def _fetch_generated_file(
     file_data: Mapping[str, Any],
     *,
     request: HarnessRequest,
     context: HarnessContext,
     file_id: str,
     mime_type: str,
+    target: str,
 ) -> dict[str, Any]:
     if not context.data_dir or not request.run_id:
         raise GeneratedFileError("generated files require a managed Harness run")
     content = file_data.get("content")
     if not isinstance(content, str) or not content:
-        content = _download_gigachat_image(file_id)
-    return persist_generated_image(
+        content = (
+            _download_gigachat_image(file_id)
+            if target == "image"
+            else _download_gigachat_file(file_id)
+        )
+    return persist_generated_file(
         context.data_dir,
         run_id=request.run_id,
         file_id=file_id,
         mime_type=mime_type,
+        target=target,
         content_base64=content,
     )
 
@@ -1098,6 +1127,24 @@ def _download_gigachat_image(file_id: str) -> str:
         content = getattr(image, "content", None)
         if not isinstance(content, str) or not content:
             raise GeneratedFileError("GigaChat returned empty generated image content")
+        return content
+    finally:
+        client.close()
+
+
+def _download_gigachat_file(file_id: str) -> str:
+    """Download generated document content with the local proxy configuration."""
+    try:
+        runtime = require_gpt2giga_preset()
+    except Gpt2GigaPresetUnavailableError as exc:
+        raise GeneratedFileError(str(exc)) from exc
+    settings = runtime.load_config().gigachat_settings
+    client = runtime.client_type(**settings.model_dump())
+    try:
+        file_response = client.get_file_content(file_id=file_id)
+        content = getattr(file_response, "content", None)
+        if not isinstance(content, str) or not content:
+            raise GeneratedFileError("GigaChat returned empty generated file content")
         return content
     finally:
         client.close()

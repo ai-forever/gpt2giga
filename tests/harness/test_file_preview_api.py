@@ -3,7 +3,10 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from gpt2giga_harness.config import HarnessConfig
-from gpt2giga_harness.generated_files import persist_generated_image
+from gpt2giga_harness.generated_files import (
+    persist_generated_file,
+    persist_generated_image,
+)
 from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.ui.app import create_app
 
@@ -82,6 +85,29 @@ def test_generated_file_preview_serves_only_hashed_harness_files(tmp_path):
     assert response.headers["content-type"] == "image/jpeg"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert escaped.status_code == 404
+
+
+def test_generated_document_is_download_only(tmp_path):
+    data_dir = tmp_path / "data"
+    generated = persist_generated_file(
+        data_dir,
+        run_id="run-1",
+        file_id="document-file-1",
+        mime_type="text/html",
+        target="doc",
+        content_base64="PGh0bWw+cmVwb3J0PC9odG1sPg==",
+    )
+    client = _client(tmp_path)
+
+    inline = client.get(generated["download_url"].split("?", 1)[0])
+    downloaded = client.get(generated["download_url"])
+
+    assert inline.status_code == 415
+    assert downloaded.status_code == 200
+    assert downloaded.content == b"<html>report</html>"
+    assert downloaded.headers["content-type"] == "application/octet-stream"
+    assert downloaded.headers["content-disposition"].startswith("attachment;")
+    assert "generated-" in downloaded.headers["content-disposition"]
 
 
 def _client(tmp_path: Path) -> TestClient:

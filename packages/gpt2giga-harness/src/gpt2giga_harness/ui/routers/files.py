@@ -5,6 +5,7 @@ from __future__ import annotations
 import mimetypes
 import os
 from pathlib import Path
+import re
 import tempfile
 
 from fastapi import APIRouter, HTTPException, Query
@@ -64,7 +65,11 @@ def create_file_preview_router(data_dir: str | None = None) -> APIRouter:
     @router.get(
         "/api/files/generated/{run_key}/{filename}", response_class=FileResponse
     )
-    def generated_file(run_key: str, filename: str) -> FileResponse:
+    def generated_file(
+        run_key: str,
+        filename: str,
+        download: str | None = Query(default=None),
+    ) -> FileResponse:
         if data_dir is None:
             raise HTTPException(status_code=404, detail="Generated file not found")
         try:
@@ -76,13 +81,18 @@ def create_file_preview_router(data_dir: str | None = None) -> APIRouter:
         if not resolved.exists() or not resolved.is_file():
             raise HTTPException(status_code=404, detail="Generated file not found")
         media_type = _preview_media_type(resolved)
-        if media_type not in _SAFE_IMAGE_TYPES:
+        if download is None and media_type not in _SAFE_IMAGE_TYPES:
             raise HTTPException(status_code=415, detail="Generated file type is unsafe")
         if resolved.stat().st_size > _MAX_PREVIEW_BYTES:
             raise HTTPException(status_code=413, detail="Generated file is too large")
         return FileResponse(
             resolved,
-            media_type=media_type,
+            media_type=media_type or "application/octet-stream",
+            filename=(
+                _safe_download_name(download, resolved.suffix)
+                if download is not None
+                else None
+            ),
             headers={
                 "Cache-Control": "private, max-age=3600",
                 "X-Content-Type-Options": "nosniff",
@@ -117,6 +127,17 @@ def create_file_preview_router(data_dir: str | None = None) -> APIRouter:
         )
 
     return router
+
+
+def _safe_download_name(value: str, suffix: str) -> str:
+    candidate = Path(value).name[:128]
+    if (
+        not candidate
+        or Path(candidate).suffix.lower() != suffix.lower()
+        or re.fullmatch(r"[A-Za-z0-9._ -]+", candidate) is None
+    ):
+        return f"generated-file{suffix.lower()}"
+    return candidate
 
 
 def _resolve_preview_path(path: str, workspace: str | None) -> tuple[Path, Path]:

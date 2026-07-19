@@ -25,7 +25,7 @@ import {
   withQuery,
 } from "../api";
 import { MessageMarkdown } from "../message-markdown";
-import { generatedImageProjection } from "../generated-image";
+import { generatedFileProjection } from "../generated-image";
 import {
   latestEditableUserMessageId,
   projectActiveMessageTimeline,
@@ -1002,7 +1002,12 @@ export function WorkbenchSurface() {
                   : ""}
               </span>
               {retainedGeneratedEvents.map((event) => (
-                <GeneratedFilePreview eventId={event.id} key={event.id} payloadUrl={event.payload_url} />
+                <GeneratedFilePreview
+                  eventId={event.id}
+                  key={event.id}
+                  locale={locale}
+                  payloadUrl={event.payload_url}
+                />
               ))}
               {!selectedRunHasRetainedResponse && streamPresentation.reasoningText ? (
                 <ReasoningDisclosure text={streamPresentation.reasoningText} locale={locale} />
@@ -1025,7 +1030,7 @@ export function WorkbenchSurface() {
                 </article>
               ) : null}
               {streamPresentation.generatedFiles.map((event) => (
-                <GeneratedImageCard key={event.id} payload={event.payload} />
+                <GeneratedFileCard key={event.id} locale={locale} payload={event.payload} />
               ))}
             </section>
             <form
@@ -1764,7 +1769,15 @@ function PlanCard({ items, locale }: { items: readonly WorkbenchPlanItem[]; loca
   );
 }
 
-function GeneratedFilePreview({ eventId, payloadUrl }: { eventId: string; payloadUrl: string }) {
+function GeneratedFilePreview({
+  eventId,
+  locale,
+  payloadUrl,
+}: {
+  eventId: string;
+  locale: "en" | "ru";
+  payloadUrl: string;
+}) {
   const payload = useQuery({
     queryKey: [...requestKeys.root, "event-payload", eventId],
     queryFn: ({ signal }) => fetchCockpit<EventPayloadResponse>(payloadUrl, signal),
@@ -1772,7 +1785,7 @@ function GeneratedFilePreview({ eventId, payloadUrl }: { eventId: string; payloa
   });
   if (payload.isPending) return <div className="generated-image-skeleton skeleton-row" />;
   if (payload.isError || payload.data.hidden) return null;
-  return <GeneratedImageCard payload={payload.data.payload} />;
+  return <GeneratedFileCard locale={locale} payload={payload.data.payload} />;
 }
 
 function loadRunPreferences(): { config: RunConfig; reasoningEffort: ReasoningEffort } {
@@ -1810,22 +1823,79 @@ function isReasoningModel(model: string): boolean {
   return model === reasoningModel || model.startsWith(`${reasoningModel}:`);
 }
 
-function GeneratedImageCard({ payload }: { payload?: Readonly<Record<string, unknown>> }) {
-  const image = generatedImageProjection(payload);
-  if (image === null) return null;
-  const size = image.sizeBytes === null ? null : formatBytes(image.sizeBytes);
+function GeneratedFileCard({
+  locale,
+  payload,
+}: {
+  locale: "en" | "ru";
+  payload?: Readonly<Record<string, unknown>>;
+}) {
+  const file = generatedFileProjection(payload);
+  if (file === null) return null;
+  const size = file.sizeBytes === null ? null : formatBytes(file.sizeBytes);
+  const downloadLabel = `${message(locale, "downloadFile")} ${file.filename}`;
   return (
-    <article className="message-entry assistant generated-image-message">
+    <article className={`message-entry assistant generated-file-message${file.isImage ? " image" : ""}`}>
       <header className="message-entry-header">
-        <span className="message-role">assistant · image generation</span>
+        <span className="message-role">
+          assistant · {message(locale, file.isImage ? "generatedImage" : "generatedFile")}
+        </span>
       </header>
-      <figure>
-        <a href={image.previewUrl} rel="noreferrer" target="_blank">
-          <img alt={image.filename} loading="lazy" src={image.previewUrl} />
-        </a>
-        <figcaption>{image.filename}{size === null ? "" : ` · ${size}`}</figcaption>
-      </figure>
+      {file.isImage && file.previewUrl !== null ? (
+        <figure>
+          <a className="generated-file-preview" href={file.previewUrl} rel="noreferrer" target="_blank">
+            <img alt={file.filename} loading="lazy" src={file.previewUrl} />
+          </a>
+          <figcaption>
+            <span>{file.filename}{size === null ? "" : ` · ${size}`}</span>
+            <DownloadFileLink
+              downloadUrl={file.downloadUrl}
+              filename={file.filename}
+              label={downloadLabel}
+            />
+          </figcaption>
+        </figure>
+      ) : (
+        <div className="generated-document-row">
+          <span aria-hidden="true" className="generated-document-icon">◇</span>
+          <span>
+            <strong>{file.filename}</strong>
+            <small>{file.mimeType}{size === null ? "" : ` · ${size}`}</small>
+          </span>
+          <DownloadFileLink
+            downloadUrl={file.downloadUrl}
+            filename={file.filename}
+            label={downloadLabel}
+          />
+        </div>
+      )}
     </article>
+  );
+}
+
+function DownloadFileLink({
+  downloadUrl,
+  filename,
+  label,
+}: {
+  downloadUrl: string;
+  filename: string;
+  label: string;
+}) {
+  return (
+    <a
+      aria-label={label}
+      className="generated-file-download"
+      download={filename}
+      href={downloadUrl}
+      title={label}
+    >
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M12 3v12" />
+        <path d="m7 10 5 5 5-5" />
+        <path d="M5 20h14" />
+      </svg>
+    </a>
   );
 }
 
