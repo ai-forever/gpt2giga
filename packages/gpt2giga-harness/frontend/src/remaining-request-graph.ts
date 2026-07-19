@@ -14,12 +14,81 @@ import {
 
 const rootKey = ["cockpit", "remaining-surfaces"] as const;
 
+export interface IntegrationFlowInventory {
+  sources: Array<{ id: string; network_required: boolean }>;
+  targets: Array<{
+    id: string;
+    component_types: string[];
+    scopes: string[];
+    execution_owner: string;
+  }>;
+  catalog: Array<{
+    catalog_id: string;
+    package_id: string;
+    version: string;
+    component_types: string[];
+    target_ids: string[];
+    scopes: string[];
+    trust_decision: string;
+  }>;
+  flows: IntegrationFlowSummary[];
+  content_free: true;
+}
+
+export interface IntegrationFlowSummary {
+  id: string;
+  plan_id: string;
+  status: string;
+  package_id: string;
+  package_version: string;
+  target_id: string;
+  scope: string;
+  verification_status: string;
+  rollback_available: boolean;
+  events: Array<{ stage: string; status: string; occurred_at: string; code: string | null }>;
+}
+
+export interface IntegrationFlowPlan {
+  plan_id: string;
+  package: {
+    id: string;
+    version: string;
+    publisher: string;
+    license: string;
+    checksum: string;
+    immutable_ref: string;
+  };
+  target: { id: string; scope: string; execution_owner: string; executable: boolean };
+  risk: { decision: string; install_authorized: false };
+  permissions: {
+    network: boolean;
+    native_consent: boolean;
+    user_home: boolean;
+    requirements: Array<{ id: string; type: string; reason: string }>;
+  };
+  configuration: { diff: string[]; restart_required: boolean; fields: string[] };
+  verification_steps: string[];
+  rollback_steps: string[];
+  handoff_reason: string | null;
+}
+
+export interface IntegrationFlowPreviewResponse {
+  flow: IntegrationFlowSummary;
+  plan: IntegrationFlowPlan;
+}
+
+export interface IntegrationFlowMutationResponse {
+  flow: IntegrationFlowSummary;
+  handoff?: { owner: string; reason: string; mutation_performed: false };
+}
+
 export const remainingRequestKeys = {
   automation: () => [...rootKey, "automation"] as const,
   arena: (arenaId: string) => [...rootKey, "arena", arenaId] as const,
   arenaFiles: (query: string) => [...rootKey, "arena-files", query] as const,
   evaluation: () => [...rootKey, "evaluation"] as const,
   integrations: () => [...rootKey, "integrations"] as const,
+  integrationFlows: () => [...rootKey, "integration-flows"] as const,
 };
 
 export function arenaDetailOptions(arenaId: string) {
@@ -89,5 +158,13 @@ export function integrationsSurfaceOptions() {
       return projectIntegrations(harnesses, settings, [modelsV1, modelsV2], mcp);
     },
     staleTime: 15_000,
+  });
+}
+
+export function integrationFlowOptions() {
+  return queryOptions({
+    queryKey: remainingRequestKeys.integrationFlows(),
+    queryFn: ({ signal }) => fetchCockpit<IntegrationFlowInventory>("/api/integrations", signal),
+    staleTime: 5_000,
   });
 }

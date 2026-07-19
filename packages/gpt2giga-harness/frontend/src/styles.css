@@ -648,6 +648,22 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .mutation-error, .mutation-success { margin: 12px 0 0; font-size: 11px; line-height: 1.5; }
 .mutation-error { color: var(--danger); }
 .mutation-success { color: var(--success); }
+.integration-wizard { display: grid; gap: 14px; padding-bottom: 24px; }
+.wizard-description { max-width: 720px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.wizard-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+.wizard-fields .span-two { grid-column: 1 / -1; }
+.integration-preview { margin-top: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-raised); padding: 16px; }
+.integration-preview-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.integration-preview-heading h2 { margin: 4px 0 0; overflow-wrap: anywhere; font-size: 16px; }
+.check-control { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.check-control input { margin-top: 1px; }
+.wizard-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.flow-status, .handoff-notice { margin: 12px 0 0; border-radius: 6px; background: var(--surface); padding: 9px 10px; font-size: 11px; line-height: 1.45; }
+.handoff-notice { color: var(--warning); }
+.flow-list { display: grid; gap: 8px; margin-top: 14px; }
+.flow-list article { display: grid; gap: 5px; border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
+.flow-list article > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.flow-list small, .flow-list span { overflow-wrap: anywhere; color: var(--muted); }
 .action-unavailable { margin: 12px 0; border-left: 2px solid var(--warning); padding-left: 10px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .automation-action-receipt { display: grid; gap: 8px; margin-top: 14px; border: 1px solid color-mix(in srgb, var(--success) 48%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--success) 6%, var(--surface)); padding: 12px; }
 .automation-action-receipt strong { color: var(--success); font-size: 12px; }
@@ -684,6 +700,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .operations-row { min-height: 66px; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
   .operations-row > span:nth-child(2), .operations-row > span:nth-child(3) { display: none; }
   .operations-toolbar { min-height: 58px; }
+  .wizard-fields { grid-template-columns: minmax(0, 1fr); }
+  .wizard-fields .span-two { grid-column: auto; }
+  .integration-preview { padding: 12px; }
 }
 
 /* UX-06 simultaneous-chat Arena */

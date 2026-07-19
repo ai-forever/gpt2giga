@@ -29,7 +29,7 @@ _COCKPIT_V2_PATH = re.compile(
     r"(?:work(?:/[^/]+)?|runs(?:/[^/]+)?|"
     r"automation(?:/(?:agents|workflows|schedules))?|"
     r"evaluation(?:/(?:arena|evals|baselines))?|"
-    r"integrations(?:/(?:harnesses|models|mcp|doctor))?|settings)/?"
+    r"integrations(?:/(?:add|harnesses|models|mcp|doctor))?|settings)/?"
 )
 _COCKPIT_V2_SHELL_HEADERS = {
     "Cache-Control": "no-cache",

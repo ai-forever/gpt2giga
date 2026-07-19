@@ -56,6 +56,13 @@ from gpt2giga_harness.editor import (
     workspace_for_run,
 )
 from gpt2giga_harness.execution import ExecutionTransport
+from gpt2giga_harness.integration_flows import (
+    IntegrationFlowConflictError,
+    IntegrationFlowError,
+    IntegrationFlowNotFoundError,
+    IntegrationFlowService,
+    integration_flow_record_to_dict,
+)
 from gpt2giga_harness.executables import (
     executable_resolution_to_dict,
     set_user_executable,
@@ -248,6 +255,12 @@ def main(argv: list[str] | None = None) -> int:
     except EvalSpecNotFoundError as exc:
         print(f"Unknown eval: {exc.args[0]}", file=sys.stderr)
         return 2
+    except IntegrationFlowNotFoundError as exc:
+        print(f"Unknown integration flow: {exc.args[0]}", file=sys.stderr)
+        return 2
+    except (IntegrationFlowConflictError, IntegrationFlowError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -367,6 +380,48 @@ def build_parser() -> argparse.ArgumentParser:
     provider_migrate.add_argument("--dry-run", action="store_true")
     provider_migrate.add_argument("--json", action="store_true")
     provider_migrate.set_defaults(handler=_handle_provider_migrate)
+
+    integration = subparsers.add_parser("integration")
+    integration_subparsers = integration.add_subparsers(dest="integration_command")
+    integration_list = integration_subparsers.add_parser("list")
+    integration_list.add_argument("--json", action="store_true")
+    integration_list.set_defaults(handler=_handle_integration_list)
+    integration_preview = integration_subparsers.add_parser("preview")
+    integration_preview.add_argument(
+        "--source",
+        required=True,
+        choices=("catalog", "marketplace", "git", "local", "package", "raw_descriptor"),
+    )
+    integration_preview.add_argument("--catalog-id")
+    integration_preview.add_argument("--manifest")
+    integration_preview.add_argument("--target", required=True)
+    integration_preview.add_argument(
+        "--scope",
+        required=True,
+        choices=("managed_home", "project", "user_home"),
+    )
+    integration_preview.add_argument("--workspace")
+    integration_preview.add_argument("--package-id")
+    integration_preview.add_argument("--configuration-json", default="{}")
+    integration_preview.add_argument("--json", action="store_true")
+    integration_preview.set_defaults(handler=_handle_integration_preview)
+    integration_status = integration_subparsers.add_parser("status")
+    integration_status.add_argument("flow_id")
+    integration_status.add_argument("--json", action="store_true")
+    integration_status.set_defaults(handler=_handle_integration_status)
+    integration_apply = integration_subparsers.add_parser("apply")
+    integration_apply.add_argument("flow_id")
+    integration_apply.add_argument("--plan-id", required=True)
+    integration_apply.add_argument("--authority", required=True)
+    integration_apply.add_argument("--allow-network", action="store_true")
+    integration_apply.add_argument("--allow-user-home", action="store_true")
+    integration_apply.add_argument("--ack-native-consent", action="store_true")
+    integration_apply.add_argument("--json", action="store_true")
+    integration_apply.set_defaults(handler=_handle_integration_apply)
+    integration_rollback = integration_subparsers.add_parser("rollback")
+    integration_rollback.add_argument("flow_id")
+    integration_rollback.add_argument("--json", action="store_true")
+    integration_rollback.set_defaults(handler=_handle_integration_rollback)
 
     init = subparsers.add_parser("init")
     init.add_argument("--workspace", default=None)
@@ -977,6 +1032,119 @@ def _handle_config_unset(args: argparse.Namespace, config: HarnessConfig) -> int
         print(f"Removed {args.key} from {path}")
     else:
         print(f"No override configured for {args.key} in {path}")
+    return 0
+
+
+def _handle_integration_list(args: argparse.Namespace, config: HarnessConfig) -> int:
+    payload = IntegrationFlowService(config.data_dir).inventory()
+    if args.json:
+        _print_json(payload)
+    else:
+        print(
+            "Integration sources: "
+            + ", ".join(item["id"] for item in payload["sources"])
+        )
+        print(f"Targets: {len(payload['targets'])}")
+        print(f"Catalog entries: {len(payload['catalog'])}")
+        print(f"Recent flows: {len(payload['flows'])}")
+    return 0
+
+
+def _handle_integration_preview(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    try:
+        configuration = json.loads(args.configuration_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("configuration-json must be valid JSON") from exc
+    manifest = None
+    if args.manifest:
+        try:
+            manifest = json.loads(
+                Path(args.manifest).expanduser().read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("manifest must be a readable JSON object") from exc
+    payload = IntegrationFlowService(config.data_dir).preview(
+        {
+            "source": args.source,
+            "catalog_id": args.catalog_id,
+            "manifest": manifest,
+            "target_id": args.target,
+            "scope": args.scope,
+            "workspace": args.workspace,
+            "package_id": args.package_id,
+            "configuration": configuration,
+        }
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        plan = payload["plan"]
+        print(f"Flow: {payload['flow']['id']}")
+        print(f"Plan: {plan['plan_id']}")
+        print(f"Package: {plan['package']['id']}@{plan['package']['version']}")
+        print(f"Target: {plan['target']['id']} ({plan['target']['scope']})")
+        print(f"Risk: {plan['risk']['decision']}")
+        print(
+            "Next: integration apply "
+            f"{payload['flow']['id']} --plan-id {plan['plan_id']} "
+            "--authority <operator>"
+        )
+    return 0
+
+
+def _handle_integration_status(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = {
+        "flow": integration_flow_record_to_dict(
+            IntegrationFlowService(config.data_dir).get(args.flow_id)
+        )
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        flow = payload["flow"]
+        print(f"Flow: {flow['id']}")
+        print(f"Status: {flow['status']}")
+        print(f"Verification: {flow['verification_status']}")
+    return 0
+
+
+def _handle_integration_apply(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = IntegrationFlowService(config.data_dir).apply(
+        args.flow_id,
+        plan_id=args.plan_id,
+        authority=args.authority,
+        allow_network=args.allow_network,
+        allow_user_home=args.allow_user_home,
+        native_consent_acknowledged=args.ack_native_consent,
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Flow: {payload['flow']['id']}")
+        print(f"Status: {payload['flow']['status']}")
+        print(f"Verification: {payload['flow']['verification_status']}")
+    return 0
+
+
+def _handle_integration_rollback(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = IntegrationFlowService(config.data_dir).rollback(args.flow_id)
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Flow: {payload['flow']['id']}")
+        print(f"Status: {payload['flow']['status']}")
     return 0
 
 

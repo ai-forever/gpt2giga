@@ -345,6 +345,70 @@ def test_cli_doctor_json_passes_explicit_workspace(capsys, monkeypatch, tmp_path
     assert payload["ok"] is True
 
 
+def test_cli_integration_flow_matches_api_preview_status_and_handoff(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+
+    assert cli.main(["integration", "list", "--json"]) == 0
+    inventory = json.loads(capsys.readouterr().out)
+    assert {item["id"] for item in inventory["sources"]} >= {
+        "catalog",
+        "raw_descriptor",
+    }
+
+    assert (
+        cli.main(
+            [
+                "integration",
+                "preview",
+                "--source",
+                "raw_descriptor",
+                "--package-id",
+                "cli-mcp",
+                "--target",
+                "codex-mcp",
+                "--scope",
+                "managed_home",
+                "--configuration-json",
+                '{"transport":"stdio","command":"cli-mcp"}',
+                "--json",
+            ]
+        )
+        == 0
+    )
+    preview = json.loads(capsys.readouterr().out)
+    flow_id = preview["flow"]["id"]
+    plan_id = preview["plan"]["plan_id"]
+
+    assert cli.main(["integration", "status", flow_id, "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["flow"]["status"] == (
+        "awaiting_approval"
+    )
+
+    assert (
+        cli.main(
+            [
+                "integration",
+                "apply",
+                flow_id,
+                "--plan-id",
+                plan_id,
+                "--authority",
+                "cli-operator",
+                "--ack-native-consent",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    applied = json.loads(capsys.readouterr().out)
+    assert applied["flow"]["status"] == "handoff_required"
+    assert applied["handoff"]["mutation_performed"] is False
+
+
 def test_cli_doctor_exports_support_report_and_fails_ci_threshold(
     capsys,
     monkeypatch,

@@ -251,6 +251,15 @@ CONFORMANCE_EVIDENCE = {
             ),
         ),
         ConformanceEvidence(
+            id="integrations.flow",
+            behaviors=frozenset(ConformanceBehavior),
+            test_nodes=(
+                "tests/harness/test_integrations_api.py::test_integration_api_keeps_preview_apply_progress_and_rollback_equivalent",
+                "tests/harness/test_integrations_api.py::test_integration_api_validates_fields_and_never_returns_secret_payloads",
+                "tests/harness/test_integration_flows.py::test_flow_rejects_secret_values_stale_approval_and_records_failure",
+            ),
+        ),
+        ConformanceEvidence(
             id="auth.bootstrap",
             behaviors=frozenset(
                 {
@@ -276,6 +285,7 @@ _EDITOR = (*_AUTH, "external.editor")
 _NATIVE_CONTROL = (*_AUTH, "external.native_control")
 _POLICY = (*_AUTH, "policy.lifecycle")
 _PROVIDER_SETTINGS = (*_AUTH, "provider.settings")
+_INTEGRATION_FLOW = (*_AUTH, "integrations.flow")
 
 
 def _route(
@@ -436,6 +446,25 @@ MUTATION_ROUTE_CONTRACTS = (
         EnforcementControl.OPTIMISTIC_LOCAL_STATE,
         "workflow_catalog.save",
         evidence=_OPTIMISTIC,
+    ),
+    _route(
+        "POST",
+        "/api/integrations/preview",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "integration_flow.preview",
+        evidence=_INTEGRATION_FLOW,
+    ),
+    *_many(
+        "POST",
+        (
+            "/api/integrations/flows/{flow_id}/apply",
+            "/api/integrations/flows/{flow_id}/rollback",
+        ),
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.REVIEW_BINDING,
+        "integration_flow.exact_plan",
+        evidence=_INTEGRATION_FLOW,
     ),
     *_many(
         "POST",

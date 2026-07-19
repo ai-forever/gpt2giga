@@ -83,6 +83,7 @@ from gpt2giga_harness.editor import (
     workspace_for_run,
 )
 from gpt2giga_harness.execution import ExecutionTransport
+from gpt2giga_harness.integration_flows import IntegrationFlowService
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
     NativePromptDelivery,
@@ -249,6 +250,7 @@ from gpt2giga_harness.ui.routers.approvals import router as approvals_router
 from gpt2giga_harness.ui.routers.cockpit import router as cockpit_router
 from gpt2giga_harness.ui.routers.evaluate import router as evaluate_router
 from gpt2giga_harness.ui.routers.files import create_file_preview_router
+from gpt2giga_harness.ui.routers.integrations import router as integrations_router
 from gpt2giga_harness.ui.routers.provider_handoffs import (
     create_provider_handoff_router,
 )
@@ -298,6 +300,7 @@ def create_app(
     native_process_manager: NativeProcessManager | None = None,
     runtime_store: RuntimeCoordinationStore | None = None,
     provider_settings_service: ProviderSettingsService | None = None,
+    integration_flow_service: IntegrationFlowService | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
@@ -326,6 +329,9 @@ def create_app(
     memory_store = FilesystemProjectMemoryStore()
     settings_store = HarnessSettingsStore(config.data_dir, config)
     provider_settings_service = provider_settings_service or ProviderSettingsService(
+        config.data_dir
+    )
+    integration_flow_service = integration_flow_service or IntegrationFlowService(
         config.data_dir
     )
     runner = HarnessSessionRunner(
@@ -410,6 +416,7 @@ def create_app(
     app.state.harness_run_event_broker = run_event_broker
     app.state.harness_settings_store = settings_store
     app.state.harness_provider_settings_service = provider_settings_service
+    app.state.harness_integration_flow_service = integration_flow_service
 
     def _approval_gate(
         action: PermissionAction,
@@ -3137,6 +3144,7 @@ def create_app(
     app.include_router(approvals_router)
     app.include_router(cockpit_router)
     app.include_router(evaluate_router)
+    app.include_router(integrations_router)
     app.include_router(tools_router)
     app.include_router(workflows_router)
     app.include_router(runs_router)

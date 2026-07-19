@@ -46,6 +46,7 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/harnesses", component: integrationsComponent, validateSearch: validateOperationalSearch }),
   createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/models", component: integrationsComponent, validateSearch: validateOperationalSearch }),
   createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/mcp", component: integrationsComponent, validateSearch: validateOperationalSearch }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/add", component: integrationsComponent, validateSearch: validateOperationalSearch }),
   createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/integrations/doctor", component: integrationsComponent, validateSearch: validateOperationalSearch }),
   createRoute({
     getParentRoute: () => rootRoute,

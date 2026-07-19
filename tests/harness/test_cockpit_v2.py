@@ -140,6 +140,7 @@ def test_legacy_selected_deep_link_cannot_set_redirect_authority(tmp_path):
         "/cockpit-v2/integrations/harnesses",
         "/cockpit-v2/integrations/models",
         "/cockpit-v2/integrations/mcp",
+        "/cockpit-v2/integrations/add",
         "/cockpit-v2/integrations/doctor",
     ),
 )

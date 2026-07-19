@@ -113,6 +113,8 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/files/preview"),
         ("GET", "/api/harnesses"),
         ("GET", "/api/health"),
+        ("GET", "/api/integrations"),
+        ("GET", "/api/integrations/flows/{flow_id}"),
         ("GET", "/api/models"),
         ("GET", "/api/native/processes/{process_id}"),
         ("GET", "/api/native/processes/{process_id}/output"),

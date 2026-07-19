@@ -14,6 +14,7 @@ export type OperationalPath =
   | "/cockpit-v2/integrations/harnesses"
   | "/cockpit-v2/integrations/models"
   | "/cockpit-v2/integrations/mcp"
+  | "/cockpit-v2/integrations/add"
   | "/cockpit-v2/integrations/doctor";
 
 export interface OperationalTab {
