@@ -717,7 +717,7 @@ def test_generated_document_download_uses_local_proxy_gigachat_config(monkeypatc
         def __init__(self, **kwargs):
             captured["settings"] = kwargs
 
-        def get_file_content(self, *, file_id):
+        def get_image(self, file_id):
             captured["file_id"] = file_id
             return SimpleNamespace(content="encoded-document")
 
