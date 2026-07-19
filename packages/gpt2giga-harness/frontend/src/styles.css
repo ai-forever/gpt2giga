@@ -72,6 +72,11 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--canvas); }
+@media (min-width: 761px) {
+  html.workbench-scroll-lock,
+  html.workbench-scroll-lock body,
+  html.workbench-scroll-lock #root { height: 100%; min-height: 0; overflow: hidden; overscroll-behavior: none; }
+}
 button, select { font: inherit; }
 input, textarea { font: inherit; }
 button { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); padding: 8px 11px; cursor: pointer; text-decoration: none; font-size: 13px; font-weight: 600; }

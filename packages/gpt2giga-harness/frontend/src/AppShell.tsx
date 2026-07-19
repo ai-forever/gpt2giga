@@ -60,6 +60,18 @@ export function AppShell() {
   }, [preferences]);
 
   useEffect(() => {
+    const root = globalThis.document.documentElement;
+    const body = globalThis.document.body;
+    const workbenchActive = activeSurface === "work";
+    root.classList.toggle("workbench-scroll-lock", workbenchActive);
+    if (workbenchActive) {
+      root.scrollTop = 0;
+      body.scrollTop = 0;
+    }
+    return () => root.classList.remove("workbench-scroll-lock");
+  }, [activeSurface]);
+
+  useEffect(() => {
     if (typeof globalThis.EventSource !== "function") return;
     return observeRunsCenterUpdates(() => {
       void queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() });
