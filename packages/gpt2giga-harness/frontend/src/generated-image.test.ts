@@ -13,6 +13,7 @@ describe("generatedFileProjection", () => {
     })).toEqual({
       downloadUrl: "/api/files/generated/run/image.png?download=result.png",
       filename: "result.png",
+      htmlPreviewUrl: null,
       isImage: true,
       mimeType: "image/png",
       previewUrl: "/api/files/generated/run/image.png",
@@ -26,6 +27,7 @@ describe("generatedFileProjection", () => {
     })).toEqual({
       downloadUrl: "/api/files/generated/run/report.html?download=report.html",
       filename: "report.html",
+      htmlPreviewUrl: "/api/files/generated/run/report.html?preview=html",
       isImage: false,
       mimeType: "text/html",
       previewUrl: null,

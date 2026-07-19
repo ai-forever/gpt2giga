@@ -1876,10 +1876,15 @@ function GeneratedFileCard({
   locale: "en" | "ru";
   payload?: Readonly<Record<string, unknown>>;
 }) {
+  const [htmlPreviewOpen, setHtmlPreviewOpen] = useState(false);
   const file = generatedFileProjection(payload);
   if (file === null) return null;
   const size = file.sizeBytes === null ? null : formatBytes(file.sizeBytes);
   const downloadLabel = `${message(locale, "downloadFile")} ${file.filename}`;
+  const htmlPreviewLabel = message(
+    locale,
+    htmlPreviewOpen ? "closeHtmlPreview" : "openHtmlPreview",
+  );
   return (
     <article className={`message-entry assistant generated-file-message${file.isImage ? " image" : ""}`}>
       <header className="message-entry-header">
@@ -1902,17 +1907,43 @@ function GeneratedFileCard({
           </figcaption>
         </figure>
       ) : (
-        <div className="generated-document-row">
-          <span aria-hidden="true" className="generated-document-icon">◇</span>
-          <span>
-            <strong>{file.filename}</strong>
-            <small>{file.mimeType}{size === null ? "" : ` · ${size}`}</small>
-          </span>
-          <DownloadFileLink
-            downloadUrl={file.downloadUrl}
-            filename={file.filename}
-            label={downloadLabel}
-          />
+        <div className={`generated-document${file.htmlPreviewUrl === null ? "" : " html"}`}>
+          <div className="generated-document-row">
+            <span aria-hidden="true" className="generated-document-icon">◇</span>
+            <span>
+              <strong>{file.filename}</strong>
+              <small>{file.mimeType}{size === null ? "" : ` · ${size}`}</small>
+            </span>
+            {file.htmlPreviewUrl === null ? null : (
+              <button
+                aria-expanded={htmlPreviewOpen}
+                aria-label={htmlPreviewLabel}
+                className="generated-file-preview-toggle"
+                onClick={() => setHtmlPreviewOpen((open) => !open)}
+                title={htmlPreviewLabel}
+                type="button"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M2.8 12s3.3-6 9.2-6 9.2 6 9.2 6-3.3 6-9.2 6-9.2-6-9.2-6Z" />
+                  <circle cx="12" cy="12" r="2.6" />
+                </svg>
+              </button>
+            )}
+            <DownloadFileLink
+              downloadUrl={file.downloadUrl}
+              filename={file.filename}
+              label={downloadLabel}
+            />
+          </div>
+          {file.htmlPreviewUrl !== null && htmlPreviewOpen ? (
+            <iframe
+              className="generated-html-preview"
+              referrerPolicy="no-referrer"
+              sandbox="allow-same-origin"
+              src={file.htmlPreviewUrl}
+              title={`${message(locale, "generatedFile")}: ${file.filename}`}
+            />
+          ) : null}
         </div>
       )}
     </article>

@@ -1,6 +1,7 @@
 export interface GeneratedFileProjection {
   downloadUrl: string;
   filename: string;
+  htmlPreviewUrl: string | null;
   isImage: boolean;
   mimeType: string;
   previewUrl: string | null;
@@ -23,9 +24,13 @@ export function generatedFileProjection(
     ? payload.mime_type
     : "application/octet-stream";
   const isImage = mimeType.startsWith("image/") && previewUrl !== null;
+  const htmlPreviewUrl = mimeType.toLowerCase() === "text/html"
+    ? `${downloadUrl.split(/[?#]/, 1)[0]}?preview=html`
+    : null;
   return {
     downloadUrl,
     filename,
+    htmlPreviewUrl,
     isImage,
     mimeType,
     previewUrl,

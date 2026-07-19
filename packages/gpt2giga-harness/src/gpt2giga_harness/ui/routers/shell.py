@@ -37,7 +37,7 @@ _COCKPIT_V2_SHELL_HEADERS = {
         "default-src 'none'; script-src 'self'; style-src 'self'; "
         "img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; "
         "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; "
-        "object-src 'none'; worker-src 'none'"
+        "frame-src 'self'; object-src 'none'; worker-src 'none'"
     ),
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
