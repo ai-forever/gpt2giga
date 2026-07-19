@@ -1939,7 +1939,7 @@ function GeneratedFileCard({
             <iframe
               className="generated-html-preview"
               referrerPolicy="no-referrer"
-              sandbox="allow-same-origin"
+              sandbox="allow-same-origin allow-scripts"
               src={file.htmlPreviewUrl}
               title={`${message(locale, "generatedFile")}: ${file.filename}`}
             />

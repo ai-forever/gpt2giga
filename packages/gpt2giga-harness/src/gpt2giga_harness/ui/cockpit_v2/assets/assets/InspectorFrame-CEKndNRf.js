@@ -1,0 +1,1 @@
+import{t as e}from"./jsx-runtime-DUAcabCT.js";import{A as t}from"./index-Dfnm4fZW.js";var n=e();function r({children:e,locale:r,title:i}){return(0,n.jsxs)(`section`,{className:`lazy-inspector`,"aria-label":i,children:[(0,n.jsx)(`div`,{className:`eyebrow`,children:t(r,`lazyBoundary`)}),(0,n.jsx)(`h2`,{children:i}),(0,n.jsx)(`p`,{children:e})]})}export{r as t};

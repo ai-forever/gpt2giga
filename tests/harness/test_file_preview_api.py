@@ -113,7 +113,13 @@ def test_generated_html_has_sandboxed_preview_and_keeps_download(tmp_path):
     )
     assert b"report</html>" in previewed.content
     assert previewed.headers["content-type"] == "text/html; charset=utf-8"
-    assert "sandbox" in previewed.headers["content-security-policy"]
+    assert "sandbox allow-scripts" in previewed.headers["content-security-policy"]
+    assert "allow-same-origin" not in previewed.headers["content-security-policy"]
+    assert (
+        "script-src 'unsafe-inline' 'unsafe-eval' blob: data:"
+        in (previewed.headers["content-security-policy"])
+    )
+    assert "connect-src 'none'" in previewed.headers["content-security-policy"]
     assert "default-src 'none'" in previewed.headers["content-security-policy"]
     assert previewed.headers["referrer-policy"] == "no-referrer"
     assert "content-disposition" not in previewed.headers

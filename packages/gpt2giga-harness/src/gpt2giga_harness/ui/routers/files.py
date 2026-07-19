@@ -23,13 +23,20 @@ from gpt2giga_harness.safe_paths import (
 from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 
 _MAX_PREVIEW_BYTES = 25 * 1024 * 1024
+# The iframe starts same-origin so browser-session auth is sent. This response
+# sandbox deliberately omits allow-same-origin, making the executed document opaque.
 _GENERATED_HTML_CSP = (
-    "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; "
-    "font-src data:; base-uri 'none'; form-action 'none'"
+    "sandbox allow-scripts; default-src 'none'; "
+    "script-src 'unsafe-inline' 'unsafe-eval' blob: data:; "
+    "img-src data: blob:; style-src 'unsafe-inline'; font-src data: blob:; "
+    "media-src data: blob:; connect-src 'none'; worker-src blob:; "
+    "base-uri 'none'; form-action 'none'; object-src 'none'"
 )
 _GENERATED_HTML_META_CSP = (
-    "default-src 'none'; img-src data:; style-src 'unsafe-inline'; "
-    "font-src data:; base-uri 'none'; form-action 'none'"
+    "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob: data:; "
+    "img-src data: blob:; style-src 'unsafe-inline'; font-src data: blob:; "
+    "media-src data: blob:; connect-src 'none'; worker-src blob:; "
+    "base-uri 'none'; form-action 'none'; object-src 'none'"
 )
 _SAFE_IMAGE_TYPES = frozenset(
     {
