@@ -85,7 +85,11 @@ const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
 const runPreferencesKey = "gpt2giga.cockpit-v2.run-preferences.v1";
 const reasoningModel = "GigaChat-2-Reasoning";
 type SessionAction = "archive" | "delete";
-type MessageAction = { kind: MessageActionKind; messageId: string };
+type MessageAction = {
+  kind: MessageActionKind;
+  messageId: string;
+  role: "assistant" | "user";
+};
 type RunConfig = { apiMode: string; harnessId: string; mode: string; model: string };
 type ReasoningEffort = "high" | "low" | "medium";
 type AdvancedRunConfig = {
@@ -968,12 +972,13 @@ export function WorkbenchSurface() {
                       <span className="message-header-meta">
                         <TokenUsage usage={item.usage} />
                         <time>{formatTimestamp(item.created_at, locale)}</time>
-                        {item.role === "assistant" || item.id === latestUserMessageId ? (
-                          <MessageActionButton
-                            action={item.role === "assistant" ? "copy" : "edit"}
+                        {item.role === "assistant" || item.role === "user" ? (
+                          <MessageActions
+                            canEdit={item.id === latestUserMessageId}
                             locale={locale}
                             messageId={item.id}
                             mutation={messageAction}
+                            role={item.role}
                           />
                         ) : null}
                       </span>
@@ -996,7 +1001,9 @@ export function WorkbenchSurface() {
                   ? message(
                       locale,
                       messageAction.data.kind === "copy"
-                        ? "assistantMessageCopied"
+                        ? messageAction.variables.role === "user"
+                          ? "userMessageCopied"
+                          : "assistantMessageCopied"
                         : "userMessageLoaded",
                     )
                   : ""}
@@ -1647,40 +1654,79 @@ function ToolActivityCard({
   );
 }
 
+function MessageActions({
+  canEdit,
+  locale,
+  messageId,
+  mutation,
+  role,
+}: {
+  canEdit: boolean;
+  locale: "en" | "ru";
+  messageId: string;
+  mutation: UseMutationResult<ResolvedMessageAction, Error, MessageAction>;
+  role: "assistant" | "user";
+}) {
+  return (
+    <span className="message-actions">
+      <MessageActionButton
+        action="copy"
+        locale={locale}
+        messageId={messageId}
+        mutation={mutation}
+        role={role}
+      />
+      {canEdit ? (
+        <MessageActionButton
+          action="edit"
+          locale={locale}
+          messageId={messageId}
+          mutation={mutation}
+          role={role}
+        />
+      ) : null}
+    </span>
+  );
+}
+
 function MessageActionButton({
   action,
   locale,
   messageId,
   mutation,
+  role,
 }: {
   action: MessageActionKind;
   locale: "en" | "ru";
   messageId: string;
   mutation: UseMutationResult<ResolvedMessageAction, Error, MessageAction>;
+  role: "assistant" | "user";
 }) {
-  const active = mutation.isPending && mutation.variables?.messageId === messageId;
+  const active = mutation.isPending
+    && mutation.variables?.messageId === messageId
+    && mutation.variables.kind === action;
   const succeeded = mutation.isSuccess
     && mutation.variables?.messageId === messageId
     && mutation.data.kind === action;
   const label = message(
     locale,
-    action === "copy" ? "copyAssistantMessage" : "editUserMessage",
+    action === "copy"
+      ? role === "user" ? "copyUserMessage" : "copyAssistantMessage"
+      : "editUserMessage",
   );
   return (
-    <span className="message-actions">
-      <button
-        aria-label={label}
-        className={`message-action${succeeded ? " success" : ""}`}
-        disabled={mutation.isPending}
-        onClick={() => mutation.mutate({ kind: action, messageId })}
-        title={label}
-        type="button"
-      >
-        {active ? <span aria-hidden="true">…</span> : succeeded ? (
-          <span aria-hidden="true">✓</span>
-        ) : action === "copy" ? <CopyIcon /> : <EditIcon />}
-      </button>
-    </span>
+    <button
+      aria-label={label}
+      className={`message-action${succeeded ? " success" : ""}`}
+      disabled={mutation.isPending}
+      onClick={() => mutation.mutate({ kind: action, messageId, role })}
+      title={label}
+      type="button"
+    >
+      {active ? <span aria-hidden="true">…</span> : succeeded ? (
+        <span aria-hidden="true">✓</span>
+      ) : action === "copy" ? <CopyIcon /> : <EditIcon />}
+    </button>
   );
 }
 

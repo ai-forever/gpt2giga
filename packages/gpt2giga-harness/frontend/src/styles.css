@@ -237,7 +237,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .confirmation-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 .message-region { min-height: 0; overflow: auto; padding: 22px clamp(18px, 3vw, 32px) 28px; scrollbar-gutter: stable; }
 .message-entry { width: fit-content; max-width: min(820px, 86%); margin: 8px 0; border: 1px solid var(--border); border-radius: 14px 14px 14px 4px; background: var(--surface-muted); padding: 12px 14px; }
-.message-entry.assistant { width: min(100%, 860px); max-width: 100%; margin: 10px 0 22px; border: 0; border-radius: 0; background: transparent; padding: 6px 0 12px; }
+.message-entry.assistant, .tool-activity-card { width: min(620px, 86%); }
+.message-entry.assistant { margin: 10px 0 22px; border-radius: 10px; background: color-mix(in srgb, var(--surface-muted) 68%, var(--surface)); }
 .message-entry.user { margin-left: auto; border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); border-radius: 14px 14px 4px; background: var(--accent-soft); }
 .message-entry, .session-row, .run-row, .timeline-row { content-visibility: auto; contain-intrinsic-size: 0 64px; }
 .message-entry-header { min-height: 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 5px; }
@@ -253,7 +254,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .message-entry > p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; }
 .message-entry.event { width: 100%; max-width: 820px; margin: 4px 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; padding: 8px 0; }
 .message-entry.event p { margin-top: 3px; color: var(--muted); font-size: 12px; }
-.tool-activity-card { width: min(620px, 86%); margin: 7px 0; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface-muted) 68%, var(--surface)); padding: 10px 12px; }
+.tool-activity-card { margin: 7px 0; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface-muted) 68%, var(--surface)); padding: 10px 12px; }
 .tool-activity-card.has-children { width: min(720px, 90%); }
 .tool-activity-card.failed { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .tool-activity-card.failed .tool-activity-heading > span { color: var(--danger); }
