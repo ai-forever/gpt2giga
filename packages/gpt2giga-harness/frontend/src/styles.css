@@ -192,7 +192,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .search-control:focus-within { border-color: var(--focus); box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 28%, transparent); }
 .search-control input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; }
 
-.workbench-layout { height: 100vh; display: grid; min-width: 0; background: var(--surface); }
+.workbench-layout { height: 100vh; display: grid; min-width: 0; overflow: hidden; background: var(--surface); }
 .session-navigator, .run-readiness { min-width: 0; overflow: hidden; background: var(--surface); }
 .session-navigator { display: flex; flex-direction: column; padding: 12px; border-right: 1px solid var(--border); }
 .new-session-button { width: 100%; height: 38px; display: flex; align-items: center; justify-content: flex-start; gap: 8px; margin: 4px 0 10px; border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); color: var(--accent); }
@@ -372,7 +372,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .attachment-chip button { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; padding: 0; }
 .preview-execution { display: grid; gap: 3px; border-bottom: 1px solid color-mix(in srgb, var(--success) 35%, var(--border)); background: color-mix(in srgb, var(--success) 8%, var(--surface)); padding: 9px 12px; color: var(--text); font-size: 11px; }
 .preview-execution.blocked { border-color: color-mix(in srgb, var(--danger) 42%, var(--border)); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }.preview-execution small { color: var(--muted); font-size: 9px; }
-.composer textarea { width: 100%; min-height: 82px; resize: vertical; border: 0; outline: 0; background: transparent; color: var(--text); padding: 14px 16px; font-size: 14px; line-height: 1.5; }
+.composer textarea { width: 100%; min-height: 82px; max-height: min(260px, 40vh); resize: vertical; overflow-y: auto; border: 0; outline: 0; background: transparent; color: var(--text); padding: 14px 16px; font-size: 14px; line-height: 1.5; }
 .workspace-file-picker { max-height: 220px; overflow-y: auto; display: grid; gap: 2px; border-top: 1px solid var(--border); background: var(--surface); padding: 7px; }
 .workspace-file-picker > div { display: flex; justify-content: space-between; gap: 8px; padding: 4px 7px 6px; }.workspace-file-picker > div small { color: var(--muted); font-size: 9px; }
 .workspace-file-picker > button { width: 100%; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 0; background: transparent; padding: 7px 9px; text-align: left; }
