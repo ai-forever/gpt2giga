@@ -1,174 +1,284 @@
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { useRouterState, useSearch } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useRouterState, useSearch } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
-import { fetchCockpit, mutateCockpit } from "../api";
-import {
-  LoadingRows,
-  OperationalRowLink,
-  OperationalSurface,
-  StatusBadge,
-  type OperationalTab,
-} from "../components/OperationalSurface";
+import { mutateCockpit } from "../api";
+import { LoadingRows, StatusBadge } from "../components/OperationalSurface";
 import { message } from "../messages";
+import {
+  buildPluginLibrary,
+  filterPluginLibrary,
+  type PluginCategory,
+  type PluginItemCategory,
+  type PluginLibraryItem,
+} from "../plugin-library-model";
 import { usePreferences } from "../preferences-context";
 import {
   integrationFlowOptions,
   integrationsSurfaceOptions,
   remainingRequestKeys,
+  type IntegrationFlowInventory,
   type IntegrationFlowMutationResponse,
   type IntegrationFlowPreviewResponse,
 } from "../remaining-request-graph";
-import { projectDoctor, type DoctorProjection, type HarnessProjection, type IntegrationsProjection } from "../surface-projections";
 
-interface HandoffPreviewResponse {
-  handoff: {
-    action: string;
-    status: string;
-    surface: string;
-    command: string[];
-    workspace: string;
-    ownership: string;
-    auth_prerequisite: string;
-    observability_limits: string[];
-    external_process_may_open: boolean;
-    external_ui_may_open: boolean;
-    instruction: string;
-    blocker: string | null;
-    queueable: false;
-    durable: false;
-  };
-}
+const categoryPaths = {
+  all: "/cockpit-v2/plugins/all",
+  mcp: "/cockpit-v2/plugins/mcp",
+  plugins: "/cockpit-v2/plugins/plugins",
+  skills: "/cockpit-v2/plugins/skills",
+} as const;
 
-const tabs: readonly OperationalTab[] = [
-  { id: "add", labelKey: "addIntegration", href: "/cockpit-v2/integrations/add" },
-  { id: "harnesses", labelKey: "harnesses", href: "/cockpit-v2/integrations/harnesses" },
-  { id: "models", labelKey: "modelsAndRoutes", href: "/cockpit-v2/integrations/models" },
-  { id: "mcp", labelKey: "mcp", href: "/cockpit-v2/integrations/mcp" },
-  { id: "doctor", labelKey: "doctor", href: "/cockpit-v2/integrations/doctor" },
-];
-
-type IntegrationSection = "add" | "harnesses" | "models" | "mcp" | "doctor";
+const categories: readonly PluginCategory[] = ["all", "mcp", "plugins", "skills"];
 
 export function IntegrationsSurface() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const section: IntegrationSection = pathname.endsWith("/add") ? "add" : pathname.endsWith("/models") ? "models" : pathname.endsWith("/mcp") ? "mcp" : pathname.endsWith("/doctor") ? "doctor" : "harnesses";
+  const category: PluginCategory = pathname.endsWith("/mcp")
+    ? "mcp"
+    : pathname.endsWith("/plugins")
+      ? "plugins"
+      : pathname.endsWith("/skills")
+        ? "skills"
+        : "all";
   const { selected: selectedId } = useSearch({ strict: false });
-  const query = useQuery(integrationsSurfaceOptions());
+  const { preferences } = usePreferences();
+  const locale = preferences.locale;
+  const integrationQuery = useQuery(integrationFlowOptions());
+  const operationalQuery = useQuery(integrationsSurfaceOptions());
+  const [search, setSearch] = useState("");
+  const [connectedOnly, setConnectedOnly] = useState(false);
+  const items = useMemo(
+    () => integrationQuery.data && operationalQuery.data
+      ? buildPluginLibrary(integrationQuery.data, operationalQuery.data.mcp)
+      : [],
+    [integrationQuery.data, operationalQuery.data],
+  );
+  const visibleItems = useMemo(
+    () => filterPluginLibrary(items, category, search, connectedOnly),
+    [category, connectedOnly, items, search],
+  );
+  const selectedItem = items.find((item) => item.id === selectedId);
+  const connectedCount = items.filter((item) => item.connected).length;
+  const pending = integrationQuery.isPending || operationalQuery.isPending;
+  const failed = integrationQuery.isError || operationalQuery.isError;
+
   return (
-    <OperationalSurface
-      activeTab={section}
-      aside={<IntegrationDetail section={section} selectedId={selectedId} />}
-      detailKey="integrationsDetailMigrated"
-      eyebrowKey="integrationsEyebrow"
-      tabs={tabs}
-      titleKey="integrations"
-    >
-      <IntegrationList section={section} query={query} selectedId={selectedId} />
-    </OperationalSurface>
+    <div className={`plugin-library ${selectedItem ? "has-selection" : ""}`}>
+      <header className="plugin-library-header">
+        <h1>{message(locale, "plugins")}</h1>
+        <p>{message(locale, "pluginLibraryDescription")}</p>
+      </header>
+      <div className="plugin-library-layout">
+        <section className="plugin-library-browser">
+          <label className="plugin-search">
+            <SearchIcon />
+            <span className="sr-only">{message(locale, "searchPlugins")}</span>
+            <input
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={message(locale, "searchPlugins")}
+              type="search"
+              value={search}
+            />
+          </label>
+          <div className="plugin-library-toolbar">
+            <nav className="plugin-category-tabs" aria-label={message(locale, "pluginCategories")}>
+              {categories.map((item) => (
+                <Link
+                  aria-current={category === item ? "page" : undefined}
+                  className={category === item ? "active" : ""}
+                  key={item}
+                  search={{}}
+                  to={categoryPaths[item]}
+                >
+                  {categoryLabel(locale, item)}
+                </Link>
+              ))}
+            </nav>
+            <div className="plugin-toolbar-summary">
+              <button
+                aria-checked={connectedOnly}
+                className={`plugin-connected-toggle ${connectedOnly ? "active" : ""}`}
+                onClick={() => setConnectedOnly((current) => !current)}
+                role="switch"
+                type="button"
+              >
+                <span aria-hidden="true"><i /></span>
+                {message(locale, "connectedOnly")}
+              </button>
+              <span>{connectedCount} {message(locale, "connectedCount")}</span>
+            </div>
+          </div>
+          {pending ? <LoadingRows /> : failed ? (
+            <div className="error-state">{message(locale, "boundedDataUnavailable")}</div>
+          ) : visibleItems.length === 0 ? (
+            <div className="plugin-empty-state">
+              <PluginItemIcon category={category === "all" ? "plugins" : category} />
+              <strong>{message(locale, "noPluginsFound")}</strong>
+              <span>{message(locale, "noPluginsFoundHint")}</span>
+            </div>
+          ) : (
+            <div className="plugin-list">
+              {visibleItems.map((item) => (
+                <PluginRow
+                  category={category}
+                  item={item}
+                  key={item.id}
+                  selected={item.id === selectedId}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+        <aside className="plugin-detail-pane">
+          {selectedItem && integrationQuery.data ? (
+            <PluginDetails
+              category={category}
+              inventory={integrationQuery.data}
+              item={selectedItem}
+            />
+          ) : (
+            <div className="plugin-detail-empty">
+              <PluginItemIcon category="plugins" />
+              <h2>{message(locale, "selectPlugin")}</h2>
+              <p>{message(locale, "selectPluginHint")}</p>
+            </div>
+          )}
+        </aside>
+      </div>
+    </div>
   );
 }
 
-function IntegrationList({ section, query, selectedId }: {
-  section: IntegrationSection;
-  query: UseQueryResult<IntegrationsProjection, Error>;
-  selectedId: string | undefined;
+function PluginRow({
+  category,
+  item,
+  selected,
+}: {
+  category: PluginCategory;
+  item: PluginLibraryItem;
+  selected: boolean;
 }) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
-  if (section === "add") return <IntegrationWizard />;
-  if (query.isPending) return <LoadingRows />;
-  if (query.isError || query.data === undefined) return <div className="error-state">{message(locale, "boundedDataUnavailable")}</div>;
-  if (section === "doctor") return <div className="doctor-intro"><span className="section-kicker">{message(locale, "selectedPlanDoctor")}</span><h2>{message(locale, "doctorTitle")}</h2><p>{message(locale, "doctorDescription")}</p></div>;
-  const rows = section === "models" ? query.data.routes : query.data[section];
   return (
-    <>
-      <div className="operations-toolbar"><div><span className="section-kicker">{message(locale, section === "models" ? "modelsAndRoutes" : section)}</span><strong>{rows.length} {message(locale, "retainedItems")}</strong></div></div>
-      {rows.length === 0 ? <div className="empty-state">{message(locale, "noItems")}</div> : <div className="operations-table" role="table">
-        {section === "harnesses" ? query.data.harnesses.map((item) => <OperationalRowLink selected={selectedId === item.id} selectedId={item.id} to="/cockpit-v2/integrations/harnesses" key={item.id}><div><strong>{item.title}</strong><span>{item.id}</span></div><span>{item.kind}</span><span>{item.reason}</span><StatusBadge status={item.status} /></OperationalRowLink>) : null}
-        {section === "models" ? query.data.routes.map((item) => <OperationalRowLink selected={selectedId === item.id} selectedId={item.id} to="/cockpit-v2/integrations/models" key={item.id}><div><strong>{item.chatEndpoint}</strong><span>{item.configuredDefault ? message(locale, "configuredDefault") : message(locale, "availableRoute")}</span></div><span>{item.effectiveModel ?? message(locale, "notSelected")}</span><span>{routeSourceLabel(locale, item.effectiveSource)}</span><StatusBadge status={item.health} /></OperationalRowLink>) : null}
-        {section === "mcp" ? query.data.mcp.map((item) => <OperationalRowLink selected={selectedId === item.id} selectedId={item.id} to="/cockpit-v2/integrations/mcp" key={item.id}><div><strong>{item.title}</strong><span>{item.id}</span></div><span>{item.transport}</span><span>{item.trusted ? message(locale, "trusted") : message(locale, "reviewRequired")}</span><StatusBadge status={item.status} /></OperationalRowLink>) : null}
-      </div>}
-    </>
+    <Link
+      className={`plugin-row ${selected ? "selected" : ""}`}
+      search={{ selected: item.id }}
+      to={categoryPaths[category]}
+    >
+      <PluginItemIcon category={item.category} />
+      <div className="plugin-row-copy">
+        <div>
+          <strong>{item.title}</strong>
+          <span className="plugin-type-label">{typeLabel(locale, item.category)}</span>
+        </div>
+        <p>{descriptionFor(locale, item)}</p>
+      </div>
+      <div className="plugin-targets" aria-label={message(locale, "compatibility")}>
+        {displayTargets(item).map((target) => <span key={target}>{target}</span>)}
+      </div>
+      <span className={`plugin-row-action ${item.connected ? "connected" : ""}`}>
+        {item.connected ? <i aria-hidden="true" /> : null}
+        {item.connected ? message(locale, "connected") : message(locale, "connect")}
+      </span>
+    </Link>
   );
 }
 
-function IntegrationDetail({ section, selectedId }: { section: IntegrationSection; selectedId: string | undefined }) {
+function PluginDetails({
+  category,
+  inventory,
+  item,
+}: {
+  category: PluginCategory;
+  inventory: IntegrationFlowInventory;
+  item: PluginLibraryItem;
+}) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
-  const query = useQuery(integrationsSurfaceOptions());
-  const [doctor, setDoctor] = useState<DoctorProjection | null>(null);
-  const [doctorHarness, setDoctorHarness] = useState("echo");
-  const selected = useMemo(() => {
-    if (section === "harnesses") return query.data?.harnesses.find((item) => item.id === selectedId);
-    if (section === "models") return query.data?.routes.find((item) => item.apiMode === selectedId);
-    if (section === "mcp") return query.data?.mcp.find((item) => item.id === selectedId);
-    return undefined;
-  }, [query.data, section, selectedId]);
-  const doctorMutation = useMutation({
-    mutationFn: () => mutateCockpit<unknown>("/api/preflight/run", { api_mode: query.data?.routes.find((item) => item.configuredDefault)?.apiMode ?? "v2", dry_run: true, durable: false, harness_id: doctorHarness, invocation_mode: "headless", mode: "plan", prompt: "Readiness check", workspace_policy: "auto" }),
-    onSuccess: (response) => setDoctor(projectDoctor(response)),
-  });
-  const probeMutation = useMutation({
-    mutationFn: () => selected !== undefined && "transport" in selected ? mutateCockpit(`/api/tool-servers/${encodeURIComponent(selected.id)}/probe`, {}) : Promise.reject(new Error("Select an MCP server first")),
-  });
-  if (section === "add") return <RecentIntegrationFlows />;
-  if (section === "doctor") return <div className="definition-detail"><span className="section-kicker">{message(locale, "doctor")}</span><h2>{message(locale, "selectedPlanReadiness")}</h2><label className="field-control">{message(locale, "harness")}<select value={doctorHarness} onChange={(event) => setDoctorHarness(event.target.value)}>{query.data?.harnesses.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><button className="primary-button" disabled={doctorMutation.isPending} onClick={() => doctorMutation.mutate()} type="button">{message(locale, "runDoctor")}</button>{doctor === null ? null : <div className="doctor-result" role="status"><StatusBadge status={doctor.status} /><p><strong>{doctor.status === "ready" ? message(locale, "ready") : doctor.status}</strong> · {doctorEvidenceLabel(locale, doctor.evidenceStatus)}</p><p>{doctor.harnessId}</p>{doctor.findings.filter((item) => item.status !== "ready").map((item) => <div className="doctor-finding" key={item.id}><strong>{item.summary}</strong>{item.remedy ? <span>{item.remedy}</span> : null}{item.command ? <code>{item.command}</code> : null}</div>)}</div>}{doctorMutation.isError ? <p className="mutation-error" role="alert">{doctorMutation.error.message}</p> : null}</div>;
-  if (selected === undefined) return <div className="detail-empty"><span className="section-kicker">{message(locale, "selectedIntegration")}</span><h2>{message(locale, "selectIntegration")}</h2><p>{message(locale, "integrationSelectionHint")}</p></div>;
-  if (section === "harnesses" && "executionSurfaces" in selected) return <HarnessDetail harness={selected} key={selected.id} />;
-  if (section === "models" && "chatEndpoint" in selected) return <div className="definition-detail"><span className="section-kicker">{message(locale, "selectedIntegration")}</span><h2>{selected.chatEndpoint}</h2><dl className="compact-fields"><div><dt>{message(locale, "apiMode")}</dt><dd>{selected.apiMode}</dd></div><div><dt>{message(locale, "configuredDefault")}</dt><dd>{selected.configuredDefault ? message(locale, "yes") : message(locale, "no")}</dd></div><div><dt>{message(locale, "effectiveSelection")}</dt><dd>{selected.effectiveModel ?? message(locale, "notSelected")}</dd></div><div><dt>{message(locale, "source")}</dt><dd>{routeSourceLabel(locale, selected.effectiveSource)}</dd></div><div><dt>{message(locale, "modelsEndpoint")}</dt><dd>{selected.modelsEndpoint}</dd></div><div><dt>{message(locale, "discoveredModels")}</dt><dd>{selected.discoveredModels.join(", ") || message(locale, "noDiscoveredModels")}</dd></div><div><dt>{message(locale, "discoverySource")}</dt><dd>{selected.discoverySource}</dd></div><div><dt>{message(locale, "lastChecked")}</dt><dd>{selected.lastCheckedAt ?? message(locale, "notChecked")}</dd></div></dl></div>;
-  return <div className="definition-detail"><span className="section-kicker">{message(locale, "selectedIntegration")}</span><h2>{"title" in selected ? selected.title : `/${selected.apiMode}`}</h2><dl className="compact-fields">{Object.entries(selected).slice(0, 7).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl>{section === "mcp" ? <button disabled={probeMutation.isPending || !("enabled" in selected) || !selected.enabled} onClick={() => probeMutation.mutate()} type="button">{message(locale, "probeMcp")}</button> : null}{probeMutation.isError ? <p className="mutation-error" role="alert">{probeMutation.error.message}</p> : null}{probeMutation.isSuccess ? <p className="mutation-success" role="status">{message(locale, "operationAccepted")}</p> : null}</div>;
+  return (
+    <div className="plugin-detail">
+      <Link
+        aria-label={message(locale, "closeDetails")}
+        className="plugin-detail-close"
+        search={{}}
+        to={categoryPaths[category]}
+      >
+        <CloseIcon />
+      </Link>
+      <div className="plugin-detail-heading">
+        <PluginItemIcon category={item.category} />
+        <div>
+          <h2>{item.title}</h2>
+          <span className="plugin-type-label">{typeLabel(locale, item.category)}</span>
+        </div>
+      </div>
+      <p className="plugin-detail-description">{descriptionFor(locale, item)}</p>
+      <section className="plugin-detail-section">
+        <h3>{message(locale, "compatibility")}</h3>
+        <div className="plugin-targets">
+          {displayTargets(item).map((target) => <span key={target}>{target}</span>)}
+        </div>
+      </section>
+      <dl className="plugin-facts">
+        <div>
+          <dt>{message(locale, "source")}</dt>
+          <dd>{sourceLabel(locale, item.source)}</dd>
+        </div>
+        <div>
+          <dt>{message(locale, "version")}</dt>
+          <dd>{item.version ?? "—"}</dd>
+        </div>
+        <div>
+          <dt>{message(locale, "connectionStatus")}</dt>
+          <dd>{item.connected ? message(locale, "connected") : statusLabel(locale, item.status)}</dd>
+        </div>
+      </dl>
+      <PluginConnectionPanel inventory={inventory} item={item} />
+    </div>
+  );
 }
 
-function IntegrationWizard() {
+function PluginConnectionPanel({
+  inventory,
+  item,
+}: {
+  inventory: IntegrationFlowInventory;
+  item: PluginLibraryItem;
+}) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
   const queryClient = useQueryClient();
-  const inventory = useQuery(integrationFlowOptions());
-  const [source, setSource] = useState("catalog");
-  const [catalogId, setCatalogId] = useState("");
-  const [targetId, setTargetId] = useState("");
-  const [scope, setScope] = useState("");
-  const [packageId, setPackageId] = useState("custom-mcp");
-  const [transport, setTransport] = useState("stdio");
-  const [command, setCommand] = useState("custom-mcp");
-  const [manifestJson, setManifestJson] = useState("{}");
-  const [authority, setAuthority] = useState("cockpit-operator");
+  const availableTargets = inventory.targets.filter((target) => item.targetIds.includes(target.id));
+  const [targetId, setTargetId] = useState(availableTargets[0]?.id ?? "");
   const [allowNetwork, setAllowNetwork] = useState(false);
   const [nativeConsent, setNativeConsent] = useState(false);
-  const selectedCatalog = inventory.data?.catalog.find((item) => item.catalog_id === catalogId) ?? inventory.data?.catalog[0];
-  const targets = inventory.data?.targets.filter((item) => source !== "catalog" || selectedCatalog?.target_ids.includes(item.id)) ?? [];
-  const selectedTarget = targets.find((item) => item.id === targetId) ?? targets[0];
-  const selectedScope = selectedTarget?.scopes.includes(scope) ? scope : selectedTarget?.scopes[0] ?? "managed_home";
-  const selectedCatalogId = selectedCatalog?.catalog_id ?? "";
-
+  const selectedTarget = availableTargets.find((target) => target.id === targetId) ?? availableTargets[0];
+  const selectedScope = selectedTarget?.scopes.includes("managed_home")
+    ? "managed_home"
+    : selectedTarget?.scopes[0];
   const preview = useMutation({
     mutationFn: () => {
-      let manifest: unknown = undefined;
-      if (!["catalog", "raw_descriptor"].includes(source)) manifest = JSON.parse(manifestJson);
+      if (!item.catalogId || !selectedTarget || !selectedScope) {
+        throw new Error("This package cannot be connected from the catalog");
+      }
       return mutateCockpit<IntegrationFlowPreviewResponse>("/api/integrations/preview", {
-        source,
-        catalog_id: source === "catalog" ? selectedCatalogId : undefined,
-        manifest,
-        target_id: selectedTarget?.id,
+        source: "catalog",
+        catalog_id: item.catalogId,
+        target_id: selectedTarget.id,
         scope: selectedScope,
-        package_id: source === "raw_descriptor" ? packageId : undefined,
-        configuration: source === "raw_descriptor" ? {
-          transport,
-          command: transport === "stdio" ? command : undefined,
-          url: transport === "stdio" ? undefined : command,
-        } : {},
+        configuration: {},
       });
     },
   });
   const apply = useMutation({
     mutationFn: () => {
-      if (!preview.data) throw new Error("Preview an integration first");
+      if (!preview.data) throw new Error("Preview the connection first");
       return mutateCockpit<IntegrationFlowMutationResponse>(
         `/api/integrations/flows/${encodeURIComponent(preview.data.flow.id)}/apply`,
         {
           plan_id: preview.data.plan.plan_id,
-          authority,
+          authority: "cockpit-operator",
           allow_network: allowNetwork,
           native_consent_acknowledged: nativeConsent,
         },
@@ -180,10 +290,9 @@ function IntegrationWizard() {
   });
   const rollback = useMutation({
     mutationFn: () => {
-      const flow = apply.data?.flow ?? preview.data?.flow;
-      if (!flow) throw new Error("No integration operation to roll back");
+      if (!item.flow) throw new Error("No connection is available to roll back");
       return mutateCockpit<IntegrationFlowMutationResponse>(
-        `/api/integrations/flows/${encodeURIComponent(flow.id)}/rollback`,
+        `/api/integrations/flows/${encodeURIComponent(item.flow.id)}/rollback`,
         {},
       );
     },
@@ -191,125 +300,208 @@ function IntegrationWizard() {
       await queryClient.invalidateQueries({ queryKey: remainingRequestKeys.integrationFlows() });
     },
   });
-
-  if (inventory.isPending) return <LoadingRows />;
-  if (inventory.isError || !inventory.data) return <div className="error-state">{message(locale, "boundedDataUnavailable")}</div>;
-  const flow = rollback.data?.flow ?? apply.data?.flow ?? preview.data?.flow;
-  return <div className="integration-wizard">
-    <div className="operations-toolbar"><div><span className="section-kicker">MCP + · Skill + · Plugin + · Harness +</span><strong>{message(locale, "addIntegration")}</strong></div></div>
-    <p className="wizard-description">{message(locale, "addIntegrationDescription")}</p>
-    <div className="wizard-fields">
-      <label className="field-control">{message(locale, "source")}<select value={source} onChange={(event) => { setSource(event.target.value); preview.reset(); apply.reset(); }}>{inventory.data.sources.map((item) => <option key={item.id} value={item.id}>{sourceLabel(item.id)}</option>)}</select></label>
-      {source === "catalog" ? <label className="field-control">{message(locale, "catalogEntry")}<select value={selectedCatalogId} onChange={(event) => { setCatalogId(event.target.value); setTargetId(""); preview.reset(); }}><option disabled value="">{message(locale, "selectCatalogEntry")}</option>{inventory.data.catalog.map((item) => <option key={item.catalog_id} value={item.catalog_id}>{item.package_id} · {item.version}</option>)}</select></label> : null}
-      {!["catalog", "raw_descriptor"].includes(source) ? <label className="field-control span-two">{message(locale, "packageManifest")}<textarea value={manifestJson} onChange={(event) => setManifestJson(event.target.value)} spellCheck={false} /></label> : null}
-      {source === "raw_descriptor" ? <><label className="field-control">{message(locale, "packageId")}<input value={packageId} onChange={(event) => setPackageId(event.target.value)} /></label><label className="field-control">{message(locale, "transport")}<select value={transport} onChange={(event) => setTransport(event.target.value)}><option value="stdio">stdio</option><option value="streamable_http">streamable HTTP</option><option value="sse">SSE</option></select></label><label className="field-control span-two">{transport === "stdio" ? message(locale, "command") : "HTTPS URL"}<input value={command} onChange={(event) => setCommand(event.target.value)} /></label></> : null}
-      <label className="field-control">{message(locale, "target")}<select value={selectedTarget?.id ?? ""} onChange={(event) => { setTargetId(event.target.value); setScope(""); preview.reset(); }}>{targets.map((item) => <option key={item.id} value={item.id}>{item.id}</option>)}</select></label>
-      <label className="field-control">{message(locale, "scope")}<select value={selectedScope} onChange={(event) => { setScope(event.target.value); preview.reset(); }}>{selectedTarget?.scopes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-    </div>
-    <button className="primary-button" disabled={preview.isPending || !selectedTarget} onClick={() => { apply.reset(); rollback.reset(); preview.mutate(); }} type="button">{message(locale, "previewInstall")}</button>
-    {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
-    {preview.data ? <section className="integration-preview" aria-label={message(locale, "previewInstall")}>
-      <div className="integration-preview-heading"><div><span className="section-kicker">{message(locale, "approvalRequired")}</span><h2>{preview.data.plan.package.id} · {preview.data.plan.target.id}</h2></div><StatusBadge status={preview.data.plan.risk.decision} /></div>
-      <dl className="compact-fields"><div><dt>{message(locale, "publisher")}</dt><dd>{preview.data.plan.package.publisher}</dd></div><div><dt>{message(locale, "license")}</dt><dd>{preview.data.plan.package.license}</dd></div><div><dt>{message(locale, "checksum")}</dt><dd>{preview.data.plan.package.checksum}</dd></div><div><dt>{message(locale, "permissions")}</dt><dd>{preview.data.plan.permissions.requirements.map((item) => item.type).join(", ") || "none"}</dd></div><div><dt>{message(locale, "configurationDiff")}</dt><dd>{preview.data.plan.configuration.diff.join(", ") || "no file changes"}</dd></div><div><dt>{message(locale, "verification")}</dt><dd>{preview.data.plan.verification_steps.join(", ")}</dd></div><div><dt>{message(locale, "restartRequired")}</dt><dd>{preview.data.plan.configuration.restart_required ? message(locale, "yes") : message(locale, "no")}</dd></div></dl>
-      <label className="field-control">{message(locale, "approvalAuthority")}<input value={authority} onChange={(event) => setAuthority(event.target.value)} /></label>
-      {preview.data.plan.permissions.network ? <label className="check-control"><input checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} type="checkbox" />{message(locale, "allowNetwork")}</label> : null}
-      {preview.data.plan.permissions.native_consent ? <label className="check-control"><input checked={nativeConsent} onChange={(event) => setNativeConsent(event.target.checked)} type="checkbox" />{message(locale, "nativeConsent")}</label> : null}
-      <div className="wizard-actions"><button className="primary-button" disabled={apply.isPending || !authority.trim()} onClick={() => apply.mutate()} type="button">{message(locale, "approveAndApply")}</button>{flow?.rollback_available ? <button disabled={rollback.isPending} onClick={() => rollback.mutate()} type="button">{message(locale, "rollback")}</button> : null}</div>
-      {apply.isError ? <p className="mutation-error" role="alert">{apply.error.message}</p> : null}
-      {rollback.isError ? <p className="mutation-error" role="alert">{rollback.error.message}</p> : null}
-      {flow ? <p className="flow-status" role="status"><strong>{message(locale, "flowStatus")}:</strong> {flow.status} · {flow.verification_status}</p> : null}
-      {apply.data?.handoff ? <p className="handoff-notice">{message(locale, "providerOwnedHandoff")}</p> : null}
-    </section> : null}
-  </div>;
-}
-
-function RecentIntegrationFlows() {
-  const { preferences } = usePreferences();
-  const locale = preferences.locale;
-  const inventory = useQuery(integrationFlowOptions());
-  if (inventory.isPending) return <LoadingRows />;
-  if (inventory.isError || !inventory.data) return <div className="error-state">{message(locale, "boundedDataUnavailable")}</div>;
-  return <div className="definition-detail"><span className="section-kicker">{message(locale, "recentOperations")}</span><h2>{message(locale, "flowStatus")}</h2>{inventory.data.flows.length === 0 ? <p>{message(locale, "noOperations")}</p> : <div className="flow-list">{inventory.data.flows.slice(0, 8).map((flow) => <article key={flow.id}><div><strong>{flow.package_id}</strong><StatusBadge status={flow.status} /></div><small>{flow.target_id} · {flow.scope}</small><span>{flow.verification_status}</span></article>)}</div>}</div>;
-}
-
-function sourceLabel(source: string) {
-  return ({ catalog: "Curated catalog", marketplace: "Provider marketplace", git: "Git + immutable ref", local: "Local path", package: "Package reference", raw_descriptor: "Raw MCP descriptor" } as Record<string, string>)[source] ?? source;
-}
-
-function HarnessDetail({ harness }: { harness: HarnessProjection }) {
-  const { preferences } = usePreferences();
-  const locale = preferences.locale;
-  const [action, setAction] = useState(harness.handoffActions[0] ?? "launch_new");
-  const preview = useMutation({
-    mutationFn: () => fetchCockpit<HandoffPreviewResponse>(
-      `/api/provider-handoffs/${encodeURIComponent(harness.id)}/preview?action=${encodeURIComponent(action)}&workspace=.`,
-    ),
+  const probe = useMutation({
+    mutationFn: () => item.mcp
+      ? mutateCockpit(`/api/tool-servers/${encodeURIComponent(item.mcp.id)}/probe`, {})
+      : Promise.reject(new Error("Select an MCP server first")),
   });
-  return <div className="definition-detail harness-execution-detail">
-    <span className="section-kicker">{message(locale, "selectedIntegration")}</span>
-    <h2>{harness.title}</h2>
-    <p>{harness.reason}</p>
-    <h3>{message(locale, "executionSurfaces")}</h3>
-    <div className="execution-surface-list">
-      {harness.executionSurfaces.map((surface) => <div className="execution-surface-card" key={surface.id}>
-        <div><strong>{executionSurfaceLabel(locale, surface.id)}</strong><StatusBadge status={surface.status} /></div>
-        <p>{surface.detail}</p>
-        <small>{surface.ownership} · {surface.queueable ? message(locale, "queueable") : message(locale, "notQueueable")}</small>
-        {surface.blocker ? <code>{surface.blocker}</code> : null}
-      </div>)}
-    </div>
-    {harness.handoffActions.length === 0 ? null : <section className="handoff-preview-panel">
-      <h3>{message(locale, "providerHandoff")}</h3>
-      <p>{message(locale, "handoffDescription")}</p>
-      <label className="field-control">{message(locale, "handoffAction")}
-        <select value={action} onChange={(event) => { setAction(event.target.value); preview.reset(); }}>
-          {harness.handoffActions.map((item) => <option key={item} value={item}>{handoffActionLabel(locale, item)}</option>)}
+
+  if (item.mcp) {
+    return (
+      <div className="plugin-detail-actions">
+        <button
+          className="primary-button"
+          disabled={!item.mcp.enabled || probe.isPending}
+          onClick={() => probe.mutate()}
+          type="button"
+        >
+          {message(locale, "probeMcp")}
+        </button>
+        {probe.isSuccess ? <p className="mutation-success" role="status">{message(locale, "operationAccepted")}</p> : null}
+        {probe.isError ? <p className="mutation-error" role="alert">{probe.error.message}</p> : null}
+      </div>
+    );
+  }
+
+  if (item.connected) {
+    return (
+      <div className="plugin-detail-actions">
+        <div className="plugin-connected-notice"><i aria-hidden="true" />{message(locale, "connected")}</div>
+        {item.flow?.rollback_available ? (
+          <button disabled={rollback.isPending} onClick={() => rollback.mutate()} type="button">
+            {message(locale, "rollback")}
+          </button>
+        ) : null}
+        {rollback.isError ? <p className="mutation-error" role="alert">{rollback.error.message}</p> : null}
+      </div>
+    );
+  }
+
+  if (!item.catalogId || availableTargets.length === 0) {
+    return (
+      <div className="plugin-detail-actions">
+        <p className="plugin-unavailable-note">{message(locale, "connectionUnavailable")}</p>
+        <StatusBadge status={item.status} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="plugin-detail-actions">
+      <label className="field-control">
+        {message(locale, "connectTo")}
+        <select
+          onChange={(event) => {
+            setTargetId(event.target.value);
+            preview.reset();
+            apply.reset();
+          }}
+          value={selectedTarget?.id ?? ""}
+        >
+          {availableTargets.map((target) => (
+            <option key={target.id} value={target.id}>{targetLabel(target.id)}</option>
+          ))}
         </select>
       </label>
-      <button className="primary-button" disabled={preview.isPending} onClick={() => preview.mutate()} type="button">{message(locale, "previewHandoff")}</button>
+      {!preview.data ? (
+        <button className="primary-button" disabled={preview.isPending} onClick={() => preview.mutate()} type="button">
+          {message(locale, "connect")}
+        </button>
+      ) : (
+        <section className="plugin-approval-panel">
+          <h3>{message(locale, "beforeConnecting")}</h3>
+          <dl className="plugin-facts">
+            <div>
+              <dt>{message(locale, "permissions")}</dt>
+              <dd>{preview.data.plan.permissions.requirements.map((requirement) => requirement.type).join(", ") || message(locale, "noExtraPermissions")}</dd>
+            </div>
+            <div>
+              <dt>{message(locale, "configurationDiff")}</dt>
+              <dd>{preview.data.plan.configuration.diff.length || 0}</dd>
+            </div>
+          </dl>
+          {preview.data.plan.permissions.network ? (
+            <label className="check-control">
+              <input checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} type="checkbox" />
+              {message(locale, "allowNetwork")}
+            </label>
+          ) : null}
+          {preview.data.plan.permissions.native_consent ? (
+            <label className="check-control">
+              <input checked={nativeConsent} onChange={(event) => setNativeConsent(event.target.checked)} type="checkbox" />
+              {message(locale, "nativeConsent")}
+            </label>
+          ) : null}
+          <button className="primary-button" disabled={apply.isPending} onClick={() => apply.mutate()} type="button">
+            {message(locale, "approveAndApply")}
+          </button>
+          {apply.data ? <p className="mutation-success" role="status">{statusLabel(locale, apply.data.flow.status)}</p> : null}
+          {apply.isError ? <p className="mutation-error" role="alert">{apply.error.message}</p> : null}
+        </section>
+      )}
       {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
-      {preview.data ? <div className="handoff-preview-result" role="status">
-        <StatusBadge status={preview.data.handoff.status} />
-        <p>{preview.data.handoff.instruction}</p>
-        {preview.data.handoff.command.length > 0 ? <code>{preview.data.handoff.command.join(" ")}</code> : null}
-        <dl className="compact-fields">
-          <div><dt>{message(locale, "workspace")}</dt><dd>{preview.data.handoff.workspace}</dd></div>
-          <div><dt>{message(locale, "ownership")}</dt><dd>{preview.data.handoff.ownership}</dd></div>
-          <div><dt>{message(locale, "authentication")}</dt><dd>{preview.data.handoff.auth_prerequisite}</dd></div>
-          <div><dt>{message(locale, "durable")}</dt><dd>{message(locale, "no")}</dd></div>
-        </dl>
-      </div> : null}
-    </section>}
-  </div>;
+    </div>
+  );
 }
 
-function executionSurfaceLabel(locale: "en" | "ru", id: string) {
-  if (id === "one_shot") return message(locale, "oneShot");
-  if (id === "native_terminal") return message(locale, "nativeTerminal");
-  if (id === "provider_handoff") return message(locale, "providerHandoff");
-  if (id === "native_structured_embedded") return message(locale, "embeddedStructured");
-  return id;
+function PluginItemIcon({ category }: { category: PluginItemCategory }) {
+  if (category === "skills") {
+    return <span className="plugin-item-icon skills" aria-hidden="true"><SparklesIcon /></span>;
+  }
+  if (category === "mcp") {
+    return <span className="plugin-item-icon mcp" aria-hidden="true"><CubeIcon /></span>;
+  }
+  return <span className="plugin-item-icon plugins" aria-hidden="true"><PluginIcon /></span>;
 }
 
-function handoffActionLabel(locale: "en" | "ru", action: string) {
-  if (action === "launch_new") return message(locale, "launchNew");
-  if (action === "attach_current") return message(locale, "attachCurrent");
-  if (action === "open_provider_ui") return message(locale, "openProviderUi");
-  if (action === "disconnect") return message(locale, "disconnect");
-  if (action === "stop") return message(locale, "stop");
-  return action;
+function SearchIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>;
 }
 
-function routeSourceLabel(locale: "en" | "ru", source: string) {
-  if (source === "environment") return message(locale, "environmentDefault");
-  if (source === "harness_settings") return message(locale, "harnessSettingsSource");
-  if (source === "built_in") return message(locale, "builtInFallback");
-  if (source === "not_selected") return message(locale, "notSelected");
-  return message(locale, "unknownSource");
+function CloseIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>;
 }
 
-function doctorEvidenceLabel(locale: "en" | "ru", status: DoctorProjection["evidenceStatus"]) {
-  if (status === "not_checked") return message(locale, "routeNotChecked");
-  if (status === "unknown") return message(locale, "routeEvidenceUnknown");
-  return message(locale, "routeEvidenceObserved");
+function SparklesIcon() {
+  return <svg viewBox="0 0 24 24"><path d="m12 3 1.3 4.2L17.5 9l-4.2 1.8L12 15l-1.3-4.2L6.5 9l4.2-1.8L12 3Z" /><path d="m18 14 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z" /></svg>;
+}
+
+function CubeIcon() {
+  return <svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" /><path d="m4 7.5 8 4.5 8-4.5M12 12v9" /></svg>;
+}
+
+function PluginIcon() {
+  return <svg viewBox="0 0 24 24"><path d="M8.5 4v4.5H4v7h4.5V20h7v-4.5H20v-7h-4.5V4h-7Z" /><path d="M11 4v3M13 17v3M4 12h3M17 12h3" /></svg>;
+}
+
+function categoryLabel(locale: "en" | "ru", category: PluginCategory) {
+  if (category === "all") return message(locale, "allPlugins");
+  if (category === "skills") return message(locale, "skills");
+  if (category === "plugins") return message(locale, "plugins");
+  return "MCP";
+}
+
+function typeLabel(locale: "en" | "ru", category: PluginItemCategory) {
+  if (category === "skills") return message(locale, "skill");
+  if (category === "plugins") return message(locale, "plugin");
+  return "MCP";
+}
+
+function descriptionFor(locale: "en" | "ru", item: PluginLibraryItem) {
+  const descriptions: Record<string, { en: string; ru: string }> = {
+    "gpt2giga.builtin.find-skills": {
+      en: "Find skills in connected repositories and reviewed catalogs.",
+      ru: "Поиск навыков в подключённых репозиториях и проверенных каталогах.",
+    },
+    "gpt2giga.builtin.skill-creator": {
+      en: "Create new skills from instructions and examples.",
+      ru: "Создание новых навыков из инструкций и примеров.",
+    },
+    "gpt2giga.builtin.skill-installer": {
+      en: "Install reviewed skills into supported agent homes.",
+      ru: "Установка проверенных навыков для поддерживаемых агентов.",
+    },
+  };
+  const known = descriptions[item.packageId];
+  if (known) return known[locale];
+  if (item.mcp) {
+    return locale === "ru"
+      ? `MCP-сервер через ${item.mcp.transport}.`
+      : `MCP server over ${item.mcp.transport}.`;
+  }
+  if (item.category === "skills") return message(locale, "skillDescriptionFallback");
+  if (item.category === "mcp") return message(locale, "mcpDescriptionFallback");
+  return message(locale, "pluginDescriptionFallback");
+}
+
+function displayTargets(item: PluginLibraryItem) {
+  if (item.mcp) return ["Harness"];
+  const targets = new Set(item.targetIds.map(targetLabel));
+  return [...targets];
+}
+
+function targetLabel(targetId: string) {
+  if (targetId.startsWith("codex-")) return "Codex";
+  if (targetId.startsWith("claude-")) return "Claude";
+  if (targetId.startsWith("gemini-")) return "Gemini";
+  if (targetId.startsWith("harness-")) return "Harness";
+  return targetId;
+}
+
+function sourceLabel(locale: "en" | "ru", source: PluginLibraryItem["source"]) {
+  if (source === "catalog") return message(locale, "builtInCatalog");
+  if (source === "configured_mcp") return message(locale, "currentConfiguration");
+  return message(locale, "installedPackage");
+}
+
+function statusLabel(locale: "en" | "ru", status: string) {
+  const labels: Record<string, { en: string; ru: string }> = {
+    available: { en: "Available", ru: "Доступно" },
+    awaiting_approval: { en: "Awaiting approval", ru: "Ожидает подтверждения" },
+    failed: { en: "Failed", ru: "Ошибка" },
+    handoff_required: { en: "Continue in provider", ru: "Продолжить у провайдера" },
+    rolled_back: { en: "Not connected", ru: "Не подключено" },
+    verified: { en: "Connected", ru: "Подключено" },
+  };
+  return labels[status]?.[locale] ?? status;
 }

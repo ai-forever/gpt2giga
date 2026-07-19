@@ -29,6 +29,7 @@ _COCKPIT_V2_PATH = re.compile(
     r"(?:work(?:/[^/]+)?|runs(?:/[^/]+)?|"
     r"automation(?:/(?:agents|workflows|schedules))?|"
     r"evaluation(?:/(?:arena|evals|baselines))?|"
+    r"plugins(?:/(?:all|mcp|plugins|skills))?|"
     r"integrations(?:/(?:add|harnesses|models|mcp|doctor))?|settings)/?"
 )
 _COCKPIT_V2_SHELL_HEADERS = {
@@ -49,7 +50,7 @@ _LEGACY_ROUTE_REDIRECTS = {
     "approvals": "/cockpit-v2/runs",
     "arena": "/cockpit-v2/evaluation/arena",
     "evaluate": "/cockpit-v2/evaluation/evals",
-    "tools": "/cockpit-v2/integrations/mcp",
+    "tools": "/cockpit-v2/plugins/mcp",
 }
 
 
