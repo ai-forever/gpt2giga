@@ -883,6 +883,63 @@ def extension_target_descriptor_to_dict(
     }
 
 
+def extension_target_descriptor_from_dict(
+    data: Mapping[str, Any],
+) -> ExtensionTargetDescriptor:
+    """Strictly parse one extension-target SDK descriptor."""
+    mapping = _strict_mapping(
+        data,
+        allowed={
+            "schema_version",
+            "id",
+            "revision",
+            "component_types",
+            "scopes",
+            "capabilities",
+            "trust_evidence",
+        },
+        field_name="extension target descriptor",
+    )
+    if mapping.get("schema_version") != EXTENSION_TARGET_SCHEMA_VERSION:
+        raise ValueError("unsupported extension target schema_version")
+    return ExtensionTargetDescriptor(
+        id=_required_text(mapping.get("id"), field_name="extension target id"),
+        revision=_required_text(
+            mapping.get("revision"), field_name="extension target revision"
+        ),
+        component_types=tuple(
+            _enum_value(
+                IntegrationComponentType,
+                item,
+                field_name="extension target component type",
+            )
+            for item in _required_list(
+                mapping.get("component_types"), "extension target component_types"
+            )
+        ),
+        scopes=tuple(
+            _enum_value(
+                InstallationScope,
+                item,
+                field_name="extension target scope",
+            )
+            for item in _required_list(mapping.get("scopes"), "extension target scopes")
+        ),
+        capabilities=tuple(
+            _required_text(item, field_name="extension target capability")
+            for item in _required_list(
+                mapping.get("capabilities"), "extension target capabilities"
+            )
+        ),
+        trust_evidence=tuple(
+            _trust_evidence_from_dict(item)
+            for item in _required_list(
+                mapping.get("trust_evidence"), "extension target trust_evidence"
+            )
+        ),
+    )
+
+
 def _component_to_dict(item: IntegrationComponent) -> dict[str, Any]:
     return {"id": item.id, "type": item.type.value, "portable": item.portable}
 
@@ -1313,6 +1370,7 @@ __all__ = [
     "IntegrationUpdatePolicy",
     "NEUTRAL_EXTENSION_TARGET_ENTRY_POINT_GROUP",
     "assess_integration_package",
+    "extension_target_descriptor_from_dict",
     "extension_target_descriptor_to_dict",
     "integration_package_from_dict",
     "integration_package_semantic_hash",

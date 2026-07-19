@@ -63,6 +63,13 @@ from gpt2giga_harness.integration_flows import (
     IntegrationFlowService,
     integration_flow_record_to_dict,
 )
+from gpt2giga_harness.integration_scaffold import scaffold_integration_package
+from gpt2giga_harness.integration_sdk import (
+    integration_conformance_report_to_dict,
+    load_extension_target_document,
+    load_integration_package_document,
+    run_integration_conformance,
+)
 from gpt2giga_harness.executables import (
     executable_resolution_to_dict,
     set_user_executable,
@@ -422,6 +429,20 @@ def build_parser() -> argparse.ArgumentParser:
     integration_rollback.add_argument("flow_id")
     integration_rollback.add_argument("--json", action="store_true")
     integration_rollback.set_defaults(handler=_handle_integration_rollback)
+    integration_scaffold = integration_subparsers.add_parser("scaffold")
+    integration_scaffold.add_argument("package_id")
+    integration_scaffold.add_argument("--output", type=Path, required=True)
+    integration_scaffold.set_defaults(handler=_handle_integration_scaffold)
+    integration_conformance = integration_subparsers.add_parser("conformance")
+    integration_conformance.add_argument("manifest", type=Path)
+    integration_conformance.add_argument(
+        "--target-descriptor",
+        action="append",
+        default=[],
+        type=Path,
+    )
+    integration_conformance.add_argument("--json", action="store_true")
+    integration_conformance.set_defaults(handler=_handle_integration_conformance)
 
     init = subparsers.add_parser("init")
     init.add_argument("--workspace", default=None)
@@ -1146,6 +1167,43 @@ def _handle_integration_rollback(
         print(f"Flow: {payload['flow']['id']}")
         print(f"Status: {payload['flow']['status']}")
     return 0
+
+
+def _handle_integration_scaffold(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    try:
+        result = scaffold_integration_package(args.package_id, args.output)
+    except FileExistsError as exc:
+        raise ValueError(str(exc)) from exc
+    print(f"Created integration scaffold: {result.root}")
+    return 0
+
+
+def _handle_integration_conformance(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    package = load_integration_package_document(args.manifest)
+    descriptors = tuple(
+        load_extension_target_document(path) for path in args.target_descriptor
+    )
+    report = run_integration_conformance(
+        package,
+        target_descriptors=descriptors,
+    )
+    payload = integration_conformance_report_to_dict(report)
+    if args.json:
+        _print_json(payload)
+    else:
+        print(
+            f"Integration {report.package_id} {report.package_version}: "
+            f"{'passed' if report.ok else 'failed'}"
+        )
+        for result in report.results:
+            print(f"- {result.claim}: {result.status} ({result.detail})")
+    return 0 if report.ok else 1
 
 
 def _handle_provider_list(args: argparse.Namespace, config: HarnessConfig) -> int:
