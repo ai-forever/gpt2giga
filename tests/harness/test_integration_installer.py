@@ -105,6 +105,101 @@ def test_managed_install_is_idempotent_discoverable_verified_and_reversible(tmp_
     assert service.discover() == ()
 
 
+def test_update_is_atomic_idempotent_and_rolls_back_to_previous_owner(tmp_path):
+    data_dir = tmp_path / "data"
+    root = data_dir / "native" / "codex" / "home"
+    service = TransactionalIntegrationInstaller(data_dir)
+    initial_request = _request(
+        root,
+        mutations=(FileInstallMutation("config/settings.json", b"one"),),
+    )
+    initial_plan = service.preview(initial_request)
+    initial = service.apply(
+        initial_request,
+        initial_plan,
+        InstallationApproval(initial_plan.plan_id, "test-operator"),
+        verifier=_verifier,
+    )
+    updated_request = replace(
+        initial_request,
+        package=replace(initial_request.package, version="2.0.0"),
+        mutations=(FileInstallMutation("config/settings.json", b"two"),),
+    )
+    update_plan = service.preview(updated_request)
+    approval = InstallationApproval(update_plan.plan_id, "test-operator")
+
+    updated = service.update(
+        updated_request,
+        update_plan,
+        approval,
+        verifier=_verifier,
+    )
+    retried = service.update(
+        updated_request,
+        update_plan,
+        approval,
+        verifier=_verifier,
+    )
+
+    assert updated == retried
+    assert (root / "config" / "settings.json").read_bytes() == b"two"
+    assert service.discover()[0].package_version == "2.0.0"
+
+    rolled_back = service.rollback(updated.transaction_id)
+
+    assert rolled_back.owner_revision == initial.owner_revision
+    assert (root / "config" / "settings.json").read_bytes() == b"one"
+    restored = service.discover()[0]
+    assert restored.transaction_id == initial.transaction_id
+    assert restored.package_version == "1.0.0"
+
+
+def test_interrupted_update_recovers_without_losing_previous_owner(tmp_path):
+    class SimulatedProcessLoss(BaseException):
+        pass
+
+    data_dir = tmp_path / "data"
+    root = data_dir / "native" / "codex" / "home"
+    stable = TransactionalIntegrationInstaller(data_dir)
+    initial_request = _request(
+        root,
+        mutations=(FileInstallMutation("config/settings.json", b"one"),),
+    )
+    initial_plan = stable.preview(initial_request)
+    initial = stable.apply(
+        initial_request,
+        initial_plan,
+        InstallationApproval(initial_plan.plan_id, "test-operator"),
+        verifier=_verifier,
+    )
+    update_request = replace(
+        initial_request,
+        package=replace(initial_request.package, version="2.0.0"),
+        mutations=(FileInstallMutation("config/settings.json", b"two"),),
+    )
+
+    def crash(phase, _transaction_id):
+        if phase == "apply:1":
+            raise SimulatedProcessLoss
+
+    crashing = TransactionalIntegrationInstaller(data_dir, fault_injector=crash)
+    update_plan = crashing.preview(update_request)
+    with pytest.raises(SimulatedProcessLoss):
+        crashing.update(
+            update_request,
+            update_plan,
+            InstallationApproval(update_plan.plan_id, "test-operator"),
+            verifier=_verifier,
+        )
+
+    assert stable.discover()[0].transaction_id == initial.transaction_id
+    recovered = stable.recover({"codex": _verifier})
+
+    assert recovered[0].outcome == "completed"
+    assert (root / "config" / "settings.json").read_bytes() == b"two"
+    assert stable.discover()[0].package_version == "2.0.0"
+
+
 def test_stale_active_symlink_and_external_drift_fail_closed(tmp_path):
     data_dir = tmp_path / "data"
     root = data_dir / "native" / "codex" / "home"

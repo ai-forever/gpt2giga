@@ -24,6 +24,7 @@ from gpt2giga_harness.sessions.store import utc_now
 
 
 INSTALLATION_STATE_SCHEMA_VERSION = 1
+INSTALLATION_JOURNAL_SCHEMA_VERSION = 2
 MAX_INSTALL_MUTATIONS = 256
 MAX_INSTALL_FILE_BYTES = 16 * 1024 * 1024
 MAX_INSTALL_TOTAL_BYTES = 64 * 1024 * 1024
@@ -300,19 +301,9 @@ class TransactionalIntegrationInstaller:
             )
         self._ensure_state_root()
         with exclusive_file_lock(self._lock_path(plan.owner_key)):
-            existing_journal = self._load_journal_if_present(plan.transaction_id)
-            if existing_journal is not None:
-                self._assert_journal_matches_plan(existing_journal, plan)
-                if existing_journal["status"] == "committed":
-                    installed = self._installed_from_journal(existing_journal)
-                    if not installed.current:
-                        raise InstallationConflictError(
-                            "installed target changed outside the installer"
-                        )
-                    return self._result_from_journal(existing_journal)
-                raise InstallationConflictError(
-                    "installation transaction is no longer applicable"
-                )
+            repeated = self._repeated_result(plan)
+            if repeated is not None:
+                return repeated
             current_owner = self._read_owner(plan.owner_key)
             current_revision = str(current_owner["revision"]) if current_owner else None
             if current_revision != plan.expected_owner_revision:
@@ -331,23 +322,73 @@ class TransactionalIntegrationInstaller:
                     "installation target is active; stop its native process first"
                 )
             self._assert_preview_current(plan)
-            journal = self._prepare_transaction(request, plan, approval)
-            try:
-                journal = self._apply_staged(journal)
-                journal = self._set_journal_status(journal, "verifying")
-                if not verifier(plan.root, plan):
-                    raise InstallationVerificationError(
-                        "installation verification failed"
-                    )
-                owner = self._publish_owner(journal)
-                journal["owner_revision"] = owner["revision"]
-                journal = self._set_journal_status(journal, "committed")
-            except Exception as exc:
-                journal["failure"] = _bounded_failure(exc)
-                self._write_journal(journal)
-                self._rollback_from_journal(journal)
-                raise
-            return self._result_from_journal(journal)
+            return self._commit(
+                request,
+                plan,
+                approval,
+                verifier=verifier,
+                previous_owner=None,
+            )
+
+    def update(
+        self,
+        request: InstallationRequest,
+        plan: InstallationPlan,
+        approval: InstallationApproval,
+        *,
+        verifier: InstallationVerifier,
+    ) -> InstallationResult:
+        """Atomically replace one exact current owner and retain rollback history."""
+        if not callable(verifier):
+            raise TypeError("installation verifier must be callable")
+        self._validate_plan_request(request, plan)
+        if approval.plan_id != plan.plan_id:
+            raise InstallationConflictError(
+                "installation approval does not match the current preview"
+            )
+        if plan.scope is InstallationScope.USER_HOME and not approval.allow_user_home:
+            raise InstallationScopeError(
+                "user-home installation requires explicit approval"
+            )
+        self._ensure_state_root()
+        with exclusive_file_lock(self._lock_path(plan.owner_key)):
+            repeated = self._repeated_result(plan)
+            if repeated is not None:
+                return repeated
+            current_owner = self._read_owner(plan.owner_key)
+            if current_owner is None:
+                raise InstallationConflictError(
+                    "installation update requires an existing owner"
+                )
+            if current_owner["revision"] != plan.expected_owner_revision:
+                raise InstallationConflictError(
+                    "installation ownership changed after preview"
+                )
+            installed = self._installed_from_owner(current_owner)
+            if not installed.current:
+                raise InstallationConflictError(
+                    "installed target changed outside the installer"
+                )
+            owned_paths = tuple(
+                str(item["relative_path"]) for item in current_owner["files"]
+            )
+            planned_paths = tuple(item.relative_path for item in plan.mutations)
+            if planned_paths != owned_paths:
+                raise InstallationConflictError(
+                    "installation update must replace the exact owned file set"
+                )
+            if self.target_active(plan.root):
+                raise InstallationConflictError(
+                    "installation target is active; stop its native process first"
+                )
+            self._assert_preview_current(plan)
+            return self._commit(
+                request,
+                plan,
+                approval,
+                verifier=verifier,
+                previous_owner=current_owner,
+            )
 
     def discover(self) -> tuple[InstalledIntegration, ...]:
         """Discover all private ownership records and report exact hash drift."""
@@ -452,6 +493,56 @@ class TransactionalIntegrationInstaller:
         """Return the validated private journal path for diagnostics/tests."""
         _validate_transaction_id(transaction_id)
         return self.transactions_root / transaction_id / "journal.json"
+
+    def transaction_plan(self, transaction_id: str) -> InstallationPlan:
+        """Return the content-free plan bound to one validated transaction."""
+        return self._plan_from_journal(self._load_journal(transaction_id))
+
+    def _repeated_result(self, plan: InstallationPlan) -> InstallationResult | None:
+        existing_journal = self._load_journal_if_present(plan.transaction_id)
+        if existing_journal is None:
+            return None
+        self._assert_journal_matches_plan(existing_journal, plan)
+        if existing_journal["status"] != "committed":
+            raise InstallationConflictError(
+                "installation transaction is no longer applicable"
+            )
+        installed = self._installed_from_journal(existing_journal)
+        if not installed.current:
+            raise InstallationConflictError(
+                "installed target changed outside the installer"
+            )
+        return self._result_from_journal(existing_journal)
+
+    def _commit(
+        self,
+        request: InstallationRequest,
+        plan: InstallationPlan,
+        approval: InstallationApproval,
+        *,
+        verifier: InstallationVerifier,
+        previous_owner: Mapping[str, Any] | None,
+    ) -> InstallationResult:
+        journal = self._prepare_transaction(
+            request,
+            plan,
+            approval,
+            previous_owner=previous_owner,
+        )
+        try:
+            journal = self._apply_staged(journal)
+            journal = self._set_journal_status(journal, "verifying")
+            if not verifier(plan.root, plan):
+                raise InstallationVerificationError("installation verification failed")
+            owner = self._publish_owner(journal)
+            journal["owner_revision"] = owner["revision"]
+            journal = self._set_journal_status(journal, "committed")
+        except Exception as exc:
+            journal["failure"] = _bounded_failure(exc)
+            self._write_journal(journal)
+            self._rollback_from_journal(journal)
+            raise
+        return self._result_from_journal(journal)
 
     def _validate_request_scope(self, request: InstallationRequest) -> Path:
         if request.target.scope not in request.package.scopes:
@@ -592,6 +683,8 @@ class TransactionalIntegrationInstaller:
         request: InstallationRequest,
         plan: InstallationPlan,
         approval: InstallationApproval,
+        *,
+        previous_owner: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         transaction_dir = self.transactions_root / plan.transaction_id
         if transaction_dir.exists() or transaction_dir.is_symlink():
@@ -624,7 +717,7 @@ class TransactionalIntegrationInstaller:
             )
         now = utc_now()
         journal = {
-            "schema_version": INSTALLATION_STATE_SCHEMA_VERSION,
+            "schema_version": INSTALLATION_JOURNAL_SCHEMA_VERSION,
             "transaction_id": plan.transaction_id,
             "plan_id": plan.plan_id,
             "status": "prepared",
@@ -643,6 +736,10 @@ class TransactionalIntegrationInstaller:
             "applied_count": 0,
             "rollback_count": 0,
             "owner_revision": None,
+            "operation": "update" if previous_owner is not None else "install",
+            "previous_owner": dict(previous_owner)
+            if previous_owner is not None
+            else None,
             "failure": None,
             "created_at": now,
             "updated_at": now,
@@ -695,11 +792,36 @@ class TransactionalIntegrationInstaller:
             journal["updated_at"] = utc_now()
             self._write_journal(journal)
             self.fault_injector(f"rollback:{index + 1}", str(journal["transaction_id"]))
-        self._delete_owner_if_owned(
-            str(journal["owner_key"]), str(journal["transaction_id"])
-        )
-        journal["owner_revision"] = None
+        previous_owner = journal.get("previous_owner")
+        if isinstance(previous_owner, Mapping):
+            self._restore_previous_owner(journal, previous_owner)
+            journal["owner_revision"] = str(previous_owner["revision"])
+        else:
+            self._delete_owner_if_owned(
+                str(journal["owner_key"]), str(journal["transaction_id"])
+            )
+            journal["owner_revision"] = None
         return self._set_journal_status(journal, "rolled_back")
+
+    def _restore_previous_owner(
+        self,
+        journal: Mapping[str, Any],
+        previous_owner: Mapping[str, Any],
+    ) -> None:
+        owner_key = str(journal["owner_key"])
+        current = self._read_owner(owner_key)
+        allowed_transactions = {
+            str(journal["transaction_id"]),
+            str(previous_owner["transaction_id"]),
+        }
+        if (
+            current is not None
+            and str(current["transaction_id"]) not in allowed_transactions
+        ):
+            raise InstallationConflictError(
+                "installation ownership changed outside the installer"
+            )
+        _atomic_write_private_json(self._owner_path(owner_key), previous_owner)
 
     def _assert_recoverable_files(self, journal: Mapping[str, Any]) -> None:
         root = self._validate_journal_scope(journal)
@@ -958,7 +1080,7 @@ class TransactionalIntegrationInstaller:
 
 
 def _validate_journal(payload: dict[str, Any], transaction_id: str) -> None:
-    required = {
+    legacy_required = {
         "schema_version",
         "transaction_id",
         "plan_id",
@@ -982,10 +1104,21 @@ def _validate_journal(payload: dict[str, Any], transaction_id: str) -> None:
         "created_at",
         "updated_at",
     }
+    required = legacy_required | {"operation", "previous_owner"}
+    schema_version = payload.get("schema_version")
+    if schema_version == INSTALLATION_STATE_SCHEMA_VERSION:
+        if set(payload) != legacy_required:
+            raise InstallationStateError("installation journal fields are invalid")
+        payload["schema_version"] = INSTALLATION_JOURNAL_SCHEMA_VERSION
+        payload["operation"] = "install"
+        payload["previous_owner"] = None
+    elif schema_version == INSTALLATION_JOURNAL_SCHEMA_VERSION:
+        if set(payload) != required:
+            raise InstallationStateError("installation journal fields are invalid")
+    else:
+        raise InstallationStateError("installation journal schema is unsupported")
     if set(payload) != required:
         raise InstallationStateError("installation journal fields are invalid")
-    if payload["schema_version"] != INSTALLATION_STATE_SCHEMA_VERSION:
-        raise InstallationStateError("installation journal schema is unsupported")
     if payload["transaction_id"] != transaction_id:
         raise InstallationStateError("installation journal identity is invalid")
     if not _PLAN_RE.fullmatch(str(payload["plan_id"])):
@@ -1044,6 +1177,32 @@ def _validate_journal(payload: dict[str, Any], transaction_id: str) -> None:
             raise InstallationStateError("installation journal counter is invalid")
     if not isinstance(payload["allow_user_home"], bool):
         raise InstallationStateError("installation journal approval is invalid")
+    operation = payload["operation"]
+    previous_owner = payload["previous_owner"]
+    if operation == "install":
+        if previous_owner is not None or payload["expected_owner_revision"] is not None:
+            raise InstallationStateError("installation journal operation is invalid")
+    elif operation == "update":
+        if not isinstance(previous_owner, dict):
+            raise InstallationStateError("installation prior owner is invalid")
+        _validate_owner(previous_owner, str(payload["owner_key"]))
+        if previous_owner["revision"] != payload["expected_owner_revision"]:
+            raise InstallationStateError("installation prior owner binding is invalid")
+        if (
+            previous_owner["target_id"] != payload["target_id"]
+            or previous_owner["scope"] != payload["scope"]
+            or previous_owner["owner_id"] != payload["owner_id"]
+            or previous_owner["root"] != payload["root"]
+        ):
+            raise InstallationStateError("installation prior owner target is invalid")
+        previous_paths = tuple(
+            str(item["relative_path"]) for item in previous_owner["files"]
+        )
+        current_paths = tuple(str(item["relative_path"]) for item in mutations)
+        if previous_paths != current_paths:
+            raise InstallationStateError("installation update paths are invalid")
+    else:
+        raise InstallationStateError("installation journal operation is invalid")
     expected_owner_key = _json_hash(
         {
             "target_id": str(payload["target_id"]),
