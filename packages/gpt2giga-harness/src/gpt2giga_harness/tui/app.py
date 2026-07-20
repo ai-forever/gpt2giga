@@ -22,8 +22,12 @@ from textual.widgets import (
 )
 
 from gpt2giga_harness.tui.client import (
+    AttachmentSummary,
+    FileCandidate,
+    HandoffPreview,
     NavigationSnapshot,
     ProjectSummary,
+    RunInspection,
     RunSnapshot,
     SessionSummary,
     TimelineEvent,
@@ -141,6 +145,168 @@ class HelpScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class FilePickerScreen(ModalScreen[FileCandidate | None]):
+    """Bounded keyboard-first project file picker with safe preview."""
+
+    CSS = """
+    FilePickerScreen { align: center middle; }
+    #file-dialog {
+        width: 92%;
+        height: 88%;
+        padding: 1 2;
+        border: round $accent;
+        background: $surface;
+    }
+    #file-policy { height: auto; color: $text-muted; }
+    #file-list { height: 40%; margin-top: 1; border: round $primary-background; }
+    #file-preview { height: 1fr; margin-top: 1; overflow: auto hidden; }
+    #file-actions { height: 3; align-horizontal: right; }
+    #file-actions Button { margin-left: 1; }
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    def __init__(
+        self,
+        candidates: tuple[FileCandidate, ...],
+        *,
+        title: str,
+        policy: str,
+        attach: str,
+        cancel: str,
+        empty: str,
+    ) -> None:
+        super().__init__()
+        self.candidates = candidates
+        self.dialog_title = title
+        self.policy = policy
+        self.attach_label = attach
+        self.cancel_label = cancel
+        self.empty = empty
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="file-dialog"):
+            yield Label(self.dialog_title, classes="dialog-title", markup=False)
+            yield Static(self.policy, id="file-policy", markup=False)
+            yield ListView(
+                *(
+                    NavigationItem(
+                        f"{item.path} · {item.kind} · {item.size_bytes} B",
+                        item.path,
+                    )
+                    for item in self.candidates
+                ),
+                id="file-list",
+            )
+            yield Static(self.empty, id="file-preview", markup=False)
+            with Horizontal(id="file-actions"):
+                yield Button(self.cancel_label, id="file-cancel")
+                yield Button(
+                    self.attach_label,
+                    id="file-attach",
+                    variant="primary",
+                    disabled=not self.candidates,
+                )
+
+    def on_mount(self) -> None:
+        view = self.query_one("#file-list", ListView)
+        if self.candidates:
+            view.index = 0
+            self._render_preview(0)
+        view.focus()
+
+    @on(ListView.Highlighted, "#file-list")
+    def highlight_file(self, event: ListView.Highlighted) -> None:
+        item = event.item
+        if not isinstance(item, NavigationItem):
+            return
+        index = next(
+            (
+                index
+                for index, candidate in enumerate(self.candidates)
+                if candidate.path == item.value
+            ),
+            None,
+        )
+        if index is not None:
+            self._render_preview(index)
+
+    @on(ListView.Selected, "#file-list")
+    def select_file(self, event: ListView.Selected) -> None:
+        item = event.item
+        if isinstance(item, NavigationItem):
+            self.dismiss(
+                next(
+                    candidate
+                    for candidate in self.candidates
+                    if candidate.path == item.value
+                )
+            )
+
+    @on(Button.Pressed, "#file-attach")
+    def attach_file(self) -> None:
+        index = self.query_one("#file-list", ListView).index
+        if index is not None and 0 <= index < len(self.candidates):
+            self.dismiss(self.candidates[index])
+
+    @on(Button.Pressed, "#file-cancel")
+    def cancel_file(self) -> None:
+        self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _render_preview(self, index: int) -> None:
+        candidate = self.candidates[index]
+        header = (
+            f"{candidate.path}\n{candidate.mime_type} · {candidate.preview_status}\n\n"
+        )
+        self.query_one("#file-preview", Static).update(header + candidate.preview)
+
+
+class DetailScreen(ModalScreen[None]):
+    """Bounded read-only inspection or handoff detail."""
+
+    CSS = """
+    DetailScreen { align: center middle; }
+    #detail-dialog {
+        width: 92%;
+        height: 88%;
+        padding: 1 2;
+        border: round $accent;
+        background: $surface;
+    }
+    #detail-body { height: 1fr; overflow: auto hidden; }
+    #detail-close { dock: bottom; width: 12; align-horizontal: right; }
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "close", "Close", show=False),
+        Binding("enter", "close", "Close", show=False),
+    ]
+
+    def __init__(self, title: str, body: str, close: str) -> None:
+        super().__init__()
+        self.dialog_title = title
+        self.body = body
+        self.close_label = close
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="detail-dialog"):
+            yield Label(self.dialog_title, classes="dialog-title", markup=False)
+            yield Static(self.body, id="detail-body", markup=False)
+            yield Button(self.close_label, id="detail-close", variant="primary")
+
+    @on(Button.Pressed, "#detail-close")
+    def close_button(self) -> None:
+        self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class WorkbenchTui(App[None]):
     """Thin optional shell over the authoritative Harness application."""
 
@@ -205,6 +371,20 @@ class WorkbenchTui(App[None]):
         padding: 0 1;
         border: round $primary-background;
         overflow: auto hidden;
+    }
+    #attachment-status {
+        height: 1;
+        color: $text-muted;
+    }
+    #context-actions {
+        height: 3;
+        align-vertical: middle;
+        overflow-x: hidden;
+    }
+    #context-actions Button {
+        min-width: 8;
+        width: 1fr;
+        margin-right: 1;
     }
     #interaction-actions {
         height: 3;
@@ -272,6 +452,13 @@ class WorkbenchTui(App[None]):
         width: 1fr;
         margin-right: 0;
     }
+    #body.narrow #context-actions Button {
+        min-width: 3;
+        margin-right: 0;
+    }
+    #body.narrow #context-actions {
+        display: none;
+    }
     #body.narrow .pane-title {
         height: 1;
     }
@@ -287,6 +474,10 @@ class WorkbenchTui(App[None]):
         Binding("r", "refresh", "Refresh"),
         Binding("p", "choose_project", "Project"),
         Binding("n", "new_session", "New session"),
+        Binding("a", "files", "Files"),
+        Binding("e", "evidence", "Evidence"),
+        Binding("o", "provider_handoff", "Provider"),
+        Binding("w", "web_handoff", "Web"),
         Binding("?", "help", "Help"),
     ]
 
@@ -306,6 +497,7 @@ class WorkbenchTui(App[None]):
         self.run_snapshot: RunSnapshot | None = None
         self.run_cursor: str | None = None
         self.timeline: list[TimelineEvent] = []
+        self.attachments: tuple[AttachmentSummary, ...] = ()
         self._polling = False
         self.t = translator(locale)
         self.sub_title = self.t("app.subtitle")
@@ -323,6 +515,14 @@ class WorkbenchTui(App[None]):
                 yield Label(self.t("pane.readiness"), id="detail-title", markup=False)
                 yield Static(self.t("detail.empty"), id="readiness", markup=False)
                 yield Static(self.t("timeline.empty"), id="timeline", markup=False)
+                yield Static(
+                    self.t("attachments.empty"), id="attachment-status", markup=False
+                )
+                with Horizontal(id="context-actions"):
+                    yield Button(self.t("button.files"), id="files")
+                    yield Button(self.t("button.evidence"), id="evidence")
+                    yield Button(self.t("button.provider"), id="provider-handoff")
+                    yield Button(self.t("button.web"), id="web-handoff")
                 with Horizontal(id="interaction-actions"):
                     yield Button(self.t("button.approve"), id="approve")
                     yield Button(self.t("button.deny"), id="deny")
@@ -371,6 +571,7 @@ class WorkbenchTui(App[None]):
             return
         self.workspace = selected.root
         self.selected_session_id = None
+        self.attachments = ()
         await self._reload()
 
     @on(ListView.Selected, "#session-list")
@@ -379,6 +580,8 @@ class WorkbenchTui(App[None]):
         if not isinstance(item, NavigationItem):
             return
         self.selected_session_id = item.value
+        self.attachments = ()
+        self._render_attachments()
         self._reset_run()
         if self.snapshot is not None:
             await self.client.remember_session(self.snapshot.project.root, item.value)
@@ -399,6 +602,22 @@ class WorkbenchTui(App[None]):
     @on(Button.Pressed, "#help")
     def press_help(self) -> None:
         self.action_help()
+
+    @on(Button.Pressed, "#files")
+    def press_files(self) -> None:
+        self.action_files()
+
+    @on(Button.Pressed, "#evidence")
+    async def press_evidence(self) -> None:
+        await self.action_evidence()
+
+    @on(Button.Pressed, "#provider-handoff")
+    async def press_provider_handoff(self) -> None:
+        await self.action_provider_handoff()
+
+    @on(Button.Pressed, "#web-handoff")
+    async def press_web_handoff(self) -> None:
+        await self.action_web_handoff()
 
     @on(Input.Submitted, "#composer")
     async def submit_composer(self, event: Input.Submitted) -> None:
@@ -481,11 +700,45 @@ class WorkbenchTui(App[None]):
     def action_help(self) -> None:
         self.push_screen(HelpScreen(self.t("help.title"), self.t("help.body")))
 
+    def action_files(self) -> None:
+        if self.selected_session_id is None:
+            self._show_detail(self.t("files.title"), self.t("files.no_session"))
+            return
+        self.push_screen(
+            TextPrompt(
+                self.t("dialog.file_query"),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            self._file_query_chosen,
+        )
+
+    async def action_evidence(self) -> None:
+        if self.run_snapshot is None:
+            self._show_detail(self.t("evidence.title"), self.t("evidence.empty"))
+            return
+        self._set_status(self.t("status.loading_evidence"))
+        try:
+            inspection = await self.client.inspect_run(self.run_snapshot.binding.run_id)
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self._show_detail(self.t("evidence.title"), self._inspection_text(inspection))
+        self._set_status(self.t("status.ready"))
+
+    async def action_provider_handoff(self) -> None:
+        await self._show_handoff("provider")
+
+    async def action_web_handoff(self) -> None:
+        await self._show_handoff("web")
+
     async def _project_chosen(self, value: str | None) -> None:
         if not value:
             return
         self.workspace = value
         self.selected_session_id = None
+        self.attachments = ()
+        self._render_attachments()
         self._reset_run()
         await self._reload()
 
@@ -504,6 +757,43 @@ class WorkbenchTui(App[None]):
         self._reset_run()
         self._set_status(self.t("session.created"))
         await self._reload()
+
+    async def _file_query_chosen(self, value: str | None) -> None:
+        if value is None or self.selected_session_id is None:
+            return
+        self._set_status(self.t("status.loading_files"))
+        try:
+            candidates = await self.client.search_files(self.selected_session_id, value)
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self.push_screen(
+            FilePickerScreen(
+                candidates,
+                title=self.t("files.title"),
+                policy=self.t("files.policy"),
+                attach=self.t("files.attach"),
+                cancel=self.t("dialog.cancel"),
+                empty=self.t("files.empty"),
+            ),
+            self._file_chosen,
+        )
+        self._set_status(self.t("status.ready"))
+
+    async def _file_chosen(self, candidate: FileCandidate | None) -> None:
+        if candidate is None or self.selected_session_id is None:
+            return
+        try:
+            attachment = await self.client.attach_file(
+                self.selected_session_id, candidate.path
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        if attachment.id not in {item.id for item in self.attachments}:
+            self.attachments = (*self.attachments, attachment)
+        self._render_attachments()
+        self._set_status(self.t("files.attached"))
 
     async def _reload(self) -> None:
         self._set_status(self.t("status.loading"))
@@ -547,16 +837,25 @@ class WorkbenchTui(App[None]):
                     self.selected_session_id,
                     content,
                     idempotency_key=key,
+                    attachment_ids=tuple(item.id for item in self.attachments),
                 )
         except Exception as exc:
             self._show_error(exc)
             return
         self._reset_run()
         self._apply_run_snapshot(snapshot)
+        self.attachments = ()
+        self._render_attachments()
         self._set_status(self.t("status.running"))
 
     async def _poll_run(self) -> None:
-        if self._polling or self.run_snapshot is None or self.run_snapshot.terminal:
+        if (
+            self._polling
+            or len(self.screen_stack) > 1
+            or not any(self.query("#timeline"))
+            or self.run_snapshot is None
+            or self.run_snapshot.terminal
+        ):
             return
         self._polling = True
         try:
@@ -564,9 +863,12 @@ class WorkbenchTui(App[None]):
                 self.run_snapshot.binding.run_id,
                 cursor=self.run_cursor,
             )
+            if len(self.screen_stack) > 1 or not any(self.query("#timeline")):
+                return
             self._apply_run_snapshot(snapshot)
         except Exception as exc:
-            self._show_error(exc)
+            if any(self.query("#status")):
+                self._show_error(exc)
         finally:
             self._polling = False
 
@@ -693,6 +995,77 @@ class WorkbenchTui(App[None]):
             self._render_timeline()
             self._update_interaction_actions()
 
+    async def _show_handoff(self, kind: str) -> None:
+        if self.selected_session_id is None:
+            self._show_detail(self.t("handoff.title"), self.t("handoff.no_session"))
+            return
+        self._set_status(self.t("status.loading_handoff"))
+        try:
+            preview = (
+                await self.client.provider_handoff(self.selected_session_id)
+                if kind == "provider"
+                else await self.client.web_handoff(self.selected_session_id)
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self._show_detail(self.t("handoff.title"), self._handoff_text(preview))
+        self._set_status(self.t("status.ready"))
+
+    def _show_detail(self, title: str, body: str) -> None:
+        self.push_screen(DetailScreen(title, body, self.t("dialog.close")))
+
+    def _inspection_text(self, inspection: RunInspection) -> str:
+        artifacts = ", ".join(item.type for item in inspection.artifacts) or "—"
+        changed = ", ".join(inspection.changed_files) or "—"
+        untracked = ", ".join(inspection.untracked_files) or "—"
+        diff = inspection.diff or self.t("evidence.no_diff")
+        if inspection.diff_truncated:
+            diff += f"\n\n{self.t('evidence.truncated')}"
+        return "\n".join(
+            (
+                f"State: ready · revision {inspection.revision[:12]}",
+                f"Run: {inspection.run_id} [{inspection.status}]",
+                f"Provider continuity: {inspection.provider_continuity}",
+                f"Harness / integration: {inspection.harness_status}",
+                f"Recovery: {inspection.recovery}",
+                f"Artifacts: {artifacts}",
+                f"Changed: {changed}",
+                f"Untracked: {untracked}",
+                "Environment: deferred to Phase N6",
+                "",
+                "Evidence:",
+                *(f"- {item}" for item in inspection.evidence),
+                "",
+                "Diff:",
+                diff,
+            )
+        )
+
+    def _handoff_text(self, preview: HandoffPreview) -> str:
+        command = " ".join(preview.command) or "—"
+        return "\n".join(
+            (
+                f"Status: {preview.status}",
+                f"Exact target: {preview.target}",
+                f"Continuity: {preview.continuity}",
+                f"Command: {command}",
+                "Observability boundary:",
+                *(f"- {item}" for item in preview.observability),
+                "",
+                preview.instruction,
+            )
+        )
+
+    def _render_attachments(self) -> None:
+        content = (
+            f"{self.t('attachments.selected')}: "
+            + ", ".join(item.path for item in self.attachments)
+            if self.attachments
+            else self.t("attachments.empty")
+        )
+        self.query_one("#attachment-status", Static).update(content)
+
     async def _render_projects(
         self,
         projects: tuple[ProjectSummary, ...],
@@ -743,6 +1116,14 @@ class WorkbenchTui(App[None]):
                 f"{self.t('label.model')}: {model}",
                 f"{self.t('label.transport')}: {readiness.transport}",
                 f"{self.t('label.readiness')}: {readiness.status}",
+                (
+                    "Integrations: "
+                    f"{snapshot.integrations.status} · "
+                    f"catalog {snapshot.integrations.catalog_count} · "
+                    f"flows {snapshot.integrations.flow_count} · "
+                    f"verified {snapshot.integrations.verified_count}"
+                ),
+                "Environment: deferred to Phase N6",
                 f"Findings: {findings}",
             )
         )

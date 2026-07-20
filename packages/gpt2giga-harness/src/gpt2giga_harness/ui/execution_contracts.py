@@ -151,6 +151,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/sessions"),
         ("GET", "/api/sessions/{session_id}"),
         ("GET", "/api/sessions/{session_id}/attachments"),
+        ("GET", "/api/sessions/{session_id}/attachments/workspace/preview"),
         ("GET", "/api/sessions/{session_id}/attachments/workspace/search"),
         ("GET", "/api/sessions/{session_id}/events"),
         ("GET", "/api/tool-servers"),

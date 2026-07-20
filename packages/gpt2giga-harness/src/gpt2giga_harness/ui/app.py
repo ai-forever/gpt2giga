@@ -45,6 +45,7 @@ from gpt2giga_harness.attachments import (
     render_attachments_for_harness,
     render_plan_to_dict,
 )
+from gpt2giga_harness.attachments.limits import normalize_workspace_file
 from gpt2giga_harness.config import (
     DEFAULT_MODEL_HINTS,
     HarnessConfig,
@@ -289,6 +290,8 @@ from gpt2giga_harness.workbench_execution import workbench_transport_projection
 NATIVE_SUBMIT_KEY_DELAY_SECONDS = 0.05
 RUN_EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
 RUN_EVENT_STREAM_POLL_SECONDS = 0.1
+TUI_FILE_PREVIEW_BYTES = 8 * 1024
+TUI_FILE_PREVIEW_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 
 @dataclass
@@ -1998,6 +2001,46 @@ def create_app(
             "files": files,
             "bounded": True,
         }
+
+    @app.get("/api/sessions/{session_id}/attachments/workspace/preview")
+    def preview_session_workspace_attachment(
+        session_id: str,
+        path: str = Query(min_length=1),
+    ) -> dict[str, Any]:
+        """Return a bounded terminal-safe text preview for one safe candidate."""
+        try:
+            session = store.get_session(session_id)
+            workspace_root = _attachment_workspace(session, {})
+            limits = _attachment_limits(session, workspace_root=workspace_root)
+            metadata = workspace_file_metadata(
+                workspace_root,
+                path,
+                limits=limits,
+            )
+            preview = {
+                "status": "unsupported",
+                "text": "Preview is unavailable for this file type.",
+                "truncated": False,
+            }
+            if metadata["kind"] == "text":
+                resolved, _relative = normalize_workspace_file(
+                    workspace_root, path, limits
+                )
+                raw = resolved.read_bytes()[: TUI_FILE_PREVIEW_BYTES + 1]
+                text = raw[:TUI_FILE_PREVIEW_BYTES].decode("utf-8", errors="replace")
+                truncated = len(raw) > TUI_FILE_PREVIEW_BYTES
+                preview = {
+                    "status": "truncated" if truncated else "ready",
+                    "text": TUI_FILE_PREVIEW_CONTROL_RE.sub("�", text).replace(
+                        "\r", ""
+                    ),
+                    "truncated": truncated,
+                }
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except (AttachmentValidationError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"file": metadata, "preview": preview, "bounded": True}
 
     @app.get("/api/sessions/{session_id}/attachments")
     def session_attachments(session_id: str) -> dict[str, Any]:

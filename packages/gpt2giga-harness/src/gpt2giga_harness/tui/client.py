@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 import hashlib
 from http.cookiejar import CookieJar
 import json
+from pathlib import Path
 import re
 import threading
 from typing import Any, Mapping, Protocol
@@ -20,10 +21,24 @@ from urllib.request import (
 
 import anyio
 
+from gpt2giga_harness.attachments import (
+    AttachmentLimits,
+    FilesystemAttachmentStore,
+    attachment_to_dict,
+    limits_from_project_settings,
+)
+from gpt2giga_harness.attachments.limits import normalize_workspace_file
 from gpt2giga_harness.application import SessionApplicationService
+from gpt2giga_harness.claude_handoff import (
+    ClaudeHandoffAction,
+    ClaudeHandoffLaunchMode,
+    claude_handoff_plan_to_dict,
+)
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.integration_flows import IntegrationFlowService
 from gpt2giga_harness.project import (
     HarnessProject,
+    load_project_config,
     load_project_state,
     resolve_project,
     update_project_state,
@@ -47,6 +62,8 @@ from gpt2giga_harness.settings import HarnessSettingsStore
 from gpt2giga_harness.structured_sessions import StructuredTurnInput
 from gpt2giga_harness.types import availability_to_dict, spec_to_dict
 from gpt2giga_harness.workbench_execution import workbench_transport_projection
+from gpt2giga_harness.workspace import workspace_tree
+from gpt2giga_harness.worktrees import run_diff_response
 
 MAX_PROJECTS = 50
 MAX_SESSIONS = 100
@@ -54,6 +71,9 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_DISPLAY_CHARS = 512
 MAX_TIMELINE_EVENTS = 100
 MAX_TIMELINE_CHARS = 64 * 1024
+MAX_FILE_CANDIDATES = 20
+MAX_FILE_PREVIEW_CHARS = 8 * 1024
+MAX_DIFF_PREVIEW_CHARS = 32 * 1024
 HTTP_TIMEOUT_SECONDS = 10.0
 RUN_START_TIMEOUT_SECONDS = 5.0
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
@@ -114,6 +134,16 @@ class ReadinessSummary:
 
 
 @dataclass(frozen=True)
+class IntegrationSummary:
+    """Content-free durable integration inventory status."""
+
+    status: str
+    catalog_count: int
+    flow_count: int
+    verified_count: int
+
+
+@dataclass(frozen=True)
 class NavigationSnapshot:
     """One authoritative, presentation-bounded TUI resnapshot."""
 
@@ -124,6 +154,7 @@ class NavigationSnapshot:
     selected_session_id: str | None
     harnesses: tuple[HarnessSummary, ...]
     readiness: ReadinessSummary
+    integrations: IntegrationSummary = IntegrationSummary("unknown", 0, 0, 0)
 
 
 @dataclass(frozen=True)
@@ -177,6 +208,69 @@ class RunSnapshot:
         return self.status in _TERMINAL_RUN_STATUSES
 
 
+@dataclass(frozen=True)
+class FileCandidate:
+    """Safe bounded project file candidate and preview."""
+
+    path: str
+    name: str
+    mime_type: str
+    kind: str
+    size_bytes: int
+    preview: str
+    preview_status: str
+
+
+@dataclass(frozen=True)
+class AttachmentSummary:
+    """One backend-owned attachment selected for the next turn."""
+
+    id: str
+    path: str
+    mime_type: str
+    kind: str
+    size_bytes: int
+
+
+@dataclass(frozen=True)
+class ArtifactSummary:
+    """Content-free retained artifact inventory item."""
+
+    type: str
+    byte_count: int | None
+
+
+@dataclass(frozen=True)
+class RunInspection:
+    """Bounded authoritative diff, evidence, and recovery projection."""
+
+    run_id: str
+    status: str
+    revision: str
+    provider_continuity: str
+    harness_status: str
+    recovery: str
+    artifacts: tuple[ArtifactSummary, ...]
+    diff: str
+    diff_truncated: bool
+    changed_files: tuple[str, ...]
+    untracked_files: tuple[str, ...]
+    evidence: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class HandoffPreview:
+    """Exact external handoff boundary shown before leaving the TUI."""
+
+    kind: str
+    status: str
+    target: str
+    continuity: str
+    observability: tuple[str, ...]
+    instruction: str
+    command: tuple[str, ...] = ()
+
+
 class WorkbenchClient(Protocol):
     """Thin asynchronous client contract shared by both transports."""
 
@@ -205,6 +299,7 @@ class WorkbenchClient(Protocol):
         content: str,
         *,
         idempotency_key: str,
+        attachment_ids: tuple[str, ...] = (),
     ) -> RunSnapshot:
         """Submit one typed turn without invoking the Harness CLI."""
 
@@ -250,6 +345,23 @@ class WorkbenchClient(Protocol):
     ) -> RunSnapshot:
         """Answer one exact provider input request where supported."""
 
+    async def search_files(
+        self, session_id: str, query: str
+    ) -> tuple[FileCandidate, ...]:
+        """Return bounded safe project files with neutralized previews."""
+
+    async def attach_file(self, session_id: str, path: str) -> AttachmentSummary:
+        """Create one backend-owned workspace attachment reference."""
+
+    async def inspect_run(self, run_id: str) -> RunInspection:
+        """Return bounded diff, evidence, provider, and recovery state."""
+
+    async def provider_handoff(self, session_id: str) -> HandoffPreview:
+        """Preview the exact provider-owned target without launching it."""
+
+    async def web_handoff(self, session_id: str) -> HandoffPreview:
+        """Preview the exact Web target without silently starting a server."""
+
 
 class InProcessWorkbenchClient:
     """Use existing application services without FastAPI, uvicorn, or a daemon."""
@@ -273,6 +385,8 @@ class InProcessWorkbenchClient:
         )
         self.settings_store = HarnessSettingsStore(config.data_dir, config)
         self.runtime_store = RuntimeCoordinationStore(config.data_dir)
+        self.attachment_store = FilesystemAttachmentStore(config.data_dir)
+        self.integration_service = IntegrationFlowService(config.data_dir)
         self.sessions = SessionApplicationService(
             runner=runner,
             settings_store=self.settings_store,
@@ -320,6 +434,7 @@ class InProcessWorkbenchClient:
             selected_session_id=selected_id,
             harnesses=harnesses,
             readiness=readiness,
+            integrations=_in_process_integration_summary(self.integration_service),
         )
 
     async def create_session(
@@ -348,6 +463,7 @@ class InProcessWorkbenchClient:
         content: str,
         *,
         idempotency_key: str,
+        attachment_ids: tuple[str, ...] = (),
     ) -> RunSnapshot:
         prompt = _required_content(content, "turn content")
         key = _required_identity(idempotency_key, "idempotency key")
@@ -363,7 +479,11 @@ class InProcessWorkbenchClient:
             anyio.to_thread.run_sync(
                 lambda: self.sessions.run_turn(
                     session_id,
-                    {"prompt": prompt, "stream": True},
+                    {
+                        "prompt": prompt,
+                        "stream": True,
+                        "attachment_ids": list(_attachment_ids(attachment_ids)),
+                    },
                     cancel_event=cancel_event,
                 ),
                 abandon_on_cancel=True,
@@ -540,6 +660,89 @@ class InProcessWorkbenchClient:
             "the selected provider does not advertise interactive input"
         )
 
+    async def search_files(
+        self, session_id: str, query: str
+    ) -> tuple[FileCandidate, ...]:
+        session = self.store.get_session(session_id)
+        workspace = _session_workspace(session)
+        limits = _workspace_limits(workspace)
+        files = workspace_tree(
+            workspace,
+            query=query,
+            limits=limits,
+            result_limit=MAX_FILE_CANDIDATES,
+        )
+        return tuple(
+            _file_candidate(item, workspace=workspace, limits=limits) for item in files
+        )
+
+    async def attach_file(self, session_id: str, path: str) -> AttachmentSummary:
+        session = self.store.get_session(session_id)
+        workspace = _session_workspace(session)
+        project_id = _optional_text(session.metadata.get("project_id"))
+        if project_id is None:
+            project_id = resolve_project(
+                workspace,
+                data_dir=self.config.data_dir,
+                load_config_name=False,
+            ).id
+        attachment = self.attachment_store.create_workspace_reference(
+            session_id=session.id,
+            project_id=project_id,
+            workspace_root=workspace,
+            path=path,
+            limits=_workspace_limits(workspace),
+        )
+        return _attachment_summary(attachment_to_dict(attachment))
+
+    async def inspect_run(self, run_id: str) -> RunInspection:
+        run = self.sessions.get_run(run_id)
+        return _in_process_run_inspection(
+            run,
+            registry=self.registry,
+            runtime_store=self.runtime_store,
+        )
+
+    async def provider_handoff(self, session_id: str) -> HandoffPreview:
+        session = self.store.get_session(session_id)
+        workspace = _session_workspace(session)
+        harness = self.registry.get(session.default_harness_id)
+        preview = getattr(harness, "provider_handoff_preview", None)
+        if not callable(preview):
+            return _blocked_provider_handoff(session.default_harness_id)
+        try:
+            plan = preview(
+                action=ClaudeHandoffAction.OPEN_PROVIDER_UI,
+                workspace=workspace,
+                launch_mode=ClaudeHandoffLaunchMode.INTERACTIVE,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            return HandoffPreview(
+                kind="provider",
+                status="blocked",
+                target=session.default_harness_id,
+                continuity="Harness session remains authoritative and unchanged.",
+                observability=("provider target was not opened",),
+                instruction=_display_text(str(exc)),
+            )
+        return _provider_handoff_from_mapping(
+            claude_handoff_plan_to_dict(plan),
+            harness_id=session.default_harness_id,
+        )
+
+    async def web_handoff(self, session_id: str) -> HandoffPreview:
+        self.store.get_session(session_id)
+        return HandoffPreview(
+            kind="web",
+            status="blocked",
+            target="unavailable in in-process mode",
+            continuity=f"Session {session_id} remains durable in the local store.",
+            observability=(
+                "no FastAPI or uvicorn server is started by the terminal client",
+            ),
+            instruction="Use attach mode with an already running local Web application.",
+        )
+
     async def _wait_for_run(
         self,
         session_id: str,
@@ -689,12 +892,18 @@ class AttachedWorkbenchClient:
     ) -> NavigationSnapshot:
         await self._ensure_session()
         query = urlencode({"workspace": workspace}) if workspace else ""
-        project_payload, sessions_payload, harness_payload = await self._parallel_get(
+        (
+            project_payload,
+            sessions_payload,
+            harness_payload,
+            integration_payload,
+        ) = await self._parallel_get(
             f"/api/project?{query}" if query else "/api/project",
             f"/api/sessions?{urlencode({'workspace': workspace, 'limit': MAX_SESSIONS})}"
             if workspace
             else f"/api/sessions?limit={MAX_SESSIONS}",
             "/api/harnesses",
+            "/api/integrations",
         )
         project_data = _mapping(project_payload.get("project"))
         session_items = tuple(
@@ -760,6 +969,7 @@ class AttachedWorkbenchClient:
                 harness_id=harness_id,
                 model=model,
             ),
+            integrations=_integration_summary_from_mapping(integration_payload),
         )
 
     async def create_session(
@@ -787,6 +997,7 @@ class AttachedWorkbenchClient:
         content: str,
         *,
         idempotency_key: str,
+        attachment_ids: tuple[str, ...] = (),
     ) -> RunSnapshot:
         response = await self._request(
             "POST",
@@ -797,6 +1008,7 @@ class AttachedWorkbenchClient:
                 "idempotency_key": _required_identity(
                     idempotency_key, "idempotency key"
                 ),
+                "attachment_ids": list(_attachment_ids(attachment_ids)),
             },
         )
         run_id = _required_identity(_mapping(response.get("run")).get("id"), "run id")
@@ -971,6 +1183,86 @@ class AttachedWorkbenchClient:
         )
         return await self.snapshot_run(binding.run_id)
 
+    async def search_files(
+        self, session_id: str, query: str
+    ) -> tuple[FileCandidate, ...]:
+        response = await self._request(
+            "GET",
+            f"/api/sessions/{_path_identity(session_id)}/attachments/workspace/search?"
+            + urlencode({"q": query, "limit": MAX_FILE_CANDIDATES}),
+        )
+        candidates: list[FileCandidate] = []
+        for item in _mapping_items(response.get("files"), MAX_FILE_CANDIDATES):
+            path = _required_text(item.get("path"), "file path")
+            preview_response = await self._request(
+                "GET",
+                f"/api/sessions/{_path_identity(session_id)}/attachments/workspace/preview?"
+                + urlencode({"path": path}),
+            )
+            candidates.append(_file_candidate_from_mapping(item, preview_response))
+        return tuple(candidates)
+
+    async def attach_file(self, session_id: str, path: str) -> AttachmentSummary:
+        response = await self._request(
+            "POST",
+            f"/api/sessions/{_path_identity(session_id)}/attachments/workspace",
+            {"path": _required_content(path, "file path")},
+        )
+        return _attachment_summary(_mapping(response.get("attachment")))
+
+    async def inspect_run(self, run_id: str) -> RunInspection:
+        identity = _path_identity(run_id)
+        run_payload, diff_payload, harness_payload = await self._parallel_get(
+            f"/api/cockpit/runs/{identity}",
+            f"/api/cockpit/runs/{identity}/diff?max_bytes={MAX_DIFF_PREVIEW_CHARS + 1024}",
+            "/api/harnesses",
+        )
+        summary_payload = await self._request_optional(
+            "GET", f"/api/runs/{identity}/summary"
+        )
+        return _attached_run_inspection(
+            run_payload, diff_payload, summary_payload, harness_payload
+        )
+
+    async def provider_handoff(self, session_id: str) -> HandoffPreview:
+        response = await self._request(
+            "GET", f"/api/sessions/{_path_identity(session_id)}"
+        )
+        session = _mapping(response.get("session")) or response
+        harness_id = _required_identity(session.get("default_harness_id"), "Harness id")
+        workspace = _required_text(session.get("workspace"), "session workspace")
+        handoff = await self._request_optional(
+            "GET",
+            f"/api/provider-handoffs/{harness_id}/preview?"
+            + urlencode(
+                {
+                    "action": "open_provider_ui",
+                    "workspace": workspace,
+                    "launch_mode": "interactive",
+                }
+            ),
+        )
+        if not handoff:
+            return _blocked_provider_handoff(harness_id)
+        return _provider_handoff_from_mapping(
+            _mapping(handoff.get("handoff")), harness_id=harness_id
+        )
+
+    async def web_handoff(self, session_id: str) -> HandoffPreview:
+        identity = _path_identity(session_id)
+        await self._request("GET", f"/api/sessions/{identity}")
+        return HandoffPreview(
+            kind="web",
+            status="ready",
+            target=f"{self.base_url}/cockpit-v2/work/{identity}",
+            continuity=f"The Web client resumes Harness session {identity}.",
+            observability=(
+                "Web and TUI share the server application/runtime/store authority",
+                "browser authentication and rendering remain Web-owned",
+            ),
+            instruction="Open this local URL after reviewing the target and boundary.",
+        )
+
     async def _validate_binding(self, binding: RunActionBinding) -> None:
         current = await self.snapshot_run(binding.run_id)
         if (
@@ -993,6 +1285,12 @@ class AttachedWorkbenchClient:
             for index, path in enumerate(paths):
                 group.start_soon(fetch, index, path)
         return tuple(item or {} for item in results)
+
+    async def _request_optional(self, method: str, path: str) -> Mapping[str, Any]:
+        try:
+            return await self._request(method, path)
+        except WorkbenchClientError:
+            return {}
 
     async def _ensure_session(self) -> None:
         if self._bootstrapped:
@@ -1059,6 +1357,310 @@ class AttachedWorkbenchClient:
             return parsed
 
         return await anyio.to_thread.run_sync(send)
+
+
+def _workspace_limits(workspace: str) -> AttachmentLimits:
+    return limits_from_project_settings(load_project_config(workspace).attachments)
+
+
+def _in_process_integration_summary(
+    service: IntegrationFlowService,
+) -> IntegrationSummary:
+    try:
+        catalog_count = len(service.catalog.list())
+        flows = service.list()
+    except (OSError, RuntimeError, ValueError):
+        return IntegrationSummary("blocked", 0, 0, 0)
+    verified = sum(
+        getattr(item.status, "value", item.status) in {"verified", "active"}
+        for item in flows
+    )
+    return IntegrationSummary("ready", catalog_count, len(flows), verified)
+
+
+def _integration_summary_from_mapping(data: Mapping[str, Any]) -> IntegrationSummary:
+    catalog = _mapping_items(data.get("catalog"), 200)
+    flows = _mapping_items(data.get("flows"), 200)
+    verified = sum(
+        str(item.get("status") or "") in {"verified", "active"} for item in flows
+    )
+    return IntegrationSummary("ready", len(catalog), len(flows), verified)
+
+
+def _session_workspace(session: HarnessSession) -> str:
+    workspace = _optional_text(session.workspace)
+    if workspace is None:
+        raise WorkbenchClientError("session has no project workspace")
+    return workspace
+
+
+def _attachment_ids(values: tuple[str, ...]) -> tuple[str, ...]:
+    if len(values) > MAX_FILE_CANDIDATES:
+        raise WorkbenchClientError("too many attachments selected")
+    return tuple(
+        _required_identity(value, "attachment id") for value in dict.fromkeys(values)
+    )
+
+
+def _file_candidate(
+    data: Mapping[str, Any],
+    *,
+    workspace: str,
+    limits: AttachmentLimits,
+) -> FileCandidate:
+    path = _required_text(data.get("path"), "file path")
+    kind = _display_text(data.get("kind") or "unknown")
+    preview = "Preview is unavailable for this file type."
+    preview_status = "unsupported"
+    if kind == "text":
+        resolved, _relative = normalize_workspace_file(workspace, path, limits)
+        raw = resolved.read_bytes()[: MAX_FILE_PREVIEW_CHARS + 1]
+        preview = _bounded_content_text(
+            raw[:MAX_FILE_PREVIEW_CHARS].decode("utf-8", errors="replace"),
+            MAX_FILE_PREVIEW_CHARS,
+        )
+        preview_status = "truncated" if len(raw) > MAX_FILE_PREVIEW_CHARS else "ready"
+    return FileCandidate(
+        path=path,
+        name=_display_text(data.get("name") or Path(path).name),
+        mime_type=_display_text(data.get("mime_type") or "application/octet-stream"),
+        kind=kind,
+        size_bytes=_bounded_non_negative_int(data.get("size_bytes")),
+        preview=preview,
+        preview_status=preview_status,
+    )
+
+
+def _file_candidate_from_mapping(
+    data: Mapping[str, Any], preview_response: Mapping[str, Any]
+) -> FileCandidate:
+    preview = _mapping(preview_response.get("preview"))
+    return FileCandidate(
+        path=_required_text(data.get("path"), "file path"),
+        name=_display_text(data.get("name") or "file"),
+        mime_type=_display_text(data.get("mime_type") or "application/octet-stream"),
+        kind=_display_text(data.get("kind") or "unknown"),
+        size_bytes=_bounded_non_negative_int(data.get("size_bytes")),
+        preview=_bounded_content_text(
+            preview.get("text") or "Preview is unavailable for this file type.",
+            MAX_FILE_PREVIEW_CHARS,
+        ),
+        preview_status=_display_text(preview.get("status") or "unsupported"),
+    )
+
+
+def _attachment_summary(data: Mapping[str, Any]) -> AttachmentSummary:
+    return AttachmentSummary(
+        id=_required_identity(data.get("id"), "attachment id"),
+        path=_required_text(
+            data.get("workspace_path") or data.get("filename"), "attachment path"
+        ),
+        mime_type=_display_text(data.get("mime_type") or "application/octet-stream"),
+        kind=_display_text(data.get("kind") or "attachment"),
+        size_bytes=_bounded_non_negative_int(data.get("size_bytes")),
+    )
+
+
+def _in_process_run_inspection(
+    run: HarnessRun,
+    *,
+    registry: HarnessRegistry,
+    runtime_store: RuntimeCoordinationStore,
+) -> RunInspection:
+    diff = run_diff_response(run.metadata)
+    patch = _bounded_content_text(diff.get("patch") or "", MAX_DIFF_PREVIEW_CHARS)
+    raw_patch = str(diff.get("patch") or "")
+    metadata = _mapping(run.metadata)
+    execution = _mapping(metadata.get("workspace_execution"))
+    artifacts: list[ArtifactSummary] = []
+    if raw_patch:
+        artifacts.append(ArtifactSummary("diff", len(raw_patch.encode("utf-8"))))
+    if execution.get("worktree_path"):
+        artifacts.append(ArtifactSummary("worktree", None))
+    if isinstance(metadata.get("pr_artifact"), Mapping):
+        artifacts.append(ArtifactSummary("pr_report", None))
+    link = _mapping(metadata.get("structured_session_link"))
+    continuity = (
+        f"provider link revision {link.get('revision', 'unknown')}"
+        if link
+        else "no provider session link retained"
+    )
+    recovery = _display_text(link.get("recovery_state") or "not_required")
+    try:
+        availability = registry.get(run.harness_id).availability().status.value
+    except (AttributeError, KeyError, ValueError):
+        availability = "unknown"
+    job = runtime_store.find_job_for_run(run.id)
+    attempts = runtime_store.list_attempts(job.id) if job is not None else ()
+    evidence = (
+        f"run={run.id} session={run.session_id}",
+        f"status={run.status.value} harness={run.harness_id} availability={availability}",
+        (
+            f"durable_job={job.status.value} attempts={len(attempts)}"
+            if job is not None
+            else "durable_job=not_present"
+        ),
+        f"artifacts={','.join(item.type for item in artifacts) or 'none'}",
+        "environment=deferred_to_N6",
+    )
+    return RunInspection(
+        run_id=run.id,
+        status=run.status.value,
+        revision=_run_revision(run),
+        provider_continuity=continuity,
+        harness_status=_display_text(availability),
+        recovery=recovery,
+        artifacts=tuple(artifacts),
+        diff=patch,
+        diff_truncated=len(raw_patch) > len(patch),
+        changed_files=_safe_paths(diff.get("changed_files")),
+        untracked_files=_safe_paths(diff.get("untracked_files")),
+        evidence=evidence,
+    )
+
+
+def _attached_run_inspection(
+    run_payload: Mapping[str, Any],
+    diff_payload: Mapping[str, Any],
+    summary_payload: Mapping[str, Any],
+    harness_payload: Mapping[str, Any],
+) -> RunInspection:
+    run = _mapping(run_payload.get("run"))
+    diff_projection = _mapping(diff_payload.get("patch"))
+    provider_session = _mapping(run.get("provider_session"))
+    artifacts = tuple(
+        ArtifactSummary(
+            _display_text(item.get("type") or "artifact"),
+            _optional_non_negative_int(item.get("byte_count")),
+        )
+        for item in _mapping_items(run.get("artifacts"), 50)
+    )
+    summary = _mapping(summary_payload.get("run"))
+    job = _mapping(summary.get("job"))
+    explanations = _mapping_items(summary.get("explanations"), 20)
+    recovery_item = next(
+        (
+            item
+            for item in explanations
+            if str(item.get("id") or item.get("kind") or "") == "recovery"
+        ),
+        {},
+    )
+    recovery = _display_text(
+        recovery_item.get("summary")
+        or provider_session.get("recovery_state")
+        or "not_required"
+    )
+    continuity = (
+        f"provider link revision {provider_session.get('revision', 'unknown')}"
+        if provider_session
+        else "no provider session link retained"
+    )
+    run_id = _required_identity(run.get("id"), "run id")
+    status = _display_text(run.get("status") or "unknown")
+    harness_id = _display_text(run.get("harness_id") or "unknown")
+    harness_status = "unknown"
+    for item in _mapping_items(harness_payload.get("harnesses"), 100):
+        if str(_mapping(item.get("spec")).get("id") or "") == harness_id:
+            harness_status = _display_text(
+                _mapping(item.get("availability")).get("status") or "unknown"
+            )
+            break
+    evidence = (
+        f"run={run_id} session={_display_text(run.get('session_id') or 'unknown')}",
+        f"status={status} harness={harness_id}",
+        (
+            f"durable_job={_display_text(job.get('status'))}"
+            if job
+            else "durable_job=not_present"
+        ),
+        f"artifacts={','.join(item.type for item in artifacts) or 'none'}",
+        "environment=deferred_to_N6",
+    )
+    patch = _bounded_content_text(
+        diff_projection.get("text") or "", MAX_DIFF_PREVIEW_CHARS
+    )
+    return RunInspection(
+        run_id=run_id,
+        status=status,
+        revision=_required_text(
+            run_payload.get("snapshot_revision") or _mapping_revision(run),
+            "run revision",
+        ),
+        provider_continuity=continuity,
+        harness_status=f"{harness_id} [{harness_status}]",
+        recovery=recovery,
+        artifacts=artifacts,
+        diff=patch,
+        diff_truncated=bool(diff_projection.get("truncated")),
+        changed_files=_safe_paths(diff_payload.get("changed_files")),
+        untracked_files=_safe_paths(diff_payload.get("untracked_files")),
+        evidence=evidence,
+    )
+
+
+def _provider_handoff_from_mapping(
+    data: Mapping[str, Any], *, harness_id: str
+) -> HandoffPreview:
+    command = tuple(
+        _display_text(item)
+        for item in (
+            data.get("command") if isinstance(data.get("command"), list) else ()
+        )
+    )[:20]
+    limits = tuple(
+        _display_text(item)
+        for item in (
+            data.get("observability_limits")
+            if isinstance(data.get("observability_limits"), list)
+            else ()
+        )
+    )[:20]
+    return HandoffPreview(
+        kind="provider",
+        status=_display_text(data.get("status") or "blocked"),
+        target=_display_text(data.get("surface") or harness_id),
+        continuity=(
+            "Provider owns the external UI; Harness retains only the current durable session."
+        ),
+        observability=limits or ("structured provider observability is unavailable",),
+        instruction=_display_text(
+            data.get("instruction") or data.get("blocker") or "Handoff unavailable"
+        ),
+        command=command,
+    )
+
+
+def _blocked_provider_handoff(harness_id: str) -> HandoffPreview:
+    return HandoffPreview(
+        kind="provider",
+        status="blocked",
+        target=_display_text(harness_id),
+        continuity="Harness session remains authoritative and unchanged.",
+        observability=("provider UI handoff is not advertised by this Harness",),
+        instruction="Continue in the TUI or use an explicit provider-owned terminal flow.",
+    )
+
+
+def _safe_paths(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(_display_text(item) for item in value[:100])
+
+
+def _bounded_non_negative_int(value: Any) -> int:
+    parsed = _optional_non_negative_int(value)
+    return parsed if parsed is not None else 0
+
+
+def _optional_non_negative_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
+def _bounded_content_text(value: Any, limit: int) -> str:
+    return _CONTROL_RE.sub("�", str(value or "")).replace("\r", "")[:limit]
 
 
 def _normalize_base_url(value: str) -> str:

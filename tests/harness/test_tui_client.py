@@ -129,6 +129,60 @@ async def test_in_process_client_bounds_slow_consumer_and_rejects_stale_action(
 
 
 @pytest.mark.anyio
+async def test_in_process_client_files_diff_evidence_and_handoffs_are_bounded(
+    tmp_path,
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "safe.md").write_text(
+        "# Note\n\x1b]52;c;hidden\x07\n", encoding="utf-8"
+    )
+    (workspace / ".hidden.txt").write_text("hidden but safe\n", encoding="utf-8")
+    (workspace / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    (workspace / "outside-link.txt").symlink_to(outside)
+    client = InProcessWorkbenchClient(HarnessConfig(data_dir=str(tmp_path / "state")))
+    session = client.sessions.create_session(
+        {"workspace": str(workspace), "harness_id": "echo"},
+        validate_harness=True,
+    )
+
+    candidates = await client.search_files(session.id, "")
+    paths = {item.path for item in candidates}
+    safe = next(item for item in candidates if item.path == "safe.md")
+    attachment = await client.attach_file(session.id, safe.path)
+    submitted = await client.submit_turn(
+        session.id,
+        "inspect",
+        idempotency_key="turn_files",
+        attachment_ids=(attachment.id,),
+    )
+    run = client.store.get_run(submitted.binding.run_id)
+    client.store.update_run(
+        run.id,
+        metadata={
+            **dict(run.metadata),
+            "diff": "diff --git a/safe.md b/safe.md\n+line\x1b]52;c;x\x07\n",
+        },
+    )
+    inspection = await client.inspect_run(run.id)
+    provider = await client.provider_handoff(session.id)
+    web = await client.web_handoff(session.id)
+
+    assert {"safe.md", ".hidden.txt"} <= paths
+    assert ".env" not in paths
+    assert "outside-link.txt" not in paths
+    assert safe.preview == "# Note\n�]52;c;hidden�\n"
+    assert attachment.path == "safe.md"
+    assert inspection.artifacts[0].type == "diff"
+    assert "�]52;c;x�" in inspection.diff
+    assert inspection.evidence[-1] == "environment=deferred_to_N6"
+    assert provider.status == "blocked"
+    assert web.status == "blocked"
+
+
+@pytest.mark.anyio
 async def test_attach_client_uses_existing_api_contract(monkeypatch):
     client = AttachedWorkbenchClient("http://127.0.0.1:8091")
     calls: list[tuple[str, str, object]] = []
@@ -174,6 +228,12 @@ async def test_attach_client_uses_existing_api_contract(monkeypatch):
                     }
                 ]
             }
+        if path == "/api/integrations":
+            return {
+                "catalog": [{"catalog_id": "pkg_1"}],
+                "flows": [{"id": "flow_1", "status": "verified"}],
+                "content_free": True,
+            }
         if path == "/api/preflight/run":
             return {
                 "preflight": {
@@ -209,6 +269,7 @@ async def test_attach_client_uses_existing_api_contract(monkeypatch):
     assert snapshot.transport_mode == "attach"
     assert snapshot.selected_session_id == "sess_1"
     assert snapshot.readiness.status == "ready"
+    assert snapshot.integrations.verified_count == 1
     assert created.id == "sess_2"
     assert (
         "PATCH",
@@ -288,6 +349,110 @@ async def test_attach_client_stream_snapshot_and_actions_share_exact_binding(
     )
     assert steer_payload["revision"] == "a" * 64
     assert steer_payload["generation"] == 3
+
+
+@pytest.mark.anyio
+async def test_attach_client_uses_authoritative_file_evidence_and_handoff_queries(
+    monkeypatch,
+):
+    client = AttachedWorkbenchClient("http://127.0.0.1:8091")
+    calls: list[tuple[str, str, object]] = []
+
+    async def request(method, path, payload=None, **kwargs):
+        calls.append((method, path, payload))
+        if "/attachments/workspace/search?" in path:
+            return {
+                "files": [
+                    {
+                        "path": "src/app.py",
+                        "name": "app.py",
+                        "mime_type": "text/x-python",
+                        "kind": "text",
+                        "size_bytes": 8,
+                    }
+                ]
+            }
+        if "/attachments/workspace/preview?" in path:
+            return {"preview": {"status": "ready", "text": "print(1)"}}
+        if path == "/api/sessions/sess_1/attachments/workspace":
+            return {
+                "attachment": {
+                    "id": "att_1",
+                    "workspace_path": "src/app.py",
+                    "mime_type": "text/x-python",
+                    "kind": "workspace_file",
+                    "size_bytes": 8,
+                }
+            }
+        if path == "/api/cockpit/runs/run_1":
+            return {
+                "snapshot_revision": "a" * 64,
+                "run": {
+                    "id": "run_1",
+                    "session_id": "sess_1",
+                    "harness_id": "claude-code",
+                    "status": "succeeded",
+                    "provider_session": {"revision": 2, "recovery_state": "ready"},
+                    "artifacts": [{"type": "diff", "byte_count": 12}],
+                },
+            }
+        if path.startswith("/api/cockpit/runs/run_1/diff?"):
+            return {
+                "patch": {"text": "+safe\x1b]52;c;x\x07", "truncated": False},
+                "changed_files": ["src/app.py"],
+                "untracked_files": [],
+            }
+        if path == "/api/harnesses":
+            return {
+                "harnesses": [
+                    {
+                        "spec": {"id": "claude-code"},
+                        "availability": {"status": "available"},
+                    }
+                ]
+            }
+        if path == "/api/runs/run_1/summary":
+            return {"run": {"job": {"status": "succeeded"}}}
+        if path == "/api/sessions/sess_1":
+            return {
+                "session": {
+                    "id": "sess_1",
+                    "workspace": "/tmp/demo",
+                    "default_harness_id": "claude-code",
+                }
+            }
+        if path.startswith("/api/provider-handoffs/claude-code/preview?"):
+            return {
+                "handoff": {
+                    "status": "supported",
+                    "surface": "Claude Desktop",
+                    "instruction": "Review then open",
+                    "command": ["claude", "/desktop"],
+                    "observability_limits": ["structured_events_unavailable"],
+                }
+            }
+        raise AssertionError(path)
+
+    monkeypatch.setattr(client, "_request", request)
+
+    files = await client.search_files("sess_1", "app")
+    attachment = await client.attach_file("sess_1", files[0].path)
+    inspection = await client.inspect_run("run_1")
+    provider = await client.provider_handoff("sess_1")
+    web = await client.web_handoff("sess_1")
+
+    assert files[0].preview == "print(1)"
+    assert attachment.id == "att_1"
+    assert inspection.changed_files == ("src/app.py",)
+    assert "�]52;c;x�" in inspection.diff
+    assert provider.target == "Claude Desktop"
+    assert provider.command == ("claude", "/desktop")
+    assert web.target.endswith("/cockpit-v2/work/sess_1")
+    assert (
+        "POST",
+        "/api/sessions/sess_1/attachments/workspace",
+        {"path": "src/app.py"},
+    ) in calls
 
 
 @pytest.mark.parametrize(

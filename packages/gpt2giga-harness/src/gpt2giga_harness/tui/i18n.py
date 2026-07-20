@@ -14,6 +14,10 @@ CATALOGS: dict[str, dict[str, str]] = {
         "button.cancel_run": "Cancel run",
         "button.deny": "Deny",
         "button.fork": "Fork",
+        "button.files": "Files",
+        "button.evidence": "Evidence",
+        "button.provider": "Provider",
+        "button.web": "Web",
         "button.new_project": "Project",
         "button.new_session": "New session",
         "button.refresh": "Refresh",
@@ -22,6 +26,8 @@ CATALOGS: dict[str, dict[str, str]] = {
         "detail.empty": "Select a session or create a new one.",
         "dialog.cancel": "Cancel",
         "dialog.confirm": "Open",
+        "dialog.close": "Close",
+        "dialog.file_query": "@file search (empty lists safe project files)",
         "dialog.input_answer": "Answer provider question",
         "dialog.project_path": "Project path",
         "dialog.session_title": "Session title (optional)",
@@ -31,6 +37,9 @@ CATALOGS: dict[str, dict[str, str]] = {
             "Enter: resume selected session\n"
             "P: choose project path\n"
             "N: create session\n"
+            "A: attach a safe project file\n"
+            "E: inspect diff and evidence\n"
+            "O / W: preview provider / Web handoff\n"
             "R: refresh\n"
             "?: help\n"
             "Q: quit"
@@ -45,11 +54,28 @@ CATALOGS: dict[str, dict[str, str]] = {
         "pane.readiness": "Session readiness",
         "pane.sessions": "Sessions",
         "provider.pending": "pending execution snapshot",
+        "attachments.empty": "No files selected for the next turn.",
+        "attachments.selected": "Files",
+        "evidence.empty": "No retained run is selected. Start or resume a run first.",
+        "evidence.no_diff": "No diff was retained for this run.",
+        "evidence.title": "Run diff and evidence",
+        "evidence.truncated": "Diff preview is truncated; authoritative evidence remains retained.",
+        "files.attach": "Attach",
+        "files.attached": "Project file attached to the next turn",
+        "files.empty": "No safe matching files. Hidden safe files may appear; ignored and denied paths do not.",
+        "files.no_session": "Select or create a session before choosing a file.",
+        "files.policy": "Hidden files are shown only when safe and not ignored. Git-ignored and denied paths are excluded. Symlinks must resolve inside the project and are canonicalized.",
+        "files.title": "Project files",
+        "handoff.no_session": "Select or create a session before previewing a handoff.",
+        "handoff.title": "External handoff preview",
         "session.created": "Session created",
         "status.attach": "Attached client",
         "status.error": "Error",
         "status.in_process": "In-process client",
         "status.loading": "Loading authoritative state…",
+        "status.loading_evidence": "Loading authoritative run evidence…",
+        "status.loading_files": "Searching safe project files…",
+        "status.loading_handoff": "Resolving exact handoff target…",
         "status.ready": "Ready",
         "status.resnapshot": "Authoritative resnapshot",
         "status.running": "Run active",
@@ -64,6 +90,10 @@ CATALOGS: dict[str, dict[str, str]] = {
         "button.cancel_run": "Отменить запуск",
         "button.deny": "Отклонить",
         "button.fork": "Ответвить",
+        "button.files": "Файлы",
+        "button.evidence": "Данные",
+        "button.provider": "Провайдер",
+        "button.web": "Web",
         "button.new_project": "Проект",
         "button.new_session": "Новая сессия",
         "button.refresh": "Обновить",
@@ -72,6 +102,8 @@ CATALOGS: dict[str, dict[str, str]] = {
         "detail.empty": "Выберите сессию или создайте новую.",
         "dialog.cancel": "Отмена",
         "dialog.confirm": "Открыть",
+        "dialog.close": "Закрыть",
+        "dialog.file_query": "Поиск @file (пустой запрос покажет безопасные файлы)",
         "dialog.input_answer": "Ответ на вопрос провайдера",
         "dialog.project_path": "Путь к проекту",
         "dialog.session_title": "Название сессии (необязательно)",
@@ -81,6 +113,9 @@ CATALOGS: dict[str, dict[str, str]] = {
             "Enter: продолжить выбранную сессию\n"
             "P: выбрать путь проекта\n"
             "N: создать сессию\n"
+            "A: прикрепить безопасный файл проекта\n"
+            "E: открыть diff и данные запуска\n"
+            "O / W: проверить переход к провайдеру / Web\n"
             "R: обновить\n"
             "?: помощь\n"
             "Q: выйти"
@@ -95,11 +130,28 @@ CATALOGS: dict[str, dict[str, str]] = {
         "pane.readiness": "Готовность сессии",
         "pane.sessions": "Сессии",
         "provider.pending": "ожидает снимка выполнения",
+        "attachments.empty": "Файлы для следующего сообщения не выбраны.",
+        "attachments.selected": "Файлы",
+        "evidence.empty": "Запуск не выбран. Сначала запустите или продолжите сессию.",
+        "evidence.no_diff": "Для этого запуска diff не сохранён.",
+        "evidence.title": "Diff и данные запуска",
+        "evidence.truncated": "Предпросмотр diff сокращён; авторитетные данные сохранены.",
+        "files.attach": "Прикрепить",
+        "files.attached": "Файл проекта прикреплён к следующему сообщению",
+        "files.empty": "Безопасных совпадений нет. Скрытые безопасные файлы могут отображаться; ignored и запрещённые пути исключены.",
+        "files.no_session": "Выберите или создайте сессию перед выбором файла.",
+        "files.policy": "Скрытые файлы видны только если безопасны и не ignored. Git-ignored и запрещённые пути исключены. Симлинки должны разрешаться внутри проекта и канонизируются.",
+        "files.title": "Файлы проекта",
+        "handoff.no_session": "Выберите или создайте сессию перед переходом.",
+        "handoff.title": "Предпросмотр внешнего перехода",
         "session.created": "Сессия создана",
         "status.attach": "Подключённый клиент",
         "status.error": "Ошибка",
         "status.in_process": "Локальный клиент",
         "status.loading": "Загрузка авторитетного состояния…",
+        "status.loading_evidence": "Загрузка авторитетных данных запуска…",
+        "status.loading_files": "Поиск безопасных файлов проекта…",
+        "status.loading_handoff": "Определение точной цели перехода…",
         "status.ready": "Готово",
         "status.resnapshot": "Обновление авторитетного снимка",
         "status.running": "Запуск активен",

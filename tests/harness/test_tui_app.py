@@ -9,12 +9,17 @@ pytest.importorskip("textual")
 from gpt2giga_harness.tui.app import WorkbenchTui
 from gpt2giga_harness.tui.client import (
     ApprovalSummary,
+    ArtifactSummary,
+    AttachmentSummary,
+    FileCandidate,
+    HandoffPreview,
     HarnessSummary,
     NavigationSnapshot,
     ProjectSummary,
     ReadinessSummary,
     RunActionBinding,
     RunSnapshot,
+    RunInspection,
     SessionSummary,
     TimelineEvent,
 )
@@ -25,6 +30,7 @@ class FakeClient:
         self.created = 0
         self.remembered: list[str] = []
         self.submitted: list[str] = []
+        self.submitted_attachments: list[tuple[str, ...]] = []
         self.decisions: list[str] = []
         self.current_run: RunSnapshot | None = None
         self.snapshot = NavigationSnapshot(
@@ -86,8 +92,11 @@ class FakeClient:
     async def latest_run(self, session_id):
         return self.current_run
 
-    async def submit_turn(self, session_id, content, *, idempotency_key):
+    async def submit_turn(
+        self, session_id, content, *, idempotency_key, attachment_ids=()
+    ):
         self.submitted.append(content)
+        self.submitted_attachments.append(attachment_ids)
         self.current_run = _run_snapshot(
             events=(
                 TimelineEvent(
@@ -132,6 +141,58 @@ class FakeClient:
 
     async def answer_input(self, binding, input_id, answer):
         return self.current_run
+
+    async def search_files(self, session_id, query):
+        return (
+            FileCandidate(
+                "src/app.py",
+                "app.py",
+                "text/x-python",
+                "text",
+                8,
+                "print(1)",
+                "ready",
+            ),
+        )
+
+    async def attach_file(self, session_id, path):
+        return AttachmentSummary("att_1", path, "text/x-python", "workspace_file", 8)
+
+    async def inspect_run(self, run_id):
+        return RunInspection(
+            run_id,
+            "running",
+            "a" * 64,
+            "provider link revision 1",
+            "available",
+            "not_required",
+            (ArtifactSummary("diff", 8),),
+            "+print(1)",
+            False,
+            ("src/app.py",),
+            (),
+            ("environment=deferred_to_N6",),
+        )
+
+    async def provider_handoff(self, session_id):
+        return HandoffPreview(
+            "provider",
+            "blocked",
+            "echo",
+            "Harness session remains authoritative.",
+            ("provider UI unavailable",),
+            "Continue in the TUI.",
+        )
+
+    async def web_handoff(self, session_id):
+        return HandoffPreview(
+            "web",
+            "ready",
+            f"http://127.0.0.1:8091/cockpit-v2/work/{session_id}",
+            "Shared session",
+            ("browser rendering is Web-owned",),
+            "Open after review.",
+        )
 
 
 def _run_snapshot(
@@ -239,3 +300,72 @@ async def test_tui_approval_decision_uses_exact_presented_binding():
 
         assert client.decisions == ["allow_once"]
         assert app.run_snapshot.pending_approvals == ()
+
+
+@pytest.mark.anyio
+async def test_tui_file_picker_evidence_and_handoff_are_keyboard_first():
+    client = FakeClient()
+    client.current_run = _run_snapshot()
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.press(*"app")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "print(1)" in str(app.screen.query_one("#file-preview").render())
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "src/app.py" in str(app.query_one("#attachment-status").render())
+
+        await pilot.click("#cancel-run")
+        await pilot.pause()
+        await pilot.click("#composer")
+        await pilot.press(*"Use file")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert client.submitted_attachments == [("att_1",)]
+
+        app.query_one("#session-list").focus()
+        await pilot.press("e")
+        await pilot.pause()
+        detail = str(app.screen.query_one("#detail-body").render())
+        assert "Environment: deferred to Phase N6" in detail
+        assert "+print(1)" in detail
+        await pilot.press("escape")
+
+        app.query_one("#session-list").focus()
+        await pilot.press("w")
+        await pilot.pause()
+        handoff = str(app.screen.query_one("#detail-body").render())
+        assert "Exact target: http://127.0.0.1:8091" in handoff
+        assert "browser rendering is Web-owned" in handoff
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("size", ((120, 40), (80, 24), (60, 20)))
+async def test_tui_file_and_evidence_modals_fit_supported_terminal_matrix(size):
+    client = FakeClient()
+    client.current_run = _run_snapshot()
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.press(*"app")
+        await pilot.press("enter")
+        await pilot.pause()
+        for widget in app.screen.query(
+            "#file-dialog, #file-list, #file-preview, #file-actions"
+        ):
+            assert widget.region.x >= 0
+            assert widget.region.right <= size[0]
+        await pilot.press("escape")
+
+        app.query_one("#session-list").focus()
+        await pilot.press("e")
+        await pilot.pause()
+        for widget in app.screen.query("#detail-dialog, #detail-body, #detail-close"):
+            assert widget.region.x >= 0
+            assert widget.region.right <= size[0]

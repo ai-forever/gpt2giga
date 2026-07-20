@@ -141,6 +141,34 @@ def test_session_attachment_search_is_bounded_and_hides_workspace_root(tmp_path)
     assert ".env" not in response.text
 
 
+def test_session_attachment_preview_is_bounded_and_terminal_safe(tmp_path):
+    data_dir = tmp_path / "data"
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    source = workspace / "notes.md"
+    source.write_text("# Safe\n\x1b]52;c;hidden\x07\n", encoding="utf-8")
+    client = _client(data_dir)
+    session_id = _create_session(client, workspace=str(workspace))
+
+    response = client.get(
+        f"/api/sessions/{session_id}/attachments/workspace/preview",
+        params={"path": "notes.md"},
+    )
+    denied = client.get(
+        f"/api/sessions/{session_id}/attachments/workspace/preview",
+        params={"path": ".env"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["preview"] == {
+        "status": "ready",
+        "text": "# Safe\n�]52;c;hidden�\n",
+        "truncated": False,
+    }
+    assert str(workspace) not in response.text
+    assert denied.status_code == 400
+
+
 def test_attachments_api_rejects_unsafe_upload_without_leaking_payload(tmp_path):
     client = _client(tmp_path / "data")
     session_id = _create_session(client)
