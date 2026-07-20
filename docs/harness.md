@@ -879,6 +879,85 @@ MCP tool invocation remains disabled. External CLI MCP usage is labeled
 call/result events. Agent run snapshots record the bound server ids and this
 enforcement boundary as configuration provenance.
 
+### Federated Skills and MCP installation
+
+The Cockpit **Plugins** area can filter **Built-in** packages from **External
+Skills & MCP** discovered through the offline catalog. The `skills-sh` source
+contributes hosted Skill metadata through the separately deployed read-only
+proxy, while `neuraldeep` contributes public Skill and MCP metadata. Source
+popularity, curation, health, or presence is discovery evidence only: it never
+grants installation authority, enables network access, or replaces an exact
+artifact review.
+
+Harness preserves the last good catalog snapshot when a source is unavailable,
+rate-limited, requires renewed authentication, or returns invalid data. An
+external Skill becomes installable only after its bytes match a reviewed
+immutable reference and content hash and its bounded `SKILL.md` and files pass
+validation. A NeuralDeep MCP card is localized discovery metadata. It can link
+to an official MCP Registry package only by exact official package name or
+canonical repository identity; the official version, immutable reference, and
+integrity remain authoritative.
+
+Inspect the offline inventory, then create a single-target preview:
+
+```bash
+giga integration list --json
+giga integration preview \
+  --source catalog \
+  --catalog-id <catalog-id> \
+  --target <target-id> \
+  --scope managed_home \
+  --json
+giga integration apply <flow-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --json
+giga integration status <flow-id> --json
+giga integration rollback <flow-id> --json
+```
+
+Preview binds the exact package and artifact hashes, target, scope/root owner,
+configuration, permissions, network and native-consent boundaries, risk, and
+approval hash. Apply rejects a stale or widened plan. `managed_home` is the
+safe default; project scope requires `--workspace`, and `user_home` remains
+disabled unless the preview and apply explicitly admit it. Secrets remain
+opaque references and are resolved only by the owning subprocess. To update an
+installed package, select the new immutable pin and complete a new preview and
+approval; catalog drift cannot update an existing installation implicitly.
+
+For a reviewed catalog Skill or MCP package, an all-supported group keeps a
+separate child plan and transaction for every target:
+
+```bash
+giga integration group-preview \
+  --catalog-id <catalog-id> \
+  --scope managed_home \
+  --json
+giga integration group-apply <group-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --json
+giga integration group-status <group-id> --json
+giga integration group-recover <group-id> --json
+giga integration group-rollback <group-id> --json
+```
+
+Skills expand to Codex, Claude, and Gemini Skill targets. MCP packages expand
+to their three managed native homes plus Harness-managed MCP inventory. Every
+child preview must succeed before mutation begins. Cross-root apply is a
+recoverable compensating transaction, not a filesystem-atomic write: a partial
+failure rolls back owned, verified children in reverse order or records exact
+repair actions for `group-recover`. Status exposes verification and
+repair-required state; rollback refuses unowned or drifted files.
+
+The same inventory and lifecycle are available through `GET /api/integrations`,
+`POST /api/integrations/preview`, the `/api/integrations/flows/{flow_id}`
+apply/rollback routes, and the corresponding `/api/integrations/groups` routes.
+Cockpit presents the same source filter, exact target or **Install to all
+Harnesses** preview, approval, verification, recovery, and rollback states.
+Federated Plugins are not supported, discovery never authorizes an implicit
+download, and no operation mutates a real user home by default.
+
 ### Shared Tool And Secret Contracts
 
 The execution-neutral `gpt2giga_harness.tools` package defines the common vocabulary

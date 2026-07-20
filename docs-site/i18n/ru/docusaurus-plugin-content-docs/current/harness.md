@@ -494,6 +494,87 @@ Apply/rollback managed configuration проходит
 через approval. Secret ref разрешается только у owning subprocess и не попадает
 в durable metadata, project YAML или browser response.
 
+### Федеративная установка Skills и MCP
+
+В разделе **Plugins** Cockpit можно отделить встроенные пакеты (**Built-in**) от
+**External Skills & MCP**, найденных в offline-каталоге. Источник `skills-sh`
+добавляет hosted metadata Skills через отдельно разворачиваемый read-only proxy,
+а `neuraldeep` — публичные metadata Skills и MCP. Popularity, curation, health и
+presence источника являются только discovery evidence: они не дают права на
+установку, не разрешают сеть и не заменяют проверку точного artifact.
+
+Если источник недоступен, ограничил частоту запросов, требует обновить
+аутентификацию или вернул некорректные данные, Harness сохраняет последний
+корректный snapshot каталога. Внешний Skill можно установить только после
+совпадения bytes с проверенными immutable reference и content hash, а также
+проверки ограниченного `SKILL.md` и файлов. Карточка MCP из NeuralDeep служит
+локализованными discovery metadata. Она связывается с пакетом официального MCP
+Registry только по точному official package name или canonical repository;
+версия, immutable reference и integrity из official Registry остаются
+authoritative.
+
+Сначала изучите offline inventory, затем создайте preview одной цели:
+
+```bash
+giga integration list --json
+giga integration preview \
+  --source catalog \
+  --catalog-id <catalog-id> \
+  --target <target-id> \
+  --scope managed_home \
+  --json
+giga integration apply <flow-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --json
+giga integration status <flow-id> --json
+giga integration rollback <flow-id> --json
+```
+
+Preview связывает точные package/artifact hashes, target, владельца scope/root,
+configuration, permissions, границы network и native consent, risk и approval
+hash. Apply отклоняет устаревший или расширенный plan. Безопасный default —
+`managed_home`; project scope требует `--workspace`, а `user_home` остаётся
+выключенным, пока preview и apply не разрешат его явно. Секреты остаются
+непрозрачными references и разрешаются только owning subprocess. Для обновления
+выберите новый immutable pin и пройдите новый preview и approval: изменение
+каталога не обновляет существующую установку неявно.
+
+Для проверенного Skill или MCP package из каталога all-supported group сохраняет
+отдельные child plan и transaction для каждой цели:
+
+```bash
+giga integration group-preview \
+  --catalog-id <catalog-id> \
+  --scope managed_home \
+  --json
+giga integration group-apply <group-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --json
+giga integration group-status <group-id> --json
+giga integration group-recover <group-id> --json
+giga integration group-rollback <group-id> --json
+```
+
+Skills разворачиваются в Skill targets Codex, Claude и Gemini. MCP packages — в
+три managed native home и Harness-managed MCP inventory. До первой мутации
+должны успешно завершиться все child previews. Межкорневой apply — это
+recoverable compensating transaction, а не filesystem-atomic write: при
+частичном сбое уже применённые owned и verified children откатываются в обратном
+порядке либо сохраняются точные repair actions для `group-recover`. Status
+показывает verification и repair-required state; rollback отказывается менять
+чужие или изменённые после установки файлы.
+
+Те же inventory и lifecycle доступны через `GET /api/integrations`,
+`POST /api/integrations/preview`, apply/rollback routes
+`/api/integrations/flows/{flow_id}` и соответствующие routes
+`/api/integrations/groups`. Cockpit показывает тот же source filter, точный
+preview одной цели или **Install to all Harnesses**, approval, verification,
+recovery и rollback. Федеративные Plugins не поддерживаются, discovery не
+разрешает неявную загрузку, и ни одна операция по умолчанию не меняет реальный
+user home.
+
 ### Eval Lab и матрицы совместимости
 
 Eval case фиксирует input, проверяемые критерии и ожидаемые artifacts. Матрица

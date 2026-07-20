@@ -240,6 +240,44 @@ Binding to `0.0.0.0` is explicit and should be done only behind an HTTPS
 reverse proxy with its own access controls. The service never installs catalog
 entries and does not grant installation authority.
 
+### Federated Skills and MCP lifecycle
+
+Cockpit's **Plugins** area and `giga integration list --json` read the same
+offline-first inventory. `skills-sh` supplies hosted Skill metadata through the
+proxy above; `neuraldeep` supplies public Skill and MCP metadata. Source health,
+popularity, curation, and presence never authorize installation. The catalog
+keeps its last good state on source failure, and a NeuralDeep MCP card can only
+correlate with an exact official MCP Registry identity without replacing the
+official immutable version or integrity.
+
+An external Skill must match its reviewed immutable reference and content hash
+before bounded `SKILL.md` validation and target projection. A normalized MCP
+candidate likewise keeps exact package integrity, argv, origins, secret
+references, permissions, and native-consent boundaries in the preview. Review
+and operate one target with:
+
+```sh
+giga integration preview --source catalog --catalog-id <id> \
+  --target <target-id> --scope managed_home --json
+giga integration apply <flow-id> --plan-id <plan-id> \
+  --authority <operator> --json
+giga integration status <flow-id> --json
+giga integration rollback <flow-id> --json
+```
+
+For **Install to all Harnesses**, use `group-preview`, `group-apply`,
+`group-status`, `group-recover`, and `group-rollback`. Skills expand to Codex,
+Claude, and Gemini; MCP expands to those managed native homes plus the
+Harness-managed MCP inventory. Every child preview must pass before mutation.
+Cross-root apply is a durable compensating transaction: partial failure rolls
+back owned verified children or records exact recovery actions. Updates require
+a new immutable pin, preview, and approval. Federated Plugins, implicit network
+authorization, and default mutation of real user homes are not supported.
+
+The equivalent API begins at `GET /api/integrations`, with single-target flows
+under `/api/integrations/flows` and grouped flows under
+`/api/integrations/groups`.
+
 ## Plugin contract
 
 Third-party adapters register through the versioned, provider-neutral
