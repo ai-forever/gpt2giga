@@ -15,7 +15,7 @@ describe("remaining surface request graph", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       const payload = url === "/api/integrations"
-        ? { sources: [], targets: [], catalog: [], flows: [], content_free: true }
+        ? { sources: [], targets: [], catalog: [], flows: [], groups: [], content_free: true }
         : { servers: [] };
       return Promise.resolve(new Response(JSON.stringify(payload)));
     });

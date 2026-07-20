@@ -49,6 +49,7 @@ from gpt2giga_harness.mcp import MCPTransport, ToolServerDescriptor
 from gpt2giga_harness.secrets import (
     SecretReference,
     SecretReferenceKind,
+    secret_reference_from_dict,
     secret_reference_to_dict,
 )
 from gpt2giga_harness.tools import PolicyDecision, ToolExecutionPolicy
@@ -181,6 +182,79 @@ class ExternalMCPSelection:
                 raise ValueError("remote MCP selection cannot contain package fields")
         elif self.artifact is None or not self.launch_argv:
             raise ValueError("package and Git MCP selections require artifact and argv")
+
+
+def external_mcp_selection_from_dict(value: Any) -> ExternalMCPSelection:
+    """Parse one strict content-free operator selection from an API payload."""
+    if not isinstance(value, Mapping):
+        raise ValueError("external MCP selection must be an object")
+    allowed = {
+        "kind",
+        "index",
+        "artifact",
+        "launch_argv",
+        "environment",
+        "headers",
+        "timeout_seconds",
+        "tool_policy",
+    }
+    if set(value) - allowed:
+        raise ValueError("external MCP selection contains unknown fields")
+    artifact_value = value.get("artifact")
+    artifact = None
+    if artifact_value is not None:
+        if not isinstance(artifact_value, Mapping):
+            raise ValueError("external MCP artifact must be an object")
+        artifact_fields = {
+            "registry_type",
+            "identifier",
+            "version",
+            "immutable_ref",
+            "integrity",
+            "download_origin",
+        }
+        if set(artifact_value) != artifact_fields:
+            raise ValueError("external MCP artifact fields are invalid")
+        artifact = ExternalMCPArtifactResolution(
+            **{key: str(artifact_value[key]) for key in sorted(artifact_fields)}
+        )
+    policy_value = value.get("tool_policy", {})
+    if not isinstance(policy_value, Mapping) or set(policy_value) - {
+        "include_tools",
+        "exclude_tools",
+        "default",
+    }:
+        raise ValueError("external MCP tool policy is invalid")
+    launch_argv = value.get("launch_argv", ())
+    include_tools = policy_value.get("include_tools", ())
+    exclude_tools = policy_value.get("exclude_tools", ())
+    if not isinstance(launch_argv, (list, tuple)):
+        raise ValueError("external MCP launch_argv must be a list")
+    if not isinstance(include_tools, (list, tuple)) or not isinstance(
+        exclude_tools, (list, tuple)
+    ):
+        raise ValueError("external MCP tool filters must be lists")
+    try:
+        kind = ExternalMCPSelectionKind(str(value.get("kind") or ""))
+        default = PolicyDecision(str(policy_value.get("default") or "ask"))
+    except ValueError as exc:
+        raise ValueError("external MCP selection enum is invalid") from exc
+    return ExternalMCPSelection(
+        kind=kind,
+        index=value.get("index", 0),
+        artifact=artifact,
+        launch_argv=tuple(str(item) for item in launch_argv),
+        environment=_selection_secret_mapping(
+            value.get("environment", {}), "environment"
+        ),
+        headers=_selection_secret_mapping(value.get("headers", {}), "header"),
+        timeout_seconds=value.get("timeout_seconds", 10),
+        tool_policy=ExternalMCPToolPolicy(
+            include_tools=tuple(str(item) for item in include_tools),
+            exclude_tools=tuple(str(item) for item in exclude_tools),
+            default=default,
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -554,6 +628,42 @@ def project_external_mcp_target(
     )
 
 
+def external_mcp_server_spec(
+    descriptor: ExternalMCPDescriptor, target_id: str
+) -> CodexMCPServerSpec | ClaudeMCPServerSpec | GeminiMCPServerSpec:
+    """Return the validated native server spec used by one supported target."""
+    if target_id == HARNESS_MANAGED_MCP_TARGET_ID:
+        raise ValueError("Harness-managed MCP inventory has no native server spec")
+    preview = project_external_mcp_target(descriptor, target_id)
+    if not preview.supported:
+        raise ValueError(
+            f"external MCP target is incompatible: {preview.error_code or 'unknown'}"
+        )
+    configuration = dict(preview.configuration)
+    configuration["args"] = tuple(configuration["args"])
+    configuration["env_vars"] = tuple(configuration["env_vars"])
+    configuration["env_http_headers"] = tuple(
+        tuple(item) for item in configuration["env_http_headers"]
+    )
+    if target_id == CODEX_MCP_TARGET_ID:
+        configuration["transport"] = CodexMCPTransport(configuration["transport"])
+        configuration["enabled_tools"] = tuple(configuration["enabled_tools"])
+        configuration["disabled_tools"] = tuple(configuration["disabled_tools"])
+        configuration["default_tools_approval_mode"] = CodexMCPDefaultApproval(
+            configuration["default_tools_approval_mode"]
+        )
+        return CodexMCPServerSpec(**configuration)
+    if target_id == CLAUDE_MCP_TARGET_ID:
+        configuration["transport"] = ClaudeMCPTransport(configuration["transport"])
+        return ClaudeMCPServerSpec(**configuration)
+    if target_id == GEMINI_MCP_TARGET_ID:
+        configuration["transport"] = GeminiMCPTransport(configuration["transport"])
+        configuration["include_tools"] = tuple(configuration["include_tools"])
+        configuration["exclude_tools"] = tuple(configuration["exclude_tools"])
+        return GeminiMCPServerSpec(**configuration)
+    raise ValueError("external MCP target is unsupported")
+
+
 def external_mcp_descriptor_to_dict(
     descriptor: ExternalMCPDescriptor,
 ) -> dict[str, Any]:
@@ -877,6 +987,19 @@ def _validate_secret_bindings(
     return dict(sorted(normalized.items()))
 
 
+def _selection_secret_mapping(
+    value: Any, field_name: str
+) -> Mapping[str, SecretReference]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"external MCP {field_name} references must be an object")
+    result: dict[str, SecretReference] = {}
+    for name, reference in value.items():
+        if not isinstance(name, str) or not isinstance(reference, Mapping):
+            raise ValueError(f"external MCP {field_name} reference is invalid")
+        result[name] = secret_reference_from_dict(reference)
+    return result
+
+
 def _normalized_names(values: Sequence[str], label: str) -> tuple[str, ...]:
     normalized = tuple(sorted(set(values)))
     if any(
@@ -960,6 +1083,8 @@ __all__ = [
     "ExternalMCPTargetPreview",
     "ExternalMCPToolPolicy",
     "external_mcp_descriptor_to_dict",
+    "external_mcp_selection_from_dict",
+    "external_mcp_server_spec",
     "normalize_external_mcp_candidate",
     "project_external_mcp_target",
 ]

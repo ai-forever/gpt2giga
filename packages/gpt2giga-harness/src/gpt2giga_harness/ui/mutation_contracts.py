@@ -455,6 +455,14 @@ MUTATION_ROUTE_CONTRACTS = (
         "integration_flow.preview",
         evidence=_INTEGRATION_FLOW,
     ),
+    _route(
+        "POST",
+        "/api/integrations/groups/preview",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "integration_group.preview",
+        evidence=_INTEGRATION_FLOW,
+    ),
     *_many(
         "POST",
         (
@@ -464,6 +472,18 @@ MUTATION_ROUTE_CONTRACTS = (
         MutationClass.GOVERNED_EXTERNAL_EFFECT,
         EnforcementControl.REVIEW_BINDING,
         "integration_flow.exact_plan",
+        evidence=_INTEGRATION_FLOW,
+    ),
+    *_many(
+        "POST",
+        (
+            "/api/integrations/groups/{group_id}/apply",
+            "/api/integrations/groups/{group_id}/recover",
+            "/api/integrations/groups/{group_id}/rollback",
+        ),
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.REVIEW_BINDING,
+        "integration_group.exact_plan",
         evidence=_INTEGRATION_FLOW,
     ),
     *_many(

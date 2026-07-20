@@ -17,6 +17,8 @@ import {
   integrationFlowOptions,
   mcpInventoryOptions,
   remainingRequestKeys,
+  type IntegrationGroupMutationResponse,
+  type IntegrationGroupPreviewResponse,
   type IntegrationFlowInventory,
   type IntegrationFlowMutationResponse,
   type IntegrationFlowPreviewResponse,
@@ -47,6 +49,7 @@ export function IntegrationsSurface() {
   const mcpQuery = useQuery(mcpInventoryOptions());
   const [search, setSearch] = useState("");
   const [connectedOnly, setConnectedOnly] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<"all" | "built_in" | "external">("all");
   const items = useMemo(
     () => integrationQuery.data
       ? buildPluginLibrary(integrationQuery.data, mcpQuery.data ?? [])
@@ -54,8 +57,8 @@ export function IntegrationsSurface() {
     [integrationQuery.data, mcpQuery.data],
   );
   const visibleItems = useMemo(
-    () => filterPluginLibrary(items, category, search, connectedOnly),
-    [category, connectedOnly, items, search],
+    () => filterPluginLibrary(items, category, search, connectedOnly, sourceFilter),
+    [category, connectedOnly, items, search, sourceFilter],
   );
   const selectedItem = items.find((item) => item.id === selectedId);
   const connectedCount = items.filter((item) => item.connected).length;
@@ -95,6 +98,14 @@ export function IntegrationsSurface() {
               ))}
             </nav>
             <div className="plugin-toolbar-summary">
+              <label className="plugin-source-filter">
+                <span>{message(locale, "source")}</span>
+                <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as typeof sourceFilter)}>
+                  <option value="all">{message(locale, "allSources")}</option>
+                  <option value="built_in">{message(locale, "builtInCatalog")}</option>
+                  <option value="external">{message(locale, "externalSources")}</option>
+                </select>
+              </label>
               <button
                 aria-checked={connectedOnly}
                 className={`plugin-connected-toggle ${connectedOnly ? "active" : ""}`}
@@ -164,6 +175,7 @@ function PluginRow({
   return (
     <Link
       className={`plugin-row ${selected ? "selected" : ""}`}
+      data-source-type={item.catalogSourceType ?? item.source}
       search={{ selected: item.id }}
       to={categoryPaths[category]}
     >
@@ -254,6 +266,8 @@ function PluginConnectionPanel({
   const [targetId, setTargetId] = useState(availableTargets[0]?.id ?? "");
   const [allowNetwork, setAllowNetwork] = useState(false);
   const [nativeConsent, setNativeConsent] = useState(false);
+  const canConnectAll = item.category === "skills"
+    && ["codex-skill", "claude-skill", "gemini-skill"].every((target) => item.targetIds.includes(target));
   const selectedTarget = availableTargets.find((target) => target.id === targetId) ?? availableTargets[0];
   const selectedScope = selectedTarget?.scopes.includes("managed_home")
     ? "managed_home"
@@ -289,11 +303,64 @@ function PluginConnectionPanel({
       await queryClient.invalidateQueries({ queryKey: remainingRequestKeys.integrationFlows() });
     },
   });
+  const groupPreview = useMutation({
+    mutationFn: () => {
+      if (!item.catalogId) throw new Error("This package cannot be connected from the catalog");
+      return mutateCockpit<IntegrationGroupPreviewResponse>("/api/integrations/groups/preview", {
+        source: "catalog",
+        catalog_id: item.catalogId,
+        scope: "managed_home",
+        target_mode: "all_supported",
+        configuration: {},
+      });
+    },
+  });
+  const groupApply = useMutation({
+    mutationFn: () => {
+      if (!groupPreview.data) throw new Error("Preview all targets first");
+      return mutateCockpit<IntegrationGroupMutationResponse>(
+        `/api/integrations/groups/${encodeURIComponent(groupPreview.data.group.id)}/apply`,
+        {
+          plan_id: groupPreview.data.plan.plan_id,
+          authority: "cockpit-operator",
+          allow_network: allowNetwork,
+          native_consent_acknowledged: nativeConsent,
+        },
+      );
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: remainingRequestKeys.integrationFlows() });
+    },
+  });
   const rollback = useMutation({
     mutationFn: () => {
       if (!item.flow) throw new Error("No connection is available to roll back");
       return mutateCockpit<IntegrationFlowMutationResponse>(
         `/api/integrations/flows/${encodeURIComponent(item.flow.id)}/rollback`,
+        {},
+      );
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: remainingRequestKeys.integrationFlows() });
+    },
+  });
+  const groupRollback = useMutation({
+    mutationFn: () => {
+      if (!item.group) throw new Error("No all-target transaction is available");
+      return mutateCockpit<IntegrationGroupMutationResponse>(
+        `/api/integrations/groups/${encodeURIComponent(item.group.id)}/rollback`,
+        {},
+      );
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: remainingRequestKeys.integrationFlows() });
+    },
+  });
+  const groupRecover = useMutation({
+    mutationFn: () => {
+      if (!item.group) throw new Error("No all-target repair is available");
+      return mutateCockpit<IntegrationGroupMutationResponse>(
+        `/api/integrations/groups/${encodeURIComponent(item.group.id)}/recover`,
         {},
       );
     },
@@ -324,16 +391,42 @@ function PluginConnectionPanel({
     );
   }
 
-  if (item.connected) {
+  if (item.connected && item.group?.status !== "repair_required") {
     return (
       <div className="plugin-detail-actions">
         <div className="plugin-connected-notice"><i aria-hidden="true" />{message(locale, "connected")}</div>
+        {item.group ? (
+          <div className="plugin-group-state">
+            <strong>{message(locale, "allHarnesses")}</strong>
+            <span>{item.group.children.filter((child) => child.verification_status !== "not_started").length}/{item.group.children.length}</span>
+          </div>
+        ) : null}
+        {item.group?.rollback_available ? (
+          <button disabled={groupRollback.isPending} onClick={() => groupRollback.mutate()} type="button">
+            {message(locale, "rollbackAll")}
+          </button>
+        ) : null}
         {item.flow?.rollback_available ? (
           <button disabled={rollback.isPending} onClick={() => rollback.mutate()} type="button">
             {message(locale, "rollback")}
           </button>
         ) : null}
         {rollback.isError ? <p className="mutation-error" role="alert">{rollback.error.message}</p> : null}
+        {groupRollback.isError ? <p className="mutation-error" role="alert">{groupRollback.error.message}</p> : null}
+      </div>
+    );
+  }
+
+  if (item.group?.status === "repair_required") {
+    return (
+      <div className="plugin-detail-actions">
+        <p className="mutation-error" role="alert">{message(locale, "partialInstallNeedsRepair")}</p>
+        <ul className="plugin-repair-actions">
+          {item.group.repair_actions.map((action) => <li key={action}>{action}</li>)}
+        </ul>
+        <button disabled={groupRecover.isPending} onClick={() => groupRecover.mutate()} type="button">
+          {message(locale, "retrySafeRecovery")}
+        </button>
       </div>
     );
   }
@@ -365,9 +458,16 @@ function PluginConnectionPanel({
         </select>
       </label>
       {!preview.data ? (
-        <button className="primary-button" disabled={preview.isPending} onClick={() => preview.mutate()} type="button">
-          {message(locale, "connect")}
-        </button>
+        <div className="plugin-connect-choices">
+          <button className="primary-button" disabled={preview.isPending} onClick={() => preview.mutate()} type="button">
+            {message(locale, "connect")}
+          </button>
+          {canConnectAll ? (
+            <button disabled={groupPreview.isPending} onClick={() => groupPreview.mutate()} type="button">
+              {message(locale, "installAllHarnesses")}
+            </button>
+          ) : null}
+        </div>
       ) : (
         <section className="plugin-approval-panel">
           <h3>{message(locale, "beforeConnecting")}</h3>
@@ -400,6 +500,26 @@ function PluginConnectionPanel({
           {apply.isError ? <p className="mutation-error" role="alert">{apply.error.message}</p> : null}
         </section>
       )}
+      {groupPreview.data ? (
+        <section className="plugin-approval-panel plugin-group-approval">
+          <h3>{message(locale, "allTargetPreview")}</h3>
+          <p>{message(locale, "compensatingTransactionNotice")}</p>
+          <ol>
+            {groupPreview.data.plan.children.map((child) => (
+              <li key={child.target_id}>
+                <strong>{targetLabel(child.target_id)}</strong>
+                <span>{child.configuration_diff.length} {message(locale, "changes")}</span>
+              </li>
+            ))}
+          </ol>
+          <button className="primary-button" disabled={groupApply.isPending} onClick={() => groupApply.mutate()} type="button">
+            {message(locale, "approveAndInstallAll")}
+          </button>
+          {groupApply.data ? <p className="mutation-success" role="status">{statusLabel(locale, groupApply.data.group.status)}</p> : null}
+          {groupApply.isError ? <p className="mutation-error" role="alert">{groupApply.error.message}</p> : null}
+        </section>
+      ) : null}
+      {groupPreview.isError ? <p className="mutation-error" role="alert">{groupPreview.error.message}</p> : null}
       {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
     </div>
   );
@@ -501,6 +621,8 @@ function statusLabel(locale: "en" | "ru", status: string) {
     awaiting_approval: { en: "Awaiting approval", ru: "Ожидает подтверждения" },
     failed: { en: "Failed", ru: "Ошибка" },
     handoff_required: { en: "Continue in provider", ru: "Продолжить у провайдера" },
+    compensated: { en: "Safely compensated", ru: "Безопасно компенсировано" },
+    repair_required: { en: "Repair required", ru: "Требуется восстановление" },
     rolled_back: { en: "Not connected", ru: "Не подключено" },
     verified: { en: "Connected", ru: "Подключено" },
   };

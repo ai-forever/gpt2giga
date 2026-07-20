@@ -30,9 +30,37 @@ export interface IntegrationFlowInventory {
     target_ids: string[];
     scopes: string[];
     trust_decision: string;
+    source_type: string;
   }>;
   flows: IntegrationFlowSummary[];
+  groups: IntegrationGroupSummary[];
   content_free: true;
+}
+
+export interface IntegrationGroupSummary {
+  id: string;
+  plan_id: string;
+  status: string;
+  component: string;
+  source: string;
+  catalog_id: string;
+  package_id: string;
+  package_version: string;
+  target_mode: "all_supported";
+  target_ids: string[];
+  aggregate_risk: string;
+  approval_hash: string | null;
+  children: Array<{
+    target_id: string;
+    flow_id: string;
+    status: string;
+    verification_status: string;
+    rollback_status: string;
+    error_code: string | null;
+  }>;
+  repair_actions: string[];
+  rollback_available: boolean;
+  updated_at: string;
 }
 
 export interface IntegrationFlowSummary {
@@ -80,6 +108,34 @@ export interface IntegrationFlowPreviewResponse {
 export interface IntegrationFlowMutationResponse {
   flow: IntegrationFlowSummary;
   handoff?: { owner: string; reason: string; mutation_performed: false };
+}
+
+export interface IntegrationGroupPlan {
+  plan_id: string;
+  component: string;
+  target_mode: "all_supported";
+  target_ids: string[];
+  aggregate_risk: string;
+  permissions: { network: boolean; native_consent: boolean; user_home: boolean };
+  children: Array<{
+    target_id: string;
+    scope: string;
+    plan_id: string;
+    configuration_diff: string[];
+    restart_required: boolean;
+    verification_steps: string[];
+    rollback_steps: string[];
+  }>;
+  atomicity: "recoverable_compensating_transaction";
+}
+
+export interface IntegrationGroupPreviewResponse {
+  group: IntegrationGroupSummary;
+  plan: IntegrationGroupPlan;
+}
+
+export interface IntegrationGroupMutationResponse {
+  group: IntegrationGroupSummary;
 }
 
 export const remainingRequestKeys = {

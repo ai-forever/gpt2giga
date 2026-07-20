@@ -1,4 +1,5 @@
 import type {
+  IntegrationGroupSummary,
   IntegrationFlowInventory,
   IntegrationFlowSummary,
 } from "./remaining-request-graph";
@@ -15,11 +16,13 @@ export interface PluginLibraryItem {
   version: string | null;
   source: "catalog" | "configured_mcp" | "installed_package";
   catalogId: string | null;
+  catalogSourceType: string | null;
   targetIds: string[];
   connectedTargetIds: string[];
   connected: boolean;
   status: string;
   flow: IntegrationFlowSummary | null;
+  group: IntegrationGroupSummary | null;
   mcp: McpProjection | null;
 }
 
@@ -28,6 +31,7 @@ export function buildPluginLibrary(
   mcpServers: McpProjection[],
 ): PluginLibraryItem[] {
   const latestFlows = latestFlowsByPackageTarget(inventory.flows);
+  const latestGroups = latestGroupsByPackage(inventory.groups);
   const catalogPackages = new Set(inventory.catalog.map((item) => item.package_id));
   const items: PluginLibraryItem[] = inventory.catalog.map((entry) => {
     const flows = entry.target_ids
@@ -35,6 +39,8 @@ export function buildPluginLibrary(
       .filter((flow): flow is IntegrationFlowSummary => flow !== undefined);
     const connectedFlows = flows.filter((flow) => flow.status === "verified");
     const latestFlow = newestFlow(flows);
+    const latestGroup = latestGroups.get(entry.package_id) ?? null;
+    const groupedConnected = latestGroup?.status === "verified";
     return {
       id: `catalog:${entry.catalog_id}`,
       category: categoryFor(entry.component_types, entry.target_ids),
@@ -43,11 +49,13 @@ export function buildPluginLibrary(
       version: entry.version,
       source: "catalog" as const,
       catalogId: entry.catalog_id,
+      catalogSourceType: entry.source_type,
       targetIds: [...entry.target_ids].sort(),
       connectedTargetIds: connectedFlows.map((flow) => flow.target_id).sort(),
-      connected: connectedFlows.length > 0,
-      status: latestFlow?.status ?? "available",
+      connected: connectedFlows.length > 0 || groupedConnected,
+      status: latestGroup?.status ?? latestFlow?.status ?? "available",
       flow: latestFlow ?? null,
+      group: latestGroup,
       mcp: null,
     };
   });
@@ -71,11 +79,13 @@ export function buildPluginLibrary(
       version: latestFlow?.package_version ?? null,
       source: "installed_package",
       catalogId: null,
+      catalogSourceType: null,
       targetIds,
       connectedTargetIds: connectedFlows.map((flow) => flow.target_id).sort(),
       connected: connectedFlows.length > 0,
       status: latestFlow?.status ?? "available",
       flow: latestFlow ?? null,
+      group: latestGroups.get(packageId) ?? null,
       mcp: null,
     });
   }
@@ -89,11 +99,13 @@ export function buildPluginLibrary(
       version: null,
       source: "configured_mcp",
       catalogId: null,
+      catalogSourceType: null,
       targetIds: [],
       connectedTargetIds: mcp.enabled ? ["harness-mcp"] : [],
       connected: mcp.enabled,
       status: mcp.status,
       flow: null,
+      group: null,
       mcp,
     });
   }
@@ -109,16 +121,34 @@ export function filterPluginLibrary(
   category: PluginCategory,
   query: string,
   connectedOnly: boolean,
+  sourceFilter: "all" | "built_in" | "external" = "all",
 ): PluginLibraryItem[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   return items.filter((item) => {
     if (category !== "all" && item.category !== category) return false;
     if (connectedOnly && !item.connected) return false;
+    if (sourceFilter === "built_in" && item.catalogSourceType !== "local_private") return false;
+    if (sourceFilter === "external" && (
+      item.category === "plugins"
+      || item.catalogSourceType === null
+      || item.catalogSourceType === "local_private"
+    )) return false;
     if (!normalizedQuery) return true;
     return `${item.title} ${item.packageId} ${item.targetIds.join(" ")}`
       .toLocaleLowerCase()
       .includes(normalizedQuery);
   });
+}
+
+function latestGroupsByPackage(groups: IntegrationGroupSummary[]) {
+  const result = new Map<string, IntegrationGroupSummary>();
+  for (const group of groups) {
+    const current = result.get(group.package_id);
+    if (current === undefined || group.updated_at > current.updated_at) {
+      result.set(group.package_id, group);
+    }
+  }
+  return result;
 }
 
 function latestFlowsByPackageTarget(flows: IntegrationFlowSummary[]) {

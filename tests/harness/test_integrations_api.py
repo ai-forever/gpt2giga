@@ -96,6 +96,56 @@ def test_integration_api_validates_fields_and_never_returns_secret_payloads(tmp_
     assert client.get("/api/integrations/flows/flow_" + "0" * 32).status_code == 404
 
 
+def test_group_api_keeps_all_target_preview_apply_recovery_and_rollback_equivalent(
+    tmp_path,
+):
+    service = IntegrationFlowService(
+        tmp_path / "data",
+        skill_capability_provider=_supported_skill,
+    )
+    client = TestClient(
+        create_app(
+            HarnessConfig(data_dir=str(tmp_path / "data")),
+            registry=create_default_registry(include_entry_points=False),
+            integration_flow_service=service,
+        )
+    )
+    entry = client.get("/api/integrations").json()["catalog"][0]
+    preview = client.post(
+        "/api/integrations/groups/preview",
+        json={
+            "source": "catalog",
+            "catalog_id": entry["catalog_id"],
+            "scope": "managed_home",
+            "target_mode": "all_supported",
+        },
+    )
+    assert preview.status_code == 200
+    group = preview.json()["group"]
+    plan = preview.json()["plan"]
+    assert plan["target_ids"] == ["codex-skill", "claude-skill", "gemini-skill"]
+    assert (
+        client.get(f"/api/integrations/groups/{group['id']}").json()["group"] == group
+    )
+
+    stale = client.post(
+        f"/api/integrations/groups/{group['id']}/apply",
+        json={"plan_id": "plan_" + "0" * 64, "authority": "api-operator"},
+    )
+    assert stale.status_code == 409
+    applied = client.post(
+        f"/api/integrations/groups/{group['id']}/apply",
+        json={"plan_id": plan["plan_id"], "authority": "api-operator"},
+    )
+    assert applied.status_code == 200
+    assert applied.json()["group"]["status"] == "verified"
+    rolled_back = client.post(
+        f"/api/integrations/groups/{group['id']}/rollback",
+    )
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["group"]["status"] == "rolled_back"
+
+
 def _supported_skill(target_id: str) -> SkillCapabilitySnapshot:
     return SkillCapabilitySnapshot(
         target_id=target_id,

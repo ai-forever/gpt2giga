@@ -20,6 +20,7 @@ const inventory: IntegrationFlowInventory = {
     target_ids: ["codex-skill"],
     scopes: ["managed_home"],
     trust_decision: "reviewed",
+    source_type: "local_private",
   }],
   flows: [
     {
@@ -59,6 +60,7 @@ const inventory: IntegrationFlowInventory = {
       events: [{ stage: "verify", status: "verified", occurred_at: "2026-07-19T12:00:00Z", code: null }],
     },
   ],
+  groups: [],
   content_free: true,
 };
 
@@ -98,5 +100,37 @@ describe("plugin library model", () => {
     expect(filterPluginLibrary(items, "all", "codex-skill", false).map((item) => item.packageId)).toEqual([
       "gpt2giga.builtin.find-skills",
     ]);
+    expect(filterPluginLibrary(items, "all", "", false, "external")).toEqual([]);
+  });
+
+  it("projects verified and repair-required all-target groups without inventing plugin sources", () => {
+    const grouped: IntegrationFlowInventory = {
+      ...inventory,
+      flows: [],
+      groups: [{
+        id: "group-1",
+        plan_id: "plan-1",
+        status: "verified",
+        component: "skill",
+        source: "catalog",
+        catalog_id: "find-skills-1",
+        package_id: "gpt2giga.builtin.find-skills",
+        package_version: "1.0.0",
+        target_mode: "all_supported",
+        target_ids: ["codex-skill", "claude-skill", "gemini-skill"],
+        aggregate_risk: "reviewed",
+        approval_hash: "approval-1",
+        children: [],
+        repair_actions: [],
+        rollback_available: true,
+        updated_at: "2026-07-20T10:00:00Z",
+      }],
+    };
+
+    const [item] = buildPluginLibrary(grouped, []);
+    expect(item).toBeDefined();
+    if (!item) throw new Error("grouped catalog item is missing");
+    expect(item).toMatchObject({ connected: true, status: "verified" });
+    expect(item.group?.target_mode).toBe("all_supported");
   });
 });

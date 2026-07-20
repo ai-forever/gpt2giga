@@ -63,6 +63,10 @@ from gpt2giga_harness.integration_flows import (
     IntegrationFlowService,
     integration_flow_record_to_dict,
 )
+from gpt2giga_harness.integration_groups import (
+    GroupedIntegrationService,
+    integration_group_record_to_dict,
+)
 from gpt2giga_harness.integration_scaffold import scaffold_integration_package
 from gpt2giga_harness.integration_sdk import (
     integration_conformance_report_to_dict,
@@ -429,6 +433,38 @@ def build_parser() -> argparse.ArgumentParser:
     integration_rollback.add_argument("flow_id")
     integration_rollback.add_argument("--json", action="store_true")
     integration_rollback.set_defaults(handler=_handle_integration_rollback)
+    integration_group_preview = integration_subparsers.add_parser("group-preview")
+    integration_group_preview.add_argument("--catalog-id", required=True)
+    integration_group_preview.add_argument(
+        "--scope",
+        default="managed_home",
+        choices=("managed_home", "project"),
+    )
+    integration_group_preview.add_argument("--workspace")
+    integration_group_preview.add_argument("--configuration-json", default="{}")
+    integration_group_preview.add_argument("--json", action="store_true")
+    integration_group_preview.set_defaults(handler=_handle_integration_group_preview)
+    integration_group_status = integration_subparsers.add_parser("group-status")
+    integration_group_status.add_argument("group_id")
+    integration_group_status.add_argument("--json", action="store_true")
+    integration_group_status.set_defaults(handler=_handle_integration_group_status)
+    integration_group_apply = integration_subparsers.add_parser("group-apply")
+    integration_group_apply.add_argument("group_id")
+    integration_group_apply.add_argument("--plan-id", required=True)
+    integration_group_apply.add_argument("--authority", required=True)
+    integration_group_apply.add_argument("--allow-network", action="store_true")
+    integration_group_apply.add_argument("--allow-user-home", action="store_true")
+    integration_group_apply.add_argument("--ack-native-consent", action="store_true")
+    integration_group_apply.add_argument("--json", action="store_true")
+    integration_group_apply.set_defaults(handler=_handle_integration_group_apply)
+    for command, handler in (
+        ("group-recover", _handle_integration_group_recover),
+        ("group-rollback", _handle_integration_group_rollback),
+    ):
+        integration_group_action = integration_subparsers.add_parser(command)
+        integration_group_action.add_argument("group_id")
+        integration_group_action.add_argument("--json", action="store_true")
+        integration_group_action.set_defaults(handler=handler)
     integration_scaffold = integration_subparsers.add_parser("scaffold")
     integration_scaffold.add_argument("package_id")
     integration_scaffold.add_argument("--output", type=Path, required=True)
@@ -1166,6 +1202,97 @@ def _handle_integration_rollback(
     else:
         print(f"Flow: {payload['flow']['id']}")
         print(f"Status: {payload['flow']['status']}")
+    return 0
+
+
+def _handle_integration_group_preview(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    try:
+        configuration = json.loads(args.configuration_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("configuration-json must be valid JSON") from exc
+    payload = GroupedIntegrationService(config.data_dir).preview(
+        {
+            "source": "catalog",
+            "catalog_id": args.catalog_id,
+            "scope": args.scope,
+            "workspace": args.workspace,
+            "configuration": configuration,
+            "target_mode": "all_supported",
+        }
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Group: {payload['group']['id']}")
+        print(f"Plan: {payload['plan']['plan_id']}")
+        print("Targets: " + ", ".join(payload["plan"]["target_ids"]))
+        print(
+            "Next: integration group-apply "
+            f"{payload['group']['id']} --plan-id {payload['plan']['plan_id']} "
+            "--authority <operator>"
+        )
+    return 0
+
+
+def _handle_integration_group_status(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = {
+        "group": integration_group_record_to_dict(
+            GroupedIntegrationService(config.data_dir).get(args.group_id)
+        )
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Group: {payload['group']['id']}")
+        print(f"Status: {payload['group']['status']}")
+    return 0
+
+
+def _handle_integration_group_apply(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = GroupedIntegrationService(config.data_dir).apply(
+        args.group_id,
+        plan_id=args.plan_id,
+        authority=args.authority,
+        allow_network=args.allow_network,
+        allow_user_home=args.allow_user_home,
+        native_consent_acknowledged=args.ack_native_consent,
+    )
+    return _print_group_result(payload, json_output=args.json)
+
+
+def _handle_integration_group_recover(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = GroupedIntegrationService(config.data_dir).recover(args.group_id)
+    return _print_group_result(payload, json_output=args.json)
+
+
+def _handle_integration_group_rollback(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = GroupedIntegrationService(config.data_dir).rollback(args.group_id)
+    return _print_group_result(payload, json_output=args.json)
+
+
+def _print_group_result(payload: dict[str, Any], *, json_output: bool) -> int:
+    if json_output:
+        _print_json(payload)
+    else:
+        print(f"Group: {payload['group']['id']}")
+        print(f"Status: {payload['group']['status']}")
+        if payload["group"]["repair_actions"]:
+            print("Repair: " + ", ".join(payload["group"]["repair_actions"]))
     return 0
 
 

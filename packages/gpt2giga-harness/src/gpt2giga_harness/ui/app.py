@@ -84,6 +84,7 @@ from gpt2giga_harness.editor import (
 )
 from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.integration_flows import IntegrationFlowService
+from gpt2giga_harness.integration_groups import GroupedIntegrationService
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
     NativePromptDelivery,
@@ -301,6 +302,7 @@ def create_app(
     runtime_store: RuntimeCoordinationStore | None = None,
     provider_settings_service: ProviderSettingsService | None = None,
     integration_flow_service: IntegrationFlowService | None = None,
+    grouped_integration_service: GroupedIntegrationService | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
@@ -333,6 +335,13 @@ def create_app(
     )
     integration_flow_service = integration_flow_service or IntegrationFlowService(
         config.data_dir
+    )
+    grouped_integration_service = (
+        grouped_integration_service
+        or GroupedIntegrationService(
+            config.data_dir,
+            flow_service=integration_flow_service,
+        )
     )
     runner = HarnessSessionRunner(
         registry=registry,
@@ -417,6 +426,7 @@ def create_app(
     app.state.harness_settings_store = settings_store
     app.state.harness_provider_settings_service = provider_settings_service
     app.state.harness_integration_flow_service = integration_flow_service
+    app.state.harness_grouped_integration_service = grouped_integration_service
 
     def _approval_gate(
         action: PermissionAction,

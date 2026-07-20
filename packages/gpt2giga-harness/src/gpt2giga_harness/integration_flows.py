@@ -20,14 +20,37 @@ from gpt2giga_harness.builtin_skills import (
     build_builtin_skill_installation_request,
     import_builtin_skills,
 )
-from gpt2giga_harness.claude_mcp_target import CLAUDE_MCP_TARGET_DESCRIPTOR
+from gpt2giga_harness.claude_mcp_target import (
+    CLAUDE_MCP_TARGET_DESCRIPTOR,
+    CLAUDE_MCP_TARGET_ID,
+    ClaudeMCPRequest,
+    ClaudeMCPTargetDriver,
+)
 from gpt2giga_harness.claude_plugin_target import CLAUDE_PLUGIN_TARGET_DESCRIPTOR
-from gpt2giga_harness.codex_mcp_target import CODEX_MCP_TARGET_DESCRIPTOR
+from gpt2giga_harness.codex_mcp_target import (
+    CODEX_MCP_TARGET_DESCRIPTOR,
+    CODEX_MCP_TARGET_ID,
+    CodexMCPRequest,
+    CodexMCPTargetDriver,
+)
+from gpt2giga_harness.external_mcp import (
+    HARNESS_MANAGED_MCP_TARGET_ID,
+    ExternalMCPDescriptor,
+    external_mcp_selection_from_dict,
+    external_mcp_server_spec,
+    normalize_external_mcp_candidate,
+    project_external_mcp_target,
+)
 from gpt2giga_harness.codex_plugin_target import CODEX_PLUGIN_TARGET_DESCRIPTOR
 from gpt2giga_harness.gemini_extension_target import (
     GEMINI_EXTENSION_TARGET_DESCRIPTOR,
 )
-from gpt2giga_harness.gemini_mcp_target import GEMINI_MCP_TARGET_DESCRIPTOR
+from gpt2giga_harness.gemini_mcp_target import (
+    GEMINI_MCP_TARGET_DESCRIPTOR,
+    GEMINI_MCP_TARGET_ID,
+    GeminiMCPRequest,
+    GeminiMCPTargetDriver,
+)
 from gpt2giga_harness.integration_catalog import (
     CatalogEntry,
     IntegrationCatalogStore,
@@ -60,6 +83,7 @@ from gpt2giga_harness.integration_packages import (
     integration_package_semantic_hash,
     integration_package_to_dict,
 )
+from gpt2giga_harness.managed_mcp_inventory import ManagedMCPInventoryStore
 from gpt2giga_harness.portable_skills import (
     CLAUDE_SKILL_TARGET_ID,
     CODEX_SKILL_TARGET_ID,
@@ -241,6 +265,30 @@ HARNESS_PACKAGE_TARGET = ExtensionTargetDescriptor(
     ),
 )
 
+HARNESS_MANAGED_MCP_TARGET = ExtensionTargetDescriptor(
+    id=HARNESS_MANAGED_MCP_TARGET_ID,
+    revision="1",
+    component_types=(IntegrationComponentType.MCP,),
+    scopes=(InstallationScope.MANAGED_HOME,),
+    capabilities=("install", "verify", "rollback", "managed-mcp.inventory"),
+    trust_evidence=(
+        IntegrationTrustEvidence(
+            id="harness-managed-mcp-inventory",
+            kind=IntegrationTrustKind.SOURCE,
+            status=IntegrationTrustStatus.VERIFIED,
+            authority="gpt2giga-harness",
+            revision="1",
+        ),
+    ),
+)
+
+_MCP_TARGET_IDS = {
+    CODEX_MCP_TARGET_ID,
+    CLAUDE_MCP_TARGET_ID,
+    GEMINI_MCP_TARGET_ID,
+    HARNESS_MANAGED_MCP_TARGET_ID,
+}
+
 BUILTIN_FLOW_TARGETS = tuple(
     sorted(
         (
@@ -250,6 +298,7 @@ BUILTIN_FLOW_TARGETS = tuple(
             CODEX_PLUGIN_TARGET_DESCRIPTOR,
             CLAUDE_PLUGIN_TARGET_DESCRIPTOR,
             GEMINI_EXTENSION_TARGET_DESCRIPTOR,
+            HARNESS_MANAGED_MCP_TARGET,
             *_SKILL_TARGETS.values(),
             HARNESS_PACKAGE_TARGET,
         ),
@@ -267,6 +316,7 @@ class IntegrationFlowService:
         *,
         skill_capability_provider: Callable[[str], SkillCapabilitySnapshot]
         | None = None,
+        mcp_driver_provider: Callable[[str], Any] | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self.data_dir = Path(data_dir).expanduser().resolve()
@@ -277,6 +327,8 @@ class IntegrationFlowService:
         self._skill_capability_provider = (
             skill_capability_provider or probe_skill_target
         )
+        self._mcp_driver_provider = mcp_driver_provider or self._default_mcp_driver
+        self._managed_mcp_inventory = ManagedMCPInventoryStore(self.data_dir)
         self._now = now or (lambda: datetime.now(timezone.utc))
 
     def inventory(self) -> dict[str, Any]:
@@ -416,11 +468,20 @@ class IntegrationFlowService:
                         "mutation_performed": False,
                     },
                 }
-            receipt_id, verification_status = self._apply_skill(
-                record.request,
-                resolved,
-                authority=authority,
-                allow_user_home=allow_user_home,
+            receipt_id, verification_status = (
+                self._apply_skill(
+                    record.request,
+                    resolved,
+                    authority=authority,
+                    allow_user_home=allow_user_home,
+                )
+                if resolved.target.id in _SKILL_TARGETS
+                else self._apply_mcp(
+                    record.request,
+                    resolved,
+                    authority=authority,
+                    allow_user_home=allow_user_home,
+                )
             )
             verified = self._transition(
                 applying,
@@ -454,12 +515,15 @@ class IntegrationFlowService:
             raise IntegrationFlowConflictError("flow has no reversible transaction")
         try:
             resolved = self._resolve_preview(record.request, existing=True)
-            if resolved.target.id not in _SKILL_TARGETS:
+            if resolved.target.id in _MCP_TARGET_IDS:
+                self._rollback_mcp(record, resolved)
+            elif resolved.target.id in _SKILL_TARGETS:
+                installer = self._skill_installer(record.request, resolved.root)
+                installer.rollback(record.receipt_id)
+            else:
                 raise IntegrationFlowConflictError(
                     "rollback remains owned by the selected native target"
                 )
-            installer = self._skill_installer(record.request, resolved.root)
-            installer.rollback(record.receipt_id)
             updated = self._transition(
                 record,
                 IntegrationFlowStatus.ROLLED_BACK,
@@ -520,6 +584,49 @@ class IntegrationFlowService:
                 ),
                 restart_required=generated.restart_required,
             )
+        if (
+            target.id in _MCP_TARGET_IDS
+            and source is IntegrationFlowSource.CATALOG
+            and self.catalog.get(str(request.get("catalog_id") or "")) is not None
+            and self.catalog.get(str(request.get("catalog_id") or "")).mcp_response
+            is not None
+        ):
+            descriptor = self._external_mcp_descriptor(request)
+            target_preview = project_external_mcp_target(descriptor, target.id)
+            if not target_preview.supported:
+                raise ValueError(
+                    "external MCP target is incompatible: "
+                    f"{target_preview.error_code or 'unknown'}"
+                )
+            if target.id == HARNESS_MANAGED_MCP_TARGET_ID:
+                native = self._managed_mcp_inventory.preview(descriptor)
+                configuration_diff = (
+                    ("create:managed-mcp-inventory",) if native.changed else ()
+                )
+                native_plan_id = native.plan_id
+                execution_owner = "harness_managed_mcp_inventory"
+                restart_required = False
+            else:
+                driver = self._mcp_driver_provider(target.id)
+                native_request = self._mcp_request(descriptor, target.id, root, scope)
+                native = driver.preview_install(native_request)
+                configuration_diff = tuple(
+                    f"{'update' if item.current_sha256 else 'create'}:{item.relative_path}"
+                    for item in native.installation.mutations
+                )
+                native_plan_id = native.plan_id
+                execution_owner = "provider_native_target_driver"
+                restart_required = True
+            return _ResolvedPreview(
+                package=descriptor.to_integration_package(),
+                target=target,
+                root=root,
+                executable=True,
+                execution_owner=execution_owner,
+                native_plan_id=native_plan_id,
+                configuration_diff=configuration_diff,
+                restart_required=restart_required,
+            )
         return _ResolvedPreview(
             package=package,
             target=target,
@@ -543,9 +650,20 @@ class IntegrationFlowService:
             self._ensure_catalog_seeded()
             catalog_id = str(request.get("catalog_id") or "")
             entry = self.catalog.get(catalog_id) if catalog_id else None
-            if entry is None or entry.package is None:
+            if entry is None:
                 raise ValueError("catalog selection requires an exact package entry")
-            return entry.package
+            if entry.package is not None:
+                return entry.package
+            if entry.mcp_response is not None:
+                descriptor = self._external_mcp_descriptor(request)
+                preview = project_external_mcp_target(descriptor, target.id)
+                if not preview.supported:
+                    raise ValueError(
+                        "external MCP target is incompatible: "
+                        f"{preview.error_code or 'unknown'}"
+                    )
+                return descriptor.to_integration_package()
+            raise ValueError("catalog selection requires an exact package entry")
         if source is IntegrationFlowSource.RAW_DESCRIPTOR:
             return _raw_mcp_package(request, target, scope)
         manifest = request.get("manifest")
@@ -612,6 +730,116 @@ class IntegrationFlowService:
         if discovery.status.value != "discovered":
             raise IntegrationFlowError("skill discovery did not verify")
         return result.transaction_id, discovery.status.value
+
+    def _apply_mcp(
+        self,
+        request: Mapping[str, Any],
+        resolved: _ResolvedPreview,
+        *,
+        authority: str,
+        allow_user_home: bool,
+    ) -> tuple[str, str]:
+        descriptor = self._external_mcp_descriptor(request)
+        if resolved.target.id == HARNESS_MANAGED_MCP_TARGET_ID:
+            plan = self._managed_mcp_inventory.preview(descriptor)
+            if plan.plan_id != resolved.native_plan_id:
+                raise InstallationConflictError("target preview changed before apply")
+            result = self._managed_mcp_inventory.apply(
+                descriptor, plan, authority=authority
+            )
+            verified = self._managed_mcp_inventory.verify(result.transaction_id)
+            return verified.transaction_id, "inventory_verified"
+        driver = self._mcp_driver_provider(resolved.target.id)
+        native_request = self._mcp_request(
+            descriptor,
+            resolved.target.id,
+            resolved.root,
+            InstallationScope(request["scope"]),
+        )
+        plan = driver.preview_install(native_request)
+        if plan.plan_id != resolved.native_plan_id:
+            raise InstallationConflictError("target preview changed before apply")
+        result = driver.install(
+            native_request,
+            plan,
+            InstallationApproval(
+                plan_id=plan.plan_id,
+                authority=authority,
+                allow_user_home=allow_user_home,
+            ),
+        )
+        health = driver.verify(result.transaction_id)
+        if getattr(health, "status", None) != "healthy":
+            raise IntegrationFlowError("native MCP discovery did not verify")
+        return result.transaction_id, "native_verified"
+
+    def _rollback_mcp(
+        self, record: IntegrationFlowRecord, resolved: _ResolvedPreview
+    ) -> None:
+        if record.receipt_id is None:
+            raise IntegrationFlowConflictError("MCP flow receipt is missing")
+        if resolved.target.id == HARNESS_MANAGED_MCP_TARGET_ID:
+            self._managed_mcp_inventory.rollback(record.receipt_id)
+            return
+        self._mcp_driver_provider(resolved.target.id).rollback(record.receipt_id)
+
+    def _external_mcp_descriptor(
+        self, request: Mapping[str, Any]
+    ) -> ExternalMCPDescriptor:
+        if (
+            IntegrationFlowSource(request["source"])
+            is not IntegrationFlowSource.CATALOG
+        ):
+            raise ValueError("managed external MCP execution requires a catalog pin")
+        catalog_id = str(request.get("catalog_id") or "")
+        entry = self.catalog.get(catalog_id) if catalog_id else None
+        if entry is None or entry.mcp_response is None:
+            raise ValueError("external MCP execution requires an official Registry pin")
+        configuration = request.get("configuration")
+        if not isinstance(configuration, Mapping):
+            raise ValueError("external MCP configuration is invalid")
+        selection = external_mcp_selection_from_dict(configuration.get("selection"))
+        discovery = None
+        discovery_id = configuration.get("discovery_catalog_id")
+        if discovery_id is not None:
+            discovery = self.catalog.get(str(discovery_id))
+            if discovery is None:
+                raise ValueError("external MCP discovery entry was not found")
+        return normalize_external_mcp_candidate(
+            entry,
+            selection,
+            discovery_entry=discovery,
+        )
+
+    def _mcp_request(
+        self,
+        descriptor: ExternalMCPDescriptor,
+        target_id: str,
+        root: Path,
+        scope: InstallationScope,
+    ) -> CodexMCPRequest | ClaudeMCPRequest | GeminiMCPRequest:
+        package = descriptor.to_integration_package()
+        spec = external_mcp_server_spec(descriptor, target_id)
+        if target_id == CODEX_MCP_TARGET_ID:
+            return CodexMCPRequest(package=package, scope=scope, root=root, server=spec)
+        if target_id == CLAUDE_MCP_TARGET_ID:
+            return ClaudeMCPRequest(
+                package=package, scope=scope, root=root, server=spec
+            )
+        if target_id == GEMINI_MCP_TARGET_ID:
+            return GeminiMCPRequest(
+                package=package, scope=scope, root=root, server=spec
+            )
+        raise ValueError("external MCP native target is unsupported")
+
+    def _default_mcp_driver(self, target_id: str) -> Any:
+        if target_id == CODEX_MCP_TARGET_ID:
+            return CodexMCPTargetDriver(self.data_dir)
+        if target_id == CLAUDE_MCP_TARGET_ID:
+            return ClaudeMCPTargetDriver(self.data_dir)
+        if target_id == GEMINI_MCP_TARGET_ID:
+            return GeminiMCPTargetDriver(self.data_dir)
+        raise ValueError("external MCP native target is unsupported")
 
     def _skill_installer(
         self,
@@ -805,6 +1033,7 @@ def _public_plan(
         IntegrationFlowSource.MARKETPLACE,
     }
     native_consent = resolved.target.id in {
+        CODEX_MCP_TARGET_DESCRIPTOR.id,
         CLAUDE_MCP_TARGET_DESCRIPTOR.id,
         GEMINI_MCP_TARGET_DESCRIPTOR.id,
         CODEX_PLUGIN_TARGET_DESCRIPTOR.id,
@@ -1056,12 +1285,24 @@ def _catalog_entry_to_dict(entry: CatalogEntry) -> dict[str, Any]:
         "component_types": (
             sorted({item.type.value for item in package.components})
             if package
-            else ([federated.component] if federated is not None else [])
+            else (
+                [federated.component]
+                if federated is not None
+                else (
+                    [IntegrationComponentType.MCP.value] if entry.mcp_response else []
+                )
+            )
         ),
         "target_ids": (
-            sorted(item.target_id for item in package.compatibility) if package else []
+            sorted(item.target_id for item in package.compatibility)
+            if package
+            else (sorted(_MCP_TARGET_IDS) if entry.mcp_response else [])
         ),
-        "scopes": [item.value for item in package.scopes] if package else [],
+        "scopes": (
+            [item.value for item in package.scopes]
+            if package
+            else ([InstallationScope.MANAGED_HOME.value] if entry.mcp_response else [])
+        ),
         "discovery": (
             {
                 "upstream_id": federated.upstream_id,
@@ -1107,6 +1348,8 @@ def _configuration_diff(configuration: object) -> tuple[str, ...]:
 def _execution_owner(target_id: str) -> str:
     if target_id in _SKILL_TARGETS:
         return "workbench_transactional_installer"
+    if target_id == HARNESS_MANAGED_MCP_TARGET_ID:
+        return "harness_managed_mcp_inventory"
     if target_id == HARNESS_PACKAGE_TARGET.id:
         return "python_package_manager_and_adapter_sdk"
     return "provider_native_target_driver"
