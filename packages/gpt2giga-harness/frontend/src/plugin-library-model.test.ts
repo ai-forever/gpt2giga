@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildRemotePluginLibrary,
   buildPluginLibrary,
   filterPluginLibrary,
 } from "./plugin-library-model";
@@ -132,5 +133,54 @@ describe("plugin library model", () => {
     if (!item) throw new Error("grouped catalog item is missing");
     expect(item).toMatchObject({ connected: true, status: "verified" });
     expect(item.group?.target_mode).toBe("all_supported");
+  });
+
+  it("projects root skills, federated results, and filters them by harness", () => {
+    const items = buildPluginLibrary({
+      ...inventory,
+      root_skills: [{
+        id: "root:abc",
+        name: "Shared review",
+        description: "Installed for every native harness",
+        target_ids: ["codex-skill", "claude-skill", "gemini-skill"],
+        origin: "root",
+        scope: "root",
+        connected: true,
+        preview_id: "root:abc",
+      }],
+    }, []);
+    const remote = buildRemotePluginLibrary({
+      query: "review",
+      items: [{
+        id: "remote:skills-sh:review",
+        source_id: "skills-sh",
+        upstream_id: "acme/review",
+        title: "Remote review",
+        component: "skill",
+        artifact_url: "https://github.com/acme/review",
+        detail_url: "https://skills.sh/acme/review",
+        curated: false,
+        popularity: 42,
+        upstream_audit: null,
+        install_authorized: false,
+      }],
+      sources: [{ id: "skills-sh", status: "ready", error_type: null }],
+      install_authorized: false,
+    });
+
+    expect(items.find((item) => item.id === "root:abc")).toMatchObject({
+      connected: true,
+      previewId: "root:abc",
+      source: "root",
+    });
+    expect(filterPluginLibrary(items, "skills", "", false, "all", "claude")
+      .some((item) => item.id === "root:abc")).toBe(true);
+    expect(filterPluginLibrary(items, "skills", "", false, "all", "harness")
+      .some((item) => item.id === "root:abc")).toBe(false);
+    expect(remote[0]).toMatchObject({
+      artifactUrl: "https://github.com/acme/review",
+      sourceId: "skills-sh",
+      popularity: 42,
+    });
   });
 });

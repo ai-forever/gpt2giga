@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useRouterState, useSearch } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { mutateCockpit } from "../api";
+import { fetchCockpit, mutateCockpit } from "../api";
 import { LoadingRows, StatusBadge } from "../components/OperationalSurface";
 import { message } from "../messages";
 import {
   buildPluginLibrary,
+  buildRemotePluginLibrary,
   filterPluginLibrary,
   type PluginCategory,
   type PluginItemCategory,
@@ -22,6 +23,9 @@ import {
   type IntegrationFlowInventory,
   type IntegrationFlowMutationResponse,
   type IntegrationFlowPreviewResponse,
+  type IntegrationSearchResponse,
+  type SkillPreviewResponse,
+  type GitInspectionResponse,
 } from "../remaining-request-graph";
 
 const categoryPaths = {
@@ -50,15 +54,40 @@ export function IntegrationsSurface() {
   const [search, setSearch] = useState("");
   const [connectedOnly, setConnectedOnly] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | "built_in" | "external">("all");
+  const [harnessFilter, setHarnessFilter] = useState<"all" | "codex" | "claude" | "gemini" | "harness">("all");
+  const [remoteSearch, setRemoteSearch] = useState("");
+  const [addItem, setAddItem] = useState<PluginLibraryItem | null | true>(null);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setRemoteSearch(search.trim()), 350);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+  const externalQuery = useQuery({
+    queryKey: ["cockpit", "integration-search", remoteSearch, category],
+    queryFn: ({ signal }) => {
+      const params = new URLSearchParams({ q: remoteSearch, limit: "50" });
+      if (category === "skills") params.append("component", "skill");
+      else if (category === "mcp") params.append("component", "mcp");
+      else {
+        params.append("component", "skill");
+        params.append("component", "mcp");
+      }
+      return fetchCockpit<IntegrationSearchResponse>(`/api/integrations/search?${params}`, signal);
+    },
+    enabled: remoteSearch.length >= 2 && category !== "plugins",
+    staleTime: 60_000,
+  });
   const items = useMemo(
     () => integrationQuery.data
-      ? buildPluginLibrary(integrationQuery.data, mcpQuery.data ?? [])
+      ? [
+          ...buildPluginLibrary(integrationQuery.data, mcpQuery.data ?? []),
+          ...buildRemotePluginLibrary(externalQuery.data),
+        ]
       : [],
-    [integrationQuery.data, mcpQuery.data],
+    [externalQuery.data, integrationQuery.data, mcpQuery.data],
   );
   const visibleItems = useMemo(
-    () => filterPluginLibrary(items, category, search, connectedOnly, sourceFilter),
-    [category, connectedOnly, items, search, sourceFilter],
+    () => filterPluginLibrary(items, category, search, connectedOnly, sourceFilter, harnessFilter),
+    [category, connectedOnly, harnessFilter, items, search, sourceFilter],
   );
   const selectedItem = items.find((item) => item.id === selectedId);
   const connectedCount = items.filter((item) => item.connected).length;
@@ -68,8 +97,13 @@ export function IntegrationsSurface() {
   return (
     <div className={`plugin-library ${selectedItem ? "has-selection" : ""}`}>
       <header className="plugin-library-header">
-        <h1>{message(locale, "plugins")}</h1>
-        <p>{message(locale, "pluginLibraryDescription")}</p>
+        <div>
+          <h1>{message(locale, "plugins")}</h1>
+          <p>{message(locale, "pluginLibraryDescription")}</p>
+        </div>
+        <button className="primary-button plugin-add-button" onClick={() => setAddItem(true)} type="button">
+          + {addLabel(locale, category)}
+        </button>
       </header>
       <div className="plugin-library-layout">
         <section className="plugin-library-browser">
@@ -106,6 +140,16 @@ export function IntegrationsSurface() {
                   <option value="external">{message(locale, "externalSources")}</option>
                 </select>
               </label>
+              <label className="plugin-source-filter">
+                <span>{message(locale, "harness")}</span>
+                <select value={harnessFilter} onChange={(event) => setHarnessFilter(event.target.value as typeof harnessFilter)}>
+                  <option value="all">{message(locale, "allHarnesses")}</option>
+                  <option value="codex">Codex</option>
+                  <option value="claude">Claude</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="harness">Harness</option>
+                </select>
+              </label>
               <button
                 aria-checked={connectedOnly}
                 className={`plugin-connected-toggle ${connectedOnly ? "active" : ""}`}
@@ -119,6 +163,16 @@ export function IntegrationsSurface() {
               <span>{connectedCount} {message(locale, "connectedCount")}</span>
             </div>
           </div>
+          {externalQuery.data ? (
+            <div className="plugin-search-sources" aria-label={message(locale, "searchSources")}>
+              <span>{message(locale, "searchSources")}</span>
+              {externalQuery.data.sources.map((source) => (
+                <span className={`source-status ${source.status}`} key={source.id}>
+                  {source.id}: {sourceStatusLabel(locale, source.status)}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {pending ? <LoadingRows /> : failed ? (
             <div className="error-state">{message(locale, "boundedDataUnavailable")}</div>
           ) : visibleItems.length === 0 ? (
@@ -147,6 +201,7 @@ export function IntegrationsSurface() {
               inventory={integrationQuery.data}
               item={selectedItem}
               key={selectedItem.id}
+              onAdd={() => setAddItem(selectedItem)}
             />
           ) : (
             <div className="plugin-detail-empty">
@@ -157,6 +212,14 @@ export function IntegrationsSurface() {
           )}
         </aside>
       </div>
+      {addItem ? (
+        <AddIntegrationDrawer
+          category={category}
+          inventory={integrationQuery.data}
+          onClose={() => setAddItem(null)}
+          seed={addItem === true ? null : addItem}
+        />
+      ) : null}
     </div>
   );
 }
@@ -202,13 +265,23 @@ function PluginDetails({
   category,
   inventory,
   item,
+  onAdd,
 }: {
   category: PluginCategory;
   inventory: IntegrationFlowInventory;
   item: PluginLibraryItem;
+  onAdd: () => void;
 }) {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
+  const skillPreview = useQuery({
+    queryKey: ["cockpit", "skill-preview", item.previewId],
+    queryFn: ({ signal }) => fetchCockpit<SkillPreviewResponse>(
+      `/api/integrations/skills/preview?preview_id=${encodeURIComponent(item.previewId ?? "")}`,
+      signal,
+    ),
+    enabled: item.category === "skills" && item.previewId !== null,
+  });
   return (
     <div className="plugin-detail">
       <Link
@@ -227,6 +300,9 @@ function PluginDetails({
         </div>
       </div>
       <p className="plugin-detail-description">{descriptionFor(locale, item)}</p>
+      {item.popularity !== null ? (
+        <p className="plugin-popularity">{item.popularity.toLocaleString()} {message(locale, "installs")}</p>
+      ) : null}
       <section className="plugin-detail-section">
         <h3>{message(locale, "compatibility")}</h3>
         <div className="plugin-targets">
@@ -236,7 +312,7 @@ function PluginDetails({
       <dl className="plugin-facts">
         <div>
           <dt>{message(locale, "source")}</dt>
-          <dd>{sourceLabel(locale, item.source)}</dd>
+          <dd>{item.sourceId ?? sourceLabel(locale, item.source)}</dd>
         </div>
         <div>
           <dt>{message(locale, "version")}</dt>
@@ -247,7 +323,22 @@ function PluginDetails({
           <dd>{item.connected ? message(locale, "connected") : statusLabel(locale, item.status)}</dd>
         </div>
       </dl>
-      <PluginConnectionPanel inventory={inventory} item={item} />
+      {item.category === "skills" && item.previewId ? (
+        <section className="plugin-skill-preview">
+          <h3>{message(locale, "skillPreview")}</h3>
+          {skillPreview.isPending ? <LoadingRows /> : null}
+          {skillPreview.data ? <pre>{skillPreview.data.markdown}</pre> : null}
+          {skillPreview.isError ? <p className="mutation-error">{skillPreview.error.message}</p> : null}
+        </section>
+      ) : null}
+      {item.source === "remote" ? (
+        <div className="plugin-detail-actions">
+          <button className="primary-button" disabled={!item.artifactUrl} onClick={onAdd} type="button">
+            + {addLabel(locale, item.category)}
+          </button>
+          {item.detailUrl ? <a href={item.detailUrl} rel="noreferrer" target="_blank">{message(locale, "openSourcePage")}</a> : null}
+        </div>
+      ) : <PluginConnectionPanel inventory={inventory} item={item} />}
     </div>
   );
 }
@@ -525,6 +616,205 @@ function PluginConnectionPanel({
   );
 }
 
+function AddIntegrationDrawer({
+  category,
+  inventory,
+  onClose,
+  seed,
+}: {
+  category: PluginCategory;
+  inventory: IntegrationFlowInventory | undefined;
+  onClose: () => void;
+  seed: PluginLibraryItem | null;
+}) {
+  const { preferences } = usePreferences();
+  const locale = preferences.locale;
+  const queryClient = useQueryClient();
+  const initialMode: PluginItemCategory = seed?.category
+    ?? (category === "all" ? "skills" : category);
+  const [mode, setMode] = useState<PluginItemCategory>(initialMode);
+  const [repositoryUrl, setRepositoryUrl] = useState(seed?.artifactUrl ?? "");
+  const [ref, setRef] = useState("");
+  const [selectedCandidateId, setSelectedCandidateId] = useState("");
+  const [catalogId, setCatalogId] = useState("");
+  const [targetId, setTargetId] = useState("");
+  const [scope, setScope] = useState("managed_home");
+  const [packageId, setPackageId] = useState("custom-mcp");
+  const [transport, setTransport] = useState("stdio");
+  const [command, setCommand] = useState("custom-mcp");
+  const [allowNetwork, setAllowNetwork] = useState(false);
+  const [nativeConsent, setNativeConsent] = useState(false);
+  const inspect = useMutation({
+    mutationFn: () => mutateCockpit<GitInspectionResponse>("/api/integrations/git/inspect", {
+      repository_url: repositoryUrl,
+      ref: ref.trim() || undefined,
+    }),
+    onSuccess: (data) => setSelectedCandidateId(
+      data.candidates.find((item) => item.type === mode.slice(0, -1))?.id
+      ?? data.candidates[0]?.id
+      ?? "",
+    ),
+  });
+  const candidates = inspect.data?.candidates.filter((item) => (
+    mode === "skills" ? item.type === "skill" : mode === "plugins" ? item.type === "plugin" : item.type === "mcp"
+  )) ?? [];
+  const selectedCandidate = candidates.find((item) => item.id === selectedCandidateId) ?? candidates[0];
+  const candidatePreview = useQuery({
+    queryKey: ["cockpit", "git-skill-preview", selectedCandidate?.preview_id],
+    queryFn: ({ signal }) => fetchCockpit<SkillPreviewResponse>(
+      `/api/integrations/skills/preview?preview_id=${encodeURIComponent(selectedCandidate?.preview_id ?? "")}`,
+      signal,
+    ),
+    enabled: selectedCandidate?.preview_id !== null && selectedCandidate?.preview_id !== undefined,
+  });
+  const importSkill = useMutation({
+    mutationFn: () => {
+      if (!selectedCandidate) throw new Error("Select a Skill first");
+      return mutateCockpit<{ catalog_id: string }>("/api/integrations/git/import-skill", {
+        candidate_id: selectedCandidate.id,
+      });
+    },
+    onSuccess: async (data) => {
+      setCatalogId(data.catalog_id);
+      await queryClient.invalidateQueries({ queryKey: remainingRequestKeys.integrationFlows() });
+    },
+  });
+  const componentHint = mode === "skills" ? "skill" : mode === "mcp" ? "mcp" : "plugin";
+  const targets = inventory?.targets.filter((target) => (
+    target.component_types.includes(componentHint)
+    || (mode === "plugins" && target.component_types.includes("extension"))
+  )) ?? [];
+  const selectedTarget = targets.find((target) => target.id === targetId) ?? targets[0];
+  const selectedScope = selectedTarget?.scopes.includes(scope)
+    ? scope
+    : selectedTarget?.scopes[0] ?? "managed_home";
+  const preview = useMutation({
+    mutationFn: () => {
+      if (!selectedTarget) throw new Error("No compatible target is available");
+      if (mode === "skills" && !catalogId) throw new Error("Import the selected Skill first");
+      if (mode === "plugins" && !selectedCandidate?.manifest) throw new Error("Select a plugin manifest first");
+      const source = mode === "skills"
+        ? "catalog"
+        : mode === "mcp"
+          ? "raw_descriptor"
+          : sourceForManifest(selectedCandidate?.manifest);
+      return mutateCockpit<IntegrationFlowPreviewResponse>("/api/integrations/preview", {
+        source,
+        catalog_id: mode === "skills" ? catalogId : undefined,
+        manifest: mode === "plugins" ? selectedCandidate?.manifest : undefined,
+        target_id: selectedTarget.id,
+        scope: selectedScope,
+        package_id: mode === "mcp" ? packageId : undefined,
+        configuration: mode === "mcp" ? {
+          transport,
+          command: transport === "stdio" ? command : undefined,
+          url: transport === "stdio" ? undefined : command,
+        } : {
+          plugin_name: selectedCandidate?.title,
+          sparse: selectedCandidate?.relative_dir && selectedCandidate.relative_dir !== "."
+            ? [selectedCandidate.relative_dir]
+            : [],
+        },
+      });
+    },
+  });
+  const apply = useMutation({
+    mutationFn: () => {
+      if (!preview.data) throw new Error("Preview the installation first");
+      return mutateCockpit<IntegrationFlowMutationResponse>(
+        `/api/integrations/flows/${encodeURIComponent(preview.data.flow.id)}/apply`,
+        {
+          plan_id: preview.data.plan.plan_id,
+          authority: "cockpit-operator",
+          allow_network: allowNetwork,
+          native_consent_acknowledged: nativeConsent,
+        },
+      );
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: remainingRequestKeys.integrationFlows() });
+    },
+  });
+
+  return (
+    <div className="plugin-add-backdrop" onMouseDown={onClose} role="presentation">
+      <section aria-label={addLabel(locale, mode)} aria-modal="true" className="plugin-add-drawer" onMouseDown={(event) => event.stopPropagation()} role="dialog">
+        <header>
+          <div><span className="section-kicker">{message(locale, "addIntegration")}</span><h2>+ {addLabel(locale, mode)}</h2></div>
+          <button aria-label={message(locale, "closeDetails")} onClick={onClose} type="button"><CloseIcon /></button>
+        </header>
+        {category === "all" ? (
+          <div className="plugin-add-kind">
+            {(["skills", "plugins", "mcp"] as const).map((item) => (
+              <button className={mode === item ? "selected" : ""} key={item} onClick={() => { setMode(item); preview.reset(); }} type="button">
+                {typeLabel(locale, item)}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {mode !== "mcp" ? (
+          <>
+            <label className="field-control">{message(locale, "gitRepository")}
+              <input onChange={(event) => setRepositoryUrl(event.target.value)} placeholder="https://github.com/owner/repository/tree/main" value={repositoryUrl} />
+            </label>
+            <label className="field-control">{message(locale, "gitRefOptional")}
+              <input onChange={(event) => setRef(event.target.value)} placeholder="main or an immutable commit" value={ref} />
+            </label>
+            <button disabled={inspect.isPending || !repositoryUrl.trim()} onClick={() => inspect.mutate()} type="button">{message(locale, "inspectRepository")}</button>
+            {inspect.isError ? <p className="mutation-error" role="alert">{inspect.error.message}</p> : null}
+            {inspect.data ? <p className="git-commit"><strong>{message(locale, "resolvedCommit")}</strong><code>{inspect.data.commit}</code></p> : null}
+            {candidates.length > 0 ? (
+              <label className="field-control">{message(locale, "selectCandidate")}
+                <select onChange={(event) => { setSelectedCandidateId(event.target.value); setCatalogId(""); preview.reset(); }} value={selectedCandidate?.id ?? ""}>
+                  {candidates.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.relative_dir}</option>)}
+                </select>
+              </label>
+            ) : inspect.data ? <p className="plugin-unavailable-note">{message(locale, "noCompatibleCandidates")}</p> : null}
+            {candidatePreview.data ? <div className="git-candidate-preview"><strong>{candidatePreview.data.description}</strong><pre>{candidatePreview.data.markdown}</pre></div> : null}
+            {mode === "skills" && selectedCandidate ? (
+              <button className="primary-button" disabled={importSkill.isPending || Boolean(catalogId)} onClick={() => importSkill.mutate()} type="button">
+                {catalogId ? message(locale, "addedToCatalog") : message(locale, "addReviewedSkill")}
+              </button>
+            ) : null}
+            {importSkill.isError ? <p className="mutation-error" role="alert">{importSkill.error.message}</p> : null}
+          </>
+        ) : (
+          <>
+            <label className="field-control">{message(locale, "packageId")}<input onChange={(event) => setPackageId(event.target.value)} value={packageId} /></label>
+            <label className="field-control">{message(locale, "transport")}<select onChange={(event) => setTransport(event.target.value)} value={transport}><option value="stdio">stdio</option><option value="streamable_http">streamable HTTP</option><option value="sse">SSE</option></select></label>
+            <label className="field-control">{transport === "stdio" ? message(locale, "command") : "HTTPS URL"}<input onChange={(event) => setCommand(event.target.value)} value={command} /></label>
+          </>
+        )}
+        <div className="wizard-fields">
+          <label className="field-control">{message(locale, "target")}<select onChange={(event) => { setTargetId(event.target.value); preview.reset(); }} value={selectedTarget?.id ?? ""}>{targets.map((target) => <option key={target.id} value={target.id}>{targetLabel(target.id)}</option>)}</select></label>
+          <label className="field-control">{message(locale, "scope")}<select onChange={(event) => { setScope(event.target.value); preview.reset(); }} value={selectedScope}>{selectedTarget?.scopes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        </div>
+        <button disabled={preview.isPending || (mode === "skills" && !catalogId) || (mode === "plugins" && !selectedCandidate?.manifest)} onClick={() => preview.mutate()} type="button">{message(locale, "previewInstall")}</button>
+        {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
+        {preview.data ? (
+          <section className="integration-preview">
+            <div className="integration-preview-heading"><h2>{preview.data.plan.package.id}</h2><StatusBadge status={preview.data.plan.risk.decision} /></div>
+            <dl className="plugin-facts"><div><dt>{message(locale, "target")}</dt><dd>{targetLabel(preview.data.plan.target.id)}</dd></div><div><dt>{message(locale, "configurationDiff")}</dt><dd>{preview.data.plan.configuration.diff.length}</dd></div><div><dt>{message(locale, "permissions")}</dt><dd>{preview.data.plan.permissions.requirements.map((item) => item.type).join(", ") || message(locale, "noExtraPermissions")}</dd></div></dl>
+            {preview.data.plan.permissions.network ? <label className="check-control"><input checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} type="checkbox" />{message(locale, "allowNetwork")}</label> : null}
+            {preview.data.plan.permissions.native_consent ? <label className="check-control"><input checked={nativeConsent} onChange={(event) => setNativeConsent(event.target.checked)} type="checkbox" />{message(locale, "nativeConsent")}</label> : null}
+            <button className="primary-button" disabled={apply.isPending} onClick={() => apply.mutate()} type="button">{message(locale, "approveAndApply")}</button>
+            {apply.data ? <p className="mutation-success" role="status">{statusLabel(locale, apply.data.flow.status)}</p> : null}
+            {apply.isError ? <p className="mutation-error" role="alert">{apply.error.message}</p> : null}
+          </section>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function sourceForManifest(manifest: Record<string, unknown> | null | undefined) {
+  const source = manifest?.source_type;
+  if (source === "provider_marketplace") return "marketplace";
+  if (source === "local") return "local";
+  if (source === "package") return "package";
+  return "git";
+}
+
 function PluginItemIcon({ category }: { category: PluginItemCategory }) {
   if (category === "skills") {
     return <span className="plugin-item-icon skills" aria-hidden="true"><SparklesIcon /></span>;
@@ -568,7 +858,15 @@ function typeLabel(locale: "en" | "ru", category: PluginItemCategory) {
   return "MCP";
 }
 
+function addLabel(locale: "en" | "ru", category: PluginCategory | PluginItemCategory) {
+  if (category === "skills") return locale === "ru" ? "Добавить Skill" : "Add Skill";
+  if (category === "mcp") return locale === "ru" ? "Добавить MCP" : "Add MCP";
+  if (category === "plugins") return locale === "ru" ? "Добавить Plugin" : "Add Plugin";
+  return message(locale, "addIntegration");
+}
+
 function descriptionFor(locale: "en" | "ru", item: PluginLibraryItem) {
+  if (item.description) return item.description;
   const descriptions: Record<string, { en: string; ru: string }> = {
     "gpt2giga.builtin.find-skills": {
       en: "Find skills in connected repositories and reviewed catalogs.",
@@ -612,7 +910,17 @@ function targetLabel(targetId: string) {
 function sourceLabel(locale: "en" | "ru", source: PluginLibraryItem["source"]) {
   if (source === "catalog") return message(locale, "builtInCatalog");
   if (source === "configured_mcp") return message(locale, "currentConfiguration");
+  if (source === "root") return message(locale, "rootSkills");
+  if (source === "remote") return message(locale, "externalSources");
   return message(locale, "installedPackage");
+}
+
+function sourceStatusLabel(locale: "en" | "ru", status: string) {
+  if (status === "ready") return message(locale, "sourceReady");
+  if (status === "configuration_required") {
+    return message(locale, "sourceConfigurationRequired");
+  }
+  return message(locale, "sourceUnavailable");
 }
 
 function statusLabel(locale: "en" | "ru", status: string) {

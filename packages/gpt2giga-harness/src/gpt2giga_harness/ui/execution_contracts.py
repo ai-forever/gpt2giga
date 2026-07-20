@@ -114,6 +114,8 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/harnesses"),
         ("GET", "/api/health"),
         ("GET", "/api/integrations"),
+        ("GET", "/api/integrations/search"),
+        ("GET", "/api/integrations/skills/preview"),
         ("GET", "/api/integrations/flows/{flow_id}"),
         ("GET", "/api/integrations/groups/{group_id}"),
         ("GET", "/api/models"),
@@ -195,6 +197,7 @@ _EVENT_LOOP_SAFE = frozenset(
 _NETWORK = frozenset(
     {
         ("GET", "/api/health"),
+        ("GET", "/api/integrations/search"),
         ("GET", "/api/models"),
         ("POST", "/api/providers/{provider_id}/discover"),
         ("POST", "/api/providers/{provider_id}/test"),
@@ -217,6 +220,7 @@ _SUBPROCESS_PREFIXES = (
 _SUBPROCESS_EXACT = frozenset(
     {
         ("POST", "/api/project/init"),
+        ("POST", "/api/integrations/git/inspect"),
         ("POST", "/api/run"),
         ("POST", "/api/tools/sync"),
         ("POST", "/api/runs/{run_id}/apply"),
@@ -254,6 +258,8 @@ _SYNC_DURABLE_SUBMISSIONS = frozenset(
 )
 _NATIVE_ASYNC = frozenset(
     {
+        ("GET", "/api/integrations/search"),
+        ("POST", "/api/integrations/git/inspect"),
         ("POST", "/api/native/processes/{process_id}/input"),
     }
 )

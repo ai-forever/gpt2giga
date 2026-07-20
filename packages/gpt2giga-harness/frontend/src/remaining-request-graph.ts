@@ -31,10 +31,76 @@ export interface IntegrationFlowInventory {
     scopes: string[];
     trust_decision: string;
     source_type: string;
+    discovery?: {
+      name: string;
+      component: string;
+      detail_url: string | null;
+      artifact_url: string | null;
+      popularity: number | null;
+      curated: boolean;
+    } | null;
+  }>;
+  root_skills?: Array<{
+    id: string;
+    name: string;
+    description: string;
+    target_ids: string[];
+    origin: string;
+    scope: "root";
+    connected: true;
+    preview_id: string;
   }>;
   flows: IntegrationFlowSummary[];
   groups: IntegrationGroupSummary[];
   content_free: true;
+}
+
+export interface IntegrationSearchResponse {
+  query: string;
+  items: Array<{
+    id: string;
+    source_id: string;
+    upstream_id: string;
+    title: string;
+    component: "skill" | "mcp";
+    artifact_url: string | null;
+    detail_url: string | null;
+    curated: boolean;
+    popularity: number | null;
+    upstream_audit: string | null;
+    install_authorized: false;
+  }>;
+  sources: Array<{ id: string; status: string; error_type: string | null }>;
+  install_authorized: false;
+}
+
+export interface SkillPreviewResponse {
+  name: string;
+  description: string;
+  markdown: string;
+  truncated: boolean;
+  source: string;
+  target_ids: string[];
+}
+
+export interface GitInspectionResponse {
+  repository_url: string;
+  requested_ref: string | null;
+  commit: string;
+  snapshot_id: string;
+  candidates: Array<{
+    id: string;
+    type: "skill" | "mcp" | "plugin" | "package";
+    title: string;
+    description: string;
+    relative_dir: string;
+    repository_url: string;
+    commit: string;
+    snapshot_id: string;
+    license: string;
+    preview_id: string | null;
+    manifest: Record<string, unknown> | null;
+  }>;
 }
 
 export interface IntegrationGroupSummary {

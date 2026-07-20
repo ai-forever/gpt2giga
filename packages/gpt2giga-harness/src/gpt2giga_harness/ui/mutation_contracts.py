@@ -455,6 +455,17 @@ MUTATION_ROUTE_CONTRACTS = (
         "integration_flow.preview",
         evidence=_INTEGRATION_FLOW,
     ),
+    *_many(
+        "POST",
+        (
+            "/api/integrations/git/inspect",
+            "/api/integrations/git/import-skill",
+        ),
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.AUTHENTICATED_LOCAL_STATE,
+        "integration_library.reviewed_import",
+        evidence=_LOCAL,
+    ),
     _route(
         "POST",
         "/api/integrations/groups/preview",

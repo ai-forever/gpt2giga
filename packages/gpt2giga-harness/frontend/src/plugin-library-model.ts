@@ -2,6 +2,7 @@ import type {
   IntegrationGroupSummary,
   IntegrationFlowInventory,
   IntegrationFlowSummary,
+  IntegrationSearchResponse,
 } from "./remaining-request-graph";
 import type { McpProjection } from "./surface-projections";
 
@@ -14,7 +15,7 @@ export interface PluginLibraryItem {
   packageId: string;
   title: string;
   version: string | null;
-  source: "catalog" | "configured_mcp" | "installed_package";
+  source: "catalog" | "configured_mcp" | "installed_package" | "root" | "remote";
   catalogId: string | null;
   catalogSourceType: string | null;
   targetIds: string[];
@@ -24,6 +25,12 @@ export interface PluginLibraryItem {
   flow: IntegrationFlowSummary | null;
   group: IntegrationGroupSummary | null;
   mcp: McpProjection | null;
+  description: string | null;
+  previewId: string | null;
+  artifactUrl: string | null;
+  detailUrl: string | null;
+  sourceId: string | null;
+  popularity: number | null;
 }
 
 export function buildPluginLibrary(
@@ -57,6 +64,14 @@ export function buildPluginLibrary(
       flow: latestFlow ?? null,
       group: latestGroup,
       mcp: null,
+      description: entry.discovery?.name ?? null,
+      previewId: entry.component_types.includes("skill") && entry.version !== "discovery"
+        ? `catalog:${entry.catalog_id}`
+        : null,
+      artifactUrl: entry.discovery?.artifact_url ?? null,
+      detailUrl: entry.discovery?.detail_url ?? null,
+      sourceId: entry.discovery ? entry.source_type : null,
+      popularity: entry.discovery?.popularity ?? null,
     };
   });
 
@@ -87,6 +102,12 @@ export function buildPluginLibrary(
       flow: latestFlow ?? null,
       group: latestGroups.get(packageId) ?? null,
       mcp: null,
+      description: null,
+      previewId: null,
+      artifactUrl: null,
+      detailUrl: null,
+      sourceId: null,
+      popularity: null,
     });
   }
 
@@ -107,6 +128,38 @@ export function buildPluginLibrary(
       flow: null,
       group: null,
       mcp,
+      description: null,
+      previewId: null,
+      artifactUrl: null,
+      detailUrl: null,
+      sourceId: null,
+      popularity: null,
+    });
+  }
+
+  for (const skill of inventory.root_skills ?? []) {
+    items.push({
+      id: skill.id,
+      category: "skills",
+      packageId: skill.name,
+      title: skill.name,
+      version: null,
+      source: "root",
+      catalogId: null,
+      catalogSourceType: "root",
+      targetIds: [...skill.target_ids].sort(),
+      connectedTargetIds: [...skill.target_ids].sort(),
+      connected: true,
+      status: "verified",
+      flow: null,
+      group: null,
+      mcp: null,
+      description: skill.description,
+      previewId: skill.preview_id,
+      artifactUrl: null,
+      detailUrl: null,
+      sourceId: skill.origin,
+      popularity: null,
     });
   }
 
@@ -116,17 +169,50 @@ export function buildPluginLibrary(
   });
 }
 
+export function buildRemotePluginLibrary(search: IntegrationSearchResponse | undefined): PluginLibraryItem[] {
+  if (!search) return [];
+  return search.items.map((item) => ({
+    id: item.id,
+    category: item.component === "skill" ? "skills" : "mcp",
+    packageId: item.upstream_id,
+    title: item.title,
+    version: null,
+    source: "remote",
+    catalogId: null,
+    catalogSourceType: item.source_id,
+    targetIds: item.component === "skill"
+      ? ["codex-skill", "claude-skill", "gemini-skill"]
+      : ["codex-mcp", "claude-mcp", "gemini-mcp", "harness-managed-mcp"],
+    connectedTargetIds: [],
+    connected: false,
+    status: "available",
+    flow: null,
+    group: null,
+    mcp: null,
+    description: item.upstream_audit,
+    previewId: null,
+    artifactUrl: item.artifact_url,
+    detailUrl: item.detail_url,
+    sourceId: item.source_id,
+    popularity: item.popularity,
+  }));
+}
+
 export function filterPluginLibrary(
   items: PluginLibraryItem[],
   category: PluginCategory,
   query: string,
   connectedOnly: boolean,
   sourceFilter: "all" | "built_in" | "external" = "all",
+  harnessFilter: "all" | "codex" | "claude" | "gemini" | "harness" = "all",
 ): PluginLibraryItem[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   return items.filter((item) => {
     if (category !== "all" && item.category !== category) return false;
     if (connectedOnly && !item.connected) return false;
+    if (harnessFilter !== "all" && !item.targetIds.some((target) => (
+      harnessFilter === "harness" ? target.startsWith("harness-") : target.startsWith(`${harnessFilter}-`)
+    ))) return false;
     if (sourceFilter === "built_in" && item.catalogSourceType !== "local_private") return false;
     if (sourceFilter === "external" && (
       item.category === "plugins"
@@ -134,7 +220,7 @@ export function filterPluginLibrary(
       || item.catalogSourceType === "local_private"
     )) return false;
     if (!normalizedQuery) return true;
-    return `${item.title} ${item.packageId} ${item.targetIds.join(" ")}`
+    return `${item.title} ${item.packageId} ${item.description ?? ""} ${item.targetIds.join(" ")}`
       .toLocaleLowerCase()
       .includes(normalizedQuery);
   });

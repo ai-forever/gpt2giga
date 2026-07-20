@@ -1,14 +1,28 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import stat
+from types import SimpleNamespace
 
 import pytest
 
+from gpt2giga_harness.codex_plugin_target import CODEX_PLUGIN_TARGET_ID
+from gpt2giga_harness.integration_catalog import CatalogSourceType
 from gpt2giga_harness.integration_flows import (
     IntegrationFlowConflictError,
     IntegrationFlowError,
     IntegrationFlowService,
+)
+from gpt2giga_harness.integration_packages import (
+    InstallationScope,
+    IntegrationCompatibility,
+    IntegrationComponent,
+    IntegrationComponentType,
+    IntegrationPackage,
+    IntegrationSourceType,
+    IntegrationTargetOverlay,
+    IntegrationUpdatePolicy,
 )
 from gpt2giga_harness.portable_skills import (
     CODEX_SKILL_TARGET_ID,
@@ -116,7 +130,7 @@ def test_catalog_skill_flow_previews_applies_verifies_and_rolls_back(tmp_path):
     assert "content_free" in state["flows"][0]
 
 
-def test_raw_mcp_flow_shows_risk_and_returns_explicit_native_handoff(tmp_path):
+def test_raw_mcp_flow_shows_risk_installs_and_rolls_back(tmp_path):
     service = _service(tmp_path)
     preview = service.preview(
         {
@@ -148,15 +162,49 @@ def test_raw_mcp_flow_shows_risk_and_returns_explicit_native_handoff(tmp_path):
             authority="test-operator",
         )
 
-    handoff = service.apply(
+    installed = service.apply(
         preview["flow"]["id"],
         plan_id=plan["plan_id"],
         authority="test-operator",
         native_consent_acknowledged=True,
     )
-    assert handoff["flow"]["status"] == "handoff_required"
-    assert handoff["flow"]["verification_status"] == "provider_owned"
-    assert handoff["handoff"]["mutation_performed"] is False
+    assert installed["flow"]["status"] == "verified"
+    assert installed["flow"]["verification_status"] == "native_verified"
+    assert installed["flow"]["rollback_available"] is True
+    assert service.rollback(installed["flow"]["id"])["flow"]["status"] == "rolled_back"
+
+
+def test_raw_mcp_flow_installs_into_managed_harness_inventory(tmp_path):
+    service = _service(tmp_path)
+    preview = service.preview(
+        {
+            "source": "raw_descriptor",
+            "package_id": "custom-mcp",
+            "target_id": "harness-managed-mcp",
+            "scope": "managed_home",
+            "configuration": {
+                "transport": "stdio",
+                "command": "custom-mcp",
+                "args": ["--stdio"],
+            },
+        }
+    )
+
+    assert preview["plan"]["target"]["execution_owner"] == (
+        "harness_managed_mcp_inventory"
+    )
+    installed = service.apply(
+        preview["flow"]["id"],
+        plan_id=preview["plan"]["plan_id"],
+        authority="test-operator",
+        native_consent_acknowledged=True,
+    )
+
+    assert installed["flow"]["status"] == "verified"
+    assert installed["flow"]["verification_status"] == "inventory_verified"
+    assert service.rollback(installed["flow"]["id"])["flow"]["status"] == (
+        "rolled_back"
+    )
 
 
 def test_flow_rejects_secret_values_stale_approval_and_records_failure(tmp_path):
@@ -205,10 +253,67 @@ def test_flow_rejects_secret_values_stale_approval_and_records_failure(tmp_path)
     assert failed.events[-1].stage == "failure"
 
 
+def test_git_plugin_flow_previews_applies_verifies_and_rolls_back(tmp_path):
+    plugin_driver = _FakePluginDriver()
+    service = IntegrationFlowService(
+        tmp_path,
+        skill_capability_provider=_supported_skill,
+        plugin_driver_provider=lambda _target, _root, _scope: plugin_driver,
+    )
+    package = _plugin_package()
+    entry = service.catalog.import_package(
+        package,
+        source_id="git-test",
+        source_type=CatalogSourceType.GIT,
+    )
+
+    preview = service.preview(
+        {
+            "source": "catalog",
+            "catalog_id": entry.catalog_id,
+            "target_id": CODEX_PLUGIN_TARGET_ID,
+            "scope": "managed_home",
+            "configuration": {"plugin_name": "review-tools"},
+        }
+    )
+
+    assert preview["plan"]["target"]["executable"] is True
+    assert preview["plan"]["target"]["execution_owner"] == (
+        "provider_native_target_driver"
+    )
+    assert preview["plan"]["configuration"]["diff"] == [
+        "native-command:codex-plugin-install"
+    ]
+    with pytest.raises(IntegrationFlowConflictError, match="native consent requires"):
+        service.apply(
+            preview["flow"]["id"],
+            plan_id=preview["plan"]["plan_id"],
+            authority="test-operator",
+        )
+
+    applied = service.apply(
+        preview["flow"]["id"],
+        plan_id=preview["plan"]["plan_id"],
+        authority="test-operator",
+        native_consent_acknowledged=True,
+    )
+
+    assert applied["flow"]["status"] == "verified"
+    assert applied["flow"]["verification_status"] == "native_verified"
+    assert plugin_driver.installed is True
+    assert service.rollback(applied["flow"]["id"])["flow"]["status"] == ("rolled_back")
+    assert plugin_driver.rolled_back is True
+
+
 def _service(tmp_path) -> IntegrationFlowService:
+    drivers = {
+        target: _FakeMCPDriver(target)
+        for target in ("codex-mcp", "claude-mcp", "gemini-mcp")
+    }
     return IntegrationFlowService(
         tmp_path,
         skill_capability_provider=_supported_skill,
+        mcp_driver_provider=drivers.__getitem__,
     )
 
 
@@ -222,4 +327,93 @@ def _supported_skill(target_id: str) -> SkillCapabilitySnapshot:
         supports_activation=True,
         discovery_method="documented_filesystem",
         activation_mode=SkillActivationMode.IMPLICIT_OR_EXPLICIT,
+    )
+
+
+class _FakeMCPDriver:
+    def __init__(self, target_id: str) -> None:
+        self.target_id = target_id
+
+    def preview_install(self, request):
+        digest = hashlib.sha256(
+            f"{self.target_id}:{request.package.id}:{request.root}".encode()
+        ).hexdigest()
+        return SimpleNamespace(
+            plan_id=f"plan_{digest}",
+            installation=SimpleNamespace(
+                mutations=(
+                    SimpleNamespace(
+                        current_sha256=None,
+                        relative_path=f"{self.target_id}.config",
+                    ),
+                )
+            ),
+        )
+
+    def install(self, _request, plan, _approval):
+        return SimpleNamespace(transaction_id=f"txn_{plan.plan_id[5:37]}")
+
+    def verify(self, transaction_id):
+        return SimpleNamespace(transaction_id=transaction_id, status="healthy")
+
+    def rollback(self, _transaction_id):
+        return None
+
+
+class _FakePluginDriver:
+    def __init__(self) -> None:
+        self.installed = False
+        self.rolled_back = False
+
+    def preview_install(self, request):
+        digest = hashlib.sha256(
+            f"{request.package.id}:{request.root}:{request.plugin_name}".encode()
+        ).hexdigest()
+        return SimpleNamespace(
+            plan_id=f"plan_{digest}",
+            command_ids=("codex-plugin-install",),
+            restart_required=True,
+        )
+
+    def install(self, _request, _plan, _approval):
+        self.installed = True
+        return SimpleNamespace()
+
+    def verify(self, _request):
+        return SimpleNamespace(status="healthy")
+
+    def rollback(self, _request):
+        self.rolled_back = True
+        return SimpleNamespace()
+
+
+def _plugin_package() -> IntegrationPackage:
+    return IntegrationPackage(
+        id="example.review-tools",
+        version="1.0.0",
+        publisher="example",
+        license="MIT",
+        source_type=IntegrationSourceType.GIT,
+        source="https://github.com/example/review-tools.git",
+        immutable_ref="b" * 40,
+        checksum="sha256:" + "c" * 64,
+        components=(
+            IntegrationComponent(
+                id="review-tools",
+                type=IntegrationComponentType.PLUGIN,
+                portable=False,
+            ),
+        ),
+        requirements=(),
+        overlays=(
+            IntegrationTargetOverlay(
+                target_id=CODEX_PLUGIN_TARGET_ID,
+                component_ids=("review-tools",),
+            ),
+        ),
+        compatibility=(IntegrationCompatibility(target_id=CODEX_PLUGIN_TARGET_ID),),
+        scopes=(InstallationScope.MANAGED_HOME,),
+        update_policy=IntegrationUpdatePolicy.PINNED,
+        verification_steps=("plugin-discovery",),
+        rollback_steps=("plugin-remove",),
     )

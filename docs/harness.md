@@ -889,6 +889,30 @@ popularity, curation, health, or presence is discovery evidence only: it never
 grants installation authority, enables network access, or replaces an exact
 artifact review.
 
+The **Skills**, **Plugins**, and **MCP** pages each expose their matching
+**Add** action. Search queries read NeuralDeep directly. To include
+`skills.sh`, run the metadata proxy and pass its fixed origin to the Harness UI:
+
+```bash
+export GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092
+giga ui
+```
+
+**Add Skill** accepts a public GitHub repository or `/tree/<ref>` URL, pins the
+resolved commit, lists bounded `SKILL.md` candidates, previews the selected
+instructions, normalizes portable frontmatter, and installs only after the
+exact preview is approved. **Add Plugin** uses the same immutable inspection
+but requires a reviewed `integration-package.json` for a compatible native
+Plugin/Extension target. **Add MCP** accepts an exact stdio or HTTP descriptor
+and can install it into Codex, Claude, Gemini, or the Harness-managed inventory.
+
+Existing shared Skills are also visible and filterable by Harness. By default,
+Harness scans `~/.agents/skills` as shared root Skills and the native Codex,
+Claude, and Gemini Skill homes. Set `GIGA_ROOT_SKILLS_DIRS` to an
+OS-path-separated list when the shared roots live elsewhere. Inventory reads
+metadata only; full `SKILL.md` content is loaded for the bounded preview after
+an item is selected.
+
 Harness preserves the last good catalog snapshot when a source is unavailable,
 rate-limited, requires renewed authentication, or returns invalid data. An
 external Skill becomes installable only after its bytes match a reviewed

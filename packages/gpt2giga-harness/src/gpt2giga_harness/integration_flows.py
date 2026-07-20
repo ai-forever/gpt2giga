@@ -13,42 +13,74 @@ from pathlib import Path
 import re
 import tempfile
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from gpt2giga_harness.builtin_skills import (
     BUILTIN_SKILL_SOURCE_ID,
-    build_builtin_skill_installation_request,
+    get_builtin_skill_bundle,
     import_builtin_skills,
 )
 from gpt2giga_harness.claude_mcp_target import (
     CLAUDE_MCP_TARGET_DESCRIPTOR,
     CLAUDE_MCP_TARGET_ID,
     ClaudeMCPRequest,
+    ClaudeMCPServerSpec,
+    ClaudeMCPTransport,
     ClaudeMCPTargetDriver,
 )
-from gpt2giga_harness.claude_plugin_target import CLAUDE_PLUGIN_TARGET_DESCRIPTOR
+from gpt2giga_harness.claude_plugin_target import (
+    CLAUDE_PLUGIN_TARGET_DESCRIPTOR,
+    CLAUDE_PLUGIN_TARGET_ID,
+    ClaudePluginApproval,
+    ClaudePluginRequest,
+    ClaudePluginSource,
+    ClaudePluginSourceKind,
+    ClaudePluginTargetDriver,
+)
 from gpt2giga_harness.codex_mcp_target import (
     CODEX_MCP_TARGET_DESCRIPTOR,
     CODEX_MCP_TARGET_ID,
     CodexMCPRequest,
+    CodexMCPServerSpec,
+    CodexMCPTransport,
     CodexMCPTargetDriver,
 )
 from gpt2giga_harness.external_mcp import (
     HARNESS_MANAGED_MCP_TARGET_ID,
     ExternalMCPDescriptor,
+    ExternalMCPToolPolicy,
     external_mcp_selection_from_dict,
     external_mcp_server_spec,
     normalize_external_mcp_candidate,
     project_external_mcp_target,
 )
-from gpt2giga_harness.codex_plugin_target import CODEX_PLUGIN_TARGET_DESCRIPTOR
+from gpt2giga_harness.external_skills import ExternalSkillStore, parse_external_skill
+from gpt2giga_harness.codex_plugin_target import (
+    CODEX_PLUGIN_TARGET_DESCRIPTOR,
+    CODEX_PLUGIN_TARGET_ID,
+    CodexPluginApproval,
+    CodexPluginRequest,
+    CodexPluginSource,
+    CodexPluginSourceKind,
+    CodexPluginTargetDriver,
+)
 from gpt2giga_harness.gemini_extension_target import (
     GEMINI_EXTENSION_TARGET_DESCRIPTOR,
+    GEMINI_EXTENSION_TARGET_ID,
+    GeminiExtensionApproval,
+    GeminiExtensionHandoff,
+    GeminiExtensionRequest,
+    GeminiExtensionSource,
+    GeminiExtensionSourceKind,
+    GeminiExtensionTargetDriver,
 )
 from gpt2giga_harness.gemini_mcp_target import (
     GEMINI_MCP_TARGET_DESCRIPTOR,
     GEMINI_MCP_TARGET_ID,
     GeminiMCPRequest,
+    GeminiMCPServerSpec,
+    GeminiMCPTransport,
     GeminiMCPTargetDriver,
 )
 from gpt2giga_harness.integration_catalog import (
@@ -84,12 +116,15 @@ from gpt2giga_harness.integration_packages import (
     integration_package_to_dict,
 )
 from gpt2giga_harness.managed_mcp_inventory import ManagedMCPInventoryStore
+from gpt2giga_harness.mcp import MCPTransport
 from gpt2giga_harness.portable_skills import (
     CLAUDE_SKILL_TARGET_ID,
     CODEX_SKILL_TARGET_ID,
     GEMINI_SKILL_TARGET_ID,
     SkillCapabilitySnapshot,
+    build_skill_installation_request,
     discover_generated_skill,
+    generate_skill_package,
     generated_skill_verifier,
     probe_skill_target,
 )
@@ -248,6 +283,12 @@ _SKILL_TARGETS = {
     ),
 }
 
+_PLUGIN_TARGET_IDS = {
+    CODEX_PLUGIN_TARGET_ID,
+    CLAUDE_PLUGIN_TARGET_ID,
+    GEMINI_EXTENSION_TARGET_ID,
+}
+
 HARNESS_PACKAGE_TARGET = ExtensionTargetDescriptor(
     id="harness-adapter-package",
     revision="1",
@@ -317,6 +358,8 @@ class IntegrationFlowService:
         skill_capability_provider: Callable[[str], SkillCapabilitySnapshot]
         | None = None,
         mcp_driver_provider: Callable[[str], Any] | None = None,
+        plugin_driver_provider: Callable[[str, Path, InstallationScope], Any]
+        | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self.data_dir = Path(data_dir).expanduser().resolve()
@@ -324,10 +367,14 @@ class IntegrationFlowService:
         self.path = self.root / "flows.json"
         self.lock_path = self.root / ".flows.json.lock"
         self.catalog = IntegrationCatalogStore(self.data_dir)
+        self._external_skill_store = ExternalSkillStore(
+            self.data_dir / "integrations" / "external-skills"
+        )
         self._skill_capability_provider = (
             skill_capability_provider or probe_skill_target
         )
         self._mcp_driver_provider = mcp_driver_provider or self._default_mcp_driver
+        self._plugin_driver_provider = plugin_driver_provider
         self._managed_mcp_inventory = ManagedMCPInventoryStore(self.data_dir)
         self._now = now or (lambda: datetime.now(timezone.utc))
 
@@ -468,21 +515,29 @@ class IntegrationFlowService:
                         "mutation_performed": False,
                     },
                 }
-            receipt_id, verification_status = (
-                self._apply_skill(
+            if resolved.target.id in _SKILL_TARGETS:
+                receipt_id, verification_status = self._apply_skill(
                     record.request,
                     resolved,
                     authority=authority,
                     allow_user_home=allow_user_home,
                 )
-                if resolved.target.id in _SKILL_TARGETS
-                else self._apply_mcp(
+            elif resolved.target.id in _MCP_TARGET_IDS:
+                receipt_id, verification_status = self._apply_mcp(
                     record.request,
                     resolved,
                     authority=authority,
                     allow_user_home=allow_user_home,
                 )
-            )
+            else:
+                receipt_id, verification_status = self._apply_plugin(
+                    record.request,
+                    resolved,
+                    authority=authority,
+                    allow_network=allow_network,
+                    allow_user_home=allow_user_home,
+                    native_consent_acknowledged=native_consent_acknowledged,
+                )
             verified = self._transition(
                 applying,
                 IntegrationFlowStatus.VERIFIED,
@@ -520,6 +575,18 @@ class IntegrationFlowService:
             elif resolved.target.id in _SKILL_TARGETS:
                 installer = self._skill_installer(record.request, resolved.root)
                 installer.rollback(record.receipt_id)
+            elif resolved.target.id in _PLUGIN_TARGET_IDS:
+                scope = InstallationScope(record.request["scope"])
+                native_request = self._plugin_request(
+                    record.request,
+                    resolved.package,
+                    resolved.target.id,
+                    resolved.root,
+                    scope,
+                )
+                self._plugin_driver(resolved.target.id, resolved.root, scope).rollback(
+                    native_request
+                )
             else:
                 raise IntegrationFlowConflictError(
                     "rollback remains owned by the selected native target"
@@ -561,11 +628,13 @@ class IntegrationFlowService:
         package = self._resolve_package(request, source, target, scope)
         _validate_target_compatibility(package, target, scope)
         if target.id in _SKILL_TARGETS:
-            entry = self._catalog_entry_for_package(package)
+            skill = self._portable_skill_for_package(package)
             capability = self._skill_capability_provider(target.id)
-            install_request, generated = build_builtin_skill_installation_request(
-                entry,
-                capability,
+            generated = generate_skill_package(skill, capability)
+            install_request = build_skill_installation_request(
+                package,
+                skill,
+                generated,
                 scope=scope,
                 root=root,
             )
@@ -627,6 +696,61 @@ class IntegrationFlowService:
                 configuration_diff=configuration_diff,
                 restart_required=restart_required,
             )
+        if (
+            target.id in _MCP_TARGET_IDS
+            and source is IntegrationFlowSource.RAW_DESCRIPTOR
+        ):
+            if target.id == HARNESS_MANAGED_MCP_TARGET_ID:
+                native = self._managed_mcp_inventory.preview(
+                    self._raw_harness_mcp_descriptor(request)
+                )
+                configuration_diff = (
+                    ("create:managed-mcp-inventory",) if native.changed else ()
+                )
+                native_plan_id = native.plan_id
+                execution_owner = "harness_managed_mcp_inventory"
+                restart_required = False
+            else:
+                driver = self._mcp_driver_provider(target.id)
+                native = driver.preview_install(
+                    self._raw_mcp_request(request, package, target.id, root, scope)
+                )
+                configuration_diff = tuple(
+                    f"{'update' if item.current_sha256 else 'create'}:{item.relative_path}"
+                    for item in native.installation.mutations
+                )
+                native_plan_id = native.plan_id
+                execution_owner = "provider_native_target_driver"
+                restart_required = True
+            return _ResolvedPreview(
+                package=package,
+                target=target,
+                root=root,
+                executable=True,
+                execution_owner=execution_owner,
+                native_plan_id=native_plan_id,
+                configuration_diff=configuration_diff,
+                restart_required=restart_required,
+            )
+        if target.id in _PLUGIN_TARGET_IDS:
+            driver = self._plugin_driver(target.id, root, scope)
+            native_request = self._plugin_request(
+                request, package, target.id, root, scope
+            )
+            native = driver.preview_install(native_request)
+            return _ResolvedPreview(
+                package=package,
+                target=target,
+                root=root,
+                executable=True,
+                execution_owner="provider_native_target_driver",
+                native_plan_id=native.plan_id,
+                configuration_diff=tuple(
+                    f"native-command:{item}"
+                    for item in getattr(native, "command_ids", ())
+                ),
+                restart_required=bool(getattr(native, "restart_required", True)),
+            )
         return _ResolvedPreview(
             package=package,
             target=target,
@@ -686,15 +810,26 @@ class IntegrationFlowService:
             (
                 item
                 for item in self.catalog.list()
-                if item.source_id == BUILTIN_SKILL_SOURCE_ID
-                and item.package_id == package.id
-                and item.version == package.version
+                if item.package_id == package.id and item.version == package.version
             ),
             None,
         )
         if entry is None or entry.package != package:
-            raise ValueError("portable skill execution requires a shipped catalog pin")
+            raise ValueError("portable skill execution requires an exact catalog pin")
         return entry
+
+    def _portable_skill_for_package(self, package: IntegrationPackage):
+        entry = self._catalog_entry_for_package(package)
+        if entry.source_id == BUILTIN_SKILL_SOURCE_ID:
+            return get_builtin_skill_bundle(package.id).skill
+        digest = package.checksum.removeprefix("sha256:")
+        try:
+            artifact = self._external_skill_store.resolve(digest)
+            return parse_external_skill(artifact)
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                "external Skill artifact is unavailable or drifted"
+            ) from exc
 
     def _apply_skill(
         self,
@@ -704,11 +839,13 @@ class IntegrationFlowService:
         authority: str,
         allow_user_home: bool,
     ) -> tuple[str, str]:
-        entry = self._catalog_entry_for_package(resolved.package)
+        skill = self._portable_skill_for_package(resolved.package)
         capability = self._skill_capability_provider(resolved.target.id)
-        install_request, generated = build_builtin_skill_installation_request(
-            entry,
-            capability,
+        generated = generate_skill_package(skill, capability)
+        install_request = build_skill_installation_request(
+            resolved.package,
+            skill,
+            generated,
             scope=InstallationScope(request["scope"]),
             root=resolved.root,
         )
@@ -739,6 +876,46 @@ class IntegrationFlowService:
         authority: str,
         allow_user_home: bool,
     ) -> tuple[str, str]:
+        if (
+            IntegrationFlowSource(request["source"])
+            is IntegrationFlowSource.RAW_DESCRIPTOR
+        ):
+            if resolved.target.id == HARNESS_MANAGED_MCP_TARGET_ID:
+                descriptor = self._raw_harness_mcp_descriptor(request)
+                plan = self._managed_mcp_inventory.preview(descriptor)
+                if plan.plan_id != resolved.native_plan_id:
+                    raise InstallationConflictError(
+                        "target preview changed before apply"
+                    )
+                result = self._managed_mcp_inventory.apply(
+                    descriptor, plan, authority=authority
+                )
+                verified = self._managed_mcp_inventory.verify(result.transaction_id)
+                return verified.transaction_id, "inventory_verified"
+            driver = self._mcp_driver_provider(resolved.target.id)
+            native_request = self._raw_mcp_request(
+                request,
+                resolved.package,
+                resolved.target.id,
+                resolved.root,
+                InstallationScope(request["scope"]),
+            )
+            plan = driver.preview_install(native_request)
+            if plan.plan_id != resolved.native_plan_id:
+                raise InstallationConflictError("target preview changed before apply")
+            result = driver.install(
+                native_request,
+                plan,
+                InstallationApproval(
+                    plan_id=plan.plan_id,
+                    authority=authority,
+                    allow_user_home=allow_user_home,
+                ),
+            )
+            health = driver.verify(result.transaction_id)
+            if getattr(health, "status", None) != "healthy":
+                raise IntegrationFlowError("native MCP discovery did not verify")
+            return result.transaction_id, "native_verified"
         descriptor = self._external_mcp_descriptor(request)
         if resolved.target.id == HARNESS_MANAGED_MCP_TARGET_ID:
             plan = self._managed_mcp_inventory.preview(descriptor)
@@ -782,6 +959,68 @@ class IntegrationFlowService:
             self._managed_mcp_inventory.rollback(record.receipt_id)
             return
         self._mcp_driver_provider(resolved.target.id).rollback(record.receipt_id)
+
+    def _apply_plugin(
+        self,
+        request: Mapping[str, Any],
+        resolved: _ResolvedPreview,
+        *,
+        authority: str,
+        allow_network: bool,
+        allow_user_home: bool,
+        native_consent_acknowledged: bool,
+    ) -> tuple[str, str]:
+        scope = InstallationScope(request["scope"])
+        driver = self._plugin_driver(resolved.target.id, resolved.root, scope)
+        native_request = self._plugin_request(
+            request, resolved.package, resolved.target.id, resolved.root, scope
+        )
+        plan = driver.preview_install(native_request)
+        if plan.plan_id != resolved.native_plan_id:
+            raise InstallationConflictError("target preview changed before apply")
+        if resolved.target.id == CODEX_PLUGIN_TARGET_ID:
+            driver.install(
+                native_request,
+                plan,
+                CodexPluginApproval(
+                    plan_id=plan.plan_id,
+                    authority=authority,
+                    native_consent_acknowledged=native_consent_acknowledged,
+                    allow_network=allow_network,
+                    allow_user_home=allow_user_home,
+                ),
+            )
+        elif resolved.target.id == CLAUDE_PLUGIN_TARGET_ID:
+            driver.install(
+                native_request,
+                plan,
+                ClaudePluginApproval(
+                    plan_id=plan.plan_id,
+                    authority=authority,
+                    native_consent_acknowledged=native_consent_acknowledged,
+                    allow_network=allow_network,
+                    allow_user_home=allow_user_home,
+                ),
+            )
+        else:
+            result = driver.install(
+                native_request,
+                plan,
+                GeminiExtensionApproval(
+                    plan_id=plan.plan_id,
+                    authority=authority,
+                    native_consent_acknowledged=native_consent_acknowledged,
+                    source_trust_acknowledged=native_consent_acknowledged,
+                    allow_network=allow_network,
+                    allow_user_home=allow_user_home,
+                ),
+            )
+            if isinstance(result, GeminiExtensionHandoff):
+                raise IntegrationFlowError("Gemini gallery requires provider handoff")
+        health = driver.verify(native_request)
+        if getattr(health, "status", None) != "healthy":
+            raise IntegrationFlowError("native Plugin discovery did not verify")
+        return str(resolved.native_plan_id), "native_verified"
 
     def _external_mcp_descriptor(
         self, request: Mapping[str, Any]
@@ -831,6 +1070,230 @@ class IntegrationFlowService:
                 package=package, scope=scope, root=root, server=spec
             )
         raise ValueError("external MCP native target is unsupported")
+
+    def _raw_mcp_request(
+        self,
+        request: Mapping[str, Any],
+        package: IntegrationPackage,
+        target_id: str,
+        root: Path,
+        scope: InstallationScope,
+    ) -> CodexMCPRequest | ClaudeMCPRequest | GeminiMCPRequest:
+        configuration = request.get("configuration")
+        if not isinstance(configuration, Mapping):
+            raise ValueError("raw MCP configuration is invalid")
+        transport = str(configuration.get("transport") or "")
+        command = str(configuration.get("command") or "") or None
+        url = str(configuration.get("url") or "") or None
+        args = tuple(str(item) for item in configuration.get("args", ()))
+        env_vars = tuple(str(item) for item in configuration.get("env_vars", ()))
+        name = package.id
+        if target_id == CODEX_MCP_TARGET_ID:
+            codex_transport = (
+                CodexMCPTransport.STDIO
+                if transport == "stdio"
+                else CodexMCPTransport.STREAMABLE_HTTP
+            )
+            return CodexMCPRequest(
+                package=package,
+                scope=scope,
+                root=root,
+                server=CodexMCPServerSpec(
+                    name=name,
+                    transport=codex_transport,
+                    command=command,
+                    args=args,
+                    env_vars=env_vars,
+                    url=url,
+                ),
+            )
+        if target_id == CLAUDE_MCP_TARGET_ID:
+            if transport == "sse":
+                raise ValueError("Claude target does not support legacy SSE MCP")
+            return ClaudeMCPRequest(
+                package=package,
+                scope=scope,
+                root=root,
+                server=ClaudeMCPServerSpec(
+                    name=name,
+                    transport=(
+                        ClaudeMCPTransport.STDIO
+                        if transport == "stdio"
+                        else ClaudeMCPTransport.HTTP
+                    ),
+                    command=command,
+                    args=args,
+                    env_vars=env_vars,
+                    url=url,
+                ),
+            )
+        if target_id == GEMINI_MCP_TARGET_ID:
+            return GeminiMCPRequest(
+                package=package,
+                scope=scope,
+                root=root,
+                server=GeminiMCPServerSpec(
+                    name=name,
+                    transport=(
+                        GeminiMCPTransport.STDIO
+                        if transport == "stdio"
+                        else GeminiMCPTransport.SSE
+                        if transport == "sse"
+                        else GeminiMCPTransport.HTTP
+                    ),
+                    command=command,
+                    args=args,
+                    env_vars=env_vars,
+                    url=url,
+                ),
+            )
+        raise ValueError("raw MCP native target is unsupported")
+
+    def _raw_harness_mcp_descriptor(
+        self, request: Mapping[str, Any]
+    ) -> ExternalMCPDescriptor:
+        configuration = request.get("configuration")
+        if not isinstance(configuration, Mapping):
+            raise ValueError("raw MCP configuration is invalid")
+        transport = str(configuration.get("transport") or "")
+        if transport == "sse":
+            raise ValueError("Harness inventory does not support legacy SSE MCP")
+        package_id = str(request.get("package_id") or "")
+        command = str(configuration.get("command")) if transport == "stdio" else None
+        args = tuple(str(item) for item in configuration.get("args", ()))
+        url = str(configuration.get("url")) if transport != "stdio" else None
+        content_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "id": package_id,
+                    "transport": transport,
+                    "command": command,
+                    "args": args,
+                    "url": url,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        network_origins = ()
+        if url is not None:
+            parsed = urlsplit(url)
+            network_origins = (urlunsplit((parsed.scheme, parsed.netloc, "", "", "")),)
+        return ExternalMCPDescriptor(
+            id=package_id,
+            official_name=package_id,
+            version="0.0.0",
+            title=package_id,
+            description="Operator-reviewed MCP server",
+            catalog_id=f"raw:{package_id}",
+            immutable_ref=f"sha256:{content_hash}",
+            content_hash=content_hash,
+            transport=(
+                MCPTransport.STDIO
+                if transport == "stdio"
+                else MCPTransport.STREAMABLE_HTTP
+            ),
+            command=command,
+            args=args,
+            url=url,
+            environment={},
+            headers={},
+            artifact=None,
+            network_origins=network_origins,
+            timeout_seconds=10,
+            tool_policy=ExternalMCPToolPolicy(),
+        )
+
+    def _plugin_request(
+        self,
+        request: Mapping[str, Any],
+        package: IntegrationPackage,
+        target_id: str,
+        root: Path,
+        scope: InstallationScope,
+    ) -> CodexPluginRequest | ClaudePluginRequest | GeminiExtensionRequest:
+        configuration = request.get("configuration")
+        if not isinstance(configuration, Mapping):
+            raise ValueError("Plugin configuration is invalid")
+        name = _plugin_name(package, configuration.get("plugin_name"))
+        sparse_value = configuration.get("sparse", ())
+        if not isinstance(sparse_value, (list, tuple)):
+            raise ValueError("Plugin sparse paths must be a list")
+        sparse = tuple(str(item) for item in sparse_value)
+        is_local = package.source_type is IntegrationSourceType.LOCAL
+        if target_id == CODEX_PLUGIN_TARGET_ID:
+            source = CodexPluginSource(
+                marketplace_name=name,
+                kind=(
+                    CodexPluginSourceKind.LOCAL
+                    if is_local
+                    else CodexPluginSourceKind.GIT
+                ),
+                location=package.source,
+                ref=None if is_local else package.immutable_ref,
+                sparse=() if is_local else sparse,
+            )
+            return CodexPluginRequest(package, scope, root, source, name)
+        if target_id == CLAUDE_PLUGIN_TARGET_ID:
+            source = ClaudePluginSource(
+                marketplace_name=name,
+                kind=(
+                    ClaudePluginSourceKind.LOCAL
+                    if is_local
+                    else ClaudePluginSourceKind.GIT
+                ),
+                location=package.source,
+                ref=None if is_local else package.immutable_ref,
+                sparse=() if is_local else sparse,
+            )
+            return ClaudePluginRequest(package, scope, root, source, name)
+        if target_id == GEMINI_EXTENSION_TARGET_ID:
+            source = GeminiExtensionSource(
+                kind=(
+                    GeminiExtensionSourceKind.LOCAL
+                    if is_local
+                    else GeminiExtensionSourceKind.GALLERY
+                    if package.source_type is IntegrationSourceType.PROVIDER_MARKETPLACE
+                    else GeminiExtensionSourceKind.GIT
+                ),
+                location=package.source,
+                ref=(
+                    package.immutable_ref
+                    if package.source_type is IntegrationSourceType.GIT
+                    else None
+                ),
+            )
+            return GeminiExtensionRequest(package, scope, root, source, name)
+        raise ValueError("Plugin native target is unsupported")
+
+    def _plugin_driver(
+        self, target_id: str, root: Path, scope: InstallationScope
+    ) -> Any:
+        if self._plugin_driver_provider is not None:
+            return self._plugin_driver_provider(target_id, root, scope)
+        managed_roots = (root,) if scope is InstallationScope.MANAGED_HOME else ()
+        project_roots = (root,) if scope is InstallationScope.PROJECT else ()
+        if target_id == CODEX_PLUGIN_TARGET_ID:
+            return CodexPluginTargetDriver(
+                self.data_dir,
+                managed_roots=managed_roots,
+                source_roots=project_roots,
+            )
+        if target_id == CLAUDE_PLUGIN_TARGET_ID:
+            return ClaudePluginTargetDriver(
+                self.data_dir,
+                managed_roots=managed_roots,
+                project_roots=project_roots,
+                source_roots=project_roots,
+            )
+        if target_id == GEMINI_EXTENSION_TARGET_ID:
+            return GeminiExtensionTargetDriver(
+                self.data_dir,
+                managed_roots=managed_roots,
+                project_roots=project_roots,
+                source_roots=project_roots,
+            )
+        raise ValueError("Plugin native target is unsupported")
 
     def _default_mcp_driver(self, target_id: str) -> Any:
         if target_id == CODEX_MCP_TARGET_ID:
@@ -1264,6 +1727,25 @@ def _validate_target_compatibility(
     assessment = assess_integration_package(package)
     if assessment.decision is IntegrationTrustDecision.BLOCKED:
         raise ValueError("package trust assessment is blocked")
+
+
+def _plugin_name(package: IntegrationPackage, configured: Any) -> str:
+    raw = str(configured or "")
+    if not raw:
+        component = next(
+            (
+                item
+                for item in package.components
+                if item.type
+                in {IntegrationComponentType.PLUGIN, IntegrationComponentType.EXTENSION}
+            ),
+            None,
+        )
+        raw = component.id if component is not None else package.id
+    normalized = re.sub(r"[^a-z0-9]+", "-", raw.casefold()).strip("-")
+    if not normalized:
+        raise ValueError("Plugin name is invalid")
+    return normalized[:64].rstrip("-")
 
 
 def _catalog_entry_to_dict(entry: CatalogEntry) -> dict[str, Any]:

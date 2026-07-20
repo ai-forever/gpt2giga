@@ -240,6 +240,13 @@ Binding to `0.0.0.0` is explicit and should be done only behind an HTTPS
 reverse proxy with its own access controls. The service never installs catalog
 entries and does not grant installation authority.
 
+Point Cockpit search at that fixed proxy origin when starting the UI:
+
+```sh
+export GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092
+giga ui
+```
+
 ### Federated Skills and MCP lifecycle
 
 Cockpit's **Plugins** area and `giga integration list --json` read the same
@@ -249,6 +256,16 @@ popularity, curation, and presence never authorize installation. The catalog
 keeps its last good state on source failure, and a NeuralDeep MCP card can only
 correlate with an exact official MCP Registry identity without replacing the
 official immutable version or integrity.
+
+The **Skills**, **Plugins**, and **MCP** pages expose **Add Skill**, **Add
+Plugin**, and **Add MCP** respectively. Git Skill import accepts public GitHub
+repository and `/tree/<ref>` URLs, pins the resolved commit, lets the operator
+choose one bounded `SKILL.md`, and shows its instructions before approval.
+Native Plugin/Extension import requires a reviewed `integration-package.json`;
+raw MCP import accepts an exact stdio or HTTP descriptor. Shared root Skills
+from `~/.agents/skills` and provider-specific Skill homes appear in inventory
+and can be filtered by Codex, Claude, Gemini, or Harness. Override shared roots
+with the OS-path-separated `GIGA_ROOT_SKILLS_DIRS` variable.
 
 An external Skill must match its reviewed immutable reference and content hash
 before bounded `SKILL.md` validation and target projection. A normalized MCP
@@ -271,8 +288,9 @@ Claude, and Gemini; MCP expands to those managed native homes plus the
 Harness-managed MCP inventory. Every child preview must pass before mutation.
 Cross-root apply is a durable compensating transaction: partial failure rolls
 back owned verified children or records exact recovery actions. Updates require
-a new immutable pin, preview, and approval. Federated Plugins, implicit network
-authorization, and default mutation of real user homes are not supported.
+a new immutable pin, preview, and approval. Federated discovery never implies
+Plugin installation or network authority; Plugin execution requires an exact
+reviewed manifest, and real user homes are never the default mutation scope.
 
 The equivalent API begins at `GET /api/integrations`, with single-target flows
 under `/api/integrations/flows` and grouped flows under

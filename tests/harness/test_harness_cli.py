@@ -345,7 +345,7 @@ def test_cli_doctor_json_passes_explicit_workspace(capsys, monkeypatch, tmp_path
     assert payload["ok"] is True
 
 
-def test_cli_integration_flow_matches_api_preview_status_and_handoff(
+def test_cli_integration_flow_matches_api_preview_status_and_native_apply(
     capsys,
     monkeypatch,
     tmp_path,
@@ -405,8 +405,9 @@ def test_cli_integration_flow_matches_api_preview_status_and_handoff(
         == 0
     )
     applied = json.loads(capsys.readouterr().out)
-    assert applied["flow"]["status"] == "handoff_required"
-    assert applied["handoff"]["mutation_performed"] is False
+    assert applied["flow"]["status"] == "verified"
+    assert applied["flow"]["verification_status"] == "native_verified"
+    assert applied["flow"]["rollback_available"] is True
 
 
 def test_cli_doctor_exports_support_report_and_fails_ci_threshold(
