@@ -207,6 +207,11 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert ".venv-artifact/bin/giga --help" in workflow
     assert ".venv-artifact/bin/gpt2giga-harness --help" in workflow
     assert "python -I -m gpt2giga_harness.base_install --json" in workflow
+    assert (
+        workflow.index("Install Harness base artifact")
+        < workflow.index("Audit Harness base installation")
+        < workflow.index("Install gateway artifact for combined smoke")
+    )
 
 
 def test_code_workflows_skip_documentation_only_changes():

@@ -7,6 +7,7 @@ import pytest
 
 from gpt2giga_harness import cli, proxy
 from gpt2giga_harness import entrypoint
+from gpt2giga_harness.codex_mcp_target import CodexMCPTargetDriver
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga_harness.harnesses.codex_cli import CodexCliHarness
@@ -351,6 +352,11 @@ def test_cli_integration_flow_matches_api_preview_status_and_native_apply(
     tmp_path,
 ):
     monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(
+        CodexMCPTargetDriver,
+        "_native_get",
+        lambda _self, _root, _scope, _server_name: True,
+    )
 
     assert cli.main(["integration", "list", "--json"]) == 0
     inventory = json.loads(capsys.readouterr().out)
