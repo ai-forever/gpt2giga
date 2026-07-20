@@ -109,7 +109,7 @@ jobs:
           cat dist/gpt2giga-SHA256SUMS
 
       - name: Attest gateway artifacts
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/gpt2giga/*
 
@@ -179,7 +179,7 @@ jobs:
           uv pip install --prerelease allow --python .venv-release-check/bin/python "gpt2giga==${GATEWAY_VERSION}"
 
       - name: Attest Harness artifacts
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/gpt2giga-harness/*
 
