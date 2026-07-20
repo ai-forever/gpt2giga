@@ -2,7 +2,7 @@
 
 :::warning[Альфа-превью — prerelease]
 
-Линейка `gpt2giga-harness` 0.2.x — alpha-preview для тестирования и обратной
+Линейка `gpt2giga-harness` 0.3.x — alpha-preview для тестирования и обратной
 связи. UI, CLI, YAML-файлы проекта, схема runtime-хранилища и процесс обновления
 могут меняться. Используйте Harness локально, для контролируемой работы под
 наблюдением, а не как критичный production-сервис или удалённую multi-user
@@ -104,8 +104,15 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-Текущий дистрибутив `gpt2giga-harness==0.2.0a1` требует
-`gpt2giga==0.2.4a1` и добавляет команды `giga` и `gpt2giga-harness`.
+Для Direct Chat и provider preset `gpt2giga` установите явный extra:
+
+```bash
+uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]'
+```
+
+Текущий дистрибутив `gpt2giga-harness==0.3.0a1` добавляет команды `giga` и
+`gpt2giga-harness`; его явный extra `gpt2giga` закрепляет
+`gpt2giga==0.2.4a1`.
 
 Для Direct Chat понадобятся credentials из [быстрого старта gpt2giga](quickstart.md).
 Codex, Claude Code и Gemini — опциональные интеграции: соответствующий CLI
@@ -116,20 +123,22 @@ CLI будет недоступен, но не сломает остальной
 
 #### Базовая установка и опциональные providers
 
-Базовый distribution содержит десять проверенных прямых runtime dependencies,
-включая совместимое требование к `gpt2giga`. В release CI оба wheel
-устанавливаются в чистые окружения Python 3.10 и 3.14, после чего versioned
-audit завершается ошибкой, если resolved environment превышает 64 distributions
-или содержит packages из следующих семейств опциональных интеграций:
+Provider-neutral базовый distribution содержит восемь проверенных прямых
+runtime dependencies. В release CI Harness wheel устанавливается в чистые
+окружения Python 3.10 и 3.14, после чего versioned audit завершается ошибкой,
+если resolved environment превышает 64 distributions или содержит packages из
+следующих семейств опциональных интеграций:
 
+- provider preset `gpt2giga`/GigaChat;
 - чтение и запись Office-документов;
 - удалённые messaging channels;
 - внешние client или agent UI frameworks;
 - sandbox и container providers.
 
-Такие возможности подключаются через отдельно установленный provider
-distribution или entry-point plugin Harness. Базовый пакет не устанавливает и
-не включает их неявно. Адаптеры Codex, Claude Code и Gemini остаются
+Такие возможности подключаются через явный extra `gpt2giga`, отдельно
+установленный provider distribution или entry-point plugin Harness. Базовый
+пакет не устанавливает и не включает их неявно. Адаптеры Codex, Claude Code и
+Gemini остаются
 встроенными, но их отдельно управляемые CLI executables обнаруживаются в
 `PATH`, а не устанавливаются как Python dependencies.
 
@@ -395,6 +404,71 @@ giga config unset executables.codex-cli
 
 Configured path должен быть абсолютным, имеет приоритет над `PATH` и проходит
 version/capability probe до запуска.
+
+### Профили providers и routes
+
+В Cockpit **Settings → Провайдер** и **Маршруты и модели** управляют
+backend-owned профилями OpenAI-, Anthropic- и Gemini-compatible endpoints.
+Provider задаёт dialect протокола, base URL, route prefix, владельца
+authentication, состояния enabled/offline и модели по назначениям. Новый run
+фиксирует выбранные provider и route в execution snapshot, поэтому последующее
+изменение Settings не переписывает сохранённые evidence и активную structured
+session.
+
+Credentials задаются ссылками, а не значениями формы. Settings и CLI принимают
+ссылку на environment variable или keychain и возвращают только её kind и name;
+значение секрета разрешается только на границе принадлежащего ему request или
+subprocess. Provider settings service отклоняет literal credentials, файлы с
+credentials и неограниченные filesystem paths.
+
+Например, зарегистрируйте OpenAI Responses-compatible endpoint, ключ которого
+остаётся в `OPENAI_API_KEY`:
+
+```bash
+giga provider add openai-production \
+  --name "OpenAI production" \
+  --protocol openai_compatible \
+  --dialect openai-responses-v1 \
+  --base-url https://api.openai.com \
+  --route-prefix /v1 \
+  --authentication secret_reference \
+  --secret-reference-kind environment \
+  --secret-reference-name OPENAI_API_KEY \
+  --coding-model <model-id> \
+  --json
+
+giga provider list --json
+giga provider show openai-production --json
+giga provider test openai-production --json
+giga provider discover openai-production --json
+```
+
+`test` и `discover` — явные ограниченные операции. Отсутствующий probe backend,
+ошибка authentication или несовместимый endpoint возвращаются как content-free
+health evidence и не приводят к молчаливому выбору другого provider. Для edit
+нужен текущий `revision` из `show` или Settings, поэтому старый browser/CLI
+request не перезапишет более новую конфигурацию:
+
+```bash
+giga provider edit openai-production \
+  --expected-revision <revision> \
+  --coding-model <new-model-id> \
+  --json
+```
+
+Legacy defaults proxy/API mode/model остаются читаемыми на время prerelease-
+перехода. Мигрируйте их только через forward-only flow с обязательным backup:
+
+```bash
+giga provider migrate-legacy --dry-run --json
+giga provider migrate-legacy \
+  --backup /safe/path/harness-before-provider-migration.zip \
+  --json
+```
+
+Перед публикацией provider registry и journal миграция повторно проверяет source
+и target state под lock. Reverse migration нет: для rollback остановите Harness
+и восстановите проверенный pre-upgrade archive.
 
 ### Конфигурация проекта
 
@@ -1237,8 +1311,9 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-Текущая metadata `gpt2giga-harness==0.2.0a1` требует
-`gpt2giga==0.2.4a1`. Старый import `gpt2giga.harness` больше не является
+Текущая metadata `gpt2giga-harness==0.3.0a1` сохраняет
+`gpt2giga==0.2.4a1` в явном optional extra `gpt2giga`. Старый import
+`gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
 перезаписывает `~/.gpt2giga/harness`, `.giga/` или vendor-owned CLI homes.
 

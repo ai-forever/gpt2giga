@@ -52,10 +52,9 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Текущая alpha-preview линия Unified Harness — `0.2.0a1`. Её всегда можно
-запустить [из source checkout](./docs/harness.md#quickstart). Если отдельный
-пакет уже доступен в вашем package index, он подтянет совместимую
-gateway-версию и добавит команды `giga` и `gpt2giga-harness`:
+Текущая alpha-preview линия Unified Harness — `0.3.0a1`. Её всегда можно
+запустить [из source checkout](./docs/harness.md#quickstart). Опубликованный
+provider-neutral пакет добавляет команды `giga` и `gpt2giga-harness`:
 
 ```sh
 uv tool install --prerelease allow gpt2giga-harness
@@ -63,6 +62,9 @@ giga doctor
 giga --version
 giga ui
 ```
+
+Для Direct Chat и provider preset локального gateway установите явный extra
+`gpt2giga-harness[gpt2giga]`; он закрепляет `gpt2giga==0.2.4a1`.
 
 Python namespace Harness — `gpt2giga_harness`; прежний
 `gpt2giga.harness` больше не поставляется. Подробности обновления со старого

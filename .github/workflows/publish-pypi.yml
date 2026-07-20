@@ -43,9 +43,12 @@ jobs:
           gateway_version = gateway["version"]
           harness_version = harness["version"]
           gateway_requirement = f"gpt2giga=={gateway_version}"
-          if gateway_requirement not in harness["dependencies"]:
+          gateway_extra = harness.get("optional-dependencies", {}).get(
+              "gpt2giga", []
+          )
+          if gateway_requirement not in gateway_extra:
               raise SystemExit(
-                  "Harness must pin the current gateway release: "
+                  "Harness gpt2giga extra must pin the current gateway release: "
                   f"missing {gateway_requirement}"
               )
 

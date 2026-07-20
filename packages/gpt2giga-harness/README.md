@@ -5,15 +5,30 @@ distribution provides the `giga` and `gpt2giga-harness` commands, the
 `gpt2giga_harness` Python namespace, a durable local worker, and the packaged
 Project Cockpit web UI.
 
-> **Alpha preview:** the `0.2.x` storage, API, adapter, and automation contracts
+> **Alpha preview:** the `0.3.x` storage, API, adapter, and automation contracts
 > are stabilizing but may still change between prereleases. Use supervised local
 > workflows first. The package metadata in the current checkout is the source of
 > truth for the supported gateway requirement.
 
 ## Install the current preview
 
-Until the standalone Harness release is available in your package index, run
-it from a source checkout:
+Install the published prerelease from your package index:
+
+```sh
+uv tool install --prerelease allow gpt2giga-harness
+giga doctor
+giga --version
+giga ui
+```
+
+For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
+
+```sh
+uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]'
+```
+
+For development or when the prerelease is not yet mirrored by your package
+index, run it from a source checkout:
 
 ```sh
 git clone https://github.com/ai-forever/gpt2giga.git
@@ -27,27 +42,18 @@ giga ui
 Keep that environment active when you `cd` to the project you want to manage.
 On Windows PowerShell, activate `.venv\Scripts\Activate.ps1` instead.
 
-If the standalone package is available in your package index, install it with:
+The current `gpt2giga-harness==0.3.0a1` metadata keeps
+`gpt2giga==0.2.4a1` in the `gpt2giga` optional extra. Installing only
+`gpt2giga` never adds Harness commands or the `gpt2giga_harness` namespace.
 
-```sh
-uv tool install --prerelease allow gpt2giga-harness
-giga doctor
-giga --version
-giga ui
-```
-
-The current `gpt2giga-harness==0.2.0a1` metadata requires
-`gpt2giga==0.2.4a1`. Installing only `gpt2giga` never adds Harness commands or
-the `gpt2giga_harness` namespace.
-
-The base Harness install is intentionally limited to ten reviewed direct
-runtime distributions, including the compatible gateway dependency. A clean
-installed-artifact audit fails if the resolved environment grows beyond 64
-distributions or pulls in Office document libraries, remote-channel SDKs,
-external client frameworks, or sandbox-provider SDKs. Those capabilities must
-arrive as separately installed providers or Harness plugins; they are not
-silently enabled by the base package. Release CI runs the same audit on clean
-Python 3.10 and 3.14 environments:
+The provider-neutral base Harness install is intentionally limited to eight
+reviewed direct runtime distributions. A clean installed-artifact audit fails
+if the resolved environment grows beyond 64 distributions or pulls in the
+`gpt2giga`/GigaChat provider preset, Office document libraries, remote-channel
+SDKs, external client frameworks, or sandbox-provider SDKs. Those capabilities
+must arrive through an explicit extra, separately installed provider, or
+Harness plugin; they are not silently enabled by the base package. Release CI
+runs the same audit on clean Python 3.10 and 3.14 environments:
 
 ```sh
 python -I -m gpt2giga_harness.base_install --json
@@ -149,6 +155,46 @@ giga session list
 giga native list
 giga worker status
 ```
+
+## Provider-neutral routes
+
+Cockpit Settings and `giga provider` manage reference-only profiles for
+OpenAI-, Anthropic-, and Gemini-compatible endpoints. A profile owns its
+protocol dialect, base URL, route prefix, authentication reference, enabled or
+offline state, and model defaults for coding, titles, evaluation, and fallback.
+Credential values are never accepted by the settings API or returned to the
+browser; they are resolved only at the owning request/subprocess boundary.
+
+```sh
+giga provider list --json
+giga provider add openai-production \
+  --name "OpenAI production" \
+  --protocol openai_compatible \
+  --dialect openai-responses-v1 \
+  --base-url https://api.openai.com \
+  --route-prefix /v1 \
+  --authentication secret_reference \
+  --secret-reference-kind environment \
+  --secret-reference-name OPENAI_API_KEY \
+  --coding-model <model-id> \
+  --json
+giga provider show openai-production --json
+```
+
+Use `giga provider test` or `discover` for an explicit bounded check; failures
+remain content-free and never trigger a silent provider fallback. Migrate old
+proxy/API-mode/model defaults only after previewing the forward-only plan and
+choosing a pre-upgrade backup outside the Harness data directory:
+
+```sh
+giga provider migrate-legacy --dry-run --json
+giga provider migrate-legacy \
+  --backup /safe/path/harness-before-provider-migration.zip \
+  --json
+```
+
+Rollback means stopping Harness and restoring that verified archive; reverse
+migration is intentionally unsupported.
 
 ## Built-in adapters
 

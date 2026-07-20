@@ -5,6 +5,24 @@ All notable changes to gpt2giga-harness are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0a1] - 2026-07-20
+
+### Added
+- **Provider-neutral providers and routes**: added user profiles for OpenAI-, Anthropic-, and Gemini-compatible APIs, per-route model defaults, reference-only authentication, bounded health/model discovery, and an optional `gpt2giga` preset instead of a mandatory Harness-to-gateway coupling.
+- **Safe provider migration**: legacy defaults can be converted only after a deterministic dry run and a verified pre-upgrade backup; migration revalidates source state under a lock, retains a journal, and permits rollback only by restoring the original archive.
+- **Skills, Plugins, and MCP library**: added an offline-first catalog, portable Skills, a first-party starter pack, Codex/Claude/Gemini MCP targets, Codex/Claude Plugins, Gemini extensions, and a preview SDK for external adapter/integration packages.
+- **Federated integration discovery**: metadata from `skills.sh` and NeuralDeep can be imported as an immutable Skill or exact MCP plan; catalog presence, popularity, and correlation never grant install authority or replace the official source pin/integrity.
+- **Target-scoped installation lifecycle**: single-target and all-Harness flows bind preview and approval to exact package/artifact hashes, scope, permissions, and target ownership, then provide verification, update, compensation, recovery, and rollback with safe `managed_home` scope by default.
+- **Generated documents in Cockpit**: saved files can be downloaded through a bounded SDK endpoint, while self-contained HTML with scripts can open in a sandboxed preview without forms, external-network, or same-origin authority.
+
+### Changed
+- **Integrations as a Plugin Library**: Cockpit unifies built-in and external Skills/MCP with separate source filters, target-aware status, and explicit Add/preview/apply actions; Settings manages providers, routes, and models through backend-authoritative read-back.
+- **Provider-neutral base package**: base `gpt2giga-harness` no longer installs the gateway and GigaChat SDK implicitly; integration with the current gateway remains the exact optional extra `gpt2giga==0.2.4a1`.
+
+### Fixed
+- **Workbench and messages**: fixed generated-file downloads, full-response Copy/Edit actions, document scrolling, the resizable composer, and desktop/mobile shell layout.
+- **Plugin lifecycle**: connection state is reset after disconnect/reload, and large library loading uses bounded projections without redundant repeated work.
+
 ## [0.2.0a1] - 2026-07-18
 
 ### Added
@@ -121,6 +139,7 @@ considered stable.
 
 ---
 
+[0.3.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.2.0a1...gpt2giga-harness-v0.3.0a1
 [0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.1.0b1...gpt2giga-harness-v0.2.0a1
 [0.1.0b1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.1.0b1
 [0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3

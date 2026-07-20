@@ -1140,7 +1140,7 @@ provides-extras = ["postgres", "opensearch", "phoenix"]
 
 [[package]]
 name = "gpt2giga-harness"
-version = "0.2.0a1"
+version = "0.3.0a1"
 source = { editable = "packages/gpt2giga-harness" }
 dependencies = [
     { name = "anyio" },
