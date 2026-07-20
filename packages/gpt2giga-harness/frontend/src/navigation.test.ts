@@ -69,6 +69,15 @@ describe("Cockpit V2 route contract", () => {
     expect(plugins).not.toContain("beforeunload");
   });
 
+  it("resets plugin connection state when the selected item changes", () => {
+    const plugins = readFileSync(
+      fileURLToPath(new URL("./surfaces/integrations.tsx", import.meta.url)),
+      "utf8",
+    );
+
+    expect(plugins).toContain("key={selectedItem.id}");
+  });
+
   it("keeps workspace utilities in the rail without a static connection banner", () => {
     const shellSource = readFileSync(
       fileURLToPath(new URL("./AppShell.tsx", import.meta.url)),

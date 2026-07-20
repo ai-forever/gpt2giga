@@ -135,6 +135,7 @@ export function IntegrationsSurface() {
               category={category}
               inventory={integrationQuery.data}
               item={selectedItem}
+              key={selectedItem.id}
             />
           ) : (
             <div className="plugin-detail-empty">
