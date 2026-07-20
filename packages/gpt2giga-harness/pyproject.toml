@@ -13,6 +13,7 @@ dependencies = [
     "pyyaml>=6.0,<7",
     "python-dateutil>=2.9.0,<3",
     "starlette>=1.1,<2",
+    "textual>=8.2.8,<9",
     "tomli>=2.0,<3; python_version < '3.11'",
     "uvicorn>=0.41.0,<1",
 ]
@@ -50,10 +51,6 @@ gpt2giga = [
 claude-sdk = [
     "claude-agent-sdk>=0.2.122,<0.3",
 ]
-tui = [
-    "textual>=8.2.8,<9",
-]
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

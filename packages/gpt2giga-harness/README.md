@@ -18,6 +18,7 @@ Install the published prerelease from your package index:
 uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 giga --version
+giga tui
 giga ui
 ```
 
@@ -27,11 +28,10 @@ For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]'
 ```
 
-For the optional terminal workbench, install the separate TUI extra and start
-it from the project you want to manage:
+The standard install includes the terminal workbench. Start it from the project
+you want to manage:
 
 ```sh
-uv tool install --prerelease allow 'gpt2giga-harness[tui]'
 giga tui
 ```
 
@@ -43,6 +43,15 @@ http://127.0.0.1:8091` only when an existing Harness UI/worker already owns the
 runtime. Attach mode uses the same cookie/bootstrap-authenticated REST contracts
 as Cockpit and never falls back silently to in-process mode. English and Russian
 presentation catalogs are available through `--locale en|ru`.
+
+The canonical terminal-dispatch contract reserves bare `giga`, `chat`,
+`run --agent`, and human session workflows for this TUI. The cutover remains
+deferred until the TUI owns the corresponding N5 interaction surfaces. `giga
+tui` is already explicit. `--non-interactive`, `--json`, `--dry-run`, pipes,
+redirected streams, and CI select the non-interactive command API and never
+initialize Textual or emit terminal control sequences. Help/version and admin
+commands also remain non-interactive. `giga open ...` is an explicit external
+handoff; `TERM=dumb` and unsupported terminals fail closed for a requested TUI.
 
 For development or when the prerelease is not yet mirrored by your package
 index, run it from a source checkout:
@@ -63,7 +72,7 @@ The current `gpt2giga-harness==0.3.0a1` metadata keeps
 `gpt2giga==0.2.4a1` in the `gpt2giga` optional extra. Installing only
 `gpt2giga` never adds Harness commands or the `gpt2giga_harness` namespace.
 
-The provider-neutral base Harness install is intentionally limited to eight
+The provider-neutral base Harness install is intentionally limited to nine
 reviewed direct runtime distributions. A clean installed-artifact audit fails
 if the resolved environment grows beyond 64 distributions or pulls in the
 `gpt2giga`/GigaChat provider preset, Office document libraries, remote-channel

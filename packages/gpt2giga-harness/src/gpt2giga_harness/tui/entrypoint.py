@@ -1,4 +1,4 @@
-"""Lazy CLI entry point for the optional Textual client."""
+"""Low-overhead CLI entry point for the built-in Textual client."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the standalone TUI argument parser without importing Textual."""
     parser = argparse.ArgumentParser(
         prog="giga tui",
-        description="Open the optional provider-neutral terminal workbench.",
+        description="Open the built-in provider-neutral terminal workbench.",
     )
     parser.add_argument("--workspace", default=None)
     parser.add_argument("--session", dest="session_id", default=None)
@@ -36,15 +36,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the optional TUI or report the exact missing-extra remediation."""
+    """Run the built-in TUI or report an incomplete installation."""
     args = build_parser().parse_args(argv)
     try:
         app_module = importlib.import_module("gpt2giga_harness.tui.app")
     except ModuleNotFoundError as exc:
         if exc.name == "textual":
             print(
-                "The optional TUI is not installed. Install "
-                "'gpt2giga-harness[tui]' and retry.",
+                "The standard Harness installation is incomplete: Textual is "
+                "missing. Reinstall 'gpt2giga-harness' and retry.",
                 file=sys.stderr,
             )
             return 2

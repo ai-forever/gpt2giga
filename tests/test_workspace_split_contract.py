@@ -189,7 +189,7 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert "package: [gateway, harness]" in workflow
     assert "- '!packages/**/*.md'" in workflow
     assert 'python-version: ["3.10", "3.13", "3.14"]' in workflow
-    assert 'python-version: ["3.10", "3.14"]' in workflow
+    assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in workflow
     assert "uv build --package gpt2giga --wheel --sdist --no-sources" in workflow
     assert (
         "uv build --package gpt2giga-harness --wheel --sdist --no-sources" in workflow
@@ -205,6 +205,7 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert harness_version not in workflow
     assert ".venv-artifact/bin/gpt2giga --help" in workflow
     assert ".venv-artifact/bin/giga --help" in workflow
+    assert ".venv-artifact/bin/giga tui --help" in workflow
     assert ".venv-artifact/bin/gpt2giga-harness --help" in workflow
     assert "python -I -m gpt2giga_harness.base_install --json" in workflow
     assert (

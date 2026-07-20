@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+import io
+import os
+
+import pytest
+
+from gpt2giga_harness.terminal_dispatch import (
+    ConsoleSurface,
+    DispatchReadiness,
+    TerminalContext,
+    plan_terminal_dispatch,
+)
+
+
+PTY = TerminalContext(
+    stdin_is_tty=True,
+    stdout_is_tty=True,
+    stderr_is_tty=True,
+    term="xterm-256color",
+)
+PIPE = TerminalContext(
+    stdin_is_tty=False,
+    stdout_is_tty=False,
+    stderr_is_tty=True,
+    term="xterm-256color",
+)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        (),
+        ("tui",),
+        ("chat", "inspect"),
+        ("run", "--agent", "codex", "inspect"),
+        ("session", "list"),
+        ("session", "turn", "sess_1", "--prompt", "inspect"),
+    ),
+)
+def test_interactive_human_paths_target_the_canonical_tui(argv):
+    plan = plan_terminal_dispatch(argv, context=PTY)
+
+    assert plan.surface is ConsoleSurface.TUI_HUMAN_WORKFLOW
+    assert plan.readiness is DispatchReadiness.READY
+    assert plan.initialize_textual is True
+    assert plan.terminal_control_allowed is True
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ("doctor",),
+        ("config", "path"),
+        ("run", "provenance", "run_1"),
+        ("run", "--agent", "codex", "--json", "inspect"),
+        ("chat", "--dry-run", "inspect"),
+        ("session", "list", "--non-interactive"),
+        ("tui", "--help"),
+        ("--help",),
+        ("--version",),
+    ),
+)
+def test_machine_and_admin_paths_never_initialize_textual_or_allow_ansi(argv):
+    plan = plan_terminal_dispatch(argv, context=PTY)
+
+    assert plan.surface is ConsoleSurface.NON_INTERACTIVE_AUTOMATION
+    assert plan.readiness is DispatchReadiness.READY
+    assert plan.initialize_textual is False
+    assert plan.terminal_control_allowed is False
+
+
+@pytest.mark.parametrize(
+    "context",
+    (
+        PIPE,
+        TerminalContext(True, True, True, "xterm-256color", ci=True),
+    ),
+)
+def test_pipe_and_ci_make_implicit_human_paths_non_interactive(context):
+    plan = plan_terminal_dispatch(
+        ("run", "--agent", "gemini", "inspect"),
+        context=context,
+    )
+
+    assert plan.surface is ConsoleSurface.NON_INTERACTIVE_AUTOMATION
+    assert plan.initialize_textual is False
+    assert plan.terminal_control_allowed is False
+
+
+@pytest.mark.parametrize(
+    "context",
+    (
+        PIPE,
+        TerminalContext(True, True, True, "dumb"),
+        TerminalContext(True, True, True, "xterm-256color", terminal_supported=False),
+    ),
+)
+def test_explicit_tui_fails_closed_in_unsupported_environments(context):
+    plan = plan_terminal_dispatch(("tui",), context=context)
+
+    assert plan.surface is ConsoleSurface.TUI_HUMAN_WORKFLOW
+    assert plan.readiness is DispatchReadiness.BLOCKED
+    assert plan.initialize_textual is False
+    assert plan.terminal_control_allowed is False
+    assert plan.remediation
+
+
+def test_term_dumb_requires_an_explicit_automation_escape_for_human_paths():
+    context = TerminalContext(True, True, True, "dumb")
+
+    blocked = plan_terminal_dispatch(("chat", "inspect"), context=context)
+    escaped = plan_terminal_dispatch(
+        ("chat", "--non-interactive", "inspect"), context=context
+    )
+
+    assert blocked.readiness is DispatchReadiness.BLOCKED
+    assert blocked.surface is ConsoleSurface.TUI_HUMAN_WORKFLOW
+    assert escaped.readiness is DispatchReadiness.READY
+    assert escaped.surface is ConsoleSurface.NON_INTERACTIVE_AUTOMATION
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ("open", "session", "sess_1"),
+        ("open", "run", "run_1"),
+        ("open", "file", "README.md"),
+    ),
+)
+def test_open_commands_are_explicit_external_handoffs(argv):
+    plan = plan_terminal_dispatch(argv, context=PTY)
+
+    assert plan.surface is ConsoleSurface.EXTERNAL_HANDOFF
+    assert plan.readiness is DispatchReadiness.READY
+    assert plan.initialize_textual is False
+    assert plan.terminal_control_allowed is False
+
+
+def test_no_color_preserves_tui_ownership_without_color_output():
+    plan = plan_terminal_dispatch(("tui", "--no-color"), context=PTY)
+
+    assert plan.surface is ConsoleSurface.TUI_HUMAN_WORKFLOW
+    assert plan.initialize_textual is True
+    assert plan.color_allowed is False
+
+
+def test_terminal_context_captures_real_pty_and_non_pty_streams():
+    master_fd, slave_fd = os.openpty()
+    try:
+        with (
+            os.fdopen(os.dup(slave_fd), "rb") as stdin,
+            os.fdopen(os.dup(slave_fd), "wb") as stdout,
+            os.fdopen(os.dup(slave_fd), "wb") as stderr,
+        ):
+            pty_context = TerminalContext.capture(
+                stdin=stdin,
+                stdout=stdout,
+                stderr=stderr,
+                environ={"TERM": "xterm-256color"},
+            )
+        pipe_context = TerminalContext.capture(
+            stdin=io.StringIO(),
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+            environ={"TERM": "xterm-256color", "CI": "true"},
+        )
+    finally:
+        os.close(master_fd)
+        os.close(slave_fd)
+
+    assert pty_context.fully_interactive is True
+    assert pty_context.tui_supported is True
+    assert pipe_context.fully_interactive is False
+    assert pipe_context.ci is True
+    assert pipe_context.tui_supported is False

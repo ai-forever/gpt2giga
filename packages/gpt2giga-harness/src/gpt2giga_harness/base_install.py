@@ -22,6 +22,7 @@ BASE_DIRECT_DISTRIBUTIONS = frozenset(
         "python-dateutil",
         "pyyaml",
         "starlette",
+        "textual",
         "tomli",
         "uvicorn",
     }

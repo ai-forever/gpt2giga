@@ -235,6 +235,13 @@ assert any(
     and "extra ==" in requirement
     for requirement in requirements
 )
+assert any(
+    requirement.startswith("textual")
+    and ">=8.2.8" in requirement
+    and "extra ==" not in requirement
+    for requirement in requirements
+)
+assert "tui" not in harness_distribution.metadata.get_all("Provides-Extra", [])
 scripts = {
     entry.name: entry.value
     for entry in harness_distribution.entry_points
@@ -562,7 +569,6 @@ def test_optional_and_development_dependencies_stay_with_their_owner():
             f"gpt2giga=={GATEWAY_VERSION}",
             "gigachat>=0.2.2a1,<0.3.0",
         ],
-        "tui": ["textual>=8.2.8,<9"],
     }
     assert _declared_distribution_names(harness_metadata) == set(
         BASE_DIRECT_DISTRIBUTIONS

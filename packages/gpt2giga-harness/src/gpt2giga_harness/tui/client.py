@@ -1,4 +1,4 @@
-"""Typed application clients used by the optional Textual presentation."""
+"""Typed application clients used by the built-in Textual presentation."""
 
 from __future__ import annotations
 

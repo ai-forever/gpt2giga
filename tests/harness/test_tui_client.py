@@ -175,7 +175,7 @@ def test_tui_catalogs_have_exact_key_parity_and_english_fallback(monkeypatch):
     assert resolve_locale() == "en"
 
 
-def test_tui_missing_extra_reports_remediation(monkeypatch, capsys):
+def test_tui_missing_standard_dependency_reports_reinstall(monkeypatch, capsys):
     from gpt2giga_harness.tui import entrypoint as tui_entrypoint
 
     def missing_textual(name):
@@ -185,7 +185,9 @@ def test_tui_missing_extra_reports_remediation(monkeypatch, capsys):
     monkeypatch.setattr(importlib, "import_module", missing_textual)
 
     assert tui_entrypoint.main([]) == 2
-    assert "gpt2giga-harness[tui]" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "standard Harness installation is incomplete" in error
+    assert "gpt2giga-harness[tui]" not in error
 
 
 def test_tui_help_does_not_import_textual_fastapi_or_uvicorn():
@@ -218,10 +220,35 @@ def test_console_entrypoint_dispatches_tui_without_full_cli(monkeypatch):
     assert "gpt2giga_harness.cli" not in sys.modules
 
 
-def test_main_cli_help_advertises_optional_tui():
+def test_main_cli_help_advertises_built_in_tui():
     from gpt2giga_harness import cli
 
-    assert "tui" in cli.build_parser().format_help()
+    help_text = cli.build_parser().format_help()
+    assert "built-in provider-neutral terminal workbench" in help_text
+    assert "optional provider-neutral terminal workbench" not in help_text
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        (
+            "--non-interactive",
+            "session",
+            "approve",
+            "approval_1",
+            "--decision",
+            "allow_once",
+        ),
+        ("--non-interactive", "chat", "inspect"),
+        ("chat", "--non-interactive", "inspect"),
+        ("run", "--agent", "codex", "--non-interactive", "inspect"),
+        ("session", "list", "--non-interactive"),
+    ),
+)
+def test_cli_accepts_the_explicit_non_interactive_escape(arguments):
+    from gpt2giga_harness import cli
+
+    assert cli.build_parser().parse_args(arguments).non_interactive is True
 
 
 def test_attach_error_is_content_free():

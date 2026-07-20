@@ -287,8 +287,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Start a local gpt2giga sidecar if the proxy is down",
     )
+    common.add_argument(
+        "--non-interactive",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Keep this invocation on the automation/admin command surface",
+    )
 
     parser = argparse.ArgumentParser(prog="giga")
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Keep this invocation on the automation/admin command surface",
+    )
     parser.add_argument(
         "--version",
         action="version",
@@ -516,7 +527,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     tui = subparsers.add_parser(
         "tui",
-        help="Open the optional provider-neutral terminal workbench",
+        help="Open the built-in provider-neutral terminal workbench",
     )
     tui.add_argument("--workspace", default=None)
     tui.add_argument("--session", dest="session_id", default=None)
@@ -2770,7 +2781,7 @@ def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
 
 
 def _handle_tui(args: argparse.Namespace, config: HarnessConfig) -> int:
-    """Delegate direct module callers to the same lazy optional TUI entry point."""
+    """Delegate direct module callers to the same low-overhead TUI entry point."""
     del config
     from gpt2giga_harness.tui.entrypoint import main as tui_main
 
