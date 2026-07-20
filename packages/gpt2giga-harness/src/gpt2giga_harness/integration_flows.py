@@ -1039,6 +1039,7 @@ def _validate_target_compatibility(
 
 def _catalog_entry_to_dict(entry: CatalogEntry) -> dict[str, Any]:
     package = entry.package
+    federated = entry.federated
     return {
         "catalog_id": entry.catalog_id,
         "source_id": entry.source_id,
@@ -1047,15 +1048,39 @@ def _catalog_entry_to_dict(entry: CatalogEntry) -> dict[str, Any]:
         "version": entry.version,
         "immutable_ref": entry.immutable_ref,
         "content_hash": entry.content_hash,
+        "status": entry.status.value,
+        "pinned": entry.pinned,
+        "source_present": entry.source_present,
         "install_authorized": False,
         "trust_decision": entry.trust_decision.value,
         "component_types": (
-            sorted({item.type.value for item in package.components}) if package else []
+            sorted({item.type.value for item in package.components})
+            if package
+            else ([federated.component] if federated is not None else [])
         ),
         "target_ids": (
             sorted(item.target_id for item in package.compatibility) if package else []
         ),
         "scopes": [item.value for item in package.scopes] if package else [],
+        "discovery": (
+            {
+                "upstream_id": federated.upstream_id,
+                "canonical_package_id": federated.canonical_package_id,
+                "name": federated.name,
+                "component": federated.component,
+                "canonical_origin": federated.canonical_origin,
+                "detail_url": federated.detail_url,
+                "artifact_url": federated.artifact_url,
+                "curated": federated.curated,
+                "popularity": federated.popularity,
+                "upstream_audit": federated.upstream_audit,
+                "artifact_resolved": federated.artifact_resolved,
+                "source_present": federated.source_present,
+                "install_authorized": False,
+            }
+            if federated is not None
+            else None
+        ),
     }
 
 

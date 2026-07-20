@@ -217,6 +217,29 @@ The control plane stores redacted metadata by default. Content capture and
 secret materialization are opt-in and should have explicit access, retention,
 and cleanup policies.
 
+### Read-only skills.sh metadata proxy
+
+`giga-skills-catalog-proxy` is an independently deployable, metadata-only
+boundary for the authenticated `https://skills.sh/api/v1/` catalog. It exposes
+only bounded GET list, search, detail, and health routes, strips detail file
+contents, never accepts an arbitrary upstream URL, and resolves
+`VERCEL_OIDC_TOKEN` inside each upstream request without persisting or logging
+the bearer value.
+
+Safe local configuration keeps the listener private by default:
+
+```sh
+export VERCEL_OIDC_TOKEN='<request-scoped token supplied by Vercel>'
+export GIGA_SKILLS_PROXY_HOST=127.0.0.1
+export GIGA_SKILLS_PROXY_PORT=8092
+export GIGA_SKILLS_PROXY_RATE_LIMIT=120
+giga-skills-catalog-proxy
+```
+
+Binding to `0.0.0.0` is explicit and should be done only behind an HTTPS
+reverse proxy with its own access controls. The service never installs catalog
+entries and does not grant installation authority.
+
 ## Plugin contract
 
 Third-party adapters register through the versioned, provider-neutral

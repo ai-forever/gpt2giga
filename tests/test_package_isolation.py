@@ -207,6 +207,8 @@ from gpt2giga_harness.cli import build_parser
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.doctor import write_doctor_support_report
 from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.skills_catalog_proxy import create_skills_catalog_proxy_app
+from gpt2giga_harness.skills_catalog_proxy_client import SkillsCatalogProxyFetcher
 from gpt2giga_harness.state_backup import (
     create_state_backup,
     restore_state_backup,
@@ -239,8 +241,14 @@ scripts = {
 }
 assert scripts == {
     "giga": "gpt2giga_harness.entrypoint:main",
+    "giga-skills-catalog-proxy": "gpt2giga_harness.skills_catalog_proxy:main",
     "gpt2giga-harness": "gpt2giga_harness.entrypoint:main",
 }
+proxy_client = TestClient(create_skills_catalog_proxy_app())
+assert proxy_client.get("/healthz").json()["read_only"] is True
+assert SkillsCatalogProxyFetcher("https://proxy.example").proxy_origin == (
+    "https://proxy.example"
+)
 harness_entry_points = {
     entry.group: entry.value
     for entry in harness_distribution.entry_points

@@ -418,10 +418,11 @@ class _BaseFederatedSource:
         incoming_by_id = {item.upstream_id: item for item in incoming}
         retained: list[FederatedCatalogCandidate] = []
         for item in self.last_good.items:
-            if item.component not in selected or item.upstream_id in incoming_by_id:
+            if item.component not in selected:
                 retained.append(item)
                 continue
-            retained.append(_with_source_presence(item, False))
+            if item.upstream_id not in incoming_by_id:
+                retained.append(_with_source_presence(item, False))
         retained.extend(
             item
             for item in incoming

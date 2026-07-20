@@ -36,7 +36,9 @@ CATALOG_SCHEMA_VERSION = 1
 OFFICIAL_MCP_REGISTRY_SOURCE_ID = "official-mcp-registry"
 OFFICIAL_MCP_REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io"
 OFFICIAL_MCP_REGISTRY_API_VERSION = "v0.1"
-MAX_CATALOG_ENTRIES = 10_000
+MAX_CATALOG_ENTRIES = 50_000
+MAX_CATALOG_SOURCE_ENTRIES = 10_000
+MAX_CATALOG_SOURCES = 100
 MAX_CATALOG_PAGE_SIZE = 1_000
 MAX_CATALOG_SOURCE_ERRORS = 20
 MAX_CATALOG_JSON_BYTES = 256 * 1024
@@ -59,6 +61,7 @@ class CatalogSourceType(str, Enum):
     PROVIDER_MARKETPLACE = "provider_marketplace"
     GIT = "git"
     LOCAL = "local"
+    FEDERATED_CATALOG = "federated_catalog"
 
 
 class CatalogEntryStatus(str, Enum):
@@ -104,6 +107,11 @@ class CatalogSourceState:
     last_attempt_succeeded: bool
     complete: bool
     entry_count: int
+    cursor: str | None = None
+    retry_count: int = 0
+    next_retry_at: str | None = None
+    etag: str | None = None
+    freshness_expires_at: str | None = None
     errors: tuple[CatalogSourceError, ...] = ()
 
     def __post_init__(self) -> None:
@@ -124,12 +132,78 @@ class CatalogSourceState:
             or self.entry_count > MAX_CATALOG_ENTRIES
         ):
             raise ValueError("catalog source entry_count is invalid")
+        if self.cursor is not None:
+            _validate_bounded_metadata(self.cursor, "catalog source cursor", 2_048)
+        if (
+            isinstance(self.retry_count, bool)
+            or not isinstance(self.retry_count, int)
+            or self.retry_count < 0
+            or self.retry_count > 100
+        ):
+            raise ValueError("catalog source retry_count is invalid")
+        if self.next_retry_at is not None:
+            _parse_timestamp(self.next_retry_at)
+        if self.etag is not None:
+            _validate_bounded_metadata(self.etag, "catalog source etag", 512)
+        if self.freshness_expires_at is not None:
+            _parse_timestamp(self.freshness_expires_at)
         errors = tuple(self.errors)
         if len(errors) > MAX_CATALOG_SOURCE_ERRORS or any(
             not isinstance(item, CatalogSourceError) for item in errors
         ):
             raise ValueError("catalog source errors are invalid")
         object.__setattr__(self, "errors", errors)
+
+
+@dataclass(frozen=True)
+class FederatedCatalogMetadata:
+    """Bounded discovery metadata retained without artifact authority."""
+
+    upstream_id: str
+    canonical_package_id: str | None
+    name: str
+    component: str
+    canonical_origin: str
+    detail_url: str
+    artifact_url: str | None
+    curated: bool
+    popularity: int | None
+    upstream_audit: str | None
+    artifact_resolved: bool
+    source_present: bool
+    install_authorized: bool = False
+
+    def __post_init__(self) -> None:
+        _validate_identity(self.upstream_id, field_name="federated upstream id")
+        if self.canonical_package_id is not None:
+            _validate_mcp_name(self.canonical_package_id)
+        _validate_bounded_metadata(self.name, "federated display name", 512)
+        if self.component not in {"skill", "mcp"}:
+            raise ValueError("federated component is invalid")
+        _validate_https_origin(self.canonical_origin)
+        _validate_https_url(self.detail_url)
+        if self.artifact_url is not None:
+            _validate_https_url(self.artifact_url)
+        if not isinstance(self.curated, bool):
+            raise ValueError("federated curated flag must be a boolean")
+        if self.popularity is not None and (
+            isinstance(self.popularity, bool)
+            or not isinstance(self.popularity, int)
+            or self.popularity < 0
+        ):
+            raise ValueError("federated popularity is invalid")
+        if self.upstream_audit not in {
+            None,
+            "reported_approved",
+            "reported_reviewed",
+        }:
+            raise ValueError("federated upstream audit is invalid")
+        if not isinstance(self.artifact_resolved, bool) or not isinstance(
+            self.source_present, bool
+        ):
+            raise ValueError("federated state flags must be booleans")
+        if self.install_authorized is not False:
+            raise ValueError("federated metadata cannot authorize installation")
 
 
 @dataclass(frozen=True)
@@ -141,7 +215,7 @@ class CatalogEntry:
     source_type: CatalogSourceType
     package_id: str
     version: str
-    immutable_ref: str
+    immutable_ref: str | None
     content_hash: str
     status: CatalogEntryStatus
     pinned: bool
@@ -151,6 +225,7 @@ class CatalogEntry:
     last_seen_at: str
     package: IntegrationPackage | None = None
     mcp_response: Mapping[str, Any] | None = None
+    federated: FederatedCatalogMetadata | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.catalog_id, field_name="catalog id")
@@ -159,12 +234,13 @@ class CatalogEntry:
             raise ValueError("catalog source type is invalid")
         _validate_identity(self.package_id, field_name="catalog package id")
         _validate_identity(self.version, field_name="catalog version")
-        _validate_immutable_ref(self.immutable_ref)
+        if self.immutable_ref is not None:
+            _validate_immutable_ref(self.immutable_ref)
         _validate_hash(self.content_hash, field_name="catalog content hash")
         if not isinstance(self.status, CatalogEntryStatus):
             raise ValueError("catalog entry status is invalid")
-        if self.pinned is not True:
-            raise ValueError("catalog entries must retain immutable pins")
+        if not isinstance(self.pinned, bool):
+            raise ValueError("catalog pinned flag must be a boolean")
         if not isinstance(self.source_present, bool):
             raise ValueError("catalog source presence must be a boolean")
         if self.install_authorized is not False:
@@ -179,8 +255,21 @@ class CatalogEntry:
             self.version,
         ):
             raise ValueError("catalog id does not match source identity")
-        if (self.package is None) == (self.mcp_response is None):
-            raise ValueError("catalog entry must contain exactly one payload")
+        if (
+            self.package is None
+            and self.mcp_response is None
+            and self.federated is None
+        ):
+            raise ValueError("catalog entry must contain a payload")
+        if self.package is not None and self.mcp_response is not None:
+            raise ValueError("catalog entry cannot contain package and MCP payloads")
+        if self.federated is not None:
+            if self.source_type is not CatalogSourceType.FEDERATED_CATALOG:
+                raise ValueError("federated metadata requires a federated source")
+            if self.federated.source_present != self.source_present:
+                raise ValueError("federated source presence does not match entry")
+            if self.federated.artifact_resolved != (self.package is not None):
+                raise ValueError("federated artifact resolution does not match payload")
         if self.package is not None:
             if (
                 self.package.id != self.package_id
@@ -193,8 +282,16 @@ class CatalogEntry:
                 raise ValueError("catalog package content hash does not match")
             if self.status is not CatalogEntryStatus.ACTIVE:
                 raise ValueError("manifest catalog entries must be active")
-            _validate_import_source(self.package.source_type, self.source_type)
-        else:
+            if self.immutable_ref is None or self.pinned is not True:
+                raise ValueError("manifest catalog entries require immutable pins")
+            if self.source_type is CatalogSourceType.FEDERATED_CATALOG:
+                if self.package.source_type is not IntegrationSourceType.GIT:
+                    raise ValueError("federated packages must retain Git provenance")
+            else:
+                _validate_import_source(self.package.source_type, self.source_type)
+        elif self.mcp_response is not None:
+            if self.immutable_ref is None or self.pinned is not True:
+                raise ValueError("MCP response entries require immutable pins")
             if (
                 self.source_type is not CatalogSourceType.OFFICIAL_MCP_REGISTRY
                 or self.source_id != OFFICIAL_MCP_REGISTRY_SOURCE_ID
@@ -211,6 +308,8 @@ class CatalogEntry:
             if self.status is not _mcp_status(response):
                 raise ValueError("catalog MCP status does not match response")
             object.__setattr__(self, "mcp_response", response)
+        elif self.immutable_ref is not None or self.pinned:
+            raise ValueError("discovery-only entries cannot claim immutable pins")
 
     @property
     def trust_decision(self) -> IntegrationTrustDecision:
@@ -341,6 +440,12 @@ class IntegrationCatalogStore:
         observed_at: str,
         complete: bool,
         raise_on_conflict: bool = False,
+        fail_entire_source_on_conflict: bool = False,
+        cursor: str | None = None,
+        retry_count: int = 0,
+        next_retry_at: str | None = None,
+        etag: str | None = None,
+        freshness_expires_at: str | None = None,
     ) -> CatalogSyncResult:
         _validate_identity(source_id, field_name="catalog source id")
         if not isinstance(source_type, CatalogSourceType):
@@ -348,12 +453,13 @@ class IntegrationCatalogStore:
         incoming_by_id = {item.catalog_id: item for item in incoming}
         if len(incoming_by_id) != len(incoming):
             raise ValueError("catalog source returned duplicate entries")
-        if len(incoming_by_id) > MAX_CATALOG_ENTRIES:
+        if len(incoming_by_id) > MAX_CATALOG_SOURCE_ENTRIES:
             raise ValueError("catalog source returned too many entries")
         self._ensure_root()
         with exclusive_file_lock(self.path):
             snapshot = self._read_unlocked()
             entries = {item.catalog_id: item for item in snapshot.entries}
+            original_entries = dict(entries)
             errors: list[CatalogSourceError] = []
             for catalog_id, candidate in incoming_by_id.items():
                 if (
@@ -384,15 +490,30 @@ class IntegrationCatalogStore:
                         first_seen_at=current.first_seen_at,
                         last_seen_at=observed_at,
                         source_present=True,
+                        federated=(
+                            replace(candidate.federated, source_present=True)
+                            if candidate.federated is not None
+                            else None
+                        ),
                     )
                 entries[catalog_id] = candidate
-            if complete:
+            if errors and fail_entire_source_on_conflict:
+                entries = original_entries
+            elif complete:
                 for catalog_id, current in tuple(entries.items()):
                     if (
                         current.source_id == source_id
                         and catalog_id not in incoming_by_id
                     ):
-                        entries[catalog_id] = replace(current, source_present=False)
+                        entries[catalog_id] = replace(
+                            current,
+                            source_present=False,
+                            federated=(
+                                replace(current.federated, source_present=False)
+                                if current.federated is not None
+                                else None
+                            ),
+                        )
             if len(entries) > MAX_CATALOG_ENTRIES:
                 raise CatalogStateError("catalog contains too many entries")
             source_states = {item.source_id: item for item in snapshot.sources}
@@ -417,6 +538,11 @@ class IntegrationCatalogStore:
                 entry_count=sum(
                     item.source_id == source_id for item in entries.values()
                 ),
+                cursor=cursor if attempt_succeeded else None,
+                retry_count=retry_count,
+                next_retry_at=next_retry_at,
+                etag=etag,
+                freshness_expires_at=freshness_expires_at,
                 errors=combined_errors,
             )
             updated = CatalogSnapshot(
@@ -442,6 +568,8 @@ class IntegrationCatalogStore:
         source_type: CatalogSourceType,
         error: CatalogSourceError,
         observed_at: str,
+        retry_count: int | None = None,
+        next_retry_at: str | None = None,
     ) -> CatalogSyncResult:
         self._ensure_root()
         with exclusive_file_lock(self.path):
@@ -462,6 +590,20 @@ class IntegrationCatalogStore:
                 entry_count=sum(
                     item.source_id == source_id for item in snapshot.entries
                 ),
+                cursor=previous.cursor if previous is not None else None,
+                retry_count=(
+                    retry_count
+                    if retry_count is not None
+                    else min(
+                        previous.retry_count + 1 if previous is not None else 1,
+                        100,
+                    )
+                ),
+                next_retry_at=next_retry_at,
+                etag=previous.etag if previous is not None else None,
+                freshness_expires_at=(
+                    previous.freshness_expires_at if previous is not None else None
+                ),
                 errors=_bounded_errors(
                     *(previous.errors if previous is not None else ()), error
                 ),
@@ -480,6 +622,55 @@ class IntegrationCatalogStore:
             fetched_count=0,
             stored_count=sum(item.source_id == source_id for item in updated.entries),
             errors=(error,),
+        )
+
+    def merge_federated_source(
+        self,
+        *,
+        source_id: str,
+        incoming: Sequence[CatalogEntry],
+        observed_at: str,
+        freshness_expires_at: str,
+        etag: str | None = None,
+    ) -> CatalogSyncResult:
+        """Atomically publish one complete federated source snapshot."""
+        return self._merge_source(
+            source_id=source_id,
+            source_type=CatalogSourceType.FEDERATED_CATALOG,
+            incoming=incoming,
+            observed_at=observed_at,
+            complete=True,
+            fail_entire_source_on_conflict=True,
+            cursor=None,
+            retry_count=0,
+            next_retry_at=None,
+            etag=etag,
+            freshness_expires_at=freshness_expires_at,
+        )
+
+    def record_federated_failure(
+        self,
+        *,
+        source_id: str,
+        code: str,
+        error_type: str,
+        observed_at: str,
+        retry_count: int,
+        next_retry_at: str,
+    ) -> CatalogSyncResult:
+        """Retain last-good federated entries and bounded retry state."""
+        return self._record_source_failure(
+            source_id=source_id,
+            source_type=CatalogSourceType.FEDERATED_CATALOG,
+            error=_source_error(
+                code=code,
+                source_id=source_id,
+                error_type=error_type,
+                occurred_at=observed_at,
+            ),
+            observed_at=observed_at,
+            retry_count=retry_count,
+            next_retry_at=next_retry_at,
         )
 
     def _ensure_root(self) -> None:
@@ -551,7 +742,7 @@ async def sync_official_mcp_registry(
                         "official registry page contains conflicting immutable entries"
                     )
                 entries[entry.catalog_id] = entry
-            if len(entries) > MAX_CATALOG_ENTRIES:
+            if len(entries) > MAX_CATALOG_SOURCE_ENTRIES:
                 raise ValueError("official registry returned too many entries")
             if next_cursor is None:
                 break
@@ -716,6 +907,11 @@ def catalog_entry_to_dict(entry: CatalogEntry) -> dict[str, Any]:
         "trust_decision": entry.trust_decision.value,
         "first_seen_at": entry.first_seen_at,
         "last_seen_at": entry.last_seen_at,
+        "federated": (
+            _federated_metadata_to_dict(entry.federated)
+            if entry.federated is not None
+            else None
+        ),
     }
 
 
@@ -1013,7 +1209,7 @@ def _snapshot_from_dict(value: Any) -> CatalogSnapshot:
     raw_sources = mapping.get("sources")
     if not isinstance(raw_entries, list) or len(raw_entries) > MAX_CATALOG_ENTRIES:
         raise CatalogStateError("integration catalog entries are invalid")
-    if not isinstance(raw_sources, list) or len(raw_sources) > MAX_CATALOG_ENTRIES:
+    if not isinstance(raw_sources, list) or len(raw_sources) > MAX_CATALOG_SOURCES:
         raise CatalogStateError("integration catalog sources are invalid")
     entries = tuple(_entry_from_state(item) for item in raw_entries)
     sources = tuple(_source_state_from_dict(item) for item in raw_sources)
@@ -1068,6 +1264,11 @@ def _entry_to_state(entry: CatalogEntry) -> dict[str, Any]:
             else None
         ),
         "mcp_response": entry.mcp_response,
+        "federated": (
+            _federated_metadata_to_dict(entry.federated)
+            if entry.federated is not None
+            else None
+        ),
     }
 
 
@@ -1090,6 +1291,7 @@ def _entry_from_state(value: Any) -> CatalogEntry:
             "last_seen_at",
             "package",
             "mcp_response",
+            "federated",
         },
         field_name="catalog entry",
     )
@@ -1107,7 +1309,7 @@ def _entry_from_state(value: Any) -> CatalogEntry:
         ),
         package_id=_required_text(mapping.get("package_id"), "catalog package id"),
         version=_required_text(mapping.get("version"), "catalog version"),
-        immutable_ref=_required_text(
+        immutable_ref=_optional_text(
             mapping.get("immutable_ref"), "catalog immutable ref"
         ),
         content_hash=_required_text(
@@ -1129,6 +1331,11 @@ def _entry_from_state(value: Any) -> CatalogEntry:
         ),
         package=package,
         mcp_response=mapping.get("mcp_response"),
+        federated=(
+            _federated_metadata_from_dict(mapping.get("federated"))
+            if mapping.get("federated") is not None
+            else None
+        ),
     )
 
 
@@ -1141,6 +1348,11 @@ def _source_state_to_dict(state: CatalogSourceState) -> dict[str, Any]:
         "last_attempt_succeeded": state.last_attempt_succeeded,
         "complete": state.complete,
         "entry_count": state.entry_count,
+        "cursor": state.cursor,
+        "retry_count": state.retry_count,
+        "next_retry_at": state.next_retry_at,
+        "etag": state.etag,
+        "freshness_expires_at": state.freshness_expires_at,
         "errors": [
             {
                 "code": item.code,
@@ -1164,6 +1376,11 @@ def _source_state_from_dict(value: Any) -> CatalogSourceState:
             "last_attempt_succeeded",
             "complete",
             "entry_count",
+            "cursor",
+            "retry_count",
+            "next_retry_at",
+            "etag",
+            "freshness_expires_at",
             "errors",
         },
         field_name="catalog source state",
@@ -1187,7 +1404,94 @@ def _source_state_from_dict(value: Any) -> CatalogSourceState:
         ),
         complete=_required_bool(mapping.get("complete"), "catalog complete"),
         entry_count=_required_int(mapping.get("entry_count"), "catalog entry_count"),
+        cursor=_optional_text(mapping.get("cursor"), "catalog source cursor"),
+        retry_count=(
+            _required_int(mapping.get("retry_count"), "catalog retry_count")
+            if "retry_count" in mapping
+            else 0
+        ),
+        next_retry_at=_optional_text(
+            mapping.get("next_retry_at"), "catalog next_retry_at"
+        ),
+        etag=_optional_text(mapping.get("etag"), "catalog etag"),
+        freshness_expires_at=_optional_text(
+            mapping.get("freshness_expires_at"), "catalog freshness_expires_at"
+        ),
         errors=tuple(_source_error_from_dict(item) for item in errors),
+    )
+
+
+def _federated_metadata_to_dict(
+    metadata: FederatedCatalogMetadata,
+) -> dict[str, Any]:
+    return {
+        "upstream_id": metadata.upstream_id,
+        "canonical_package_id": metadata.canonical_package_id,
+        "name": metadata.name,
+        "component": metadata.component,
+        "canonical_origin": metadata.canonical_origin,
+        "detail_url": metadata.detail_url,
+        "artifact_url": metadata.artifact_url,
+        "curated": metadata.curated,
+        "popularity": metadata.popularity,
+        "upstream_audit": metadata.upstream_audit,
+        "artifact_resolved": metadata.artifact_resolved,
+        "source_present": metadata.source_present,
+        "install_authorized": metadata.install_authorized,
+    }
+
+
+def _federated_metadata_from_dict(value: Any) -> FederatedCatalogMetadata:
+    mapping = _strict_mapping(
+        value,
+        allowed={
+            "upstream_id",
+            "canonical_package_id",
+            "name",
+            "component",
+            "canonical_origin",
+            "detail_url",
+            "artifact_url",
+            "curated",
+            "popularity",
+            "upstream_audit",
+            "artifact_resolved",
+            "source_present",
+            "install_authorized",
+        },
+        field_name="federated catalog metadata",
+    )
+    popularity = mapping.get("popularity")
+    if popularity is not None:
+        popularity = _required_int(popularity, "federated popularity")
+    return FederatedCatalogMetadata(
+        upstream_id=_required_text(mapping.get("upstream_id"), "federated upstream id"),
+        canonical_package_id=_optional_text(
+            mapping.get("canonical_package_id"), "federated canonical package id"
+        ),
+        name=_required_text(mapping.get("name"), "federated name"),
+        component=_required_text(mapping.get("component"), "federated component"),
+        canonical_origin=_required_text(
+            mapping.get("canonical_origin"), "federated canonical origin"
+        ),
+        detail_url=_required_text(mapping.get("detail_url"), "federated detail URL"),
+        artifact_url=_optional_text(
+            mapping.get("artifact_url"), "federated artifact URL"
+        ),
+        curated=_required_bool(mapping.get("curated"), "federated curated"),
+        popularity=popularity,
+        upstream_audit=_optional_text(
+            mapping.get("upstream_audit"), "federated upstream audit"
+        ),
+        artifact_resolved=_required_bool(
+            mapping.get("artifact_resolved"), "federated artifact_resolved"
+        ),
+        source_present=_required_bool(
+            mapping.get("source_present"), "federated source_present"
+        ),
+        install_authorized=_required_bool(
+            mapping.get("install_authorized"), "federated install_authorized"
+        ),
     )
 
 
@@ -1214,7 +1518,9 @@ def _source_error(
     error_type: str,
     occurred_at: str,
 ) -> CatalogSourceError:
-    safe_type = re.sub(r"[^A-Za-z0-9._:+~-]", "_", error_type)[:128] or "Error"
+    safe_type = (
+        re.sub(r"[^A-Za-z0-9._:+~-]", "_", error_type).lstrip("_")[:128] or "Error"
+    )
     return CatalogSourceError(
         code=code,
         source_id=source_id,
@@ -1369,6 +1675,36 @@ def _validate_immutable_ref(value: Any) -> None:
         raise ValueError("catalog immutable ref is invalid")
 
 
+def _validate_bounded_metadata(value: Any, field_name: str, maximum: int) -> None:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > maximum
+        or any(ord(char) < 32 for char in value)
+    ):
+        raise ValueError(f"{field_name} is invalid")
+
+
+def _validate_https_url(value: Any) -> None:
+    _validate_bounded_metadata(value, "federated HTTPS URL", 2_048)
+    parsed = urllib_parse.urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or not parsed.hostname
+        or parsed.fragment
+    ):
+        raise ValueError("federated HTTPS URL is invalid")
+
+
+def _validate_https_origin(value: Any) -> None:
+    _validate_https_url(value)
+    parsed = urllib_parse.urlsplit(value)
+    if parsed.path or parsed.query:
+        raise ValueError("federated HTTPS origin is invalid")
+
+
 def _validate_hash(value: Any, *, field_name: str) -> None:
     if not isinstance(value, str) or _HASH_RE.fullmatch(value) is None:
         raise ValueError(f"{field_name} is invalid")
@@ -1400,6 +1736,7 @@ __all__ = [
     "CatalogConflictError",
     "CatalogEntry",
     "CatalogEntryStatus",
+    "FederatedCatalogMetadata",
     "CatalogSnapshot",
     "CatalogSourceError",
     "CatalogSourceState",

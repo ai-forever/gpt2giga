@@ -127,6 +127,7 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
     )
     assert harness_metadata["scripts"] == {
         "giga": "gpt2giga_harness.entrypoint:main",
+        "giga-skills-catalog-proxy": "gpt2giga_harness.skills_catalog_proxy:main",
         "gpt2giga-harness": "gpt2giga_harness.entrypoint:main",
     }
     entry_point_groups = harness_metadata["entry-points"]

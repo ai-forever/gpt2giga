@@ -20,6 +20,7 @@ dependencies = [
 [project.scripts]
 gpt2giga-harness = "gpt2giga_harness.entrypoint:main"
 giga = "gpt2giga_harness.entrypoint:main"
+giga-skills-catalog-proxy = "gpt2giga_harness.skills_catalog_proxy:main"
 
 [project.entry-points."gpt2giga.harnesses"]
 direct-chat = "gpt2giga_harness.harnesses.direct_chat:DirectChatHarness"
