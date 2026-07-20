@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import os
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -195,7 +197,7 @@ def test_tui_help_does_not_import_textual_fastapi_or_uvicorn():
 import sys
 from gpt2giga_harness import entrypoint
 try:
-    entrypoint.main(["tui", "--help"])
+    entrypoint.main(["--help"])
 except SystemExit as exc:
     assert exc.code == 0
 print("textual" in sys.modules, "fastapi" in sys.modules, "uvicorn" in sys.modules)
@@ -215,17 +217,76 @@ def test_console_entrypoint_dispatches_tui_without_full_cli(monkeypatch):
 
     monkeypatch.delitem(sys.modules, "gpt2giga_harness.cli", raising=False)
     monkeypatch.setattr(tui_entrypoint, "main", lambda arguments: len(arguments))
+    monkeypatch.setattr(entrypoint, "_tui_environment_supported", lambda: True)
 
+    assert entrypoint.main(["--workspace", "."]) == 2
     assert entrypoint.main(["tui", "--workspace", "."]) == 2
     assert "gpt2giga_harness.cli" not in sys.modules
 
 
-def test_main_cli_help_advertises_built_in_tui():
+def test_automation_cli_does_not_advertise_a_competing_tui_command():
     from gpt2giga_harness import cli
 
     help_text = cli.build_parser().format_help()
-    assert "built-in provider-neutral terminal workbench" in help_text
-    assert "optional provider-neutral terminal workbench" not in help_text
+    assert "tui" not in help_text
+
+
+def test_bare_console_entrypoint_dispatches_to_tui(monkeypatch):
+    from gpt2giga_harness.tui import entrypoint as tui_entrypoint
+
+    monkeypatch.delitem(sys.modules, "gpt2giga_harness.cli", raising=False)
+    monkeypatch.setattr(entrypoint, "_tui_environment_supported", lambda: True)
+    calls = []
+    monkeypatch.setattr(
+        tui_entrypoint,
+        "main",
+        lambda arguments: calls.append(arguments) or 0,
+    )
+
+    assert entrypoint.main([]) == 0
+    assert calls == [[]]
+    assert "gpt2giga_harness.cli" not in sys.modules
+
+
+def test_bare_console_entrypoint_fails_closed_without_an_interactive_terminal(
+    monkeypatch, capsys
+):
+    monkeypatch.delitem(sys.modules, "gpt2giga_harness.cli", raising=False)
+    monkeypatch.setattr(entrypoint, "_tui_environment_supported", lambda: False)
+
+    assert entrypoint.main([]) == 2
+
+    assert "requires a supported interactive terminal" in capsys.readouterr().err
+    assert "gpt2giga_harness.cli" not in sys.modules
+
+
+def test_tui_run_uses_textual_8_signature_and_scopes_no_color(monkeypatch, tmp_path):
+    from gpt2giga_harness.tui import entrypoint as tui_entrypoint
+
+    calls = []
+
+    class FakeApplication:
+        def run(self, **kwargs):
+            calls.append((kwargs, dict(os.environ)))
+
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(
+        tui_entrypoint.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(
+            WorkbenchTui=lambda *_args, **_kwargs: FakeApplication()
+        ),
+    )
+    monkeypatch.setattr(
+        tui_entrypoint, "InProcessWorkbenchClient", lambda _config: None
+    )
+
+    assert tui_entrypoint.main(["--no-color"]) == 0
+
+    assert calls[0][0] == {"mouse": False}
+    assert calls[0][1]["NO_COLOR"] == "1"
+    assert "NO_COLOR" not in os.environ
 
 
 @pytest.mark.parametrize(

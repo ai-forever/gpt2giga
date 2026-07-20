@@ -525,22 +525,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ui.set_defaults(handler=_handle_ui)
 
-    tui = subparsers.add_parser(
-        "tui",
-        help="Open the built-in provider-neutral terminal workbench",
-    )
-    tui.add_argument("--workspace", default=None)
-    tui.add_argument("--session", dest="session_id", default=None)
-    tui.add_argument("--attach", default=None, metavar="URL")
-    tui.add_argument(
-        "--bootstrap-token-env",
-        default="GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN",
-        metavar="NAME",
-    )
-    tui.add_argument("--locale", choices=("en", "ru"), default=None)
-    tui.add_argument("--no-color", action="store_true")
-    tui.set_defaults(handler=_handle_tui)
-
     run = subparsers.add_parser("run", parents=[common])
     run.add_argument("--agent", choices=tuple(AGENT_ALIASES), default=None)
     run.add_argument("--mode", choices=("plan", "read", "edit"), default="plan")
@@ -2778,26 +2762,6 @@ def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     finally:
         _stop_ui_workers(worker_processes)
     return 0
-
-
-def _handle_tui(args: argparse.Namespace, config: HarnessConfig) -> int:
-    """Delegate direct module callers to the same low-overhead TUI entry point."""
-    del config
-    from gpt2giga_harness.tui.entrypoint import main as tui_main
-
-    arguments: list[str] = []
-    for flag, value in (
-        ("--workspace", args.workspace),
-        ("--session", args.session_id),
-        ("--attach", args.attach),
-        ("--bootstrap-token-env", args.bootstrap_token_env),
-        ("--locale", args.locale),
-    ):
-        if value is not None:
-            arguments.extend((flag, str(value)))
-    if args.no_color:
-        arguments.append("--no-color")
-    return tui_main(arguments)
 
 
 def _start_ui_workers(

@@ -56,15 +56,24 @@ def test_interactive_human_paths_target_the_canonical_tui(argv):
         ("run", "--agent", "codex", "--json", "inspect"),
         ("chat", "--dry-run", "inspect"),
         ("session", "list", "--non-interactive"),
-        ("tui", "--help"),
-        ("--help",),
-        ("--version",),
+        ("--non-interactive", "--help"),
+        ("open", "--help"),
     ),
 )
 def test_machine_and_admin_paths_never_initialize_textual_or_allow_ansi(argv):
     plan = plan_terminal_dispatch(argv, context=PTY)
 
     assert plan.surface is ConsoleSurface.NON_INTERACTIVE_AUTOMATION
+    assert plan.readiness is DispatchReadiness.READY
+    assert plan.initialize_textual is False
+    assert plan.terminal_control_allowed is False
+
+
+@pytest.mark.parametrize("argv", (("tui", "--help"), ("--help",), ("--version",)))
+def test_root_metadata_belongs_to_tui_without_initializing_textual(argv):
+    plan = plan_terminal_dispatch(argv, context=PIPE)
+
+    assert plan.surface is ConsoleSurface.TUI_HUMAN_WORKFLOW
     assert plan.readiness is DispatchReadiness.READY
     assert plan.initialize_textual is False
     assert plan.terminal_control_allowed is False

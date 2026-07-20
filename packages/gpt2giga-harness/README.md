@@ -18,7 +18,7 @@ Install the published prerelease from your package index:
 uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 giga --version
-giga tui
+giga
 giga ui
 ```
 
@@ -32,26 +32,29 @@ The standard install includes the terminal workbench. Start it from the project
 you want to manage:
 
 ```sh
-giga tui
+giga
 ```
 
 The default TUI mode composes the existing Harness application in-process: it
 does not open a browser or start FastAPI/uvicorn. It provides keyboard-first
 project and session navigation, session creation/resume, and an explicit
-provider/Harness/model/transport readiness panel. Use `giga tui --attach
+provider/Harness/model/transport readiness panel. Use `giga --attach
 http://127.0.0.1:8091` only when an existing Harness UI/worker already owns the
 runtime. Attach mode uses the same cookie/bootstrap-authenticated REST contracts
 as Cockpit and never falls back silently to in-process mode. English and Russian
 presentation catalogs are available through `--locale en|ru`.
 
-The canonical terminal-dispatch contract reserves bare `giga`, `chat`,
+Bare `giga` is the canonical TUI entry point; `giga tui` remains a compatibility
+alias but is not a separate product surface. Root `--help`, `--version`, and TUI
+options are owned by the same low-overhead TUI entry point without importing
+Textual for metadata-only requests. The terminal-dispatch contract reserves `chat`,
 `run --agent`, and human session workflows for this TUI. The cutover remains
-deferred until the TUI owns the corresponding N5 interaction surfaces. `giga
-tui` is already explicit. `--non-interactive`, `--json`, `--dry-run`, pipes,
+deferred until the TUI owns the corresponding N5 interaction surfaces.
+`--non-interactive`, `--json`, `--dry-run`, pipes,
 redirected streams, and CI select the non-interactive command API and never
-initialize Textual or emit terminal control sequences. Help/version and admin
-commands also remain non-interactive. `giga open ...` is an explicit external
-handoff; `TERM=dumb` and unsupported terminals fail closed for a requested TUI.
+initialize Textual or emit terminal control sequences. Automation/admin metadata
+also remains non-interactive. `giga open ...` is an explicit external handoff;
+`TERM=dumb` and unsupported terminals fail closed for a requested TUI.
 
 For development or when the prerelease is not yet mirrored by your package
 index, run it from a source checkout:

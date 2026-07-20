@@ -116,18 +116,24 @@ def plan_terminal_dispatch(
     command_path = _command_path(arguments, command)
     explicit_tui = command == "tui"
 
+    if _is_metadata_request(arguments):
+        if command in {None, "tui"} and "--non-interactive" not in arguments:
+            return _ready_plan(
+                ConsoleSurface.TUI_HUMAN_WORKFLOW,
+                command_path,
+                reason="tui_metadata_route",
+            )
+        return _ready_plan(
+            ConsoleSurface.NON_INTERACTIVE_AUTOMATION,
+            command_path,
+            reason="metadata_route",
+        )
+
     if command == "open":
         return _ready_plan(
             ConsoleSurface.EXTERNAL_HANDOFF,
             command_path,
             reason="explicit_external_handoff",
-        )
-
-    if _is_metadata_request(arguments):
-        return _ready_plan(
-            ConsoleSurface.NON_INTERACTIVE_AUTOMATION,
-            command_path,
-            reason="metadata_route",
         )
 
     if _is_machine_request(arguments, context):
