@@ -27,6 +27,23 @@ For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]'
 ```
 
+For the optional terminal workbench, install the separate TUI extra and start
+it from the project you want to manage:
+
+```sh
+uv tool install --prerelease allow 'gpt2giga-harness[tui]'
+giga tui
+```
+
+The default TUI mode composes the existing Harness application in-process: it
+does not open a browser or start FastAPI/uvicorn. It provides keyboard-first
+project and session navigation, session creation/resume, and an explicit
+provider/Harness/model/transport readiness panel. Use `giga tui --attach
+http://127.0.0.1:8091` only when an existing Harness UI/worker already owns the
+runtime. Attach mode uses the same cookie/bootstrap-authenticated REST contracts
+as Cockpit and never falls back silently to in-process mode. English and Russian
+presentation catalogs are available through `--locale en|ru`.
+
 For development or when the prerelease is not yet mirrored by your package
 index, run it from a source checkout:
 

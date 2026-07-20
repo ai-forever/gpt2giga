@@ -40,6 +40,7 @@ IMPORT_DISTRIBUTIONS = {
     "gpt2giga": "gpt2giga",
     "pydantic": "pydantic",
     "starlette": "starlette",
+    "textual": "textual",
     "tomli": "tomli",
     "uvicorn": "uvicorn",
     "yaml": "pyyaml",

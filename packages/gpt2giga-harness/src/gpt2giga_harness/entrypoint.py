@@ -13,6 +13,10 @@ def main(argv: list[str] | None = None) -> int:
     if arguments == ["--version"]:
         print(f"gpt2giga-harness {__version__}")
         return 0
+    if arguments and arguments[0] == "tui":
+        from gpt2giga_harness.tui.entrypoint import main as tui_main
+
+        return tui_main(arguments[1:])
 
     from gpt2giga_harness.cli import main as cli_main
 
