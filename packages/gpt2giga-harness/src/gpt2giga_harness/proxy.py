@@ -18,6 +18,10 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from gpt2giga_harness.config import DEFAULT_MODEL_HINTS, HarnessConfig
+from gpt2giga_harness.gpt2giga_preset import (
+    GPT2GIGA_PRESET_EXTRA,
+    gpt2giga_preset_available,
+)
 from gpt2giga_harness.types import GigaChatApiMode, HarnessContext, redact_secrets
 
 
@@ -299,6 +303,14 @@ def sidecar_preflight(context: HarnessContext) -> SidecarPreflight:
         return SidecarPreflight(
             ok=False,
             reason="auto-start requires a proxy URL without a path component",
+        )
+    if not gpt2giga_preset_available():
+        return SidecarPreflight(
+            ok=False,
+            reason=(
+                "optional gpt2giga preset is not installed; install "
+                f"gpt2giga-harness[{GPT2GIGA_PRESET_EXTRA}]"
+            ),
         )
     if not _has_upstream_credentials(os.environ):
         return SidecarPreflight(

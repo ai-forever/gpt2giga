@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 import os
 from pathlib import Path
 import sqlite3
@@ -17,6 +18,7 @@ from gpt2giga_harness.state_backup import (
     BACKUP_KIND,
     BACKUP_MANIFEST,
     BACKUP_SCHEMA_VERSION,
+    LEGACY_BACKUP_SCHEMA_VERSION,
     create_state_backup,
     restore_state_backup,
     verify_state_backup,
@@ -58,6 +60,9 @@ def test_state_backup_is_deterministic_versioned_and_sqlite_safe(tmp_path):
         assert manifest["schema_version"] == BACKUP_SCHEMA_VERSION
         assert manifest["kind"] == BACKUP_KIND
         assert manifest["restore_policy"] == "offline_replace_only"
+        assert manifest["state_layout_version"] == 1
+        assert manifest["component_schema_versions"] == {}
+        assert manifest["minimum_reader_schema_version"] == BACKUP_SCHEMA_VERSION
         assert manifest["entries"][0]["sqlite_user_version"] == 0
         assert [entry["path"] for entry in manifest["entries"]] == [
             "runtime.sqlite3",
@@ -110,7 +115,7 @@ def test_state_backup_rejects_unsafe_or_changed_inputs(tmp_path, monkeypatch):
 def test_state_backup_verification_rejects_manifest_mismatch(tmp_path):
     archive = tmp_path / "invalid.zip"
     manifest = {
-        "schema_version": BACKUP_SCHEMA_VERSION,
+        "schema_version": LEGACY_BACKUP_SCHEMA_VERSION,
         "kind": BACKUP_KIND,
         "harness_version": "0.0.1a4",
         "source_layout": "harness_user_data_dir",
@@ -134,6 +139,55 @@ def test_state_backup_verification_rejects_manifest_mismatch(tmp_path):
 
     with pytest.raises(ValueError, match="entry failed verification"):
         verify_state_backup(archive)
+
+
+def test_state_backup_accepts_v1_archive_and_rejects_future_component_on_restore(
+    tmp_path,
+):
+    legacy = tmp_path / "legacy-v1.zip"
+    payload = b"{}\n"
+    manifest = {
+        "schema_version": LEGACY_BACKUP_SCHEMA_VERSION,
+        "kind": BACKUP_KIND,
+        "harness_version": "0.1.0b1",
+        "source_layout": "harness_user_data_dir",
+        "restore_policy": "offline_replace_only",
+        "entries": [
+            {
+                "kind": "file",
+                "mode": 0o600,
+                "path": "state.json",
+                "sha256": sha256(payload).hexdigest(),
+                "size": len(payload),
+            }
+        ],
+    }
+    with ZipFile(legacy, "w", compression=ZIP_STORED) as bundle:
+        bundle.writestr(BACKUP_MANIFEST, json.dumps(manifest))
+        info = ZipInfo("state.json")
+        info.create_system = 3
+        info.external_attr = (stat.S_IFREG | 0o600) << 16
+        bundle.writestr(info, payload)
+
+    legacy_result = verify_state_backup(legacy)
+    assert legacy_result.schema_version == LEGACY_BACKUP_SCHEMA_VERSION
+    assert legacy_result.restore_compatible is True
+    assert legacy_result.component_schema_versions == {}
+
+    future = tmp_path / "future-component"
+    (future / "settings").mkdir(parents=True)
+    (future / "settings" / "defaults.json").write_text(
+        '{"schema_version":2,"defaults":{}}\n', encoding="utf-8"
+    )
+    future_archive = tmp_path / "future-component.zip"
+    future_result = create_state_backup(future, future_archive)
+    destination = tmp_path / "destination"
+
+    assert future_result.component_schema_versions == {"settings.defaults": 2}
+    assert future_result.restore_compatible is False
+    with pytest.raises(ValueError, match="newer than this Harness supports"):
+        restore_state_backup(future_archive, destination)
+    assert not destination.exists()
 
 
 def test_state_backup_cli_creates_and_verifies_json(tmp_path, monkeypatch, capsys):

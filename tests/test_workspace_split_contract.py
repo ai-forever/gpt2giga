@@ -109,9 +109,14 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
     }
     assert harness_metadata["name"] == "gpt2giga-harness"
     assert harness_metadata["version"]
-    assert (
-        f"gpt2giga=={gateway_metadata['version']}" in harness_metadata["dependencies"]
+    assert not any(
+        dependency.startswith(("gpt2giga", "gigachat"))
+        for dependency in harness_metadata["dependencies"]
     )
+    assert harness_metadata["optional-dependencies"]["gpt2giga"] == [
+        f"gpt2giga=={gateway_metadata['version']}",
+        "gigachat>=0.2.2a1,<0.3.0",
+    ]
     assert any(
         dependency.startswith("pyyaml")
         for dependency in harness_metadata["dependencies"]
@@ -122,14 +127,20 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
     )
     assert harness_metadata["scripts"] == {
         "giga": "gpt2giga_harness.entrypoint:main",
+        "giga-skills-catalog-proxy": "gpt2giga_harness.skills_catalog_proxy:main",
         "gpt2giga-harness": "gpt2giga_harness.entrypoint:main",
     }
     entry_point_groups = harness_metadata["entry-points"]
     assert set(entry_point_groups) == {
         "agent_workbench.harness_adapters.v1",
+        "agent_workbench.provider_adapters.v1",
         "gpt2giga.harnesses",
     }
-    for entry_points in entry_point_groups.values():
+    for group in (
+        "agent_workbench.harness_adapters.v1",
+        "gpt2giga.harnesses",
+    ):
+        entry_points = entry_point_groups[group]
         assert set(entry_points) == {
             "claude-code",
             "codex-cli",
@@ -140,6 +151,17 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
         assert all(
             target.startswith("gpt2giga_harness.") for target in entry_points.values()
         )
+    provider_entry_points = entry_point_groups["agent_workbench.provider_adapters.v1"]
+    assert set(provider_entry_points) == {
+        "claude-legacy",
+        "codex-legacy",
+        "direct-chat-legacy",
+        "gemini-legacy",
+    }
+    assert all(
+        target.startswith("gpt2giga_harness.provider_profiles:")
+        for target in provider_entry_points.values()
+    )
 
     gateway_source = GATEWAY_MEMBER / "src/gpt2giga"
     harness_source = HARNESS_MEMBER / "src/gpt2giga_harness"
@@ -185,6 +207,11 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert ".venv-artifact/bin/giga --help" in workflow
     assert ".venv-artifact/bin/gpt2giga-harness --help" in workflow
     assert "python -I -m gpt2giga_harness.base_install --json" in workflow
+    assert (
+        workflow.index("Install Harness base artifact")
+        < workflow.index("Audit Harness base installation")
+        < workflow.index("Install gateway artifact for combined smoke")
+    )
 
 
 def test_code_workflows_skip_documentation_only_changes():

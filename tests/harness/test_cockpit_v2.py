@@ -78,6 +78,7 @@ def test_cockpit_v2_is_default_and_legacy_remains_explicit_fallback(tmp_path):
     assert cockpit.headers["content-security-policy"].startswith(
         "default-src 'none'; script-src 'self'; style-src 'self'"
     )
+    assert "frame-src 'self'" in cockpit.headers["content-security-policy"]
     assert cockpit.headers["x-content-type-options"] == "nosniff"
     assert unknown.status_code == 404
 
@@ -99,7 +100,7 @@ def test_cockpit_v2_is_default_and_legacy_remains_explicit_fallback(tmp_path):
         ("/agents", "/cockpit-v2/automation/agents"),
         ("/arena", "/cockpit-v2/evaluation/arena"),
         ("/evaluate", "/cockpit-v2/evaluation/evals"),
-        ("/tools", "/cockpit-v2/integrations/mcp"),
+        ("/tools", "/cockpit-v2/plugins/mcp"),
         ("/approvals", "/cockpit-v2/runs"),
     ),
 )
@@ -137,9 +138,14 @@ def test_legacy_selected_deep_link_cannot_set_redirect_authority(tmp_path):
         "/cockpit-v2/evaluation/arena",
         "/cockpit-v2/evaluation/evals",
         "/cockpit-v2/evaluation/baselines",
+        "/cockpit-v2/plugins/all",
+        "/cockpit-v2/plugins/mcp",
+        "/cockpit-v2/plugins/plugins",
+        "/cockpit-v2/plugins/skills",
         "/cockpit-v2/integrations/harnesses",
         "/cockpit-v2/integrations/models",
         "/cockpit-v2/integrations/mcp",
+        "/cockpit-v2/integrations/add",
         "/cockpit-v2/integrations/doctor",
     ),
 )

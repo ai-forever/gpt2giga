@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from gpt2giga.protocols.normalized.models import (
+from gpt2giga_harness.protocols.normalized import (
     NormalizedChoice,
     NormalizedError,
     NormalizedMessage,

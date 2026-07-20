@@ -5,6 +5,24 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.3.0a1] - 2026-07-20
+
+### Добавлено
+- **Provider-neutral providers и routes**: добавлены пользовательские профили для OpenAI-, Anthropic- и Gemini-compatible API, отдельные route/model defaults, reference-only authentication, bounded health/model discovery и опциональный preset `gpt2giga` вместо обязательной связи Harness с gateway.
+- **Безопасная миграция providers**: legacy defaults можно преобразовать только после deterministic dry-run и проверенного pre-upgrade backup; операция повторно проверяет исходное состояние под lock, сохраняет журнал и допускает rollback только восстановлением исходного архива.
+- **Библиотека Skills, Plugins и MCP**: добавлены offline-first каталог, portable Skills, first-party starter pack, Codex/Claude/Gemini MCP targets, Codex/Claude Plugins, Gemini extensions и preview SDK для внешних adapter/integration packages.
+- **Федеративное обнаружение интеграций**: metadata из `skills.sh` и NeuralDeep можно импортировать как immutable Skill или exact MCP plan; catalog presence, popularity и correlation никогда не дают install authority и не заменяют pin/integrity официального источника.
+- **Target-scoped installation lifecycle**: single-target и all-Harness flows связывают preview и approval с точными package/artifact hashes, scope, permissions и target ownership, затем предоставляют verification, update, compensation, recovery и rollback с безопасным `managed_home` по умолчанию.
+- **Generated documents в Cockpit**: сохранённые файлы можно скачать через bounded SDK endpoint, а self-contained HTML с scripts открыть в sandboxed preview без выдачи forms, external network или same-origin authority.
+
+### Изменено
+- **Integrations как Plugin Library**: Cockpit объединяет встроенные и внешние Skills/MCP с отдельными source filters, target-aware status и явными Add/preview/apply действиями; Settings управляет providers, routes и models через backend-authoritative read-back.
+- **Provider-neutral base package**: базовый `gpt2giga-harness` больше не устанавливает gateway и GigaChat SDK неявно; интеграция с текущим gateway остаётся точным optional extra `gpt2giga==0.2.4a1`.
+
+### Исправлено
+- **Workbench и сообщения**: исправлены скачивание generated files, full-response Copy/Edit actions, document scrolling, изменяемый composer и layout shell на desktop/mobile.
+- **Plugin lifecycle**: connection state сбрасывается после disconnect/reload, а загрузка большой библиотеки использует bounded projections без лишней повторной работы.
+
 ## [0.2.0a1] - 2026-07-18
 
 ### Добавлено
@@ -120,6 +138,7 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
+[0.3.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.2.0a1...gpt2giga-harness-v0.3.0a1
 [0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.1.0b1...gpt2giga-harness-v0.2.0a1
 [0.1.0b1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.1.0b1
 [0.0.1a3]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a2...gpt2giga-harness-v0.0.1a3

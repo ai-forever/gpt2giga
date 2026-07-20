@@ -623,10 +623,12 @@ def test_generated_image_download_uses_local_proxy_gigachat_config(monkeypatch):
 
     monkeypatch.setattr(
         direct_chat_module,
-        "load_config",
-        lambda: SimpleNamespace(gigachat_settings=FakeSettings()),
+        "require_gpt2giga_preset",
+        lambda: SimpleNamespace(
+            client_type=FakeClient,
+            load_config=lambda: SimpleNamespace(gigachat_settings=FakeSettings()),
+        ),
     )
-    monkeypatch.setattr(direct_chat_module, "GigaChat", FakeClient)
 
     assert direct_chat_module._download_gigachat_image("image-file-1") == (
         "encoded-image"
@@ -638,6 +640,105 @@ def test_generated_image_download_uses_local_proxy_gigachat_config(monkeypatch):
             "verify_ssl_certs": False,
         },
         "file_id": "image-file-1",
+        "closed": True,
+    }
+
+
+def test_direct_chat_streams_generated_document_from_response_messages(
+    monkeypatch, tmp_path
+):
+    emitted = []
+    document = base64.b64encode(b"<html><body>report</body></html>").decode("ascii")
+
+    def fake_stream_sse_json(*args, **kwargs):
+        file_event = {
+            "model": "GigaChat-3.5-432B-A28B:32.9.23.6",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "files": [
+                                {
+                                    "id": "document-file-1",
+                                    "mime": "text/html",
+                                    "target": "doc",
+                                }
+                            ]
+                        }
+                    ],
+                }
+            ],
+        }
+        yield file_event
+        yield file_event
+        yield {"choices": [{"delta": {"content": "ready"}, "finish_reason": "stop"}]}
+
+    monkeypatch.setattr(proxy, "stream_sse_json", fake_stream_sse_json)
+    monkeypatch.setattr(
+        "gpt2giga_harness.harnesses.direct_chat._download_gigachat_file",
+        lambda file_id: document,
+    )
+
+    result = DirectChatHarness().run(
+        HarnessRequest(
+            prompt="create a report",
+            stream=True,
+            run_id="run-document-1",
+            event_sink=emitted.append,
+        ),
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            data_dir=str(tmp_path),
+        ),
+    )
+
+    generated = [event for event in emitted if event.type == "generated_file"]
+    assert len(generated) == 1
+    assert generated[0].payload["file_id"] == "document-file-1"
+    assert generated[0].payload["mime_type"] == "text/html"
+    assert generated[0].payload["target"] == "doc"
+    assert generated[0].payload["download_url"].startswith("/api/files/generated/")
+    assert "preview_url" not in generated[0].payload
+    stored_files = list((tmp_path / "generated-files").rglob("*.html"))
+    assert len(stored_files) == 1
+    assert stored_files[0].read_bytes() == b"<html><body>report</body></html>"
+    assert result.text == "ready"
+
+
+def test_generated_document_download_uses_local_proxy_gigachat_config(monkeypatch):
+    captured = {}
+
+    class FakeSettings:
+        def model_dump(self):
+            return {"credentials": "configured"}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured["settings"] = kwargs
+
+        def get_image(self, file_id):
+            captured["file_id"] = file_id
+            return SimpleNamespace(content="encoded-document")
+
+        def close(self):
+            captured["closed"] = True
+
+    monkeypatch.setattr(
+        direct_chat_module,
+        "require_gpt2giga_preset",
+        lambda: SimpleNamespace(
+            client_type=FakeClient,
+            load_config=lambda: SimpleNamespace(gigachat_settings=FakeSettings()),
+        ),
+    )
+
+    assert direct_chat_module._download_gigachat_file("document-file-1") == (
+        "encoded-document"
+    )
+    assert captured == {
+        "settings": {"credentials": "configured"},
+        "file_id": "document-file-1",
         "closed": True,
     }
 

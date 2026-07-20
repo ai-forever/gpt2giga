@@ -113,6 +113,11 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/files/preview"),
         ("GET", "/api/harnesses"),
         ("GET", "/api/health"),
+        ("GET", "/api/integrations"),
+        ("GET", "/api/integrations/search"),
+        ("GET", "/api/integrations/skills/preview"),
+        ("GET", "/api/integrations/flows/{flow_id}"),
+        ("GET", "/api/integrations/groups/{group_id}"),
         ("GET", "/api/models"),
         ("GET", "/api/native/processes/{process_id}"),
         ("GET", "/api/native/processes/{process_id}/output"),
@@ -125,6 +130,8 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/project/memory"),
         ("GET", "/api/project/presets"),
         ("GET", "/api/project/state"),
+        ("GET", "/api/providers"),
+        ("GET", "/api/providers/{provider_id}"),
         ("GET", "/api/provider-handoffs/{harness_id}/preview"),
         ("GET", "/api/runs"),
         ("GET", "/api/runs/updates/stream"),
@@ -190,7 +197,10 @@ _EVENT_LOOP_SAFE = frozenset(
 _NETWORK = frozenset(
     {
         ("GET", "/api/health"),
+        ("GET", "/api/integrations/search"),
         ("GET", "/api/models"),
+        ("POST", "/api/providers/{provider_id}/discover"),
+        ("POST", "/api/providers/{provider_id}/test"),
     }
 )
 _SQLITE_PREFIXES = (
@@ -210,6 +220,7 @@ _SUBPROCESS_PREFIXES = (
 _SUBPROCESS_EXACT = frozenset(
     {
         ("POST", "/api/project/init"),
+        ("POST", "/api/integrations/git/inspect"),
         ("POST", "/api/run"),
         ("POST", "/api/tools/sync"),
         ("POST", "/api/runs/{run_id}/apply"),
@@ -247,6 +258,8 @@ _SYNC_DURABLE_SUBMISSIONS = frozenset(
 )
 _NATIVE_ASYNC = frozenset(
     {
+        ("GET", "/api/integrations/search"),
+        ("POST", "/api/integrations/git/inspect"),
         ("POST", "/api/native/processes/{process_id}/input"),
     }
 )

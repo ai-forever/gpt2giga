@@ -56,6 +56,24 @@ from gpt2giga_harness.editor import (
     workspace_for_run,
 )
 from gpt2giga_harness.execution import ExecutionTransport
+from gpt2giga_harness.integration_flows import (
+    IntegrationFlowConflictError,
+    IntegrationFlowError,
+    IntegrationFlowNotFoundError,
+    IntegrationFlowService,
+    integration_flow_record_to_dict,
+)
+from gpt2giga_harness.integration_groups import (
+    GroupedIntegrationService,
+    integration_group_record_to_dict,
+)
+from gpt2giga_harness.integration_scaffold import scaffold_integration_package
+from gpt2giga_harness.integration_sdk import (
+    integration_conformance_report_to_dict,
+    load_extension_target_document,
+    load_integration_package_document,
+    run_integration_conformance,
+)
 from gpt2giga_harness.executables import (
     executable_resolution_to_dict,
     set_user_executable,
@@ -106,6 +124,12 @@ from gpt2giga_harness.project_memory import (
     ProjectMemoryNotFoundError,
     memory_entry_to_dict,
 )
+from gpt2giga_harness.provider_settings import (
+    ProviderRegistryConflict,
+    ProviderSettingsNotFoundError,
+    ProviderSettingsService,
+)
+from gpt2giga_harness.provider_migration import ProviderMigrationService
 from gpt2giga_harness.preflight import (
     build_preflight_report,
     format_preflight_block_message,
@@ -233,8 +257,20 @@ def main(argv: list[str] | None = None) -> int:
     except ProjectMemoryNotFoundError as exc:
         print(f"Unknown memory: {exc.args[0]}", file=sys.stderr)
         return 2
+    except ProviderSettingsNotFoundError as exc:
+        print(f"Unknown provider: {exc.args[0]}", file=sys.stderr)
+        return 2
+    except ProviderRegistryConflict as exc:
+        print(f"Provider registry conflict: {exc}", file=sys.stderr)
+        return 2
     except EvalSpecNotFoundError as exc:
         print(f"Unknown eval: {exc.args[0]}", file=sys.stderr)
+        return 2
+    except IntegrationFlowNotFoundError as exc:
+        print(f"Unknown integration flow: {exc.args[0]}", file=sys.stderr)
+        return 2
+    except (IntegrationFlowConflictError, IntegrationFlowError) as exc:
+        print(str(exc), file=sys.stderr)
         return 2
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
@@ -287,6 +323,162 @@ def build_parser() -> argparse.ArgumentParser:
     config_unset = config_subparsers.add_parser("unset")
     config_unset.add_argument("key")
     config_unset.set_defaults(handler=_handle_config_unset)
+
+    provider = subparsers.add_parser("provider")
+    provider_subparsers = provider.add_subparsers(dest="provider_command")
+    provider_list = provider_subparsers.add_parser("list")
+    provider_list.add_argument("--json", action="store_true")
+    provider_list.set_defaults(handler=_handle_provider_list)
+    provider_show = provider_subparsers.add_parser("show")
+    provider_show.add_argument("provider_id")
+    provider_show.add_argument("--json", action="store_true")
+    provider_show.set_defaults(handler=_handle_provider_show)
+    provider_add = provider_subparsers.add_parser("add")
+    provider_add.add_argument("provider_id")
+    provider_add.add_argument("--name", required=True)
+    provider_add.add_argument(
+        "--protocol",
+        required=True,
+        choices=("openai_compatible", "anthropic_compatible", "gemini_compatible"),
+    )
+    provider_add.add_argument("--dialect", default=None)
+    provider_add.add_argument("--base-url", required=True)
+    provider_add.add_argument("--route-prefix", default=None)
+    _add_provider_auth_arguments(provider_add, optional=False)
+    _add_provider_model_arguments(provider_add)
+    provider_add.add_argument("--offline", action="store_true")
+    provider_add.add_argument("--disabled", action="store_true")
+    provider_add.add_argument("--json", action="store_true")
+    provider_add.set_defaults(handler=_handle_provider_add)
+    provider_edit = provider_subparsers.add_parser("edit")
+    provider_edit.add_argument("provider_id")
+    provider_edit.add_argument("--expected-revision", type=int, required=True)
+    provider_edit.add_argument("--name", default=None)
+    provider_edit.add_argument(
+        "--protocol",
+        choices=("openai_compatible", "anthropic_compatible", "gemini_compatible"),
+        default=None,
+    )
+    provider_edit.add_argument("--dialect", default=None)
+    provider_edit.add_argument("--base-url", default=None)
+    provider_edit.add_argument("--route-prefix", default=None)
+    _add_provider_auth_arguments(provider_edit, optional=True)
+    _add_provider_model_arguments(provider_edit)
+    provider_edit.add_argument(
+        "--enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    provider_edit.add_argument(
+        "--offline",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    provider_edit.add_argument("--json", action="store_true")
+    provider_edit.set_defaults(handler=_handle_provider_edit)
+    for command, handler in (
+        ("test", _handle_provider_test),
+        ("discover", _handle_provider_discover),
+    ):
+        provider_probe = provider_subparsers.add_parser(command)
+        provider_probe.add_argument("provider_id")
+        provider_probe.add_argument("--json", action="store_true")
+        provider_probe.set_defaults(handler=handler)
+    provider_migrate = provider_subparsers.add_parser(
+        "migrate-legacy", aliases=("migrate",)
+    )
+    provider_migrate.add_argument("--backup", default=None)
+    provider_migrate.add_argument("--dry-run", action="store_true")
+    provider_migrate.add_argument("--json", action="store_true")
+    provider_migrate.set_defaults(handler=_handle_provider_migrate)
+
+    integration = subparsers.add_parser("integration")
+    integration_subparsers = integration.add_subparsers(dest="integration_command")
+    integration_list = integration_subparsers.add_parser("list")
+    integration_list.add_argument("--json", action="store_true")
+    integration_list.set_defaults(handler=_handle_integration_list)
+    integration_preview = integration_subparsers.add_parser("preview")
+    integration_preview.add_argument(
+        "--source",
+        required=True,
+        choices=("catalog", "marketplace", "git", "local", "package", "raw_descriptor"),
+    )
+    integration_preview.add_argument("--catalog-id")
+    integration_preview.add_argument("--manifest")
+    integration_preview.add_argument("--target", required=True)
+    integration_preview.add_argument(
+        "--scope",
+        required=True,
+        choices=("managed_home", "project", "user_home"),
+    )
+    integration_preview.add_argument("--workspace")
+    integration_preview.add_argument("--package-id")
+    integration_preview.add_argument("--configuration-json", default="{}")
+    integration_preview.add_argument("--json", action="store_true")
+    integration_preview.set_defaults(handler=_handle_integration_preview)
+    integration_status = integration_subparsers.add_parser("status")
+    integration_status.add_argument("flow_id")
+    integration_status.add_argument("--json", action="store_true")
+    integration_status.set_defaults(handler=_handle_integration_status)
+    integration_apply = integration_subparsers.add_parser("apply")
+    integration_apply.add_argument("flow_id")
+    integration_apply.add_argument("--plan-id", required=True)
+    integration_apply.add_argument("--authority", required=True)
+    integration_apply.add_argument("--allow-network", action="store_true")
+    integration_apply.add_argument("--allow-user-home", action="store_true")
+    integration_apply.add_argument("--ack-native-consent", action="store_true")
+    integration_apply.add_argument("--json", action="store_true")
+    integration_apply.set_defaults(handler=_handle_integration_apply)
+    integration_rollback = integration_subparsers.add_parser("rollback")
+    integration_rollback.add_argument("flow_id")
+    integration_rollback.add_argument("--json", action="store_true")
+    integration_rollback.set_defaults(handler=_handle_integration_rollback)
+    integration_group_preview = integration_subparsers.add_parser("group-preview")
+    integration_group_preview.add_argument("--catalog-id", required=True)
+    integration_group_preview.add_argument(
+        "--scope",
+        default="managed_home",
+        choices=("managed_home", "project"),
+    )
+    integration_group_preview.add_argument("--workspace")
+    integration_group_preview.add_argument("--configuration-json", default="{}")
+    integration_group_preview.add_argument("--json", action="store_true")
+    integration_group_preview.set_defaults(handler=_handle_integration_group_preview)
+    integration_group_status = integration_subparsers.add_parser("group-status")
+    integration_group_status.add_argument("group_id")
+    integration_group_status.add_argument("--json", action="store_true")
+    integration_group_status.set_defaults(handler=_handle_integration_group_status)
+    integration_group_apply = integration_subparsers.add_parser("group-apply")
+    integration_group_apply.add_argument("group_id")
+    integration_group_apply.add_argument("--plan-id", required=True)
+    integration_group_apply.add_argument("--authority", required=True)
+    integration_group_apply.add_argument("--allow-network", action="store_true")
+    integration_group_apply.add_argument("--allow-user-home", action="store_true")
+    integration_group_apply.add_argument("--ack-native-consent", action="store_true")
+    integration_group_apply.add_argument("--json", action="store_true")
+    integration_group_apply.set_defaults(handler=_handle_integration_group_apply)
+    for command, handler in (
+        ("group-recover", _handle_integration_group_recover),
+        ("group-rollback", _handle_integration_group_rollback),
+    ):
+        integration_group_action = integration_subparsers.add_parser(command)
+        integration_group_action.add_argument("group_id")
+        integration_group_action.add_argument("--json", action="store_true")
+        integration_group_action.set_defaults(handler=handler)
+    integration_scaffold = integration_subparsers.add_parser("scaffold")
+    integration_scaffold.add_argument("package_id")
+    integration_scaffold.add_argument("--output", type=Path, required=True)
+    integration_scaffold.set_defaults(handler=_handle_integration_scaffold)
+    integration_conformance = integration_subparsers.add_parser("conformance")
+    integration_conformance.add_argument("manifest", type=Path)
+    integration_conformance.add_argument(
+        "--target-descriptor",
+        action="append",
+        default=[],
+        type=Path,
+    )
+    integration_conformance.add_argument("--json", action="store_true")
+    integration_conformance.set_defaults(handler=_handle_integration_conformance)
 
     init = subparsers.add_parser("init")
     init.add_argument("--workspace", default=None)
@@ -432,6 +624,11 @@ def build_parser() -> argparse.ArgumentParser:
     state_restore.add_argument("--replace", action="store_true")
     state_restore.add_argument("--json", action="store_true")
     state_restore.set_defaults(handler=_handle_state_restore)
+    state_migrate_providers = state_subparsers.add_parser("migrate-providers")
+    state_migrate_providers.add_argument("--backup", default=None)
+    state_migrate_providers.add_argument("--dry-run", action="store_true")
+    state_migrate_providers.add_argument("--json", action="store_true")
+    state_migrate_providers.set_defaults(handler=_handle_provider_migrate)
 
     worker = subparsers.add_parser("worker", parents=[common])
     worker_subparsers = worker.add_subparsers(dest="worker_command")
@@ -893,6 +1090,431 @@ def _handle_config_unset(args: argparse.Namespace, config: HarnessConfig) -> int
     else:
         print(f"No override configured for {args.key} in {path}")
     return 0
+
+
+def _handle_integration_list(args: argparse.Namespace, config: HarnessConfig) -> int:
+    payload = IntegrationFlowService(config.data_dir).inventory()
+    if args.json:
+        _print_json(payload)
+    else:
+        print(
+            "Integration sources: "
+            + ", ".join(item["id"] for item in payload["sources"])
+        )
+        print(f"Targets: {len(payload['targets'])}")
+        print(f"Catalog entries: {len(payload['catalog'])}")
+        print(f"Recent flows: {len(payload['flows'])}")
+    return 0
+
+
+def _handle_integration_preview(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    try:
+        configuration = json.loads(args.configuration_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("configuration-json must be valid JSON") from exc
+    manifest = None
+    if args.manifest:
+        try:
+            manifest = json.loads(
+                Path(args.manifest).expanduser().read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("manifest must be a readable JSON object") from exc
+    payload = IntegrationFlowService(config.data_dir).preview(
+        {
+            "source": args.source,
+            "catalog_id": args.catalog_id,
+            "manifest": manifest,
+            "target_id": args.target,
+            "scope": args.scope,
+            "workspace": args.workspace,
+            "package_id": args.package_id,
+            "configuration": configuration,
+        }
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        plan = payload["plan"]
+        print(f"Flow: {payload['flow']['id']}")
+        print(f"Plan: {plan['plan_id']}")
+        print(f"Package: {plan['package']['id']}@{plan['package']['version']}")
+        print(f"Target: {plan['target']['id']} ({plan['target']['scope']})")
+        print(f"Risk: {plan['risk']['decision']}")
+        print(
+            "Next: integration apply "
+            f"{payload['flow']['id']} --plan-id {plan['plan_id']} "
+            "--authority <operator>"
+        )
+    return 0
+
+
+def _handle_integration_status(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = {
+        "flow": integration_flow_record_to_dict(
+            IntegrationFlowService(config.data_dir).get(args.flow_id)
+        )
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        flow = payload["flow"]
+        print(f"Flow: {flow['id']}")
+        print(f"Status: {flow['status']}")
+        print(f"Verification: {flow['verification_status']}")
+    return 0
+
+
+def _handle_integration_apply(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = IntegrationFlowService(config.data_dir).apply(
+        args.flow_id,
+        plan_id=args.plan_id,
+        authority=args.authority,
+        allow_network=args.allow_network,
+        allow_user_home=args.allow_user_home,
+        native_consent_acknowledged=args.ack_native_consent,
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Flow: {payload['flow']['id']}")
+        print(f"Status: {payload['flow']['status']}")
+        print(f"Verification: {payload['flow']['verification_status']}")
+    return 0
+
+
+def _handle_integration_rollback(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = IntegrationFlowService(config.data_dir).rollback(args.flow_id)
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Flow: {payload['flow']['id']}")
+        print(f"Status: {payload['flow']['status']}")
+    return 0
+
+
+def _handle_integration_group_preview(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    try:
+        configuration = json.loads(args.configuration_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("configuration-json must be valid JSON") from exc
+    payload = GroupedIntegrationService(config.data_dir).preview(
+        {
+            "source": "catalog",
+            "catalog_id": args.catalog_id,
+            "scope": args.scope,
+            "workspace": args.workspace,
+            "configuration": configuration,
+            "target_mode": "all_supported",
+        }
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Group: {payload['group']['id']}")
+        print(f"Plan: {payload['plan']['plan_id']}")
+        print("Targets: " + ", ".join(payload["plan"]["target_ids"]))
+        print(
+            "Next: integration group-apply "
+            f"{payload['group']['id']} --plan-id {payload['plan']['plan_id']} "
+            "--authority <operator>"
+        )
+    return 0
+
+
+def _handle_integration_group_status(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = {
+        "group": integration_group_record_to_dict(
+            GroupedIntegrationService(config.data_dir).get(args.group_id)
+        )
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Group: {payload['group']['id']}")
+        print(f"Status: {payload['group']['status']}")
+    return 0
+
+
+def _handle_integration_group_apply(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = GroupedIntegrationService(config.data_dir).apply(
+        args.group_id,
+        plan_id=args.plan_id,
+        authority=args.authority,
+        allow_network=args.allow_network,
+        allow_user_home=args.allow_user_home,
+        native_consent_acknowledged=args.ack_native_consent,
+    )
+    return _print_group_result(payload, json_output=args.json)
+
+
+def _handle_integration_group_recover(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = GroupedIntegrationService(config.data_dir).recover(args.group_id)
+    return _print_group_result(payload, json_output=args.json)
+
+
+def _handle_integration_group_rollback(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = GroupedIntegrationService(config.data_dir).rollback(args.group_id)
+    return _print_group_result(payload, json_output=args.json)
+
+
+def _print_group_result(payload: dict[str, Any], *, json_output: bool) -> int:
+    if json_output:
+        _print_json(payload)
+    else:
+        print(f"Group: {payload['group']['id']}")
+        print(f"Status: {payload['group']['status']}")
+        if payload["group"]["repair_actions"]:
+            print("Repair: " + ", ".join(payload["group"]["repair_actions"]))
+    return 0
+
+
+def _handle_integration_scaffold(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    try:
+        result = scaffold_integration_package(args.package_id, args.output)
+    except FileExistsError as exc:
+        raise ValueError(str(exc)) from exc
+    print(f"Created integration scaffold: {result.root}")
+    return 0
+
+
+def _handle_integration_conformance(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    package = load_integration_package_document(args.manifest)
+    descriptors = tuple(
+        load_extension_target_document(path) for path in args.target_descriptor
+    )
+    report = run_integration_conformance(
+        package,
+        target_descriptors=descriptors,
+    )
+    payload = integration_conformance_report_to_dict(report)
+    if args.json:
+        _print_json(payload)
+    else:
+        print(
+            f"Integration {report.package_id} {report.package_version}: "
+            f"{'passed' if report.ok else 'failed'}"
+        )
+        for result in report.results:
+            print(f"- {result.claim}: {result.status} ({result.detail})")
+    return 0 if report.ok else 1
+
+
+def _handle_provider_list(args: argparse.Namespace, config: HarnessConfig) -> int:
+    payload = ProviderSettingsService(config.data_dir).list()
+    if args.json:
+        _print_json(payload)
+    else:
+        _print_provider_table(payload["providers"])
+    return 0
+
+
+def _handle_provider_show(args: argparse.Namespace, config: HarnessConfig) -> int:
+    provider = ProviderSettingsService(config.data_dir).get(args.provider_id)
+    if args.json:
+        _print_json(provider)
+    else:
+        _print_provider_detail(provider)
+    return 0
+
+
+def _handle_provider_add(args: argparse.Namespace, config: HarnessConfig) -> int:
+    service = ProviderSettingsService(config.data_dir)
+    result = service.create(
+        args.provider_id,
+        _provider_payload_from_args(args, create=True),
+    )
+    if args.json:
+        _print_json(
+            {"saved": True, "provider": result.provider, "effects": result.effects}
+        )
+    else:
+        _print_provider_detail(result.provider)
+    return 0
+
+
+def _handle_provider_edit(args: argparse.Namespace, config: HarnessConfig) -> int:
+    service = ProviderSettingsService(config.data_dir)
+    result = service.update(
+        args.provider_id,
+        _provider_payload_from_args(args, create=False),
+        expected_revision=args.expected_revision,
+    )
+    if args.json:
+        _print_json(
+            {"saved": True, "provider": result.provider, "effects": result.effects}
+        )
+    else:
+        _print_provider_detail(result.provider)
+    return 0
+
+
+def _handle_provider_test(args: argparse.Namespace, config: HarnessConfig) -> int:
+    return _handle_provider_probe(args, config, discover_models=False)
+
+
+def _handle_provider_discover(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    return _handle_provider_probe(args, config, discover_models=True)
+
+
+def _handle_provider_probe(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+    *,
+    discover_models: bool,
+) -> int:
+    payload = ProviderSettingsService(config.data_dir).check(
+        args.provider_id,
+        discover_models=discover_models,
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        health = payload["health"]
+        print(f"Provider: {payload['provider_id']}")
+        print(f"Health: {health['status']}")
+        print(f"Discovery: {health['discovery_status']}")
+        if health["failure_kind"]:
+            print(
+                f"Failure: {health['failure_kind']} ({health['reason_code']})",
+                file=sys.stderr,
+            )
+        for model in health["models"]:
+            print(f"- {model['model']} [{model['source']}]")
+    return 0 if payload["health"]["status"] == "ready" else 1
+
+
+def _handle_provider_migrate(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    service = ProviderMigrationService(config.data_dir, config)
+    if args.dry_run:
+        payload = service.plan().to_dict()
+    else:
+        if args.backup is None:
+            raise ValueError("provider migration requires --backup or --dry-run")
+        payload = service.migrate(args.backup).to_dict()
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Provider migration: {payload['status']}")
+        print(f"Providers: {', '.join(payload['provider_ids'])}")
+        print(f"Routes: {payload['route_count']}")
+        if payload.get("applied"):
+            print(f"Pre-upgrade backup SHA-256: {payload['backup_sha256']}")
+        print("Rollback: stop Harness and restore the verified pre-upgrade archive.")
+    return 0
+
+
+def _provider_payload_from_args(
+    args: argparse.Namespace,
+    *,
+    create: bool,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for argument, field in (
+        ("name", "display_name"),
+        ("protocol", "protocol"),
+        ("dialect", "dialect"),
+        ("base_url", "base_url"),
+        ("route_prefix", "route_prefix"),
+    ):
+        value = getattr(args, argument, None)
+        if value is not None:
+            payload[field] = value
+    authentication = getattr(args, "authentication", None)
+    auth_values = {
+        "ownership": authentication,
+        "reference_kind": getattr(args, "secret_reference_kind", None),
+        "reference_name": getattr(args, "secret_reference_name", None),
+        "service": getattr(args, "keychain_service", None),
+        "account": getattr(args, "keychain_account", None),
+    }
+    if create or any(value is not None for value in auth_values.values()):
+        payload["authentication"] = {
+            key: value for key, value in auth_values.items() if value is not None
+        }
+    defaults = {
+        purpose: getattr(args, f"{purpose}_model", None)
+        for purpose in ("coding", "title", "evaluation", "fallback")
+    }
+    if any(value is not None for value in defaults.values()):
+        payload["default_models"] = {
+            purpose: value for purpose, value in defaults.items() if value is not None
+        }
+    if create:
+        payload["enabled"] = not args.disabled
+        payload["offline"] = args.offline
+    else:
+        if args.enabled is not None:
+            payload["enabled"] = args.enabled
+        if args.offline is not None:
+            payload["offline"] = args.offline
+    return payload
+
+
+def _add_provider_auth_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    optional: bool,
+) -> None:
+    parser.add_argument(
+        "--authentication",
+        choices=("secret_reference", "provider_native", "none"),
+        default=None if optional else "secret_reference",
+    )
+    parser.add_argument(
+        "--secret-reference-kind",
+        choices=("environment", "keychain"),
+        default=None if optional else "environment",
+    )
+    parser.add_argument("--secret-reference-name", default=None)
+    parser.add_argument("--keychain-service", default=None)
+    parser.add_argument("--keychain-account", default=None)
+
+
+def _add_provider_model_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--coding-model", default=None)
+    parser.add_argument("--title-model", default=None)
+    parser.add_argument("--evaluation-model", default=None)
+    parser.add_argument("--fallback-model", default=None)
 
 
 def _handle_harness_inspect(args: argparse.Namespace, config: HarnessConfig) -> int:
@@ -2452,6 +3074,32 @@ def _print_table(rows: list[dict[str, Any]]) -> None:
             f"{row['id']:<16}{row['kind']:<14}{row['status']:<12}"
             f"{native:<8}{row['description']}"
         )
+
+
+def _print_provider_table(rows: list[dict[str, Any]]) -> None:
+    print(f"{'ID':<24}{'Protocol':<24}{'Status':<16}Name")
+    for row in rows:
+        health = row.get("health") or {}
+        status = "disabled" if not row["enabled"] else health.get("status", "unchecked")
+        print(
+            f"{row['id'][:23]:<24}{row['protocol'][:23]:<24}"
+            f"{status[:15]:<16}{row['display_name']}"
+        )
+
+
+def _print_provider_detail(provider: Mapping[str, Any]) -> None:
+    print(f"Provider: {provider['display_name']} ({provider['id']})")
+    print(f"Protocol: {provider['protocol']} / {provider['dialect']}")
+    print(f"Endpoint: {provider['effective_base_url']}")
+    print(f"Source: {provider['source']}")
+    print(
+        "Authentication: "
+        f"{provider['authentication']['ownership']} "
+        f"({provider['authentication']['reference_kind'] or 'provider-owned'})"
+    )
+    print(f"Registry revision: {provider['registry_revision']}")
+    for purpose, model in provider["default_models"].items():
+        print(f"- {purpose}: {model}")
 
 
 def _print_preset_table(rows: list[dict[str, Any]]) -> None:

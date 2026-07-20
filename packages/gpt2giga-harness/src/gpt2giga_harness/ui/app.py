@@ -83,6 +83,9 @@ from gpt2giga_harness.editor import (
     workspace_for_run,
 )
 from gpt2giga_harness.execution import ExecutionTransport
+from gpt2giga_harness.integration_flows import IntegrationFlowService
+from gpt2giga_harness.integration_groups import GroupedIntegrationService
+from gpt2giga_harness.skill_library import SkillLibraryService
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
     NativePromptDelivery,
@@ -144,6 +147,7 @@ from gpt2giga_harness.preflight import (
     format_preflight_block_message,
     preflight_report_to_dict,
 )
+from gpt2giga_harness.provider_settings import ProviderSettingsService
 from gpt2giga_harness.pr_artifacts import (
     build_pr_artifact,
     create_pr_branch,
@@ -248,6 +252,7 @@ from gpt2giga_harness.ui.routers.approvals import router as approvals_router
 from gpt2giga_harness.ui.routers.cockpit import router as cockpit_router
 from gpt2giga_harness.ui.routers.evaluate import router as evaluate_router
 from gpt2giga_harness.ui.routers.files import create_file_preview_router
+from gpt2giga_harness.ui.routers.integrations import router as integrations_router
 from gpt2giga_harness.ui.routers.provider_handoffs import (
     create_provider_handoff_router,
 )
@@ -296,6 +301,10 @@ def create_app(
     native_index_store: NativeSessionIndexStore | None = None,
     native_process_manager: NativeProcessManager | None = None,
     runtime_store: RuntimeCoordinationStore | None = None,
+    provider_settings_service: ProviderSettingsService | None = None,
+    integration_flow_service: IntegrationFlowService | None = None,
+    grouped_integration_service: GroupedIntegrationService | None = None,
+    skill_library_service: SkillLibraryService | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
@@ -323,6 +332,22 @@ def create_app(
     eval_store = FilesystemHarnessEvalStore(config.data_dir)
     memory_store = FilesystemProjectMemoryStore()
     settings_store = HarnessSettingsStore(config.data_dir, config)
+    provider_settings_service = provider_settings_service or ProviderSettingsService(
+        config.data_dir
+    )
+    integration_flow_service = integration_flow_service or IntegrationFlowService(
+        config.data_dir
+    )
+    skill_library_service = skill_library_service or SkillLibraryService(
+        config.data_dir
+    )
+    grouped_integration_service = (
+        grouped_integration_service
+        or GroupedIntegrationService(
+            config.data_dir,
+            flow_service=integration_flow_service,
+        )
+    )
     runner = HarnessSessionRunner(
         registry=registry,
         config=config,
@@ -404,6 +429,10 @@ def create_app(
     app.state.harness_async_diagnostics = async_diagnostics
     app.state.harness_run_event_broker = run_event_broker
     app.state.harness_settings_store = settings_store
+    app.state.harness_provider_settings_service = provider_settings_service
+    app.state.harness_integration_flow_service = integration_flow_service
+    app.state.harness_grouped_integration_service = grouped_integration_service
+    app.state.harness_skill_library_service = skill_library_service
 
     def _approval_gate(
         action: PermissionAction,
@@ -3131,6 +3160,7 @@ def create_app(
     app.include_router(approvals_router)
     app.include_router(cockpit_router)
     app.include_router(evaluate_router)
+    app.include_router(integrations_router)
     app.include_router(tools_router)
     app.include_router(workflows_router)
     app.include_router(runs_router)

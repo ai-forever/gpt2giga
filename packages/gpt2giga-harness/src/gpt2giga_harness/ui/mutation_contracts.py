@@ -134,6 +134,23 @@ CONFORMANCE_EVIDENCE = {
             ),
         ),
         ConformanceEvidence(
+            id="provider.settings",
+            behaviors=frozenset(
+                {
+                    ConformanceBehavior.AUTHENTICATION,
+                    ConformanceBehavior.ALLOW,
+                    ConformanceBehavior.DENY,
+                    ConformanceBehavior.STALE_OR_REBOUND,
+                    ConformanceBehavior.REDACTION,
+                }
+            ),
+            test_nodes=(
+                "tests/harness/test_settings_api.py::test_provider_settings_api_crud_is_reference_only_and_optimistic",
+                "tests/harness/test_settings_api.py::test_provider_settings_api_returns_field_errors_before_persistence",
+                "tests/harness/test_settings_api.py::test_provider_settings_api_probe_is_explicit_bounded_and_content_free",
+            ),
+        ),
+        ConformanceEvidence(
             id="external.editor",
             behaviors=frozenset(
                 {
@@ -234,6 +251,15 @@ CONFORMANCE_EVIDENCE = {
             ),
         ),
         ConformanceEvidence(
+            id="integrations.flow",
+            behaviors=frozenset(ConformanceBehavior),
+            test_nodes=(
+                "tests/harness/test_integrations_api.py::test_integration_api_keeps_preview_apply_progress_and_rollback_equivalent",
+                "tests/harness/test_integrations_api.py::test_integration_api_validates_fields_and_never_returns_secret_payloads",
+                "tests/harness/test_integration_flows.py::test_flow_rejects_secret_values_stale_approval_and_records_failure",
+            ),
+        ),
+        ConformanceEvidence(
             id="auth.bootstrap",
             behaviors=frozenset(
                 {
@@ -258,6 +284,8 @@ _EXTERNAL = (*_AUTH, "external.selected_plan")
 _EDITOR = (*_AUTH, "external.editor")
 _NATIVE_CONTROL = (*_AUTH, "external.native_control")
 _POLICY = (*_AUTH, "policy.lifecycle")
+_PROVIDER_SETTINGS = (*_AUTH, "provider.settings")
+_INTEGRATION_FLOW = (*_AUTH, "integrations.flow")
 
 
 def _route(
@@ -339,6 +367,22 @@ MUTATION_ROUTE_CONTRACTS = (
         "local_state.patch",
         evidence=_LOCAL,
     ),
+    _route(
+        "POST",
+        "/api/providers",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "provider_settings.create",
+        evidence=_PROVIDER_SETTINGS,
+    ),
+    _route(
+        "PATCH",
+        "/api/providers/{provider_id}",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "provider_settings.update",
+        evidence=_PROVIDER_SETTINGS,
+    ),
     *_many(
         "DELETE",
         (
@@ -403,6 +447,56 @@ MUTATION_ROUTE_CONTRACTS = (
         "workflow_catalog.save",
         evidence=_OPTIMISTIC,
     ),
+    _route(
+        "POST",
+        "/api/integrations/preview",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "integration_flow.preview",
+        evidence=_INTEGRATION_FLOW,
+    ),
+    *_many(
+        "POST",
+        (
+            "/api/integrations/git/inspect",
+            "/api/integrations/git/import-skill",
+        ),
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.AUTHENTICATED_LOCAL_STATE,
+        "integration_library.reviewed_import",
+        evidence=_LOCAL,
+    ),
+    _route(
+        "POST",
+        "/api/integrations/groups/preview",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "integration_group.preview",
+        evidence=_INTEGRATION_FLOW,
+    ),
+    *_many(
+        "POST",
+        (
+            "/api/integrations/flows/{flow_id}/apply",
+            "/api/integrations/flows/{flow_id}/rollback",
+        ),
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.REVIEW_BINDING,
+        "integration_flow.exact_plan",
+        evidence=_INTEGRATION_FLOW,
+    ),
+    *_many(
+        "POST",
+        (
+            "/api/integrations/groups/{group_id}/apply",
+            "/api/integrations/groups/{group_id}/recover",
+            "/api/integrations/groups/{group_id}/rollback",
+        ),
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.REVIEW_BINDING,
+        "integration_group.exact_plan",
+        evidence=_INTEGRATION_FLOW,
+    ),
     *_many(
         "POST",
         (
@@ -452,6 +546,18 @@ MUTATION_ROUTE_CONTRACTS = (
         EnforcementControl.EXPLICIT_OPERATOR_ACTION,
         "native_process.control",
         evidence=_NATIVE_CONTROL,
+    ),
+    *_many(
+        "POST",
+        (
+            "/api/providers/{provider_id}/test",
+            "/api/providers/{provider_id}/discover",
+        ),
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.EXPLICIT_OPERATOR_ACTION,
+        "provider_settings.probe",
+        actions=(PermissionAction.NETWORK_CONNECT,),
+        evidence=_PROVIDER_SETTINGS,
     ),
     _route(
         "DELETE",

@@ -7,6 +7,7 @@ import pytest
 
 from gpt2giga_harness import cli, proxy
 from gpt2giga_harness import entrypoint
+from gpt2giga_harness.codex_mcp_target import CodexMCPTargetDriver
 from gpt2giga_harness.harnesses.base import BaseHarness
 from gpt2giga_harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga_harness.harnesses.codex_cli import CodexCliHarness
@@ -345,6 +346,76 @@ def test_cli_doctor_json_passes_explicit_workspace(capsys, monkeypatch, tmp_path
     assert payload["ok"] is True
 
 
+def test_cli_integration_flow_matches_api_preview_status_and_native_apply(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(
+        CodexMCPTargetDriver,
+        "_native_get",
+        lambda _self, _root, _scope, _server_name: True,
+    )
+
+    assert cli.main(["integration", "list", "--json"]) == 0
+    inventory = json.loads(capsys.readouterr().out)
+    assert {item["id"] for item in inventory["sources"]} >= {
+        "catalog",
+        "raw_descriptor",
+    }
+
+    assert (
+        cli.main(
+            [
+                "integration",
+                "preview",
+                "--source",
+                "raw_descriptor",
+                "--package-id",
+                "cli-mcp",
+                "--target",
+                "codex-mcp",
+                "--scope",
+                "managed_home",
+                "--configuration-json",
+                '{"transport":"stdio","command":"cli-mcp"}',
+                "--json",
+            ]
+        )
+        == 0
+    )
+    preview = json.loads(capsys.readouterr().out)
+    flow_id = preview["flow"]["id"]
+    plan_id = preview["plan"]["plan_id"]
+
+    assert cli.main(["integration", "status", flow_id, "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["flow"]["status"] == (
+        "awaiting_approval"
+    )
+
+    assert (
+        cli.main(
+            [
+                "integration",
+                "apply",
+                flow_id,
+                "--plan-id",
+                plan_id,
+                "--authority",
+                "cli-operator",
+                "--ack-native-consent",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    applied = json.loads(capsys.readouterr().out)
+    assert applied["flow"]["status"] == "verified"
+    assert applied["flow"]["verification_status"] == "native_verified"
+    assert applied["flow"]["rollback_available"] is True
+
+
 def test_cli_doctor_exports_support_report_and_fails_ci_threshold(
     capsys,
     monkeypatch,
@@ -481,6 +552,85 @@ def test_cli_config_set_path_unset_round_trip(capsys, monkeypatch, tmp_path):
 def test_cli_config_rejects_non_executable_key(capsys):
     assert cli.main(["config", "set", "proxy.url", "/tmp/proxy"]) == 2
     assert "executables.<harness-id>" in capsys.readouterr().err
+
+
+def test_cli_provider_commands_share_authoritative_reference_only_registry(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    assert (
+        cli.main(
+            [
+                "provider",
+                "add",
+                "team-openai",
+                "--name",
+                "Team OpenAI",
+                "--protocol",
+                "openai_compatible",
+                "--dialect",
+                "openai-responses-v1",
+                "--base-url",
+                "https://models.example.test",
+                "--route-prefix",
+                "/v1",
+                "--secret-reference-name",
+                "TEAM_OPENAI_KEY",
+                "--coding-model",
+                "coding-model",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    created = json.loads(capsys.readouterr().out)["provider"]
+    assert created["authentication"]["reference_name"] == "TEAM_OPENAI_KEY"
+    assert created["authentication"]["value_readable"] is False
+
+    assert cli.main(["provider", "list", "--json"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert [item["id"] for item in listed["providers"]] == ["team-openai"]
+    assert listed["secret_contract"]["values_accepted"] is False
+
+    assert (
+        cli.main(
+            [
+                "provider",
+                "edit",
+                "team-openai",
+                "--expected-revision",
+                str(created["registry_revision"]),
+                "--title-model",
+                "title-model",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    updated = json.loads(capsys.readouterr().out)["provider"]
+    assert updated["default_models"] == {
+        "coding": "coding-model",
+        "title": "title-model",
+    }
+    assert updated["effects"]["structured_sessions"] == ("fork_or_new_session_required")
+
+    assert (
+        cli.main(
+            [
+                "provider",
+                "edit",
+                "team-openai",
+                "--expected-revision",
+                str(created["registry_revision"]),
+                "--name",
+                "stale",
+            ]
+        )
+        == 2
+    )
+    assert "Provider registry conflict" in capsys.readouterr().err
 
 
 def test_cli_harness_validate_json_reports_invalid_plugin(

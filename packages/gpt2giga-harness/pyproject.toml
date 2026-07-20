@@ -1,16 +1,14 @@
 [project]
 name = "gpt2giga-harness"
-version = "0.2.0a1"
+version = "0.3.0a1"
 description = "Local agentic control plane for gpt2giga"
 authors = [{ name = "Ruslan Yakupov", email = "rusyak1999@gmail.com" }]
 requires-python = ">=3.10,<4,<3.15"
 readme = "README.md"
 license = "MIT"
 dependencies = [
-    "gpt2giga==0.2.4a1",
     "anyio>=4.10,<5",
     "fastapi>=0.133.0,<1",
-    "gigachat>=0.2.2a1,<0.3.0",
     "pydantic>=2.12.0,<3",
     "pyyaml>=6.0,<7",
     "python-dateutil>=2.9.0,<3",
@@ -22,6 +20,7 @@ dependencies = [
 [project.scripts]
 gpt2giga-harness = "gpt2giga_harness.entrypoint:main"
 giga = "gpt2giga_harness.entrypoint:main"
+giga-skills-catalog-proxy = "gpt2giga_harness.skills_catalog_proxy:main"
 
 [project.entry-points."gpt2giga.harnesses"]
 direct-chat = "gpt2giga_harness.harnesses.direct_chat:DirectChatHarness"
@@ -37,7 +36,17 @@ claude-code = "gpt2giga_harness.harnesses.claude_code:ClaudeCodeHarness"
 gemini-cli = "gpt2giga_harness.harnesses.gemini_cli:GeminiCliHarness"
 echo = "gpt2giga_harness.harnesses.echo:EchoHarness"
 
+[project.entry-points."agent_workbench.provider_adapters.v1"]
+direct-chat-legacy = "gpt2giga_harness.provider_profiles:direct_chat_legacy_compatibility"
+codex-legacy = "gpt2giga_harness.provider_profiles:codex_legacy_compatibility"
+claude-legacy = "gpt2giga_harness.provider_profiles:claude_legacy_compatibility"
+gemini-legacy = "gpt2giga_harness.provider_profiles:gemini_legacy_compatibility"
+
 [project.optional-dependencies]
+gpt2giga = [
+    "gpt2giga==0.2.4a1",
+    "gigachat>=0.2.2a1,<0.3.0",
+]
 claude-sdk = [
     "claude-agent-sdk>=0.2.122,<0.3",
 ]
@@ -49,6 +58,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build]
 artifacts = [
     "src/gpt2giga_harness/evidence/**",
+    "src/gpt2giga_harness/integration_sdk_preview/**",
     "src/gpt2giga_harness/ui/assets/**",
     "src/gpt2giga_harness/ui/cockpit_v2/assets/**",
 ]

@@ -2,7 +2,7 @@
 
 :::warning[Альфа-превью — prerelease]
 
-Линейка `gpt2giga-harness` 0.2.x — alpha-preview для тестирования и обратной
+Линейка `gpt2giga-harness` 0.3.x — alpha-preview для тестирования и обратной
 связи. UI, CLI, YAML-файлы проекта, схема runtime-хранилища и процесс обновления
 могут меняться. Используйте Harness локально, для контролируемой работы под
 наблюдением, а не как критичный production-сервис или удалённую multi-user
@@ -104,8 +104,15 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-Текущий дистрибутив `gpt2giga-harness==0.2.0a1` требует
-`gpt2giga==0.2.4a1` и добавляет команды `giga` и `gpt2giga-harness`.
+Для Direct Chat и provider preset `gpt2giga` установите явный extra:
+
+```bash
+uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]'
+```
+
+Текущий дистрибутив `gpt2giga-harness==0.3.0a1` добавляет команды `giga` и
+`gpt2giga-harness`; его явный extra `gpt2giga` закрепляет
+`gpt2giga==0.2.4a1`.
 
 Для Direct Chat понадобятся credentials из [быстрого старта gpt2giga](quickstart.md).
 Codex, Claude Code и Gemini — опциональные интеграции: соответствующий CLI
@@ -116,20 +123,22 @@ CLI будет недоступен, но не сломает остальной
 
 #### Базовая установка и опциональные providers
 
-Базовый distribution содержит десять проверенных прямых runtime dependencies,
-включая совместимое требование к `gpt2giga`. В release CI оба wheel
-устанавливаются в чистые окружения Python 3.10 и 3.14, после чего versioned
-audit завершается ошибкой, если resolved environment превышает 64 distributions
-или содержит packages из следующих семейств опциональных интеграций:
+Provider-neutral базовый distribution содержит восемь проверенных прямых
+runtime dependencies. В release CI Harness wheel устанавливается в чистые
+окружения Python 3.10 и 3.14, после чего versioned audit завершается ошибкой,
+если resolved environment превышает 64 distributions или содержит packages из
+следующих семейств опциональных интеграций:
 
+- provider preset `gpt2giga`/GigaChat;
 - чтение и запись Office-документов;
 - удалённые messaging channels;
 - внешние client или agent UI frameworks;
 - sandbox и container providers.
 
-Такие возможности подключаются через отдельно установленный provider
-distribution или entry-point plugin Harness. Базовый пакет не устанавливает и
-не включает их неявно. Адаптеры Codex, Claude Code и Gemini остаются
+Такие возможности подключаются через явный extra `gpt2giga`, отдельно
+установленный provider distribution или entry-point plugin Harness. Базовый
+пакет не устанавливает и не включает их неявно. Адаптеры Codex, Claude Code и
+Gemini остаются
 встроенными, но их отдельно управляемые CLI executables обнаруживаются в
 `PATH`, а не устанавливаются как Python dependencies.
 
@@ -396,6 +405,71 @@ giga config unset executables.codex-cli
 Configured path должен быть абсолютным, имеет приоритет над `PATH` и проходит
 version/capability probe до запуска.
 
+### Профили providers и routes
+
+В Cockpit **Settings → Провайдер** и **Маршруты и модели** управляют
+backend-owned профилями OpenAI-, Anthropic- и Gemini-compatible endpoints.
+Provider задаёт dialect протокола, base URL, route prefix, владельца
+authentication, состояния enabled/offline и модели по назначениям. Новый run
+фиксирует выбранные provider и route в execution snapshot, поэтому последующее
+изменение Settings не переписывает сохранённые evidence и активную structured
+session.
+
+Credentials задаются ссылками, а не значениями формы. Settings и CLI принимают
+ссылку на environment variable или keychain и возвращают только её kind и name;
+значение секрета разрешается только на границе принадлежащего ему request или
+subprocess. Provider settings service отклоняет literal credentials, файлы с
+credentials и неограниченные filesystem paths.
+
+Например, зарегистрируйте OpenAI Responses-compatible endpoint, ключ которого
+остаётся в `OPENAI_API_KEY`:
+
+```bash
+giga provider add openai-production \
+  --name "OpenAI production" \
+  --protocol openai_compatible \
+  --dialect openai-responses-v1 \
+  --base-url https://api.openai.com \
+  --route-prefix /v1 \
+  --authentication secret_reference \
+  --secret-reference-kind environment \
+  --secret-reference-name OPENAI_API_KEY \
+  --coding-model <model-id> \
+  --json
+
+giga provider list --json
+giga provider show openai-production --json
+giga provider test openai-production --json
+giga provider discover openai-production --json
+```
+
+`test` и `discover` — явные ограниченные операции. Отсутствующий probe backend,
+ошибка authentication или несовместимый endpoint возвращаются как content-free
+health evidence и не приводят к молчаливому выбору другого provider. Для edit
+нужен текущий `revision` из `show` или Settings, поэтому старый browser/CLI
+request не перезапишет более новую конфигурацию:
+
+```bash
+giga provider edit openai-production \
+  --expected-revision <revision> \
+  --coding-model <new-model-id> \
+  --json
+```
+
+Legacy defaults proxy/API mode/model остаются читаемыми на время prerelease-
+перехода. Мигрируйте их только через forward-only flow с обязательным backup:
+
+```bash
+giga provider migrate-legacy --dry-run --json
+giga provider migrate-legacy \
+  --backup /safe/path/harness-before-provider-migration.zip \
+  --json
+```
+
+Перед публикацией provider registry и journal миграция повторно проверяет source
+и target state под lock. Reverse migration нет: для rollback остановите Harness
+и восстановите проверенный pre-upgrade archive.
+
 ### Конфигурация проекта
 
 `giga init` создаёт `.giga/harness.toml` и стартовые определения. Посмотреть
@@ -493,6 +567,87 @@ refs и policy labels. Раздел **Tools** показывает discovery и 
 Apply/rollback managed configuration проходит
 через approval. Secret ref разрешается только у owning subprocess и не попадает
 в durable metadata, project YAML или browser response.
+
+### Федеративная установка Skills и MCP
+
+В разделе **Plugins** Cockpit можно отделить встроенные пакеты (**Built-in**) от
+**External Skills & MCP**, найденных в offline-каталоге. Источник `skills-sh`
+добавляет hosted metadata Skills через отдельно разворачиваемый read-only proxy,
+а `neuraldeep` — публичные metadata Skills и MCP. Popularity, curation, health и
+presence источника являются только discovery evidence: они не дают права на
+установку, не разрешают сеть и не заменяют проверку точного artifact.
+
+Если источник недоступен, ограничил частоту запросов, требует обновить
+аутентификацию или вернул некорректные данные, Harness сохраняет последний
+корректный snapshot каталога. Внешний Skill можно установить только после
+совпадения bytes с проверенными immutable reference и content hash, а также
+проверки ограниченного `SKILL.md` и файлов. Карточка MCP из NeuralDeep служит
+локализованными discovery metadata. Она связывается с пакетом официального MCP
+Registry только по точному official package name или canonical repository;
+версия, immutable reference и integrity из official Registry остаются
+authoritative.
+
+Сначала изучите offline inventory, затем создайте preview одной цели:
+
+```bash
+giga integration list --json
+giga integration preview \
+  --source catalog \
+  --catalog-id <catalog-id> \
+  --target <target-id> \
+  --scope managed_home \
+  --json
+giga integration apply <flow-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --json
+giga integration status <flow-id> --json
+giga integration rollback <flow-id> --json
+```
+
+Preview связывает точные package/artifact hashes, target, владельца scope/root,
+configuration, permissions, границы network и native consent, risk и approval
+hash. Apply отклоняет устаревший или расширенный plan. Безопасный default —
+`managed_home`; project scope требует `--workspace`, а `user_home` остаётся
+выключенным, пока preview и apply не разрешат его явно. Секреты остаются
+непрозрачными references и разрешаются только owning subprocess. Для обновления
+выберите новый immutable pin и пройдите новый preview и approval: изменение
+каталога не обновляет существующую установку неявно.
+
+Для проверенного Skill или MCP package из каталога all-supported group сохраняет
+отдельные child plan и transaction для каждой цели:
+
+```bash
+giga integration group-preview \
+  --catalog-id <catalog-id> \
+  --scope managed_home \
+  --json
+giga integration group-apply <group-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --json
+giga integration group-status <group-id> --json
+giga integration group-recover <group-id> --json
+giga integration group-rollback <group-id> --json
+```
+
+Skills разворачиваются в Skill targets Codex, Claude и Gemini. MCP packages — в
+три managed native home и Harness-managed MCP inventory. До первой мутации
+должны успешно завершиться все child previews. Межкорневой apply — это
+recoverable compensating transaction, а не filesystem-atomic write: при
+частичном сбое уже применённые owned и verified children откатываются в обратном
+порядке либо сохраняются точные repair actions для `group-recover`. Status
+показывает verification и repair-required state; rollback отказывается менять
+чужие или изменённые после установки файлы.
+
+Те же inventory и lifecycle доступны через `GET /api/integrations`,
+`POST /api/integrations/preview`, apply/rollback routes
+`/api/integrations/flows/{flow_id}` и соответствующие routes
+`/api/integrations/groups`. Cockpit показывает тот же source filter, точный
+preview одной цели или **Install to all Harnesses**, approval, verification,
+recovery и rollback. Федеративные Plugins не поддерживаются, discovery не
+разрешает неявную загрузку, и ни одна операция по умолчанию не меняет реальный
+user home.
 
 ### Eval Lab и матрицы совместимости
 
@@ -1156,8 +1311,9 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-Текущая metadata `gpt2giga-harness==0.2.0a1` требует
-`gpt2giga==0.2.4a1`. Старый import `gpt2giga.harness` больше не является
+Текущая metadata `gpt2giga-harness==0.3.0a1` сохраняет
+`gpt2giga==0.2.4a1` в явном optional extra `gpt2giga`. Старый import
+`gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
 перезаписывает `~/.gpt2giga/harness`, `.giga/` или vendor-owned CLI homes.
 
