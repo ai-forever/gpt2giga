@@ -9,7 +9,7 @@ import {
 import {
   projectAutomation,
   projectEvaluation,
-  projectIntegrations,
+  projectMcpServers,
 } from "./surface-projections";
 
 const rootKey = ["cockpit", "remaining-surfaces"] as const;
@@ -87,8 +87,8 @@ export const remainingRequestKeys = {
   arena: (arenaId: string) => [...rootKey, "arena", arenaId] as const,
   arenaFiles: (query: string) => [...rootKey, "arena-files", query] as const,
   evaluation: () => [...rootKey, "evaluation"] as const,
-  integrations: () => [...rootKey, "integrations"] as const,
   integrationFlows: () => [...rootKey, "integration-flows"] as const,
+  mcpInventory: () => [...rootKey, "mcp-inventory"] as const,
 };
 
 export function arenaDetailOptions(arenaId: string) {
@@ -144,19 +144,12 @@ export function evaluationSurfaceOptions() {
   });
 }
 
-export function integrationsSurfaceOptions() {
+export function mcpInventoryOptions() {
   return queryOptions({
-    queryKey: remainingRequestKeys.integrations(),
-    queryFn: async ({ signal }) => {
-      const [harnesses, settings, modelsV1, modelsV2, mcp] = await Promise.all([
-        fetchCockpit<unknown>("/api/harnesses", signal),
-        fetchCockpit<unknown>("/api/settings", signal),
-        fetchCockpit<unknown>(withQuery("/api/models", { api_mode: "v1" }), signal),
-        fetchCockpit<unknown>(withQuery("/api/models", { api_mode: "v2" }), signal),
-        fetchCockpit<unknown>("/api/tool-servers", signal),
-      ]);
-      return projectIntegrations(harnesses, settings, [modelsV1, modelsV2], mcp);
-    },
+    queryKey: remainingRequestKeys.mcpInventory(),
+    queryFn: async ({ signal }) => projectMcpServers(
+      await fetchCockpit<unknown>("/api/tool-servers", signal),
+    ),
     staleTime: 15_000,
   });
 }

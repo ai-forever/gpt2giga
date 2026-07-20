@@ -78,6 +78,16 @@ describe("Cockpit V2 route contract", () => {
     expect(plugins).toContain("key={selectedItem.id}");
   });
 
+  it("renders the plugin catalog before MCP inventory hydration finishes", () => {
+    const plugins = readFileSync(
+      fileURLToPath(new URL("./surfaces/integrations.tsx", import.meta.url)),
+      "utf8",
+    );
+
+    expect(plugins).toContain("const pending = integrationQuery.isPending;");
+    expect(plugins).not.toContain("operationalQuery");
+  });
+
   it("keeps workspace utilities in the rail without a static connection banner", () => {
     const shellSource = readFileSync(
       fileURLToPath(new URL("./AppShell.tsx", import.meta.url)),

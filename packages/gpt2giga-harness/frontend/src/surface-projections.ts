@@ -337,24 +337,28 @@ export function projectIntegrations(
         lastCheckedAt: nullableText(discovery.last_checked_at),
       };
     }),
-    mcp: array(record(mcpResponse).servers)
-      .slice(0, MAX_ROWS)
-      .map((value) => {
-        const item = record(value);
-        const descriptor = record(item.descriptor);
-        const probe = record(item.latest_probe);
-        return {
-          id: text(descriptor.id),
-          title: text(descriptor.title) || text(descriptor.id),
-          transport: text(descriptor.transport),
-          enabled: descriptor.enabled === true,
-          trusted: descriptor.trusted === true,
-          status: text(probe.status) || (descriptor.enabled === true ? "not probed" : "disabled"),
-        };
-      })
-      .filter((item) => item.id),
+    mcp: projectMcpServers(mcpResponse),
     contentFree: true,
   };
+}
+
+export function projectMcpServers(response: unknown): McpProjection[] {
+  return array(record(response).servers)
+    .slice(0, MAX_ROWS)
+    .map((value) => {
+      const item = record(value);
+      const descriptor = record(item.descriptor);
+      const probe = record(item.latest_probe);
+      return {
+        id: text(descriptor.id),
+        title: text(descriptor.title) || text(descriptor.id),
+        transport: text(descriptor.transport),
+        enabled: descriptor.enabled === true,
+        trusted: descriptor.trusted === true,
+        status: text(probe.status) || (descriptor.enabled === true ? "not probed" : "disabled"),
+      };
+    })
+    .filter((item) => item.id);
 }
 
 export function projectDoctor(response: unknown): DoctorProjection {

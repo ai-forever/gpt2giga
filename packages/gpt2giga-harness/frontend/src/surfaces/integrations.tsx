@@ -15,7 +15,7 @@ import {
 import { usePreferences } from "../preferences-context";
 import {
   integrationFlowOptions,
-  integrationsSurfaceOptions,
+  mcpInventoryOptions,
   remainingRequestKeys,
   type IntegrationFlowInventory,
   type IntegrationFlowMutationResponse,
@@ -44,14 +44,14 @@ export function IntegrationsSurface() {
   const { preferences } = usePreferences();
   const locale = preferences.locale;
   const integrationQuery = useQuery(integrationFlowOptions());
-  const operationalQuery = useQuery(integrationsSurfaceOptions());
+  const mcpQuery = useQuery(mcpInventoryOptions());
   const [search, setSearch] = useState("");
   const [connectedOnly, setConnectedOnly] = useState(false);
   const items = useMemo(
-    () => integrationQuery.data && operationalQuery.data
-      ? buildPluginLibrary(integrationQuery.data, operationalQuery.data.mcp)
+    () => integrationQuery.data
+      ? buildPluginLibrary(integrationQuery.data, mcpQuery.data ?? [])
       : [],
-    [integrationQuery.data, operationalQuery.data],
+    [integrationQuery.data, mcpQuery.data],
   );
   const visibleItems = useMemo(
     () => filterPluginLibrary(items, category, search, connectedOnly),
@@ -59,8 +59,8 @@ export function IntegrationsSurface() {
   );
   const selectedItem = items.find((item) => item.id === selectedId);
   const connectedCount = items.filter((item) => item.connected).length;
-  const pending = integrationQuery.isPending || operationalQuery.isPending;
-  const failed = integrationQuery.isError || operationalQuery.isError;
+  const pending = integrationQuery.isPending;
+  const failed = integrationQuery.isError;
 
   return (
     <div className={`plugin-library ${selectedItem ? "has-selection" : ""}`}>
