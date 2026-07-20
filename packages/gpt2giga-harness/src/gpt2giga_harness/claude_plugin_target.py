@@ -1061,6 +1061,7 @@ class ClaudePluginTargetDriver:
                 ),
             )
         except Exception:
+            # Best-effort rollback must not mask the original installation failure.
             pass
 
     def _lock_path(self, root: Path, scope: InstallationScope) -> Path:

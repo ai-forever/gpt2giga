@@ -888,6 +888,7 @@ class CodexPluginTargetDriver:
                     ),
                 )
         except Exception:
+            # Best-effort rollback must not mask the original installation failure.
             pass
 
     def _marketplace_items(self, root: Path) -> tuple[Mapping[str, Any], ...]:

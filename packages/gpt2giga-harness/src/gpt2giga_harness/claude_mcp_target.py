@@ -49,7 +49,6 @@ MAX_CLAUDE_MCP_OUTPUT_CHARS = 128_000
 MAX_CLAUDE_MCP_UNINSTALL_DEPTH = 100
 _IDENTITY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+~-]{0,255}\Z")
 _ENV_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
-_PLAN_RE = re.compile(r"plan_[0-9a-f]{64}\Z")
 _ENV_REFERENCE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]{0,127}\}\Z")
 
 
