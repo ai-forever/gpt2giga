@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,7 @@ from gpt2giga_harness.portable_skills import (
     portable_skill_semantic_hash,
     probe_skill_target,
 )
+from gpt2giga_harness.external_skills import ExternalSkillStore, parse_external_skill
 
 
 _TARGETS = (
@@ -353,3 +355,34 @@ def _file(package: GeneratedSkillPackage, suffix: str) -> bytes:
     return next(
         item.content for item in package.files if item.relative_path.endswith(suffix)
     )
+
+
+def test_external_skill_import_is_content_addressed_and_strict(tmp_path):
+    files = {
+        "SKILL.md": b"---\nname: review-release\ndescription: Review releases.\n---\nDo it.\n",
+        "references/checklist.md": b"check\n",
+    }
+    digest = hashlib.sha256(
+        b"".join(name.encode() + b"\0" + files[name] for name in sorted(files))
+    ).hexdigest()
+    store = ExternalSkillStore(tmp_path / "artifacts")
+    store.import_artifact(
+        source_id="skills-sh",
+        immutable_ref="github:acme/review@" + "a" * 40,
+        license_evidence="MIT",
+        files=files,
+        expected_sha256=digest,
+    )
+    assert parse_external_skill(store.resolve(digest)).component_id == "review-release"
+    with pytest.raises(ValueError, match="duplicate"):
+        parse_external_skill(
+            store.import_artifact(
+                source_id="skills-sh",
+                immutable_ref="github:acme/review@" + "b" * 40,
+                license_evidence="MIT",
+                files={"SKILL.md": b"---\nname: x\nname: y\ndescription: z\n---\nbody"},
+                expected_sha256=hashlib.sha256(
+                    b"SKILL.md\0---\nname: x\nname: y\ndescription: z\n---\nbody"
+                ).hexdigest(),
+            )
+        )
