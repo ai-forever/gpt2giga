@@ -342,7 +342,7 @@ def cockpit_artifacts(
 def cockpit_run(run_id: str, request: Request) -> Response:
     """Resolve one run through the direct read index, without a session scan."""
     run = _get_run(request, run_id)
-    revision = _run_revision(run)
+    revision = run_snapshot_revision(run)
     return _etag_response(
         request,
         revision,
@@ -392,7 +392,7 @@ def cockpit_run_raw(
     items, byte_count, truncated = _fit_items(items, max_bytes)
     revision = _revision(
         "raw",
-        _run_revision(run),
+        run_snapshot_revision(run),
         *(f"{item[1].id}:{item[1].created_at}" for item in records),
     )
     return _etag_response(
@@ -419,7 +419,7 @@ def cockpit_run_diff(
     diff = run_diff_response(run.metadata)
     patch = str(diff.get("patch") or "")
     revision = _revision(
-        "diff", _run_revision(run), hashlib.sha256(patch.encode()).hexdigest()
+        "diff", run_snapshot_revision(run), hashlib.sha256(patch.encode()).hexdigest()
     )
     return _etag_response(
         request,
@@ -446,7 +446,9 @@ def cockpit_run_report(
     run = _get_run(request, run_id)
     report = _retained_report(run.metadata)
     revision = _revision(
-        "report", _run_revision(run), hashlib.sha256(report.encode()).hexdigest()
+        "report",
+        run_snapshot_revision(run),
+        hashlib.sha256(report.encode()).hexdigest(),
     )
     return _etag_response(
         request,
@@ -660,7 +662,7 @@ def _provider_session_projection(metadata: Mapping[str, Any]) -> dict[str, Any] 
         return None
     config = link.get("config_snapshot")
     config = config if isinstance(config, Mapping) else {}
-    return {
+    projection = {
         "link_id": link.get("id"),
         "external_session_id": link.get("external_session_id"),
         "latest_external_turn_id": link.get("latest_external_turn_id"),
@@ -670,6 +672,10 @@ def _provider_session_projection(metadata: Mapping[str, Any]) -> dict[str, Any] 
         "link_hash": link.get("link_hash"),
         "content_free": True,
     }
+    revision = link.get("revision")
+    if isinstance(revision, int) and not isinstance(revision, bool) and revision > 0:
+        projection["revision"] = revision
+    return projection
 
 
 def _event_projection(event: HarnessStoredEvent) -> dict[str, Any]:
@@ -727,7 +733,8 @@ def _retained_report(metadata: Mapping[str, Any]) -> str:
     return ""
 
 
-def _run_revision(run: HarnessRun) -> str:
+def run_snapshot_revision(run: HarnessRun) -> str:
+    """Return the process-local revision used to bind interactive mutations."""
     return _revision(
         "run",
         json.dumps(run_to_dict(run), ensure_ascii=False, sort_keys=True),

@@ -190,6 +190,7 @@ CONFORMANCE_EVIDENCE = {
             test_nodes=(
                 "tests/harness/test_native_process_api.py::test_native_process_api_start_poll_input_and_stop",
                 "tests/harness/test_native_process_api.py::test_native_process_resize_api_validates_terminal_limits",
+                "tests/harness/test_ui_sessions_api.py::test_interactive_run_actions_reject_stale_binding_and_missing_owner",
             ),
         ),
         ConformanceEvidence(
@@ -541,6 +542,8 @@ MUTATION_ROUTE_CONTRACTS = (
         (
             "/api/native/processes/{process_id}/input",
             "/api/native/processes/{process_id}/resize",
+            "/api/runs/{run_id}/input",
+            "/api/runs/{run_id}/steer",
         ),
         MutationClass.GOVERNED_EXTERNAL_EFFECT,
         EnforcementControl.EXPLICIT_OPERATOR_ACTION,

@@ -1,4 +1,4 @@
-"""Small locale catalog for the optional terminal client."""
+"""Small locale catalog for the built-in terminal client."""
 
 from __future__ import annotations
 
@@ -9,12 +9,20 @@ CATALOGS: dict[str, dict[str, str]] = {
     "en": {
         "app.subtitle": "Provider-neutral terminal workbench",
         "button.help": "Help",
+        "button.answer": "Answer",
+        "button.approve": "Approve",
+        "button.cancel_run": "Cancel run",
+        "button.deny": "Deny",
+        "button.fork": "Fork",
         "button.new_project": "Project",
         "button.new_session": "New session",
         "button.refresh": "Refresh",
+        "button.send": "Send",
+        "composer.placeholder": "Message or steer the active run",
         "detail.empty": "Select a session or create a new one.",
         "dialog.cancel": "Cancel",
         "dialog.confirm": "Open",
+        "dialog.input_answer": "Answer provider question",
         "dialog.project_path": "Project path",
         "dialog.session_title": "Session title (optional)",
         "help.body": (
@@ -43,16 +51,28 @@ CATALOGS: dict[str, dict[str, str]] = {
         "status.in_process": "In-process client",
         "status.loading": "Loading authoritative state…",
         "status.ready": "Ready",
+        "status.resnapshot": "Authoritative resnapshot",
+        "status.running": "Run active",
+        "status.finished": "Run finished",
+        "timeline.empty": "No run events yet.",
     },
     "ru": {
         "app.subtitle": "Провайдер-независимая рабочая среда",
         "button.help": "Помощь",
+        "button.answer": "Ответить",
+        "button.approve": "Разрешить",
+        "button.cancel_run": "Отменить запуск",
+        "button.deny": "Отклонить",
+        "button.fork": "Ответвить",
         "button.new_project": "Проект",
         "button.new_session": "Новая сессия",
         "button.refresh": "Обновить",
+        "button.send": "Отправить",
+        "composer.placeholder": "Сообщение или уточнение активного запуска",
         "detail.empty": "Выберите сессию или создайте новую.",
         "dialog.cancel": "Отмена",
         "dialog.confirm": "Открыть",
+        "dialog.input_answer": "Ответ на вопрос провайдера",
         "dialog.project_path": "Путь к проекту",
         "dialog.session_title": "Название сессии (необязательно)",
         "help.body": (
@@ -81,6 +101,10 @@ CATALOGS: dict[str, dict[str, str]] = {
         "status.in_process": "Локальный клиент",
         "status.loading": "Загрузка авторитетного состояния…",
         "status.ready": "Готово",
+        "status.resnapshot": "Обновление авторитетного снимка",
+        "status.running": "Запуск активен",
+        "status.finished": "Запуск завершён",
+        "timeline.empty": "Событий запуска пока нет.",
     },
 }
 

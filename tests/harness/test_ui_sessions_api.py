@@ -161,6 +161,44 @@ def test_sessions_api_events_polling_after_id():
     assert response.json()["events"][0]["id"] != first_event_id
 
 
+def test_interactive_run_actions_reject_stale_binding_and_missing_owner():
+    client = _client()
+    completed = client.post(
+        "/api/sessions/run",
+        json={"harness_id": "echo", "prompt": "binding"},
+    ).json()
+    run_id = completed["run"]["id"]
+    session_id = completed["session"]["id"]
+    projection = client.get(f"/api/cockpit/runs/{run_id}").json()
+    binding = {
+        "run_id": run_id,
+        "session_id": session_id,
+        "revision": projection["snapshot_revision"],
+        "generation": 1,
+        "idempotency_key": "tui_action_1",
+    }
+
+    stale = client.post(
+        f"/api/runs/{run_id}/steer",
+        json={**binding, "revision": "0" * 64, "content": "stale"},
+    )
+    owner_lost = client.post(
+        f"/api/runs/{run_id}/steer",
+        json={**binding, "content": "continue"},
+    )
+    unsupported_input = client.post(
+        f"/api/runs/{run_id}/input",
+        json={**binding, "input_id": "input_1", "answer": "yes"},
+    )
+
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == "Run revision changed"
+    assert owner_lost.status_code == 409
+    assert "owner is unavailable" in owner_lost.json()["detail"]
+    assert unsupported_input.status_code == 409
+    assert "does not expose" in unsupported_input.json()["detail"]
+
+
 def test_session_update_stream_replays_title_revision_and_closes_on_delete():
     store = _ObservedSessionUpdateStore()
     session = store.create_session()

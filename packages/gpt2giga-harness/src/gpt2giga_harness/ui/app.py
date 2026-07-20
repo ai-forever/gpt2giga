@@ -257,6 +257,10 @@ from gpt2giga_harness.ui.routers.provider_handoffs import (
     create_provider_handoff_router,
 )
 from gpt2giga_harness.ui.routers.tools import router as tools_router
+from gpt2giga_harness.ui.routers.tui_actions import (
+    router as tui_actions_router,
+    validate_run_action_binding,
+)
 from gpt2giga_harness.ui.routers.workflows import router as workflows_router
 from gpt2giga_harness.ui.routers.shell import create_shell_router
 from gpt2giga_harness.ui.security import (
@@ -2301,11 +2305,15 @@ def create_app(
         )
 
     @app.post("/api/runs/{run_id}/cancel")
-    def cancel_run(run_id: str) -> dict[str, Any]:
+    def cancel_run(
+        run_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
         except RunNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Run not found") from exc
+        validate_run_action_binding(run, payload)
         if _run_status_is_terminal(run.status):
             return {
                 "cancel_requested": False,
@@ -2543,9 +2551,13 @@ def create_app(
         return response
 
     @app.post("/api/runs/{run_id}/fork")
-    def fork_run(run_id: str) -> dict[str, Any]:
+    def fork_run(
+        run_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
+            validate_run_action_binding(run, payload)
             session = _fork_session_from_run(store, run)
             bundle = store.get_session_bundle(session.id)
         except RunNotFoundError as exc:
@@ -3162,6 +3174,7 @@ def create_app(
     app.include_router(evaluate_router)
     app.include_router(integrations_router)
     app.include_router(tools_router)
+    app.include_router(tui_actions_router)
     app.include_router(workflows_router)
     app.include_router(runs_router)
     app.include_router(schedules_router)

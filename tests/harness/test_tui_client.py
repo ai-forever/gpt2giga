@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
+from dataclasses import replace
 import os
 import subprocess
 import sys
@@ -10,6 +12,8 @@ import pytest
 
 from gpt2giga_harness import entrypoint
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.sessions.models import HarnessStoredEvent
+from gpt2giga_harness.sessions.store import utc_now
 from gpt2giga_harness.tui.client import (
     AttachedWorkbenchClient,
     InProcessWorkbenchClient,
@@ -62,6 +66,66 @@ async def test_in_process_client_navigates_projects_and_sessions(tmp_path):
         "First�]52;c;hidden� session",
         "From TUI",
     }
+
+
+@pytest.mark.anyio
+async def test_in_process_client_submits_idempotent_turn_and_resnapshots(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    client = InProcessWorkbenchClient(HarnessConfig(data_dir=str(tmp_path / "state")))
+    session = client.sessions.create_session(
+        {"workspace": str(workspace), "harness_id": "echo"},
+        validate_harness=True,
+    )
+
+    first = await client.submit_turn(session.id, "hello", idempotency_key="turn_1")
+    for _ in range(100):
+        if first.events:
+            break
+        await asyncio.sleep(0.01)
+        first = await client.snapshot_run(first.binding.run_id)
+    duplicate = await client.submit_turn(session.id, "hello", idempotency_key="turn_1")
+    gap = await client.snapshot_run(first.binding.run_id, cursor="invalid")
+
+    assert duplicate.binding.run_id == first.binding.run_id
+    assert {event.type for event in first.events} >= {"run_started"}
+    assert gap.resnapshot_reason == "cursor_gap"
+    assert gap.binding.session_id == session.id
+
+
+@pytest.mark.anyio
+async def test_in_process_client_bounds_slow_consumer_and_rejects_stale_action(
+    tmp_path,
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    client = InProcessWorkbenchClient(HarnessConfig(data_dir=str(tmp_path / "state")))
+    session = client.sessions.create_session(
+        {"workspace": str(workspace), "harness_id": "echo"},
+        validate_harness=True,
+    )
+    submitted = await client.submit_turn(
+        session.id, "bounded", idempotency_key="turn_bounded"
+    )
+    for index in range(110):
+        client.store.append_event(
+            HarnessStoredEvent(
+                id=f"evt_extra_{index}",
+                session_id=session.id,
+                run_id=submitted.binding.run_id,
+                type="warning",
+                message=f"event {index}",
+                payload={},
+                created_at=utc_now(),
+            )
+        )
+
+    snapshot = await client.snapshot_run(submitted.binding.run_id)
+
+    assert len(snapshot.events) <= 100
+    assert snapshot.resnapshot_reason == "slow_consumer"
+    with pytest.raises(WorkbenchClientError, match="revision changed"):
+        await client.fork_run(replace(snapshot.binding, revision="0" * 64))
 
 
 @pytest.mark.anyio
@@ -154,6 +218,76 @@ async def test_attach_client_uses_existing_api_contract(monkeypatch):
             "last_selected_session": "sess_2",
         },
     ) in calls
+
+
+@pytest.mark.anyio
+async def test_attach_client_stream_snapshot_and_actions_share_exact_binding(
+    monkeypatch,
+):
+    client = AttachedWorkbenchClient("http://127.0.0.1:8091")
+    calls: list[tuple[str, str, object]] = []
+
+    async def request(method, path, payload=None, **kwargs):
+        calls.append((method, path, payload))
+        if path == "/api/cockpit/runs/run_1":
+            return {
+                "snapshot_revision": "a" * 64,
+                "run": {
+                    "id": "run_1",
+                    "session_id": "sess_1",
+                    "status": "running",
+                    "provider_session": {"revision": 3, "link_hash": "b" * 64},
+                },
+            }
+        if path.startswith("/api/sessions/sess_1/events?"):
+            return {
+                "events": [
+                    {
+                        "id": "evt_1",
+                        "session_id": "sess_1",
+                        "run_id": "run_1",
+                        "type": "message_delta",
+                        "message": "delta",
+                        "payload": {"delta": "hello"},
+                        "created_at": "2026-07-20T00:00:00Z",
+                    }
+                ]
+            }
+        if path == "/api/approvals?status=pending&limit=100":
+            return {
+                "approvals": [
+                    {
+                        "id": "approval_1",
+                        "run_id": "run_1",
+                        "action": "tool.call",
+                        "reason": "tool",
+                        "status": "pending",
+                    }
+                ]
+            }
+        if path == "/api/runs/run_1/steer":
+            return {"accepted": True}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(client, "_request", request)
+
+    snapshot = await client.snapshot_run("run_1", cursor="invalid")
+    steered = await client.steer_run(
+        snapshot.binding,
+        "continue",
+        idempotency_key="steer_1",
+    )
+
+    assert snapshot.binding.generation == 3
+    assert snapshot.resnapshot_reason == "cursor_gap"
+    assert snapshot.events[0].delta == "hello"
+    assert snapshot.pending_approvals[0].id == "approval_1"
+    assert steered.binding == snapshot.binding
+    steer_payload = next(
+        payload for method, path, payload in calls if path == "/api/runs/run_1/steer"
+    )
+    assert steer_payload["revision"] == "a" * 64
+    assert steer_payload["generation"] == 3
 
 
 @pytest.mark.parametrize(

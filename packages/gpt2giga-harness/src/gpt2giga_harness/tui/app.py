@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import ClassVar
+from uuid import uuid4
 
 from textual import events, on
 from textual.app import App, ComposeResult
@@ -23,7 +24,9 @@ from textual.widgets import (
 from gpt2giga_harness.tui.client import (
     NavigationSnapshot,
     ProjectSummary,
+    RunSnapshot,
     SessionSummary,
+    TimelineEvent,
     WorkbenchClient,
 )
 from gpt2giga_harness.tui.i18n import translator
@@ -193,6 +196,35 @@ class WorkbenchTui(App[None]):
     }
     #readiness {
         height: auto;
+        max-height: 9;
+    }
+    #timeline {
+        height: 1fr;
+        min-height: 4;
+        margin-top: 1;
+        padding: 0 1;
+        border: round $primary-background;
+        overflow: auto hidden;
+    }
+    #interaction-actions {
+        height: 3;
+        align-vertical: middle;
+        overflow-x: hidden;
+    }
+    #interaction-actions Button {
+        min-width: 8;
+        margin-right: 1;
+    }
+    #composer-row {
+        height: 3;
+        align-vertical: middle;
+    }
+    #composer {
+        width: 1fr;
+    }
+    #send-turn {
+        min-width: 10;
+        margin-left: 1;
     }
     #actions {
         height: 3;
@@ -228,6 +260,18 @@ class WorkbenchTui(App[None]):
         min-height: 4;
         padding: 0 1;
     }
+    #body.narrow #readiness {
+        display: none;
+    }
+    #body.narrow #timeline {
+        margin-top: 0;
+        min-height: 3;
+    }
+    #body.narrow #interaction-actions Button {
+        min-width: 3;
+        width: 1fr;
+        margin-right: 0;
+    }
     #body.narrow .pane-title {
         height: 1;
     }
@@ -259,6 +303,10 @@ class WorkbenchTui(App[None]):
         self.workspace = workspace
         self.selected_session_id = session_id
         self.snapshot: NavigationSnapshot | None = None
+        self.run_snapshot: RunSnapshot | None = None
+        self.run_cursor: str | None = None
+        self.timeline: list[TimelineEvent] = []
+        self._polling = False
         self.t = translator(locale)
         self.sub_title = self.t("app.subtitle")
 
@@ -274,6 +322,23 @@ class WorkbenchTui(App[None]):
             with Vertical(id="detail-pane"):
                 yield Label(self.t("pane.readiness"), id="detail-title", markup=False)
                 yield Static(self.t("detail.empty"), id="readiness", markup=False)
+                yield Static(self.t("timeline.empty"), id="timeline", markup=False)
+                with Horizontal(id="interaction-actions"):
+                    yield Button(self.t("button.approve"), id="approve")
+                    yield Button(self.t("button.deny"), id="deny")
+                    yield Button(self.t("button.answer"), id="answer")
+                    yield Button(self.t("button.cancel_run"), id="cancel-run")
+                    yield Button(self.t("button.fork"), id="fork-run")
+                with Horizontal(id="composer-row"):
+                    yield Input(
+                        placeholder=self.t("composer.placeholder"),
+                        id="composer",
+                    )
+                    yield Button(
+                        self.t("button.send"),
+                        id="send-turn",
+                        variant="primary",
+                    )
         with Horizontal(id="actions"):
             yield Button(self.t("button.new_project"), id="project")
             yield Button(
@@ -287,6 +352,7 @@ class WorkbenchTui(App[None]):
     async def on_mount(self) -> None:
         self._set_narrow(self.size.width)
         await self._reload()
+        self.set_interval(0.15, self._poll_run)
         self.query_one("#session-list", ListView).focus()
 
     def on_resize(self, event: events.Resize) -> None:
@@ -313,6 +379,7 @@ class WorkbenchTui(App[None]):
         if not isinstance(item, NavigationItem):
             return
         self.selected_session_id = item.value
+        self._reset_run()
         if self.snapshot is not None:
             await self.client.remember_session(self.snapshot.project.root, item.value)
         await self._reload()
@@ -332,6 +399,61 @@ class WorkbenchTui(App[None]):
     @on(Button.Pressed, "#help")
     def press_help(self) -> None:
         self.action_help()
+
+    @on(Input.Submitted, "#composer")
+    async def submit_composer(self, event: Input.Submitted) -> None:
+        event.stop()
+        await self._submit_content(event.value)
+
+    @on(Button.Pressed, "#send-turn")
+    async def press_send_turn(self) -> None:
+        composer = self.query_one("#composer", Input)
+        await self._submit_content(composer.value)
+
+    @on(Button.Pressed, "#approve")
+    async def press_approve(self) -> None:
+        await self._decide_approval("allow_once")
+
+    @on(Button.Pressed, "#deny")
+    async def press_deny(self) -> None:
+        await self._decide_approval("deny")
+
+    @on(Button.Pressed, "#cancel-run")
+    async def press_cancel_run(self) -> None:
+        if self.run_snapshot is None:
+            return
+        try:
+            snapshot = await self.client.cancel_run(self.run_snapshot.binding)
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self._apply_run_snapshot(snapshot)
+
+    @on(Button.Pressed, "#fork-run")
+    async def press_fork_run(self) -> None:
+        if self.run_snapshot is None:
+            return
+        try:
+            session = await self.client.fork_run(self.run_snapshot.binding)
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self.selected_session_id = session.id
+        self._reset_run()
+        await self._reload()
+
+    @on(Button.Pressed, "#answer")
+    def press_answer(self) -> None:
+        if self._pending_input_id() is None:
+            return
+        self.push_screen(
+            TextPrompt(
+                self.t("dialog.input_answer"),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            self._input_answered,
+        )
 
     async def action_refresh(self) -> None:
         await self._reload()
@@ -364,6 +486,7 @@ class WorkbenchTui(App[None]):
             return
         self.workspace = value
         self.selected_session_id = None
+        self._reset_run()
         await self._reload()
 
     async def _session_title_chosen(self, value: str | None) -> None:
@@ -378,6 +501,7 @@ class WorkbenchTui(App[None]):
             self._show_error(exc)
             return
         self.selected_session_id = created.id
+        self._reset_run()
         self._set_status(self.t("session.created"))
         await self._reload()
 
@@ -397,12 +521,177 @@ class WorkbenchTui(App[None]):
         await self._render_projects(snapshot.projects, snapshot.project.id)
         await self._render_sessions(snapshot.sessions, snapshot.selected_session_id)
         self._render_readiness(snapshot)
+        await self._reconnect_selected_run()
         mode_key = (
             "status.attach"
             if snapshot.transport_mode == "attach"
             else "status.in_process"
         )
         self._set_status(f"{self.t('status.ready')} · {self.t(mode_key)}")
+
+    async def _submit_content(self, value: str) -> None:
+        content = value.strip()
+        if not content or self.selected_session_id is None:
+            return
+        self.query_one("#composer", Input).value = ""
+        key = f"tui-{uuid4().hex}"
+        try:
+            if self.run_snapshot is not None and not self.run_snapshot.terminal:
+                snapshot = await self.client.steer_run(
+                    self.run_snapshot.binding,
+                    content,
+                    idempotency_key=key,
+                )
+            else:
+                snapshot = await self.client.submit_turn(
+                    self.selected_session_id,
+                    content,
+                    idempotency_key=key,
+                )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self._reset_run()
+        self._apply_run_snapshot(snapshot)
+        self._set_status(self.t("status.running"))
+
+    async def _poll_run(self) -> None:
+        if self._polling or self.run_snapshot is None or self.run_snapshot.terminal:
+            return
+        self._polling = True
+        try:
+            snapshot = await self.client.snapshot_run(
+                self.run_snapshot.binding.run_id,
+                cursor=self.run_cursor,
+            )
+            self._apply_run_snapshot(snapshot)
+        except Exception as exc:
+            self._show_error(exc)
+        finally:
+            self._polling = False
+
+    async def _reconnect_selected_run(self) -> None:
+        if self.selected_session_id is None:
+            self._reset_run()
+            return
+        if (
+            self.run_snapshot is not None
+            and self.run_snapshot.binding.session_id == self.selected_session_id
+        ):
+            return
+        try:
+            snapshot = await self.client.latest_run(self.selected_session_id)
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self._reset_run()
+        if snapshot is not None:
+            self._apply_run_snapshot(snapshot)
+
+    def _apply_run_snapshot(self, snapshot: RunSnapshot) -> None:
+        if (
+            self.run_snapshot is None
+            or self.run_snapshot.binding.run_id != snapshot.binding.run_id
+            or snapshot.resnapshot_reason in {"cursor_gap", "generation_changed"}
+        ):
+            self.timeline.clear()
+        known = {event.id for event in self.timeline}
+        self.timeline.extend(
+            event for event in snapshot.events if event.id not in known
+        )
+        self.timeline = self.timeline[-100:]
+        self.run_snapshot = snapshot
+        self.run_cursor = snapshot.cursor
+        self._render_timeline()
+        self._update_interaction_actions()
+        if snapshot.terminal:
+            self._set_status(f"{self.t('status.finished')}: {snapshot.status}")
+        elif snapshot.resnapshot_reason:
+            self._set_status(
+                f"{self.t('status.resnapshot')}: {snapshot.resnapshot_reason}"
+            )
+
+    def _render_timeline(self) -> None:
+        lines: list[str] = []
+        for event in self.timeline:
+            if event.type == "message_delta" and event.delta:
+                lines.append(event.delta)
+            elif event.type == "reasoning_delta" and event.delta:
+                lines.append(f"· {event.delta}")
+            elif event.type.startswith("tool_call"):
+                lines.append(f"⚙ {event.tool_name or event.message}")
+            elif event.type == "approval_requested":
+                lines.append(f"! {event.message}")
+            elif event.input_id is not None or event.type in {
+                "input_requested",
+                "user_input_requested",
+            }:
+                lines.append(f"? {event.message}")
+            elif event.type in {
+                "run_started",
+                "run_finished",
+                "run_canceled",
+                "error",
+                "warning",
+            }:
+                lines.append(event.message)
+        content = "\n".join(lines)[-64_000:] or self.t("timeline.empty")
+        self.query_one("#timeline", Static).update(content)
+
+    def _update_interaction_actions(self) -> None:
+        snapshot = self.run_snapshot
+        pending = bool(snapshot and snapshot.pending_approvals)
+        self.query_one("#approve", Button).disabled = not pending
+        self.query_one("#deny", Button).disabled = not pending
+        self.query_one("#answer", Button).disabled = self._pending_input_id() is None
+        self.query_one("#cancel-run", Button).disabled = (
+            not snapshot or snapshot.terminal
+        )
+        self.query_one("#fork-run", Button).disabled = snapshot is None
+
+    async def _decide_approval(self, decision: str) -> None:
+        if self.run_snapshot is None or not self.run_snapshot.pending_approvals:
+            return
+        approval = self.run_snapshot.pending_approvals[0]
+        try:
+            snapshot = await self.client.decide_approval(
+                self.run_snapshot.binding,
+                approval.id,
+                decision,
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self._apply_run_snapshot(snapshot)
+
+    async def _input_answered(self, answer: str | None) -> None:
+        input_id = self._pending_input_id()
+        if not answer or input_id is None or self.run_snapshot is None:
+            return
+        try:
+            snapshot = await self.client.answer_input(
+                self.run_snapshot.binding,
+                input_id,
+                answer,
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self._apply_run_snapshot(snapshot)
+
+    def _pending_input_id(self) -> str | None:
+        return next(
+            (event.input_id for event in reversed(self.timeline) if event.input_id),
+            None,
+        )
+
+    def _reset_run(self) -> None:
+        self.run_snapshot = None
+        self.run_cursor = None
+        self.timeline.clear()
+        if self.is_mounted:
+            self._render_timeline()
+            self._update_interaction_actions()
 
     async def _render_projects(
         self,
