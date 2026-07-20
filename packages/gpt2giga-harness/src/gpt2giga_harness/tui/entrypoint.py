@@ -45,6 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--locale", choices=("en", "ru"), default=None)
     parser.add_argument("--no-color", action="store_true")
+    parser.add_argument(
+        "--no-animation",
+        action="store_true",
+        help="Disable animations and smooth scrolling for reduced-motion terminals.",
+    )
     return parser
 
 
@@ -55,7 +60,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"gpt2giga-harness {__version__}")
         return 0
     args = build_parser().parse_args(arguments)
-    with _no_color_environment(args.no_color):
+    with _presentation_environment(
+        no_color=args.no_color,
+        no_animation=args.no_animation,
+    ):
         try:
             app_module = importlib.import_module("gpt2giga_harness.tui.app")
         except ModuleNotFoundError as exc:
@@ -84,20 +92,32 @@ def main(argv: list[str] | None = None) -> int:
 
 
 @contextmanager
-def _no_color_environment(enabled: bool) -> Iterator[None]:
-    """Apply the standard NO_COLOR contract before Textual is imported."""
-    if not enabled:
-        yield
-        return
-    previous = os.environ.get("NO_COLOR")
-    os.environ["NO_COLOR"] = "1"
+def _presentation_environment(
+    *,
+    no_color: bool,
+    no_animation: bool,
+) -> Iterator[None]:
+    """Scope presentation accessibility flags before Textual is imported."""
+    updates: dict[str, str] = {}
+    if no_color:
+        updates["NO_COLOR"] = "1"
+    if no_animation:
+        updates.update(
+            {
+                "TEXTUAL_ANIMATIONS": "none",
+                "TEXTUAL_SMOOTH_SCROLL": "0",
+            }
+        )
+    previous = {name: os.environ.get(name) for name in updates}
+    os.environ.update(updates)
     try:
         yield
     finally:
-        if previous is None:
-            os.environ.pop("NO_COLOR", None)
-        else:
-            os.environ["NO_COLOR"] = previous
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 if __name__ == "__main__":  # pragma: no cover

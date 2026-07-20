@@ -1888,9 +1888,7 @@ def _native_terminal_snapshot_from_mapping(
 def neutralize_native_terminal_output(value: Any) -> str:
     """Remove terminal-control semantics while preserving bounded visible text."""
     text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
-    text = _TERMINAL_SEQUENCE_RE.sub("⟦terminal-control⟧", text)
-    text = _BIDI_CONTROL_RE.sub("�", text)
-    return _CONTROL_RE.sub("�", text)
+    return _neutralize_presentation_text(text)
 
 
 def _native_terminal_input(value: Any) -> str:
@@ -1965,7 +1963,8 @@ def _optional_non_negative_int(value: Any) -> int | None:
 
 
 def _bounded_content_text(value: Any, limit: int) -> str:
-    return _CONTROL_RE.sub("�", str(value or "")).replace("\r", "")[:limit]
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "")
+    return _neutralize_presentation_text(text)[:limit]
 
 
 def _normalize_base_url(value: str) -> str:
@@ -2139,12 +2138,8 @@ def _optional_text(value: Any) -> str | None:
 
 
 def _display_text(value: Any) -> str:
-    text = str(value or "")
-    return (
-        _CONTROL_RE.sub("�", text)
-        .replace("\r", " ")
-        .replace("\n", " ")[:MAX_DISPLAY_CHARS]
-    )
+    text = _neutralize_presentation_text(str(value or ""))
+    return text.replace("\r", " ").replace("\n", " ")[:MAX_DISPLAY_CHARS]
 
 
 def _optional_display_text(value: Any) -> str | None:
@@ -2346,7 +2341,15 @@ def _event_from_mapping(value: Mapping[str, Any]) -> HarnessStoredEvent:
 
 
 def _bounded_event_text(value: Any) -> str:
-    return _CONTROL_RE.sub("�", str(value or "")).replace("\r", "")[:8192]
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "")
+    return _neutralize_presentation_text(text)[:8192]
+
+
+def _neutralize_presentation_text(value: str) -> str:
+    """Neutralize control sequences and bidi overrides for all TUI surfaces."""
+    text = _TERMINAL_SEQUENCE_RE.sub("⟦terminal-control⟧", value)
+    text = _BIDI_CONTROL_RE.sub("�", text)
+    return _CONTROL_RE.sub("�", text)
 
 
 def _optional_identity(value: Any) -> str | None:

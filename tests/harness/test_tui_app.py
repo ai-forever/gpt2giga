@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
+import os
+from pathlib import Path
 
 import pytest
 
@@ -486,3 +489,199 @@ async def test_tui_blocks_fullscreen_provider_controls_and_stops_process():
         assert "raw terminal fallback" in rendered
         assert ("stop", "proc_1") in client.native_calls
         assert app.screen.query_one("#native-input").disabled is True
+
+
+def _quality_state_snapshot(state: str) -> RunSnapshot | None:
+    if state in {"loading", "empty", "ready", "disconnected"}:
+        return None
+    event = {
+        "streaming": TimelineEvent(
+            "evt_stream", "message_delta", "Streaming", delta="partial response"
+        ),
+        "tool": TimelineEvent(
+            "evt_tool", "tool_call_started", "Reading files", tool_name="read"
+        ),
+        "approval": TimelineEvent(
+            "evt_approval",
+            "approval_requested",
+            "Allow project write?",
+            approval_id="approval_1",
+        ),
+        "question": TimelineEvent(
+            "evt_question",
+            "input_requested",
+            "Which target?",
+            input_id="input_1",
+        ),
+        "error": TimelineEvent("evt_error", "error", "Provider unavailable"),
+        "completed": TimelineEvent("evt_done", "run_finished", "Run completed"),
+    }[state]
+    approvals = (
+        (ApprovalSummary("approval_1", "write", "review", "pending"),)
+        if state == "approval"
+        else ()
+    )
+    return replace(
+        _run_snapshot(events=(event,), approvals=approvals),
+        status="succeeded" if state == "completed" else "running",
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("size", ((120, 40), (80, 24), (60, 20)))
+@pytest.mark.parametrize(
+    "state",
+    (
+        "loading",
+        "empty",
+        "ready",
+        "streaming",
+        "tool",
+        "approval",
+        "question",
+        "error",
+        "disconnected",
+        "completed",
+    ),
+)
+async def test_tui_quality_states_have_headless_artifacts_and_primary_actions(
+    size, state
+):
+    client = FakeClient()
+    client.current_run = _quality_state_snapshot(state)
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        if state == "loading":
+            app._set_status(app.t("status.loading"))
+        elif state == "disconnected":
+            app._set_status(app.t("status.disconnected"))
+        await pilot.pause()
+
+        screenshot = app.export_screenshot(
+            title=f"N5-05 {state} {size[0]}x{size[1]}", simplify=True
+        )
+        assert screenshot.startswith("<svg")
+        if artifact_root := os.getenv("GIGALOOM_TUI_ARTIFACT_DIR"):
+            root = Path(artifact_root)
+            root.mkdir(parents=True, exist_ok=True)
+            (root / f"{state}-{size[0]}x{size[1]}.svg").write_text(
+                screenshot,
+                encoding="utf-8",
+            )
+        for selector in (
+            "#body",
+            "#sessions-pane",
+            "#detail-pane",
+            "#timeline",
+            "#composer-row",
+            "#send-turn",
+            "#actions",
+            "#new-session",
+            "#status",
+        ):
+            widget = app.query_one(selector)
+            assert widget.region.x >= 0
+            assert widget.region.right <= size[0]
+            assert widget.region.y >= 0
+            assert widget.region.bottom <= size[1]
+
+
+@pytest.mark.anyio
+async def test_tui_keyboard_focus_help_palette_and_semantic_status_are_non_color():
+    client = FakeClient()
+    client.current_run = _quality_state_snapshot("approval")
+    app = WorkbenchTui(client, workspace="/tmp/demo", locale="ru")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        focused_ids: set[str | None] = set()
+        for _ in range(24):
+            focused_ids.add(app.focused.id if app.focused is not None else None)
+            await pilot.press("tab")
+        assert {"session-list", "composer", "send-turn", "new-session", "help"} <= (
+            focused_ids
+        )
+
+        timeline = str(app.query_one("#timeline").render())
+        assert "[РАЗРЕШЕНИЕ]" in timeline
+        app.query_one("#session-list").focus()
+        await pilot.press("?")
+        assert "Ctrl+P" in app.screen.body
+        await pilot.press("escape")
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        assert type(app.screen).__name__ == "CommandPalette"
+
+
+@pytest.mark.anyio
+async def test_tui_marks_api_loss_and_authoritative_reconnect():
+    class RecoveringClient(FakeClient):
+        fail_snapshot = False
+
+        async def snapshot_run(self, run_id, *, cursor=None):
+            if self.fail_snapshot:
+                raise RuntimeError("worker unavailable")
+            return await super().snapshot_run(run_id, cursor=cursor)
+
+    client = RecoveringClient()
+    client.current_run = _quality_state_snapshot("streaming")
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        client.fail_snapshot = True
+        await app._poll_run()
+        assert "Disconnected" in str(app.query_one("#status").render())
+        client.fail_snapshot = False
+        await app._poll_run()
+        assert "Reconnected" in str(app.query_one("#status").render())
+
+
+@pytest.mark.anyio
+async def test_tui_bounds_long_streams_and_coalesces_resize_storms():
+    client = FakeClient()
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        events = tuple(
+            TimelineEvent(
+                f"evt_{index}",
+                "message_delta",
+                "chunk",
+                delta=f"{index}:" + "x" * 1024,
+            )
+            for index in range(1_000)
+        )
+        app._apply_run_snapshot(_run_snapshot(events=events))
+        assert len(app.timeline) == 100
+        assert len(str(app.query_one("#timeline").render())) <= 64_000
+
+        client.snapshot = replace(
+            client.snapshot,
+            readiness=replace(client.snapshot.readiness, transport="native_terminal"),
+        )
+        app.snapshot = client.snapshot
+        app._show_native_terminal(client.native_snapshot)
+        await pilot.pause()
+        screen = app.screen
+        active = 0
+        maximum_active = 0
+        calls = 0
+
+        async def slow_resize(process_id, *, rows, columns):
+            nonlocal active, maximum_active, calls
+            active += 1
+            calls += 1
+            maximum_active = max(maximum_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return replace(client.native_snapshot, output="")
+
+        client.resize_native_terminal = slow_resize
+        await asyncio.gather(*(screen._resize() for _ in range(50)))
+
+        assert maximum_active == 1
+        assert calls <= 2

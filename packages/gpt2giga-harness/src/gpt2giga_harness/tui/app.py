@@ -356,6 +356,8 @@ class NativeTerminalScreen(ModalScreen[str | None]):
         return_to_session: str,
         handoff: str,
         fullscreen_blocked: str,
+        disconnected: str,
+        reconnected: str,
     ) -> None:
         super().__init__()
         self.client = client
@@ -366,8 +368,13 @@ class NativeTerminalScreen(ModalScreen[str | None]):
         self.return_label = return_to_session
         self.handoff_label = handoff
         self.fullscreen_blocked = fullscreen_blocked
+        self.disconnected_label = disconnected
+        self.reconnected_label = reconnected
         self.scrollback = ""
         self._polling = False
+        self._resizing = False
+        self._pending_dimensions: tuple[int, int] | None = None
+        self._disconnected = False
         self._stopping_for_handoff = False
 
     def compose(self) -> ComposeResult:
@@ -454,10 +461,17 @@ class NativeTerminalScreen(ModalScreen[str | None]):
             if not self.is_mounted:
                 return
             self._apply_snapshot(updated)
+            if self._disconnected:
+                self._disconnected = False
+                self.query_one("#native-status", Static).update(
+                    f"{updated.harness_id} · {updated.transport} · "
+                    f"{self.reconnected_label}"
+                )
             await self._enforce_fullscreen_boundary()
         except Exception as exc:
             if self.is_mounted:
-                self._show_error(exc)
+                self._disconnected = True
+                self._show_error(exc, prefix=self.disconnected_label)
         finally:
             self._polling = False
 
@@ -466,15 +480,27 @@ class NativeTerminalScreen(ModalScreen[str | None]):
             return
         rows = max(2, min(200, self.size.height - 10))
         columns = max(20, min(500, self.size.width - 8))
-        try:
-            updated = await self.client.resize_native_terminal(
-                self.snapshot.process_id,
-                rows=rows,
-                columns=columns,
-            )
-        except Exception:
+        self._pending_dimensions = (rows, columns)
+        if self._resizing:
             return
-        self._apply_snapshot(updated)
+        self._resizing = True
+        try:
+            while self._pending_dimensions is not None:
+                requested_rows, requested_columns = self._pending_dimensions
+                self._pending_dimensions = None
+                try:
+                    updated = await self.client.resize_native_terminal(
+                        self.snapshot.process_id,
+                        rows=requested_rows,
+                        columns=requested_columns,
+                    )
+                except Exception as exc:
+                    self._disconnected = True
+                    self._show_error(exc, prefix=self.disconnected_label)
+                    return
+                self._apply_snapshot(updated)
+        finally:
+            self._resizing = False
 
     async def _enforce_fullscreen_boundary(self) -> None:
         if (
@@ -511,8 +537,10 @@ class NativeTerminalScreen(ModalScreen[str | None]):
         self.query_one("#native-send", Button).disabled = blocked
         self.query_one("#native-stop", Button).disabled = snapshot.terminal
 
-    def _show_error(self, exc: Exception) -> None:
+    def _show_error(self, exc: Exception, *, prefix: str | None = None) -> None:
         message = str(exc).strip() or type(exc).__name__
+        if prefix:
+            message = f"{prefix}: {message}"
         self.query_one("#native-status", Static).update(message[:240])
 
 
@@ -556,6 +584,12 @@ class WorkbenchTui(App[None]):
     ListItem {
         height: 2;
         padding: 0 1;
+    }
+    ListView:focus, Input:focus {
+        border: tall $accent;
+    }
+    Button:focus {
+        text-style: bold reverse underline;
     }
     #detail-pane {
         width: 1fr;
@@ -638,10 +672,13 @@ class WorkbenchTui(App[None]):
     }
     #body.narrow #sessions-pane {
         width: 100%;
-        height: 42%;
-        min-height: 5;
+        height: 4;
+        min-height: 4;
         border-right: none;
         border-bottom: solid $primary-background;
+    }
+    #body.narrow ListItem {
+        height: 1;
     }
     #body.narrow #detail-pane {
         width: 100%;
@@ -654,7 +691,7 @@ class WorkbenchTui(App[None]):
     }
     #body.narrow #timeline {
         margin-top: 0;
-        min-height: 3;
+        min-height: 2;
     }
     #body.narrow #interaction-actions Button {
         min-width: 3;
@@ -670,6 +707,9 @@ class WorkbenchTui(App[None]):
     }
     #body.narrow .pane-title {
         height: 1;
+    }
+    #body.narrow #detail-title {
+        display: none;
     }
     #body.narrow #actions Button {
         min-width: 3;
@@ -709,6 +749,7 @@ class WorkbenchTui(App[None]):
         self.timeline: list[TimelineEvent] = []
         self.attachments: tuple[AttachmentSummary, ...] = ()
         self._polling = False
+        self._disconnected = False
         self.t = translator(locale)
         self.sub_title = self.t("app.subtitle")
 
@@ -1133,9 +1174,16 @@ class WorkbenchTui(App[None]):
             if len(self.screen_stack) > 1 or not any(self.query("#timeline")):
                 return
             self._apply_run_snapshot(snapshot)
+            if self._disconnected:
+                self._disconnected = False
+                self._set_status(self.t("status.reconnected"))
         except Exception as exc:
             if any(self.query("#status")):
-                self._show_error(exc)
+                self._disconnected = True
+                self._set_status(
+                    f"{self.t('status.disconnected')}: "
+                    f"{(str(exc).strip() or type(exc).__name__)[:180]}"
+                )
         finally:
             self._polling = False
 
@@ -1187,16 +1235,18 @@ class WorkbenchTui(App[None]):
             if event.type == "message_delta" and event.delta:
                 lines.append(event.delta)
             elif event.type == "reasoning_delta" and event.delta:
-                lines.append(f"· {event.delta}")
+                lines.append(f"[{self.t('timeline.reasoning')}] {event.delta}")
             elif event.type.startswith("tool_call"):
-                lines.append(f"⚙ {event.tool_name or event.message}")
+                lines.append(
+                    f"[{self.t('timeline.tool')}] {event.tool_name or event.message}"
+                )
             elif event.type == "approval_requested":
-                lines.append(f"! {event.message}")
+                lines.append(f"[{self.t('timeline.approval')}] {event.message}")
             elif event.input_id is not None or event.type in {
                 "input_requested",
                 "user_input_requested",
             }:
-                lines.append(f"? {event.message}")
+                lines.append(f"[{self.t('timeline.question')}] {event.message}")
             elif event.type in {
                 "run_started",
                 "run_finished",
@@ -1204,7 +1254,14 @@ class WorkbenchTui(App[None]):
                 "error",
                 "warning",
             }:
-                lines.append(event.message)
+                label = (
+                    self.t("timeline.error")
+                    if event.type == "error"
+                    else self.t("timeline.warning")
+                    if event.type == "warning"
+                    else self.t("timeline.status")
+                )
+                lines.append(f"[{label}] {event.message}")
         content = "\n".join(lines)[-64_000:] or self.t("timeline.empty")
         self.query_one("#timeline", Static).update(content)
 
@@ -1294,6 +1351,8 @@ class WorkbenchTui(App[None]):
                 return_to_session=self.t("terminal.return"),
                 handoff=self.t("button.provider"),
                 fullscreen_blocked=self.t("terminal.fullscreen_blocked"),
+                disconnected=self.t("status.disconnected"),
+                reconnected=self.t("status.reconnected"),
             ),
             self._native_terminal_closed,
         )

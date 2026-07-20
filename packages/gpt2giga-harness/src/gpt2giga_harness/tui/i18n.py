@@ -35,6 +35,7 @@ CATALOGS: dict[str, dict[str, str]] = {
         "help.body": (
             "Tab / Shift+Tab: move focus\n"
             "Arrow keys: navigate lists\n"
+            "Ctrl+P: command palette\n"
             "Enter: resume selected session\n"
             "P: choose project path\n"
             "N: create session\n"
@@ -83,12 +84,21 @@ CATALOGS: dict[str, dict[str, str]] = {
         "status.running": "Run active",
         "status.native_terminal": "Native terminal contained in TUI",
         "status.finished": "Run finished",
+        "status.disconnected": "Disconnected; retrying",
+        "status.reconnected": "Reconnected to authoritative state",
         "terminal.fullscreen_blocked": "Unsupported provider screen controls were blocked. Use the reviewed provider handoff instead; no raw terminal fallback was opened.",
         "terminal.no_process": "No retained native-terminal process is available for this run.",
         "terminal.return": "Return",
         "terminal.stop": "Stop",
         "terminal.title": "Contained native terminal",
         "timeline.empty": "No run events yet.",
+        "timeline.approval": "APPROVAL",
+        "timeline.error": "ERROR",
+        "timeline.question": "QUESTION",
+        "timeline.reasoning": "REASONING",
+        "timeline.status": "STATUS",
+        "timeline.tool": "TOOL",
+        "timeline.warning": "WARNING",
     },
     "ru": {
         "app.subtitle": "Провайдер-независимая рабочая среда",
@@ -119,6 +129,7 @@ CATALOGS: dict[str, dict[str, str]] = {
         "help.body": (
             "Tab / Shift+Tab: сменить фокус\n"
             "Стрелки: навигация по спискам\n"
+            "Ctrl+P: палитра команд\n"
             "Enter: продолжить выбранную сессию\n"
             "P: выбрать путь проекта\n"
             "N: создать сессию\n"
@@ -167,12 +178,21 @@ CATALOGS: dict[str, dict[str, str]] = {
         "status.running": "Запуск активен",
         "status.native_terminal": "Native-терминал изолирован внутри TUI",
         "status.finished": "Запуск завершён",
+        "status.disconnected": "Связь потеряна; повторная попытка",
+        "status.reconnected": "Связь с авторитетным состоянием восстановлена",
         "terminal.fullscreen_blocked": "Неподдерживаемые управляющие последовательности экрана заблокированы. Используйте проверенный переход к провайдеру; raw-terminal fallback не открывался.",
         "terminal.no_process": "Для этого запуска нет сохранённого native-terminal процесса.",
         "terminal.return": "Вернуться",
         "terminal.stop": "Остановить",
         "terminal.title": "Изолированный native-терминал",
         "timeline.empty": "Событий запуска пока нет.",
+        "timeline.approval": "РАЗРЕШЕНИЕ",
+        "timeline.error": "ОШИБКА",
+        "timeline.question": "ВОПРОС",
+        "timeline.reasoning": "РАССУЖДЕНИЕ",
+        "timeline.status": "СТАТУС",
+        "timeline.tool": "ИНСТРУМЕНТ",
+        "timeline.warning": "ПРЕДУПРЕЖДЕНИЕ",
     },
 }
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
+import locale
 import os
 import sys
 from typing import Any, Sequence
@@ -35,6 +36,9 @@ class TerminalContext:
     term: str | None
     ci: bool = False
     terminal_supported: bool = True
+    platform: str = sys.platform
+    utf8: bool = True
+    windows_terminal: bool = False
 
     @classmethod
     def capture(
@@ -45,12 +49,18 @@ class TerminalContext:
         stderr: Any = None,
         environ: Mapping[str, str] | None = None,
         terminal_supported: bool = True,
+        platform: str | None = None,
     ) -> TerminalContext:
         """Capture only routing-relevant process and stream capabilities."""
         environment = os.environ if environ is None else environ
         input_stream = sys.stdin if stdin is None else stdin
         output_stream = sys.stdout if stdout is None else stdout
         error_stream = sys.stderr if stderr is None else stderr
+        encoding = (
+            getattr(output_stream, "encoding", None)
+            or locale.getpreferredencoding(False)
+            or ""
+        )
         return cls(
             stdin_is_tty=bool(input_stream.isatty()),
             stdout_is_tty=bool(output_stream.isatty()),
@@ -58,6 +68,9 @@ class TerminalContext:
             term=environment.get("TERM"),
             ci=_environment_truthy(environment.get("CI")),
             terminal_supported=terminal_supported,
+            platform=sys.platform if platform is None else platform,
+            utf8="utf" in encoding.casefold(),
+            windows_terminal=bool(environment.get("WT_SESSION")),
         )
 
     @property
@@ -68,12 +81,16 @@ class TerminalContext:
     @property
     def tui_supported(self) -> bool:
         """Return whether terminal control is safe for the canonical TUI."""
+        terminal_control = bool(self.term) and self.term.casefold() != "dumb"
+        if self.platform == "win32" and self.windows_terminal:
+            terminal_control = True
         return (
             self.fully_interactive
             and not self.ci
             and self.terminal_supported
-            and bool(self.term)
-            and self.term.casefold() != "dumb"
+            and self.platform in {"darwin", "linux", "win32"}
+            and self.utf8
+            and terminal_control
         )
 
 

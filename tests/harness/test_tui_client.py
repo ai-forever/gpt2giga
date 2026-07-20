@@ -34,7 +34,7 @@ async def test_in_process_client_navigates_projects_and_sessions(tmp_path):
     first_session = client.sessions.create_session(
         {
             "workspace": str(first),
-            "title": "First\x1b]52;c;hidden\x07 session",
+            "title": "First\x1b]52;c;hidden\x07 \u202esession",
             "harness_id": "echo",
             "model": "local-model",
         },
@@ -51,7 +51,7 @@ async def test_in_process_client_navigates_projects_and_sessions(tmp_path):
     assert snapshot.project.root == str(first)
     assert {project.root for project in snapshot.projects} == {str(first), str(second)}
     assert [session.id for session in snapshot.sessions] == [first_session.id]
-    assert snapshot.sessions[0].title == "First�]52;c;hidden� session"
+    assert snapshot.sessions[0].title == "First⟦terminal-control⟧ �session"
     assert snapshot.readiness.harness_id == "echo"
     assert snapshot.readiness.harness_status == "available"
     assert snapshot.readiness.model == "local-model"
@@ -63,7 +63,7 @@ async def test_in_process_client_navigates_projects_and_sessions(tmp_path):
 
     assert resumed.selected_session_id == created.id
     assert {session.title for session in resumed.sessions} == {
-        "First�]52;c;hidden� session",
+        "First⟦terminal-control⟧ �session",
         "From TUI",
     }
 
@@ -135,7 +135,7 @@ async def test_in_process_client_files_diff_evidence_and_handoffs_are_bounded(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "safe.md").write_text(
-        "# Note\n\x1b]52;c;hidden\x07\n", encoding="utf-8"
+        "# Note\n\x1b]52;c;hidden\x07\u202e\n", encoding="utf-8"
     )
     (workspace / ".hidden.txt").write_text("hidden but safe\n", encoding="utf-8")
     (workspace / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
@@ -163,7 +163,7 @@ async def test_in_process_client_files_diff_evidence_and_handoffs_are_bounded(
         run.id,
         metadata={
             **dict(run.metadata),
-            "diff": "diff --git a/safe.md b/safe.md\n+line\x1b]52;c;x\x07\n",
+            "diff": "diff --git a/safe.md b/safe.md\n+line\x1b]52;c;x\x07\u202e\n",
         },
     )
     inspection = await client.inspect_run(run.id)
@@ -173,10 +173,10 @@ async def test_in_process_client_files_diff_evidence_and_handoffs_are_bounded(
     assert {"safe.md", ".hidden.txt"} <= paths
     assert ".env" not in paths
     assert "outside-link.txt" not in paths
-    assert safe.preview == "# Note\n�]52;c;hidden�\n"
+    assert safe.preview == "# Note\n⟦terminal-control⟧�\n"
     assert attachment.path == "safe.md"
     assert inspection.artifacts[0].type == "diff"
-    assert "�]52;c;x�" in inspection.diff
+    assert "⟦terminal-control⟧�" in inspection.diff
     assert inspection.evidence[-1] == "environment=deferred_to_N6"
     assert provider.status == "blocked"
     assert web.status == "blocked"
@@ -444,7 +444,7 @@ async def test_attach_client_uses_authoritative_file_evidence_and_handoff_querie
     assert files[0].preview == "print(1)"
     assert attachment.id == "att_1"
     assert inspection.changed_files == ("src/app.py",)
-    assert "�]52;c;x�" in inspection.diff
+    assert "⟦terminal-control⟧" in inspection.diff
     assert provider.target == "Claude Desktop"
     assert provider.command == ("claude", "/desktop")
     assert web.target.endswith("/cockpit-v2/work/sess_1")
@@ -671,7 +671,9 @@ def test_bare_console_entrypoint_fails_closed_without_an_interactive_terminal(
     assert "gpt2giga_harness.cli" not in sys.modules
 
 
-def test_tui_run_uses_textual_8_signature_and_scopes_no_color(monkeypatch, tmp_path):
+def test_tui_run_scopes_accessibility_environment_and_restores_it(
+    monkeypatch, tmp_path
+):
     from gpt2giga_harness.tui import entrypoint as tui_entrypoint
 
     calls = []
@@ -682,6 +684,8 @@ def test_tui_run_uses_textual_8_signature_and_scopes_no_color(monkeypatch, tmp_p
 
     monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path))
     monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TEXTUAL_ANIMATIONS", "basic")
+    monkeypatch.delenv("TEXTUAL_SMOOTH_SCROLL", raising=False)
     monkeypatch.setattr(
         tui_entrypoint.importlib,
         "import_module",
@@ -693,11 +697,15 @@ def test_tui_run_uses_textual_8_signature_and_scopes_no_color(monkeypatch, tmp_p
         tui_entrypoint, "InProcessWorkbenchClient", lambda _config: None
     )
 
-    assert tui_entrypoint.main(["--no-color"]) == 0
+    assert tui_entrypoint.main(["--no-color", "--no-animation"]) == 0
 
     assert calls[0][0] == {"mouse": False}
     assert calls[0][1]["NO_COLOR"] == "1"
+    assert calls[0][1]["TEXTUAL_ANIMATIONS"] == "none"
+    assert calls[0][1]["TEXTUAL_SMOOTH_SCROLL"] == "0"
     assert "NO_COLOR" not in os.environ
+    assert os.environ["TEXTUAL_ANIMATIONS"] == "basic"
+    assert "TEXTUAL_SMOOTH_SCROLL" not in os.environ
 
 
 @pytest.mark.parametrize(

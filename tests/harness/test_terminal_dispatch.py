@@ -154,6 +154,44 @@ def test_no_color_preserves_tui_ownership_without_color_output():
     assert plan.color_allowed is False
 
 
+@pytest.mark.parametrize(
+    "context",
+    (
+        TerminalContext(True, True, True, "xterm-256color", platform="darwin"),
+        TerminalContext(True, True, True, "xterm", platform="linux"),
+        TerminalContext(True, True, True, "screen", platform="linux"),
+        TerminalContext(True, True, True, "tmux-256color", platform="darwin"),
+        TerminalContext(
+            True,
+            True,
+            True,
+            None,
+            platform="win32",
+            windows_terminal=True,
+        ),
+        TerminalContext(True, True, True, "vt100", platform="linux"),
+    ),
+)
+def test_supported_cross_platform_utf8_terminal_families_are_admitted(context):
+    assert context.tui_supported is True
+
+
+@pytest.mark.parametrize(
+    "context",
+    (
+        TerminalContext(True, True, True, "xterm", platform="freebsd"),
+        TerminalContext(True, True, True, "xterm", platform="linux", utf8=False),
+        TerminalContext(True, True, True, None, platform="win32"),
+    ),
+)
+def test_unverified_or_non_utf8_terminals_fail_before_textual_import(context):
+    plan = plan_terminal_dispatch(("tui",), context=context)
+
+    assert plan.readiness is DispatchReadiness.BLOCKED
+    assert plan.initialize_textual is False
+    assert plan.terminal_control_allowed is False
+
+
 def test_terminal_context_captures_real_pty_and_non_pty_streams():
     master_fd, slave_fd = os.openpty()
     try:
@@ -167,6 +205,7 @@ def test_terminal_context_captures_real_pty_and_non_pty_streams():
                 stdout=stdout,
                 stderr=stderr,
                 environ={"TERM": "xterm-256color"},
+                platform="darwin",
             )
         pipe_context = TerminalContext.capture(
             stdin=io.StringIO(),
