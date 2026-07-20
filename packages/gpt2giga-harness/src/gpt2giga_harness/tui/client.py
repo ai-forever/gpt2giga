@@ -334,8 +334,12 @@ class WorkbenchClient(Protocol):
         workspace: str,
         *,
         title: str | None = None,
+        harness_id: str | None = None,
+        model: str | None = None,
+        api_mode: str | None = None,
+        mode: str | None = None,
     ) -> SessionSummary:
-        """Create a session using backend-owned defaults."""
+        """Create a session using explicit intent plus backend-owned defaults."""
 
     async def remember_session(self, workspace: str, session_id: str) -> None:
         """Persist the selected session through the existing project state."""
@@ -347,6 +351,12 @@ class WorkbenchClient(Protocol):
         *,
         idempotency_key: str,
         attachment_ids: tuple[str, ...] = (),
+        harness_id: str | None = None,
+        model: str | None = None,
+        api_mode: str | None = None,
+        mode: str | None = None,
+        capability: str | None = None,
+        execution_transport: str | None = None,
     ) -> RunSnapshot:
         """Submit one typed turn without invoking the Harness CLI."""
 
@@ -416,6 +426,10 @@ class WorkbenchClient(Protocol):
         *,
         idempotency_key: str,
         attachment_ids: tuple[str, ...] = (),
+        harness_id: str | None = None,
+        model: str | None = None,
+        api_mode: str | None = None,
+        mode: str | None = None,
     ) -> NativeTerminalSnapshot:
         """Start native-terminal execution through an application authority."""
 
@@ -479,6 +493,8 @@ class InProcessWorkbenchClient:
         *,
         selected_session_id: str | None = None,
     ) -> NavigationSnapshot:
+        if workspace is None and selected_session_id is not None:
+            workspace = self.store.get_session(selected_session_id).workspace
         project = resolve_project(workspace, data_dir=self.config.data_dir)
         sessions = self.store.list_sessions(
             workspace=project.root,
@@ -520,9 +536,22 @@ class InProcessWorkbenchClient:
         workspace: str,
         *,
         title: str | None = None,
+        harness_id: str | None = None,
+        model: str | None = None,
+        api_mode: str | None = None,
+        mode: str | None = None,
     ) -> SessionSummary:
+        payload = {
+            "workspace": workspace,
+            **({"title": title} if title else {}),
+            **({"harness_id": harness_id} if harness_id else {}),
+            **({"model": model} if model else {}),
+            **({"api_mode": api_mode} if api_mode else {}),
+            **({"mode": mode} if mode else {}),
+        }
         session = self.sessions.create_session(
-            {"workspace": workspace, **({"title": title} if title else {})}
+            payload,
+            validate_harness=harness_id is not None,
         )
         await self.remember_session(workspace, session.id)
         return _session_summary(session)
@@ -542,6 +571,12 @@ class InProcessWorkbenchClient:
         *,
         idempotency_key: str,
         attachment_ids: tuple[str, ...] = (),
+        harness_id: str | None = None,
+        model: str | None = None,
+        api_mode: str | None = None,
+        mode: str | None = None,
+        capability: str | None = None,
+        execution_transport: str | None = None,
     ) -> RunSnapshot:
         prompt = _required_content(content, "turn content")
         key = _required_identity(idempotency_key, "idempotency key")
@@ -553,15 +588,30 @@ class InProcessWorkbenchClient:
             return await self.snapshot_run(previous.id)
         before = {run.id for run in self.store.list_runs(session_id)}
         cancel_event = threading.Event()
+        payload: dict[str, Any] = {
+            "prompt": prompt,
+            "stream": True,
+            "attachment_ids": list(_attachment_ids(attachment_ids)),
+        }
+        payload.update(
+            {
+                key: value
+                for key, value in {
+                    "harness_id": harness_id,
+                    "model": model,
+                    "api_mode": api_mode,
+                    "mode": mode,
+                    "capability": capability,
+                    "execution_transport": execution_transport,
+                }.items()
+                if value is not None
+            }
+        )
         task = asyncio.create_task(
             anyio.to_thread.run_sync(
                 lambda: self.sessions.run_turn(
                     session_id,
-                    {
-                        "prompt": prompt,
-                        "stream": True,
-                        "attachment_ids": list(_attachment_ids(attachment_ids)),
-                    },
+                    payload,
                     cancel_event=cancel_event,
                 ),
                 abandon_on_cancel=True,
@@ -828,6 +878,10 @@ class InProcessWorkbenchClient:
         *,
         idempotency_key: str,
         attachment_ids: tuple[str, ...] = (),
+        harness_id: str | None = None,
+        model: str | None = None,
+        api_mode: str | None = None,
+        mode: str | None = None,
     ) -> NativeTerminalSnapshot:
         self.store.get_session(session_id)
         _required_content(content, "native terminal prompt")
@@ -1009,6 +1063,14 @@ class AttachedWorkbenchClient:
         selected_session_id: str | None = None,
     ) -> NavigationSnapshot:
         await self._ensure_session()
+        if workspace is None and selected_session_id is not None:
+            selected_payload = await self._request(
+                "GET",
+                f"/api/sessions/{_path_identity(selected_session_id)}",
+            )
+            workspace = _optional_text(
+                _mapping(selected_payload.get("session")).get("workspace")
+            )
         query = urlencode({"workspace": workspace}) if workspace else ""
         (
             project_payload,
@@ -1095,10 +1157,25 @@ class AttachedWorkbenchClient:
         workspace: str,
         *,
         title: str | None = None,
+        harness_id: str | None = None,
+        model: str | None = None,
+        api_mode: str | None = None,
+        mode: str | None = None,
     ) -> SessionSummary:
         payload: dict[str, Any] = {"workspace": workspace}
-        if title:
-            payload["title"] = title
+        payload.update(
+            {
+                key: value
+                for key, value in {
+                    "title": title,
+                    "harness_id": harness_id,
+                    "model": model,
+                    "api_mode": api_mode,
+                    "mode": mode,
+                }.items()
+                if value is not None
+            }
+        )
         response = await self._request("POST", "/api/sessions", payload)
         return _session_summary_from_mapping(_mapping(response.get("session")))
 
@@ -1116,18 +1193,37 @@ class AttachedWorkbenchClient:
         *,
         idempotency_key: str,
         attachment_ids: tuple[str, ...] = (),
+        harness_id: str | None = None,
+        model: str | None = None,
+        api_mode: str | None = None,
+        mode: str | None = None,
+        capability: str | None = None,
+        execution_transport: str | None = None,
     ) -> RunSnapshot:
+        payload: dict[str, Any] = {
+            "prompt": _required_content(content, "turn content"),
+            "stream": True,
+            "idempotency_key": _required_identity(idempotency_key, "idempotency key"),
+            "attachment_ids": list(_attachment_ids(attachment_ids)),
+        }
+        payload.update(
+            {
+                key: value
+                for key, value in {
+                    "harness_id": harness_id,
+                    "model": model,
+                    "api_mode": api_mode,
+                    "mode": mode,
+                    "capability": capability,
+                    "execution_transport": execution_transport,
+                }.items()
+                if value is not None
+            }
+        )
         response = await self._request(
             "POST",
             f"/api/sessions/{_path_identity(session_id)}/run/start",
-            {
-                "prompt": _required_content(content, "turn content"),
-                "stream": True,
-                "idempotency_key": _required_identity(
-                    idempotency_key, "idempotency key"
-                ),
-                "attachment_ids": list(_attachment_ids(attachment_ids)),
-            },
+            payload,
         )
         run_id = _required_identity(_mapping(response.get("run")).get("id"), "run id")
         return await self.snapshot_run(run_id)
@@ -1390,21 +1486,36 @@ class AttachedWorkbenchClient:
         *,
         idempotency_key: str,
         attachment_ids: tuple[str, ...] = (),
+        harness_id: str | None = None,
+        model: str | None = None,
+        api_mode: str | None = None,
+        mode: str | None = None,
     ) -> NativeTerminalSnapshot:
+        payload: dict[str, Any] = {
+            "action": "start",
+            "session_id": _path_identity(session_id),
+            "prompt": _required_content(content, "native terminal prompt"),
+            "idempotency_key": _required_identity(idempotency_key, "idempotency key"),
+            "attachment_ids": list(_attachment_ids(attachment_ids)),
+            "execution_transport": "native_terminal",
+            "invocation_mode": "native",
+        }
+        payload.update(
+            {
+                key: value
+                for key, value in {
+                    "harness_id": harness_id,
+                    "model": model,
+                    "api_mode": api_mode,
+                    "mode": mode,
+                }.items()
+                if value is not None
+            }
+        )
         response = await self._request(
             "POST",
             "/api/native/processes/start",
-            {
-                "action": "start",
-                "session_id": _path_identity(session_id),
-                "prompt": _required_content(content, "native terminal prompt"),
-                "idempotency_key": _required_identity(
-                    idempotency_key, "idempotency key"
-                ),
-                "attachment_ids": list(_attachment_ids(attachment_ids)),
-                "execution_transport": "native_terminal",
-                "invocation_mode": "native",
-            },
+            payload,
         )
         if bool(response.get("approval_required")):
             raise WorkbenchClientError(

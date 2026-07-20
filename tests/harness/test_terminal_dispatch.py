@@ -6,6 +6,7 @@ import os
 import pytest
 
 from gpt2giga_harness.terminal_dispatch import (
+    CLASSIFIED_ROOT_COMMANDS,
     ConsoleSurface,
     DispatchReadiness,
     TerminalContext,
@@ -222,3 +223,37 @@ def test_terminal_context_captures_real_pty_and_non_pty_streams():
     assert pipe_context.fully_interactive is False
     assert pipe_context.ci is True
     assert pipe_context.tui_supported is False
+
+
+def test_console_handler_inventory_matches_the_cli_parser():
+    from gpt2giga_harness.cli import build_parser
+
+    parser = build_parser()
+    command_action = next(
+        action for action in parser._actions if action.dest == "command"
+    )
+
+    assert set(command_action.choices) | {"tui"} == CLASSIFIED_ROOT_COMMANDS
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ("session", "events", "run_1"),
+        ("session", "approve", "approval_1", "--decision", "deny"),
+        ("session", "list", "--include-archived"),
+        ("session", "list", "--harness", "echo"),
+    ),
+)
+def test_session_admin_and_extended_inventory_routes_remain_automation(argv):
+    plan = plan_terminal_dispatch(argv, context=PTY)
+
+    assert plan.surface is ConsoleSurface.NON_INTERACTIVE_AUTOMATION
+    assert plan.initialize_textual is False
+
+
+def test_root_tui_options_do_not_become_false_commands():
+    plan = plan_terminal_dispatch(("--workspace", ".", "--locale", "ru"), context=PTY)
+
+    assert plan.surface is ConsoleSurface.TUI_HUMAN_WORKFLOW
+    assert plan.command_path == ()

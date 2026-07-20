@@ -9,6 +9,7 @@ import pytest
 
 pytest.importorskip("textual")
 
+from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
 from gpt2giga_harness.tui.app import WorkbenchTui
 from gpt2giga_harness.tui.client import (
     ApprovalSummary,
@@ -37,6 +38,7 @@ class FakeClient:
         self.submitted_attachments: list[tuple[str, ...]] = []
         self.decisions: list[str] = []
         self.native_calls: list[tuple[str, object]] = []
+        self.launch_calls: list[tuple[str, dict[str, object]]] = []
         self.native_snapshot = NativeTerminalSnapshot(
             "proc_1",
             "sess_1",
@@ -82,16 +84,17 @@ class FakeClient:
         selected = selected_session_id or self.snapshot.selected_session_id
         return replace(self.snapshot, selected_session_id=selected)
 
-    async def create_session(self, workspace, *, title=None):
+    async def create_session(self, workspace, *, title=None, **intent):
         self.created += 1
+        self.launch_calls.append(("create", intent))
         created = SessionSummary(
             f"sess_{self.created + 1}",
             title or "Untitled session",
             "2026-07-20T00:00:01Z",
             workspace,
-            "echo",
-            "local",
-            "plan",
+            str(intent.get("harness_id") or "echo"),
+            str(intent.get("model") or "local"),
+            str(intent.get("mode") or "plan"),
         )
         self.snapshot = replace(
             self.snapshot,
@@ -107,8 +110,15 @@ class FakeClient:
         return self.current_run
 
     async def submit_turn(
-        self, session_id, content, *, idempotency_key, attachment_ids=()
+        self,
+        session_id,
+        content,
+        *,
+        idempotency_key,
+        attachment_ids=(),
+        **intent,
     ):
+        self.launch_calls.append(("submit", intent))
         self.submitted.append(content)
         self.submitted_attachments.append(attachment_ids)
         self.current_run = _run_snapshot(
@@ -215,7 +225,9 @@ class FakeClient:
         *,
         idempotency_key,
         attachment_ids=(),
+        **intent,
     ):
+        self.launch_calls.append(("native", intent))
         self.native_calls.append(("start", (session_id, content, attachment_ids)))
         return self.native_snapshot
 
@@ -294,6 +306,49 @@ async def test_tui_creates_and_resumes_session_from_keyboard():
         assert client.created == 1
         assert app.selected_session_id == "sess_2"
         assert any(session.title == "Created" for session in app.snapshot.sessions)
+
+
+@pytest.mark.anyio
+async def test_tui_applies_exact_human_deep_link_once_on_mount():
+    client = FakeClient()
+    intent = TuiLaunchIntent(
+        workspace="/tmp/demo",
+        create_session=True,
+        harness_id="codex-cli",
+        model="reasoning-model",
+        mode="read",
+        execution_transport="one_shot",
+        prompt="Inspect safely",
+    )
+    app = WorkbenchTui(client, launch_intent=intent)
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+
+        assert client.created == 1
+        assert client.submitted == ["Inspect safely"]
+        assert client.launch_calls == [
+            (
+                "create",
+                {
+                    "harness_id": "codex-cli",
+                    "model": "reasoning-model",
+                    "api_mode": None,
+                    "mode": "read",
+                },
+            ),
+            (
+                "submit",
+                {
+                    "harness_id": "codex-cli",
+                    "model": "reasoning-model",
+                    "api_mode": None,
+                    "mode": "read",
+                    "capability": None,
+                    "execution_transport": "one_shot",
+                },
+            ),
+        ]
 
 
 @pytest.mark.anyio

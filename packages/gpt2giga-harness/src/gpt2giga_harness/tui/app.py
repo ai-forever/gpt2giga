@@ -22,6 +22,7 @@ from textual.widgets import (
     Static,
 )
 
+from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
 from gpt2giga_harness.tui.client import (
     AttachmentSummary,
     FileCandidate,
@@ -738,11 +739,17 @@ class WorkbenchTui(App[None]):
         workspace: str | None = None,
         session_id: str | None = None,
         locale: str | None = None,
+        launch_intent: TuiLaunchIntent | None = None,
     ) -> None:
         super().__init__()
         self.client = client
         self.workspace = workspace
         self.selected_session_id = session_id
+        self.launch_intent = launch_intent or TuiLaunchIntent(
+            workspace=workspace,
+            session_id=session_id,
+        )
+        self._launch_intent_applied = False
         self.snapshot: NavigationSnapshot | None = None
         self.run_snapshot: RunSnapshot | None = None
         self.run_cursor: str | None = None
@@ -804,6 +811,7 @@ class WorkbenchTui(App[None]):
     async def on_mount(self) -> None:
         self._set_narrow(self.size.width)
         await self._reload()
+        await self._apply_launch_intent()
         self.set_interval(0.15, self._poll_run)
         self.query_one("#session-list", ListView).focus()
 
@@ -1092,14 +1100,55 @@ class WorkbenchTui(App[None]):
         )
         self._set_status(f"{self.t('status.ready')} · {self.t(mode_key)}")
 
-    async def _submit_content(self, value: str) -> None:
+    async def _apply_launch_intent(self) -> None:
+        if self._launch_intent_applied or self.snapshot is None:
+            return
+        self._launch_intent_applied = True
+        intent = self.launch_intent
+        if intent.create_session:
+            try:
+                created = await self.client.create_session(
+                    intent.workspace or self.snapshot.project.root,
+                    title=intent.title,
+                    harness_id=intent.harness_id,
+                    model=intent.model,
+                    api_mode=intent.api_mode,
+                    mode=intent.mode,
+                )
+            except Exception as exc:
+                self._show_error(exc)
+                return
+            self.selected_session_id = created.id
+            await self._reload()
+        if intent.prompt and self.selected_session_id is not None:
+            await self._submit_content(intent.prompt, launch_intent=intent)
+
+    async def _submit_content(
+        self,
+        value: str,
+        *,
+        launch_intent: TuiLaunchIntent | None = None,
+    ) -> None:
         content = value.strip()
         if not content or self.selected_session_id is None:
             return
         self.query_one("#composer", Input).value = ""
         key = f"tui-{uuid4().hex}"
+        intent_arguments = (
+            {
+                "harness_id": launch_intent.harness_id,
+                "model": launch_intent.model,
+                "api_mode": launch_intent.api_mode,
+                "mode": launch_intent.mode,
+            }
+            if launch_intent is not None
+            else {}
+        )
         try:
-            if self._native_terminal_selected():
+            if (
+                launch_intent is not None
+                and launch_intent.execution_transport == "native_terminal"
+            ) or self._native_terminal_selected():
                 process_id = (
                     self.run_snapshot.native_process_id
                     if self.run_snapshot is not None and not self.run_snapshot.terminal
@@ -1111,6 +1160,7 @@ class WorkbenchTui(App[None]):
                         content,
                         idempotency_key=key,
                         attachment_ids=tuple(item.id for item in self.attachments),
+                        **intent_arguments,
                     )
                 else:
                     terminal = await self.client.send_native_terminal_input(
@@ -1130,11 +1180,18 @@ class WorkbenchTui(App[None]):
                     idempotency_key=key,
                 )
             else:
+                turn_intent_arguments = dict(intent_arguments)
+                if launch_intent is not None:
+                    turn_intent_arguments.update(
+                        capability=launch_intent.capability,
+                        execution_transport=launch_intent.execution_transport,
+                    )
                 snapshot = await self.client.submit_turn(
                     self.selected_session_id,
                     content,
                     idempotency_key=key,
                     attachment_ids=tuple(item.id for item in self.attachments),
+                    **turn_intent_arguments,
                 )
         except Exception as exc:
             self._show_error(exc)

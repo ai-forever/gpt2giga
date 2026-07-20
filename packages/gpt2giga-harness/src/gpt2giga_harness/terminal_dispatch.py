@@ -108,9 +108,68 @@ class TerminalDispatchPlan:
     remediation: str | None = None
 
 
+@dataclass(frozen=True)
+class TuiLaunchIntent:
+    """Typed human-workflow intent preserved across the terminal cutover."""
+
+    workspace: str | None = None
+    session_id: str | None = None
+    create_session: bool = False
+    title: str | None = None
+    harness_id: str | None = None
+    model: str | None = None
+    api_mode: str | None = None
+    mode: str | None = None
+    capability: str | None = None
+    execution_transport: str | None = None
+    prompt: str | None = None
+    proxy_url: str | None = None
+    auto_start_proxy: bool | None = None
+
+
 _MACHINE_FLAGS = frozenset({"--dry-run", "--json", "--non-interactive"})
 _METADATA_FLAGS = frozenset({"--help", "-h", "--version"})
-_HUMAN_ROOT_COMMANDS = frozenset({"chat", "session", "tui"})
+HUMAN_ROOT_COMMANDS = frozenset({"chat", "session", "tui"})
+EXTERNAL_HANDOFF_ROOT_COMMANDS = frozenset({"open"})
+AUTOMATION_ROOT_COMMANDS = frozenset(
+    {
+        "agent",
+        "config",
+        "doctor",
+        "eval",
+        "harness",
+        "init",
+        "integration",
+        "memory",
+        "native",
+        "preset",
+        "project",
+        "provider",
+        "runtime",
+        "schedule",
+        "state",
+        "ui",
+        "worker",
+        "workflow",
+    }
+)
+CLASSIFIED_ROOT_COMMANDS = (
+    HUMAN_ROOT_COMMANDS
+    | EXTERNAL_HANDOFF_ROOT_COMMANDS
+    | AUTOMATION_ROOT_COMMANDS
+    | {"run"}
+)
+_HUMAN_SESSION_ACTIONS = frozenset({"create", "list", "show", "turn"})
+_AUTOMATION_SESSION_ACTIONS = frozenset({"approve", "events"})
+_ROOT_TUI_VALUE_OPTIONS = frozenset(
+    {
+        "--attach",
+        "--bootstrap-token-env",
+        "--locale",
+        "--session",
+        "--workspace",
+    }
+)
 
 
 def _environment_truthy(value: str | None) -> bool:
@@ -146,7 +205,7 @@ def plan_terminal_dispatch(
             reason="metadata_route",
         )
 
-    if command == "open":
+    if command in EXTERNAL_HANDOFF_ROOT_COMMANDS:
         return _ready_plan(
             ConsoleSurface.EXTERNAL_HANDOFF,
             command_path,
@@ -186,9 +245,17 @@ def plan_terminal_dispatch(
 
 
 def _first_command(arguments: tuple[str, ...]) -> str | None:
-    return next(
-        (argument for argument in arguments if not argument.startswith("-")), None
-    )
+    skip_value = False
+    for argument in arguments:
+        if skip_value:
+            skip_value = False
+            continue
+        if argument in _ROOT_TUI_VALUE_OPTIONS:
+            skip_value = True
+            continue
+        if not argument.startswith("-"):
+            return argument
+    return None
 
 
 def _command_path(arguments: tuple[str, ...], command: str | None) -> tuple[str, ...]:
@@ -212,6 +279,7 @@ def _is_metadata_request(arguments: tuple[str, ...]) -> bool:
 def _is_machine_request(arguments: tuple[str, ...], context: TerminalContext) -> bool:
     return (
         any(argument in _MACHINE_FLAGS for argument in arguments)
+        or _session_requires_automation(arguments)
         or context.ci
         or not context.fully_interactive
     )
@@ -220,9 +288,38 @@ def _is_machine_request(arguments: tuple[str, ...], context: TerminalContext) ->
 def _is_human_workflow(arguments: tuple[str, ...], command: str | None) -> bool:
     if command is None:
         return True
-    if command in _HUMAN_ROOT_COMMANDS:
+    if command == "session":
+        action = _session_action(arguments)
+        return action is None or action in _HUMAN_SESSION_ACTIONS
+    if command in HUMAN_ROOT_COMMANDS:
         return True
     return command == "run" and "--agent" in arguments
+
+
+def _session_action(arguments: tuple[str, ...]) -> str | None:
+    try:
+        index = arguments.index("session")
+    except ValueError:
+        return None
+    return next(
+        (
+            argument
+            for argument in arguments[index + 1 :]
+            if not argument.startswith("-")
+        ),
+        None,
+    )
+
+
+def _session_requires_automation(arguments: tuple[str, ...]) -> bool:
+    if "session" not in arguments:
+        return False
+    action = _session_action(arguments)
+    return (
+        action in _AUTOMATION_SESSION_ACTIONS
+        or "--include-archived" in arguments
+        or (action == "list" and "--harness" in arguments)
+    )
 
 
 def _ready_plan(

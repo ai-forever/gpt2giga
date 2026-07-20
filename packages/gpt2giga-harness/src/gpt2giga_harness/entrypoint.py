@@ -4,14 +4,28 @@ from __future__ import annotations
 
 import sys
 
-from gpt2giga_harness.terminal_dispatch import TerminalContext
+from gpt2giga_harness.terminal_dispatch import (
+    ConsoleSurface,
+    DispatchReadiness,
+    TerminalContext,
+    plan_terminal_dispatch,
+)
+from gpt2giga_harness.terminal_intent import parse_tui_launch_intent
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    context: TerminalContext | None = None,
+) -> int:
     """Launch the built-in TUI by default or an explicit command API route."""
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if _is_tui_invocation(arguments):
-        if not _is_tui_metadata(arguments) and not _tui_environment_supported():
+    plan = plan_terminal_dispatch(
+        arguments,
+        context=context or TerminalContext.capture(),
+    )
+    if plan.surface is ConsoleSurface.TUI_HUMAN_WORKFLOW:
+        if plan.readiness is DispatchReadiness.BLOCKED:
             print(
                 "The built-in TUI requires a supported interactive terminal. "
                 "Use an explicit automation/admin command for redirected or CI use.",
@@ -20,25 +34,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         from gpt2giga_harness.tui.entrypoint import main as tui_main
 
-        return tui_main(arguments[1:] if arguments[:1] == ["tui"] else arguments)
+        launch_intent, tui_arguments = parse_tui_launch_intent(arguments)
+        return tui_main(tui_arguments, launch_intent=launch_intent)
 
     from gpt2giga_harness.cli import main as cli_main
 
     return cli_main(arguments)
-
-
-def _is_tui_invocation(arguments: list[str]) -> bool:
-    """Return whether arguments belong to the default human terminal surface."""
-    if not arguments or arguments[0] == "tui":
-        return True
-    if arguments[0] == "--non-interactive":
-        return False
-    return arguments[0].startswith("-")
-
-
-def _is_tui_metadata(arguments: list[str]) -> bool:
-    return any(argument in {"-h", "--help", "--version"} for argument in arguments)
-
-
-def _tui_environment_supported() -> bool:
-    return TerminalContext.capture().tui_supported

@@ -14,6 +14,8 @@ from gpt2giga_harness import entrypoint
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.sessions.models import HarnessStoredEvent
 from gpt2giga_harness.sessions.store import utc_now
+from gpt2giga_harness.terminal_dispatch import TerminalContext
+from gpt2giga_harness.terminal_intent import parse_tui_launch_intent
 from gpt2giga_harness.tui.client import (
     AttachedWorkbenchClient,
     InProcessWorkbenchClient,
@@ -69,6 +71,24 @@ async def test_in_process_client_navigates_projects_and_sessions(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_in_process_client_resolves_an_exact_session_deep_link_workspace(
+    tmp_path,
+):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    client = InProcessWorkbenchClient(HarnessConfig(data_dir=str(tmp_path / "state")))
+    client.sessions.create_session({"workspace": str(first)})
+    selected = client.sessions.create_session({"workspace": str(second)})
+
+    snapshot = await client.load(None, selected_session_id=selected.id)
+
+    assert snapshot.project.root == str(second.resolve())
+    assert snapshot.selected_session_id == selected.id
+
+
+@pytest.mark.anyio
 async def test_in_process_client_submits_idempotent_turn_and_resnapshots(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -78,7 +98,15 @@ async def test_in_process_client_submits_idempotent_turn_and_resnapshots(tmp_pat
         validate_harness=True,
     )
 
-    first = await client.submit_turn(session.id, "hello", idempotency_key="turn_1")
+    first = await client.submit_turn(
+        session.id,
+        "hello",
+        idempotency_key="turn_1",
+        harness_id="echo",
+        model="intent-model",
+        mode="read",
+        execution_transport="one_shot",
+    )
     for _ in range(100):
         if first.events:
             break
@@ -91,6 +119,10 @@ async def test_in_process_client_submits_idempotent_turn_and_resnapshots(tmp_pat
     assert {event.type for event in first.events} >= {"run_started"}
     assert gap.resnapshot_reason == "cursor_gap"
     assert gap.binding.session_id == session.id
+    run = client.store.get_run(first.binding.run_id)
+    assert run.model == "intent-model"
+    assert run.mode == "read"
+    assert run.metadata["execution_transport"] == "one_shot"
 
 
 @pytest.mark.anyio
@@ -201,6 +233,8 @@ async def test_attach_client_uses_existing_api_contract(monkeypatch):
                 },
                 "defaults": {"harness": "echo", "model": "local"},
             }
+        if path == "/api/sessions/sess_1":
+            return {"session": {"id": "sess_1", "workspace": "/tmp/demo"}}
         if path.startswith("/api/sessions?"):
             return {
                 "sessions": [
@@ -262,8 +296,15 @@ async def test_attach_client_uses_existing_api_contract(monkeypatch):
 
     monkeypatch.setattr(client, "_request", request)
 
-    snapshot = await client.load("/tmp/demo", selected_session_id="sess_1")
-    created = await client.create_session("/tmp/demo", title="New")
+    snapshot = await client.load(None, selected_session_id="sess_1")
+    created = await client.create_session(
+        "/tmp/demo",
+        title="New",
+        harness_id="codex-cli",
+        model="reasoning-model",
+        api_mode="v2",
+        mode="read",
+    )
     await client.remember_session("/tmp/demo", created.id)
 
     assert snapshot.transport_mode == "attach"
@@ -271,6 +312,18 @@ async def test_attach_client_uses_existing_api_contract(monkeypatch):
     assert snapshot.readiness.status == "ready"
     assert snapshot.integrations.verified_count == 1
     assert created.id == "sess_2"
+    assert (
+        "POST",
+        "/api/sessions",
+        {
+            "workspace": "/tmp/demo",
+            "title": "New",
+            "harness_id": "codex-cli",
+            "model": "reasoning-model",
+            "api_mode": "v2",
+            "mode": "read",
+        },
+    ) in calls
     assert (
         "PATCH",
         "/api/project/state",
@@ -513,6 +566,10 @@ async def test_attach_client_contains_native_terminal_through_existing_api(
         "inspect",
         idempotency_key="native_1",
         attachment_ids=("att_1",),
+        harness_id="codex-cli",
+        model="reasoning-model",
+        api_mode="v2",
+        mode="read",
     )
     output = await client.snapshot_native_terminal(started.process_id)
     status = await client.status_native_terminal("proc_1")
@@ -540,6 +597,10 @@ async def test_attach_client_contains_native_terminal_through_existing_api(
             "attachment_ids": ["att_1"],
             "execution_transport": "native_terminal",
             "invocation_mode": "native",
+            "harness_id": "codex-cli",
+            "model": "reasoning-model",
+            "api_mode": "v2",
+            "mode": "read",
         },
     ) in calls
     assert (
@@ -627,11 +688,15 @@ def test_console_entrypoint_dispatches_tui_without_full_cli(monkeypatch):
     from gpt2giga_harness.tui import entrypoint as tui_entrypoint
 
     monkeypatch.delitem(sys.modules, "gpt2giga_harness.cli", raising=False)
-    monkeypatch.setattr(tui_entrypoint, "main", lambda arguments: len(arguments))
-    monkeypatch.setattr(entrypoint, "_tui_environment_supported", lambda: True)
+    monkeypatch.setattr(
+        tui_entrypoint,
+        "main",
+        lambda arguments, **_kwargs: len(arguments),
+    )
+    context = TerminalContext(True, True, True, "xterm-256color")
 
-    assert entrypoint.main(["--workspace", "."]) == 2
-    assert entrypoint.main(["tui", "--workspace", "."]) == 2
+    assert entrypoint.main(["--workspace", "."], context=context) == 2
+    assert entrypoint.main(["tui", "--workspace", "."], context=context) == 2
     assert "gpt2giga_harness.cli" not in sys.modules
 
 
@@ -646,16 +711,16 @@ def test_bare_console_entrypoint_dispatches_to_tui(monkeypatch):
     from gpt2giga_harness.tui import entrypoint as tui_entrypoint
 
     monkeypatch.delitem(sys.modules, "gpt2giga_harness.cli", raising=False)
-    monkeypatch.setattr(entrypoint, "_tui_environment_supported", lambda: True)
     calls = []
     monkeypatch.setattr(
         tui_entrypoint,
         "main",
-        lambda arguments: calls.append(arguments) or 0,
+        lambda arguments, **kwargs: calls.append((arguments, kwargs)) or 0,
     )
 
-    assert entrypoint.main([]) == 0
-    assert calls == [[]]
+    context = TerminalContext(True, True, True, "xterm-256color")
+    assert entrypoint.main([], context=context) == 0
+    assert calls[0][0] == []
     assert "gpt2giga_harness.cli" not in sys.modules
 
 
@@ -663,9 +728,9 @@ def test_bare_console_entrypoint_fails_closed_without_an_interactive_terminal(
     monkeypatch, capsys
 ):
     monkeypatch.delitem(sys.modules, "gpt2giga_harness.cli", raising=False)
-    monkeypatch.setattr(entrypoint, "_tui_environment_supported", lambda: False)
 
-    assert entrypoint.main([]) == 2
+    context = TerminalContext(False, False, True, "xterm-256color")
+    assert entrypoint.main(["tui"], context=context) == 2
 
     assert "requires a supported interactive terminal" in capsys.readouterr().err
     assert "gpt2giga_harness.cli" not in sys.modules
@@ -734,3 +799,83 @@ def test_cli_accepts_the_explicit_non_interactive_escape(arguments):
 def test_attach_error_is_content_free():
     error = WorkbenchClientError("attach endpoint is unavailable")
     assert "endpoint" in str(error)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    (
+        (
+            ("chat", "--model", "chat-model", "hello", "world"),
+            {
+                "create_session": True,
+                "harness_id": "direct-chat",
+                "model": "chat-model",
+                "mode": "plan",
+                "prompt": "hello world",
+            },
+        ),
+        (
+            (
+                "run",
+                "--agent",
+                "codex",
+                "--workspace",
+                ".",
+                "--mode",
+                "read",
+                "--native",
+                "inspect",
+            ),
+            {
+                "create_session": True,
+                "workspace": ".",
+                "harness_id": "codex-cli",
+                "mode": "read",
+                "execution_transport": "native_terminal",
+                "prompt": "inspect",
+            },
+        ),
+        (
+            (
+                "session",
+                "turn",
+                "sess_1",
+                "--prompt",
+                "continue",
+                "--transport",
+                "native_structured",
+            ),
+            {
+                "session_id": "sess_1",
+                "execution_transport": "native_structured",
+                "prompt": "continue",
+            },
+        ),
+    ),
+)
+def test_human_terminal_deep_links_preserve_typed_intent(arguments, expected):
+    intent, tui_arguments = parse_tui_launch_intent(arguments)
+
+    assert tui_arguments == []
+    for key, value in expected.items():
+        assert getattr(intent, key) == value
+
+
+def test_console_entrypoint_deep_links_human_chat_without_importing_cli(monkeypatch):
+    from gpt2giga_harness.tui import entrypoint as tui_entrypoint
+
+    monkeypatch.delitem(sys.modules, "gpt2giga_harness.cli", raising=False)
+    calls = []
+    monkeypatch.setattr(
+        tui_entrypoint,
+        "main",
+        lambda arguments, **kwargs: calls.append((arguments, kwargs)) or 0,
+    )
+
+    context = TerminalContext(True, True, True, "xterm-256color")
+    assert entrypoint.main(["chat", "hello"], context=context) == 0
+
+    assert calls[0][0] == []
+    assert calls[0][1]["launch_intent"].harness_id == "direct-chat"
+    assert calls[0][1]["launch_intent"].prompt == "hello"
+    assert "gpt2giga_harness.cli" not in sys.modules

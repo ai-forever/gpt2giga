@@ -124,10 +124,11 @@ CLI будет недоступен, но не сломает остальной
 #### Базовая установка и опциональные providers
 
 Provider-neutral базовый distribution содержит восемь проверенных прямых
-runtime dependencies. В release CI Harness wheel устанавливается в чистые
-окружения Python 3.10 и 3.14, после чего versioned audit завершается ошибкой,
-если resolved environment превышает 64 distributions или содержит packages из
-следующих семейств опциональных интеграций:
+runtime dependencies. В release CI Harness wheel устанавливается с Python
+3.10–3.14 под Linux, macOS и Windows, проходит terminal-command smoke, после
+чего versioned audit завершается ошибкой, если resolved environment превышает
+64 distributions или содержит packages из следующих семейств опциональных
+интеграций:
 
 - provider preset `gpt2giga`/GigaChat;
 - чтение и запись Office-документов;
@@ -153,6 +154,37 @@ python -I -m gpt2giga_harness.base_install --json
 Команда source-checkout `uv sync --all-packages --all-extras --dev`
 устанавливает development tooling и repository integration fixtures, поэтому
 не измеряет footprint базовой установки.
+
+#### Переход на терминальный TUI и CLI автоматизации
+
+Стандартная установка включает канонический терминальный workbench. В
+поддерживаемом интерактивном терминале его открывают `giga` и совместимый alias
+`giga tui`. Интерактивные `giga chat`, `giga run --agent` и `giga session
+list|show|create|turn` переходят в тот же TUI и сохраняют явно заданные
+workspace, session, Harness, model, mode, transport и prompt.
+
+Для скриптов и администрирования используйте неинтерактивный CLI. Флаги
+`--non-interactive`, `--json`, `--dry-run`, перенаправленные потоки, pipe, CI,
+help/version, административные команды и просмотр session events/approvals не
+импортируют Textual, не запрашивают ввод и не выводят управляющие терминальные
+последовательности. `giga open ...` остаётся явным внешним handoff. Явно
+запрошенный TUI завершается до импорта при `TERM=dumb` или неподдерживаемом
+терминале; перенаправленная интерактивная команда сохраняет прежние schema,
+bytes, exit code и разделение stdout/stderr CLI.
+
+Для перехода с prerelease, где TUI был optional extra, обновите стандартный
+пакет и удалите `[tui]` из команд установки:
+
+```bash
+uv tool upgrade --prerelease allow gpt2giga-harness
+giga --version
+giga
+```
+
+Для rollback установите точную ранее проверенную версию: `uv tool install
+--force 'gpt2giga-harness==<previous-version>'`. Команда `uv tool uninstall
+gpt2giga-harness` удаляет пакет и команды, но не удаляет пользовательские
+runtime-данные Harness.
 
 ### 2. Инициализируйте тестовый проект
 

@@ -121,10 +121,10 @@ stay disabled rather than breaking the cockpit.
 #### Base install and optional providers
 
 The provider-neutral base distribution has eight reviewed direct runtime
-dependencies. Release CI installs the Harness wheel in clean Python 3.10 and
-3.14 environments and runs a versioned audit that fails if the resolved
-environment exceeds 64 distributions or includes packages from these optional
-integration families:
+dependencies. Release CI installs the Harness wheel on Python 3.10–3.14 across
+Linux, macOS, and Windows, runs terminal-command smoke, and runs a versioned
+audit that fails if the resolved environment exceeds 64 distributions or
+includes packages from these optional integration families:
 
 - the `gpt2giga`/GigaChat provider preset;
 - Office document readers and writers;
@@ -150,6 +150,36 @@ python -I -m gpt2giga_harness.base_install --json
 The source-checkout `uv sync --all-packages --all-extras --dev` command installs
 development tooling and repository integration fixtures, so it is not a base
 footprint measurement.
+
+#### Terminal TUI and automation cutover
+
+The standard install includes the canonical terminal workbench. Bare `giga` and
+the compatibility alias `giga tui` open it on a supported interactive terminal.
+Human `giga chat`, `giga run --agent`, and `giga session list|show|create|turn`
+deep-link into the same TUI while preserving the explicit workspace, session,
+Harness, model, mode, transport, and prompt intent.
+
+Use the non-interactive CLI for scripts and administration. `--non-interactive`,
+`--json`, `--dry-run`, redirected streams, pipes, CI, help/version, admin
+commands, and session event/approval inspection do not initialize Textual,
+prompt, or emit terminal-control sequences. `giga open ...` remains an explicit
+external handoff. An explicitly requested TUI fails before import under
+`TERM=dumb` or an unsupported terminal; a redirected human command keeps its
+established CLI schema, bytes, exit code, and stdout/stderr discipline.
+
+To migrate from the optional-TUI prerelease, upgrade the standard package and
+remove `[tui]` from install commands:
+
+```bash
+uv tool upgrade --prerelease allow gpt2giga-harness
+giga --version
+giga
+```
+
+Rollback installs the exact previously reviewed version with `uv tool install
+--force 'gpt2giga-harness==<previous-version>'`. `uv tool uninstall
+gpt2giga-harness` removes the package and commands but does not delete the
+user-owned Harness runtime data.
 
 ### 2. Initialize a disposable or test project
 

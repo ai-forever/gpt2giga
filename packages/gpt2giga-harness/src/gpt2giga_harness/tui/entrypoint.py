@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 import importlib
 import os
 import sys
 
 from gpt2giga_harness import __version__
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
 from gpt2giga_harness.tui.client import (
     AttachedWorkbenchClient,
     InProcessWorkbenchClient,
@@ -53,7 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    launch_intent: TuiLaunchIntent | None = None,
+) -> int:
     """Run the built-in TUI or report an incomplete installation."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments == ["--version"]:
@@ -75,7 +81,16 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 2
             raise
-        config = HarnessConfig.from_env()
+        intent = launch_intent or TuiLaunchIntent()
+        intent = replace(
+            intent,
+            workspace=intent.workspace or args.workspace,
+            session_id=intent.session_id or args.session_id,
+        )
+        config = HarnessConfig.from_env().with_overrides(
+            proxy_url=intent.proxy_url,
+            auto_start_proxy=intent.auto_start_proxy,
+        )
         if args.attach:
             token = os.getenv(args.bootstrap_token_env)
             client = AttachedWorkbenchClient(args.attach, bootstrap_token=token)
@@ -83,9 +98,10 @@ def main(argv: list[str] | None = None) -> int:
             client = InProcessWorkbenchClient(config)
         application = app_module.WorkbenchTui(
             client,
-            workspace=args.workspace,
-            session_id=args.session_id,
+            workspace=intent.workspace,
+            session_id=intent.session_id,
             locale=resolve_locale(args.locale),
+            launch_intent=intent,
         )
         application.run(mouse=False)
     return 0

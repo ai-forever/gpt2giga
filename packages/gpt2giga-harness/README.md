@@ -47,14 +47,35 @@ presentation catalogs are available through `--locale en|ru`.
 Bare `giga` is the canonical TUI entry point; `giga tui` remains a compatibility
 alias but is not a separate product surface. Root `--help`, `--version`, and TUI
 options are owned by the same low-overhead TUI entry point without importing
-Textual for metadata-only requests. The terminal-dispatch contract reserves `chat`,
-`run --agent`, and human session workflows for this TUI. The cutover remains
-deferred until the TUI owns the corresponding N5 interaction surfaces.
-`--non-interactive`, `--json`, `--dry-run`, pipes,
-redirected streams, and CI select the non-interactive command API and never
-initialize Textual or emit terminal control sequences. Automation/admin metadata
-also remains non-interactive. `giga open ...` is an explicit external handoff;
-`TERM=dumb` and unsupported terminals fail closed for a requested TUI.
+Textual for metadata-only requests. On a supported interactive terminal, `chat`,
+`run --agent`, and `session list|show|create|turn` deep-link into that same TUI
+with their workspace, session, Harness, model, mode, transport, and prompt intent
+preserved. There is no parallel transcript renderer.
+
+| Command shape | Owner |
+| --- | --- |
+| bare `giga`, `giga tui`, human `chat`, `run --agent`, and selected `session` actions | built-in TUI |
+| `--non-interactive`, `--json`, `--dry-run`, redirects, pipes, CI, admin commands, and session event/approval inspection | non-interactive CLI |
+| `giga open ...` | explicit external handoff |
+
+Machine routes never initialize Textual, prompt, or emit terminal control
+sequences. `TERM=dumb` and unsupported terminals fail closed for an explicitly
+requested TUI; redirected human commands retain their established CLI bytes,
+schemas, exit codes, and stdout/stderr behavior.
+
+If you installed the earlier optional-TUI prerelease, upgrade the existing tool;
+do not keep or add a `[tui]` extra:
+
+```sh
+uv tool upgrade --prerelease allow gpt2giga-harness
+giga --version
+giga
+```
+
+Rollback uses the exact previously reviewed version, for example `uv tool
+install --force 'gpt2giga-harness==<previous-version>'`. Remove the preview with
+`uv tool uninstall gpt2giga-harness`; runtime state remains under the user-owned
+Harness data directory and is not deleted by package uninstall.
 
 For development or when the prerelease is not yet mirrored by your package
 index, run it from a source checkout:
@@ -82,7 +103,8 @@ if the resolved environment grows beyond 64 distributions or pulls in the
 SDKs, external client frameworks, or sandbox-provider SDKs. Those capabilities
 must arrive through an explicit extra, separately installed provider, or
 Harness plugin; they are not silently enabled by the base package. Release CI
-runs the same audit on clean Python 3.10 and 3.14 environments:
+runs the audit plus installed terminal-command smoke on clean Python 3.10–3.14
+environments across Linux, macOS, and Windows:
 
 ```sh
 python -I -m gpt2giga_harness.base_install --json
