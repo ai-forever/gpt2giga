@@ -2,7 +2,7 @@
 
 :::warning[Alpha preview — prerelease]
 
-The `gpt2giga-harness` 0.2.x line is an alpha preview for testing and feedback.
+The `gpt2giga-harness` 0.3.x line is an alpha preview for testing and feedback.
 The UI, CLI, project YAML, runtime schema, and upgrade behavior can change while
 the product is being developed. Use it for local evaluation and supervised
 workflows, not as a production-critical or unattended multi-user service.
@@ -100,8 +100,15 @@ uv tool install --prerelease allow gpt2giga-harness
 giga doctor
 ```
 
-The current `gpt2giga-harness==0.2.0a1` distribution requires
-`gpt2giga==0.2.4a1` and provides the `giga` and `gpt2giga-harness` commands.
+For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
+
+```bash
+uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]'
+```
+
+The current `gpt2giga-harness==0.3.0a1` distribution provides the `giga` and
+`gpt2giga-harness` commands; its explicit `gpt2giga` extra pins
+`gpt2giga==0.2.4a1`.
 
 Requirements are Python 3.10–3.14 and `uv`. Direct GigaChat runs also need the
 gateway credentials described in the [gpt2giga quickstart](quickstart.md).
@@ -113,20 +120,22 @@ stay disabled rather than breaking the cockpit.
 
 #### Base install and optional providers
 
-The base distribution has ten reviewed direct runtime dependencies, including
-the compatible `gpt2giga` requirement. Release CI installs both wheels into
-clean Python 3.10 and 3.14 environments and runs a versioned audit that fails
-if the resolved environment exceeds 64 distributions or includes packages from
-these optional integration families:
+The provider-neutral base distribution has eight reviewed direct runtime
+dependencies. Release CI installs the Harness wheel in clean Python 3.10 and
+3.14 environments and runs a versioned audit that fails if the resolved
+environment exceeds 64 distributions or includes packages from these optional
+integration families:
 
+- the `gpt2giga`/GigaChat provider preset;
 - Office document readers and writers;
 - remote messaging channels;
 - external client or agent UI frameworks;
 - sandbox and container providers.
 
-Add those capabilities through a separately installed provider distribution or
-a Harness entry-point plugin. The base package does not install or silently
-enable them. The Codex, Claude Code, and Gemini adapters remain built in, but
+Add those capabilities through the explicit `gpt2giga` extra, a separately
+installed provider distribution, or a Harness entry-point plugin. The base
+package does not install or silently enable them. The Codex, Claude Code, and
+Gemini adapters remain built in, but
 their separately managed CLI executables are discovered on `PATH` rather than
 installed as Python dependencies.
 
@@ -494,6 +503,70 @@ External agent harnesses run the same proxy preflight before launching Codex,
 Claude Code, or Gemini CLI. If a sidecar is started, the generated local proxy
 key is passed only through the agent-specific local API-key environment variable
 and remains redacted from JSON/UI results.
+
+### Provider and Route Profiles
+
+Cockpit **Settings → Provider** and **Routes & models** manage backend-owned
+profiles for OpenAI-, Anthropic-, and Gemini-compatible endpoints. A provider
+owns its protocol dialect, base URL, route prefix, authentication ownership,
+enabled/offline state, and purpose-specific model defaults. New runs freeze the
+selected provider and route into their execution snapshot, so later settings
+changes do not rewrite retained evidence or an active structured session.
+
+Credentials are references, never form values. Settings and the CLI accept an
+environment-variable or keychain reference and return only its kind and name;
+the secret value is resolved only at the owning request or subprocess boundary.
+Literal credentials, credential files, and unrestricted filesystem paths are
+rejected by the provider settings service.
+
+For example, register an OpenAI Responses-compatible endpoint whose key remains
+in `OPENAI_API_KEY`:
+
+```bash
+giga provider add openai-production \
+  --name "OpenAI production" \
+  --protocol openai_compatible \
+  --dialect openai-responses-v1 \
+  --base-url https://api.openai.com \
+  --route-prefix /v1 \
+  --authentication secret_reference \
+  --secret-reference-kind environment \
+  --secret-reference-name OPENAI_API_KEY \
+  --coding-model <model-id> \
+  --json
+
+giga provider list --json
+giga provider show openai-production --json
+giga provider test openai-production --json
+giga provider discover openai-production --json
+```
+
+`test` and `discover` are explicit bounded operations. A missing probe backend,
+authentication failure, or incompatible endpoint is reported as content-free
+health evidence and does not silently select another provider. Edit requires
+the current `revision` from `show` or Settings, which prevents an older browser
+or CLI request from overwriting a newer configuration:
+
+```bash
+giga provider edit openai-production \
+  --expected-revision <revision> \
+  --coding-model <new-model-id> \
+  --json
+```
+
+Legacy proxy/API-mode/model defaults remain readable during the prerelease
+transition. Migrate them only through the forward-only, backup-gated flow:
+
+```bash
+giga provider migrate-legacy --dry-run --json
+giga provider migrate-legacy \
+  --backup /safe/path/harness-before-provider-migration.zip \
+  --json
+```
+
+The migration revalidates source and target state under a lock before publishing
+the provider registry and journal. There is no reverse migration: stop Harness
+and restore the verified pre-upgrade archive if rollback is required.
 
 ### Project Config
 
@@ -878,6 +951,109 @@ MCP tool invocation remains disabled. External CLI MCP usage is labeled
 `delegated_to_cli_sandbox` and opaque unless a structured adapter emits explicit
 call/result events. Agent run snapshots record the bound server ids and this
 enforcement boundary as configuration provenance.
+
+### Federated Skills and MCP installation
+
+The Cockpit **Plugins** area can filter **Built-in** packages from **External
+Skills & MCP** discovered through the offline catalog. The `skills-sh` source
+contributes hosted Skill metadata through the separately deployed read-only
+proxy, while `neuraldeep` contributes public Skill and MCP metadata. Source
+popularity, curation, health, or presence is discovery evidence only: it never
+grants installation authority, enables network access, or replaces an exact
+artifact review.
+
+The **Skills**, **Plugins**, and **MCP** pages each expose their matching
+**Add** action. Search queries read NeuralDeep directly. To include
+`skills.sh`, run the metadata proxy and pass its fixed origin to the Harness UI:
+
+```bash
+export GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092
+giga ui
+```
+
+**Add Skill** accepts a public GitHub repository or `/tree/<ref>` URL, pins the
+resolved commit, lists bounded `SKILL.md` candidates, previews the selected
+instructions, normalizes portable frontmatter, and installs only after the
+exact preview is approved. **Add Plugin** uses the same immutable inspection
+but requires a reviewed `integration-package.json` for a compatible native
+Plugin/Extension target. **Add MCP** accepts an exact stdio or HTTP descriptor
+and can install it into Codex, Claude, Gemini, or the Harness-managed inventory.
+
+Existing shared Skills are also visible and filterable by Harness. By default,
+Harness scans `~/.agents/skills` as shared root Skills and the native Codex,
+Claude, and Gemini Skill homes. Set `GIGA_ROOT_SKILLS_DIRS` to an
+OS-path-separated list when the shared roots live elsewhere. Inventory reads
+metadata only; full `SKILL.md` content is loaded for the bounded preview after
+an item is selected.
+
+Harness preserves the last good catalog snapshot when a source is unavailable,
+rate-limited, requires renewed authentication, or returns invalid data. An
+external Skill becomes installable only after its bytes match a reviewed
+immutable reference and content hash and its bounded `SKILL.md` and files pass
+validation. A NeuralDeep MCP card is localized discovery metadata. It can link
+to an official MCP Registry package only by exact official package name or
+canonical repository identity; the official version, immutable reference, and
+integrity remain authoritative.
+
+Inspect the offline inventory, then create a single-target preview:
+
+```bash
+giga integration list --json
+giga integration preview \
+  --source catalog \
+  --catalog-id <catalog-id> \
+  --target <target-id> \
+  --scope managed_home \
+  --json
+giga integration apply <flow-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --json
+giga integration status <flow-id> --json
+giga integration rollback <flow-id> --json
+```
+
+Preview binds the exact package and artifact hashes, target, scope/root owner,
+configuration, permissions, network and native-consent boundaries, risk, and
+approval hash. Apply rejects a stale or widened plan. `managed_home` is the
+safe default; project scope requires `--workspace`, and `user_home` remains
+disabled unless the preview and apply explicitly admit it. Secrets remain
+opaque references and are resolved only by the owning subprocess. To update an
+installed package, select the new immutable pin and complete a new preview and
+approval; catalog drift cannot update an existing installation implicitly.
+
+For a reviewed catalog Skill or MCP package, an all-supported group keeps a
+separate child plan and transaction for every target:
+
+```bash
+giga integration group-preview \
+  --catalog-id <catalog-id> \
+  --scope managed_home \
+  --json
+giga integration group-apply <group-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --json
+giga integration group-status <group-id> --json
+giga integration group-recover <group-id> --json
+giga integration group-rollback <group-id> --json
+```
+
+Skills expand to Codex, Claude, and Gemini Skill targets. MCP packages expand
+to their three managed native homes plus Harness-managed MCP inventory. Every
+child preview must succeed before mutation begins. Cross-root apply is a
+recoverable compensating transaction, not a filesystem-atomic write: a partial
+failure rolls back owned, verified children in reverse order or records exact
+repair actions for `group-recover`. Status exposes verification and
+repair-required state; rollback refuses unowned or drifted files.
+
+The same inventory and lifecycle are available through `GET /api/integrations`,
+`POST /api/integrations/preview`, the `/api/integrations/flows/{flow_id}`
+apply/rollback routes, and the corresponding `/api/integrations/groups` routes.
+Cockpit presents the same source filter, exact target or **Install to all
+Harnesses** preview, approval, verification, recovery, and rollback states.
+Federated Plugins are not supported, discovery never authorizes an implicit
+download, and no operation mutates a real user home by default.
 
 ### Shared Tool And Secret Contracts
 
@@ -2286,8 +2462,8 @@ uv tool install --prerelease allow gpt2giga
 uv tool install --prerelease allow gpt2giga-harness
 ```
 
-The current `gpt2giga-harness==0.2.0a1` metadata requires
-`gpt2giga==0.2.4a1`.
+The current `gpt2giga-harness==0.3.0a1` metadata keeps
+`gpt2giga==0.2.4a1` in the explicit `gpt2giga` optional extra.
 
 This package migration does not move or rewrite Harness state. Existing
 `~/.gpt2giga/harness` data and project-local `.giga/` directories remain in

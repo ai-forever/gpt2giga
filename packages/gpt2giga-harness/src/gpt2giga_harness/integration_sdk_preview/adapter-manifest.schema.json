@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agent-workbench:adapter-manifest:v1",
+  "title": "AdapterManifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sdk_api_version", "adapter_id", "adapter_version", "distribution", "entry_point", "claims"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "sdk_api_version": {"const": 1},
+    "adapter_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+    "adapter_version": {"type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+){1,3}(?:[A-Za-z0-9._+-]*)?$"},
+    "distribution": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "entry_point": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_.]*$"},
+    "claims": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "execution.run", "sessions.lifecycle", "approvals.round_trip",
+          "attachments.input", "integrations.configuration",
+          "recovery.process_loss", "history.discovery",
+          "telemetry.content_free", "packaging.entry_point"
+        ]
+      }
+    }
+  }
+}

@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Node.js 22.13
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: '22.13.0'
           cache: npm
@@ -187,9 +187,17 @@ jobs:
         if: matrix.package == 'gateway'
         run: uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl
 
-      - name: Install Harness and gateway artifacts
+      - name: Install Harness base artifact
         if: matrix.package == 'harness'
-        run: uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl dist/smoke/gpt2giga_harness-*.whl
+        run: uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga_harness-*.whl
+
+      - name: Audit Harness base installation
+        if: matrix.package == 'harness'
+        run: .venv-artifact/bin/python -I -m gpt2giga_harness.base_install --json
+
+      - name: Install gateway artifact for combined smoke
+        if: matrix.package == 'harness'
+        run: uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl
 
       - name: Smoke gateway-only imports and command
         if: matrix.package == 'gateway'
@@ -211,7 +219,6 @@ jobs:
           .venv-artifact/bin/gpt2giga --help
           .venv-artifact/bin/giga --help
           .venv-artifact/bin/gpt2giga-harness --help
-          .venv-artifact/bin/python -I -m gpt2giga_harness.base_install --json
 
 
   coverage-badge:

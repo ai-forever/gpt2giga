@@ -12,7 +12,7 @@ describe("Cockpit V2 route contract", () => {
       "Runs",
       "Automation",
       "Evaluation",
-      "Integrations",
+      "Plugins",
     ]);
   });
 
@@ -21,6 +21,7 @@ describe("Cockpit V2 route contract", () => {
     expect(surfaceForPath("/cockpit-v2/runs/run_123/")).toBe("runs");
     expect(surfaceForPath("/cockpit-v2/automation/workflows")).toBe("automation");
     expect(surfaceForPath("/cockpit-v2/evaluation/baselines")).toBe("evaluation");
+    expect(surfaceForPath("/cockpit-v2/plugins/skills")).toBe("integrations");
     expect(surfaceForPath("/cockpit-v2/integrations/doctor")).toBe("integrations");
     expect(surfaceForPath("/cockpit-v2/settings")).toBe("settings");
     expect(surfaceForPath("/api/runs/run_123")).toBeNull();
@@ -43,7 +44,7 @@ describe("Cockpit V2 route contract", () => {
       ),
       "utf8",
     );
-    const surfaces = ["automation", "evaluation", "integrations"].map((surface) =>
+    const surfaces = ["automation", "evaluation"].map((surface) =>
       readFileSync(
         fileURLToPath(new URL(`./surfaces/${surface}.tsx`, import.meta.url)),
         "utf8",
@@ -59,6 +60,46 @@ describe("Cockpit V2 route contract", () => {
       expect(source).not.toContain("beforeunload");
       expect(source).not.toMatch(/href=\{?`?\/cockpit-v2\//);
     }
+    const plugins = readFileSync(
+      fileURLToPath(new URL("./surfaces/integrations.tsx", import.meta.url)),
+      "utf8",
+    );
+    expect(plugins).toContain("<Link");
+    expect(plugins).toContain("search={{ selected: item.id }}");
+    expect(plugins).not.toContain("beforeunload");
+  });
+
+  it("resets plugin connection state when the selected item changes", () => {
+    const plugins = readFileSync(
+      fileURLToPath(new URL("./surfaces/integrations.tsx", import.meta.url)),
+      "utf8",
+    );
+
+    expect(plugins).toContain("key={selectedItem.id}");
+  });
+
+  it("renders the plugin catalog before MCP inventory hydration finishes", () => {
+    const plugins = readFileSync(
+      fileURLToPath(new URL("./surfaces/integrations.tsx", import.meta.url)),
+      "utf8",
+    );
+
+    expect(plugins).toContain("const pending = integrationQuery.isPending;");
+    expect(plugins).not.toContain("operationalQuery");
+  });
+
+  it("keeps workspace utilities in the rail without a static connection banner", () => {
+    const shellSource = readFileSync(
+      fileURLToPath(new URL("./AppShell.tsx", import.meta.url)),
+      "utf8",
+    );
+
+    expect(shellSource).toContain('className="rail-utility-actions"');
+    expect(shellSource).toContain("<ApprovalIcon />");
+    expect(shellSource).toContain("<AttentionIcon />");
+    expect(shellSource).toContain("<SettingsIcon />");
+    expect(shellSource).not.toContain('className="cockpit-header"');
+    expect(shellSource).not.toContain('message(preferences.locale, "connected")');
   });
 
   it("labels intentional full-document authoring transitions as legacy", () => {

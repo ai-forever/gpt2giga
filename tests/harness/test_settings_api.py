@@ -6,6 +6,9 @@ import pytest
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.provider_profiles import ProviderProtocol
+from gpt2giga_harness.provider_registry import ProviderProbeResponse
+from gpt2giga_harness.provider_settings import ProviderSettingsService
 from gpt2giga_harness.secrets import SecretReference, SecretReferenceKind
 from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
 from gpt2giga_harness.settings import (
@@ -31,11 +34,13 @@ def test_settings_read_model_is_bounded_and_never_exposes_secrets(
     body = response.json()
     assert body["runtime"]["proxy_url"] == "http://127.0.0.1:8090/"
     assert body["provider"] == {
-        "configured": True,
-        "source": "environment",
+        "configured": False,
+        "count": 0,
+        "source": "unconfigured",
         "health": "not_checked",
         "secret_readable": False,
-        "change_effect": "restart_required",
+        "change_effect": "new_session_required",
+        "registry_path_readable": False,
     }
     assert body["workspace"]["name"] == tmp_path.name
     assert body["routes"]["default_api_mode_source"] == "built_in"
@@ -49,6 +54,154 @@ def test_settings_read_model_is_bounded_and_never_exposes_secrets(
     assert "provider-secret" not in serialized
     assert "proxy-secret" not in serialized
     assert "token=hidden" not in serialized
+
+
+def test_provider_settings_api_crud_is_reference_only_and_optimistic(tmp_path):
+    canary = "n3-06-provider-secret-canary"
+    client = _client(tmp_path)
+    created = client.post(
+        "/api/providers",
+        json={
+            "id": "team-openai",
+            "display_name": "Team OpenAI",
+            "protocol": "openai_compatible",
+            "dialect": "openai-responses-v1",
+            "base_url": "https://models.example.test",
+            "route_prefix": "/v1",
+            "authentication": {
+                "ownership": "secret_reference",
+                "reference_kind": "environment",
+                "reference_name": "TEAM_OPENAI_KEY",
+            },
+            "default_models": {
+                "coding": "coding-model",
+                "title": "title-model",
+            },
+            "enabled": True,
+            "offline": False,
+        },
+    )
+
+    assert created.status_code == 200
+    provider = created.json()["provider"]
+    assert provider["source"] == "user"
+    assert provider["authentication"] == {
+        "ownership": "secret_reference",
+        "reference_kind": "environment",
+        "reference_name": "TEAM_OPENAI_KEY",
+        "service": None,
+        "account": None,
+        "value_readable": False,
+        "explanation": (
+            "The backend resolves the environment reference only at the owning "
+            "probe or execution boundary; its value is never stored or returned."
+        ),
+    }
+    assert {route["purpose"] for route in provider["routes"]} == {
+        "coding",
+        "title",
+    }
+    assert provider["effects"]["structured_sessions"] == (
+        "fork_or_new_session_required"
+    )
+    serialized = str(created.json())
+    assert canary not in serialized
+    assert "filesystem" not in serialized.lower()
+
+    updated = client.patch(
+        "/api/providers/team-openai",
+        json={
+            "expected_revision": provider["registry_revision"],
+            "display_name": "Team Models",
+            "default_models": {"coding": "coding-model-v2"},
+        },
+    )
+    assert updated.status_code == 200
+    read_back = client.get("/api/providers/team-openai").json()
+    assert read_back == updated.json()["provider"]
+    assert read_back["display_name"] == "Team Models"
+    assert read_back["default_models"] == {
+        "coding": "coding-model-v2",
+        "title": "title-model",
+    }
+
+    stale = client.patch(
+        "/api/providers/team-openai",
+        json={
+            "expected_revision": provider["registry_revision"],
+            "display_name": "Stale write",
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "provider_conflict"
+    stored = tmp_path / "data" / "providers" / "user.json"
+    assert "TEAM_OPENAI_KEY" in stored.read_text(encoding="utf-8")
+    assert canary not in stored.read_text(encoding="utf-8")
+
+
+def test_provider_settings_api_returns_field_errors_before_persistence(tmp_path):
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/api/providers",
+        json={
+            "id": "invalid-provider",
+            "display_name": "Invalid",
+            "protocol": "openai_compatible",
+            "dialect": "gemini-generate-content-v1beta",
+            "base_url": "https://user:secret@example.test",
+            "authentication": {
+                "ownership": "secret_reference",
+                "reference_kind": "environment",
+            },
+            "default_models": {"unknown": "model"},
+        },
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "invalid_provider"
+    assert set(detail["field_errors"]) >= {
+        "dialect",
+        "authentication.reference_name",
+        "default_models.unknown",
+    }
+    assert not (tmp_path / "data" / "providers" / "user.json").exists()
+
+
+def test_provider_settings_api_probe_is_explicit_bounded_and_content_free(tmp_path):
+    service = ProviderSettingsService(
+        str(tmp_path / "data"),
+        probe_backends={ProviderProtocol.OPENAI_COMPATIBLE: _ProbeBackend()},
+    )
+    client = _client(tmp_path, provider_settings_service=service)
+    created = client.post(
+        "/api/providers",
+        json={
+            "id": "offline-fixture",
+            "display_name": "Offline fixture",
+            "protocol": "openai_compatible",
+            "dialect": "openai-chat-completions-v1",
+            "base_url": "https://fixture.invalid",
+            "authentication": {"ownership": "none"},
+            "default_models": {"coding": "configured-model"},
+        },
+    )
+    assert created.status_code == 200
+    assert service.health_store.load("offline-fixture") is None
+
+    tested = client.post("/api/providers/offline-fixture/test")
+    assert tested.status_code == 200
+    assert tested.json()["health"]["status"] == "ready"
+    assert tested.json()["health"]["discovery_status"] == "not_requested"
+
+    discovered = client.post("/api/providers/offline-fixture/discover")
+    assert discovered.status_code == 200
+    assert discovered.json()["health"]["models"] == [
+        {"model": "configured-model", "source": "configured_fallback"},
+        {"model": "discovered-model", "source": "discovered"},
+    ]
+    assert "fixture-response-canary" not in str(discovered.json())
 
 
 def test_settings_defaults_persist_read_back_and_seed_new_sessions(tmp_path):
@@ -247,11 +400,20 @@ def test_secret_reference_settings_round_trip_references_only(tmp_path):
         )
 
 
-def _client(data_dir, **overrides) -> TestClient:
+class _ProbeBackend:
+    def check(self, request):
+        assert request.timeout_seconds <= 30
+        return ProviderProbeResponse(
+            models=("discovered-model",) if request.discover_models else (),
+        )
+
+
+def _client(data_dir, *, provider_settings_service=None, **overrides) -> TestClient:
     config = HarnessConfig(data_dir=str(data_dir / "data"), **overrides)
     app = create_app(
         config,
         registry=create_default_registry(include_entry_points=False),
         store=InMemoryHarnessSessionStore(),
+        provider_settings_service=provider_settings_service,
     )
     return TestClient(app)

@@ -5,15 +5,30 @@ distribution provides the `giga` and `gpt2giga-harness` commands, the
 `gpt2giga_harness` Python namespace, a durable local worker, and the packaged
 Project Cockpit web UI.
 
-> **Alpha preview:** the `0.2.x` storage, API, adapter, and automation contracts
+> **Alpha preview:** the `0.3.x` storage, API, adapter, and automation contracts
 > are stabilizing but may still change between prereleases. Use supervised local
 > workflows first. The package metadata in the current checkout is the source of
 > truth for the supported gateway requirement.
 
 ## Install the current preview
 
-Until the standalone Harness release is available in your package index, run
-it from a source checkout:
+Install the published prerelease from your package index:
+
+```sh
+uv tool install --prerelease allow gpt2giga-harness
+giga doctor
+giga --version
+giga ui
+```
+
+For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
+
+```sh
+uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]'
+```
+
+For development or when the prerelease is not yet mirrored by your package
+index, run it from a source checkout:
 
 ```sh
 git clone https://github.com/ai-forever/gpt2giga.git
@@ -27,27 +42,18 @@ giga ui
 Keep that environment active when you `cd` to the project you want to manage.
 On Windows PowerShell, activate `.venv\Scripts\Activate.ps1` instead.
 
-If the standalone package is available in your package index, install it with:
+The current `gpt2giga-harness==0.3.0a1` metadata keeps
+`gpt2giga==0.2.4a1` in the `gpt2giga` optional extra. Installing only
+`gpt2giga` never adds Harness commands or the `gpt2giga_harness` namespace.
 
-```sh
-uv tool install --prerelease allow gpt2giga-harness
-giga doctor
-giga --version
-giga ui
-```
-
-The current `gpt2giga-harness==0.2.0a1` metadata requires
-`gpt2giga==0.2.4a1`. Installing only `gpt2giga` never adds Harness commands or
-the `gpt2giga_harness` namespace.
-
-The base Harness install is intentionally limited to ten reviewed direct
-runtime distributions, including the compatible gateway dependency. A clean
-installed-artifact audit fails if the resolved environment grows beyond 64
-distributions or pulls in Office document libraries, remote-channel SDKs,
-external client frameworks, or sandbox-provider SDKs. Those capabilities must
-arrive as separately installed providers or Harness plugins; they are not
-silently enabled by the base package. Release CI runs the same audit on clean
-Python 3.10 and 3.14 environments:
+The provider-neutral base Harness install is intentionally limited to eight
+reviewed direct runtime distributions. A clean installed-artifact audit fails
+if the resolved environment grows beyond 64 distributions or pulls in the
+`gpt2giga`/GigaChat provider preset, Office document libraries, remote-channel
+SDKs, external client frameworks, or sandbox-provider SDKs. Those capabilities
+must arrive through an explicit extra, separately installed provider, or
+Harness plugin; they are not silently enabled by the base package. Release CI
+runs the same audit on clean Python 3.10 and 3.14 environments:
 
 ```sh
 python -I -m gpt2giga_harness.base_install --json
@@ -150,6 +156,46 @@ giga native list
 giga worker status
 ```
 
+## Provider-neutral routes
+
+Cockpit Settings and `giga provider` manage reference-only profiles for
+OpenAI-, Anthropic-, and Gemini-compatible endpoints. A profile owns its
+protocol dialect, base URL, route prefix, authentication reference, enabled or
+offline state, and model defaults for coding, titles, evaluation, and fallback.
+Credential values are never accepted by the settings API or returned to the
+browser; they are resolved only at the owning request/subprocess boundary.
+
+```sh
+giga provider list --json
+giga provider add openai-production \
+  --name "OpenAI production" \
+  --protocol openai_compatible \
+  --dialect openai-responses-v1 \
+  --base-url https://api.openai.com \
+  --route-prefix /v1 \
+  --authentication secret_reference \
+  --secret-reference-kind environment \
+  --secret-reference-name OPENAI_API_KEY \
+  --coding-model <model-id> \
+  --json
+giga provider show openai-production --json
+```
+
+Use `giga provider test` or `discover` for an explicit bounded check; failures
+remain content-free and never trigger a silent provider fallback. Migrate old
+proxy/API-mode/model defaults only after previewing the forward-only plan and
+choosing a pre-upgrade backup outside the Harness data directory:
+
+```sh
+giga provider migrate-legacy --dry-run --json
+giga provider migrate-legacy \
+  --backup /safe/path/harness-before-provider-migration.zip \
+  --json
+```
+
+Rollback means stopping Harness and restoring that verified archive; reverse
+migration is intentionally unsupported.
+
 ## Built-in adapters
 
 - Direct Chat through the local gateway;
@@ -216,6 +262,85 @@ and support window are reviewed.
 The control plane stores redacted metadata by default. Content capture and
 secret materialization are opt-in and should have explicit access, retention,
 and cleanup policies.
+
+### Read-only skills.sh metadata proxy
+
+`giga-skills-catalog-proxy` is an independently deployable, metadata-only
+boundary for the authenticated `https://skills.sh/api/v1/` catalog. It exposes
+only bounded GET list, search, detail, and health routes, strips detail file
+contents, never accepts an arbitrary upstream URL, and resolves
+`VERCEL_OIDC_TOKEN` inside each upstream request without persisting or logging
+the bearer value.
+
+Safe local configuration keeps the listener private by default:
+
+```sh
+export VERCEL_OIDC_TOKEN='<request-scoped token supplied by Vercel>'
+export GIGA_SKILLS_PROXY_HOST=127.0.0.1
+export GIGA_SKILLS_PROXY_PORT=8092
+export GIGA_SKILLS_PROXY_RATE_LIMIT=120
+giga-skills-catalog-proxy
+```
+
+Binding to `0.0.0.0` is explicit and should be done only behind an HTTPS
+reverse proxy with its own access controls. The service never installs catalog
+entries and does not grant installation authority.
+
+Point Cockpit search at that fixed proxy origin when starting the UI:
+
+```sh
+export GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092
+giga ui
+```
+
+### Federated Skills and MCP lifecycle
+
+Cockpit's **Plugins** area and `giga integration list --json` read the same
+offline-first inventory. `skills-sh` supplies hosted Skill metadata through the
+proxy above; `neuraldeep` supplies public Skill and MCP metadata. Source health,
+popularity, curation, and presence never authorize installation. The catalog
+keeps its last good state on source failure, and a NeuralDeep MCP card can only
+correlate with an exact official MCP Registry identity without replacing the
+official immutable version or integrity.
+
+The **Skills**, **Plugins**, and **MCP** pages expose **Add Skill**, **Add
+Plugin**, and **Add MCP** respectively. Git Skill import accepts public GitHub
+repository and `/tree/<ref>` URLs, pins the resolved commit, lets the operator
+choose one bounded `SKILL.md`, and shows its instructions before approval.
+Native Plugin/Extension import requires a reviewed `integration-package.json`;
+raw MCP import accepts an exact stdio or HTTP descriptor. Shared root Skills
+from `~/.agents/skills` and provider-specific Skill homes appear in inventory
+and can be filtered by Codex, Claude, Gemini, or Harness. Override shared roots
+with the OS-path-separated `GIGA_ROOT_SKILLS_DIRS` variable.
+
+An external Skill must match its reviewed immutable reference and content hash
+before bounded `SKILL.md` validation and target projection. A normalized MCP
+candidate likewise keeps exact package integrity, argv, origins, secret
+references, permissions, and native-consent boundaries in the preview. Review
+and operate one target with:
+
+```sh
+giga integration preview --source catalog --catalog-id <id> \
+  --target <target-id> --scope managed_home --json
+giga integration apply <flow-id> --plan-id <plan-id> \
+  --authority <operator> --json
+giga integration status <flow-id> --json
+giga integration rollback <flow-id> --json
+```
+
+For **Install to all Harnesses**, use `group-preview`, `group-apply`,
+`group-status`, `group-recover`, and `group-rollback`. Skills expand to Codex,
+Claude, and Gemini; MCP expands to those managed native homes plus the
+Harness-managed MCP inventory. Every child preview must pass before mutation.
+Cross-root apply is a durable compensating transaction: partial failure rolls
+back owned verified children or records exact recovery actions. Updates require
+a new immutable pin, preview, and approval. Federated discovery never implies
+Plugin installation or network authority; Plugin execution requires an exact
+reviewed manifest, and real user homes are never the default mutation scope.
+
+The equivalent API begins at `GET /api/integrations`, with single-target flows
+under `/api/integrations/flows` and grouped flows under
+`/api/integrations/groups`.
 
 ## Plugin contract
 

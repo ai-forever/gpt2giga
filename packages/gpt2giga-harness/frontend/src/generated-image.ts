@@ -1,18 +1,38 @@
-export interface GeneratedImageProjection {
+export interface GeneratedFileProjection {
+  downloadUrl: string;
   filename: string;
+  htmlPreviewUrl: string | null;
+  isImage: boolean;
   mimeType: string;
-  previewUrl: string;
+  previewUrl: string | null;
   sizeBytes: number | null;
 }
 
-export function generatedImageProjection(
+export function generatedFileProjection(
   payload?: Readonly<Record<string, unknown>>,
-): GeneratedImageProjection | null {
-  const previewUrl = typeof payload?.preview_url === "string" ? payload.preview_url : "";
-  if (!previewUrl.startsWith("/api/files/generated/")) return null;
+): GeneratedFileProjection | null {
+  const previewUrl = typeof payload?.preview_url === "string" ? payload.preview_url : null;
+  if (previewUrl !== null && !previewUrl.startsWith("/api/files/generated/")) return null;
+  const filename = typeof payload?.filename === "string" ? payload.filename : "Generated file";
+  const explicitDownloadUrl = typeof payload?.download_url === "string"
+    ? payload.download_url
+    : null;
+  const downloadUrl = explicitDownloadUrl
+    ?? (previewUrl === null ? "" : `${previewUrl}?download=${encodeURIComponent(filename)}`);
+  if (!downloadUrl.startsWith("/api/files/generated/")) return null;
+  const mimeType = typeof payload?.mime_type === "string"
+    ? payload.mime_type
+    : "application/octet-stream";
+  const isImage = mimeType.startsWith("image/") && previewUrl !== null;
+  const htmlPreviewUrl = mimeType.toLowerCase() === "text/html"
+    ? `${downloadUrl.split(/[?#]/, 1)[0]}?preview=html`
+    : null;
   return {
-    filename: typeof payload?.filename === "string" ? payload.filename : "Generated image",
-    mimeType: typeof payload?.mime_type === "string" ? payload.mime_type : "image/jpeg",
+    downloadUrl,
+    filename,
+    htmlPreviewUrl,
+    isImage,
+    mimeType,
     previewUrl,
     sizeBytes: typeof payload?.size_bytes === "number" ? payload.size_bytes : null,
   };

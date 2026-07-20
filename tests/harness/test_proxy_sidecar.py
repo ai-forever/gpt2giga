@@ -99,6 +99,7 @@ def test_stream_sse_json_cancellation_interrupts_blocked_read(monkeypatch):
 
 
 def test_sidecar_preflight_requires_gigachat_credentials(monkeypatch):
+    monkeypatch.setattr(proxy, "gpt2giga_preset_available", lambda: True)
     monkeypatch.delenv("GIGACHAT_CREDENTIALS", raising=False)
     monkeypatch.delenv("GIGACHAT_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("GIGACHAT_USER", raising=False)
@@ -112,6 +113,23 @@ def test_sidecar_preflight_requires_gigachat_credentials(monkeypatch):
 
     assert result.ok is False
     assert "missing GigaChat credentials" in result.reason
+
+
+def test_sidecar_preflight_requires_optional_gpt2giga_preset(monkeypatch):
+    monkeypatch.setattr(proxy, "gpt2giga_preset_available", lambda: False)
+    monkeypatch.setenv("GIGACHAT_CREDENTIALS", "secret")
+
+    result = proxy.sidecar_preflight(
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            auto_start_proxy=True,
+        )
+    )
+
+    assert result.ok is False
+    assert result.reason == (
+        "optional gpt2giga preset is not installed; install gpt2giga-harness[gpt2giga]"
+    )
 
 
 def test_sidecar_preflight_rejects_remote_proxy_url(monkeypatch):

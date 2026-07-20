@@ -15,6 +15,12 @@ from gpt2giga_harness.project import (
     load_project_state,
     resolve_project,
 )
+from gpt2giga_harness.provider_settings import (
+    ProviderRegistryConflict,
+    ProviderSettingsNotFoundError,
+    ProviderSettingsService,
+    ProviderSettingsValidationError,
+)
 from gpt2giga_harness.runtime.policy import permission_profile
 from gpt2giga_harness.settings import (
     SETTINGS_FIELDS,
@@ -46,7 +52,8 @@ def settings_read_model(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     history = MCPProbeHistoryStore(config.data_dir)
     defaults = snapshot.defaults
-    provider_configured = _provider_configured()
+    provider_registry = request.app.state.harness_provider_settings_service.list()
+    configured_providers = provider_registry["providers"]
     harnesses = []
     for harness in request.app.state.harness_registry.list():
         spec = harness.spec()
@@ -83,11 +90,13 @@ def settings_read_model(
             "proxy_auth_configured": config.api_key is not None,
         },
         "provider": {
-            "configured": provider_configured,
-            "source": "environment" if provider_configured else "unconfigured",
-            "health": "not_checked",
+            "configured": bool(configured_providers),
+            "count": len(configured_providers),
+            "source": "user_registry" if configured_providers else "unconfigured",
+            "health": _provider_health(configured_providers),
             "secret_readable": False,
-            "change_effect": "restart_required",
+            "change_effect": "new_session_required",
+            "registry_path_readable": False,
         },
         "routes": {
             "default_api_mode": defaults.default_api_mode,
@@ -139,11 +148,96 @@ def settings_read_model(
             "content_free": True,
             "actions": [
                 {"id": "check_runtime", "method": "GET", "path": "/api/health"},
-                {"id": "discover_models", "method": "GET", "path": "/api/models"},
+                {
+                    "id": "provider_settings",
+                    "method": "GET",
+                    "path": "/api/providers",
+                },
             ],
             "async_data_plane": request.app.state.harness_async_diagnostics.snapshot(),
         },
     }
+
+
+@router.get("/api/providers")
+def list_provider_settings(request: Request) -> dict[str, Any]:
+    """Return the reference-only provider registry and template catalog."""
+    return request.app.state.harness_provider_settings_service.list()
+
+
+@router.get("/api/providers/{provider_id}")
+def get_provider_settings(request: Request, provider_id: str) -> dict[str, Any]:
+    """Return one backend-owned provider projection."""
+    try:
+        return request.app.state.harness_provider_settings_service.get(provider_id)
+    except ProviderSettingsNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="provider not found") from exc
+    except ProviderSettingsValidationError as exc:
+        raise _provider_field_error(exc) from exc
+
+
+@router.post("/api/providers")
+def create_provider_settings(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Create and authoritatively read back one reference-only provider."""
+    provider_id = payload.get("id")
+    spec = {key: value for key, value in payload.items() if key != "id"}
+    try:
+        result = request.app.state.harness_provider_settings_service.create(
+            provider_id,
+            spec,
+        )
+    except ProviderSettingsValidationError as exc:
+        raise _provider_field_error(exc) from exc
+    except ProviderRegistryConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "provider_conflict", "message": str(exc)},
+        ) from exc
+    return {"saved": True, "provider": result.provider, "effects": result.effects}
+
+
+@router.patch("/api/providers/{provider_id}")
+def update_provider_settings(
+    request: Request,
+    provider_id: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Optimistically edit and read back one reference-only provider."""
+    expected_revision = payload.get("expected_revision")
+    if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+        raise _field_error({"expected_revision": "expected an integer revision"})
+    spec = {key: value for key, value in payload.items() if key != "expected_revision"}
+    try:
+        result = request.app.state.harness_provider_settings_service.update(
+            provider_id,
+            spec,
+            expected_revision=expected_revision,
+        )
+    except ProviderSettingsNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="provider not found") from exc
+    except ProviderSettingsValidationError as exc:
+        raise _provider_field_error(exc) from exc
+    except ProviderRegistryConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "provider_conflict", "message": str(exc)},
+        ) from exc
+    return {"saved": True, "provider": result.provider, "effects": result.effects}
+
+
+@router.post("/api/providers/{provider_id}/test")
+def test_provider_settings(request: Request, provider_id: str) -> dict[str, Any]:
+    """Run one explicit bounded provider connection check."""
+    return _run_provider_check(request, provider_id, discover_models=False)
+
+
+@router.post("/api/providers/{provider_id}/discover")
+def discover_provider_models(request: Request, provider_id: str) -> dict[str, Any]:
+    """Run one explicit bounded provider model-discovery check."""
+    return _run_provider_check(request, provider_id, discover_models=True)
 
 
 @router.patch("/api/settings/defaults")
@@ -286,20 +380,39 @@ def _runtime_source(name: str) -> str:
     return "environment" if os.getenv(name) else "built_in"
 
 
-def _provider_configured() -> bool:
-    import os
+def _provider_health(providers: list[dict[str, Any]]) -> str:
+    states = {
+        item["health"]["status"] for item in providers if item.get("health") is not None
+    }
+    if "unhealthy" in states or "blocked" in states:
+        return "attention_required"
+    if "ready" in states:
+        return "ready"
+    return "not_checked"
 
-    return any(
-        os.getenv(name)
-        for name in (
-            "GIGACHAT_ACCESS_TOKEN",
-            "GIGACHAT_CLIENT_ID",
-            "GIGACHAT_CLIENT_SECRET",
-            "GIGACHAT_CREDENTIALS",
-            "GIGACHAT_PASSWORD",
-            "GIGACHAT_USER",
-        )
+
+def _provider_field_error(exc: ProviderSettingsValidationError) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={"code": "invalid_provider", "field_errors": exc.field_errors},
     )
+
+
+def _run_provider_check(
+    request: Request,
+    provider_id: str,
+    *,
+    discover_models: bool,
+) -> dict[str, Any]:
+    service: ProviderSettingsService = (
+        request.app.state.harness_provider_settings_service
+    )
+    try:
+        return service.check(provider_id, discover_models=discover_models)
+    except ProviderSettingsNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="provider not found") from exc
+    except ProviderSettingsValidationError as exc:
+        raise _provider_field_error(exc) from exc
 
 
 def _mcp_health(history: MCPProbeHistoryStore, server_id: str) -> str:

@@ -168,12 +168,20 @@ class HarnessSettingsStore:
     def _read_unlocked(self) -> dict[str, Any]:
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        except FileNotFoundError:
             return {}
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Harness defaults are unreadable") from exc
         if not isinstance(payload, Mapping):
-            return {}
+            raise ValueError("Harness defaults must be an object")
+        if set(payload) != {"schema_version", "defaults"}:
+            raise ValueError("Harness defaults fields are invalid")
+        if payload.get("schema_version") != SETTINGS_SCHEMA_VERSION:
+            raise ValueError("unsupported Harness defaults schema_version")
         defaults = payload.get("defaults")
-        return dict(defaults) if isinstance(defaults, Mapping) else {}
+        if not isinstance(defaults, Mapping):
+            raise ValueError("Harness defaults values must be an object")
+        return dict(defaults)
 
 
 class SettingsConflictError(RuntimeError):

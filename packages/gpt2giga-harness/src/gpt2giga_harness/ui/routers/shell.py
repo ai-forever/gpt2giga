@@ -29,7 +29,8 @@ _COCKPIT_V2_PATH = re.compile(
     r"(?:work(?:/[^/]+)?|runs(?:/[^/]+)?|"
     r"automation(?:/(?:agents|workflows|schedules))?|"
     r"evaluation(?:/(?:arena|evals|baselines))?|"
-    r"integrations(?:/(?:harnesses|models|mcp|doctor))?|settings)/?"
+    r"plugins(?:/(?:all|mcp|plugins|skills))?|"
+    r"integrations(?:/(?:add|harnesses|models|mcp|doctor))?|settings)/?"
 )
 _COCKPIT_V2_SHELL_HEADERS = {
     "Cache-Control": "no-cache",
@@ -37,7 +38,7 @@ _COCKPIT_V2_SHELL_HEADERS = {
         "default-src 'none'; script-src 'self'; style-src 'self'; "
         "img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; "
         "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; "
-        "object-src 'none'; worker-src 'none'"
+        "frame-src 'self'; object-src 'none'; worker-src 'none'"
     ),
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
@@ -49,7 +50,7 @@ _LEGACY_ROUTE_REDIRECTS = {
     "approvals": "/cockpit-v2/runs",
     "arena": "/cockpit-v2/evaluation/arena",
     "evaluate": "/cockpit-v2/evaluation/evals",
-    "tools": "/cockpit-v2/integrations/mcp",
+    "tools": "/cockpit-v2/plugins/mcp",
 }
 
 

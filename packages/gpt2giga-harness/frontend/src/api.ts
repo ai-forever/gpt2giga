@@ -320,10 +320,12 @@ export interface SettingsResponse {
   };
   provider: {
     configured: boolean;
+    count: number;
     source: string;
     health: string;
     secret_readable: false;
     change_effect: string;
+    registry_path_readable: false;
   };
   routes: {
     default_api_mode: string;
@@ -391,6 +393,97 @@ export interface SettingsSaveResponse {
   sources: Record<string, string>;
   locked_fields: string[];
   change_effect: "new_runs";
+}
+
+export interface ProviderHealthProjection {
+  status: string;
+  checked_at: string;
+  duration_ms: number;
+  discovery_status: string;
+  failure_kind: string | null;
+  reason_code: string | null;
+  discovery_reason_code: string | null;
+  cached: boolean;
+  models: Array<{ model: string; source: string }>;
+}
+
+export interface ProviderProjection {
+  id: string;
+  display_name: string;
+  protocol: string;
+  dialect: string;
+  base_url: string;
+  route_prefix: string | null;
+  effective_base_url: string;
+  source: string;
+  enabled: boolean;
+  offline: boolean;
+  registry_revision: number;
+  profile_revision: string;
+  authentication: {
+    ownership: string;
+    reference_kind: string | null;
+    reference_name: string | null;
+    service: string | null;
+    account: string | null;
+    value_readable: false;
+    explanation: string;
+  };
+  default_models: Partial<Record<"coding" | "title" | "evaluation" | "fallback", string>>;
+  routes: Array<{
+    id: string;
+    revision: string;
+    purpose: string;
+    model: string;
+    provider_revision: string;
+    authentication_ownership: string;
+  }>;
+  compatibility: Array<{
+    harness_id: string;
+    adapter_version: string;
+    transports: string[];
+    native_auth: boolean;
+    capabilities: string[];
+    evidence_status: "reviewed";
+  }>;
+  compatibility_explanation: string;
+  health: ProviderHealthProjection | null;
+  effects: Record<string, string>;
+  updated_at: string;
+}
+
+export interface ProviderSettingsResponse {
+  providers: ProviderProjection[];
+  templates: Array<{
+    id: string;
+    title: string;
+    protocol: string;
+    dialect: string;
+    base_url: string;
+    route_prefix: string | null;
+    authentication: string;
+    secret_reference_name: string | null;
+  }>;
+  effects: Record<string, string>;
+  secret_contract: {
+    accepted_reference_kinds: string[];
+    values_accepted: false;
+    values_returned: false;
+    filesystem_paths_accepted: false;
+  };
+  discovery_errors: string[];
+}
+
+export interface ProviderMutationResponse {
+  saved: true;
+  provider: ProviderProjection;
+  effects: Record<string, string>;
+}
+
+export interface ProviderCheckResponse {
+  provider_id: string;
+  health: ProviderHealthProjection;
+  effects: Record<string, string>;
 }
 
 export interface AttachmentSummary {

@@ -18,8 +18,6 @@ BASE_DIRECT_DISTRIBUTIONS = frozenset(
     {
         "anyio",
         "fastapi",
-        "gigachat",
-        "gpt2giga",
         "pydantic",
         "python-dateutil",
         "pyyaml",
@@ -29,6 +27,12 @@ BASE_DIRECT_DISTRIBUTIONS = frozenset(
     }
 )
 OPTIONAL_INTEGRATION_DISTRIBUTIONS = {
+    "provider_presets": frozenset(
+        {
+            "gigachat",
+            "gpt2giga",
+        }
+    ),
     "office": frozenset(
         {
             "odfpy",
@@ -71,9 +75,6 @@ OPTIONAL_INTEGRATION_DISTRIBUTIONS = {
 
 _REQUIREMENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*")
 _EXTRA_MARKER = re.compile(r"\bextra\s*==", re.IGNORECASE)
-_EXACT_GATEWAY_REQUIREMENT = re.compile(
-    r"^gpt2giga==[^\s;,]+(?:\s*;.*)?$", re.IGNORECASE
-)
 
 
 def _normalize_distribution_name(value: str) -> str:
@@ -124,21 +125,10 @@ def audit_base_install(
     direct = {_requirement_name(requirement) for requirement in base_requirements}
     missing = sorted(BASE_DIRECT_DISTRIBUTIONS - direct)
     unexpected = sorted(direct - BASE_DIRECT_DISTRIBUTIONS)
-    gateway_requirements = [
-        requirement
-        for requirement in base_requirements
-        if _requirement_name(requirement) == "gpt2giga"
-    ]
-    gateway_exact = len(gateway_requirements) == 1 and bool(
-        _EXACT_GATEWAY_REQUIREMENT.fullmatch(gateway_requirements[0].strip())
-    )
-
     optional_integrations: dict[str, dict[str, Any]] = {}
     violations: list[str] = []
     if missing or unexpected:
         violations.append("direct_dependency_drift")
-    if not gateway_exact:
-        violations.append("gateway_dependency_not_exact")
     if len(installed) > MAX_BASE_DISTRIBUTIONS:
         violations.append("installed_distribution_budget_exceeded")
 
@@ -161,7 +151,6 @@ def audit_base_install(
             "actual": sorted(direct),
             "missing": missing,
             "unexpected": unexpected,
-            "gateway_exact": gateway_exact,
         },
         "installed_distributions": {
             "count": len(installed),

@@ -8,7 +8,7 @@ import {
 } from "./message-actions";
 
 describe("message actions", () => {
-  it("copies the complete fetched assistant message instead of its bounded preview", async () => {
+  it("copies the complete fetched message instead of its bounded preview", async () => {
     const full = `prefix\n${"x".repeat(40_000)}\nsuffix`;
     const writeClipboard = vi.fn(async () => undefined);
 
