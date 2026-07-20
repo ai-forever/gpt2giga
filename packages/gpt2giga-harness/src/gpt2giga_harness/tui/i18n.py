@@ -16,6 +16,7 @@ CATALOGS: dict[str, dict[str, str]] = {
         "button.fork": "Fork",
         "button.files": "Files",
         "button.evidence": "Evidence",
+        "button.terminal": "Terminal",
         "button.provider": "Provider",
         "button.web": "Web",
         "button.new_project": "Project",
@@ -39,6 +40,7 @@ CATALOGS: dict[str, dict[str, str]] = {
             "N: create session\n"
             "A: attach a safe project file\n"
             "E: inspect diff and evidence\n"
+            "T: return to a contained native terminal\n"
             "O / W: preview provider / Web handoff\n"
             "R: refresh\n"
             "?: help\n"
@@ -79,7 +81,13 @@ CATALOGS: dict[str, dict[str, str]] = {
         "status.ready": "Ready",
         "status.resnapshot": "Authoritative resnapshot",
         "status.running": "Run active",
+        "status.native_terminal": "Native terminal contained in TUI",
         "status.finished": "Run finished",
+        "terminal.fullscreen_blocked": "Unsupported provider screen controls were blocked. Use the reviewed provider handoff instead; no raw terminal fallback was opened.",
+        "terminal.no_process": "No retained native-terminal process is available for this run.",
+        "terminal.return": "Return",
+        "terminal.stop": "Stop",
+        "terminal.title": "Contained native terminal",
         "timeline.empty": "No run events yet.",
     },
     "ru": {
@@ -92,6 +100,7 @@ CATALOGS: dict[str, dict[str, str]] = {
         "button.fork": "Ответвить",
         "button.files": "Файлы",
         "button.evidence": "Данные",
+        "button.terminal": "Терминал",
         "button.provider": "Провайдер",
         "button.web": "Web",
         "button.new_project": "Проект",
@@ -115,6 +124,7 @@ CATALOGS: dict[str, dict[str, str]] = {
             "N: создать сессию\n"
             "A: прикрепить безопасный файл проекта\n"
             "E: открыть diff и данные запуска\n"
+            "T: вернуться во встроенный native-терминал\n"
             "O / W: проверить переход к провайдеру / Web\n"
             "R: обновить\n"
             "?: помощь\n"
@@ -155,7 +165,13 @@ CATALOGS: dict[str, dict[str, str]] = {
         "status.ready": "Готово",
         "status.resnapshot": "Обновление авторитетного снимка",
         "status.running": "Запуск активен",
+        "status.native_terminal": "Native-терминал изолирован внутри TUI",
         "status.finished": "Запуск завершён",
+        "terminal.fullscreen_blocked": "Неподдерживаемые управляющие последовательности экрана заблокированы. Используйте проверенный переход к провайдеру; raw-terminal fallback не открывался.",
+        "terminal.no_process": "Для этого запуска нет сохранённого native-terminal процесса.",
+        "terminal.return": "Вернуться",
+        "terminal.stop": "Остановить",
+        "terminal.title": "Изолированный native-терминал",
         "timeline.empty": "Событий запуска пока нет.",
     },
 }

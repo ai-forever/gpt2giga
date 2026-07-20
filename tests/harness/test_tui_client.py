@@ -455,6 +455,118 @@ async def test_attach_client_uses_authoritative_file_evidence_and_handoff_querie
     ) in calls
 
 
+@pytest.mark.anyio
+async def test_attach_client_contains_native_terminal_through_existing_api(
+    monkeypatch,
+):
+    client = AttachedWorkbenchClient("http://127.0.0.1:8091")
+    calls: list[tuple[str, str, object]] = []
+
+    def process(status="running", *, cursor=0, exit_code=None):
+        return {
+            "id": "proc_1",
+            "session_id": "sess_1",
+            "run_id": "run_1",
+            "harness_id": "codex-cli",
+            "transport": "pty",
+            "status": status,
+            "terminal_cursor": cursor,
+            "exit_code": exit_code,
+        }
+
+    async def request(method, path, payload=None, **kwargs):
+        calls.append((method, path, payload))
+        if path == "/api/native/processes/start":
+            return {"process": process(), "run": {"id": "run_1"}}
+        if path == "/api/native/processes/proc_1/output?cursor=0":
+            return {
+                "process_id": "proc_1",
+                "status": "running",
+                "cursor": 2,
+                "run": {
+                    "id": "run_1",
+                    "session_id": "sess_1",
+                    "harness_id": "codex-cli",
+                },
+                "outputs": [
+                    {"text": "safe\n"},
+                    {"text": "\x1b]52;c;clipboard\x07\x1b[?1049howned"},
+                ],
+            }
+        if path == "/api/native/processes/proc_1/input":
+            return {"process": process(cursor=2), "run": {"id": "run_1"}}
+        if path == "/api/native/processes/proc_1/resize":
+            return {"process": process(cursor=2), "run": {"id": "run_1"}}
+        if method == "GET" and path == "/api/native/processes/proc_1":
+            return {"process": process(cursor=2), "run": {"id": "run_1"}}
+        if method == "DELETE" and path == "/api/native/processes/proc_1":
+            return {
+                "process": process("stopped", cursor=2, exit_code=0),
+                "run": {"id": "run_1"},
+            }
+        raise AssertionError(path)
+
+    monkeypatch.setattr(client, "_request", request)
+
+    started = await client.start_native_terminal(
+        "sess_1",
+        "inspect",
+        idempotency_key="native_1",
+        attachment_ids=("att_1",),
+    )
+    output = await client.snapshot_native_terminal(started.process_id)
+    status = await client.status_native_terminal("proc_1")
+    await client.send_native_terminal_input("proc_1", "continue", submit=True)
+    await client.resize_native_terminal("proc_1", rows=24, columns=80)
+    stopped = await client.stop_native_terminal("proc_1")
+
+    assert started.transport == "pty"
+    assert output.cursor == 2
+    assert output.handoff_required is True
+    assert status.status == "running"
+    assert "safe" in output.output
+    assert "terminal-control" in output.output
+    assert "\x1b" not in output.output
+    assert stopped.status == "stopped"
+    assert stopped.exit_code == 0
+    assert (
+        "POST",
+        "/api/native/processes/start",
+        {
+            "action": "start",
+            "session_id": "sess_1",
+            "prompt": "inspect",
+            "idempotency_key": "native_1",
+            "attachment_ids": ["att_1"],
+            "execution_transport": "native_terminal",
+            "invocation_mode": "native",
+        },
+    ) in calls
+    assert (
+        "POST",
+        "/api/native/processes/proc_1/input",
+        {"data": "continue", "submit": True},
+    ) in calls
+
+
+@pytest.mark.anyio
+async def test_native_terminal_fails_closed_for_in_process_and_control_input(tmp_path):
+    client = InProcessWorkbenchClient(HarnessConfig(data_dir=str(tmp_path / "state")))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    session = client.sessions.create_session(
+        {"workspace": str(workspace), "harness_id": "echo"},
+        validate_harness=True,
+    )
+
+    with pytest.raises(WorkbenchClientError, match="requires attach mode"):
+        await client.start_native_terminal(
+            session.id, "inspect", idempotency_key="native_1"
+        )
+    with pytest.raises(WorkbenchClientError, match="terminal controls"):
+        await client.send_native_terminal_input("proc_1", "\x1b[2J")
+
+
 @pytest.mark.parametrize(
     "value",
     (

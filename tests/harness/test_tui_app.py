@@ -14,6 +14,7 @@ from gpt2giga_harness.tui.client import (
     FileCandidate,
     HandoffPreview,
     HarnessSummary,
+    NativeTerminalSnapshot,
     NavigationSnapshot,
     ProjectSummary,
     ReadinessSummary,
@@ -32,6 +33,16 @@ class FakeClient:
         self.submitted: list[str] = []
         self.submitted_attachments: list[tuple[str, ...]] = []
         self.decisions: list[str] = []
+        self.native_calls: list[tuple[str, object]] = []
+        self.native_snapshot = NativeTerminalSnapshot(
+            "proc_1",
+            "sess_1",
+            "run_native",
+            "codex-cli",
+            "pty",
+            "running",
+            0,
+        )
         self.current_run: RunSnapshot | None = None
         self.snapshot = NavigationSnapshot(
             transport_mode="in_process",
@@ -193,6 +204,43 @@ class FakeClient:
             ("browser rendering is Web-owned",),
             "Open after review.",
         )
+
+    async def start_native_terminal(
+        self,
+        session_id,
+        content,
+        *,
+        idempotency_key,
+        attachment_ids=(),
+    ):
+        self.native_calls.append(("start", (session_id, content, attachment_ids)))
+        return self.native_snapshot
+
+    async def snapshot_native_terminal(self, process_id, *, cursor=0):
+        self.native_calls.append(("snapshot", (process_id, cursor)))
+        return replace(self.native_snapshot, output="", cursor=max(cursor, 1))
+
+    async def status_native_terminal(self, process_id):
+        self.native_calls.append(("status", process_id))
+        return replace(self.native_snapshot, output="")
+
+    async def send_native_terminal_input(self, process_id, data, *, submit=False):
+        self.native_calls.append(("input", (process_id, data, submit)))
+        self.native_snapshot = replace(
+            self.native_snapshot,
+            output=f"provider: {data}\n",
+            cursor=self.native_snapshot.cursor + 1,
+        )
+        return self.native_snapshot
+
+    async def resize_native_terminal(self, process_id, *, rows, columns):
+        self.native_calls.append(("resize", (process_id, rows, columns)))
+        return replace(self.native_snapshot, output="")
+
+    async def stop_native_terminal(self, process_id):
+        self.native_calls.append(("stop", process_id))
+        self.native_snapshot = replace(self.native_snapshot, status="stopped")
+        return self.native_snapshot
 
 
 def _run_snapshot(
@@ -369,3 +417,72 @@ async def test_tui_file_and_evidence_modals_fit_supported_terminal_matrix(size):
         for widget in app.screen.query("#detail-dialog, #detail-body, #detail-close"):
             assert widget.region.x >= 0
             assert widget.region.right <= size[0]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("size", ((120, 40), (80, 24), (60, 20)))
+async def test_tui_contains_native_terminal_and_restores_session_view(size):
+    client = FakeClient()
+    client.snapshot = replace(
+        client.snapshot,
+        readiness=replace(client.snapshot.readiness, transport="native_terminal"),
+    )
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        composer = app.query_one("#composer")
+        composer.focus()
+        composer.value = "Start native"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert client.native_calls[0][0] == "start"
+        for widget in app.screen.query(
+            "#native-dialog, #native-output, #native-input-row, #native-actions"
+        ):
+            assert widget.region.x >= 0
+            assert widget.region.right <= size[0]
+
+        await pilot.click("#native-input")
+        await pilot.press(*"continue")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert ("input", ("proc_1", "continue", True)) in client.native_calls
+        assert "provider: continue" in str(
+            app.screen.query_one("#native-output").render()
+        )
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+
+
+@pytest.mark.anyio
+async def test_tui_blocks_fullscreen_provider_controls_and_stops_process():
+    client = FakeClient()
+    client.snapshot = replace(
+        client.snapshot,
+        readiness=replace(client.snapshot.readiness, transport="native_terminal"),
+    )
+    client.native_snapshot = replace(
+        client.native_snapshot,
+        output="safe\x1b]52;c;clipboard\x07\x1b[?1049howned",
+        handoff_required=True,
+    )
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        composer = app.query_one("#composer")
+        composer.focus()
+        composer.value = "Start native"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        rendered = str(app.screen.query_one("#native-output").render())
+        assert "\x1b" not in rendered
+        assert "terminal-control" in rendered
+        assert "raw terminal fallback" in rendered
+        assert ("stop", "proc_1") in client.native_calls
+        assert app.screen.query_one("#native-input").disabled is True

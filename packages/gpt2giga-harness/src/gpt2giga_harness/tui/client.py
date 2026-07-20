@@ -74,10 +74,33 @@ MAX_TIMELINE_CHARS = 64 * 1024
 MAX_FILE_CANDIDATES = 20
 MAX_FILE_PREVIEW_CHARS = 8 * 1024
 MAX_DIFF_PREVIEW_CHARS = 32 * 1024
+MAX_NATIVE_SCROLLBACK_CHARS = 64 * 1024
+MAX_NATIVE_INPUT_CHARS = 8 * 1024
 HTTP_TIMEOUT_SECONDS = 10.0
 RUN_START_TIMEOUT_SECONDS = 5.0
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+_BIDI_CONTROL_RE = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
+_TERMINAL_SEQUENCE_RE = re.compile(
+    r"\x1b(?:"
+    r"\][^\x07\x1b]*(?:\x07|\x1b\\)?|"
+    r"P.*?(?:\x1b\\|$)|"
+    r"\[[0-?]*[ -/]*[@-~]|"
+    r"[@-_]"
+    r")",
+    re.DOTALL,
+)
+_FULLSCREEN_TERMINAL_RE = re.compile(
+    r"\x1b(?:"
+    r"\][^\x07\x1b]*(?:\x07|\x1b\\)?|"
+    r"P.*?(?:\x1b\\|$)|"
+    r"\[[0-9;?]*(?:[ABCDEFGHJKSTf]|[hl])"
+    r")",
+    re.DOTALL,
+)
 _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "failed", "canceled"})
+_TERMINAL_PROCESS_STATUSES = frozenset(
+    {"exited", "stopped", "failed", "timed_out", "interrupted", "unknown"}
+)
 
 
 class WorkbenchClientError(RuntimeError):
@@ -201,6 +224,8 @@ class RunSnapshot:
     cursor: str | None
     pending_approvals: tuple[ApprovalSummary, ...] = ()
     resnapshot_reason: str | None = None
+    execution_transport: str | None = None
+    native_process_id: str | None = None
 
     @property
     def terminal(self) -> bool:
@@ -269,6 +294,28 @@ class HandoffPreview:
     observability: tuple[str, ...]
     instruction: str
     command: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class NativeTerminalSnapshot:
+    """Bounded, terminal-neutral native-process projection."""
+
+    process_id: str
+    session_id: str
+    run_id: str
+    harness_id: str
+    transport: str
+    status: str
+    cursor: int
+    output: str = ""
+    output_truncated: bool = False
+    exit_code: int | None = None
+    handoff_required: bool = False
+
+    @property
+    def terminal(self) -> bool:
+        """Return whether the native process reached a terminal state."""
+        return self.status in _TERMINAL_PROCESS_STATUSES
 
 
 class WorkbenchClient(Protocol):
@@ -361,6 +408,37 @@ class WorkbenchClient(Protocol):
 
     async def web_handoff(self, session_id: str) -> HandoffPreview:
         """Preview the exact Web target without silently starting a server."""
+
+    async def start_native_terminal(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        idempotency_key: str,
+        attachment_ids: tuple[str, ...] = (),
+    ) -> NativeTerminalSnapshot:
+        """Start native-terminal execution through an application authority."""
+
+    async def snapshot_native_terminal(
+        self, process_id: str, *, cursor: int = 0
+    ) -> NativeTerminalSnapshot:
+        """Read bounded native output after an exact cursor."""
+
+    async def status_native_terminal(self, process_id: str) -> NativeTerminalSnapshot:
+        """Read authoritative native-process lifecycle state."""
+
+    async def send_native_terminal_input(
+        self, process_id: str, data: str, *, submit: bool = False
+    ) -> NativeTerminalSnapshot:
+        """Send reviewed text input to an exact native process."""
+
+    async def resize_native_terminal(
+        self, process_id: str, *, rows: int, columns: int
+    ) -> NativeTerminalSnapshot:
+        """Resize an exact application-owned native process."""
+
+    async def stop_native_terminal(self, process_id: str) -> NativeTerminalSnapshot:
+        """Stop an exact application-owned native process."""
 
 
 class InProcessWorkbenchClient:
@@ -743,6 +821,46 @@ class InProcessWorkbenchClient:
             instruction="Use attach mode with an already running local Web application.",
         )
 
+    async def start_native_terminal(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        idempotency_key: str,
+        attachment_ids: tuple[str, ...] = (),
+    ) -> NativeTerminalSnapshot:
+        self.store.get_session(session_id)
+        _required_content(content, "native terminal prompt")
+        _required_identity(idempotency_key, "idempotency key")
+        _attachment_ids(attachment_ids)
+        raise WorkbenchClientError(
+            "native terminal start requires attach mode so the existing policy, "
+            "worktree, and process application authority remains the sole owner"
+        )
+
+    async def snapshot_native_terminal(
+        self, process_id: str, *, cursor: int = 0
+    ) -> NativeTerminalSnapshot:
+        raise _in_process_native_terminal_error(process_id, cursor=cursor)
+
+    async def status_native_terminal(self, process_id: str) -> NativeTerminalSnapshot:
+        raise _in_process_native_terminal_error(process_id)
+
+    async def send_native_terminal_input(
+        self, process_id: str, data: str, *, submit: bool = False
+    ) -> NativeTerminalSnapshot:
+        _native_terminal_input(data)
+        raise _in_process_native_terminal_error(process_id)
+
+    async def resize_native_terminal(
+        self, process_id: str, *, rows: int, columns: int
+    ) -> NativeTerminalSnapshot:
+        _native_terminal_dimensions(rows, columns)
+        raise _in_process_native_terminal_error(process_id)
+
+    async def stop_native_terminal(self, process_id: str) -> NativeTerminalSnapshot:
+        raise _in_process_native_terminal_error(process_id)
+
     async def _wait_for_run(
         self,
         session_id: str,
@@ -1097,6 +1215,8 @@ class AttachedWorkbenchClient:
             ),
             pending_approvals=approvals,
             resnapshot_reason=reason,
+            execution_transport=_optional_display_text(run.get("execution_transport")),
+            native_process_id=_optional_text(run.get("native_process_id")),
         )
 
     async def latest_run(self, session_id: str) -> RunSnapshot | None:
@@ -1262,6 +1382,80 @@ class AttachedWorkbenchClient:
             ),
             instruction="Open this local URL after reviewing the target and boundary.",
         )
+
+    async def start_native_terminal(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        idempotency_key: str,
+        attachment_ids: tuple[str, ...] = (),
+    ) -> NativeTerminalSnapshot:
+        response = await self._request(
+            "POST",
+            "/api/native/processes/start",
+            {
+                "action": "start",
+                "session_id": _path_identity(session_id),
+                "prompt": _required_content(content, "native terminal prompt"),
+                "idempotency_key": _required_identity(
+                    idempotency_key, "idempotency key"
+                ),
+                "attachment_ids": list(_attachment_ids(attachment_ids)),
+                "execution_transport": "native_terminal",
+                "invocation_mode": "native",
+            },
+        )
+        if bool(response.get("approval_required")):
+            raise WorkbenchClientError(
+                "native process approval is required; review the retained approval "
+                "before retrying this exact start"
+            )
+        return _native_terminal_snapshot_from_mapping(response)
+
+    async def snapshot_native_terminal(
+        self, process_id: str, *, cursor: int = 0
+    ) -> NativeTerminalSnapshot:
+        validated_cursor = _non_negative_cursor(cursor)
+        response = await self._request(
+            "GET",
+            f"/api/native/processes/{_path_identity(process_id)}/output?"
+            + urlencode({"cursor": validated_cursor}),
+        )
+        return _native_terminal_snapshot_from_mapping(response)
+
+    async def status_native_terminal(self, process_id: str) -> NativeTerminalSnapshot:
+        response = await self._request(
+            "GET", f"/api/native/processes/{_path_identity(process_id)}"
+        )
+        return _native_terminal_snapshot_from_mapping(response)
+
+    async def send_native_terminal_input(
+        self, process_id: str, data: str, *, submit: bool = False
+    ) -> NativeTerminalSnapshot:
+        response = await self._request(
+            "POST",
+            f"/api/native/processes/{_path_identity(process_id)}/input",
+            {"data": _native_terminal_input(data), "submit": bool(submit)},
+        )
+        return _native_terminal_snapshot_from_mapping(response)
+
+    async def resize_native_terminal(
+        self, process_id: str, *, rows: int, columns: int
+    ) -> NativeTerminalSnapshot:
+        validated_rows, validated_columns = _native_terminal_dimensions(rows, columns)
+        response = await self._request(
+            "POST",
+            f"/api/native/processes/{_path_identity(process_id)}/resize",
+            {"rows": validated_rows, "columns": validated_columns},
+        )
+        return _native_terminal_snapshot_from_mapping(response)
+
+    async def stop_native_terminal(self, process_id: str) -> NativeTerminalSnapshot:
+        response = await self._request(
+            "DELETE", f"/api/native/processes/{_path_identity(process_id)}"
+        )
+        return _native_terminal_snapshot_from_mapping(response)
 
     async def _validate_binding(self, binding: RunActionBinding) -> None:
         current = await self.snapshot_run(binding.run_id)
@@ -1642,6 +1836,117 @@ def _blocked_provider_handoff(harness_id: str) -> HandoffPreview:
     )
 
 
+def _native_terminal_snapshot_from_mapping(
+    data: Mapping[str, Any],
+) -> NativeTerminalSnapshot:
+    process = _mapping(data.get("process"))
+    run = _mapping(data.get("run"))
+    raw_parts = tuple(
+        str(item.get("text") or "") for item in _mapping_items(data.get("outputs"), 512)
+    )
+    raw_output = "".join(raw_parts)
+    handoff_required = bool(_FULLSCREEN_TERMINAL_RE.search(raw_output))
+    safe_output = neutralize_native_terminal_output(raw_output)
+    output_truncated = bool(data.get("truncated")) or (
+        len(safe_output) > MAX_NATIVE_SCROLLBACK_CHARS
+    )
+    safe_output = safe_output[-MAX_NATIVE_SCROLLBACK_CHARS:]
+    return NativeTerminalSnapshot(
+        process_id=_required_identity(
+            process.get("id") or data.get("process_id"), "native process id"
+        ),
+        session_id=_required_identity(
+            process.get("session_id") or run.get("session_id"), "session id"
+        ),
+        run_id=_required_identity(process.get("run_id") or run.get("id"), "run id"),
+        harness_id=_display_text(
+            process.get("harness_id") or run.get("harness_id") or "unknown"
+        ),
+        transport=_display_text(process.get("transport") or "unknown"),
+        status=_display_text(
+            data.get("status")
+            or process.get("status")
+            or run.get("status")
+            or "unknown"
+        ),
+        cursor=_bounded_non_negative_int(
+            data.get("cursor")
+            if data.get("cursor") is not None
+            else process.get("terminal_cursor")
+        ),
+        output=safe_output,
+        output_truncated=output_truncated,
+        exit_code=_optional_int(
+            data.get("exit_code")
+            if data.get("exit_code") is not None
+            else process.get("exit_code")
+        ),
+        handoff_required=handoff_required,
+    )
+
+
+def neutralize_native_terminal_output(value: Any) -> str:
+    """Remove terminal-control semantics while preserving bounded visible text."""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = _TERMINAL_SEQUENCE_RE.sub("⟦terminal-control⟧", text)
+    text = _BIDI_CONTROL_RE.sub("�", text)
+    return _CONTROL_RE.sub("�", text)
+
+
+def _native_terminal_input(value: Any) -> str:
+    if not isinstance(value, str):
+        raise WorkbenchClientError("native terminal input must be text")
+    if not value or len(value) > MAX_NATIVE_INPUT_CHARS:
+        raise WorkbenchClientError(
+            f"native terminal input must contain 1-{MAX_NATIVE_INPUT_CHARS} characters"
+        )
+    if (
+        _CONTROL_RE.search(value)
+        or _BIDI_CONTROL_RE.search(value)
+        or "\r" in value
+        or "\n" in value
+    ):
+        raise WorkbenchClientError("native terminal input contains terminal controls")
+    return value
+
+
+def _native_terminal_dimensions(rows: Any, columns: Any) -> tuple[int, int]:
+    if (
+        not isinstance(rows, int)
+        or isinstance(rows, bool)
+        or not 2 <= rows <= 200
+        or not isinstance(columns, int)
+        or isinstance(columns, bool)
+        or not 20 <= columns <= 500
+    ):
+        raise WorkbenchClientError(
+            "native terminal dimensions require rows 2-200 and columns 20-500"
+        )
+    return rows, columns
+
+
+def _non_negative_cursor(value: Any) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise WorkbenchClientError("native terminal cursor must be non-negative")
+    return value
+
+
+def _optional_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _in_process_native_terminal_error(
+    process_id: str, *, cursor: int | None = None
+) -> WorkbenchClientError:
+    _path_identity(process_id)
+    if cursor is not None:
+        _non_negative_cursor(cursor)
+    return WorkbenchClientError(
+        "native terminal process control requires attach mode; the in-process "
+        "presentation does not read PTYs or runtime stores directly"
+    )
+
+
 def _safe_paths(value: Any) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
         return ()
@@ -1930,6 +2235,8 @@ def _run_snapshot(
     pending_approvals: tuple[ApprovalSummary, ...] = (),
     resnapshot_reason: str | None = None,
 ) -> RunSnapshot:
+    metadata = _mapping(run.metadata)
+    native_process = _mapping(metadata.get("native_process"))
     return RunSnapshot(
         binding=RunActionBinding(
             session_id=run.session_id,
@@ -1943,6 +2250,8 @@ def _run_snapshot(
         cursor=cursor,
         pending_approvals=pending_approvals,
         resnapshot_reason=resnapshot_reason,
+        execution_transport=_optional_display_text(metadata.get("execution_transport")),
+        native_process_id=_optional_text(native_process.get("id")),
     )
 
 
