@@ -61,7 +61,12 @@
         "output_families": ["terminal", "text", "json", "jsonl", "protocol_bytes", "unknown"],
         "tty_behavior": "headless_flag_precedes_human_selectors",
         "capability_status": {
-          "session.resume.native": "degraded"
+          "session.continue.native": "degraded",
+          "session.resume.native": "degraded",
+          "session.fork.native": "degraded",
+          "approval.provider_owned": "ready",
+          "one_shot.events.decode": "ready",
+          "handoff.remote_control": "degraded"
         },
         "help_byte_digests": {
           "version": {"bytes": 15, "sha256": "e86740780c6343c8f5d57367fff51a48b585b8fb2bc0b78ede981e24fbcf56df"},

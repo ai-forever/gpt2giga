@@ -451,11 +451,23 @@ WORKBENCH_INTEGRATION_SPECS: Mapping[str, WorkbenchIntegrationSpec] = MappingPro
                 ),
             ),
             structured_transport=None,
-            event_decoder=None,
+            event_decoder="claude-stream-json-v1",
             l1_fallback="provider_terminal_handoff",
             capture_help_paths=((),),
             isolated_variables=("HOME", "CLAUDE_CONFIG_DIR"),
             capabilities=(
+                _capability(
+                    "session.continue.native",
+                    CapabilityImplementation.HANDOFF,
+                    CapabilityState.DEGRADED,
+                    CapabilityEffectScope.NEW_SESSION,
+                    ("provider-terminal",),
+                    ("provider",),
+                    "--continue",
+                    "claude-2.1-native",
+                    limitation="No admitted durable structured transport.",
+                    remediation="Use the visible provider-terminal handoff.",
+                ),
                 _capability(
                     "session.resume.native",
                     CapabilityImplementation.HANDOFF,
@@ -467,6 +479,51 @@ WORKBENCH_INTEGRATION_SPECS: Mapping[str, WorkbenchIntegrationSpec] = MappingPro
                     "claude-2.1-native",
                     limitation="No admitted durable structured transport.",
                     remediation="Use the visible provider-terminal handoff.",
+                ),
+                _capability(
+                    "session.fork.native",
+                    CapabilityImplementation.HANDOFF,
+                    CapabilityState.DEGRADED,
+                    CapabilityEffectScope.NEW_SESSION,
+                    ("provider-terminal",),
+                    ("provider",),
+                    "--fork-session",
+                    "claude-2.1-native",
+                    limitation="No admitted durable structured transport.",
+                    remediation="Use the visible provider-terminal handoff.",
+                ),
+                _capability(
+                    "approval.provider_owned",
+                    CapabilityImplementation.HANDOFF,
+                    CapabilityState.READY,
+                    CapabilityEffectScope.LIVE,
+                    ("provider-terminal",),
+                    ("provider",),
+                    "permission mode",
+                    "claude-2.1-native",
+                    limitation="Claude Code owns native tool waiting and approval.",
+                ),
+                _capability(
+                    "one_shot.events.decode",
+                    CapabilityImplementation.DERIVED,
+                    CapabilityState.READY,
+                    CapabilityEffectScope.NEXT_RUN,
+                    ("one-shot",),
+                    ("harness",),
+                    "stream-json",
+                    "claude-2.1-stream-json",
+                    limitation="One-shot events do not prove durable session continuity.",
+                ),
+                _capability(
+                    "handoff.remote_control",
+                    CapabilityImplementation.HANDOFF,
+                    CapabilityState.DEGRADED,
+                    CapabilityEffectScope.NEW_SESSION,
+                    ("provider-terminal",),
+                    ("provider",),
+                    "remote-control",
+                    "claude-2.1-native",
+                    limitation="Remote Control identity and lifecycle remain provider-owned.",
                 ),
             ),
         ),
@@ -784,6 +841,8 @@ def _native_owned_class(
             return NativeCommandClass.PROTOCOL
     elif namespace == "claude":
         if _has_option(argv, "--print", "-p"):
+            return NativeCommandClass.HEADLESS
+        if first == "exec":
             return NativeCommandClass.HEADLESS
         if first == "daemon":
             return NativeCommandClass.PROTOCOL

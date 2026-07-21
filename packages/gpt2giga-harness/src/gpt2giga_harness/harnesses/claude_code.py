@@ -369,7 +369,7 @@ def _agent_profile_args(request: HarnessRequest) -> tuple[str, ...]:
     return tuple(args)
 
 
-class _ClaudeStreamParser:
+class ClaudeStreamParser:
     """Normalize Claude Code stream-json content, tool, and usage events."""
 
     def __init__(self) -> None:
@@ -557,6 +557,10 @@ class _ClaudeStreamParser:
                 )
             )
         return tuple(events)
+
+
+# Retain the historical private name for callers already importing it.
+_ClaudeStreamParser = ClaudeStreamParser
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
