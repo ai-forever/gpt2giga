@@ -141,6 +141,39 @@ def test_session_navigation_api_binds_revision_and_replays_idempotently():
     assert "resnapshot" in stale.json()["detail"]
 
 
+def test_session_navigation_export_never_derives_paths_from_request_data(tmp_path):
+    data_dir = tmp_path / "data"
+    client = _client(config=HarnessConfig(data_dir=str(data_dir)))
+    created = client.post(
+        "/api/sessions",
+        json={"title": "Safe export", "harness_id": "echo"},
+    ).json()["session"]
+    session_id = created["id"]
+    summary = client.get(f"/api/sessions/{session_id}/navigation-preview").json()[
+        "session"
+    ]
+    binding = {
+        "session_revision": summary["session_revision"],
+        "session_generation": summary["session_generation"],
+        "session_lease": summary["session_lease"],
+        "idempotency_key": "../../outside-export",
+    }
+
+    response = client.post(
+        f"/api/sessions/{session_id}/navigation-export", json=binding
+    )
+    replay = client.post(f"/api/sessions/{session_id}/navigation-export", json=binding)
+
+    assert response.status_code == 200
+    assert replay.json() == response.json()
+    path = Path(response.json()["export"]["path"])
+    assert path.parent == data_dir / "exports"
+    assert path.name.startswith("session-")
+    assert path.suffix == ".md"
+    assert path.is_file()
+    assert not (tmp_path / "outside-export").exists()
+
+
 def test_sessions_api_filters_by_project_id(tmp_path):
     client = _client()
     first_workspace = tmp_path / "first"

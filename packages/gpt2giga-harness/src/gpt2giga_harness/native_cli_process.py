@@ -414,6 +414,7 @@ def _case_insensitive_child(parent: Path, name: str) -> Path:
             if child.name.casefold() == name.casefold():
                 return child
     except OSError:
+        # A missing or unreadable PATH entry is equivalent to no matching child.
         pass
     return candidate
 
@@ -461,6 +462,7 @@ def _write_prelaunch_diagnostic(namespace: str, status: NativeResolutionStatus) 
     try:
         os.write(sys.stderr.fileno(), message)
     except (AttributeError, OSError, ValueError):
+        # Diagnostics are best-effort and must never replace the native exit status.
         pass
 
 
@@ -472,6 +474,7 @@ def _write_handoff_notice(namespace: str) -> None:
     try:
         os.write(sys.stderr.fileno(), message)
     except (AttributeError, OSError, ValueError):
+        # Handoff remains provider-owned even when the advisory cannot be written.
         pass
 
 

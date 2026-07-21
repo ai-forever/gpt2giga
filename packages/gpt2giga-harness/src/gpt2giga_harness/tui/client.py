@@ -48,6 +48,7 @@ from gpt2giga_harness.runtime.models import ApprovalStatus
 from gpt2giga_harness.runtime.policy import approval_request_to_dict
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.session_runner import HarnessSessionRunner
+from gpt2giga_harness.session_exports import write_session_export
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.sessions.models import (
     HarnessMessage,
@@ -879,13 +880,8 @@ class InProcessWorkbenchClient:
             return cached
         session = self._validate_session_binding(binding)
         messages = self.store.list_messages(session.id)
-        export_dir = Path(self.config.data_dir) / "exports"
-        export_dir.mkdir(parents=True, exist_ok=True)
-        path = export_dir / f"{session.id}.md"
-        temporary = export_dir / f".{session.id}.{binding.idempotency_key}.tmp"
         body = _session_export_text(session, messages)
-        temporary.write_text(body, encoding="utf-8")
-        temporary.replace(path)
+        path = write_session_export(Path(self.config.data_dir) / "exports", body)
         result = SessionExport(session.id, str(path), len(messages))
         self._session_mutations[binding.idempotency_key] = result
         return result

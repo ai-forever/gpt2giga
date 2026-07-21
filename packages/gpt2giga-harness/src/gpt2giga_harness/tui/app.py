@@ -2728,7 +2728,7 @@ class WorkbenchTui(App[None]):
         callback = getattr(self, f"action_{command.action}")
         result = callback()
         if hasattr(result, "__await__"):
-            await result
+            _ = await result
 
     async def _runtime_control_chosen(self, control_id: str, value: str | None) -> None:
         if not value or self.snapshot is None:

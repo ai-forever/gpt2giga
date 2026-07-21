@@ -195,6 +195,7 @@ from gpt2giga_harness.runtime.store import JobNotFoundError, RuntimeCoordination
 from gpt2giga_harness.runtime.worker import DurableJobDispatcher
 from gpt2giga_harness.schedules import ScheduleService
 from gpt2giga_harness.session_runner import HarnessSessionRunner
+from gpt2giga_harness.session_exports import write_session_export
 from gpt2giga_harness.sessions import (
     FilesystemHarnessSessionStore,
     HarnessSessionStore,
@@ -2052,16 +2053,10 @@ def create_app(
         _validate_navigation_binding(store, session_id, payload)
         session = store.get_session(session_id)
         messages = store.list_messages(session_id)
-        export_dir = Path(config.data_dir) / "exports"
-        export_dir.mkdir(parents=True, exist_ok=True)
-        path = export_dir / f"{session.id}.md"
-        temporary = export_dir / (
-            f".{session.id}.{_required_text(payload.get('idempotency_key'), 'idempotency_key')}.tmp"
+        path = write_session_export(
+            Path(config.data_dir) / "exports",
+            _navigation_export_text(session, messages),
         )
-        temporary.write_text(
-            _navigation_export_text(session, messages), encoding="utf-8"
-        )
-        temporary.replace(path)
         response = {
             "export": {
                 "path": str(path),
