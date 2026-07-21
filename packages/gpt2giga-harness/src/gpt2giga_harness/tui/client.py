@@ -67,6 +67,18 @@ from gpt2giga_harness.workbench_protocol import (
     WorkbenchStatePage,
     workbench_state_page_from_dict,
 )
+from gpt2giga_harness.workbench_resources import (
+    PreferenceSnapshot,
+    ProcessProjection,
+    TaskProjection,
+    WorkbenchPreferenceStore,
+    WorkbenchResourceService,
+    WorkbenchResourceSnapshot,
+    preference_snapshot_from_dict,
+    process_binding,
+    resource_snapshot_from_dict,
+    task_binding,
+)
 from gpt2giga_harness.workspace import workspace_tree
 from gpt2giga_harness.worktrees import run_diff_response
 
@@ -396,6 +408,22 @@ class WorkbenchClient(Protocol):
     ) -> WorkbenchStatePage:
         """Load provider-neutral projections and ordered reconnect deltas."""
 
+    async def resources(
+        self, session_id: str | None = None
+    ) -> WorkbenchResourceSnapshot:
+        """Load bounded tasks, processes, usage, preferences, and inventory."""
+
+    async def cancel_task(self, task: TaskProjection) -> TaskProjection:
+        """Cancel one exact task owner, lease, generation, and child identity."""
+
+    async def stop_process(self, process: ProcessProjection) -> ProcessProjection:
+        """Stop one exact application-owned process."""
+
+    async def save_preferences(
+        self, values: Mapping[str, Any], *, expected_revision: str
+    ) -> PreferenceSnapshot:
+        """Persist one exact private Workbench preference revision."""
+
     async def create_session(
         self,
         workspace: str,
@@ -582,6 +610,12 @@ class InProcessWorkbenchClient:
         self.runtime_store = RuntimeCoordinationStore(config.data_dir)
         self.attachment_store = FilesystemAttachmentStore(config.data_dir)
         self.integration_service = IntegrationFlowService(config.data_dir)
+        self.resource_service = WorkbenchResourceService(
+            session_store=self.store,
+            runtime_store=self.runtime_store,
+            preference_store=WorkbenchPreferenceStore(config.data_dir),
+            integration_service=self.integration_service,
+        )
         self.sessions = SessionApplicationService(
             runner=runner,
             settings_store=self.settings_store,
@@ -600,6 +634,31 @@ class InProcessWorkbenchClient:
     ) -> WorkbenchStatePage:
         """Read the same bounded backbone contract used by attach mode."""
         return self.workbench_backbone.read(cursor, limit=limit)
+
+    async def resources(
+        self, session_id: str | None = None
+    ) -> WorkbenchResourceSnapshot:
+        """Read resources through the same application authority as attach mode."""
+        return self.resource_service.snapshot(session_id)
+
+    async def cancel_task(self, task: TaskProjection) -> TaskProjection:
+        """Request exact durable task cancellation."""
+        return self.resource_service.cancel_task(task_binding(task))
+
+    async def stop_process(self, process: ProcessProjection) -> ProcessProjection:
+        """Fail closed because in-process mode does not own native supervision."""
+        self.resource_service.validate_process(process_binding(process))
+        raise WorkbenchClientError(
+            "native process control requires attach mode; ownership is server-side"
+        )
+
+    async def save_preferences(
+        self, values: Mapping[str, Any], *, expected_revision: str
+    ) -> PreferenceSnapshot:
+        """Persist private Workbench-only preferences."""
+        return self.resource_service.save_preferences(
+            values, expected_revision=expected_revision
+        )
 
     async def load(
         self,
@@ -1363,6 +1422,43 @@ class AttachedWorkbenchClient:
             "GET", f"/api/workbench/state?{urlencode(query)}"
         )
         return workbench_state_page_from_dict(response)
+
+    async def resources(
+        self, session_id: str | None = None
+    ) -> WorkbenchResourceSnapshot:
+        """Read bounded resources through the authenticated API."""
+        query = f"?{urlencode({'session_id': session_id})}" if session_id else ""
+        response = await self._request("GET", f"/api/workbench/resources{query}")
+        return resource_snapshot_from_dict(response)
+
+    async def cancel_task(self, task: TaskProjection) -> TaskProjection:
+        """Request exact task cancellation through application authority."""
+        response = await self._request(
+            "POST",
+            f"/api/workbench/tasks/{_path_identity(task.id)}/cancel",
+            {"binding": task_binding(task)},
+        )
+        return TaskProjection(**_mapping(response.get("task")))
+
+    async def stop_process(self, process: ProcessProjection) -> ProcessProjection:
+        """Stop one exact native process through its server-side owner."""
+        response = await self._request(
+            "POST",
+            f"/api/workbench/processes/{_path_identity(process.id)}/stop",
+            {"binding": process_binding(process)},
+        )
+        return ProcessProjection(**_mapping(response.get("process")))
+
+    async def save_preferences(
+        self, values: Mapping[str, Any], *, expected_revision: str
+    ) -> PreferenceSnapshot:
+        """Persist private Workbench-only preferences through attach mode."""
+        response = await self._request(
+            "PUT",
+            "/api/workbench/preferences",
+            {"values": dict(values), "expected_revision": expected_revision},
+        )
+        return preference_snapshot_from_dict(_mapping(response.get("preferences")))
 
     async def load(
         self,

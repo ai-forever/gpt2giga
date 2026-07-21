@@ -39,6 +39,15 @@ from gpt2giga_harness.tui.client import (
     SessionPreview,
     TimelineEvent,
 )
+from gpt2giga_harness.workbench_resources import (
+    InventoryProjection,
+    PreferenceSnapshot,
+    ProcessProjection,
+    TaskProjection,
+    UsageMetric,
+    WorkbenchPreferences,
+    WorkbenchResourceSnapshot,
+)
 
 
 class FakeClient:
@@ -60,6 +69,47 @@ class FakeClient:
             0,
         )
         self.current_run: RunSnapshot | None = None
+        preferences = WorkbenchPreferences(reduced_motion=True)
+        self.resources_snapshot = WorkbenchResourceSnapshot(
+            "resource-revision",
+            "sess_1",
+            tasks=(
+                TaskProjection(
+                    "job_1",
+                    "reviewer",
+                    "root_1",
+                    "sess_1",
+                    "run_1",
+                    "durable_worker",
+                    "running",
+                    2,
+                    3,
+                    "worker_1",
+                    "2099-01-01T00:00:00+00:00",
+                    cancelable=True,
+                    result_run_id="run_1",
+                ),
+            ),
+            processes=(
+                ProcessProjection(
+                    "proc_1",
+                    "sess_1",
+                    "run_1",
+                    "server_1",
+                    "running",
+                    "pty",
+                    2,
+                    "2099-01-01T00:00:00+00:00",
+                    4,
+                    output="bounded output",
+                ),
+            ),
+            usage=(UsageMetric("total_tokens", 42, "tokens", "codex"),),
+            preferences=PreferenceSnapshot(preferences, "preference-revision"),
+            inventory=(
+                InventoryProjection("codex-mcp", "mcp", "codex", "provider-owned"),
+            ),
+        )
         self.snapshot = NavigationSnapshot(
             transport_mode="in_process",
             projects=(ProjectSummary("proj_1", "Demo", "/tmp/demo", "main", 1),),
@@ -94,6 +144,26 @@ class FakeClient:
     async def load(self, workspace, *, selected_session_id=None):
         selected = selected_session_id or self.snapshot.selected_session_id
         return replace(self.snapshot, selected_session_id=selected)
+
+    async def resources(self, session_id=None):
+        return replace(self.resources_snapshot, session_id=session_id)
+
+    async def cancel_task(self, task):
+        updated = replace(task, cancel_requested=True)
+        self.resources_snapshot = replace(self.resources_snapshot, tasks=(updated,))
+        return updated
+
+    async def stop_process(self, process):
+        updated = replace(process, status="stopped")
+        self.resources_snapshot = replace(self.resources_snapshot, processes=(updated,))
+        return updated
+
+    async def save_preferences(self, values, *, expected_revision):
+        saved = PreferenceSnapshot(
+            WorkbenchPreferences(**values), "preference-revision-next"
+        )
+        self.resources_snapshot = replace(self.resources_snapshot, preferences=saved)
+        return saved
 
     async def create_session(self, workspace, *, title=None, **intent):
         self.created += 1
@@ -945,6 +1015,75 @@ def test_tui_command_registry_is_the_single_discovery_inventory():
         action_name = item.action.split("(", 1)[0]
         assert callable(getattr(WorkbenchTui, f"action_{action_name}"))
     assert set(CATALOGS["en"]) == set(CATALOGS["ru"])
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("size", ((120, 40), (80, 24), (60, 20)))
+async def test_tui_resource_drawers_are_bounded_and_narrow_safe(size):
+    client = FakeClient()
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        await app.action_tasks()
+        await pilot.pause()
+        dialog = app.screen.query_one("#resource-dialog")
+        assert dialog.region.x >= 0
+        assert dialog.region.right <= size[0]
+        assert "reviewer" in str(app.screen.query_one("#resource-detail").render())
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await app.action_processes()
+        await pilot.pause()
+        assert "bounded output" in str(
+            app.screen.query_one("#resource-detail").render()
+        )
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await app.action_usage()
+        assert "source=codex" in app.screen.body
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await app.action_preferences()
+        await pilot.pause()
+        preferences = app.screen.query_one("#resource-list", ListView)
+        preferences.index = 4
+        await pilot.pause()
+        assert "Reduced Motion: True" in str(
+            app.screen.query_one("#resource-detail").render()
+        )
+        assert "content-free" in str(app.screen.query_one("#resource-detail").render())
+        app.screen.query_one("#resource-change").press()
+        await pilot.pause()
+        assert client.resources_snapshot.preferences.values.reduced_motion is False
+
+        await app.action_integrations()
+        assert "explicit provider_handoff" in app.screen.body
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("transport_mode", ("in_process", "attach"))
+async def test_tui_resource_actions_bind_cancel_and_stop(transport_mode):
+    client = FakeClient()
+    client.snapshot = replace(client.snapshot, transport_mode=transport_mode)
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await app.action_tasks()
+        await pilot.pause()
+        app.screen.query_one("#resource-cancel").press()
+        await pilot.pause()
+        assert client.resources_snapshot.tasks[0].cancel_requested is True
+
+        await app.action_processes()
+        await pilot.pause()
+        app.screen.query_one("#resource-stop").press()
+        await pilot.pause()
+        assert client.resources_snapshot.processes[0].status == "stopped"
 
 
 @pytest.mark.anyio

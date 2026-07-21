@@ -43,6 +43,9 @@ from gpt2giga_harness.tui.client import (
     neutralize_native_terminal_output,
     session_action_binding,
 )
+from gpt2giga_harness.workbench_resources import (
+    WorkbenchResourceSnapshot,
+)
 from gpt2giga_harness.tui.i18n import translator
 from gpt2giga_harness.tui.commands import (
     COMMAND_REGISTRY,
@@ -646,6 +649,94 @@ class DetailScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class ResourceDrawerScreen(ModalScreen[tuple[str, str] | None]):
+    """Bounded keyboard-first task or process drawer."""
+
+    CSS = """
+    ResourceDrawerScreen { align: center middle; }
+    #resource-dialog {
+        width: 94%; height: 90%; padding: 1 2;
+        border: round $accent; background: $surface;
+    }
+    #resource-body { height: 1fr; layout: horizontal; }
+    #resource-list, #resource-detail { width: 1fr; height: 1fr; overflow: auto hidden; }
+    #resource-detail { padding: 0 1; border-left: solid $primary-background; }
+    #resource-actions { height: 3; align-horizontal: right; }
+    #resource-actions Button { min-width: 10; margin-left: 1; }
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Close", show=False)]
+
+    def __init__(
+        self,
+        *,
+        title: str,
+        rows: tuple[tuple[str, str, str], ...],
+        actions: tuple[tuple[str, str], ...],
+        empty: str,
+        close: str,
+    ) -> None:
+        super().__init__()
+        self.dialog_title = title
+        self.rows = rows
+        self.actions = actions
+        self.empty = empty
+        self.close_label = close
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="resource-dialog"):
+            yield Label(self.dialog_title, markup=False)
+            with Horizontal(id="resource-body"):
+                yield ListView(
+                    *(
+                        NavigationItem(label, identity)
+                        for identity, label, _ in self.rows
+                    ),
+                    id="resource-list",
+                )
+                yield Static(self.empty, id="resource-detail", markup=False)
+            with Horizontal(id="resource-actions"):
+                for action, label in self.actions:
+                    yield Button(label, id=f"resource-{action}")
+                yield Button(self.close_label, id="resource-close", variant="primary")
+
+    def on_mount(self) -> None:
+        if self.rows:
+            self.query_one("#resource-list", ListView).index = 0
+            self._render_detail(self.rows[0][0])
+        self.query_one("#resource-list", ListView).focus()
+
+    @on(ListView.Highlighted, "#resource-list")
+    def highlight_resource(self, event: ListView.Highlighted) -> None:
+        if isinstance(event.item, NavigationItem):
+            self._render_detail(event.item.value)
+
+    @on(ListView.Selected, "#resource-list")
+    def select_resource(self, event: ListView.Selected) -> None:
+        if isinstance(event.item, NavigationItem):
+            self.dismiss(("inspect", event.item.value))
+
+    @on(Button.Pressed)
+    def resource_action(self, event: Button.Pressed) -> None:
+        if event.button.id == "resource-close":
+            self.dismiss(None)
+            return
+        highlighted = self.query_one("#resource-list", ListView).highlighted_child
+        if not isinstance(highlighted, NavigationItem):
+            return
+        action = str(event.button.id or "").removeprefix("resource-")
+        self.dismiss((action, highlighted.value))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _render_detail(self, identity: str) -> None:
+        detail = next(
+            (body for key, _, body in self.rows if key == identity), self.empty
+        )
+        self.query_one("#resource-detail", Static).update(detail)
+
+
 class ApprovalScreen(ModalScreen[str | None]):
     """Exact, revision-bound approval preview with explicit decision scope."""
 
@@ -1200,6 +1291,7 @@ class WorkbenchTui(App[None]):
         localized_bindings = BindingsMap(command_bindings(self.t))
         self._bindings.key_to_bindings.update(localized_bindings.key_to_bindings)
         self._runtime_overrides: dict[str, str] = {}
+        self.resource_snapshot: WorkbenchResourceSnapshot | None = None
         self.sub_title = self.t("app.subtitle")
 
     def compose(self) -> ComposeResult:
@@ -1670,6 +1762,248 @@ class WorkbenchTui(App[None]):
 
     async def action_status_view(self) -> None:
         self._show_detail(self.t("status.title"), self._status_detail())
+
+    async def action_tasks(self) -> None:
+        snapshot = await self._load_resources()
+        if snapshot is None:
+            return
+        rows = tuple(
+            (
+                task.id,
+                f"{task.child_id} · {task.status}",
+                "\n".join(
+                    (
+                        f"Task: {task.id}",
+                        f"Child: {task.child_id}",
+                        f"Parent: {task.parent_id or 'root'}",
+                        f"Owner: {task.owner}",
+                        f"Session: {task.session_id}",
+                        f"Run: {task.run_id or 'unavailable'}",
+                        f"Generation: {task.generation}",
+                        f"Lease owner: {task.lease_owner or 'unleased'}",
+                        f"Lease until: {task.leased_until or 'unleased'}",
+                        f"Cancelable: {task.cancelable}",
+                    )
+                ),
+            )
+            for task in snapshot.tasks
+        )
+        self.push_screen(
+            ResourceDrawerScreen(
+                title=self.t("command.tasks"),
+                rows=rows,
+                actions=(
+                    ("inspect", self.t("resource.inspect")),
+                    ("cancel", self.t("resource.cancel")),
+                    ("result", self.t("resource.result")),
+                ),
+                empty=self.t("resource.empty"),
+                close=self.t("dialog.close"),
+            ),
+            self._task_resource_chosen,
+        )
+
+    async def action_processes(self) -> None:
+        snapshot = await self._load_resources()
+        if snapshot is None:
+            return
+        rows = tuple(
+            (
+                process.id,
+                f"{process.id} · {process.status}",
+                "\n".join(
+                    (
+                        f"Process: {process.id}",
+                        f"Owner: {process.owner}",
+                        f"Run: {process.run_id}",
+                        f"Transport: {process.transport}",
+                        f"Status: {process.status}",
+                        f"Lease until: {process.leased_until}",
+                        f"Exit: {process.exit_code if process.exit_code is not None else 'running'}",
+                        "",
+                        process.output or "No bounded retained output.",
+                    )
+                ),
+            )
+            for process in snapshot.processes
+        )
+        self.push_screen(
+            ResourceDrawerScreen(
+                title=self.t("command.processes"),
+                rows=rows,
+                actions=(
+                    ("inspect", self.t("resource.inspect")),
+                    ("stop", self.t("resource.stop")),
+                ),
+                empty=self.t("resource.empty"),
+                close=self.t("dialog.close"),
+            ),
+            self._process_resource_chosen,
+        )
+
+    async def action_usage(self) -> None:
+        snapshot = await self._load_resources()
+        if snapshot is None:
+            return
+        body = "\n".join(
+            f"{metric.id}: {metric.value} {metric.unit} · source={metric.source}"
+            for metric in snapshot.usage
+        ) or self.t("resource.empty")
+        self._show_detail(self.t("command.usage"), body)
+
+    async def action_preferences(self) -> None:
+        snapshot = await self._load_resources()
+        if snapshot is None:
+            return
+        preferences = snapshot.preferences
+        values = preferences.values
+        rows = tuple(
+            (
+                field,
+                f"{field.replace('_', ' ')} · {value}",
+                "\n".join(
+                    (
+                        f"{field.replace('_', ' ').title()}: {value}",
+                        f"Schema: {preferences.schema_version}",
+                        f"Revision: {preferences.revision}",
+                        self.t("preferences.notification_policy"),
+                        "Native provider configuration is not read or mutated.",
+                    )
+                ),
+            )
+            for field, value in (
+                ("theme", values.theme),
+                ("keymap", values.keymap),
+                ("screen_mode", values.screen_mode),
+                ("mouse", values.mouse),
+                ("reduced_motion", values.reduced_motion),
+                ("screen_reader", values.screen_reader),
+                ("status_fields", ", ".join(values.status_fields)),
+                ("notifications", values.notifications),
+            )
+        )
+        self.push_screen(
+            ResourceDrawerScreen(
+                title=self.t("command.preferences"),
+                rows=rows,
+                actions=(("change", self.t("resource.change")),),
+                empty=self.t("resource.empty"),
+                close=self.t("dialog.close"),
+            ),
+            self._preference_chosen,
+        )
+
+    async def action_integrations(self) -> None:
+        snapshot = await self._load_resources()
+        if snapshot is None:
+            return
+        body = "\n".join(
+            f"{item.provider} · {item.kind} · {item.id} · owner={item.owner} · explicit {item.action}"
+            for item in snapshot.inventory
+        ) or self.t("resource.empty")
+        body += "\n\nInventory is content-free and never grants install authority."
+        self._show_detail(self.t("command.integrations"), body)
+
+    async def _load_resources(self) -> WorkbenchResourceSnapshot | None:
+        try:
+            self.resource_snapshot = await self.client.resources(
+                self.selected_session_id
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return None
+        return self.resource_snapshot
+
+    async def _task_resource_chosen(self, choice: tuple[str, str] | None) -> None:
+        if choice is None or self.resource_snapshot is None:
+            return
+        action, task_id = choice
+        task = next(
+            (item for item in self.resource_snapshot.tasks if item.id == task_id), None
+        )
+        if task is None:
+            return
+        if action == "cancel":
+            if not task.cancelable:
+                self._show_detail(self.t("command.tasks"), "Task is not cancelable.")
+                return
+            try:
+                await self.client.cancel_task(task)
+                await self._load_resources()
+            except Exception as exc:
+                self._show_error(exc)
+                return
+            self._set_status(self.t("resource.canceled"))
+            return
+        if action == "result":
+            self._show_detail(
+                self.t("command.tasks"),
+                f"Result run: {task.result_run_id or 'unavailable'}\nSession: {task.session_id}",
+            )
+            return
+        self.selected_session_id = task.session_id
+        await self._reload()
+
+    async def _process_resource_chosen(self, choice: tuple[str, str] | None) -> None:
+        if choice is None or self.resource_snapshot is None:
+            return
+        action, process_id = choice
+        process = next(
+            (
+                item
+                for item in self.resource_snapshot.processes
+                if item.id == process_id
+            ),
+            None,
+        )
+        if process is None:
+            return
+        if action == "stop":
+            try:
+                await self.client.stop_process(process)
+                await self._load_resources()
+            except Exception as exc:
+                self._show_error(exc)
+                return
+            self._set_status(self.t("resource.stopped"))
+            return
+        self._show_detail(
+            self.t("command.processes"), process.output or "No retained output."
+        )
+
+    async def _preference_chosen(self, choice: tuple[str, str] | None) -> None:
+        snapshot = self.resource_snapshot
+        if choice is None or snapshot is None or choice[0] != "change":
+            return
+        field = choice[1]
+        current = snapshot.preferences.values
+        values = dict(current.__dict__)
+        cycles: dict[str, tuple[object, ...]] = {
+            "theme": ("system", "dark", "light"),
+            "keymap": ("default", "vim"),
+            "screen_mode": ("fullscreen", "inline"),
+            "status_fields": (
+                ("provider", "model", "mode", "permission", "policy", "sandbox"),
+                ("provider", "model", "usage"),
+                ("provider",),
+            ),
+        }
+        if field in {"mouse", "reduced_motion", "screen_reader", "notifications"}:
+            values[field] = not bool(values[field])
+        elif field in cycles:
+            options = cycles[field]
+            values[field] = options[(options.index(values[field]) + 1) % len(options)]
+        else:
+            return
+        try:
+            saved = await self.client.save_preferences(
+                values, expected_revision=snapshot.preferences.revision
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self.resource_snapshot = replace(snapshot, preferences=saved)
+        self._set_status(f"{self.t('command.preferences')}: {field}")
 
     def action_runtime_control(self, control_id: str) -> None:
         control = self._runtime_controls()[control_id]

@@ -440,6 +440,14 @@ MUTATION_ROUTE_CONTRACTS = (
         "project_authoring.optimistic_apply",
         evidence=_OPTIMISTIC,
     ),
+    _route(
+        "POST",
+        "/api/workbench/tasks/{task_id}/cancel",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "workbench_tasks.exact_owner_lease",
+        evidence=_OPTIMISTIC,
+    ),
     *_many(
         "POST",
         (
@@ -459,6 +467,14 @@ MUTATION_ROUTE_CONTRACTS = (
         MutationClass.LOCAL_STATE,
         EnforcementControl.OPTIMISTIC_LOCAL_STATE,
         "workflow_catalog.save",
+        evidence=_OPTIMISTIC,
+    ),
+    _route(
+        "PUT",
+        "/api/workbench/preferences",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "workbench_preferences.exact_revision",
         evidence=_OPTIMISTIC,
     ),
     _route(
@@ -555,6 +571,7 @@ MUTATION_ROUTE_CONTRACTS = (
         (
             "/api/native/processes/{process_id}/input",
             "/api/native/processes/{process_id}/resize",
+            "/api/workbench/processes/{process_id}/stop",
             "/api/runs/{run_id}/input",
             "/api/runs/{run_id}/steer",
         ),

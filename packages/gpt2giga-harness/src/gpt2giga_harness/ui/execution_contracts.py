@@ -159,6 +159,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/tool-servers/{server_id}"),
         ("GET", "/api/tools"),
         ("GET", "/api/workbench/state"),
+        ("GET", "/api/workbench/resources"),
         ("GET", "/api/workflow-runs/{run_id}"),
         ("GET", "/api/workflow-runs/{run_id}/handoffs"),
         ("GET", "/api/workflows"),

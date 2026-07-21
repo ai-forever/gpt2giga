@@ -24,6 +24,17 @@ from gpt2giga_harness.tui.client import (
     session_action_binding,
 )
 from gpt2giga_harness.tui.i18n import CATALOGS, resolve_locale, translator
+from gpt2giga_harness.workbench_resources import (
+    InventoryProjection,
+    PreferenceSnapshot,
+    ProcessProjection,
+    TaskProjection,
+    UsageMetric,
+    WorkbenchPreferences,
+    WorkbenchResourceSnapshot,
+    preference_snapshot_to_dict,
+    resource_snapshot_to_dict,
+)
 
 
 @pytest.mark.anyio
@@ -465,6 +476,81 @@ async def test_attach_client_uses_existing_api_contract(monkeypatch):
             "last_selected_session": "sess_2",
         },
     ) in calls
+
+
+@pytest.mark.anyio
+async def test_attach_resource_client_preserves_exact_bindings_and_sources(monkeypatch):
+    client = AttachedWorkbenchClient("http://127.0.0.1:8091")
+    task = TaskProjection(
+        "job_1",
+        "child_1",
+        "parent_1",
+        "sess_1",
+        "run_1",
+        "worker",
+        "running",
+        2,
+        3,
+        "worker_1",
+        "2099-01-01T00:00:00+00:00",
+        cancelable=True,
+        result_run_id="run_1",
+    )
+    process = ProcessProjection(
+        "proc_1",
+        "sess_1",
+        "run_1",
+        "server_1",
+        "running",
+        "pty",
+        4,
+        "2099-01-01T00:00:00+00:00",
+        1,
+    )
+    preferences = PreferenceSnapshot(WorkbenchPreferences(), "pref-revision")
+    expected = WorkbenchResourceSnapshot(
+        "resource-revision",
+        "sess_1",
+        (task,),
+        (process,),
+        (UsageMetric("provider_cost", 0.5, "USD", "codex"),),
+        preferences,
+        (InventoryProjection("codex-mcp", "mcp", "codex", "provider"),),
+    )
+    calls: list[tuple[str, str, object]] = []
+
+    async def request(method, path, payload=None, **kwargs):
+        calls.append((method, path, payload))
+        if method == "GET":
+            return resource_snapshot_to_dict(expected)
+        if "/tasks/" in path:
+            return {"task": {**task.__dict__, "cancel_requested": True}}
+        if "/processes/" in path:
+            return {"process": {**process.__dict__, "status": "stopped"}}
+        if path == "/api/workbench/preferences":
+            return {"preferences": preference_snapshot_to_dict(preferences)}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(client, "_request", request)
+
+    snapshot = await client.resources("sess_1")
+    canceled = await client.cancel_task(task)
+    stopped = await client.stop_process(process)
+    saved = await client.save_preferences(
+        preferences.values.__dict__, expected_revision=preferences.revision
+    )
+
+    assert snapshot == expected
+    assert canceled.cancel_requested is True
+    assert stopped.status == "stopped"
+    assert saved == preferences
+    assert calls[0] == (
+        "GET",
+        "/api/workbench/resources?session_id=sess_1",
+        None,
+    )
+    assert calls[1][2]["binding"]["leased_until"] == task.leased_until
+    assert calls[2][2]["binding"]["owner"] == process.owner
 
 
 @pytest.mark.anyio

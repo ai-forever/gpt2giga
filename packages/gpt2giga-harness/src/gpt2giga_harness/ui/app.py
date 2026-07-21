@@ -64,6 +64,9 @@ from gpt2giga_harness.ui.execution_contracts import install_execution_contracts
 from gpt2giga_harness.ui.routers.workbench_state import (
     router as workbench_state_router,
 )
+from gpt2giga_harness.ui.routers.workbench_resources import (
+    router as workbench_resources_router,
+)
 from gpt2giga_harness.harnesses.attachment_plan import attachment_capability_error
 from gpt2giga_harness.evals import (
     EvalRunNotFoundError,
@@ -289,6 +292,10 @@ from gpt2giga_harness.workspace import (
     workspace_tree,
 )
 from gpt2giga_harness.workbench_execution import workbench_transport_projection
+from gpt2giga_harness.workbench_resources import (
+    WorkbenchPreferenceStore,
+    WorkbenchResourceService,
+)
 
 
 NATIVE_SUBMIT_KEY_DELAY_SECONDS = 0.05
@@ -393,6 +400,12 @@ def create_app(
     async_diagnostics = AsyncExecutionDiagnostics()
     run_event_broker = getattr(store, "event_broker", RunEventBroker())
     workbench_backbone = WorkbenchBackbone()
+    workbench_resources = WorkbenchResourceService(
+        session_store=store,
+        runtime_store=runtime_store,
+        preference_store=WorkbenchPreferenceStore(config.data_dir),
+        integration_service=integration_flow_service,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -447,6 +460,7 @@ def create_app(
     app.state.harness_async_diagnostics = async_diagnostics
     app.state.harness_run_event_broker = run_event_broker
     app.state.harness_workbench_backbone = workbench_backbone
+    app.state.harness_workbench_resources = workbench_resources
     app.state.harness_settings_store = settings_store
     app.state.harness_provider_settings_service = provider_settings_service
     app.state.harness_integration_flow_service = integration_flow_service
@@ -3357,6 +3371,7 @@ def create_app(
     app.include_router(tools_router)
     app.include_router(tui_actions_router)
     app.include_router(workbench_state_router)
+    app.include_router(workbench_resources_router)
     app.include_router(workflows_router)
     app.include_router(runs_router)
     app.include_router(schedules_router)
