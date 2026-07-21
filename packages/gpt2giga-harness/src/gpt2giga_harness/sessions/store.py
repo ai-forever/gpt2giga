@@ -86,8 +86,23 @@ class HarnessSessionStore(Protocol):
     ) -> HarnessSession | None:
         """Atomically patch one session only while its title is unchanged."""
 
+    def update_session_if_revision(
+        self,
+        session_id: str,
+        expected_updated_at: str,
+        **patch: Any,
+    ) -> HarnessSession | None:
+        """Atomically patch one session only at the presented revision."""
+
     def delete_session(self, session_id: str) -> None:
         """Delete one session."""
+
+    def delete_session_if_revision(
+        self,
+        session_id: str,
+        expected_updated_at: str,
+    ) -> bool:
+        """Atomically delete one session only at the presented revision."""
 
     def archive_session(
         self,
@@ -319,6 +334,22 @@ class InMemoryHarnessSessionStore:
         self.event_broker.publish_runs_center()
         return updated
 
+    def update_session_if_revision(
+        self,
+        session_id: str,
+        expected_updated_at: str,
+        **patch: Any,
+    ) -> HarnessSession | None:
+        with self._session_lock:
+            session = self.get_session(session_id)
+            if session.updated_at != expected_updated_at:
+                return None
+            updated = _patch_session(session, patch)
+            self._sessions[session_id] = updated
+        self._session_generation += 1
+        self.event_broker.publish_runs_center()
+        return updated
+
     def delete_session(self, session_id: str) -> None:
         with self._session_lock:
             self.get_session(session_id)
@@ -332,6 +363,27 @@ class InMemoryHarnessSessionStore:
             self._session_generation += 1
         self.event_broker.publish_session(session_id)
         self.event_broker.publish_runs_center()
+
+    def delete_session_if_revision(
+        self,
+        session_id: str,
+        expected_updated_at: str,
+    ) -> bool:
+        with self._session_lock:
+            session = self.get_session(session_id)
+            if session.updated_at != expected_updated_at:
+                return False
+            self._sessions.pop(session_id, None)
+            self._messages.pop(session_id, None)
+            self._runs.pop(session_id, None)
+            self._events.pop(session_id, None)
+            self._raw_requests.pop(session_id, None)
+            self._raw_responses.pop(session_id, None)
+            self._native_links.pop(session_id, None)
+            self._session_generation += 1
+        self.event_broker.publish_session(session_id)
+        self.event_broker.publish_runs_center()
+        return True
 
     def archive_session(
         self,

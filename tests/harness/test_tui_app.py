@@ -9,8 +9,10 @@ import pytest
 
 pytest.importorskip("textual")
 
+from textual.widgets import Input, ListView
+
 from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
-from gpt2giga_harness.tui.app import WorkbenchTui
+from gpt2giga_harness.tui.app import SessionBrowserScreen, WorkbenchTui
 from gpt2giga_harness.tui.commands import (
     COMMAND_REGISTRY,
     command_bindings,
@@ -33,6 +35,8 @@ from gpt2giga_harness.tui.client import (
     RunSnapshot,
     RunInspection,
     SessionSummary,
+    SessionExport,
+    SessionPreview,
     TimelineEvent,
 )
 
@@ -112,6 +116,78 @@ class FakeClient:
 
     async def remember_session(self, workspace, session_id):
         self.remembered.append(session_id)
+
+    async def search_sessions(
+        self, query="", *, provider=None, project=None, include_archived=True
+    ):
+        items = self.snapshot.sessions
+        if query:
+            items = tuple(
+                item for item in items if query.casefold() in item.title.casefold()
+            )
+        if provider:
+            items = tuple(item for item in items if item.harness_id == provider)
+        if project:
+            items = tuple(item for item in items if item.project_id == project)
+        return tuple(item for item in items if include_archived or not item.archived)
+
+    async def preview_session(self, session_id, *, transcript_query=""):
+        session = next(item for item in self.snapshot.sessions if item.id == session_id)
+        return SessionPreview(
+            session, (f"USER\n{transcript_query or 'preview'}",), 1, False
+        )
+
+    async def rename_session(self, binding, title):
+        current = next(
+            item for item in self.snapshot.sessions if item.id == binding.session_id
+        )
+        updated = replace(current, title=title, revision="renamed")
+        self.snapshot = replace(
+            self.snapshot,
+            sessions=tuple(
+                updated if item.id == updated.id else item
+                for item in self.snapshot.sessions
+            ),
+        )
+        return updated
+
+    async def archive_session(self, binding, *, archived=True):
+        current = next(
+            item for item in self.snapshot.sessions if item.id == binding.session_id
+        )
+        updated = replace(current, archived=archived, revision="archived")
+        self.snapshot = replace(
+            self.snapshot,
+            sessions=tuple(
+                updated if item.id == updated.id else item
+                for item in self.snapshot.sessions
+            ),
+        )
+        return updated
+
+    async def delete_session(self, binding):
+        self.snapshot = replace(
+            self.snapshot,
+            sessions=tuple(
+                item for item in self.snapshot.sessions if item.id != binding.session_id
+            ),
+        )
+
+    async def fork_session(self, binding):
+        fork = replace(
+            next(
+                item for item in self.snapshot.sessions if item.id == binding.session_id
+            ),
+            id="sess_forked",
+            title="Forked",
+            revision="forked",
+            native_operation="fork",
+        )
+        self.snapshot = replace(self.snapshot, sessions=(fork, *self.snapshot.sessions))
+        return fork
+
+    async def export_session(self, binding):
+        return SessionExport(binding.session_id, "/tmp/session.md", 1)
 
     async def latest_run(self, session_id):
         return self.current_run
@@ -313,6 +389,68 @@ async def test_tui_creates_and_resumes_session_from_keyboard():
         assert client.created == 1
         assert app.selected_session_id == "sess_2"
         assert any(session.title == "Created" for session in app.snapshot.sessions)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("size", [(120, 40), (80, 24), (60, 20)])
+async def test_tui_session_browser_filters_previews_and_stays_in_viewport(size):
+    client = FakeClient()
+    session = replace(
+        client.snapshot.sessions[0],
+        project_id="project-demo",
+        preview="Retained preview",
+        native_authority="codex",
+        native_session_id="thread-1",
+        native_operation="resume",
+        revision="revision-1",
+        generation=2,
+    )
+    archived = replace(
+        session,
+        id="sess_archived",
+        title="Archived",
+        archived=True,
+        revision="revision-archived",
+    )
+    client.snapshot = replace(client.snapshot, sessions=(session, archived))
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        await app.action_sessions()
+        await pilot.pause()
+        assert isinstance(app.screen, SessionBrowserScreen)
+        query = app.screen.query_one("#session-browser-query", Input)
+        query.value = "provider:codex project:project-demo archived:true"
+        await pilot.pause()
+        results = app.screen.query_one("#session-browser-results", ListView)
+        assert len(results.children) == 1
+        assert app.screen.filtered[0].title == "Archived"
+        assert app.screen.region.right <= size[0]
+        assert app.screen.region.bottom <= size[1]
+        app.screen.dismiss(None)
+
+
+@pytest.mark.anyio
+async def test_tui_later_resume_restores_archived_session_without_git():
+    client = FakeClient()
+    archived = replace(
+        client.snapshot.sessions[0],
+        id="sess_archived",
+        title="Archived",
+        archived=True,
+        revision="revision-archived",
+    )
+    client.snapshot = replace(client.snapshot, sessions=(archived,))
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await app._browser_session_chosen(archived)
+        await pilot.pause()
+
+    assert app.selected_session_id == archived.id
+    assert client.snapshot.sessions[0].archived is False
 
 
 @pytest.mark.anyio

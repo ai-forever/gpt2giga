@@ -134,6 +134,45 @@ class SessionSummary:
     harness_id: str
     model: str | None
     mode: str
+    archived: bool = False
+    project_id: str | None = None
+    preview: str = ""
+    native_authority: str | None = None
+    native_session_id: str | None = None
+    native_operation: str | None = None
+    revision: str = ""
+    generation: int = 0
+    lease: str | None = None
+
+
+@dataclass(frozen=True)
+class SessionActionBinding:
+    """Exact session state presented before a navigation mutation."""
+
+    session_id: str
+    revision: str
+    generation: int
+    lease: str | None
+    idempotency_key: str
+
+
+@dataclass(frozen=True)
+class SessionPreview:
+    """Bounded session preview and transcript-search result."""
+
+    session: SessionSummary
+    transcript: tuple[str, ...]
+    match_count: int
+    truncated: bool
+
+
+@dataclass(frozen=True)
+class SessionExport:
+    """Sanitized local export created by session application authority."""
+
+    session_id: str
+    path: str
+    message_count: int
 
 
 @dataclass(frozen=True)
@@ -372,6 +411,40 @@ class WorkbenchClient(Protocol):
     async def remember_session(self, workspace: str, session_id: str) -> None:
         """Persist the selected session through the existing project state."""
 
+    async def search_sessions(
+        self,
+        query: str = "",
+        *,
+        provider: str | None = None,
+        project: str | None = None,
+        include_archived: bool = True,
+    ) -> tuple[SessionSummary, ...]:
+        """Search bounded session projections across projects and providers."""
+
+    async def preview_session(
+        self, session_id: str, *, transcript_query: str = ""
+    ) -> SessionPreview:
+        """Preview one session without implying filesystem restoration."""
+
+    async def rename_session(
+        self, binding: SessionActionBinding, title: str
+    ) -> SessionSummary:
+        """Rename one exact session revision."""
+
+    async def archive_session(
+        self, binding: SessionActionBinding, *, archived: bool = True
+    ) -> SessionSummary:
+        """Archive or restore one exact session revision."""
+
+    async def delete_session(self, binding: SessionActionBinding) -> None:
+        """Delete one exact session revision after confirmation."""
+
+    async def fork_session(self, binding: SessionActionBinding) -> SessionSummary:
+        """Fork one exact Harness session without claiming native resume."""
+
+    async def export_session(self, binding: SessionActionBinding) -> SessionExport:
+        """Create a sanitized local transcript export."""
+
     async def submit_turn(
         self,
         session_id: str,
@@ -516,6 +589,7 @@ class InProcessWorkbenchClient:
         )
         self._active_runs: dict[str, tuple[asyncio.Task[Any], threading.Event]] = {}
         self._submitted_turns: dict[str, str] = {}
+        self._session_mutations: dict[str, SessionSummary | SessionExport | None] = {}
         self.workbench_backbone = WorkbenchBackbone()
 
     async def workbench_state(
@@ -603,6 +677,179 @@ class InProcessWorkbenchClient:
             load_config_name=False,
         )
         update_project_state(project, {"last_selected_session": session_id})
+
+    async def search_sessions(
+        self,
+        query: str = "",
+        *,
+        provider: str | None = None,
+        project: str | None = None,
+        include_archived: bool = True,
+    ) -> tuple[SessionSummary, ...]:
+        sessions = self.store.list_sessions(
+            project_id=project,
+            harness_id=provider,
+            q=query.strip() or None,
+            include_archived=include_archived,
+            limit=MAX_SESSIONS,
+        )
+        return tuple(_session_summary(item, self.store) for item in sessions)
+
+    async def preview_session(
+        self, session_id: str, *, transcript_query: str = ""
+    ) -> SessionPreview:
+        session = self.store.get_session(session_id)
+        messages = self.store.list_messages(session_id)
+        needle = transcript_query.strip().casefold()
+        matches = [
+            item for item in messages if not needle or needle in item.content.casefold()
+        ]
+        selected = matches[-100:]
+        return SessionPreview(
+            session=_session_summary(session, self.store),
+            transcript=tuple(_message_preview(item) for item in selected),
+            match_count=len(matches),
+            truncated=len(matches) > len(selected),
+        )
+
+    async def rename_session(
+        self, binding: SessionActionBinding, title: str
+    ) -> SessionSummary:
+        cached = self._session_mutations.get(binding.idempotency_key)
+        if isinstance(cached, SessionSummary):
+            return cached
+        self._validate_session_binding(binding)
+        updated = self.store.update_session_if_revision(
+            binding.session_id,
+            binding.revision,
+            title=_required_content(title, "session title"),
+        )
+        if updated is None:
+            raise WorkbenchClientError(
+                "session changed; authoritative resnapshot required"
+            )
+        result = _session_summary(updated, self.store)
+        self._session_mutations[binding.idempotency_key] = result
+        return result
+
+    async def archive_session(
+        self, binding: SessionActionBinding, *, archived: bool = True
+    ) -> SessionSummary:
+        cached = self._session_mutations.get(binding.idempotency_key)
+        if isinstance(cached, SessionSummary):
+            return cached
+        self._validate_session_binding(binding)
+        updated = self.store.update_session_if_revision(
+            binding.session_id,
+            binding.revision,
+            archived=archived,
+        )
+        if updated is None:
+            raise WorkbenchClientError(
+                "session changed; authoritative resnapshot required"
+            )
+        result = _session_summary(updated, self.store)
+        self._session_mutations[binding.idempotency_key] = result
+        return result
+
+    async def delete_session(self, binding: SessionActionBinding) -> None:
+        if binding.idempotency_key in self._session_mutations:
+            return
+        self._validate_session_binding(binding, require_idle=True)
+        if not self.store.delete_session_if_revision(
+            binding.session_id, binding.revision
+        ):
+            raise WorkbenchClientError(
+                "session changed; authoritative resnapshot required"
+            )
+        self._session_mutations[binding.idempotency_key] = None
+
+    async def fork_session(self, binding: SessionActionBinding) -> SessionSummary:
+        cached = self._session_mutations.get(binding.idempotency_key)
+        if isinstance(cached, SessionSummary):
+            return cached
+        source = self._validate_session_binding(binding)
+        source_summary = _session_summary(source, self.store)
+        reference = {
+            key: value
+            for key, value in {
+                "authority": source_summary.native_authority,
+                "native_id": source_summary.native_session_id,
+                "workspace": source.workspace,
+                "operation": "fork",
+            }.items()
+            if value is not None
+        }
+        metadata = {
+            **dict(source.metadata),
+            "forked_from_session_id": source.id,
+            "fork_semantics": "harness_replay",
+            **({"native_session_reference": reference} if reference else {}),
+        }
+        metadata.pop("structured_session_link", None)
+        fork = self.store.create_session(
+            title=f"Fork: {source.title}",
+            workspace=source.workspace,
+            default_harness_id=source.default_harness_id,
+            default_model=source.default_model,
+            default_api_mode=source.default_api_mode,
+            default_mode=source.default_mode,
+            metadata=metadata,
+        )
+        for message in self.store.list_messages(source.id):
+            self.store.append_message(
+                replace(
+                    message,
+                    id=new_id("msg"),
+                    session_id=fork.id,
+                    run_id=None,
+                    created_at=utc_now(),
+                    metadata={
+                        **dict(message.metadata),
+                        "forked_from_message_id": message.id,
+                    },
+                )
+            )
+        result = _session_summary(fork, self.store)
+        self._session_mutations[binding.idempotency_key] = result
+        return result
+
+    async def export_session(self, binding: SessionActionBinding) -> SessionExport:
+        cached = self._session_mutations.get(binding.idempotency_key)
+        if isinstance(cached, SessionExport):
+            return cached
+        session = self._validate_session_binding(binding)
+        messages = self.store.list_messages(session.id)
+        export_dir = Path(self.config.data_dir) / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        path = export_dir / f"{session.id}.md"
+        temporary = export_dir / f".{session.id}.{binding.idempotency_key}.tmp"
+        body = _session_export_text(session, messages)
+        temporary.write_text(body, encoding="utf-8")
+        temporary.replace(path)
+        result = SessionExport(session.id, str(path), len(messages))
+        self._session_mutations[binding.idempotency_key] = result
+        return result
+
+    def _validate_session_binding(
+        self,
+        binding: SessionActionBinding,
+        *,
+        require_idle: bool = False,
+    ) -> HarnessSession:
+        session = self.store.get_session(binding.session_id)
+        summary = _session_summary(session, self.store)
+        if (
+            summary.revision != binding.revision
+            or summary.generation != binding.generation
+            or summary.lease != binding.lease
+        ):
+            raise WorkbenchClientError(
+                "session changed; authoritative resnapshot required"
+            )
+        if require_idle and binding.lease is not None:
+            raise WorkbenchClientError("active session lease blocks destructive action")
+        return session
 
     async def submit_turn(
         self,
@@ -1100,6 +1347,7 @@ class AttachedWorkbenchClient:
         self.timeout_seconds = timeout_seconds
         self._opener = build_opener(HTTPCookieProcessor(CookieJar()))
         self._bootstrapped = False
+        self._session_mutations: dict[str, SessionSummary | SessionExport | None] = {}
 
     async def workbench_state(
         self,
@@ -1245,6 +1493,109 @@ class AttachedWorkbenchClient:
             "/api/project/state",
             {"workspace": workspace, "last_selected_session": session_id},
         )
+
+    async def search_sessions(
+        self,
+        query: str = "",
+        *,
+        provider: str | None = None,
+        project: str | None = None,
+        include_archived: bool = True,
+    ) -> tuple[SessionSummary, ...]:
+        values: dict[str, str | int] = {
+            "include_archived": "true" if include_archived else "false",
+            "limit": MAX_SESSIONS,
+        }
+        if query.strip():
+            values["q"] = query.strip()
+        if provider:
+            values["harness_id"] = provider
+        if project:
+            values["project_id"] = project
+        response = await self._request("GET", f"/api/sessions?{urlencode(values)}")
+        return tuple(
+            _session_summary_from_mapping(item)
+            for item in _mapping_items(response.get("sessions"), MAX_SESSIONS)
+        )
+
+    async def preview_session(
+        self, session_id: str, *, transcript_query: str = ""
+    ) -> SessionPreview:
+        values = {"q": transcript_query} if transcript_query.strip() else {}
+        suffix = f"?{urlencode(values)}" if values else ""
+        response = await self._request(
+            "GET",
+            f"/api/sessions/{_path_identity(session_id)}/navigation-preview{suffix}",
+        )
+        return _session_preview_from_mapping(response)
+
+    async def rename_session(
+        self, binding: SessionActionBinding, title: str
+    ) -> SessionSummary:
+        return await self._attached_session_patch(binding, {"title": title})
+
+    async def archive_session(
+        self, binding: SessionActionBinding, *, archived: bool = True
+    ) -> SessionSummary:
+        return await self._attached_session_patch(binding, {"archived": archived})
+
+    async def delete_session(self, binding: SessionActionBinding) -> None:
+        if binding.idempotency_key in self._session_mutations:
+            return
+        await self._request(
+            "POST",
+            f"/api/sessions/{_path_identity(binding.session_id)}/navigation-delete",
+            _session_binding_payload(binding),
+        )
+        self._session_mutations[binding.idempotency_key] = None
+
+    async def fork_session(self, binding: SessionActionBinding) -> SessionSummary:
+        cached = self._session_mutations.get(binding.idempotency_key)
+        if isinstance(cached, SessionSummary):
+            return cached
+        response = await self._request(
+            "POST",
+            f"/api/sessions/{_path_identity(binding.session_id)}/navigation-fork",
+            _session_binding_payload(binding),
+        )
+        result = _session_summary_from_mapping(_mapping(response.get("session")))
+        self._session_mutations[binding.idempotency_key] = result
+        return result
+
+    async def export_session(self, binding: SessionActionBinding) -> SessionExport:
+        cached = self._session_mutations.get(binding.idempotency_key)
+        if isinstance(cached, SessionExport):
+            return cached
+        response = await self._request(
+            "POST",
+            f"/api/sessions/{_path_identity(binding.session_id)}/navigation-export",
+            _session_binding_payload(binding),
+        )
+        export = _mapping(response.get("export"))
+        result = SessionExport(
+            session_id=binding.session_id,
+            path=_required_text(export.get("path"), "export path"),
+            message_count=_bounded_non_negative_int(export.get("message_count")),
+        )
+        self._session_mutations[binding.idempotency_key] = result
+        return result
+
+    async def _attached_session_patch(
+        self,
+        binding: SessionActionBinding,
+        patch: Mapping[str, Any],
+    ) -> SessionSummary:
+        cached = self._session_mutations.get(binding.idempotency_key)
+        if isinstance(cached, SessionSummary):
+            return cached
+        response = await self._request(
+            "POST",
+            f"/api/sessions/{_path_identity(binding.session_id)}/navigation-update",
+            {**patch, **_session_binding_payload(binding)},
+        )
+        result = _session_summary_from_mapping(_mapping(response.get("session")))
+        self._session_mutations[binding.idempotency_key] = result
+        return result
 
     async def submit_turn(
         self,
@@ -2200,7 +2551,14 @@ def _project_summary_from_mapping(
     )
 
 
-def _session_summary(session: HarnessSession) -> SessionSummary:
+def _session_summary(
+    session: HarnessSession,
+    store: FilesystemHarnessSessionStore | None = None,
+) -> SessionSummary:
+    native = _session_native_reference(session.native, session.metadata)
+    runs = store.list_runs(session.id) if store is not None else ()
+    messages = store.list_messages(session.id) if store is not None else ()
+    active = [run.id for run in runs if run.status.value not in _TERMINAL_RUN_STATUSES]
     return SessionSummary(
         id=session.id,
         title=_display_text(session.title),
@@ -2209,10 +2567,30 @@ def _session_summary(session: HarnessSession) -> SessionSummary:
         harness_id=session.default_harness_id,
         model=_optional_display_text(session.default_model),
         mode=session.default_mode,
+        archived=session.archived,
+        project_id=_optional_text(session.metadata.get("project_id")),
+        preview=(
+            _bounded_content_text(" ".join(messages[-1].content.split()), 120)
+            if messages
+            else ""
+        ),
+        native_authority=_optional_display_text(native.get("authority")),
+        native_session_id=_optional_identity(
+            native.get("native_id") or native.get("session_id") or native.get("id")
+        ),
+        native_operation=_optional_display_text(native.get("operation")),
+        revision=session.updated_at,
+        generation=_session_generation(native),
+        lease=active[-1] if active else None,
     )
 
 
 def _session_summary_from_mapping(data: Mapping[str, Any]) -> SessionSummary:
+    native = _mapping(data.get("native_session_reference"))
+    if not native:
+        native = _session_native_reference(
+            _mapping(data.get("native")), _mapping(data.get("metadata"))
+        )
     return SessionSummary(
         id=_required_text(data.get("id"), "session id"),
         title=_display_text(data.get("title") or "Untitled session"),
@@ -2221,7 +2599,110 @@ def _session_summary_from_mapping(data: Mapping[str, Any]) -> SessionSummary:
         harness_id=_display_text(data.get("default_harness_id") or "unknown"),
         model=_optional_display_text(data.get("default_model")),
         mode=_display_text(data.get("default_mode") or "plan"),
+        archived=bool(data.get("archived")),
+        project_id=_optional_text(data.get("project_id")),
+        preview=_bounded_content_text(data.get("last_message_preview"), 120),
+        native_authority=_optional_display_text(native.get("authority")),
+        native_session_id=_optional_identity(
+            native.get("native_id") or native.get("session_id") or native.get("id")
+        ),
+        native_operation=_optional_display_text(native.get("operation")),
+        revision=_required_text(
+            data.get("session_revision") or data.get("updated_at"),
+            "session revision",
+        ),
+        generation=_bounded_non_negative_int(
+            data.get("session_generation")
+            if data.get("session_generation") is not None
+            else _session_generation(native)
+        ),
+        lease=_optional_identity(data.get("session_lease")),
     )
+
+
+def _session_native_reference(
+    native: Mapping[str, Any], metadata: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    explicit = _mapping(metadata.get("native_session_reference"))
+    if explicit:
+        return explicit
+    structured = _mapping(metadata.get("structured_session_link"))
+    if structured:
+        return {
+            "authority": structured.get("provider")
+            or structured.get("authority")
+            or native.get("harness_id"),
+            "native_id": structured.get("thread_id")
+            or structured.get("session_id")
+            or structured.get("native_session_id"),
+            "operation": structured.get("operation") or "resume",
+            "revision": structured.get("revision"),
+            "link_hash": structured.get("link_hash"),
+        }
+    return native
+
+
+def _session_generation(native: Mapping[str, Any]) -> int:
+    revision = native.get("revision")
+    if isinstance(revision, int) and revision >= 0:
+        return revision
+    return _hash_generation(_optional_text(native.get("link_hash")))
+
+
+def session_action_binding(
+    session: SessionSummary, *, idempotency_key: str
+) -> SessionActionBinding:
+    """Bind one navigation action to the exact presented session state."""
+    return SessionActionBinding(
+        session_id=session.id,
+        revision=session.revision,
+        generation=session.generation,
+        lease=session.lease,
+        idempotency_key=_required_identity(idempotency_key, "idempotency key"),
+    )
+
+
+def _session_binding_payload(binding: SessionActionBinding) -> dict[str, Any]:
+    return {
+        "session_revision": binding.revision,
+        "session_generation": binding.generation,
+        "session_lease": binding.lease,
+        "idempotency_key": binding.idempotency_key,
+    }
+
+
+def _session_preview_from_mapping(data: Mapping[str, Any]) -> SessionPreview:
+    return SessionPreview(
+        session=_session_summary_from_mapping(_mapping(data.get("session"))),
+        transcript=tuple(
+            _bounded_content_text(item, MAX_DISPLAY_CHARS)
+            for item in data.get("transcript", ())
+            if isinstance(item, str)
+        )[:100],
+        match_count=_bounded_non_negative_int(data.get("match_count")),
+        truncated=bool(data.get("truncated")),
+    )
+
+
+def _message_preview(message: HarnessMessage) -> str:
+    content = _bounded_content_text(message.content, MAX_DISPLAY_CHARS)
+    return f"{_display_text(message.role).upper()} · {message.created_at}\n{content}"
+
+
+def _session_export_text(
+    session: HarnessSession, messages: tuple[HarnessMessage, ...]
+) -> str:
+    header = (
+        f"# {_display_text(session.title)}\n\n"
+        f"Session: `{session.id}`  \n"
+        f"Workspace: conversation context only; filesystem restore is not included.\n\n"
+    )
+    transcript = "\n\n".join(
+        f"## {_display_text(item.role).title()} · {item.created_at}\n\n"
+        f"{_neutralize_presentation_text(item.content)}"
+        for item in messages
+    )
+    return f"{header}{transcript}\n"
 
 
 def _harness_summary(

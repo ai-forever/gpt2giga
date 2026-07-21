@@ -440,6 +440,19 @@ MUTATION_ROUTE_CONTRACTS = (
         "project_authoring.optimistic_apply",
         evidence=_OPTIMISTIC,
     ),
+    *_many(
+        "POST",
+        (
+            "/api/sessions/{session_id}/navigation-update",
+            "/api/sessions/{session_id}/navigation-delete",
+            "/api/sessions/{session_id}/navigation-fork",
+            "/api/sessions/{session_id}/navigation-export",
+        ),
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "session_navigation.exact_revision",
+        evidence=_OPTIMISTIC,
+    ),
     _route(
         "PUT",
         "/api/workflows/{workflow_id}",

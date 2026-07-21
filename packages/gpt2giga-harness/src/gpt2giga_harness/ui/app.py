@@ -296,6 +296,11 @@ RUN_EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
 RUN_EVENT_STREAM_POLL_SECONDS = 0.1
 TUI_FILE_PREVIEW_BYTES = 8 * 1024
 TUI_FILE_PREVIEW_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+TUI_NAVIGATION_TERMINAL_RE = re.compile(
+    r"\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)?|P.*?(?:\x1b\\|$)|\[[0-?]*[ -/]*[@-~]|[@-_])",
+    re.DOTALL,
+)
+TUI_NAVIGATION_BIDI_RE = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
 
 
 @dataclass
@@ -384,6 +389,7 @@ def create_app(
     )
     policy_engine = PolicyEngine(runtime_store)
     active_headless_runs: dict[str, _ActiveHeadlessRun] = {}
+    session_navigation_mutations: dict[str, dict[str, Any]] = {}
     async_diagnostics = AsyncExecutionDiagnostics()
     run_event_broker = getattr(store, "event_broker", RunEventBroker())
     workbench_backbone = WorkbenchBackbone()
@@ -1926,6 +1932,132 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"session": _session_summary(store, session.id)}
+
+    @app.get("/api/sessions/{session_id}/navigation-preview")
+    def session_navigation_preview(
+        session_id: str,
+        q: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        try:
+            session = store.get_session(session_id)
+            messages = store.list_messages(session_id)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        needle = (_optional_text(q) or "").casefold()
+        matches = [
+            item for item in messages if not needle or needle in item.content.casefold()
+        ]
+        selected = matches[-100:]
+        return {
+            "session": _session_summary(store, session.id),
+            "transcript": [_navigation_message_preview(item) for item in selected],
+            "match_count": len(matches),
+            "truncated": len(matches) > len(selected),
+        }
+
+    @app.post("/api/sessions/{session_id}/navigation-update")
+    def session_navigation_update(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        cached = _navigation_cached(session_navigation_mutations, payload, "update")
+        if cached is not None:
+            return cached
+        _validate_navigation_binding(store, session_id, payload)
+        patch = _session_patch(payload)
+        try:
+            updated = store.update_session_if_revision(
+                session_id,
+                _required_text(payload.get("session_revision"), "session_revision"),
+                **patch,
+            )
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        if updated is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Session changed; authoritative resnapshot required",
+            )
+        response = {"session": _session_summary(store, updated.id)}
+        _cache_navigation_response(
+            session_navigation_mutations, payload, response, "update"
+        )
+        return response
+
+    @app.post("/api/sessions/{session_id}/navigation-delete")
+    def session_navigation_delete(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        cached = _navigation_cached(session_navigation_mutations, payload, "delete")
+        if cached is not None:
+            return cached
+        summary = _validate_navigation_binding(store, session_id, payload)
+        if summary.get("session_lease") is not None:
+            raise HTTPException(
+                status_code=409, detail="Active session lease blocks destructive action"
+            )
+        if not store.delete_session_if_revision(
+            session_id,
+            _required_text(payload.get("session_revision"), "session_revision"),
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Session changed; authoritative resnapshot required",
+            )
+        response = {"deleted": True}
+        _cache_navigation_response(
+            session_navigation_mutations, payload, response, "delete"
+        )
+        return response
+
+    @app.post("/api/sessions/{session_id}/navigation-fork")
+    def session_navigation_fork(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        cached = _navigation_cached(session_navigation_mutations, payload, "fork")
+        if cached is not None:
+            return cached
+        _validate_navigation_binding(store, session_id, payload)
+        fork = _fork_session_from_session(store, session_id)
+        response = {"session": _session_summary(store, fork.id)}
+        _cache_navigation_response(
+            session_navigation_mutations, payload, response, "fork"
+        )
+        return response
+
+    @app.post("/api/sessions/{session_id}/navigation-export")
+    def session_navigation_export(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        cached = _navigation_cached(session_navigation_mutations, payload, "export")
+        if cached is not None:
+            return cached
+        _validate_navigation_binding(store, session_id, payload)
+        session = store.get_session(session_id)
+        messages = store.list_messages(session_id)
+        export_dir = Path(config.data_dir) / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        path = export_dir / f"{session.id}.md"
+        temporary = export_dir / (
+            f".{session.id}.{_required_text(payload.get('idempotency_key'), 'idempotency_key')}.tmp"
+        )
+        temporary.write_text(
+            _navigation_export_text(session, messages), encoding="utf-8"
+        )
+        temporary.replace(path)
+        response = {
+            "export": {
+                "path": str(path),
+                "message_count": len(messages),
+            }
+        }
+        _cache_navigation_response(
+            session_navigation_mutations, payload, response, "export"
+        )
+        return response
 
     @app.delete("/api/sessions/{session_id}")
     def delete_session(session_id: str) -> dict[str, Any]:
@@ -5448,6 +5580,12 @@ def _session_summary(
     if messages:
         preview = " ".join(messages[-1].content.split())[:120]
     last_status = runs[-1].status if runs else None
+    active_runs = [
+        run.id
+        for run in runs
+        if run.status not in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}
+    ]
+    native_reference = _navigation_native_reference(session)
     payload = session_to_dict(session)
     project_id = _optional_text(session.metadata.get("project_id"))
     payload.update(
@@ -5464,9 +5602,183 @@ def _session_summary(
                 if project_id
                 else None
             ),
+            "native_session_reference": native_reference,
+            "session_revision": session.updated_at,
+            "session_generation": _navigation_generation(native_reference),
+            "session_lease": active_runs[-1] if active_runs else None,
         }
     )
     return payload
+
+
+def _navigation_native_reference(session: HarnessSession) -> dict[str, Any]:
+    explicit = session.metadata.get("native_session_reference")
+    if isinstance(explicit, Mapping):
+        return dict(explicit)
+    structured = session.metadata.get("structured_session_link")
+    if isinstance(structured, Mapping):
+        return {
+            "authority": structured.get("provider")
+            or structured.get("authority")
+            or session.native.get("harness_id"),
+            "native_id": structured.get("thread_id")
+            or structured.get("session_id")
+            or structured.get("native_session_id"),
+            "operation": structured.get("operation") or "resume",
+            "revision": structured.get("revision"),
+            "link_hash": structured.get("link_hash"),
+        }
+    return dict(session.native)
+
+
+def _navigation_generation(reference: Mapping[str, Any]) -> int:
+    revision = reference.get("revision")
+    if isinstance(revision, int) and revision >= 0:
+        return revision
+    link_hash = _optional_text(reference.get("link_hash"))
+    if not link_hash:
+        return 0
+    return int(hashlib.sha256(link_hash.encode("utf-8")).hexdigest()[:8], 16)
+
+
+def _validate_navigation_binding(
+    store: HarnessSessionStore,
+    session_id: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        summary = _session_summary(store, session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+    expected = (
+        _required_text(payload.get("session_revision"), "session_revision"),
+        _navigation_non_negative_int(
+            payload.get("session_generation"), "session_generation"
+        ),
+        _optional_text(payload.get("session_lease")),
+    )
+    current = (
+        summary["session_revision"],
+        summary["session_generation"],
+        summary["session_lease"],
+    )
+    if expected != current:
+        raise HTTPException(
+            status_code=409,
+            detail="Session changed; authoritative resnapshot required",
+        )
+    _required_text(payload.get("idempotency_key"), "idempotency_key")
+    return summary
+
+
+def _navigation_cached(
+    cache: Mapping[str, dict[str, Any]],
+    payload: Mapping[str, Any],
+    action: str,
+) -> dict[str, Any] | None:
+    key = _optional_text(payload.get("idempotency_key"))
+    return cache.get(f"{action}:{key}") if key else None
+
+
+def _cache_navigation_response(
+    cache: dict[str, dict[str, Any]],
+    payload: Mapping[str, Any],
+    response: dict[str, Any],
+    action: str,
+) -> None:
+    key = _required_text(payload.get("idempotency_key"), "idempotency_key")
+    if len(cache) >= 512:
+        cache.pop(next(iter(cache)))
+    cache[f"{action}:{key}"] = response
+
+
+def _navigation_message_preview(message: HarnessMessage) -> str:
+    content = _navigation_safe_text(message.content)[:512]
+    return f"{_navigation_safe_text(message.role).upper()} · {message.created_at}\n{content}"
+
+
+def _navigation_export_text(
+    session: HarnessSession, messages: tuple[HarnessMessage, ...]
+) -> str:
+    transcript = "\n\n".join(
+        f"## {_navigation_safe_text(item.role).title()} · {item.created_at}\n\n"
+        f"{_navigation_safe_text(item.content)}"
+        for item in messages
+    )
+    return (
+        f"# {_navigation_safe_text(session.title)}\n\n"
+        f"Session: `{session.id}`  \n"
+        "Workspace: conversation context only; filesystem restore is not included.\n\n"
+        f"{transcript}\n"
+    )
+
+
+def _navigation_safe_text(value: Any) -> str:
+    text = TUI_NAVIGATION_TERMINAL_RE.sub("⟦terminal-control⟧", str(value))
+    text = TUI_FILE_PREVIEW_CONTROL_RE.sub("�", text)
+    return TUI_NAVIGATION_BIDI_RE.sub("�", text)
+
+
+def _navigation_non_negative_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise HTTPException(status_code=400, detail=f"{field_name} must be an integer")
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail=f"{field_name} must be an integer"
+        ) from exc
+    if result < 0:
+        raise HTTPException(
+            status_code=400, detail=f"{field_name} must be non-negative"
+        )
+    return result
+
+
+def _fork_session_from_session(
+    store: HarnessSessionStore, session_id: str
+) -> HarnessSession:
+    source = store.get_session(session_id)
+    reference = _navigation_native_reference(source)
+    metadata = {
+        **dict(source.metadata),
+        "forked_from_session_id": source.id,
+        "fork_semantics": "harness_replay",
+    }
+    metadata.pop("structured_session_link", None)
+    if reference:
+        metadata["native_session_reference"] = {
+            "authority": reference.get("authority"),
+            "native_id": reference.get("native_id")
+            or reference.get("session_id")
+            or reference.get("id"),
+            "workspace": source.workspace,
+            "operation": "fork",
+        }
+    fork = store.create_session(
+        title=f"Fork: {source.title}",
+        workspace=source.workspace,
+        default_harness_id=source.default_harness_id,
+        default_model=source.default_model,
+        default_api_mode=source.default_api_mode,
+        default_mode=source.default_mode,
+        metadata=metadata,
+    )
+    for message in store.list_messages(source.id):
+        store.append_message(
+            replace(
+                message,
+                id=new_id("msg"),
+                session_id=fork.id,
+                run_id=None,
+                created_at=utc_now(),
+                metadata={
+                    **dict(message.metadata),
+                    "forked_from_message_id": message.id,
+                },
+            )
+        )
+    return fork
 
 
 def _session_patch(payload: dict[str, Any]) -> dict[str, Any]:

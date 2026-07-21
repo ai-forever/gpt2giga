@@ -4,6 +4,7 @@ import asyncio
 import importlib
 from dataclasses import replace
 import os
+from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -12,14 +13,15 @@ import pytest
 
 from gpt2giga_harness import entrypoint
 from gpt2giga_harness.config import HarnessConfig
-from gpt2giga_harness.sessions.models import HarnessStoredEvent
-from gpt2giga_harness.sessions.store import utc_now
+from gpt2giga_harness.sessions.models import HarnessMessage, HarnessStoredEvent
+from gpt2giga_harness.sessions.store import new_id, utc_now
 from gpt2giga_harness.terminal_dispatch import TerminalContext
 from gpt2giga_harness.terminal_intent import parse_tui_launch_intent
 from gpt2giga_harness.tui.client import (
     AttachedWorkbenchClient,
     InProcessWorkbenchClient,
     WorkbenchClientError,
+    session_action_binding,
 )
 from gpt2giga_harness.tui.i18n import CATALOGS, resolve_locale, translator
 
@@ -86,6 +88,89 @@ async def test_in_process_client_resolves_an_exact_session_deep_link_workspace(
 
     assert snapshot.project.root == str(second.resolve())
     assert snapshot.selected_session_id == selected.id
+
+
+@pytest.mark.anyio
+async def test_in_process_session_navigation_is_bound_searchable_and_exportable(
+    tmp_path,
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    client = InProcessWorkbenchClient(HarnessConfig(data_dir=str(tmp_path / "state")))
+    source = client.sessions.create_session(
+        {
+            "workspace": str(workspace),
+            "title": "Native review",
+            "harness_id": "codex-cli",
+        }
+    )
+    client.store.update_session(
+        source.id,
+        metadata={
+            "project_id": "project-review",
+            "structured_session_link": {
+                "provider": "codex",
+                "thread_id": "thread-native-1",
+                "operation": "resume",
+                "revision": 3,
+            },
+        },
+    )
+    client.store.append_message(
+        HarnessMessage(
+            id=new_id("msg"),
+            session_id=source.id,
+            run_id=None,
+            role="user",
+            content="inspect the revision\x1b]52;c;blocked\x07",
+            created_at=utc_now(),
+        )
+    )
+
+    matches = await client.search_sessions(
+        "Native", provider="codex-cli", project="project-review"
+    )
+    assert len(matches) == 1
+    summary = matches[0]
+    assert summary.native_session_id == "thread-native-1"
+    assert summary.native_operation == "resume"
+    assert summary.generation == 3
+
+    preview = await client.preview_session(source.id, transcript_query="revision")
+    assert preview.match_count == 1
+    assert "terminal-control" in preview.transcript[0]
+
+    stale = session_action_binding(summary, idempotency_key="rename-stale")
+    client.store.update_session(source.id, title="Concurrent rename")
+    with pytest.raises(WorkbenchClientError, match="resnapshot"):
+        await client.rename_session(stale, "Lost update")
+
+    current = (await client.search_sessions("Concurrent rename"))[0]
+    archive_binding = session_action_binding(current, idempotency_key="archive-once")
+    archived = await client.archive_session(archive_binding)
+    assert archived.archived is True
+    assert await client.archive_session(archive_binding) == archived
+
+    restored = await client.archive_session(
+        session_action_binding(archived, idempotency_key="restore-once"),
+        archived=False,
+    )
+    fork = await client.fork_session(
+        session_action_binding(restored, idempotency_key="fork-once")
+    )
+    assert fork.native_session_id == "thread-native-1"
+    assert fork.native_operation == "fork"
+    assert (
+        client.store.get_session(fork.id).metadata["fork_semantics"] == "harness_replay"
+    )
+
+    exported = await client.export_session(
+        session_action_binding(restored, idempotency_key="export-once")
+    )
+    exported_text = Path(exported.path).read_text(encoding="utf-8")
+    assert "filesystem restore is not included" in exported_text
+    assert "terminal-control" in exported_text
+    assert "\x1b]52" not in exported_text
 
 
 @pytest.mark.anyio

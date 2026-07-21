@@ -36,10 +36,12 @@ from gpt2giga_harness.tui.client import (
     RunActionBinding,
     RunInspection,
     RunSnapshot,
+    SessionActionBinding,
     SessionSummary,
     TimelineEvent,
     WorkbenchClient,
     neutralize_native_terminal_output,
+    session_action_binding,
 )
 from gpt2giga_harness.tui.i18n import translator
 from gpt2giga_harness.tui.commands import (
@@ -402,6 +404,205 @@ class FilePickerScreen(ModalScreen[FileCandidate | None]):
             f"{candidate.path}\n{candidate.mime_type} · {candidate.preview_status}\n\n"
         )
         self.query_one("#file-preview", Static).update(header + candidate.preview)
+
+
+class SessionBrowserScreen(ModalScreen[SessionSummary | None]):
+    """Search and preview bounded session projections across projects."""
+
+    CSS = """
+    SessionBrowserScreen {
+        align: center middle;
+    }
+    #session-browser-dialog {
+        width: 96%;
+        max-width: 100;
+        height: 92%;
+        max-height: 32;
+        padding: 1 2;
+        border: round $accent;
+        background: $surface;
+    }
+    #session-browser-query {
+        height: 3;
+    }
+    #session-browser-body {
+        height: 1fr;
+        layout: horizontal;
+    }
+    #session-browser-results, #session-browser-preview {
+        width: 1fr;
+        height: 1fr;
+        overflow: auto hidden;
+    }
+    #session-browser-preview {
+        padding: 0 1;
+        border-left: solid $primary-background;
+    }
+    #session-browser-actions {
+        height: 3;
+        align-horizontal: right;
+    }
+    #session-browser-actions Button {
+        margin-left: 1;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
+
+    def __init__(
+        self,
+        sessions: tuple[SessionSummary, ...],
+        *,
+        title: str,
+        placeholder: str,
+        open_label: str,
+        cancel_label: str,
+        empty: str,
+    ) -> None:
+        super().__init__()
+        self.sessions = sessions
+        self.title = title
+        self.placeholder = placeholder
+        self.open_label = open_label
+        self.cancel_label = cancel_label
+        self.empty = empty
+        self.filtered: tuple[SessionSummary, ...] = sessions
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="session-browser-dialog"):
+            yield Label(self.title, markup=False)
+            yield Input(placeholder=self.placeholder, id="session-browser-query")
+            with Horizontal(id="session-browser-body"):
+                yield ListView(id="session-browser-results")
+                yield Static("", id="session-browser-preview", markup=False)
+            with Horizontal(id="session-browser-actions"):
+                yield Button(
+                    self.open_label, id="session-browser-open", variant="primary"
+                )
+                yield Button(self.cancel_label, id="session-browser-cancel")
+
+    def on_mount(self) -> None:
+        self._apply_filter("")
+        self.query_one("#session-browser-query", Input).focus()
+
+    @on(Input.Changed, "#session-browser-query")
+    def filter_sessions(self, event: Input.Changed) -> None:
+        self._apply_filter(event.value)
+
+    @on(ListView.Highlighted, "#session-browser-results")
+    def preview_session(self, event: ListView.Highlighted) -> None:
+        item = event.item
+        if not isinstance(item, NavigationItem):
+            return
+        selected = next(
+            (session for session in self.filtered if session.id == item.value), None
+        )
+        if selected is not None:
+            self._render_preview(selected)
+
+    @on(ListView.Selected, "#session-browser-results")
+    def select_session(self, event: ListView.Selected) -> None:
+        item = event.item
+        if isinstance(item, NavigationItem):
+            self._dismiss_id(item.value)
+
+    @on(Button.Pressed, "#session-browser-open")
+    def open_session(self) -> None:
+        highlighted = self.query_one(
+            "#session-browser-results", ListView
+        ).highlighted_child
+        if isinstance(highlighted, NavigationItem):
+            self._dismiss_id(highlighted.value)
+
+    @on(Button.Pressed, "#session-browser-cancel")
+    def cancel_session(self) -> None:
+        self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _dismiss_id(self, session_id: str) -> None:
+        self.dismiss(
+            next((item for item in self.filtered if item.id == session_id), None)
+        )
+
+    def _apply_filter(self, value: str) -> None:
+        terms = value.casefold().split()
+
+        def matches(session: SessionSummary) -> bool:
+            searchable = " ".join(
+                filter(
+                    None,
+                    (
+                        session.title,
+                        session.preview,
+                        session.workspace,
+                        session.project_id,
+                        session.harness_id,
+                        session.native_authority,
+                        session.native_session_id,
+                    ),
+                )
+            ).casefold()
+            for term in terms:
+                if term.startswith("provider:"):
+                    provider = term.partition(":")[2]
+                    if (
+                        provider
+                        not in " ".join(
+                            filter(None, (session.harness_id, session.native_authority))
+                        ).casefold()
+                    ):
+                        return False
+                elif term.startswith("project:"):
+                    project = term.partition(":")[2]
+                    if (
+                        project
+                        not in " ".join(
+                            filter(None, (session.project_id, session.workspace))
+                        ).casefold()
+                    ):
+                        return False
+                elif term == "archived:true":
+                    if not session.archived:
+                        return False
+                elif term not in searchable:
+                    return False
+            return True
+
+        self.filtered = tuple(item for item in self.sessions if matches(item))
+        results = self.query_one("#session-browser-results", ListView)
+        results.clear()
+        for session in self.filtered:
+            marker = "[archived] " if session.archived else ""
+            results.append(NavigationItem(f"{marker}{session.title}", session.id))
+        if self.filtered:
+            results.index = 0
+            self._render_preview(self.filtered[0])
+        else:
+            self.query_one("#session-browser-preview", Static).update(self.empty)
+
+    def _render_preview(self, session: SessionSummary) -> None:
+        native = (
+            f"{session.native_authority}:{session.native_session_id} "
+            f"({session.native_operation or 'linked'})"
+            if session.native_session_id
+            else "none"
+        )
+        self.query_one("#session-browser-preview", Static).update(
+            "\n".join(
+                (
+                    session.title,
+                    f"Provider: {session.harness_id}",
+                    f"Project: {session.project_id or session.workspace or 'unbound'}",
+                    f"Native session: {native}",
+                    f"Revision: {session.revision}",
+                    f"State: {'archived' if session.archived else 'active'}",
+                    "",
+                    session.preview or "No retained transcript preview.",
+                )
+            )
+        )
 
 
 class DetailScreen(ModalScreen[None]):
@@ -1250,6 +1451,198 @@ class WorkbenchTui(App[None]):
                 self.t("dialog.cancel"),
             ),
             self._session_title_chosen,
+        )
+
+    async def action_sessions(self) -> None:
+        self._set_status(self.t("status.loading_sessions"))
+        try:
+            sessions = await self.client.search_sessions(include_archived=True)
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self.push_screen(
+            SessionBrowserScreen(
+                sessions,
+                title=self.t("sessions.title"),
+                placeholder=self.t("sessions.search"),
+                open_label=self.t("sessions.open"),
+                cancel_label=self.t("dialog.cancel"),
+                empty=self.t("sessions.empty"),
+            ),
+            self._browser_session_chosen,
+        )
+        self._set_status(self.t("status.ready"))
+
+    def action_rename_session(self) -> None:
+        if self._selected_session_summary() is None:
+            return
+        self.push_screen(
+            TextPrompt(
+                self.t("sessions.rename_prompt"),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            self._session_rename_chosen,
+        )
+
+    def action_archive_session(self) -> None:
+        session = self._selected_session_summary()
+        if session is None:
+            return
+        self.push_screen(
+            TextPrompt(
+                self.t("sessions.confirm_archive").format(title=session.title),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            self._session_archive_confirmed,
+        )
+
+    def action_delete_session(self) -> None:
+        session = self._selected_session_summary()
+        if session is None:
+            return
+        self.push_screen(
+            TextPrompt(
+                self.t("sessions.confirm_delete").format(title=session.title),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            self._session_delete_confirmed,
+        )
+
+    async def action_fork_session(self) -> None:
+        session = self._selected_session_summary()
+        if session is None:
+            return
+        try:
+            fork = await self.client.fork_session(self._session_binding(session))
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self.workspace = fork.workspace or self.workspace
+        self.selected_session_id = fork.id
+        self._reset_run()
+        await self._reload()
+        self._set_status(self.t("sessions.forked"))
+
+    def action_transcript_search(self) -> None:
+        if self._selected_session_summary() is None:
+            return
+        self.push_screen(
+            TextPrompt(
+                self.t("sessions.transcript_query"),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            self._transcript_query_chosen,
+        )
+
+    async def action_export_session(self) -> None:
+        session = self._selected_session_summary()
+        if session is None:
+            return
+        try:
+            exported = await self.client.export_session(self._session_binding(session))
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self._show_detail(
+            self.t("sessions.exported_title"),
+            self.t("sessions.exported").format(
+                path=exported.path, count=exported.message_count
+            ),
+        )
+
+    async def _browser_session_chosen(self, session: SessionSummary | None) -> None:
+        if session is None:
+            return
+        try:
+            if session.archived:
+                session = await self.client.archive_session(
+                    self._session_binding(session), archived=False
+                )
+            self.workspace = session.workspace or self.workspace
+            self.selected_session_id = session.id
+            self.attachments = ()
+            self._reset_run()
+            await self._reload()
+        except Exception as exc:
+            self._show_error(exc)
+
+    async def _session_rename_chosen(self, title: str | None) -> None:
+        session = self._selected_session_summary()
+        if not title or session is None:
+            return
+        try:
+            await self.client.rename_session(self._session_binding(session), title)
+            await self._reload()
+        except Exception as exc:
+            self._show_error(exc)
+
+    async def _session_archive_confirmed(self, confirmation: str | None) -> None:
+        session = self._selected_session_summary()
+        if session is None or confirmation != session.title:
+            if confirmation is not None:
+                self._set_status(self.t("sessions.confirmation_mismatch"))
+            return
+        try:
+            await self.client.archive_session(self._session_binding(session))
+            self.selected_session_id = None
+            self._reset_run()
+            await self._reload()
+        except Exception as exc:
+            self._show_error(exc)
+
+    async def _session_delete_confirmed(self, confirmation: str | None) -> None:
+        session = self._selected_session_summary()
+        if session is None or confirmation != session.title:
+            if confirmation is not None:
+                self._set_status(self.t("sessions.confirmation_mismatch"))
+            return
+        try:
+            await self.client.delete_session(self._session_binding(session))
+            self.selected_session_id = None
+            self._reset_run()
+            await self._reload()
+        except Exception as exc:
+            self._show_error(exc)
+
+    async def _transcript_query_chosen(self, query: str | None) -> None:
+        session = self._selected_session_summary()
+        if query is None or session is None:
+            return
+        try:
+            preview = await self.client.preview_session(
+                session.id, transcript_query=query
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        body = "\n\n".join(preview.transcript) or self.t("sessions.no_matches")
+        if preview.truncated:
+            body += f"\n\n{self.t('sessions.search_truncated')}"
+        self._show_detail(
+            self.t("sessions.transcript_results").format(count=preview.match_count),
+            body,
+        )
+
+    def _selected_session_summary(self) -> SessionSummary | None:
+        if self.snapshot is None or self.selected_session_id is None:
+            return None
+        return next(
+            (
+                session
+                for session in self.snapshot.sessions
+                if session.id == self.selected_session_id
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _session_binding(session: SessionSummary) -> SessionActionBinding:
+        return session_action_binding(
+            session, idempotency_key=f"tui-session-{uuid4().hex}"
         )
 
     def action_help(self) -> None:

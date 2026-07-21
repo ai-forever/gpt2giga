@@ -86,6 +86,61 @@ def test_sessions_api_create_list_get_update_delete():
     assert deleted.json() == {"deleted": True}
 
 
+def test_session_navigation_api_binds_revision_and_replays_idempotently():
+    client = _client()
+    created = client.post(
+        "/api/sessions",
+        json={"title": "Bound session", "harness_id": "echo"},
+    ).json()["session"]
+    session_id = created["id"]
+    store = client.app.state.harness_session_store
+    store.update_session(
+        session_id,
+        metadata={
+            "project_id": "project-bound",
+            "native_session_reference": {
+                "authority": "codex",
+                "native_id": "thread-bound",
+                "operation": "resume",
+                "revision": 7,
+            },
+        },
+    )
+    summary = client.get(f"/api/sessions/{session_id}/navigation-preview").json()[
+        "session"
+    ]
+    binding = {
+        "session_revision": summary["session_revision"],
+        "session_generation": summary["session_generation"],
+        "session_lease": summary["session_lease"],
+        "idempotency_key": "rename-bound-once",
+    }
+
+    first = client.post(
+        f"/api/sessions/{session_id}/navigation-update",
+        json={**binding, "title": "Renamed once"},
+    )
+    replay = client.post(
+        f"/api/sessions/{session_id}/navigation-update",
+        json={**binding, "title": "Different retry payload"},
+    )
+    stale = client.post(
+        f"/api/sessions/{session_id}/navigation-update",
+        json={**binding, "idempotency_key": "stale-binding", "title": "Lost"},
+    )
+
+    assert first.status_code == 200
+    assert replay.json() == first.json()
+    assert first.json()["session"]["native_session_reference"] == {
+        "authority": "codex",
+        "native_id": "thread-bound",
+        "operation": "resume",
+        "revision": 7,
+    }
+    assert stale.status_code == 409
+    assert "resnapshot" in stale.json()["detail"]
+
+
 def test_sessions_api_filters_by_project_id(tmp_path):
     client = _client()
     first_workspace = tmp_path / "first"
