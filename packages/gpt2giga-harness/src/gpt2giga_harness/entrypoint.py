@@ -20,15 +20,17 @@ def main(
 ) -> int:
     """Launch the built-in TUI by default or an explicit command API route."""
     arguments = list(sys.argv[1:] if argv is None else argv)
+    terminal_context = context or TerminalContext.capture()
     native_result = run_native_namespace(
         arguments,
         facade_executable=sys.argv[0],
+        context=terminal_context,
     )
     if native_result is not None:
         return native_result
     plan = plan_terminal_dispatch(
         arguments,
-        context=context or TerminalContext.capture(),
+        context=terminal_context,
     )
     if plan.surface is ConsoleSurface.TUI_HUMAN_WORKFLOW:
         if plan.readiness is DispatchReadiness.BLOCKED:

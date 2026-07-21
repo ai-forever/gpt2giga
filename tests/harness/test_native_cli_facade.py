@@ -15,6 +15,12 @@ from gpt2giga_harness.native_cli_facade import (
     match_native_namespace,
     run_native_namespace,
 )
+from gpt2giga_harness.terminal_dispatch import TerminalContext
+from gpt2giga_harness.terminal_intent import parse_native_tui_launch_intent
+
+
+PTY = TerminalContext(True, True, True, "xterm-256color")
+PIPE = TerminalContext(False, False, True, "xterm-256color")
 
 
 @pytest.mark.parametrize("namespace", ("codex", "claude", "gemini"))
@@ -75,13 +81,184 @@ def test_console_entrypoint_routes_native_namespace_before_terminal_or_cli(monke
         lambda *_args, **_kwargs: pytest.fail("terminal routing must not run"),
     )
 
-    assert entrypoint.main(["gemini", "-p", "inspect", "--json"]) == 37
+    assert entrypoint.main(["gemini", "-p", "inspect", "--json"], context=PTY) == 37
     assert calls == [
         (
             ["gemini", "-p", "inspect", "--json"],
-            {"facade_executable": sys.argv[0]},
+            {"facade_executable": sys.argv[0], "context": PTY},
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("namespace", "suffix", "expected"),
+    (
+        (
+            "codex",
+            ("resume", "--last"),
+            {
+                "provider_namespace": "codex",
+                "native_session_selector": "--last",
+                "session_operation": "resume",
+                "harness_id": "codex-cli",
+                "provider_transport": "app-server",
+            },
+        ),
+        (
+            "claude",
+            ("--fork-session", "-r", "fixture-session"),
+            {
+                "provider_namespace": "claude",
+                "native_session_selector": "fixture-session",
+                "session_operation": "fork",
+                "fork_session": True,
+                "harness_id": "claude-code",
+            },
+        ),
+        (
+            "claude",
+            ("--permission-mode", "plan"),
+            {
+                "provider_namespace": "claude",
+                "permission_mode": "plan",
+                "harness_id": "claude-code",
+            },
+        ),
+        (
+            "gemini",
+            ("-i", "inspect"),
+            {
+                "provider_namespace": "gemini",
+                "prompt": "inspect",
+                "harness_id": "gemini-cli",
+                "provider_transport": "acp",
+            },
+        ),
+    ),
+)
+def test_affirmative_native_human_forms_decode_to_lossless_typed_intent(
+    namespace, suffix, expected
+):
+    from gpt2giga_harness.native_cli_contracts import classify_native_route
+
+    decision = classify_native_route(
+        namespace,
+        suffix,
+        stdin_is_tty=True,
+        stdout_is_tty=True,
+        structured_transport_ready=False,
+    )
+    intent = parse_native_tui_launch_intent(namespace, suffix, decision)
+
+    assert intent is not None
+    assert intent.persistence == "provider_native"
+    for field, value in expected.items():
+        assert getattr(intent, field) == value
+
+
+def test_affirmative_human_route_uses_visible_l1_handoff_without_l0_exec():
+    calls = []
+
+    def managed_runner(spec, suffix, **kwargs):
+        calls.append((spec.namespace, suffix, kwargs))
+        return 19
+
+    result = run_native_namespace(
+        ("claude", "-c"),
+        context=PTY,
+        environment={"PATH": "provider-path"},
+        facade_executable="/installed/giga",
+        runner=lambda *_args, **_kwargs: pytest.fail("L0 must not own human route"),
+        managed_runner=managed_runner,
+    )
+
+    assert result == 19
+    assert calls == [
+        (
+            "claude",
+            ("-c",),
+            {
+                "environment": {"PATH": "provider-path"},
+                "facade_executable": "/installed/giga",
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("context", "argv"),
+    (
+        (PIPE, ("codex",)),
+        (PIPE, ("claude", "-c")),
+        (PIPE, ("gemini", "-r", "latest")),
+        (PTY, ("claude", "-c", "-p", "inspect")),
+        (PTY, ("gemini", "-p", "inspect")),
+    ),
+)
+def test_non_tty_and_headless_precedence_remain_l0(context, argv):
+    calls = []
+
+    def runner(spec, suffix, **_kwargs):
+        calls.append((spec.namespace, suffix))
+        return 11
+
+    result = run_native_namespace(
+        argv,
+        context=context,
+        runner=runner,
+        managed_runner=lambda *_args, **_kwargs: pytest.fail(
+            "machine precedence must bypass the managed handoff"
+        ),
+    )
+
+    assert result == 11
+    assert calls == [(argv[0], tuple(argv[1:]))]
+
+
+@pytest.mark.parametrize(
+    ("namespace", "suffix"),
+    (
+        ("codex", ("resume", "--last", "--future-mode")),
+        ("claude", ("--permission-mode", "plan", "--future-mode")),
+        ("gemini", ("-i", "inspect", "--future-mode")),
+    ),
+)
+def test_lossy_or_unknown_human_shapes_remain_exact_l0_passthrough(namespace, suffix):
+    calls = []
+
+    def runner(spec, forwarded, **kwargs):
+        calls.append((spec.namespace, forwarded, kwargs))
+        return 7
+
+    result = run_native_namespace(
+        (namespace, *suffix),
+        context=PTY,
+        runner=runner,
+        managed_runner=lambda *_args, **_kwargs: pytest.fail(
+            "lossy intent must not enter managed routing"
+        ),
+    )
+
+    assert result == 7
+    assert calls[0][1] == suffix
+
+
+def test_attach_and_in_process_entry_paths_share_one_native_intent_decoder():
+    from gpt2giga_harness.native_cli_contracts import classify_native_route
+
+    suffix = ("-r", "latest")
+    decision = classify_native_route(
+        "gemini",
+        suffix,
+        stdin_is_tty=True,
+        stdout_is_tty=True,
+        structured_transport_ready=False,
+    )
+
+    in_process = parse_native_tui_launch_intent("gemini", suffix, decision)
+    attached = parse_native_tui_launch_intent("gemini", suffix, decision)
+
+    assert in_process == attached
 
 
 def test_native_console_import_path_avoids_argparse_textual_and_full_cli():

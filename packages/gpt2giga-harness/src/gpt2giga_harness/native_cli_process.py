@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from typing import cast
 
 from gpt2giga_harness.native_cli_contracts import NativeNamespaceSpec
 
@@ -68,6 +69,7 @@ class WindowsLaunchPlan:
 
 Execve = Callable[[str, Sequence[str], Mapping[str, str]], object]
 WindowsSpawner = Callable[..., subprocess.Popen[bytes]]
+NativeSpawner = Callable[..., subprocess.Popen[bytes]]
 
 
 _WINDOWS_META = re.compile(r'([()\[\]{}%!^"`<>&|;,*? ])')
@@ -216,6 +218,78 @@ def run_native_l0(
         except KeyboardInterrupt:
             # The child shares the inherited console and receives the same event.
             continue
+
+
+def run_native_l1_handoff(
+    spec: NativeNamespaceSpec,
+    suffix: Sequence[str],
+    *,
+    environment: Mapping[str, str] | None = None,
+    environment_overrides: Mapping[str, str | None] | None = None,
+    facade_executable: str | os.PathLike[str] | None = None,
+    platform: NativeProcessPlatform | None = None,
+    spawner: NativeSpawner = subprocess.Popen,
+    windows_cmd: str | os.PathLike[str] | None = None,
+) -> int:
+    """Visibly supervise a provider that temporarily owns the terminal."""
+    selected_platform = platform or current_native_platform()
+    native_environment = build_native_environment(
+        inherited=environment,
+        overrides=environment_overrides,
+    )
+    resolution = resolve_native_executable(
+        spec,
+        environment=native_environment,
+        facade_executable=facade_executable,
+        platform=selected_platform,
+    )
+    if resolution.status is not NativeResolutionStatus.READY:
+        _write_prelaunch_diagnostic(spec.namespace, resolution.status)
+        return resolution.exit_code or 126
+    assert resolution.path is not None
+    assert resolution.kind is not None
+    native_suffix = tuple(_validate_native_argument(argument) for argument in suffix)
+    _write_handoff_notice(spec.namespace)
+    terminal_state = _capture_terminal_state()
+    try:
+        if selected_platform is NativeProcessPlatform.WINDOWS:
+            plan = build_windows_launch_plan(
+                resolution,
+                native_suffix,
+                environment=native_environment,
+                windows_cmd=windows_cmd,
+            )
+            argv: Sequence[str] | str = plan.argv
+            executable = os.fspath(plan.executable)
+            close_fds = False
+        else:
+            argv = (os.fspath(resolution.path), *native_suffix)
+            executable = os.fspath(resolution.path)
+            close_fds = True
+        process = spawner(
+            argv,
+            executable=executable,
+            stdin=None,
+            stdout=None,
+            stderr=None,
+            cwd=None,
+            env=native_environment,
+            shell=False,
+            close_fds=close_fds,
+        )
+        while True:
+            try:
+                return process.wait()
+            except KeyboardInterrupt:
+                # The provider shares the foreground console and receives the signal.
+                continue
+    except (OSError, ValueError):
+        _write_prelaunch_diagnostic(
+            spec.namespace, NativeResolutionStatus.NON_EXECUTABLE
+        )
+        return 126
+    finally:
+        _restore_terminal_state(terminal_state)
 
 
 def build_windows_launch_plan(
@@ -388,3 +462,83 @@ def _write_prelaunch_diagnostic(namespace: str, status: NativeResolutionStatus) 
         os.write(sys.stderr.fileno(), message)
     except (AttributeError, OSError, ValueError):
         pass
+
+
+def _write_handoff_notice(namespace: str) -> None:
+    message = (
+        f"giga: handing interactive {namespace} control to the provider terminal; "
+        "structured Workbench features are unavailable\n"
+    ).encode("ascii")
+    try:
+        os.write(sys.stderr.fileno(), message)
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
+def _capture_terminal_state() -> tuple[str, tuple[tuple[int, object], ...]]:
+    if os.name == "nt":
+        return "windows", _capture_windows_console_state()
+    try:
+        import termios
+    except ImportError:  # pragma: no cover - non-POSIX runtime.
+        return "posix", ()
+    captured: list[tuple[int, list[object]]] = []
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            descriptor = stream.fileno()
+            if os.isatty(descriptor) and all(fd != descriptor for fd, _ in captured):
+                captured.append((descriptor, termios.tcgetattr(descriptor)))
+        except (AttributeError, OSError, ValueError, termios.error):
+            continue
+    return "posix", tuple(captured)
+
+
+def _restore_terminal_state(
+    state: tuple[str, tuple[tuple[int, object], ...]],
+) -> None:
+    platform, entries = state
+    if not entries:
+        return
+    if platform == "windows":
+        _restore_windows_console_state(entries)
+        return
+    import termios
+
+    for descriptor, attributes in entries:
+        try:
+            termios.tcsetattr(
+                descriptor,
+                termios.TCSANOW,
+                cast(list[object], attributes),
+            )
+        except (OSError, termios.error):
+            continue
+
+
+def _capture_windows_console_state() -> tuple[tuple[int, object], ...]:
+    try:
+        import ctypes
+        import msvcrt
+    except ImportError:  # pragma: no cover - Windows-only imports.
+        return ()
+    captured: list[tuple[int, object]] = []
+    kernel32 = ctypes.windll.kernel32
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            handle = msvcrt.get_osfhandle(stream.fileno())
+            mode = ctypes.c_uint()
+            if kernel32.GetConsoleMode(handle, ctypes.byref(mode)) and all(
+                saved_handle != handle for saved_handle, _ in captured
+            ):
+                captured.append((handle, mode.value))
+        except (AttributeError, OSError, ValueError):
+            continue
+    return tuple(captured)
+
+
+def _restore_windows_console_state(state: tuple[tuple[int, object], ...]) -> None:
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    for handle, mode in state:
+        kernel32.SetConsoleMode(handle, int(mode))

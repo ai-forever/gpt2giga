@@ -5,6 +5,11 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
+from gpt2giga_harness.native_cli_contracts import (
+    NativeCommandClass,
+    RouteDecision,
+    WORKBENCH_INTEGRATION_SPECS,
+)
 from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
 
 
@@ -13,6 +18,74 @@ AGENT_HARNESSES = {
     "claude": "claude-code",
     "gemini": "gemini-cli",
 }
+
+
+def parse_native_tui_launch_intent(
+    namespace: str,
+    suffix: Sequence[str],
+    decision: RouteDecision,
+) -> TuiLaunchIntent | None:
+    """Decode one affirmatively classified provider intent without loss."""
+    integration = WORKBENCH_INTEGRATION_SPECS.get(namespace)
+    if integration is None or decision.intent_pattern_id is None:
+        return None
+    argv = tuple(suffix)
+    base = {
+        "provider_namespace": namespace,
+        "create_session": decision.command_class
+        in {
+            NativeCommandClass.HUMAN_ROOT,
+            NativeCommandClass.HUMAN_PROMPT,
+            NativeCommandClass.HUMAN_CONTROL,
+        },
+        "harness_id": integration.harness_id,
+        "provider_transport": integration.structured_transport,
+        "persistence": "provider_native",
+    }
+    pattern = decision.intent_pattern_id
+    if pattern.endswith(".root"):
+        return TuiLaunchIntent(**base)
+    if pattern == "codex.resume":
+        return TuiLaunchIntent(
+            **base,
+            native_session_selector=argv[1],
+            session_operation="resume",
+        )
+    if pattern == "codex.fork":
+        return TuiLaunchIntent(
+            **base,
+            native_session_selector=argv[1],
+            session_operation="fork",
+            fork_session=True,
+        )
+    if pattern.endswith(".prompt"):
+        return TuiLaunchIntent(**base, prompt=argv[0])
+    if pattern == "claude.continue":
+        return TuiLaunchIntent(
+            **base,
+            session_operation="continue",
+            continue_session=True,
+        )
+    if pattern == "claude.resume":
+        fork = argv[0] == "--fork-session"
+        return TuiLaunchIntent(
+            **base,
+            native_session_selector=argv[-1],
+            session_operation="fork" if fork else "resume",
+            fork_session=fork,
+        )
+    if pattern == "claude.control":
+        field = "permission_mode" if argv[0] == "--permission-mode" else "sandbox"
+        return TuiLaunchIntent(**base, **{field: argv[1]})
+    if pattern == "gemini.interactive":
+        return TuiLaunchIntent(**base, prompt=argv[1])
+    if pattern == "gemini.resume":
+        return TuiLaunchIntent(
+            **base,
+            native_session_selector=argv[1],
+            session_operation="resume",
+        )
+    return None
 
 
 def parse_tui_launch_intent(

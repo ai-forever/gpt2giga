@@ -21,6 +21,7 @@ from gpt2giga_harness.native_cli_process import (
     build_windows_launch_plan,
     resolve_native_executable,
     run_native_l0,
+    run_native_l1_handoff,
 )
 
 
@@ -428,6 +429,92 @@ def test_windows_runner_inherits_handles_console_and_exit_code(tmp_path):
         "close_fds": False,
         "creationflags": 0,
     }
+
+
+def test_l1_handoff_is_visible_and_inherits_provider_terminal(capfd, tmp_path):
+    executable = tmp_path / "codex"
+    executable.touch()
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    calls = []
+
+    class Process:
+        def wait(self):
+            return 29
+
+    def spawn(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Process()
+
+    result = run_native_l1_handoff(
+        CODEX,
+        ("resume", "--last"),
+        environment={"PATH": os.fspath(tmp_path)},
+        platform=NativeProcessPlatform.POSIX,
+        spawner=spawn,
+    )
+
+    assert result == 29
+    captured = capfd.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        "giga: handing interactive codex control to the provider terminal; "
+        "structured Workbench features are unavailable\n"
+    )
+    args, kwargs = calls[0]
+    assert args == ((os.fspath(executable.resolve()), "resume", "--last"),)
+    assert kwargs["stdin"] is None
+    assert kwargs["stdout"] is None
+    assert kwargs["stderr"] is None
+    assert kwargs["shell"] is False
+    assert kwargs["close_fds"] is True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX termios restoration contract")
+def test_l1_handoff_restores_terminal_after_provider_failure(tmp_path):
+    import pty
+    import termios
+
+    _make_executable(
+        tmp_path / "codex",
+        """
+import sys
+import termios
+state = termios.tcgetattr(sys.stdin.fileno())
+state[3] &= ~termios.ECHO
+termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, state)
+raise SystemExit(31)
+""",
+    )
+    master, slave = pty.openpty()
+    before = termios.tcgetattr(slave)
+    source = """
+import os
+import sys
+from gpt2giga_harness.native_cli_contracts import NATIVE_NAMESPACE_SPECS
+from gpt2giga_harness.native_cli_process import run_native_l1_handoff
+raise SystemExit(run_native_l1_handoff(
+    NATIVE_NAMESPACE_SPECS['codex'],
+    (),
+    environment={**os.environ, 'PATH': sys.argv[1]},
+    facade_executable=sys.executable,
+))
+"""
+    try:
+        completed = subprocess.run(
+            (sys.executable, "-c", source, os.fspath(tmp_path)),
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            check=False,
+        )
+        after = termios.tcgetattr(slave)
+    finally:
+        os.close(master)
+        os.close(slave)
+
+    assert completed.returncode == 31
+    assert after == before
+    assert not (tmp_path / ".giga").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="real Windows cmd shim contract")

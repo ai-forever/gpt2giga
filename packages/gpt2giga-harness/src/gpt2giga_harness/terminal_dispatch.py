@@ -113,16 +113,28 @@ class TuiLaunchIntent:
     """Typed human-workflow intent preserved across the terminal cutover."""
 
     workspace: str | None = None
+    provider_namespace: str | None = None
     session_id: str | None = None
+    native_session_selector: str | None = None
+    session_operation: str | None = None
+    continue_session: bool = False
+    fork_session: bool = False
     create_session: bool = False
     title: str | None = None
     harness_id: str | None = None
     model: str | None = None
+    effort: str | None = None
     api_mode: str | None = None
     mode: str | None = None
+    permission_mode: str | None = None
+    policy: str | None = None
+    sandbox: str | None = None
     capability: str | None = None
+    provider_transport: str | None = None
     execution_transport: str | None = None
+    persistence: str | None = None
     prompt: str | None = None
+    attachment_paths: tuple[str, ...] = ()
     proxy_url: str | None = None
     auto_start_proxy: bool | None = None
 
