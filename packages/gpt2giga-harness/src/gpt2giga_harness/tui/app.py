@@ -750,6 +750,7 @@ class WorkbenchTui(App[None]):
             session_id=session_id,
         )
         self._launch_intent_applied = False
+        self._launch_session_id: str | None = None
         self.snapshot: NavigationSnapshot | None = None
         self.run_snapshot: RunSnapshot | None = None
         self.run_cursor: str | None = None
@@ -1119,6 +1120,7 @@ class WorkbenchTui(App[None]):
                 self._show_error(exc)
                 return
             self.selected_session_id = created.id
+            self._launch_session_id = created.id
             await self._reload()
         if intent.prompt and self.selected_session_id is not None:
             await self._submit_content(intent.prompt, launch_intent=intent)
@@ -1132,6 +1134,11 @@ class WorkbenchTui(App[None]):
         content = value.strip()
         if not content or self.selected_session_id is None:
             return
+        if (
+            launch_intent is None
+            and self.selected_session_id == self._launch_session_id
+        ):
+            launch_intent = self.launch_intent
         self.query_one("#composer", Input).value = ""
         key = f"tui-{uuid4().hex}"
         intent_arguments = (
@@ -1144,6 +1151,13 @@ class WorkbenchTui(App[None]):
             if launch_intent is not None
             else {}
         )
+        if launch_intent is not None and launch_intent.native_session_selector:
+            intent_arguments["native_session_id"] = (
+                launch_intent.native_session_selector
+            )
+            intent_arguments["native_session_operation"] = (
+                launch_intent.session_operation
+            )
         try:
             if (
                 launch_intent is not None
@@ -1193,6 +1207,7 @@ class WorkbenchTui(App[None]):
                     attachment_ids=tuple(item.id for item in self.attachments),
                     **turn_intent_arguments,
                 )
+                self._launch_session_id = None
         except Exception as exc:
             self._show_error(exc)
             return

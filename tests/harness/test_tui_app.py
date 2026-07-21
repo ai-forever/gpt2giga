@@ -352,6 +352,43 @@ async def test_tui_applies_exact_human_deep_link_once_on_mount():
 
 
 @pytest.mark.anyio
+async def test_codex_resume_deep_link_preserves_native_thread_on_first_turn():
+    client = FakeClient()
+    intent = TuiLaunchIntent(
+        workspace="/tmp/demo",
+        create_session=True,
+        provider_namespace="codex",
+        harness_id="codex-cli",
+        provider_transport="app-server",
+        native_session_selector="thread_fixture",
+        session_operation="resume",
+        persistence="provider_native",
+    )
+    app = WorkbenchTui(client, launch_intent=intent)
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await pilot.click("#composer")
+        await pilot.press(*"Continue")
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert client.launch_calls[-1] == (
+        "submit",
+        {
+            "harness_id": "codex-cli",
+            "model": None,
+            "api_mode": None,
+            "mode": None,
+            "native_session_id": "thread_fixture",
+            "native_session_operation": "resume",
+            "capability": None,
+            "execution_transport": None,
+        },
+    )
+
+
+@pytest.mark.anyio
 async def test_tui_cancel_does_not_create_a_session():
     client = FakeClient()
     app = WorkbenchTui(client, workspace="/tmp/demo")

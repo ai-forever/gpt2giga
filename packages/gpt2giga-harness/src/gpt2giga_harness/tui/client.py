@@ -370,6 +370,8 @@ class WorkbenchClient(Protocol):
         mode: str | None = None,
         capability: str | None = None,
         execution_transport: str | None = None,
+        native_session_id: str | None = None,
+        native_session_operation: str | None = None,
     ) -> RunSnapshot:
         """Submit one typed turn without invoking the Harness CLI."""
 
@@ -600,6 +602,8 @@ class InProcessWorkbenchClient:
         mode: str | None = None,
         capability: str | None = None,
         execution_transport: str | None = None,
+        native_session_id: str | None = None,
+        native_session_operation: str | None = None,
     ) -> RunSnapshot:
         prompt = _required_content(content, "turn content")
         key = _required_identity(idempotency_key, "idempotency key")
@@ -626,10 +630,13 @@ class InProcessWorkbenchClient:
                     "mode": mode,
                     "capability": capability,
                     "execution_transport": execution_transport,
+                    "native_session_id": native_session_id,
                 }.items()
                 if value is not None
             }
         )
+        if native_session_operation is not None:
+            payload["extra"] = {"native_session_operation": native_session_operation}
         task = asyncio.create_task(
             anyio.to_thread.run_sync(
                 lambda: self.sessions.run_turn(
@@ -1237,6 +1244,8 @@ class AttachedWorkbenchClient:
         mode: str | None = None,
         capability: str | None = None,
         execution_transport: str | None = None,
+        native_session_id: str | None = None,
+        native_session_operation: str | None = None,
     ) -> RunSnapshot:
         payload: dict[str, Any] = {
             "prompt": _required_content(content, "turn content"),
@@ -1254,10 +1263,13 @@ class AttachedWorkbenchClient:
                     "mode": mode,
                     "capability": capability,
                     "execution_transport": execution_transport,
+                    "native_session_id": native_session_id,
                 }.items()
                 if value is not None
             }
         )
+        if native_session_operation is not None:
+            payload["extra"] = {"native_session_operation": native_session_operation}
         response = await self._request(
             "POST",
             f"/api/sessions/{_path_identity(session_id)}/run/start",

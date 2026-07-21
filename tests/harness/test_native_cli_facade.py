@@ -185,6 +185,42 @@ def test_affirmative_human_route_uses_visible_l1_handoff_without_l0_exec():
     ]
 
 
+def test_admitted_codex_root_enters_canonical_workbench_with_exact_cwd(tmp_path):
+    intents = []
+
+    result = run_native_namespace(
+        ("codex",),
+        context=PTY,
+        structured_probe=lambda _spec, _suffix: ("0.144.5", True),
+        structured_runner=lambda intent: intents.append(intent) or 29,
+        managed_runner=lambda *_args, **_kwargs: pytest.fail("L1 must not own L2"),
+        runner=lambda *_args, **_kwargs: pytest.fail("L0 must not own L2"),
+    )
+
+    assert result == 29
+    assert len(intents) == 1
+    assert intents[0].workspace == os.getcwd()
+    assert intents[0].provider_namespace == "codex"
+    assert intents[0].provider_transport == "app-server"
+
+
+def test_codex_app_server_drift_degrades_only_human_route_to_l1():
+    calls = []
+
+    result = run_native_namespace(
+        ("codex", "resume", "fixture-thread"),
+        context=PTY,
+        structured_probe=lambda _spec, _suffix: ("0.145.0", False),
+        structured_runner=lambda _intent: pytest.fail("drift must disable L2"),
+        managed_runner=lambda spec, suffix, **_kwargs: (
+            calls.append((spec.namespace, suffix)) or 31
+        ),
+    )
+
+    assert result == 31
+    assert calls == [("codex", ("resume", "fixture-thread"))]
+
+
 @pytest.mark.parametrize(
     ("context", "argv"),
     (

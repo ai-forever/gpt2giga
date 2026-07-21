@@ -29,7 +29,10 @@
         "output_families": ["terminal", "text", "json", "jsonl", "protocol_bytes", "unknown"],
         "tty_behavior": "affirmative_human_tty_only",
         "capability_status": {
+          "approval.decide": "ready",
+          "session.fork.native": "ready",
           "session.resume.native": "ready",
+          "turn.cancel": "ready",
           "turn.steer": "ready"
         },
         "help_byte_digests": {

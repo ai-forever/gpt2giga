@@ -24,6 +24,8 @@ def parse_native_tui_launch_intent(
     namespace: str,
     suffix: Sequence[str],
     decision: RouteDecision,
+    *,
+    workspace: str | None = None,
 ) -> TuiLaunchIntent | None:
     """Decode one affirmatively classified provider intent without loss."""
     integration = WORKBENCH_INTEGRATION_SPECS.get(namespace)
@@ -31,6 +33,7 @@ def parse_native_tui_launch_intent(
         return None
     argv = tuple(suffix)
     base = {
+        "workspace": workspace,
         "provider_namespace": namespace,
         "create_session": decision.command_class
         in {
