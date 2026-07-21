@@ -1,0 +1,17 @@
+{
+  "schema": "gpt2giga-native-cli-route-evidence-v2",
+  "content_free": true,
+  "cases": [
+    {"case_id": "codex-root-admitted", "provider": "codex", "command_class": "human_root", "version_evidence": "in_window", "tty_behavior": "human_tty", "level": "structured_workbench", "reason": "structured_admitted"},
+    {"case_id": "codex-resume-drift", "provider": "codex", "command_class": "human_resume", "version_evidence": "above_window", "tty_behavior": "human_tty", "level": "managed_handoff", "reason": "managed_handoff"},
+    {"case_id": "codex-unknown-absent", "provider": "codex", "command_class": "unknown_native", "version_evidence": "absent", "tty_behavior": "human_tty", "level": "native_passthrough", "reason": "native_owned"},
+    {"case_id": "codex-headless-unparsed", "provider": "codex", "command_class": "headless", "version_evidence": "unparsed", "tty_behavior": "redirected", "level": "native_passthrough", "reason": "native_owned"},
+    {"case_id": "claude-root-reviewed", "provider": "claude", "command_class": "human_root", "version_evidence": "in_window", "tty_behavior": "human_tty", "level": "managed_handoff", "reason": "managed_handoff"},
+    {"case_id": "claude-headless-precedence", "provider": "claude", "command_class": "headless", "version_evidence": "in_window", "tty_behavior": "human_tty", "level": "native_passthrough", "reason": "native_owned"},
+    {"case_id": "claude-unknown-newer", "provider": "claude", "command_class": "unknown_native", "version_evidence": "above_window", "tty_behavior": "human_tty", "level": "native_passthrough", "reason": "native_owned"},
+    {"case_id": "gemini-root-admitted", "provider": "gemini", "command_class": "human_root", "version_evidence": "in_window", "tty_behavior": "human_tty", "level": "structured_workbench", "reason": "structured_admitted"},
+    {"case_id": "gemini-non-tty", "provider": "gemini", "command_class": "headless", "version_evidence": "in_window", "tty_behavior": "redirected", "level": "native_passthrough", "reason": "native_owned"},
+    {"case_id": "gemini-resume-below", "provider": "gemini", "command_class": "human_resume", "version_evidence": "below_window", "tty_behavior": "human_tty", "level": "managed_handoff", "reason": "managed_handoff"},
+    {"case_id": "gemini-unknown-unparsed", "provider": "gemini", "command_class": "unknown_native", "version_evidence": "unparsed", "tty_behavior": "human_tty", "level": "native_passthrough", "reason": "native_owned"}
+  ]
+}
