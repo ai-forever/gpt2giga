@@ -132,6 +132,7 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
     }
     entry_point_groups = harness_metadata["entry-points"]
     assert set(entry_point_groups) == {
+        "agent_workbench.environment_providers.v1",
         "agent_workbench.harness_adapters.v1",
         "agent_workbench.provider_adapters.v1",
         "gpt2giga.harnesses",
@@ -162,6 +163,9 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
         target.startswith("gpt2giga_harness.provider_profiles:")
         for target in provider_entry_points.values()
     )
+    assert entry_point_groups["agent_workbench.environment_providers.v1"] == {
+        "git": "gpt2giga_harness.environments:git_environment_provider_plugin"
+    }
 
     gateway_source = GATEWAY_MEMBER / "src/gpt2giga"
     harness_source = HARNESS_MEMBER / "src/gpt2giga_harness"

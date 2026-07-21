@@ -43,6 +43,9 @@ codex-legacy = "gpt2giga_harness.provider_profiles:codex_legacy_compatibility"
 claude-legacy = "gpt2giga_harness.provider_profiles:claude_legacy_compatibility"
 gemini-legacy = "gpt2giga_harness.provider_profiles:gemini_legacy_compatibility"
 
+[project.entry-points."agent_workbench.environment_providers.v1"]
+git = "gpt2giga_harness.environments:git_environment_provider_plugin"
+
 [project.optional-dependencies]
 gpt2giga = [
     "gpt2giga==0.2.4a1",
