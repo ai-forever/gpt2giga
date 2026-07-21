@@ -7,8 +7,8 @@ from typing import ClassVar
 from uuid import uuid4
 
 from textual import events, on
-from textual.app import App, ComposeResult
-from textual.binding import Binding
+from textual.app import App, ComposeResult, SystemCommand
+from textual.binding import Binding, BindingsMap
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import (
@@ -21,6 +21,7 @@ from textual.widgets import (
     ListView,
     Static,
 )
+from textual.suggester import SuggestFromList
 
 from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
 from gpt2giga_harness.tui.client import (
@@ -39,6 +40,14 @@ from gpt2giga_harness.tui.client import (
     neutralize_native_terminal_output,
 )
 from gpt2giga_harness.tui.i18n import translator
+from gpt2giga_harness.tui.commands import (
+    COMMAND_REGISTRY,
+    RuntimeControlState,
+    command_bindings,
+    command_for_slash,
+    slash_commands,
+    visible_commands,
+)
 
 
 class NavigationItem(ListItem):
@@ -665,6 +674,12 @@ class WorkbenchTui(App[None]):
         padding: 0 1;
         color: $text-muted;
     }
+    #runtime-status {
+        height: 1;
+        padding: 0 1;
+        color: $text-muted;
+        overflow-x: hidden;
+    }
     #body.narrow {
         layout: vertical;
     }
@@ -719,18 +734,7 @@ class WorkbenchTui(App[None]):
     }
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("q", "quit", "Quit"),
-        Binding("r", "refresh", "Refresh"),
-        Binding("p", "choose_project", "Project"),
-        Binding("n", "new_session", "New session"),
-        Binding("a", "files", "Files"),
-        Binding("e", "evidence", "Evidence"),
-        Binding("t", "native_terminal", "Terminal"),
-        Binding("o", "provider_handoff", "Provider"),
-        Binding("w", "web_handoff", "Web"),
-        Binding("?", "help", "Help"),
-    ]
+    BINDINGS: ClassVar[list[Binding]] = command_bindings(translator("en"))
 
     def __init__(
         self,
@@ -759,6 +763,9 @@ class WorkbenchTui(App[None]):
         self._polling = False
         self._disconnected = False
         self.t = translator(locale)
+        localized_bindings = BindingsMap(command_bindings(self.t))
+        self._bindings.key_to_bindings.update(localized_bindings.key_to_bindings)
+        self._runtime_overrides: dict[str, str] = {}
         self.sub_title = self.t("app.subtitle")
 
     def compose(self) -> ComposeResult:
@@ -793,6 +800,9 @@ class WorkbenchTui(App[None]):
                     yield Input(
                         placeholder=self.t("composer.placeholder"),
                         id="composer",
+                        suggester=SuggestFromList(
+                            slash_commands(), case_sensitive=False
+                        ),
                     )
                     yield Button(
                         self.t("button.send"),
@@ -807,6 +817,7 @@ class WorkbenchTui(App[None]):
             yield Button(self.t("button.refresh"), id="refresh")
             yield Button(self.t("button.help"), id="help")
         yield Static(self.t("status.loading"), id="status", markup=False)
+        yield Static("", id="runtime-status", markup=False)
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -887,6 +898,11 @@ class WorkbenchTui(App[None]):
     @on(Input.Submitted, "#composer")
     async def submit_composer(self, event: Input.Submitted) -> None:
         event.stop()
+        command = command_for_slash(event.value)
+        if command is not None:
+            event.input.value = ""
+            await self._execute_registered_command(command.id)
+            return
         await self._submit_content(event.value)
 
     @on(Button.Pressed, "#send-turn")
@@ -963,7 +979,51 @@ class WorkbenchTui(App[None]):
         )
 
     def action_help(self) -> None:
-        self.push_screen(HelpScreen(self.t("help.title"), self.t("help.body")))
+        commands = visible_commands(has_session=self.selected_session_id is not None)
+        body = "\n".join(
+            f"{_display_key(command.key) if command.key else command.slash}: "
+            f"{self.t(command.title_key)}"
+            for command in commands
+        )
+        self.push_screen(HelpScreen(self.t("help.title"), body))
+
+    def get_system_commands(self, screen):
+        """Populate Ctrl+P from the same registry used by slash and bindings."""
+        del screen
+        for command in visible_commands(
+            has_session=self.selected_session_id is not None
+        ):
+            yield SystemCommand(
+                self.t(command.title_key),
+                f"{command.slash} · {self.t(command.description_key)}",
+                lambda command_id=command.id: self.call_later(
+                    self._execute_registered_command, command_id
+                ),
+            )
+
+    async def action_status_view(self) -> None:
+        self._show_detail(self.t("status.title"), self._status_detail())
+
+    def action_runtime_control(self, control_id: str) -> None:
+        control = self._runtime_controls()[control_id]
+        if control.state != "ready":
+            self._show_detail(
+                self.t(f"control.{control_id}"),
+                self._runtime_control_text(control),
+            )
+            return
+        self.push_screen(
+            TextPrompt(
+                self.t("control.change_prompt").format(
+                    control=self.t(f"control.{control_id}"),
+                    scope=self.t(f"scope.{control.effect_scope}"),
+                    current=control.current,
+                ),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            lambda value: self._runtime_control_chosen(control_id, value),
+        )
 
     def action_files(self) -> None:
         if self.selected_session_id is None:
@@ -1151,6 +1211,9 @@ class WorkbenchTui(App[None]):
             if launch_intent is not None
             else {}
         )
+        for field in ("model", "mode"):
+            if field in self._runtime_overrides:
+                intent_arguments[field] = self._runtime_overrides[field]
         if launch_intent is not None and launch_intent.native_session_selector:
             intent_arguments["native_session_id"] = (
                 launch_intent.native_session_selector
@@ -1216,6 +1279,8 @@ class WorkbenchTui(App[None]):
         self.attachments = ()
         self._render_attachments()
         self._set_status(self.t("status.running"))
+        self._runtime_overrides.clear()
+        self._render_runtime_status()
 
     def _native_terminal_selected(self) -> bool:
         if (
@@ -1550,9 +1615,12 @@ class WorkbenchTui(App[None]):
             )
         )
         self.query_one("#readiness", Static).update(content)
+        self._render_runtime_status()
 
     def _set_narrow(self, width: int) -> None:
         self.query_one("#body").set_class(width < 84, "narrow")
+        if self.is_mounted:
+            self._render_runtime_status()
 
     def _show_error(self, exc: Exception) -> None:
         message = str(exc).strip() or type(exc).__name__
@@ -1560,3 +1628,206 @@ class WorkbenchTui(App[None]):
 
     def _set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(message)
+
+    async def _execute_registered_command(self, command_id: str) -> None:
+        command = next(item for item in COMMAND_REGISTRY if item.id == command_id)
+        if command.requires_session and self.selected_session_id is None:
+            self._set_status(self.t("command.session_required"))
+            return
+        if command.control_id is not None:
+            self.action_runtime_control(command.control_id)
+            return
+        callback = getattr(self, f"action_{command.action}")
+        result = callback()
+        if hasattr(result, "__await__"):
+            await result
+
+    async def _runtime_control_chosen(self, control_id: str, value: str | None) -> None:
+        if not value or self.snapshot is None:
+            return
+        if control_id == "harness":
+            available = {
+                item.id
+                for item in self.snapshot.harnesses
+                if item.availability != "unavailable"
+            }
+            if value not in available:
+                self._set_status(self.t("control.invalid_harness"))
+                return
+            try:
+                created = await self.client.create_session(
+                    self.snapshot.project.root, harness_id=value
+                )
+            except Exception as exc:
+                self._show_error(exc)
+                return
+            self.selected_session_id = created.id
+            self._reset_run()
+            await self._reload()
+            return
+        self._runtime_overrides[control_id] = value
+        self._set_status(
+            self.t("control.queued").format(
+                control=self.t(f"control.{control_id}"),
+                scope=self.t(
+                    f"scope.{self._runtime_controls()[control_id].effect_scope}"
+                ),
+            )
+        )
+        self._render_runtime_status()
+
+    def _runtime_controls(self) -> dict[str, RuntimeControlState]:
+        readiness = self.snapshot.readiness if self.snapshot is not None else None
+        intent = self.launch_intent
+        selected_session = (
+            next(
+                (
+                    item
+                    for item in self.snapshot.sessions
+                    if item.id == self.selected_session_id
+                ),
+                None,
+            )
+            if self.snapshot is not None
+            else None
+        )
+        current = {
+            "harness": readiness.harness_id if readiness else intent.harness_id or "—",
+            "model": self._runtime_overrides.get(
+                "model",
+                readiness.model
+                if readiness and readiness.model
+                else intent.model or "—",
+            ),
+            "effort": intent.effort or "—",
+            "mode": self._runtime_overrides.get(
+                "mode",
+                selected_session.mode
+                if selected_session is not None
+                else intent.mode or "—",
+            ),
+            "permission": intent.permission_mode or "—",
+            "policy": intent.policy or "—",
+            "sandbox": intent.sandbox or "—",
+        }
+        ready = {
+            "harness": ("new_session",),
+            "model": ("next_run",),
+            "mode": ("next_run",),
+        }
+        states: dict[str, RuntimeControlState] = {}
+        for control_id in current:
+            if control_id in {"model", "mode"} and self.selected_session_id is None:
+                states[control_id] = RuntimeControlState(
+                    control_id,
+                    current[control_id],
+                    ready[control_id][0],
+                    "blocked",
+                    self.t("control.session_required"),
+                    self.t("control.session_remediation"),
+                )
+            elif control_id in ready:
+                states[control_id] = RuntimeControlState(
+                    control_id, current[control_id], ready[control_id][0], "ready"
+                )
+            else:
+                states[control_id] = RuntimeControlState(
+                    control_id,
+                    current[control_id],
+                    "next_run" if control_id == "effort" else "next_turn",
+                    "handoff",
+                    self.t("control.provider_owned"),
+                    self.t("control.handoff_remediation"),
+                )
+        return states
+
+    def _runtime_control_text(self, control: RuntimeControlState) -> str:
+        return "\n".join(
+            part
+            for part in (
+                f"{self.t('status.current')}: {control.current}",
+                f"{self.t('status.effect_scope')}: {self.t(f'scope.{control.effect_scope}')}",
+                f"{self.t('status.control_state')}: {self.t(f'control.state.{control.state}')}",
+                control.limitation,
+                (
+                    f"{self.t('status.remediation')}: {control.remediation}"
+                    if control.remediation
+                    else None
+                ),
+            )
+            if part
+        )
+
+    def _route_status(self) -> tuple[str, str, str, int]:
+        intent = self.launch_intent
+        transport = (
+            self.run_snapshot.execution_transport
+            if self.run_snapshot and self.run_snapshot.execution_transport
+            else intent.provider_transport
+            or (self.snapshot.readiness.transport if self.snapshot else "unknown")
+        )
+        if intent.provider_namespace and intent.provider_transport:
+            level, owner = "L2", "harness"
+        elif intent.provider_namespace:
+            level, owner = "L1", "provider"
+        else:
+            level, owner = "Harness", "harness"
+        generation = self.run_snapshot.binding.generation if self.run_snapshot else 1
+        return level, transport, owner, generation
+
+    def _render_runtime_status(self) -> None:
+        if not any(self.query("#runtime-status")) or self.snapshot is None:
+            return
+        level, transport, owner, generation = self._route_status()
+        controls = self._runtime_controls()
+        width = self.size.width
+        if width < 72:
+            value = f"{level} · {controls['harness'].current} · {self.snapshot.readiness.status}"
+        elif width < 100:
+            value = (
+                f"{level} · {transport} · {controls['harness'].current} · "
+                f"{controls['model'].current}"
+            )
+        else:
+            value = (
+                f"{level} · {transport} · {owner} · gen {generation} · "
+                f"{controls['harness'].current} · {controls['model'].current} · "
+                f"{controls['mode'].current}"
+            )
+        self.query_one("#runtime-status", Static).update(value)
+
+    def _status_detail(self) -> str:
+        if self.snapshot is None:
+            return self.t("status.loading")
+        readiness = self.snapshot.readiness
+        level, transport, owner, generation = self._route_status()
+        controls = self._runtime_controls()
+        lines = [
+            f"{self.t('label.provider')}: {readiness.provider} [{readiness.provider_status}]",
+            f"{self.t('status.route_level')}: {level}",
+            f"{self.t('label.transport')}: {transport}",
+            f"{self.t('status.process_owner')}: {owner}",
+            f"{self.t('status.generation')}: {generation}",
+            f"{self.t('status.client_transport')}: {self.snapshot.transport_mode}",
+            f"{self.t('label.readiness')}: {readiness.status}",
+            "",
+        ]
+        lines.extend(
+            f"{self.t(f'control.{control.id}')}: {control.current} · "
+            f"{self.t(f'control.state.{control.state}')} · "
+            f"{self.t(f'scope.{control.effect_scope}')}"
+            + (f" · {control.remediation}" if control.remediation else "")
+            for control in controls.values()
+        )
+        if readiness.findings:
+            lines.extend(
+                ("", f"{self.t('status.findings')}: {', '.join(readiness.findings)}")
+            )
+        return "\n".join(lines)
+
+
+def _display_key(key: str) -> str:
+    """Render a compact human-facing key chord."""
+    return "+".join(
+        part.title() if len(part) > 1 else part.upper() for part in key.split("+")
+    )

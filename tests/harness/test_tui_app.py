@@ -11,6 +11,13 @@ pytest.importorskip("textual")
 
 from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
 from gpt2giga_harness.tui.app import WorkbenchTui
+from gpt2giga_harness.tui.commands import (
+    COMMAND_REGISTRY,
+    command_bindings,
+    command_for_slash,
+    slash_commands,
+)
+from gpt2giga_harness.tui.i18n import CATALOGS, translator
 from gpt2giga_harness.tui.client import (
     ApprovalSummary,
     ArtifactSummary,
@@ -672,6 +679,7 @@ async def test_tui_quality_states_have_headless_artifacts_and_primary_actions(
             "#actions",
             "#new-session",
             "#status",
+            "#runtime-status",
         ):
             widget = app.query_one(selector)
             assert widget.region.x >= 0
@@ -705,6 +713,78 @@ async def test_tui_keyboard_focus_help_palette_and_semantic_status_are_non_color
         await pilot.press("ctrl+p")
         await pilot.pause()
         assert type(app.screen).__name__ == "CommandPalette"
+
+
+def test_tui_command_registry_is_the_single_discovery_inventory():
+    assert len({item.id for item in COMMAND_REGISTRY}) == len(COMMAND_REGISTRY)
+    assert len({item.slash for item in COMMAND_REGISTRY}) == len(COMMAND_REGISTRY)
+    assert slash_commands() == tuple(item.slash for item in COMMAND_REGISTRY)
+    assert command_for_slash("/status") is not None
+    assert command_for_slash("/status ignored") is not None
+    assert command_for_slash("/unknown") is None
+    assert {binding.action for binding in command_bindings(translator("en"))} == {
+        item.action for item in COMMAND_REGISTRY if item.key is not None
+    }
+    for item in COMMAND_REGISTRY:
+        action_name = item.action.split("(", 1)[0]
+        assert callable(getattr(WorkbenchTui, f"action_{action_name}"))
+    assert set(CATALOGS["en"]) == set(CATALOGS["ru"])
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("transport_mode", ("in_process", "attach"))
+async def test_tui_slash_status_and_runtime_controls_are_contextual(transport_mode):
+    client = FakeClient()
+    client.snapshot = replace(client.snapshot, transport_mode=transport_mode)
+    app = WorkbenchTui(client, workspace="/tmp/demo", locale="ru")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        composer = app.query_one("#composer")
+        composer.focus()
+        await pilot.press(*"/status")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "Транспорт клиента" in app.screen.body
+        assert transport_mode in app.screen.body
+        assert "Разрешения" in app.screen.body
+        assert "Политика" in app.screen.body
+        assert "Песочница" in app.screen.body
+        await pilot.press("escape")
+
+        composer.focus()
+        await pilot.press(*"/permission")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "переход" in app.screen.body.lower()
+        assert "значения не переводятся" in app.screen.body.lower()
+
+
+@pytest.mark.anyio
+async def test_tui_model_control_prompts_for_scope_and_applies_to_next_run():
+    client = FakeClient()
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        composer = app.query_one("#composer")
+        composer.focus()
+        await pilot.press(*"/model")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "next run" in str(app.screen.query_one("#prompt-dialog Label").render())
+        await pilot.press(*"review-model")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "review-model" in str(app.query_one("#runtime-status").render())
+
+        composer.focus()
+        await pilot.press(*"Inspect")
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert client.launch_calls[-1][0] == "submit"
+    assert client.launch_calls[-1][1]["model"] == "review-model"
 
 
 @pytest.mark.anyio
