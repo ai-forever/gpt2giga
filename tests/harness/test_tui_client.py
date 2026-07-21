@@ -161,6 +161,54 @@ async def test_in_process_client_bounds_slow_consumer_and_rejects_stale_action(
 
 
 @pytest.mark.anyio
+async def test_in_process_transcript_projection_neutralizes_terminal_bidi_and_markup(
+    tmp_path,
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    client = InProcessWorkbenchClient(HarnessConfig(data_dir=str(tmp_path / "state")))
+    session = client.sessions.create_session(
+        {"workspace": str(workspace), "harness_id": "echo"},
+        validate_harness=True,
+    )
+    submitted = await client.submit_turn(
+        session.id, "bounded", idempotency_key="turn_controls"
+    )
+    hostile = (
+        "[bold]literal[/bold]"
+        "\x1b]8;;https://example.invalid\x1b\\link\x1b]8;;\x1b\\"
+        "\x1b]52;c;clipboard\x07\x1bPowned\x1b\\\x1b[?1049h\u202e"
+    )
+    client.store.append_event(
+        HarnessStoredEvent(
+            id="evt_hostile",
+            session_id=session.id,
+            run_id=submitted.binding.run_id,
+            type="mcp_tool_call",
+            message=hostile,
+            payload={
+                "text": hostile,
+                "artifact_id": "artifact_1",
+                "artifact_type": "mcp",
+                "truncated": True,
+            },
+            created_at=utc_now(),
+        )
+    )
+
+    snapshot = await client.snapshot_run(submitted.binding.run_id)
+    event = next(item for item in snapshot.events if item.id == "evt_hostile")
+
+    assert event.category == "mcp"
+    assert event.artifact_id == "artifact_1"
+    assert event.truncated is True
+    assert "[bold]literal[/bold]" in event.message
+    assert "⟦terminal-control⟧" in event.message
+    assert "\x1b" not in event.message
+    assert "\u202e" not in event.message
+
+
+@pytest.mark.anyio
 async def test_in_process_client_files_diff_evidence_and_handoffs_are_bounded(
     tmp_path,
 ):
@@ -376,6 +424,16 @@ async def test_attach_client_stream_snapshot_and_actions_share_exact_binding(
                         "action": "tool.call",
                         "reason": "tool",
                         "status": "pending",
+                        "enforcement": "enforced_by_harness",
+                        "enforcement_owner": "runtime.worker",
+                        "policy_source": "profile:review",
+                        "preview": {
+                            "executable": ["uv", "run", "pytest"],
+                            "cwd": "/tmp/demo",
+                            "paths": ["src/app.py"],
+                            "network": False,
+                            "mutation_class": "process",
+                        },
                     }
                 ]
             }
@@ -396,6 +454,14 @@ async def test_attach_client_stream_snapshot_and_actions_share_exact_binding(
     assert snapshot.resnapshot_reason == "cursor_gap"
     assert snapshot.events[0].delta == "hello"
     assert snapshot.pending_approvals[0].id == "approval_1"
+    assert snapshot.pending_approvals[0].executable == "uv"
+    assert snapshot.pending_approvals[0].paths == ("src/app.py",)
+    assert snapshot.pending_approvals[0].network == "not required"
+    assert snapshot.pending_approvals[0].decision_scopes == (
+        "allow_once",
+        "allow_run",
+        "deny",
+    )
     assert steered.binding == snapshot.binding
     steer_payload = next(
         payload for method, path, payload in calls if path == "/api/runs/run_1/steer"

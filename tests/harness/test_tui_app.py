@@ -428,6 +428,78 @@ async def test_tui_composer_renders_incremental_content_and_tool_lifecycle():
 
 
 @pytest.mark.anyio
+async def test_tui_queued_turn_survives_disconnect_and_starts_exactly_once():
+    class ReconnectingClient(FakeClient):
+        disconnected = False
+        finish_active = False
+
+        async def snapshot_run(self, run_id, *, cursor=None):
+            if self.disconnected:
+                raise RuntimeError("transport unavailable")
+            if self.finish_active:
+                return replace(self.current_run, status="succeeded")
+            return self.current_run
+
+    client = ReconnectingClient()
+    client.current_run = _run_snapshot(
+        events=(TimelineEvent("evt_active", "run_started", "Active"),)
+    )
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        composer = app.query_one("#composer")
+        composer.focus()
+        await pilot.press(*"Follow up")
+        await pilot.click("#queue-turn")
+        assert app.queued_turn is not None
+
+        client.disconnected = True
+        await app._poll_run()
+        assert app.queued_turn is not None
+
+        client.disconnected = False
+        client.finish_active = True
+        await app._poll_run()
+        await pilot.pause()
+        await app._flush_queued_turn()
+
+        assert client.submitted == ["Follow up"]
+        assert app.queued_turn is None
+
+
+@pytest.mark.anyio
+async def test_tui_transcript_cards_expand_with_keyboard_and_safe_artifact_refs():
+    client = FakeClient()
+    client.current_run = _run_snapshot(
+        events=(
+            TimelineEvent(
+                "evt_diff",
+                "diff",
+                "Changed app.py",
+                delta="+safe⟦terminal-control⟧�",
+                category="diff",
+                artifact_id="artifact_1",
+                artifact_kind="diff",
+                truncated=True,
+            ),
+        )
+    )
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        app.query_one("#timeline").focus()
+        await pilot.press("enter")
+        rendered = str(app.query_one("#timeline").render())
+
+        assert "[−] [DIFF]" in rendered
+        assert "artifact_1" in rendered
+        assert "preview truncated" in rendered
+        assert "\x1b" not in rendered
+
+
+@pytest.mark.anyio
 async def test_tui_approval_decision_uses_exact_presented_binding():
     client = FakeClient()
     client.current_run = _run_snapshot(
@@ -446,6 +518,9 @@ async def test_tui_approval_decision_uses_exact_presented_binding():
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
         await pilot.click("#approve")
+        await pilot.pause()
+        assert "Revision:" in str(app.screen.query_one("#approval-detail").render())
+        await pilot.click("#approval-allow-once")
         await pilot.pause()
 
         assert client.decisions == ["allow_once"]
@@ -675,7 +750,10 @@ async def test_tui_quality_states_have_headless_artifacts_and_primary_actions(
             "#detail-pane",
             "#timeline",
             "#composer-row",
+            "#composer-state",
             "#send-turn",
+            "#steer-turn",
+            "#queue-turn",
             "#actions",
             "#new-session",
             "#status",
@@ -700,7 +778,7 @@ async def test_tui_keyboard_focus_help_palette_and_semantic_status_are_non_color
         for _ in range(24):
             focused_ids.add(app.focused.id if app.focused is not None else None)
             await pilot.press("tab")
-        assert {"session-list", "composer", "send-turn", "new-session", "help"} <= (
+        assert {"session-list", "composer", "steer-turn", "queue-turn", "help"} <= (
             focused_ids
         )
 

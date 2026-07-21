@@ -207,16 +207,31 @@ class TimelineEvent:
     tool_name: str | None = None
     approval_id: str | None = None
     input_id: str | None = None
+    category: str = "status"
+    stream: str | None = None
+    artifact_id: str | None = None
+    artifact_kind: str | None = None
+    truncated: bool = False
 
 
 @dataclass(frozen=True)
 class ApprovalSummary:
-    """Content-free pending approval projected into the selected run."""
+    """Redaction-safe pending approval projected into the selected run."""
 
     id: str
     action: str
     reason: str
     status: str
+    enforcement: str = "unknown"
+    enforcement_owner: str = "unknown"
+    policy_source: str = "unknown"
+    executable: str = "not declared"
+    tool: str = "not declared"
+    cwd: str = "not declared"
+    paths: tuple[str, ...] = ()
+    network: str = "not declared"
+    mutation_class: str = "unknown"
+    decision_scopes: tuple[str, ...] = ("allow_once", "deny")
 
 
 @dataclass(frozen=True)
@@ -2486,6 +2501,15 @@ def _timeline_event(event: HarnessStoredEvent) -> TimelineEvent:
         input_id=_optional_identity(
             payload.get("input_id") or payload.get("request_id")
         ),
+        category=_timeline_category(event.type),
+        stream=_optional_display_text(payload.get("stream")),
+        artifact_id=_optional_identity(
+            payload.get("artifact_id") or payload.get("file_id")
+        ),
+        artifact_kind=_optional_display_text(
+            payload.get("artifact_type") or payload.get("kind")
+        ),
+        truncated=bool(payload.get("truncated")),
     )
 
 
@@ -2523,12 +2547,81 @@ def _optional_identity(value: Any) -> str | None:
 
 
 def _approval_summary(value: Mapping[str, Any]) -> ApprovalSummary:
+    preview = _mapping(value.get("preview"))
+    executable = preview.get("executable") or preview.get("command")
+    if isinstance(executable, (list, tuple)):
+        executable = executable[0] if executable else None
+    paths = _safe_paths(preview.get("paths") or preview.get("changed_files"))
+    hash_bound = bool(preview.get("approval_binding_sha256"))
+    scopes = (
+        ("allow_once", "deny")
+        if hash_bound or not value.get("run_id")
+        else ("allow_once", "allow_run", "deny")
+    )
     return ApprovalSummary(
         id=_required_identity(value.get("id"), "approval id"),
         action=_display_text(value.get("action") or "approval"),
         reason=_display_text(value.get("reason") or "Approval required"),
         status=_display_text(value.get("status") or "pending"),
+        enforcement=_display_text(value.get("enforcement") or "unknown"),
+        enforcement_owner=_display_text(value.get("enforcement_owner") or "unknown"),
+        policy_source=_display_text(value.get("policy_source") or "unknown"),
+        executable=_display_text(executable or "not declared"),
+        tool=_display_text(
+            preview.get("tool") or preview.get("tool_name") or "not declared"
+        ),
+        cwd=_display_text(preview.get("cwd") or "not declared"),
+        paths=paths,
+        network=_approval_network_label(preview),
+        mutation_class=_display_text(
+            preview.get("mutation_class") or value.get("action") or "unknown"
+        ),
+        decision_scopes=scopes,
     )
+
+
+def _timeline_category(event_type: str) -> str:
+    normalized = event_type.lower().replace("-", "_")
+    if "approval" in normalized:
+        return "approval"
+    if "question" in normalized or "input_request" in normalized:
+        return "question"
+    if "reason" in normalized:
+        return "reasoning"
+    if "stderr" in normalized:
+        return "stderr"
+    if "stdout" in normalized or "output_delta" in normalized:
+        return "stdout"
+    if "diff" in normalized:
+        return "diff"
+    if "file" in normalized or "attachment" in normalized:
+        return "file"
+    if "mcp" in normalized:
+        return "mcp"
+    if "web" in normalized:
+        return "web"
+    if "tool" in normalized or "command" in normalized:
+        return "tool"
+    if "plan" in normalized or "todo" in normalized:
+        return "plan"
+    if "warning" in normalized:
+        return "warning"
+    if "error" in normalized or "failed" in normalized:
+        return "error"
+    if "message" in normalized or normalized in {"user", "assistant", "agent"}:
+        return "message"
+    return "status"
+
+
+def _approval_network_label(preview: Mapping[str, Any]) -> str:
+    value = preview.get("network")
+    if isinstance(value, bool):
+        return "required" if value else "not required"
+    if value is None:
+        value = preview.get("network_required")
+    if isinstance(value, bool):
+        return "required" if value else "not required"
+    return _display_text(value or "not declared")
 
 
 def _binding_payload(binding: RunActionBinding) -> dict[str, Any]:

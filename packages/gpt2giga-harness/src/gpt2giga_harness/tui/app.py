@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import ClassVar
 from uuid import uuid4
 
@@ -26,12 +26,14 @@ from textual.suggester import SuggestFromList
 from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
 from gpt2giga_harness.tui.client import (
     AttachmentSummary,
+    ApprovalSummary,
     FileCandidate,
     HandoffPreview,
     MAX_NATIVE_SCROLLBACK_CHARS,
     NativeTerminalSnapshot,
     NavigationSnapshot,
     ProjectSummary,
+    RunActionBinding,
     RunInspection,
     RunSnapshot,
     SessionSummary,
@@ -56,6 +58,128 @@ class NavigationItem(ListItem):
     def __init__(self, label: str, value: str) -> None:
         super().__init__(Label(label, markup=False))
         self.value = value
+
+
+@dataclass(frozen=True)
+class QueuedTurn:
+    """One idempotent next-turn intent retained across transport reconnects."""
+
+    session_id: str
+    content: str
+    idempotency_key: str
+    attachment_ids: tuple[str, ...]
+
+
+class TimelinePanel(Static):
+    """Keyboard and mouse expandable typed transcript cards."""
+
+    can_focus = True
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("up", "previous_card", "Previous", show=False),
+        Binding("down", "next_card", "Next", show=False),
+        Binding("enter", "toggle_card", "Expand", show=False),
+        Binding("space", "toggle_card", "Expand", show=False),
+    ]
+
+    def __init__(self, empty: str, labels: dict[str, str], *, id: str) -> None:
+        super().__init__(empty, id=id, markup=False)
+        self.empty = empty
+        self.labels = labels
+        self.events: tuple[TimelineEvent, ...] = ()
+        self.active_index = 0
+        self.expanded: set[str] = set()
+        self._card_rows: list[tuple[int, int]] = []
+
+    def set_events(self, events: tuple[TimelineEvent, ...]) -> None:
+        self.events = events
+        self.active_index = min(self.active_index, max(len(events) - 1, 0))
+        retained = {event.id for event in events}
+        self.expanded.intersection_update(retained)
+        self._render_cards()
+
+    def action_previous_card(self) -> None:
+        if self.events:
+            self.active_index = max(self.active_index - 1, 0)
+            self._render_cards()
+
+    def action_next_card(self) -> None:
+        if self.events:
+            self.active_index = min(self.active_index + 1, len(self.events) - 1)
+            self._render_cards()
+
+    def action_toggle_card(self) -> None:
+        if not self.events:
+            return
+        event_id = self.events[self.active_index].id
+        if event_id in self.expanded:
+            self.expanded.remove(event_id)
+        else:
+            self.expanded.add(event_id)
+        self._render_cards()
+
+    def on_click(self, event: events.Click) -> None:
+        self.focus()
+        self.active_index = next(
+            (
+                index
+                for index, (start, end) in enumerate(self._card_rows)
+                if start <= event.y < end
+            ),
+            self.active_index,
+        )
+        self.action_toggle_card()
+
+    def _render_cards(self) -> None:
+        lines: list[str] = []
+        self._card_rows = []
+        for index, event in enumerate(self.events):
+            start_row = len(lines)
+            active = ">" if index == self.active_index else " "
+            expanded = "−" if event.id in self.expanded else "+"
+            title = event.tool_name or event.message or event.type
+            title = title.replace("\n", " ")[:160]
+            category = _timeline_card_category(event)
+            label = self.labels.get(category, category.upper())
+            preview = ""
+            if event.delta and event.delta.replace("\n", " ") != title:
+                preview = f" · {event.delta.replace(chr(10), ' ')[:120]}"
+            lines.append(f"{active}[{expanded}] [{label}] {title}{preview}")
+            if event.id in self.expanded:
+                detail = event.delta or event.message or "—"
+                lines.extend(f"    {line}" for line in detail.splitlines() or ("—",))
+                if event.stream:
+                    lines.append(f"    stream: {event.stream}")
+                if event.artifact_kind or event.artifact_id:
+                    lines.append(
+                        "    artifact: "
+                        f"{event.artifact_kind or 'artifact'} · "
+                        f"{event.artifact_id or 'authoritative run inspection'}"
+                    )
+                if event.truncated:
+                    lines.append("    preview truncated; open authoritative evidence")
+            self._card_rows.append((start_row, len(lines)))
+        self.update("\n".join(lines)[-64_000:] or self.empty)
+
+
+def _timeline_card_category(event: TimelineEvent) -> str:
+    if event.category != "status":
+        return event.category
+    normalized = event.type.lower()
+    if "message" in normalized:
+        return "message"
+    if "reason" in normalized:
+        return "reasoning"
+    if "tool" in normalized:
+        return "tool"
+    if "approval" in normalized:
+        return "approval"
+    if "input" in normalized or "question" in normalized:
+        return "question"
+    if "warning" in normalized:
+        return "warning"
+    if "error" in normalized or "failed" in normalized:
+        return "error"
+    return "status"
 
 
 class TextPrompt(ModalScreen[str | None]):
@@ -318,6 +442,104 @@ class DetailScreen(ModalScreen[None]):
         self.dismiss(None)
 
     def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class ApprovalScreen(ModalScreen[str | None]):
+    """Exact, revision-bound approval preview with explicit decision scope."""
+
+    CSS = """
+    ApprovalScreen { align: center middle; }
+    #approval-dialog {
+        width: 92%;
+        max-width: 110;
+        height: auto;
+        max-height: 92%;
+        padding: 1 2;
+        border: round $warning;
+        background: $surface;
+    }
+    #approval-detail { height: auto; max-height: 1fr; overflow: auto hidden; }
+    #approval-actions { height: 3; align-horizontal: right; }
+    #approval-actions Button { min-width: 12; margin-left: 1; }
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    def __init__(
+        self,
+        approval: ApprovalSummary,
+        binding: RunActionBinding,
+        *,
+        title: str,
+        allow_once: str,
+        allow_run: str,
+        deny: str,
+        cancel: str,
+    ) -> None:
+        super().__init__()
+        self.approval = approval
+        self.binding = binding
+        self.dialog_title = title
+        self.allow_once_label = allow_once
+        self.allow_run_label = allow_run
+        self.deny_label = deny
+        self.cancel_label = cancel
+
+    def compose(self) -> ComposeResult:
+        paths = ", ".join(self.approval.paths) or "not declared"
+        scopes = ", ".join(self.approval.decision_scopes)
+        detail = "\n".join(
+            (
+                f"Action: {self.approval.action}",
+                f"Executable: {self.approval.executable}",
+                f"Tool: {self.approval.tool}",
+                f"Cwd: {self.approval.cwd}",
+                f"Paths: {paths}",
+                f"Network: {self.approval.network}",
+                f"Mutation: {self.approval.mutation_class}",
+                f"Policy: {self.approval.policy_source}",
+                f"Enforcement: {self.approval.enforcement} · {self.approval.enforcement_owner}",
+                f"Reason: {self.approval.reason}",
+                f"Run: {self.binding.run_id}",
+                f"Revision: {self.binding.revision}",
+                f"Generation: {self.binding.generation}",
+                f"Decision scopes: {scopes}",
+            )
+        )
+        with Vertical(id="approval-dialog"):
+            yield Label(self.dialog_title, classes="dialog-title", markup=False)
+            yield Static(detail, id="approval-detail", markup=False)
+            with Horizontal(id="approval-actions"):
+                yield Button(self.cancel_label, id="approval-cancel")
+                yield Button(self.deny_label, id="approval-deny", variant="error")
+                if "allow_run" in self.approval.decision_scopes:
+                    yield Button(self.allow_run_label, id="approval-allow-run")
+                yield Button(
+                    self.allow_once_label,
+                    id="approval-allow-once",
+                    variant="primary",
+                )
+
+    @on(Button.Pressed, "#approval-allow-once")
+    def allow_once(self) -> None:
+        self.dismiss("allow_once")
+
+    @on(Button.Pressed, "#approval-allow-run")
+    def allow_run(self) -> None:
+        self.dismiss("allow_run")
+
+    @on(Button.Pressed, "#approval-deny")
+    def deny(self) -> None:
+        self.dismiss("deny")
+
+    @on(Button.Pressed, "#approval-cancel")
+    def cancel_button(self) -> None:
+        self.dismiss(None)
+
+    def action_cancel(self) -> None:
         self.dismiss(None)
 
 
@@ -659,6 +881,15 @@ class WorkbenchTui(App[None]):
         min-width: 10;
         margin-left: 1;
     }
+    #steer-turn, #queue-turn {
+        min-width: 10;
+        margin-left: 1;
+    }
+    #composer-state {
+        height: 1;
+        color: $text-muted;
+        overflow-x: hidden;
+    }
     #actions {
         height: 3;
         padding: 0 1;
@@ -760,6 +991,8 @@ class WorkbenchTui(App[None]):
         self.run_cursor: str | None = None
         self.timeline: list[TimelineEvent] = []
         self.attachments: tuple[AttachmentSummary, ...] = ()
+        self.queued_turn: QueuedTurn | None = None
+        self._queue_flushing = False
         self._polling = False
         self._disconnected = False
         self.t = translator(locale)
@@ -780,7 +1013,30 @@ class WorkbenchTui(App[None]):
             with Vertical(id="detail-pane"):
                 yield Label(self.t("pane.readiness"), id="detail-title", markup=False)
                 yield Static(self.t("detail.empty"), id="readiness", markup=False)
-                yield Static(self.t("timeline.empty"), id="timeline", markup=False)
+                yield TimelinePanel(
+                    self.t("timeline.empty"),
+                    {
+                        category: self.t(f"timeline.{category}")
+                        for category in (
+                            "message",
+                            "reasoning",
+                            "tool",
+                            "stdout",
+                            "stderr",
+                            "file",
+                            "diff",
+                            "mcp",
+                            "web",
+                            "plan",
+                            "approval",
+                            "question",
+                            "warning",
+                            "error",
+                            "status",
+                        )
+                    },
+                    id="timeline",
+                )
                 yield Static(
                     self.t("attachments.empty"), id="attachment-status", markup=False
                 )
@@ -809,6 +1065,13 @@ class WorkbenchTui(App[None]):
                         id="send-turn",
                         variant="primary",
                     )
+                    yield Button(self.t("button.steer"), id="steer-turn")
+                    yield Button(self.t("button.queue"), id="queue-turn")
+                yield Static(
+                    self.t("composer.state_idle"),
+                    id="composer-state",
+                    markup=False,
+                )
         with Horizontal(id="actions"):
             yield Button(self.t("button.new_project"), id="project")
             yield Button(
@@ -903,20 +1166,31 @@ class WorkbenchTui(App[None]):
             event.input.value = ""
             await self._execute_registered_command(command.id)
             return
-        await self._submit_content(event.value)
+        if self.run_snapshot is not None and not self.run_snapshot.terminal:
+            await self._queue_content(event.value)
+        else:
+            await self._submit_content(event.value)
 
     @on(Button.Pressed, "#send-turn")
     async def press_send_turn(self) -> None:
         composer = self.query_one("#composer", Input)
         await self._submit_content(composer.value)
 
+    @on(Button.Pressed, "#steer-turn")
+    async def press_steer_turn(self) -> None:
+        await self._steer_content(self.query_one("#composer", Input).value)
+
+    @on(Button.Pressed, "#queue-turn")
+    async def press_queue_turn(self) -> None:
+        await self._queue_content(self.query_one("#composer", Input).value)
+
     @on(Button.Pressed, "#approve")
-    async def press_approve(self) -> None:
-        await self._decide_approval("allow_once")
+    def press_approve(self) -> None:
+        self._show_approval()
 
     @on(Button.Pressed, "#deny")
-    async def press_deny(self) -> None:
-        await self._decide_approval("deny")
+    def press_deny(self) -> None:
+        self._show_approval()
 
     @on(Button.Pressed, "#cancel-run")
     async def press_cancel_run(self) -> None:
@@ -1194,6 +1468,9 @@ class WorkbenchTui(App[None]):
         content = value.strip()
         if not content or self.selected_session_id is None:
             return
+        if self.run_snapshot is not None and not self.run_snapshot.terminal:
+            self._set_status(self.t("composer.choose_active_action"))
+            return
         if (
             launch_intent is None
             and self.selected_session_id == self._launch_session_id
@@ -1250,27 +1527,20 @@ class WorkbenchTui(App[None]):
                 self._show_native_terminal(terminal)
                 self._set_status(self.t("status.native_terminal"))
                 return
-            if self.run_snapshot is not None and not self.run_snapshot.terminal:
-                snapshot = await self.client.steer_run(
-                    self.run_snapshot.binding,
-                    content,
-                    idempotency_key=key,
+            turn_intent_arguments = dict(intent_arguments)
+            if launch_intent is not None:
+                turn_intent_arguments.update(
+                    capability=launch_intent.capability,
+                    execution_transport=launch_intent.execution_transport,
                 )
-            else:
-                turn_intent_arguments = dict(intent_arguments)
-                if launch_intent is not None:
-                    turn_intent_arguments.update(
-                        capability=launch_intent.capability,
-                        execution_transport=launch_intent.execution_transport,
-                    )
-                snapshot = await self.client.submit_turn(
-                    self.selected_session_id,
-                    content,
-                    idempotency_key=key,
-                    attachment_ids=tuple(item.id for item in self.attachments),
-                    **turn_intent_arguments,
-                )
-                self._launch_session_id = None
+            snapshot = await self.client.submit_turn(
+                self.selected_session_id,
+                content,
+                idempotency_key=key,
+                attachment_ids=tuple(item.id for item in self.attachments),
+                **turn_intent_arguments,
+            )
+            self._launch_session_id = None
         except Exception as exc:
             self._show_error(exc)
             return
@@ -1281,6 +1551,88 @@ class WorkbenchTui(App[None]):
         self._set_status(self.t("status.running"))
         self._runtime_overrides.clear()
         self._render_runtime_status()
+
+    async def _steer_content(self, value: str) -> None:
+        content = value.strip()
+        snapshot = self.run_snapshot
+        if not content or snapshot is None or snapshot.terminal:
+            return
+        if self.attachments:
+            self._set_status(self.t("composer.steer_attachments_blocked"))
+            return
+        key = f"tui-steer-{uuid4().hex}"
+        try:
+            updated = await self.client.steer_run(
+                snapshot.binding,
+                content,
+                idempotency_key=key,
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self.query_one("#composer", Input).value = ""
+        self._apply_run_snapshot(updated)
+        self._set_status(self.t("composer.steered"))
+
+    async def _queue_content(self, value: str) -> None:
+        content = value.strip()
+        snapshot = self.run_snapshot
+        if not content or self.selected_session_id is None:
+            return
+        if snapshot is None or snapshot.terminal:
+            await self._submit_content(value)
+            return
+        if self.queued_turn is not None:
+            self._set_status(self.t("composer.queue_full"))
+            return
+        self.queued_turn = QueuedTurn(
+            session_id=self.selected_session_id,
+            content=content,
+            idempotency_key=f"tui-queued-{uuid4().hex}",
+            attachment_ids=tuple(item.id for item in self.attachments),
+        )
+        self.query_one("#composer", Input).value = ""
+        self.attachments = ()
+        self._render_attachments()
+        self._update_composer_state()
+        self._set_status(self.t("composer.queued"))
+
+    async def _flush_queued_turn(self) -> None:
+        queued = self.queued_turn
+        if queued is None or self._queue_flushing:
+            return
+        if self.run_snapshot is not None and not self.run_snapshot.terminal:
+            return
+        if self.selected_session_id != queued.session_id:
+            self._set_status(self.t("composer.queue_session_changed"))
+            return
+        self._queue_flushing = True
+        intent_arguments = {
+            field: self._runtime_overrides[field]
+            for field in ("model", "mode")
+            if field in self._runtime_overrides
+        }
+        try:
+            snapshot = await self.client.submit_turn(
+                queued.session_id,
+                queued.content,
+                idempotency_key=queued.idempotency_key,
+                attachment_ids=queued.attachment_ids,
+                **intent_arguments,
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            self._update_composer_state()
+            return
+        finally:
+            self._queue_flushing = False
+        if self.queued_turn == queued:
+            self.queued_turn = None
+        self._reset_run()
+        self._apply_run_snapshot(snapshot)
+        self._runtime_overrides.clear()
+        self._render_runtime_status()
+        self._set_status(self.t("composer.queue_started"))
 
     def _native_terminal_selected(self) -> bool:
         if (
@@ -1361,46 +1713,15 @@ class WorkbenchTui(App[None]):
         self._update_interaction_actions()
         if snapshot.terminal:
             self._set_status(f"{self.t('status.finished')}: {snapshot.status}")
+            if self.queued_turn is not None:
+                self.call_later(self._flush_queued_turn)
         elif snapshot.resnapshot_reason:
             self._set_status(
                 f"{self.t('status.resnapshot')}: {snapshot.resnapshot_reason}"
             )
 
     def _render_timeline(self) -> None:
-        lines: list[str] = []
-        for event in self.timeline:
-            if event.type == "message_delta" and event.delta:
-                lines.append(event.delta)
-            elif event.type == "reasoning_delta" and event.delta:
-                lines.append(f"[{self.t('timeline.reasoning')}] {event.delta}")
-            elif event.type.startswith("tool_call"):
-                lines.append(
-                    f"[{self.t('timeline.tool')}] {event.tool_name or event.message}"
-                )
-            elif event.type == "approval_requested":
-                lines.append(f"[{self.t('timeline.approval')}] {event.message}")
-            elif event.input_id is not None or event.type in {
-                "input_requested",
-                "user_input_requested",
-            }:
-                lines.append(f"[{self.t('timeline.question')}] {event.message}")
-            elif event.type in {
-                "run_started",
-                "run_finished",
-                "run_canceled",
-                "error",
-                "warning",
-            }:
-                label = (
-                    self.t("timeline.error")
-                    if event.type == "error"
-                    else self.t("timeline.warning")
-                    if event.type == "warning"
-                    else self.t("timeline.status")
-                )
-                lines.append(f"[{label}] {event.message}")
-        content = "\n".join(lines)[-64_000:] or self.t("timeline.empty")
-        self.query_one("#timeline", Static).update(content)
+        self.query_one("#timeline", TimelinePanel).set_events(tuple(self.timeline))
 
     def _update_interaction_actions(self) -> None:
         snapshot = self.run_snapshot
@@ -1415,6 +1736,46 @@ class WorkbenchTui(App[None]):
         self.query_one("#native-terminal", Button).disabled = not bool(
             snapshot and snapshot.native_process_id
         )
+        active = bool(snapshot and not snapshot.terminal)
+        self.query_one("#send-turn", Button).disabled = active
+        self.query_one("#steer-turn", Button).disabled = not active
+        self.query_one("#queue-turn", Button).disabled = (
+            not active or self.queued_turn is not None
+        )
+        self._update_composer_state()
+
+    def _update_composer_state(self) -> None:
+        if not any(self.query("#composer-state")):
+            return
+        snapshot = self.run_snapshot
+        if self.queued_turn is not None:
+            state = self.t("composer.state_queued")
+        elif snapshot is not None and not snapshot.terminal:
+            state = self.t("composer.state_active")
+        else:
+            state = self.t("composer.state_idle")
+        self.query_one("#composer-state", Static).update(state)
+
+    def _show_approval(self) -> None:
+        if self.run_snapshot is None or not self.run_snapshot.pending_approvals:
+            return
+        approval = self.run_snapshot.pending_approvals[0]
+        self.push_screen(
+            ApprovalScreen(
+                approval,
+                self.run_snapshot.binding,
+                title=self.t("approval.title"),
+                allow_once=self.t("approval.allow_once"),
+                allow_run=self.t("approval.allow_run"),
+                deny=self.t("button.deny"),
+                cancel=self.t("dialog.cancel"),
+            ),
+            self._approval_decided,
+        )
+
+    async def _approval_decided(self, decision: str | None) -> None:
+        if decision is not None:
+            await self._decide_approval(decision)
 
     async def _decide_approval(self, decision: str) -> None:
         if self.run_snapshot is None or not self.run_snapshot.pending_approvals:
