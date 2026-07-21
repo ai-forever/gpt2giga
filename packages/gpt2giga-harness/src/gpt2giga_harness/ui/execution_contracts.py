@@ -157,6 +157,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/tool-servers"),
         ("GET", "/api/tool-servers/{server_id}"),
         ("GET", "/api/tools"),
+        ("GET", "/api/workbench/state"),
         ("GET", "/api/workflow-runs/{run_id}"),
         ("GET", "/api/workflow-runs/{run_id}/handoffs"),
         ("GET", "/api/workflows"),
@@ -189,6 +190,7 @@ _STREAMS = frozenset(
 _EVENT_LOOP_SAFE = frozenset(
     {
         ("GET", "/api/policy/profiles"),
+        ("GET", "/api/workbench/state"),
         ("GET", "/healthz"),
         ("GET", "/openapi.json"),
         ("POST", "/auth/session"),
@@ -286,6 +288,7 @@ _OPAQUE_CURSOR_IDENTITIES = frozenset(
         ("GET", "/api/cockpit/sessions/{session_id}/events"),
         ("GET", "/api/cockpit/sessions/{session_id}/messages"),
         ("GET", "/api/cockpit/sessions/{session_id}/runs"),
+        ("GET", "/api/workbench/state"),
     }
 )
 

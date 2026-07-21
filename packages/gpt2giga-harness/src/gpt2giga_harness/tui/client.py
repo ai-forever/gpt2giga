@@ -62,6 +62,11 @@ from gpt2giga_harness.settings import HarnessSettingsStore
 from gpt2giga_harness.structured_sessions import StructuredTurnInput
 from gpt2giga_harness.types import availability_to_dict, spec_to_dict
 from gpt2giga_harness.workbench_execution import workbench_transport_projection
+from gpt2giga_harness.workbench_protocol import (
+    WorkbenchBackbone,
+    WorkbenchStatePage,
+    workbench_state_page_from_dict,
+)
 from gpt2giga_harness.workspace import workspace_tree
 from gpt2giga_harness.worktrees import run_diff_response
 
@@ -329,6 +334,14 @@ class WorkbenchClient(Protocol):
     ) -> NavigationSnapshot:
         """Load one authoritative navigation snapshot."""
 
+    async def workbench_state(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int = 32,
+    ) -> WorkbenchStatePage:
+        """Load provider-neutral projections and ordered reconnect deltas."""
+
     async def create_session(
         self,
         workspace: str,
@@ -486,6 +499,16 @@ class InProcessWorkbenchClient:
         )
         self._active_runs: dict[str, tuple[asyncio.Task[Any], threading.Event]] = {}
         self._submitted_turns: dict[str, str] = {}
+        self.workbench_backbone = WorkbenchBackbone()
+
+    async def workbench_state(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int = 32,
+    ) -> WorkbenchStatePage:
+        """Read the same bounded backbone contract used by attach mode."""
+        return self.workbench_backbone.read(cursor, limit=limit)
 
     async def load(
         self,
@@ -1055,6 +1078,21 @@ class AttachedWorkbenchClient:
         self.timeout_seconds = timeout_seconds
         self._opener = build_opener(HTTPCookieProcessor(CookieJar()))
         self._bootstrapped = False
+
+    async def workbench_state(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int = 32,
+    ) -> WorkbenchStatePage:
+        """Read provider-neutral projections through the authenticated API."""
+        query: dict[str, str | int] = {"limit": min(max(limit, 1), 32)}
+        if cursor is not None:
+            query["cursor"] = cursor
+        response = await self._request(
+            "GET", f"/api/workbench/state?{urlencode(query)}"
+        )
+        return workbench_state_page_from_dict(response)
 
     async def load(
         self,

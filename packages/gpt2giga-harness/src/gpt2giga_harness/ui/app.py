@@ -61,6 +61,9 @@ from gpt2giga_harness.ui.async_execution import (
     stop_monitor,
 )
 from gpt2giga_harness.ui.execution_contracts import install_execution_contracts
+from gpt2giga_harness.ui.routers.workbench_state import (
+    router as workbench_state_router,
+)
 from gpt2giga_harness.harnesses.attachment_plan import attachment_capability_error
 from gpt2giga_harness.evals import (
     EvalRunNotFoundError,
@@ -220,6 +223,7 @@ from gpt2giga_harness.cli_capabilities import (
     CliCapabilitySnapshot,
     cli_capability_snapshot_to_dict,
 )
+from gpt2giga_harness.workbench_protocol import WorkbenchBackbone
 from gpt2giga_harness.claude_handoff import (
     ClaudeHandoffError,
     claude_execution_surfaces_to_dict,
@@ -382,6 +386,7 @@ def create_app(
     active_headless_runs: dict[str, _ActiveHeadlessRun] = {}
     async_diagnostics = AsyncExecutionDiagnostics()
     run_event_broker = getattr(store, "event_broker", RunEventBroker())
+    workbench_backbone = WorkbenchBackbone()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -435,6 +440,7 @@ def create_app(
     app.state.harness_native_process_manager = native_process_manager
     app.state.harness_async_diagnostics = async_diagnostics
     app.state.harness_run_event_broker = run_event_broker
+    app.state.harness_workbench_backbone = workbench_backbone
     app.state.harness_settings_store = settings_store
     app.state.harness_provider_settings_service = provider_settings_service
     app.state.harness_integration_flow_service = integration_flow_service
@@ -3218,6 +3224,7 @@ def create_app(
     app.include_router(integrations_router)
     app.include_router(tools_router)
     app.include_router(tui_actions_router)
+    app.include_router(workbench_state_router)
     app.include_router(workflows_router)
     app.include_router(runs_router)
     app.include_router(schedules_router)
