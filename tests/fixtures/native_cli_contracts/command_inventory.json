@@ -94,7 +94,12 @@
         "tty_behavior": "non_tty_is_native_headless",
         "capability_status": {
           "session.resume.native": "experimental",
-          "control.policy.set": "experimental"
+          "approval.decide": "experimental",
+          "structured.events.decode": "ready",
+          "one_shot.events.decode": "ready",
+          "control.approval.set": "degraded",
+          "control.policy.set": "degraded",
+          "control.sandbox.set": "degraded"
         },
         "help_byte_digests": {
           "version": {"bytes": 14, "sha256": "f46fd09b66de81455cc5698e0ca42db1571353d226855efa02d1a9e651933755"},

@@ -696,7 +696,7 @@ def _adapter_version() -> str:
     return normalized if normalized else "unknown"
 
 
-class _GeminiStreamParser:
+class GeminiStreamParser:
     """Normalize Gemini CLI stream-json events."""
 
     def __init__(self, *, home: Path | None = None) -> None:
@@ -786,6 +786,10 @@ class _GeminiStreamParser:
         if self._subagent_trace is None:
             return ()
         return self._subagent_trace.poll_events()
+
+
+# Retain the historical private name for callers already importing it.
+_GeminiStreamParser = GeminiStreamParser
 
 
 class _GeminiSubagentTrace:
