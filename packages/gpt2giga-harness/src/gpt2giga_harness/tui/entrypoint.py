@@ -25,10 +25,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="giga",
         description="Open the built-in provider-neutral terminal workbench.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Automation and administration commands remain available through "
-            "explicit subcommands; use 'giga --non-interactive --help' to list "
-            "that command API."
+            "Prefix a native command with only 'giga': 'giga codex exec ...', "
+            "'giga claude -p ...', or 'giga gemini -p ...'. Provider suffixes, "
+            "help, version, JSON/JSONL, pipes, redirects, and exit status remain "
+            "provider-owned. Legacy Harness automation remains available; use "
+            "'giga --non-interactive --help' to list it and 'giga completion "
+            "<bash|zsh|fish|powershell>' for shell setup."
         ),
     )
     parser.add_argument(

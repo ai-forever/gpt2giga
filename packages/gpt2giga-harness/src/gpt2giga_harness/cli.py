@@ -39,6 +39,7 @@ from gpt2giga_harness.capability_matrix import (
     render_adapter_capability_matrix_markdown,
 )
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.completion import SHELLS, render_completion
 from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
 from gpt2giga_harness.doctor import (
     build_doctor_report,
@@ -322,6 +323,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Return 1 when the selected CI readiness threshold is reached",
     )
     doctor.set_defaults(handler=_handle_doctor)
+
+    completion = subparsers.add_parser(
+        "completion",
+        help="Print shell completion for the stable giga command boundary",
+    )
+    completion.add_argument("shell", choices=SHELLS)
+    completion.set_defaults(handler=_handle_completion)
 
     config_parser = subparsers.add_parser("config")
     config_subparsers = config_parser.add_subparsers(dest="config_command")
@@ -977,6 +985,12 @@ def _handle_doctor(args: argparse.Namespace, config: HarnessConfig) -> int:
         return 1
     if args.fail_on == "degraded" and (blocked or degraded):
         return 1
+    return 0
+
+
+def _handle_completion(args: argparse.Namespace, config: HarnessConfig) -> int:
+    del config
+    print(render_completion(args.shell), end="")
     return 0
 
 

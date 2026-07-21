@@ -81,6 +81,18 @@ provide Direct Chat and the local `gpt2giga` provider preset.
 The [Unified Harness guide](harness.md) also documents the always-available
 source-checkout path for development and prerelease evaluation.
 
+Prefix an existing native agent command with exactly `giga`:
+
+```sh
+giga codex exec --json "inspect this repository"
+giga claude -p "inspect this repository"
+giga gemini -p "inspect this repository"
+```
+
+Do not replace Claude or Gemini syntax with an invented common `exec` command.
+Run `giga doctor --json` for L0/L1/L2 compatibility and `giga completion
+bash|zsh|fish|powershell` to generate conservative root completion.
+
 The Harness distribution uses the `gpt2giga_harness` Python namespace and
 provides the `giga` and `gpt2giga-harness` commands. The gateway distribution
 provides only the `gpt2giga` command.

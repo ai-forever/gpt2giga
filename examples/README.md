@@ -26,6 +26,9 @@ client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
 ## Быстрые ссылки
 
+- Нативные команды Codex/Claude/Gemini с единственным префиксом `giga`,
+  pipe/redirect/CI/resume и L1/L2 degradation:
+  [`examples/harness/native-cli-prefix/README.md`](harness/native-cli-prefix/README.md)
 - Unified Harness, полностью локальный first-run без credentials и proxy:
   [`examples/harness/first-run-demo/README.md`](harness/first-run-demo/README.md)
 - Unified Harness, issue-to-reviewed-patch с изолированным worktree, review и

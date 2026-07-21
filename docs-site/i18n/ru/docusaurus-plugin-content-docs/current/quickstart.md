@@ -81,6 +81,18 @@ giga ui
 В [руководстве Unified Harness](harness.md) также описан всегда доступный запуск
 из source checkout для разработки и проверки prerelease.
 
+Добавьте ровно `giga` перед существующей нативной командой агента:
+
+```sh
+giga codex exec --json "проверь репозиторий"
+giga claude -p "проверь репозиторий"
+giga gemini -p "проверь репозиторий"
+```
+
+Не заменяйте синтаксис Claude или Gemini выдуманной общей командой `exec`.
+`giga doctor --json` показывает совместимость L0/L1/L2, а `giga completion
+bash|zsh|fish|powershell` генерирует консервативный completion корневых команд.
+
 Дистрибутив Harness использует Python namespace `gpt2giga_harness` и добавляет
 команды `giga` и `gpt2giga-harness`. Дистрибутив gateway добавляет только
 команду `gpt2giga`.

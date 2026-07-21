@@ -21,6 +21,7 @@ from gpt2giga_harness.config import (
     pass_model_env_note,
 )
 from gpt2giga_harness.managed_mcp import HeadlessManagedMCPSnapshotStore
+from gpt2giga_harness.native_cli_contracts import WORKBENCH_INTEGRATION_SPECS
 from gpt2giga_harness.project import load_project_config, resolve_project
 from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga_harness.runtime.store import RUNTIME_DB_NAME
@@ -172,6 +173,24 @@ def format_doctor_report(report: Mapping[str, Any]) -> str:
             continue
         status = str(raw_check.get("status") or "unknown").upper()
         lines.extend(["", f"[{status}] {raw_check.get('summary') or 'Unknown check'}"])
+        native_facade = (raw_check.get("evidence") or {}).get("native_facade")
+        if isinstance(native_facade, Mapping):
+            levels = native_facade.get("levels") or {}
+            lines.append(
+                "  Native facade: "
+                f"{native_facade.get('namespace')}; "
+                f"executable={native_facade.get('executable') or 'missing'}; "
+                f"version={native_facade.get('version') or 'unknown'}; "
+                f"L0={levels.get('L0', 'unknown')}; "
+                f"L1={levels.get('L1', 'unknown')}; "
+                f"L2={levels.get('L2', 'unknown')}; "
+                f"transport={native_facade.get('transport') or 'none'}; "
+                f"fallback={native_facade.get('fallback') or 'none'}"
+            )
+            if native_facade.get("degradation"):
+                lines.append(f"  Degradation: {native_facade['degradation']}")
+            if native_facade.get("remediation"):
+                lines.append(f"  Remedy: {native_facade['remediation']}")
         for remediation in raw_check.get("remediation") or ():
             if not isinstance(remediation, Mapping):
                 continue
@@ -381,9 +400,29 @@ def _harness_checks(
         }
         probe_method = getattr(harness, "capability_probe", None)
         if include_compatibility and callable(probe_method):
-            compatibility = cli_capability_snapshot_to_dict(probe_method())
+            probe = probe_method()
+            compatibility = cli_capability_snapshot_to_dict(probe)
             compatibility.pop("command", None)
             evidence["compatibility"] = compatibility
+            namespace = _native_namespace_for_harness(spec.id)
+            if namespace is not None:
+                resolution_method = getattr(harness, "executable_resolution", None)
+                resolution = (
+                    resolution_method() if callable(resolution_method) else None
+                )
+                evidence["native_facade"] = _native_facade_evidence(
+                    namespace,
+                    probe_status=probe.status,
+                    compatible=probe.compatible,
+                    version=probe.parsed_version or probe.version,
+                    version_status=probe.version_window_status,
+                    executable=(
+                        resolution.executable if resolution is not None else None
+                    ),
+                    executable_source=(
+                        resolution.source if resolution is not None else "unknown"
+                    ),
+                )
         suffix = f" - {availability.reason}" if availability.reason else ""
         checks.append(
             _check(
@@ -405,6 +444,68 @@ def _harness_checks(
             )
         )
     return checks
+
+
+def _native_namespace_for_harness(harness_id: str) -> str | None:
+    return {
+        "codex-cli": "codex",
+        "claude-code": "claude",
+        "gemini-cli": "gemini",
+    }.get(harness_id)
+
+
+def _native_facade_evidence(
+    namespace: str,
+    *,
+    probe_status: str,
+    compatible: bool,
+    version: str | None,
+    version_status: str,
+    executable: str | None,
+    executable_source: str,
+) -> dict[str, Any]:
+    integration = WORKBENCH_INTEGRATION_SPECS[namespace]
+    executable_ready = executable is not None and probe_status != "missing"
+    l2_ready = (
+        executable_ready and compatible and bool(integration.structured_transport)
+    )
+    degradation = None
+    remediation = None
+    if not executable_ready:
+        degradation = "native_runtime_missing"
+        remediation = (
+            f"Install {namespace} on PATH or configure executables."
+            f"{integration.harness_id}."
+        )
+    elif not l2_ready:
+        degradation = (
+            "provider_owned_l1"
+            if integration.structured_transport is None
+            else f"structured_{version_status}"
+        )
+        remediation = (
+            "Use the visible provider-owned L1 handoff, or install a reviewed "
+            "structured-transport version; L0 remains available."
+        )
+    return {
+        "namespace": namespace,
+        "executable": executable,
+        "executable_source": executable_source,
+        "version": version,
+        "levels": {
+            "L0": "ready" if executable_ready else "blocked",
+            "L1": "ready" if executable_ready else "blocked",
+            "L2": "ready"
+            if l2_ready
+            else "degraded"
+            if executable_ready
+            else "blocked",
+        },
+        "transport": integration.structured_transport,
+        "fallback": integration.l1_fallback,
+        "degradation": degradation,
+        "remediation": remediation,
+    }
 
 
 def _workspace_checks(

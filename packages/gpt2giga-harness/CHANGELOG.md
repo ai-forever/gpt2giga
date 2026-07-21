@@ -8,6 +8,7 @@
 ## [0.3.0a1] - 2026-07-20
 
 ### Добавлено
+- **Завершение provider-native CLI**: root help объясняет буквальный контракт префикса `giga codex|claude|gemini`, `giga completion` генерирует консервативный completion для Bash/Zsh/Fish/PowerShell без разбора provider suffix, а doctor показывает executable/version и деградацию/remediation transport для L0/L1/L2.
 - **Provider-neutral providers и routes**: добавлены пользовательские профили для OpenAI-, Anthropic- и Gemini-compatible API, отдельные route/model defaults, reference-only authentication, bounded health/model discovery и опциональный preset `gpt2giga` вместо обязательной связи Harness с gateway.
 - **Безопасная миграция providers**: legacy defaults можно преобразовать только после deterministic dry-run и проверенного pre-upgrade backup; операция повторно проверяет исходное состояние под lock, сохраняет журнал и допускает rollback только восстановлением исходного архива.
 - **Библиотека Skills, Plugins и MCP**: добавлены offline-first каталог, portable Skills, first-party starter pack, Codex/Claude/Gemini MCP targets, Codex/Claude Plugins, Gemini extensions и preview SDK для внешних adapter/integration packages.

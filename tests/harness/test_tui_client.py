@@ -921,6 +921,19 @@ print("textual" in sys.modules, "fastapi" in sys.modules, "uvicorn" in sys.modul
     assert completed.stdout.rstrip().endswith("False False False")
 
 
+def test_root_help_teaches_prefix_contract_and_legacy_automation(capsys):
+    with pytest.raises(SystemExit) as raised:
+        entrypoint.main(["--help"])
+
+    assert raised.value.code == 0
+    output = capsys.readouterr().out
+    assert "giga codex exec" in output
+    assert "giga claude -p" in output
+    assert "giga gemini -p" in output
+    assert "giga --non-interactive --help" in output
+    assert "giga completion" in output
+
+
 def test_console_entrypoint_dispatches_tui_without_full_cli(monkeypatch):
     from gpt2giga_harness.tui import entrypoint as tui_entrypoint
 

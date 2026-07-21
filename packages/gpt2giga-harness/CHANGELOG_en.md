@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0a1] - 2026-07-20
 
 ### Added
+- **Provider-native CLI completion**: root help now teaches the literal `giga codex|claude|gemini` prefix contract, `giga completion` emits conservative Bash/Zsh/Fish/PowerShell completion without parsing provider suffixes, and doctor reports executable/version plus L0/L1/L2 transport degradation and remediation.
 - **Provider-neutral providers and routes**: added user profiles for OpenAI-, Anthropic-, and Gemini-compatible APIs, per-route model defaults, reference-only authentication, bounded health/model discovery, and an optional `gpt2giga` preset instead of a mandatory Harness-to-gateway coupling.
 - **Safe provider migration**: legacy defaults can be converted only after a deterministic dry run and a verified pre-upgrade backup; migration revalidates source state under a lock, retains a journal, and permits rollback only by restoring the original archive.
 - **Skills, Plugins, and MCP library**: added an offline-first catalog, portable Skills, a first-party starter pack, Codex/Claude/Gemini MCP targets, Codex/Claude Plugins, Gemini extensions, and a preview SDK for external adapter/integration packages.

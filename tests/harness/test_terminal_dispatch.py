@@ -52,6 +52,7 @@ def test_interactive_human_paths_target_the_canonical_tui(argv):
     "argv",
     (
         ("doctor",),
+        ("completion", "bash"),
         ("config", "path"),
         ("run", "provenance", "run_1"),
         ("run", "--agent", "codex", "--json", "inspect"),

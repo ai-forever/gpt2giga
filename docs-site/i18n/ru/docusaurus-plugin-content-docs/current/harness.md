@@ -48,6 +48,80 @@ Approval в Harness относится к действиям, которыми H
 не обещает видеть каждое внутреннее действие непрозрачного Codex, Claude или
 Gemini subprocess.
 
+## Контракт префикса нативного CLI
+
+Правило совместимости буквальное: добавьте ровно `giga` перед командой
+provider. Harness не вводит общий синтаксис выполнения.
+
+```sh
+giga codex exec --json "проверь репозиторий"
+giga claude -p "проверь репозиторий"
+giga gemini -p "проверь репозиторий"
+```
+
+После имени provider argv непрозрачен для Harness. Нативными остаются
+`--help`/`--version`, stdin, stdout/stderr, сырые байты, JSON/JSONL, `--`,
+сигналы и exit status. Неизвестные новые команды и flags не ждут обновления
+парсера Harness.
+
+| Ситуация | Пример | Результат |
+| --- | --- | --- |
+| Human TTY | `giga codex` | Допущенный Workbench L2 или видимый provider-owned L1 handoff при drift. |
+| Pipe/stdin | `printf 'task' \| giga claude -p -` | Нативные L0 descriptors и bytes. |
+| Redirect | `giga gemini -p task >result.txt` | Provider stdout записывается напрямую. |
+| JSON | `giga codex exec --json task` | Provider JSON/JSONL не изменяется. |
+| CI | `CI=1 giga gemini -p task` | Нативный L0 без prompt Harness. |
+| Resume | `giga codex resume --last` | Точный provider selector; допущенный L2 или видимый L1. |
+| Drift | Версия вне reviewed window | Деградирует только L2; валидные L0-команды доступны. |
+| Нет runtime | `giga claude --version` без Claude | Понятная ошибка до provider side effects. |
+
+`giga doctor --json` показывает executable и его источник, version evidence,
+состояния L0/L1/L2, structured transport, fallback, причину деградации и
+remediation. Отчёт не хранит provider argv, prompts или output.
+
+### Shell completion
+
+Сгенерируйте completion стабильной границы Harness:
+
+```sh
+giga completion bash
+giga completion zsh
+giga completion fish
+giga completion powershell
+```
+
+Скрипты намеренно не копируют upstream-парсеры. После выбора `codex`, `claude`
+или `gemini` суффикс и `--` остаются нетронутыми, а shell использует обычный
+fallback completion.
+
+### Установка, миграция и откат
+
+Стандартные wheel/sdist содержат TUI и native facade, но не provider binary,
+Node.js runtime, credentials или provider config. `uv tool` и `pipx` создают
+изолированное окружение Harness:
+
+```sh
+uv tool install --prerelease allow gpt2giga-harness
+pipx install --pip-args='--pre' gpt2giga-harness
+```
+
+Существующий prerelease с optional TUI обновляйте на месте без extra `[tui]`.
+Перед обновлением сохраните user-owned state. Откат — установка точной прежней
+версии и восстановление проверенного pre-upgrade архива, если выполнялась
+миграция state:
+
+```sh
+giga state backup /safe/path/harness-before-upgrade.zip
+uv tool upgrade --prerelease allow gpt2giga-harness
+uv tool install --force 'gpt2giga-harness==<previous-version>'
+uv tool uninstall gpt2giga-harness
+uv tool install --prerelease allow gpt2giga-harness
+```
+
+Удаление пакета не удаляет `~/.gpt2giga/harness`, проектные `.giga/` или
+нативные provider homes. Harness не делает reverse migration provider config,
+не устанавливает provider runtime и не выполняет authentication.
+
 ## Кому подходит prerelease
 
 Попробуйте preview, если хотите оценить локальный agent cockpit, сравнить

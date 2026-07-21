@@ -63,6 +63,38 @@ sequences. `TERM=dumb` and unsupported terminals fail closed for an explicitly
 requested TUI; redirected human commands retain their established CLI bytes,
 schemas, exit codes, and stdout/stderr behavior.
 
+## Prefix native agent commands
+
+Add exactly `giga` before a Codex CLI, Claude Code, or Gemini CLI command:
+
+```sh
+giga codex exec --json "inspect this repository"
+giga claude -p "inspect this repository"
+giga gemini -p "inspect this repository"
+```
+
+There is no common `exec` verb: everything after `codex`, `claude`, or `gemini`
+remains provider-owned. This includes `--help`, `--version`, stdin, stdout,
+stderr, JSON/JSONL, `--`, signals, and exit status. On an admitted human TTY,
+known session workflows may open the canonical Workbench; structured-version
+drift degrades visibly to a provider-owned terminal handoff and never disables
+otherwise valid native passthrough.
+
+Generate conservative root completion without copying upstream parsers:
+
+```sh
+giga completion bash
+giga completion zsh
+giga completion fish
+giga completion powershell
+```
+
+The generated scripts complete only the stable Harness boundary. Provider
+suffixes, including unknown future flags and `--`, are left to the provider and
+the shell's default completion behavior. `giga doctor --json` reports each
+runtime's executable, version, L0/L1/L2 state, structured transport,
+degradation, and remediation without storing prompts or provider output.
+
 If you installed the earlier optional-TUI prerelease, upgrade the existing tool;
 do not keep or add a `[tui]` extra:
 

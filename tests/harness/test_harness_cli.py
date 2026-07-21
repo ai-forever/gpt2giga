@@ -89,6 +89,18 @@ def test_cli_version_reports_distribution_version(capsys):
     )
 
 
+@pytest.mark.parametrize("shell", ("bash", "zsh", "fish", "powershell"))
+def test_cli_completion_is_static_and_leaves_provider_suffix_owned(shell, capsys):
+    assert cli.main(["completion", shell]) == 0
+
+    output = capsys.readouterr().out
+    assert "codex" in output
+    assert "claude" in output
+    assert "gemini" in output
+    assert "exec resume" not in output
+    assert "--output-format" not in output
+
+
 def test_console_entrypoint_reports_version_without_importing_full_cli(
     capsys, monkeypatch
 ):

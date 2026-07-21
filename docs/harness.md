@@ -47,6 +47,82 @@ This separation matters: an approval shown by Unified Harness covers actions it
 owns, such as spawning a run or applying a captured patch. It cannot claim to
 observe every internal action performed by a black-box external CLI.
 
+## Native CLI prefix contract
+
+The native compatibility rule is literal: add exactly `giga` before the
+provider command. Harness does not invent one shared execution grammar.
+
+```sh
+giga codex exec --json "inspect this repository"
+giga claude -p "inspect this repository"
+giga gemini -p "inspect this repository"
+```
+
+After the provider token, argv is opaque. Provider-scoped `--help` and
+`--version`, stdin, stdout/stderr placement, raw bytes, JSON/JSONL, `--`,
+signals, and exit status stay native. Unknown commands and flags therefore keep
+working without waiting for a Harness parser update.
+
+| Situation | Example | Result |
+| --- | --- | --- |
+| Human TTY | `giga codex` | Admitted Workbench L2, or a visible provider-owned L1 handoff on drift. |
+| Pipe/stdin | `printf 'task' \| giga claude -p -` | Native L0 descriptors and bytes. |
+| Redirect | `giga gemini -p task >result.txt` | Provider stdout is written directly. |
+| JSON | `giga codex exec --json task` | Provider JSON/JSONL remains unchanged. |
+| CI | `CI=1 giga gemini -p task` | Prompt-free native L0 execution. |
+| Resume | `giga codex resume --last` | Exact provider selector; admitted L2 or visible L1. |
+| Structured drift | version outside the reviewed window | Only L2 degrades; valid L0 commands remain available. |
+| Missing runtime | `giga claude --version` without Claude | Actionable startup failure before provider side effects. |
+
+Inspect the local truth with `giga doctor --json`. Each native provider entry
+reports the executable and source, version evidence, L0/L1/L2 state, structured
+transport, fallback, degradation reason, and remediation. The report is
+content-free and does not retain provider argv, prompts, or output.
+
+### Shell completion
+
+Generate completion for the stable Harness boundary and source it according to
+your shell's normal startup conventions:
+
+```sh
+giga completion bash
+giga completion zsh
+giga completion fish
+giga completion powershell
+```
+
+The scripts intentionally do not mirror upstream provider parsers. Once
+`codex`, `claude`, or `gemini` is selected, the suffix and `--` remain untouched
+and the shell's default completion applies.
+
+### Install, migrate, and roll back
+
+The standard wheel/sdist contains the TUI and native facade but no provider
+binary, Node.js runtime, credentials, or provider configuration. Both `uv tool`
+and `pipx` create an isolated Harness environment:
+
+```sh
+uv tool install --prerelease allow gpt2giga-harness
+pipx install --pip-args='--pre' gpt2giga-harness
+```
+
+Upgrade an existing optional-TUI prerelease in place; do not retain or add a
+`[tui]` extra. Before an upgrade, back up user-owned Harness state. Rollback is
+an exact package reinstall plus restoration of a verified pre-upgrade state
+archive when a state migration occurred:
+
+```sh
+giga state backup /safe/path/harness-before-upgrade.zip
+uv tool upgrade --prerelease allow gpt2giga-harness
+uv tool install --force 'gpt2giga-harness==<previous-version>'
+uv tool uninstall gpt2giga-harness
+uv tool install --prerelease allow gpt2giga-harness
+```
+
+Uninstalling the package does not delete `~/.gpt2giga/harness`, project
+`.giga/`, or native provider homes. Harness never reverse-migrates provider
+configuration or installs/authenticates a provider runtime.
+
 ## Is the prerelease preview for you?
 
 Try it now if you want to evaluate a local agent cockpit, compare harnesses,
