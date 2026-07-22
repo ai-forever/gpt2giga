@@ -68,6 +68,7 @@ from gpt2giga_harness.ui.routers.workbench_resources import (
     router as workbench_resources_router,
 )
 from gpt2giga_harness.ui.routers.environments import router as environments_router
+from gpt2giga_harness.github_environments import GitHubEnvironmentService
 from gpt2giga_harness.harnesses.attachment_plan import attachment_capability_error
 from gpt2giga_harness.evals import (
     EvalRunNotFoundError,
@@ -330,6 +331,7 @@ def create_app(
     integration_flow_service: IntegrationFlowService | None = None,
     grouped_integration_service: GroupedIntegrationService | None = None,
     skill_library_service: SkillLibraryService | None = None,
+    github_environment_service: GitHubEnvironmentService | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
@@ -365,6 +367,9 @@ def create_app(
     )
     skill_library_service = skill_library_service or SkillLibraryService(
         config.data_dir
+    )
+    github_environment_service = (
+        github_environment_service or GitHubEnvironmentService()
     )
     grouped_integration_service = (
         grouped_integration_service
@@ -468,6 +473,7 @@ def create_app(
     app.state.harness_integration_flow_service = integration_flow_service
     app.state.harness_grouped_integration_service = grouped_integration_service
     app.state.harness_skill_library_service = skill_library_service
+    app.state.harness_github_environment_service = github_environment_service
 
     def _approval_gate(
         action: PermissionAction,

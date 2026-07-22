@@ -47,8 +47,62 @@ export interface EnvironmentResponse {
     push_blocker: string | null;
   };
   commit: { blocker: string | null; ready: boolean };
-  issue_pr: { status: string };
+  github: {
+    schema_version: number;
+    status: string;
+    auth_status: string;
+    checked_at: string;
+    repository: {
+      host: string;
+      name_with_owner: string;
+      url: string;
+      default_branch: string | null;
+      is_fork: boolean;
+    } | null;
+    pull_request: {
+      number: number;
+      state: string;
+      url: string;
+      draft: boolean;
+      head_branch: string;
+      base_branch: string;
+      checks: GitHubCountRollup;
+      issues: { number: number; state: string; url: string }[];
+    } | null;
+    runs: {
+      database_id: number;
+      status: string;
+      conclusion: string | null;
+      url: string;
+      head_sha: string;
+      created_at: string;
+      updated_at: string;
+      jobs: GitHubCountRollup;
+    }[];
+    reason_code: string | null;
+    cached: boolean;
+    stale: boolean;
+  };
+  issue_pr: {
+    status: string;
+    kind?: string;
+    number?: number;
+    url?: string;
+    checks?: GitHubCountRollup;
+    issues?: { number: number; state: string; url: string }[];
+  };
   freshness: { captured_at: string; status: string };
+}
+
+export interface GitHubCountRollup {
+  status: string;
+  total: number;
+  passed: number;
+  failed: number;
+  pending: number;
+  skipped: number;
+  cancelled: number;
+  unknown: number;
 }
 
 export interface MessageProjection {

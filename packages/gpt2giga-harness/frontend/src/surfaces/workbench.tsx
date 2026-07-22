@@ -168,6 +168,9 @@ function EnvironmentCard({
           <div><dt>{message(locale, "environmentCommit")}</dt><dd>{environment.commit}</dd></div>
           <div><dt>{message(locale, "environmentPush")}</dt><dd>{environment.push}</dd></div>
           <div><dt>{message(locale, "environmentIssuePr")}</dt><dd>{environment.issuePr}</dd></div>
+          <div><dt>{message(locale, "environmentGitHub")}</dt><dd>{environment.githubRepository} · {environment.githubStatus}</dd></div>
+          <div><dt>{message(locale, "environmentGitHubChecks")}</dt><dd>{environment.githubChecks}</dd></div>
+          <div><dt>{message(locale, "environmentGitHubActions")}</dt><dd>{environment.githubActions}</dd></div>
           <div><dt>{message(locale, "environmentCaptured")}</dt><dd>{formatTimestamp(environment.capturedAt, locale)}</dd></div>
         </dl>
       )}

@@ -439,6 +439,24 @@ async def test_attach_client_uses_existing_api_contract(monkeypatch):
                     "push_ready": True,
                     "push_blocker": None,
                 },
+                "github": {
+                    "schema_version": 1,
+                    "status": "ready",
+                    "auth_status": "authenticated",
+                    "checked_at": "2026-07-22T00:00:01Z",
+                    "repository": {
+                        "host": "github.com",
+                        "name_with_owner": "ferriscorp/gigalo",
+                        "url": "https://github.com/ferriscorp/gigalo",
+                        "default_branch": "main",
+                        "is_fork": False,
+                    },
+                    "pull_request": None,
+                    "runs": [],
+                    "reason_code": None,
+                    "cached": False,
+                    "stale": False,
+                },
                 "commit": {"ready": True, "blocker": None},
                 "issue_pr": {"status": "not_connected"},
                 "freshness": {
@@ -491,6 +509,7 @@ async def test_attach_client_uses_existing_api_contract(monkeypatch):
     assert snapshot.integrations.verified_count == 1
     assert snapshot.environment.branch == "main"
     assert snapshot.environment.commit_ready is True
+    assert snapshot.environment.github_repository == "ferriscorp/gigalo"
     assert created.id == "sess_2"
     assert (
         "POST",

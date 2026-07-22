@@ -15,6 +15,7 @@ import stat
 import subprocess
 import threading
 from typing import Any, Callable, Mapping, Protocol
+from urllib.parse import urlsplit
 
 from gpt2giga_harness.registries import (
     EntryPointFamily,
@@ -42,6 +43,8 @@ MAX_PATH_CHARS = 512
 GIT_TIMEOUT_SECONDS = 10.0
 _HEX_SHA_RE = re.compile(r"[0-9a-f]{40,64}\Z")
 _IDENTITY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+@~-]{0,127}\Z")
+_HOST_RE = re.compile(r"(?=.{1,253}\Z)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\Z")
+_REPOSITORY_PART_RE = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
 _SECRET_FILENAMES = frozenset(
     {
         ".netrc",
@@ -78,6 +81,23 @@ class EnvironmentCaptureError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+@dataclass(frozen=True)
+class HostedRepositoryHint:
+    """Credential-free hosted repository identity derived by the Git owner."""
+
+    host: str
+    name_with_owner: str
+
+    def __post_init__(self) -> None:
+        if _HOST_RE.fullmatch(self.host) is None:
+            raise ValueError("hosted repository host is invalid")
+        parts = self.name_with_owner.split("/")
+        if len(parts) != 2 or any(
+            _REPOSITORY_PART_RE.fullmatch(part) is None for part in parts
+        ):
+            raise ValueError("hosted repository identity is invalid")
 
 
 @dataclass(frozen=True)
@@ -515,6 +535,20 @@ class GitEnvironmentProvider:
             push_blocker=push_blocker,
         )
 
+    def hosted_repository(
+        self, snapshot: EnvironmentSnapshot
+    ) -> HostedRepositoryHint | None:
+        """Resolve one credential-free remote identity without exposing its URL."""
+        if snapshot.provider_id != self.descriptor.id or snapshot.remote is None:
+            return None
+        root = Path(snapshot.worktree_root).expanduser().resolve()
+        remote_url = self._optional_text(
+            root, "remote", "get-url", "--", snapshot.remote
+        )
+        if remote_url is None:
+            return None
+        return _parse_hosted_repository(remote_url)
+
     def _remote_name(
         self,
         root: Path,
@@ -768,6 +802,37 @@ def _is_safe_summary_path(value: str) -> bool:
         if part.endswith(_SECRET_SUFFIXES):
             return False
     return not any(ord(character) < 32 or ord(character) == 127 for character in value)
+
+
+def _parse_hosted_repository(value: str) -> HostedRepositoryHint | None:
+    """Discard credentials and accept only an exact host/owner/repository tuple."""
+    if not value or len(value) > 4096 or any(ord(char) < 32 for char in value):
+        return None
+    host = ""
+    repository_path = ""
+    if "://" in value:
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            return None
+        if parsed.scheme not in {"http", "https", "ssh"}:
+            return None
+        host = parsed.hostname or ""
+        repository_path = parsed.path
+    else:
+        match = re.fullmatch(r"(?:[^@/:\s]+@)?([^/:\s]+):/?([^\s]+)", value)
+        if match is None:
+            return None
+        host, repository_path = match.groups()
+    host = host.casefold().rstrip(".")
+    path = repository_path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    parts = path.split("/")
+    try:
+        return HostedRepositoryHint(host=host, name_with_owner="/".join(parts))
+    except ValueError:
+        return None
 
 
 def _push_blocker(

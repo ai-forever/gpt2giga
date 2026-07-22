@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import re
 import threading
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import (
@@ -39,6 +39,10 @@ from gpt2giga_harness.environments import (
     EnvironmentCaptureError,
     EnvironmentSnapshot,
     GitEnvironmentProvider,
+)
+from gpt2giga_harness.github_environments import (
+    GitHubEnvironmentService,
+    GitHubEnvironmentSnapshot,
 )
 from gpt2giga_harness.integration_flows import IntegrationFlowService
 from gpt2giga_harness.project import (
@@ -247,6 +251,12 @@ class EnvironmentSummary:
     push_blocker: str | None = None
     captured_at: str | None = None
     issue_pr_status: str = "not_connected"
+    github_status: str = "unavailable"
+    github_repository: str | None = None
+    github_checks: str = "unavailable"
+    github_actions: str = "unavailable"
+    github_run_count: int = 0
+    github_checked_at: str | None = None
     reason: str | None = None
 
 
@@ -626,6 +636,7 @@ class InProcessWorkbenchClient:
         *,
         registry: HarnessRegistry | None = None,
         store: FilesystemHarnessSessionStore | None = None,
+        github_environment_service: GitHubEnvironmentService | None = None,
     ) -> None:
         self.config = config
         self.registry = registry or create_default_registry()
@@ -639,6 +650,9 @@ class InProcessWorkbenchClient:
         self.runtime_store = RuntimeCoordinationStore(config.data_dir)
         self.attachment_store = FilesystemAttachmentStore(config.data_dir)
         self.integration_service = IntegrationFlowService(config.data_dir)
+        self.github_environment_service = (
+            github_environment_service or GitHubEnvironmentService()
+        )
         self.resource_service = WorkbenchResourceService(
             session_store=self.store,
             runtime_store=self.runtime_store,
@@ -720,7 +734,11 @@ class InProcessWorkbenchClient:
             for harness in self.registry.list()
         )
         readiness = self._readiness(project, selected, harnesses)
-        environment = _capture_environment_summary(project.root)
+        environment = await asyncio.to_thread(
+            _capture_environment_summary,
+            project.root,
+            self.github_environment_service,
+        )
         projects = self._projects(project)
         project_summary = next(item for item in projects if item.id == project.id)
         return NavigationSnapshot(
@@ -2239,11 +2257,18 @@ def _integration_summary_from_mapping(data: Mapping[str, Any]) -> IntegrationSum
     return IntegrationSummary("ready", len(catalog), len(flows), verified)
 
 
-def _capture_environment_summary(workspace: str) -> EnvironmentSummary:
+def _capture_environment_summary(
+    workspace: str,
+    github_service: GitHubEnvironmentService | None = None,
+) -> EnvironmentSummary:
     try:
-        return _environment_summary_from_snapshot(
-            GitEnvironmentProvider().snapshot(workspace)
-        )
+        provider = GitEnvironmentProvider()
+        snapshot = provider.snapshot(workspace)
+        summary = _environment_summary_from_snapshot(snapshot)
+        if github_service is None:
+            return summary
+        github = github_service.inspect(snapshot, provider.hosted_repository(snapshot))
+        return _environment_summary_with_github(summary, github)
     except EnvironmentCaptureError as exc:
         return EnvironmentSummary("unavailable", reason=str(exc))
 
@@ -2275,12 +2300,59 @@ def _environment_summary_from_mapping(data: Mapping[str, Any]) -> EnvironmentSum
     freshness = _mapping(data.get("freshness"))
     issue_pr = _mapping(data.get("issue_pr"))
     commit = _mapping(data.get("commit"))
+    github = _mapping(data.get("github"))
+    repository = _mapping(github.get("repository"))
+    pull_request = _mapping(github.get("pull_request"))
+    checks = _mapping(pull_request.get("checks"))
+    runs = _mapping_items(github.get("runs"), 5)
+    issue_status = str(issue_pr.get("status") or "not_connected")
+    number = issue_pr.get("number")
+    if issue_pr.get("kind") == "pull_request" and isinstance(number, int):
+        issue_status = f"PR #{number} {issue_status} · checks {checks.get('status') or 'unavailable'}"
     return replace(
         summary,
         status=str(freshness.get("status") or "stale"),
         commit_ready=bool(commit.get("ready")),
-        issue_pr_status=str(issue_pr.get("status") or "not_connected"),
+        issue_pr_status=issue_status,
+        github_status=str(github.get("status") or "unavailable"),
+        github_repository=_optional_text(repository.get("name_with_owner")),
+        github_checks=str(checks.get("status") or "unavailable"),
+        github_actions=_github_actions_status(runs),
+        github_run_count=len(runs),
+        github_checked_at=_optional_text(github.get("checked_at")),
     )
+
+
+def _environment_summary_with_github(
+    summary: EnvironmentSummary,
+    github: GitHubEnvironmentSnapshot,
+) -> EnvironmentSummary:
+    pull_request = github.pull_request
+    issue_pr = "none" if github.status == "ready" else "not_connected"
+    checks = "unavailable"
+    if pull_request is not None:
+        checks = pull_request.checks.status
+        issue_pr = f"PR #{pull_request.number} {pull_request.state} · checks {checks}"
+    runs = tuple(run.to_dict() for run in github.runs)
+    return replace(
+        summary,
+        issue_pr_status=issue_pr,
+        github_status=github.status,
+        github_repository=(
+            github.repository.name_with_owner if github.repository else None
+        ),
+        github_checks=checks,
+        github_actions=_github_actions_status(runs),
+        github_run_count=len(runs),
+        github_checked_at=github.checked_at,
+    )
+
+
+def _github_actions_status(runs: Sequence[Mapping[str, Any]]) -> str:
+    if not runs:
+        return "unavailable"
+    latest = runs[0]
+    return str(latest.get("conclusion") or latest.get("status") or "unknown")
 
 
 def _session_workspace(session: HarnessSession) -> str:

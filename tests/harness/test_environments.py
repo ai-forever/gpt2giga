@@ -16,6 +16,7 @@ from gpt2giga_harness.environments import (
     EnvironmentProviderRegistry,
     EnvironmentSnapshot,
     GitEnvironmentProvider,
+    HostedRepositoryHint,
     git_environment_provider_plugin,
 )
 from gpt2giga_harness.registries import RegistryCollisionError
@@ -172,6 +173,25 @@ def test_environment_provider_entry_points_use_neutral_registry_kernel(monkeypat
         )
 
 
+def test_git_environment_derives_credential_free_hosted_repository_hint(tmp_path):
+    repository = tmp_path / "repository"
+    _init_repository(repository)
+    _git(
+        repository,
+        "remote",
+        "add",
+        "origin",
+        "https://token-canary@github.com/ferriscorp/gigalo.git",
+    )
+    provider = GitEnvironmentProvider(clock=lambda: CAPTURED_AT)
+    snapshot = provider.snapshot(repository)
+
+    hint = provider.hosted_repository(snapshot)
+
+    assert hint == HostedRepositoryHint("github.com", "ferriscorp/gigalo")
+    assert "canary" not in repr(hint)
+
+
 def test_environment_api_projects_readiness_and_fails_closed(tmp_path):
     repository = tmp_path / "repository"
     _init_repository(repository)
@@ -191,6 +211,8 @@ def test_environment_api_projects_readiness_and_fails_closed(tmp_path):
     assert payload["environment"]["branch"]
     assert payload["environment"]["staged_count"] == 1
     assert payload["commit"] == {"ready": True, "blocker": None}
+    assert payload["github"]["status"] == "unavailable"
+    assert payload["github"]["reason_code"] == "repository_unavailable"
     assert payload["issue_pr"] == {"status": "not_connected"}
     assert payload["freshness"]["status"] == "fresh"
 

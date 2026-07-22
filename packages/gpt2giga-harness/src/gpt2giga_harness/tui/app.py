@@ -2730,6 +2730,14 @@ class WorkbenchTui(App[None]):
                 f"Git: {branch} @ {head} · {changes}",
                 f"{self.t('label.commit')}: {commit} · {self.t('label.push')}: {push}",
                 f"{self.t('label.issue_pr')}: {issue_pr} · {self.t('label.captured')}: {environment.captured_at or '—'}",
+                (
+                    f"{self.t('label.github')}: "
+                    f"{environment.github_repository or self.t('environment.not_connected')} "
+                    f"[{environment.github_status}] · {self.t('label.checks')}: "
+                    f"{environment.github_checks} · {self.t('label.actions')}: "
+                    f"{environment.github_actions} ({environment.github_run_count} "
+                    f"{self.t('environment.runs')})"
+                ),
                 f"Findings: {findings}",
             )
         )
