@@ -751,6 +751,8 @@ def _classify_failure(payload: bytes, *, default: str = "github_failed") -> str:
         return "rate_limited"
     if "not logged" in text or "authentication" in text or "bad credentials" in text:
         return "unauthenticated"
+    if "checks unavailable" in text or "checks are unavailable" in text:
+        return "checks_unavailable"
     if "could not resolve" in text or "network" in text or "connection" in text:
         return "network_unavailable"
     return default
@@ -819,10 +821,15 @@ def _safe_url(value: str, expected_host: str) -> str:
         raise GitHubEnrichmentError(
             "github_output_invalid", "GitHub URL is invalid."
         ) from exc
+    if parsed.hostname is not None and (
+        parsed.hostname.casefold() != expected_host.casefold()
+    ):
+        raise GitHubEnrichmentError(
+            "host_mismatch", "GitHub URL host does not match the repository."
+        )
     if (
         parsed.scheme != "https"
         or parsed.hostname is None
-        or parsed.hostname.casefold() != expected_host.casefold()
         or parsed.username is not None
         or parsed.password is not None
         or parsed.query

@@ -424,7 +424,7 @@ def _push_http_error(exc: EnvironmentPushError) -> HTTPException:
         else 404
         if exc.code == "preview_not_found"
         else 403
-        if exc.code == "policy_denied"
+        if exc.code in {"policy_denied", "permission_denied", "protected_branch"}
         else 409
     )
     return HTTPException(

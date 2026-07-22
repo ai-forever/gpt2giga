@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import subprocess
@@ -9,6 +10,7 @@ import time
 
 from fastapi.testclient import TestClient
 
+from gpt2giga_harness import github_environments
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.environments import EnvironmentSnapshot, HostedRepositoryHint
 from gpt2giga_harness.github_environments import (
@@ -193,6 +195,91 @@ def test_github_enrichment_fails_closed_for_auth_and_repository_mismatch(tmp_pat
 
     assert mismatch_snapshot.status == "unavailable"
     assert mismatch_snapshot.reason_code == "repository_mismatch"
+
+
+def test_github_enrichment_failure_security_matrix(tmp_path, monkeypatch):
+    environment = _environment(tmp_path)
+    monkeypatch.setattr(github_environments.shutil, "which", lambda _name: None)
+
+    missing = GitHubEnvironmentService(clock=lambda: CHECKED_AT).inspect(
+        environment, HINT
+    )
+
+    assert missing.status == "unavailable"
+    assert missing.reason_code == "gh_unavailable"
+
+    calls: list[tuple[str, ...]] = []
+
+    def must_not_run(command, cwd, timeout, cancel_event):
+        calls.append(command)
+        raise AssertionError("detached enrichment must not invoke gh")
+
+    detached = replace(
+        environment,
+        branch=None,
+        detached=True,
+        upstream=None,
+        push_ready=False,
+        push_blocker="detached_head",
+    )
+    detached_snapshot = GitHubEnvironmentService(
+        gh_executable="/fixture/gh",
+        command_runner=must_not_run,
+        clock=lambda: CHECKED_AT,
+    ).inspect(detached, HINT)
+
+    assert detached_snapshot.status == "unavailable"
+    assert detached_snapshot.reason_code == "branch_unavailable"
+    assert calls == []
+
+    def wrong_host(command, cwd, timeout, cancel_event):
+        if command[1:3] == ("auth", "status"):
+            return _CommandResult(0, b"", b"")
+        assert command[1:3] == ("repo", "view")
+        return _json_result(
+            {
+                "nameWithOwner": "ferriscorp/gigalo",
+                "url": "https://wrong.example/ferriscorp/gigalo",
+                "isFork": False,
+                "defaultBranchRef": {"name": "main"},
+            }
+        )
+
+    wrong_host_snapshot = GitHubEnvironmentService(
+        gh_executable="/fixture/gh",
+        command_runner=wrong_host,
+        clock=lambda: CHECKED_AT,
+    ).inspect(environment, HINT)
+
+    assert wrong_host_snapshot.status == "unavailable"
+    assert wrong_host_snapshot.reason_code == "host_mismatch"
+
+    def checks_unavailable(command, cwd, timeout, cancel_event):
+        if command[1:3] == ("auth", "status"):
+            return _CommandResult(0, b"", b"")
+        if command[1:3] == ("repo", "view"):
+            return _json_result(
+                {
+                    "nameWithOwner": "ferriscorp/gigalo",
+                    "url": "https://github.com/ferriscorp/gigalo",
+                    "isFork": False,
+                    "defaultBranchRef": {"name": "main"},
+                }
+            )
+        if command[1:3] == ("pr", "list"):
+            return _json_result([])
+        assert command[1:3] == ("run", "list")
+        return _CommandResult(1, b"", b"checks unavailable TOKEN=canary")
+
+    unavailable_checks = GitHubEnvironmentService(
+        gh_executable="/fixture/gh",
+        command_runner=checks_unavailable,
+        clock=lambda: CHECKED_AT,
+    ).inspect(environment, HINT)
+
+    assert unavailable_checks.status == "unavailable"
+    assert unavailable_checks.reason_code == "checks_unavailable"
+    assert "canary" not in repr(unavailable_checks)
 
 
 def test_gh_subprocess_is_killed_on_cancellation(tmp_path):

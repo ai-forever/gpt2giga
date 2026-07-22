@@ -6,7 +6,9 @@ from pathlib import Path
 import subprocess
 
 from fastapi.testclient import TestClient
+import pytest
 
+from gpt2giga_harness import environment_pull_requests
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.environment_pull_requests import (
     EnvironmentPullRequestService,
@@ -241,6 +243,154 @@ def test_environment_pull_request_recovers_network_loss_after_hosted_write(
     assert result.recovered is True
     assert service.apply(preview.id) == result
     assert len(hosted.write_inputs) == 1
+
+
+def test_environment_pull_request_rejects_missing_gh(tmp_path, monkeypatch):
+    git_executable = environment_pull_requests.shutil.which("git")
+    assert git_executable is not None
+    monkeypatch.setattr(
+        environment_pull_requests.shutil,
+        "which",
+        lambda name: None if name == "gh" else git_executable,
+    )
+
+    with pytest.raises(environment_pull_requests.EnvironmentPullRequestError) as error:
+        EnvironmentPullRequestService(tmp_path / "state")
+
+    assert error.value.code == "gh_unavailable"
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected_code"),
+    [
+        (b"not logged into github.com TOKEN=canary", "unauthenticated"),
+        (b"API rate limit exceeded TOKEN=canary", "rate_limited"),
+    ],
+)
+def test_environment_pull_request_rejects_auth_failures_content_free(
+    tmp_path, stderr, expected_code
+):
+    repository = _repository(tmp_path)
+
+    def auth_failure(command, cwd, input_bytes, timeout):
+        assert command[1:3] == ("auth", "status")
+        return environment_pull_requests._CommandResult(1, b"", stderr)
+
+    service = EnvironmentPullRequestService(
+        tmp_path / "state",
+        gh_executable="/fixture/gh",
+        command_runner=auth_failure,
+        clock=lambda: PR_CLOCK,
+        repository_resolver=lambda _snapshot: HOSTED_REPOSITORY,
+    )
+
+    with pytest.raises(environment_pull_requests.EnvironmentPullRequestError) as error:
+        service.preview(repository, title="Exact PR", body="")
+
+    assert error.value.code == expected_code
+    assert "canary" not in repr(error.value)
+
+
+@pytest.mark.parametrize(
+    ("repository_payload", "expected_code"),
+    [
+        (
+            {
+                "nameWithOwner": "fixture/repository",
+                "url": "https://wrong.example/fixture/repository",
+                "defaultBranchRef": {"name": "main"},
+                "isFork": False,
+            },
+            "host_mismatch",
+        ),
+        (
+            {
+                "nameWithOwner": "fixture/repository",
+                "url": "https://github.com/fixture/repository",
+                "defaultBranchRef": {"name": "main"},
+                "isFork": True,
+            },
+            "fork_unsupported",
+        ),
+        (
+            {
+                "nameWithOwner": "other/repository",
+                "url": "https://github.com/other/repository",
+                "defaultBranchRef": {"name": "main"},
+                "isFork": False,
+            },
+            "repository_mismatch",
+        ),
+    ],
+)
+def test_environment_pull_request_rejects_wrong_host_fork_and_cross_repository(
+    tmp_path, repository_payload, expected_code
+):
+    repository = _repository(tmp_path)
+    hosted = HostedFixture(_git_output(repository, "rev-parse", "HEAD"))
+
+    def repository_boundary(command, cwd, input_bytes, timeout):
+        if command[1:3] == ("repo", "view"):
+            return HostedFixture._json(repository_payload)
+        return hosted(command, cwd, input_bytes, timeout)
+
+    service = EnvironmentPullRequestService(
+        tmp_path / "state",
+        gh_executable="/fixture/gh",
+        command_runner=repository_boundary,
+        clock=lambda: PR_CLOCK,
+        repository_resolver=lambda _snapshot: HOSTED_REPOSITORY,
+    )
+
+    with pytest.raises(environment_pull_requests.EnvironmentPullRequestError) as error:
+        service.preview(repository, title="Exact PR", body="")
+
+    assert error.value.code == expected_code
+
+
+def test_environment_pull_request_classifies_write_permission_failure(tmp_path):
+    repository = _repository(tmp_path)
+    hosted = HostedFixture(_git_output(repository, "rev-parse", "HEAD"))
+
+    def permission_failure(command, cwd, input_bytes, timeout):
+        if command[1] == "api":
+            return environment_pull_requests._CommandResult(
+                1, b"", b"Resource not accessible by integration TOKEN=canary"
+            )
+        return hosted(command, cwd, input_bytes, timeout)
+
+    service = EnvironmentPullRequestService(
+        tmp_path / "state",
+        gh_executable="/fixture/gh",
+        command_runner=permission_failure,
+        clock=lambda: PR_CLOCK,
+        repository_resolver=lambda _snapshot: HOSTED_REPOSITORY,
+    )
+    preview = service.preview(repository, title="Exact PR", body="")
+
+    with pytest.raises(environment_pull_requests.EnvironmentPullRequestError) as error:
+        service.apply(preview.id)
+
+    assert error.value.code == "permission_denied"
+    assert "canary" not in repr(error.value)
+
+
+def test_environment_pull_request_rejects_detached_head(tmp_path):
+    repository = _repository(tmp_path)
+    _git(repository, "checkout", "--detach", "-q")
+    hosted = HostedFixture(_git_output(repository, "rev-parse", "HEAD"))
+    service = EnvironmentPullRequestService(
+        tmp_path / "state",
+        gh_executable="/fixture/gh",
+        command_runner=hosted,
+        clock=lambda: PR_CLOCK,
+        repository_resolver=lambda _snapshot: HOSTED_REPOSITORY,
+    )
+
+    with pytest.raises(environment_pull_requests.EnvironmentPullRequestError) as error:
+        service.preview(repository, title="Exact PR", body="")
+
+    assert error.value.code == "detached_head"
 
 
 def _repository(tmp_path: Path) -> Path:

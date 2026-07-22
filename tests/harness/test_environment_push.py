@@ -9,6 +9,7 @@ import pytest
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.environment_push import (
+    _CommandResult,
     EnvironmentPushError,
     EnvironmentPushService,
 )
@@ -227,6 +228,53 @@ def test_environment_push_previews_and_configures_new_upstream_explicitly(tmp_pa
         )
         == "origin/feature/new-upstream"
     )
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected_code"),
+    [
+        (
+            b"remote: GH006: Protected branch update failed TOKEN=canary",
+            "protected_branch",
+        ),
+        (
+            b"remote: Permission to fixture/repository denied TOKEN=canary",
+            "permission_denied",
+        ),
+    ],
+)
+def test_environment_push_classifies_hosted_security_failures_content_free(
+    tmp_path, monkeypatch, stderr, expected_code
+):
+    repository, remote = _repository(tmp_path)
+    service = _service(tmp_path / "state")
+    preview = service.preview(repository)
+    original_run = service._run
+
+    def reject_push(root: Path, *args: str):
+        if args and args[0] == "push":
+            return _CommandResult(1, b"", stderr)
+        return original_run(root, *args)
+
+    monkeypatch.setattr(service, "_run", reject_push)
+
+    with pytest.raises(EnvironmentPushError) as error:
+        service.apply(preview.id)
+
+    assert error.value.code == expected_code
+    assert "canary" not in repr(error.value)
+    assert _remote_head(remote) != preview.head
+
+
+def test_environment_push_rejects_detached_head_before_remote_access(tmp_path):
+    repository, _remote = _repository(tmp_path)
+    _git(repository, "checkout", "--detach", "-q")
+    service = _service(tmp_path / "state")
+
+    with pytest.raises(EnvironmentPushError) as error:
+        service.preview(repository)
+
+    assert error.value.code == "detached_head"
 
 
 def _service(state: Path) -> EnvironmentPushService:

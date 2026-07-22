@@ -947,11 +947,16 @@ def _safe_repository_url(value: str, hint: HostedRepositoryHint) -> str:
         raise EnvironmentPullRequestError(
             "hosted_output_invalid", "Hosted repository URL is invalid."
         ) from exc
+    if parsed.hostname is not None and (
+        parsed.hostname.casefold() != hint.host.casefold()
+    ):
+        raise EnvironmentPullRequestError(
+            "host_mismatch", "Hosted repository URL uses an unexpected host."
+        )
     expected_path = f"/{hint.name_with_owner}"
     if (
         parsed.scheme != "https"
         or parsed.hostname is None
-        or parsed.hostname.casefold() != hint.host.casefold()
         or parsed.username is not None
         or parsed.password is not None
         or parsed.query

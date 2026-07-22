@@ -379,7 +379,9 @@ class EnvironmentPushService:
                 recovered = self._recover_if_pushed(preview)
                 if recovered is not None:
                     return recovered
-                raise EnvironmentPushError("push_failed", "Git push failed.")
+                raise EnvironmentPushError(
+                    _classify_push_failure(result.stderr), "Git push failed."
+                )
             remote_head = self._remote_head(root, preview.remote, preview.remote_ref)
             if remote_head != preview.head:
                 raise EnvironmentPushError(
@@ -750,6 +752,30 @@ def _validate_ref_component(value: str, field: str) -> None:
         or _REF_COMPONENT_RE.fullmatch(text) is None
     ):
         raise EnvironmentPushError("ref_invalid", f"Git {field} is invalid.")
+
+
+def _classify_push_failure(payload: bytes) -> str:
+    """Classify bounded Git diagnostics without retaining their content."""
+    text = payload[:8192].decode("utf-8", "replace").casefold()
+    if "protected branch" in text or "gh006" in text:
+        return "protected_branch"
+    if any(
+        marker in text
+        for marker in (
+            "permission",
+            "denied",
+            "forbidden",
+            "not authorized",
+            "authentication failed",
+        )
+    ):
+        return "permission_denied"
+    if any(
+        marker in text
+        for marker in ("could not resolve", "network", "connection", "timed out")
+    ):
+        return "network_unavailable"
+    return "push_failed"
 
 
 def _mapping_hash(payload: Mapping[str, Any]) -> str:
