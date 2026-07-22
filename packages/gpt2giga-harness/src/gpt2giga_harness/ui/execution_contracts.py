@@ -226,6 +226,8 @@ _SUBPROCESS_PREFIXES = (
 _SUBPROCESS_EXACT = frozenset(
     {
         ("GET", "/api/environment"),
+        ("POST", "/api/environment/commit/apply"),
+        ("POST", "/api/environment/commit/preview"),
         ("POST", "/api/project/init"),
         ("POST", "/api/integrations/git/inspect"),
         ("POST", "/api/run"),
@@ -266,6 +268,8 @@ _SYNC_DURABLE_SUBMISSIONS = frozenset(
 _NATIVE_ASYNC = frozenset(
     {
         ("GET", "/api/environment"),
+        ("POST", "/api/environment/commit/apply"),
+        ("POST", "/api/environment/commit/preview"),
         ("GET", "/api/integrations/search"),
         ("POST", "/api/integrations/git/inspect"),
         ("POST", "/api/native/processes/{process_id}/input"),

@@ -24,6 +24,8 @@ from gpt2giga_harness.tui.client import (
     ApprovalSummary,
     ArtifactSummary,
     AttachmentSummary,
+    EnvironmentCommitApplySummary,
+    EnvironmentCommitPreviewSummary,
     EnvironmentSummary,
     FileCandidate,
     HandoffPreview,
@@ -58,6 +60,18 @@ class FakeClient:
         self.submitted: list[str] = []
         self.submitted_attachments: list[tuple[str, ...]] = []
         self.decisions: list[str] = []
+        self.environment_commit_approved = False
+        self.environment_commit_preview = EnvironmentCommitPreviewSummary(
+            "commit_" + "c" * 64,
+            "main",
+            "a" * 40,
+            "d" * 64,
+            1,
+            "feat: exact TUI commit",
+            "TUI Operator",
+            "tui@example.com",
+            "/tmp/demo",
+        )
         self.native_calls: list[tuple[str, object]] = []
         self.launch_calls: list[tuple[str, dict[str, object]]] = []
         self.native_snapshot = NativeTerminalSnapshot(
@@ -179,6 +193,52 @@ class FakeClient:
         )
         self.resources_snapshot = replace(self.resources_snapshot, preferences=saved)
         return saved
+
+    async def preview_environment_commit(
+        self, workspace, *, message, author_name, author_email
+    ):
+        assert workspace == "/tmp/demo"
+        self.environment_commit_preview = replace(
+            self.environment_commit_preview,
+            message=message,
+            author_name=author_name,
+            author_email=author_email,
+        )
+        return self.environment_commit_preview
+
+    async def apply_environment_commit(self, preview_id, *, workspace, session_id=None):
+        assert preview_id == self.environment_commit_preview.id
+        assert workspace == "/tmp/demo"
+        assert session_id == "sess_1"
+        if self.environment_commit_approved:
+            return EnvironmentCommitApplySummary(
+                self.environment_commit_preview,
+                commit_head="b" * 40,
+            )
+        return EnvironmentCommitApplySummary(
+            self.environment_commit_preview,
+            approval=ApprovalSummary(
+                "approval_commit",
+                "git.commit",
+                "Create the exact reviewed local Git commit.",
+                "pending",
+                enforcement="enforced_by_harness",
+                enforcement_owner="environment.commit",
+                policy_source="profile:interactive",
+                mutation_class="git.commit",
+                details=(
+                    "Author: TUI Operator <tui@example.com>",
+                    "Message: feat: exact TUI commit",
+                    "HEAD: " + "a" * 40,
+                    "Diff: " + "d" * 64,
+                ),
+            ),
+        )
+
+    async def decide_environment_approval(self, approval_id, decision):
+        assert approval_id == "approval_commit"
+        self.decisions.append(decision)
+        self.environment_commit_approved = decision == "allow_once"
 
     async def create_session(self, workspace, *, title=None, **intent):
         self.created += 1
@@ -478,6 +538,33 @@ async def test_tui_creates_and_resumes_session_from_keyboard():
         assert client.created == 1
         assert app.selected_session_id == "sess_2"
         assert any(session.title == "Created" for session in app.snapshot.sessions)
+
+
+@pytest.mark.anyio
+async def test_tui_commit_command_previews_approves_and_applies_exact_state():
+    client = FakeClient()
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await app._execute_registered_command("environment-commit")
+        await pilot.press(*"feat: exact TUI commit")
+        await pilot.press("enter")
+        await pilot.press(*"TUI Operator")
+        await pilot.press("enter")
+        await pilot.press(*"tui@example.com")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        approval_detail = str(app.screen.query_one("#approval-detail").render())
+        assert "Author: TUI Operator <tui@example.com>" in approval_detail
+        assert "Message: feat: exact TUI commit" in approval_detail
+        assert "Diff: " + "d" * 64 in approval_detail
+        await pilot.click("#approval-allow-once")
+        await pilot.pause()
+
+        assert client.decisions == ["allow_once"]
+        assert "Commit created: bbbbbbbb" in str(app.query_one("#status").render())
 
 
 @pytest.mark.anyio

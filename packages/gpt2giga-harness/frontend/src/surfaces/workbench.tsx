@@ -11,6 +11,9 @@ import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from
 import {
   type AttachmentUploadResponse,
   deleteCockpit,
+  type EnvironmentCommitApplyResponse,
+  type EnvironmentCommitPreview,
+  type EnvironmentCommitPreviewResponse,
   type EventProjection,
   type EventPayloadResponse,
   fetchCockpit,
@@ -134,16 +137,34 @@ type ProviderHandoffPreview = {
   };
 };
 
+type EnvironmentCommitDraft = {
+  authorEmail: string;
+  authorName: string;
+  message: string;
+};
+
+type EnvironmentCommitAction = {
+  draft: EnvironmentCommitDraft;
+  error: boolean;
+  notice: string | null;
+  pending: boolean;
+  preview: EnvironmentCommitPreview | undefined;
+  setField: (field: keyof EnvironmentCommitDraft, value: string) => void;
+  submit: () => void;
+};
+
 function EnvironmentCard({
   className = "",
   environment,
   error,
+  commitAction,
   locale,
   pending,
 }: {
   className?: string;
   environment: EnvironmentView | undefined;
   error: boolean;
+  commitAction: EnvironmentCommitAction;
   locale: LocalePreference;
   pending: boolean;
 }) {
@@ -174,6 +195,64 @@ function EnvironmentCard({
           <div><dt>{message(locale, "environmentCaptured")}</dt><dd>{formatTimestamp(environment.capturedAt, locale)}</dd></div>
         </dl>
       )}
+      <form
+        className="environment-commit-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          commitAction.submit();
+        }}
+      >
+        <label>
+          <span>{locale === "ru" ? "Сообщение коммита" : "Commit message"}</span>
+          <input
+            disabled={environment?.commit !== "ready" || commitAction.pending}
+            maxLength={4096}
+            onChange={(event) => commitAction.setField("message", event.target.value)}
+            required
+            value={commitAction.draft.message}
+          />
+        </label>
+        <div>
+          <label>
+            <span>{locale === "ru" ? "Имя автора" : "Author name"}</span>
+            <input
+              disabled={environment?.commit !== "ready" || commitAction.pending}
+              maxLength={200}
+              onChange={(event) => commitAction.setField("authorName", event.target.value)}
+              required
+              value={commitAction.draft.authorName}
+            />
+          </label>
+          <label>
+            <span>{locale === "ru" ? "Email автора" : "Author email"}</span>
+            <input
+              disabled={environment?.commit !== "ready" || commitAction.pending}
+              maxLength={200}
+              onChange={(event) => commitAction.setField("authorEmail", event.target.value)}
+              required
+              type="email"
+              value={commitAction.draft.authorEmail}
+            />
+          </label>
+        </div>
+        <button
+          className="primary-button"
+          disabled={environment?.commit !== "ready" || commitAction.pending}
+          type="submit"
+        >
+          {message(
+            locale,
+            commitAction.preview === undefined
+              ? "environmentCommit"
+              : "apply",
+          )}
+        </button>
+        {commitAction.notice === null ? null : (
+          <p className={commitAction.error ? "mutation-error" : "mutation-success"}>
+            {commitAction.notice}
+          </p>
+        )}
+      </form>
     </section>
   );
 }
@@ -194,6 +273,13 @@ export function WorkbenchSurface() {
   const [leftWidth, setLeftWidth] = useState(() => loadWidth("left", 264));
   const [rightWidth, setRightWidth] = useState(() => loadWidth("right", 320));
   const [prompt, setPrompt] = useState("");
+  const [environmentCommitDraft, setEnvironmentCommitDraft] = useState<EnvironmentCommitDraft>({
+    authorEmail: "",
+    authorName: "",
+    message: "",
+  });
+  const [environmentCommitPreview, setEnvironmentCommitPreview] = useState<EnvironmentCommitPreview>();
+  const [environmentCommitNotice, setEnvironmentCommitNotice] = useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const rememberedRunPreferences = useMemo(loadRunPreferences, []);
   const [runConfig, setRunConfig] = useState<RunConfig>(rememberedRunPreferences.config);
@@ -386,6 +472,44 @@ export function WorkbenchSurface() {
         to: "/cockpit-v2/work/$sessionId",
       });
       void queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() });
+    },
+  });
+  const environmentCommit = useMutation({
+    mutationFn: async () => {
+      if (sessionId === undefined) throw new Error("Session is not selected");
+      const preview = environmentCommitPreview ?? (
+        await mutateCockpit<EnvironmentCommitPreviewResponse>(
+          "/api/environment/commit/preview",
+          {
+            session_id: sessionId,
+            message: environmentCommitDraft.message,
+            author_name: environmentCommitDraft.authorName,
+            author_email: environmentCommitDraft.authorEmail,
+          },
+        )
+      ).preview;
+      return mutateCockpit<EnvironmentCommitApplyResponse>(
+        "/api/environment/commit/apply",
+        { preview_id: preview.id, session_id: sessionId },
+      );
+    },
+    onSuccess: async (response) => {
+      if (response.result === undefined) {
+        setEnvironmentCommitPreview(response.preview);
+        setEnvironmentCommitNotice(
+          locale === "ru"
+            ? "Подтвердите точный коммит во Inbox и примените снова."
+            : "Approve the exact commit in Inbox, then apply again.",
+        );
+        openInbox("approvals");
+        return;
+      }
+      setEnvironmentCommitPreview(undefined);
+      setEnvironmentCommitDraft((current) => ({ ...current, message: "" }));
+      setEnvironmentCommitNotice(
+        `${message(locale, "environmentCommit")}: ${response.result.commit_head.slice(0, 8)}`,
+      );
+      await queryClient.invalidateQueries({ queryKey: requestKeys.environment(sessionId ?? "pending") });
     },
   });
   const createSessionMutate = createSession.mutate;
@@ -650,6 +774,22 @@ export function WorkbenchSurface() {
   const environmentView = environment.data === undefined
     ? undefined
     : projectEnvironment(environment.data, { failedRefresh: environment.isError });
+  const environmentCommitAction: EnvironmentCommitAction = {
+    draft: environmentCommitDraft,
+    error: environmentCommit.isError,
+    notice: environmentCommit.isError
+      ? (environmentCommit.error instanceof Error ? environmentCommit.error.message : "Commit failed")
+      : environmentCommitNotice,
+    pending: environmentCommit.isPending,
+    preview: environmentCommitPreview,
+    setField: (field, value) => {
+      setEnvironmentCommitDraft((current) => ({ ...current, [field]: value }));
+      setEnvironmentCommitPreview(undefined);
+      setEnvironmentCommitNotice(null);
+      environmentCommit.reset();
+    },
+    submit: () => environmentCommit.mutate(),
+  };
   const selectedHarness = harnesses.data?.harnesses.find(
     (harness) => harness.spec.id === runConfig.harnessId,
   );
@@ -993,6 +1133,7 @@ export function WorkbenchSurface() {
             </header>
             <EnvironmentCard
               className="mobile-environment"
+              commitAction={environmentCommitAction}
               environment={environmentView}
               error={environment.isError}
               locale={locale}
@@ -1547,6 +1688,7 @@ export function WorkbenchSurface() {
               ) : null}
             </div>
             <EnvironmentCard
+              commitAction={environmentCommitAction}
               environment={environmentView}
               error={environment.isError}
               locale={locale}

@@ -94,6 +94,35 @@ export interface EnvironmentResponse {
   freshness: { captured_at: string; status: string };
 }
 
+export interface EnvironmentCommitPreview {
+  id: string;
+  branch: string;
+  head: string | null;
+  diff_sha256: string;
+  staged_count: number;
+  message: string;
+  author: { name: string; email: string };
+  worktree_root: string;
+}
+
+export interface EnvironmentCommitPreviewResponse {
+  preview: EnvironmentCommitPreview;
+}
+
+export interface EnvironmentCommitApplyResponse {
+  approval_required?: boolean;
+  approval?: ApprovalRequest;
+  preview: EnvironmentCommitPreview;
+  result?: {
+    preview_id: string;
+    commit_head: string;
+    parent_head: string | null;
+    completed_at: string;
+    recovered: boolean;
+  };
+  idempotent_replay?: boolean;
+}
+
 export interface GitHubCountRollup {
   status: string;
   total: number;

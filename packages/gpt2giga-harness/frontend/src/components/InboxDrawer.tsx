@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
 
 import { mutateCockpit } from "../api";
 import { message } from "../messages";
@@ -13,7 +14,12 @@ import { formatTimestamp, statusTone } from "../surface-model";
 
 export type InboxKind = "approvals" | "attention";
 
-export function InboxDrawer({
+const CommitApprovalPreview = lazy(async () => {
+  const module = await import("../inspectors/InspectorFrame");
+  return { default: module.CommitApprovalPreview };
+});
+
+export default function InboxDrawer({
   kind,
   onClose,
 }: {
@@ -85,6 +91,11 @@ export function InboxDrawer({
                   <div><dt>{message(locale, "run")}</dt><dd>{approval.run_id ?? "—"}</dd></div>
                   <div><dt>{message(locale, "created")}</dt><dd>{formatTimestamp(approval.created_at, locale)}</dd></div>
                 </dl>
+                {approval.action === "git.commit" && (
+                  <Suspense fallback={null}>
+                    <CommitApprovalPreview preview={approval.preview} />
+                  </Suspense>
+                )}
                 {approval.status === "pending" ? (
                   <div className="decision-actions">
                     <button

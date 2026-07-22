@@ -40,6 +40,11 @@ from gpt2giga_harness.environments import (
     EnvironmentSnapshot,
     GitEnvironmentProvider,
 )
+from gpt2giga_harness.environment_actions import (
+    EnvironmentCommitError,
+    EnvironmentCommitService,
+    GovernedEnvironmentCommitService,
+)
 from gpt2giga_harness.github_environments import (
     GitHubEnvironmentService,
     GitHubEnvironmentSnapshot,
@@ -54,7 +59,7 @@ from gpt2giga_harness.project import (
 )
 from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga_harness.runtime.models import ApprovalStatus
-from gpt2giga_harness.runtime.policy import approval_request_to_dict
+from gpt2giga_harness.runtime.policy import PolicyEngine, approval_request_to_dict
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.session_exports import write_session_export
@@ -261,6 +266,31 @@ class EnvironmentSummary:
 
 
 @dataclass(frozen=True)
+class EnvironmentCommitPreviewSummary:
+    """Exact author/message and immutable Git state shown before approval."""
+
+    id: str
+    branch: str
+    head: str | None
+    diff_sha256: str
+    staged_count: int
+    message: str
+    author_name: str
+    author_email: str
+    worktree_root: str
+
+
+@dataclass(frozen=True)
+class EnvironmentCommitApplySummary:
+    """Governed commit outcome for either approval or exact completion."""
+
+    preview: EnvironmentCommitPreviewSummary
+    approval: ApprovalSummary | None = None
+    commit_head: str | None = None
+    idempotent_replay: bool = False
+
+
+@dataclass(frozen=True)
 class NavigationSnapshot:
     """One authoritative, presentation-bounded TUI resnapshot."""
 
@@ -322,6 +352,7 @@ class ApprovalSummary:
     network: str = "not declared"
     mutation_class: str = "unknown"
     decision_scopes: tuple[str, ...] = ("allow_once", "deny")
+    details: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -462,6 +493,30 @@ class WorkbenchClient(Protocol):
         self, values: Mapping[str, Any], *, expected_revision: str
     ) -> PreferenceSnapshot:
         """Persist one exact private Workbench preference revision."""
+
+    async def preview_environment_commit(
+        self,
+        workspace: str,
+        *,
+        message: str,
+        author_name: str,
+        author_email: str,
+    ) -> EnvironmentCommitPreviewSummary:
+        """Create one exact local commit preview."""
+
+    async def apply_environment_commit(
+        self,
+        preview_id: str,
+        *,
+        workspace: str,
+        session_id: str | None = None,
+    ) -> EnvironmentCommitApplySummary:
+        """Request approval or apply the exact commit once."""
+
+    async def decide_environment_approval(
+        self, approval_id: str, decision: str
+    ) -> None:
+        """Decide one hash-bound environment approval."""
 
     async def create_session(
         self,
@@ -648,6 +703,19 @@ class InProcessWorkbenchClient:
         )
         self.settings_store = HarnessSettingsStore(config.data_dir, config)
         self.runtime_store = RuntimeCoordinationStore(config.data_dir)
+        try:
+            self.environment_commit_service = EnvironmentCommitService(config.data_dir)
+        except EnvironmentCommitError:
+            self.environment_commit_service = None
+        self.governed_environment_commit_service = (
+            GovernedEnvironmentCommitService(
+                self.environment_commit_service,
+                self.runtime_store,
+                PolicyEngine(self.runtime_store),
+            )
+            if self.environment_commit_service is not None
+            else None
+        )
         self.attachment_store = FilesystemAttachmentStore(config.data_dir)
         self.integration_service = IntegrationFlowService(config.data_dir)
         self.github_environment_service = (
@@ -677,6 +745,62 @@ class InProcessWorkbenchClient:
     ) -> WorkbenchStatePage:
         """Read the same bounded backbone contract used by attach mode."""
         return self.workbench_backbone.read(cursor, limit=limit)
+
+    async def preview_environment_commit(
+        self,
+        workspace: str,
+        *,
+        message: str,
+        author_name: str,
+        author_email: str,
+    ) -> EnvironmentCommitPreviewSummary:
+        if self.environment_commit_service is None:
+            raise WorkbenchClientError("Git commit action is unavailable")
+        preview = await asyncio.to_thread(
+            self.environment_commit_service.preview,
+            workspace,
+            message=message,
+            author_name=author_name,
+            author_email=author_email,
+        )
+        return _environment_commit_preview_summary(preview.to_dict())
+
+    async def apply_environment_commit(
+        self,
+        preview_id: str,
+        *,
+        workspace: str,
+        session_id: str | None = None,
+    ) -> EnvironmentCommitApplySummary:
+        if (
+            self.environment_commit_service is None
+            or self.governed_environment_commit_service is None
+        ):
+            raise WorkbenchClientError("Git commit action is unavailable")
+        preview = self.environment_commit_service.get_preview(preview_id)
+        resolved = Path(workspace).expanduser().resolve()
+        root = Path(preview.worktree_root).resolve()
+        if resolved != root and not resolved.is_relative_to(root):
+            raise WorkbenchClientError("workspace changed after commit preview")
+        project_id = preview.scope_id
+        if session_id is not None:
+            session = self.store.get_session(session_id)
+            project_id = str(session.metadata.get("project_id") or "") or project_id
+        try:
+            outcome = await asyncio.to_thread(
+                self.governed_environment_commit_service.apply_or_request,
+                preview_id,
+                project_id=project_id,
+                session_id=session_id,
+            )
+        except RuntimeError as exc:
+            raise WorkbenchClientError(str(exc)) from exc
+        return _environment_commit_outcome_summary(outcome)
+
+    async def decide_environment_approval(
+        self, approval_id: str, decision: str
+    ) -> None:
+        self.sessions.decide_approval(approval_id, decision)
 
     async def resources(
         self, session_id: str | None = None
@@ -1503,6 +1627,52 @@ class AttachedWorkbenchClient:
             {"values": dict(values), "expected_revision": expected_revision},
         )
         return preference_snapshot_from_dict(_mapping(response.get("preferences")))
+
+    async def preview_environment_commit(
+        self,
+        workspace: str,
+        *,
+        message: str,
+        author_name: str,
+        author_email: str,
+    ) -> EnvironmentCommitPreviewSummary:
+        response = await self._request(
+            "POST",
+            "/api/environment/commit/preview",
+            {
+                "workspace": workspace,
+                "message": message,
+                "author_name": author_name,
+                "author_email": author_email,
+            },
+        )
+        return _environment_commit_preview_summary(_mapping(response.get("preview")))
+
+    async def apply_environment_commit(
+        self,
+        preview_id: str,
+        *,
+        workspace: str,
+        session_id: str | None = None,
+    ) -> EnvironmentCommitApplySummary:
+        payload: dict[str, Any] = {
+            "preview_id": preview_id,
+            "workspace": workspace,
+        }
+        if session_id is not None:
+            payload.pop("workspace")
+            payload["session_id"] = session_id
+        response = await self._request("POST", "/api/environment/commit/apply", payload)
+        return _environment_commit_apply_summary(response)
+
+    async def decide_environment_approval(
+        self, approval_id: str, decision: str
+    ) -> None:
+        await self._request(
+            "POST",
+            f"/api/approvals/{_path_identity(approval_id)}/decision",
+            {"decision": decision},
+        )
 
     async def load(
         self,
@@ -3286,6 +3456,22 @@ def _approval_summary(value: Mapping[str, Any]) -> ApprovalSummary:
         if hash_bound or not value.get("run_id")
         else ("allow_once", "allow_run", "deny")
     )
+    details: list[str] = []
+    author = preview.get("author")
+    if isinstance(author, Mapping):
+        details.append(
+            "Author: "
+            + _display_text(author.get("name") or "unknown")
+            + " <"
+            + _display_text(author.get("email") or "unknown")
+            + ">"
+        )
+    if preview.get("message") is not None:
+        details.append("Message: " + _display_text(preview.get("message")))
+    if preview.get("head") is not None:
+        details.append("HEAD: " + _display_text(preview.get("head")))
+    if preview.get("diff_sha256") is not None:
+        details.append("Diff: " + _display_text(preview.get("diff_sha256")))
     return ApprovalSummary(
         id=_required_identity(value.get("id"), "approval id"),
         action=_display_text(value.get("action") or "approval"),
@@ -3305,6 +3491,57 @@ def _approval_summary(value: Mapping[str, Any]) -> ApprovalSummary:
             preview.get("mutation_class") or value.get("action") or "unknown"
         ),
         decision_scopes=scopes,
+        details=tuple(details),
+    )
+
+
+def _environment_commit_preview_summary(
+    value: Mapping[str, Any],
+) -> EnvironmentCommitPreviewSummary:
+    author = _mapping(value.get("author"))
+    return EnvironmentCommitPreviewSummary(
+        id=_required_identity(value.get("id"), "commit preview id"),
+        branch=_display_text(value.get("branch") or "detached"),
+        head=_optional_text(value.get("head")),
+        diff_sha256=_required_identity(value.get("diff_sha256"), "diff hash"),
+        staged_count=max(0, int(value.get("staged_count", 0))),
+        message=_display_text(value.get("message") or ""),
+        author_name=_display_text(author.get("name") or ""),
+        author_email=_display_text(author.get("email") or ""),
+        worktree_root=_display_text(value.get("worktree_root") or ""),
+    )
+
+
+def _environment_commit_apply_summary(
+    value: Mapping[str, Any],
+) -> EnvironmentCommitApplySummary:
+    preview = _environment_commit_preview_summary(_mapping(value.get("preview")))
+    approval_payload = value.get("approval")
+    result = _mapping(value.get("result"))
+    return EnvironmentCommitApplySummary(
+        preview=preview,
+        approval=(
+            _approval_summary(approval_payload)
+            if isinstance(approval_payload, Mapping)
+            else None
+        ),
+        commit_head=_optional_text(result.get("commit_head")),
+        idempotent_replay=bool(value.get("idempotent_replay", False)),
+    )
+
+
+def _environment_commit_outcome_summary(outcome: Any) -> EnvironmentCommitApplySummary:
+    return EnvironmentCommitApplySummary(
+        preview=_environment_commit_preview_summary(outcome.preview.to_dict()),
+        approval=(
+            _approval_summary(approval_request_to_dict(outcome.approval))
+            if outcome.approval is not None
+            else None
+        ),
+        commit_head=(
+            outcome.result.commit_head if outcome.result is not None else None
+        ),
+        idempotent_replay=outcome.idempotent_replay,
     )
 
 

@@ -21,6 +21,7 @@ class PermissionAction(str, Enum):
     NETWORK_CONNECT = "network.connect"
     MCP_SERVER_START = "mcp.server.start"
     MCP_TOOL_CALL = "mcp.tool.call"
+    GIT_COMMIT = "git.commit"
     GIT_APPLY = "git.apply"
     GIT_BRANCH_CREATE = "git.branch.create"
     EXTERNAL_WRITE = "external.write"
@@ -251,6 +252,7 @@ INTERACTIVE_PROFILE = PermissionProfile(
         PermissionAction.NETWORK_CONNECT: PolicyDecision.ALLOW,
         PermissionAction.MCP_SERVER_START: PolicyDecision.ASK,
         PermissionAction.MCP_TOOL_CALL: PolicyDecision.ASK,
+        PermissionAction.GIT_COMMIT: PolicyDecision.ASK,
         PermissionAction.GIT_APPLY: PolicyDecision.ASK,
         PermissionAction.GIT_BRANCH_CREATE: PolicyDecision.ASK,
         PermissionAction.EXTERNAL_WRITE: PolicyDecision.ASK,

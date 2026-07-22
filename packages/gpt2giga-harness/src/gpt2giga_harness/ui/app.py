@@ -69,6 +69,11 @@ from gpt2giga_harness.ui.routers.workbench_resources import (
 )
 from gpt2giga_harness.ui.routers.environments import router as environments_router
 from gpt2giga_harness.github_environments import GitHubEnvironmentService
+from gpt2giga_harness.environment_actions import (
+    EnvironmentCommitError,
+    EnvironmentCommitService,
+    GovernedEnvironmentCommitService,
+)
 from gpt2giga_harness.harnesses.attachment_plan import attachment_capability_error
 from gpt2giga_harness.evals import (
     EvalRunNotFoundError,
@@ -332,6 +337,7 @@ def create_app(
     grouped_integration_service: GroupedIntegrationService | None = None,
     skill_library_service: SkillLibraryService | None = None,
     github_environment_service: GitHubEnvironmentService | None = None,
+    environment_commit_service: EnvironmentCommitService | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
@@ -371,6 +377,11 @@ def create_app(
     github_environment_service = (
         github_environment_service or GitHubEnvironmentService()
     )
+    if environment_commit_service is None:
+        try:
+            environment_commit_service = EnvironmentCommitService(config.data_dir)
+        except EnvironmentCommitError:
+            environment_commit_service = None
     grouped_integration_service = (
         grouped_integration_service
         or GroupedIntegrationService(
@@ -474,6 +485,16 @@ def create_app(
     app.state.harness_grouped_integration_service = grouped_integration_service
     app.state.harness_skill_library_service = skill_library_service
     app.state.harness_github_environment_service = github_environment_service
+    app.state.harness_environment_commit_service = environment_commit_service
+    app.state.harness_governed_environment_commit_service = (
+        GovernedEnvironmentCommitService(
+            environment_commit_service,
+            runtime_store,
+            policy_engine,
+        )
+        if runtime_store is not None and environment_commit_service is not None
+        else None
+    )
 
     def _approval_gate(
         action: PermissionAction,

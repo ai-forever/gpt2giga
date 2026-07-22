@@ -153,6 +153,14 @@ COMMAND_REGISTRY: tuple[CommandSpec, ...] = (
         show_in_footer=True,
     ),
     CommandSpec(
+        "environment-commit",
+        "/commit",
+        "environment_commit",
+        "command.environment_commit",
+        "command.environment_commit.help",
+        requires_session=True,
+    ),
+    CommandSpec(
         "files", "/files", "files", "command.files", "command.files.help", "a", True
     ),
     CommandSpec(

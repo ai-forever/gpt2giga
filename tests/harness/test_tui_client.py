@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from gpt2giga_harness import entrypoint
+from gpt2giga_harness import environment_actions
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.sessions.models import HarnessMessage, HarnessStoredEvent
 from gpt2giga_harness.sessions.store import new_id, utc_now
@@ -35,6 +36,24 @@ from gpt2giga_harness.workbench_resources import (
     preference_snapshot_to_dict,
     resource_snapshot_to_dict,
 )
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _git_output(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
 
 @pytest.mark.anyio
@@ -84,6 +103,23 @@ async def test_in_process_client_navigates_projects_and_sessions(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_in_process_client_starts_without_git_and_commit_fails_closed(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(environment_actions.shutil, "which", lambda _command: None)
+
+    client = InProcessWorkbenchClient(HarnessConfig(data_dir=str(tmp_path / "state")))
+
+    with pytest.raises(WorkbenchClientError, match="Git commit action is unavailable"):
+        await client.preview_environment_commit(
+            str(tmp_path),
+            message="test: unavailable git",
+            author_name="Workbench Operator",
+            author_email="operator@example.com",
+        )
+
+
+@pytest.mark.anyio
 async def test_in_process_client_resolves_an_exact_session_deep_link_workspace(
     tmp_path,
 ):
@@ -99,6 +135,56 @@ async def test_in_process_client_resolves_an_exact_session_deep_link_workspace(
 
     assert snapshot.project.root == str(second.resolve())
     assert snapshot.selected_session_id == selected.id
+
+
+@pytest.mark.anyio
+async def test_in_process_client_uses_governed_environment_commit_authority(tmp_path):
+    repository = tmp_path / "repository"
+    _git(tmp_path, "init", "-q", str(repository))
+    _git(repository, "config", "user.name", "Fixture")
+    _git(repository, "config", "user.email", "fixture@example.com")
+    tracked = repository / "tracked.txt"
+    tracked.write_text("one\n", encoding="utf-8")
+    _git(repository, "add", "tracked.txt")
+    _git(repository, "commit", "-qm", "fixture")
+    tracked.write_text("one\ntwo\n", encoding="utf-8")
+    _git(repository, "add", "tracked.txt")
+    client = InProcessWorkbenchClient(HarnessConfig(data_dir=str(tmp_path / "state")))
+    session = client.sessions.create_session({"workspace": str(repository)})
+
+    preview = await client.preview_environment_commit(
+        str(repository),
+        message="feat: in-process commit",
+        author_name="TUI Operator",
+        author_email="tui@example.com",
+    )
+    requested = await client.apply_environment_commit(
+        preview.id,
+        workspace=str(repository),
+        session_id=session.id,
+    )
+
+    assert requested.approval is not None
+    assert requested.approval.action == "git.commit"
+    await client.decide_environment_approval(
+        requested.approval.id,
+        "allow_once",
+    )
+    committed = await client.apply_environment_commit(
+        preview.id,
+        workspace=str(repository),
+        session_id=session.id,
+    )
+    replay = await client.apply_environment_commit(
+        preview.id,
+        workspace=str(repository),
+        session_id=session.id,
+    )
+
+    assert committed.commit_head == _git_output(repository, "rev-parse", "HEAD")
+    assert replay.commit_head == committed.commit_head
+    assert replay.idempotent_replay is True
+    assert _git_output(repository, "rev-list", "--count", "HEAD") == "2"
 
 
 @pytest.mark.anyio

@@ -27,6 +27,8 @@ from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
 from gpt2giga_harness.tui.client import (
     AttachmentSummary,
     ApprovalSummary,
+    EnvironmentCommitApplySummary,
+    EnvironmentCommitPreviewSummary,
     FileCandidate,
     HandoffPreview,
     MAX_NATIVE_SCROLLBACK_CHARS,
@@ -799,6 +801,7 @@ class ApprovalScreen(ModalScreen[str | None]):
                 f"Revision: {self.binding.revision}",
                 f"Generation: {self.binding.generation}",
                 f"Decision scopes: {scopes}",
+                *self.approval.details,
             )
         )
         with Vertical(id="approval-dialog"):
@@ -1292,6 +1295,9 @@ class WorkbenchTui(App[None]):
         self._bindings.key_to_bindings.update(localized_bindings.key_to_bindings)
         self._runtime_overrides: dict[str, str] = {}
         self.resource_snapshot: WorkbenchResourceSnapshot | None = None
+        self._commit_draft: dict[str, str] = {}
+        self._commit_preview: EnvironmentCommitPreviewSummary | None = None
+        self._commit_approval: ApprovalSummary | None = None
         self.sub_title = self.t("app.subtitle")
 
     def compose(self) -> ComposeResult:
@@ -1524,6 +1530,136 @@ class WorkbenchTui(App[None]):
 
     async def action_refresh(self) -> None:
         await self._reload()
+
+    def action_environment_commit(self) -> None:
+        if self.snapshot is None or not self.snapshot.environment.commit_ready:
+            self._set_status(self.t("environment.commit.not_ready"))
+            return
+        self._commit_draft = {}
+        self._commit_preview = None
+        self._commit_approval = None
+        self.push_screen(
+            TextPrompt(
+                self.t("environment.commit.message"),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            self._commit_message_chosen,
+        )
+
+    def _commit_message_chosen(self, value: str | None) -> None:
+        if not value:
+            return
+        self._commit_draft["message"] = value
+        self.push_screen(
+            TextPrompt(
+                self.t("environment.commit.author_name"),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            self._commit_author_name_chosen,
+        )
+
+    def _commit_author_name_chosen(self, value: str | None) -> None:
+        if not value:
+            return
+        self._commit_draft["author_name"] = value
+        self.push_screen(
+            TextPrompt(
+                self.t("environment.commit.author_email"),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            self._commit_author_email_chosen,
+        )
+
+    async def _commit_author_email_chosen(self, value: str | None) -> None:
+        if not value or self.snapshot is None:
+            return
+        self._commit_draft["author_email"] = value
+        try:
+            preview = await self.client.preview_environment_commit(
+                self.snapshot.project.root,
+                message=self._commit_draft["message"],
+                author_name=self._commit_draft["author_name"],
+                author_email=value,
+            )
+            self._commit_preview = preview
+            outcome = await self.client.apply_environment_commit(
+                preview.id,
+                workspace=self.snapshot.project.root,
+                session_id=self.selected_session_id,
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        await self._handle_environment_commit_outcome(outcome)
+
+    async def _handle_environment_commit_outcome(
+        self, outcome: EnvironmentCommitApplySummary
+    ) -> None:
+        if outcome.commit_head is not None:
+            self._commit_approval = None
+            await self._reload()
+            self._set_status(
+                self.t("environment.commit.completed").format(
+                    head=outcome.commit_head[:8]
+                )
+            )
+            return
+        if outcome.approval is None:
+            self._set_status(self.t("status.error"))
+            return
+        self._commit_approval = outcome.approval
+        preview = outcome.preview
+        binding = RunActionBinding(
+            session_id=self.selected_session_id or "environment",
+            run_id="environment-commit",
+            revision=preview.diff_sha256,
+            generation=0,
+            idempotency_key=preview.id,
+        )
+        self.push_screen(
+            ApprovalScreen(
+                outcome.approval,
+                binding,
+                title=self.t("environment.commit.approval"),
+                allow_once=self.t("approval.allow_once"),
+                allow_run=self.t("approval.allow_run"),
+                deny=self.t("button.deny"),
+                cancel=self.t("dialog.cancel"),
+            ),
+            self._environment_commit_approval_decided,
+        )
+
+    async def _environment_commit_approval_decided(self, decision: str | None) -> None:
+        preview = self._commit_preview
+        approval = self._commit_approval
+        if (
+            decision is None
+            or preview is None
+            or approval is None
+            or self.snapshot is None
+        ):
+            return
+        try:
+            await self.client.decide_environment_approval(
+                approval.id,
+                decision,
+            )
+            if decision == "deny":
+                self._commit_approval = None
+                self._set_status(self.t("environment.commit.denied"))
+                return
+            outcome = await self.client.apply_environment_commit(
+                preview.id,
+                workspace=self.snapshot.project.root,
+                session_id=self.selected_session_id,
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        await self._handle_environment_commit_outcome(outcome)
 
     def action_choose_project(self) -> None:
         self.push_screen(

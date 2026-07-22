@@ -17,6 +17,7 @@ from gpt2giga_harness.runtime.policy import (
     SCHEDULE_RUN_NOW_OWNER,
     PermissionAction,
 )
+from gpt2giga_harness.environment_actions import ENVIRONMENT_COMMIT_OWNER
 
 UNSAFE_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -224,6 +225,15 @@ CONFORMANCE_EVIDENCE = {
             behaviors=frozenset({ConformanceBehavior.ALLOW, ConformanceBehavior.ASK}),
             test_nodes=(
                 "tests/harness/test_schedules.py::test_schedule_api_requires_exact_test_hash_and_online_worker",
+            ),
+        ),
+        ConformanceEvidence(
+            id="policy.environment_commit",
+            behaviors=frozenset(ConformanceBehavior),
+            test_nodes=(
+                "tests/harness/test_environment_actions.py::test_environment_commit_api_requires_exact_approval_and_is_idempotent",
+                "tests/harness/test_environment_actions.py::test_environment_commit_rejects_stale_preview_before_approval_consumption",
+                "tests/harness/test_environment_actions.py::test_environment_commit_validation_errors_are_content_free",
             ),
         ),
         ConformanceEvidence(
@@ -608,6 +618,23 @@ MUTATION_ROUTE_CONTRACTS = (
         NATIVE_PROCESS_SPAWN_OWNER,
         actions=(PermissionAction.PROCESS_SPAWN,),
         evidence=(*_POLICY, "policy.native_process"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/commit/preview",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "environment.commit_preview",
+        evidence=(*_AUTH, "policy.environment_commit"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/commit/apply",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.POLICY_ENGINE,
+        ENVIRONMENT_COMMIT_OWNER,
+        actions=(PermissionAction.GIT_COMMIT,),
+        evidence=(*_POLICY, "policy.environment_commit"),
     ),
     _route(
         "POST",

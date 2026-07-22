@@ -432,6 +432,13 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .environment-heading span { border: 1px solid var(--border); border-radius: 999px; background: var(--surface-muted); color: var(--muted); padding: 3px 7px; font-size: 9px; font-weight: 700; text-transform: uppercase; }
 .environment-card[data-state="fresh"] .environment-heading span { border-color: color-mix(in srgb, var(--success) 45%, var(--border)); color: var(--success); }
 .environment-card .plan-fields dd { min-width: 0; overflow-wrap: anywhere; }
+.environment-commit-form { display: grid; gap: 9px; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.environment-commit-form > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.environment-commit-form label { min-width: 0; display: grid; gap: 4px; color: var(--muted); font-size: 10px; }
+.environment-commit-form input { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); padding: 7px 8px; font: inherit; }
+.environment-commit-form input:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 20%, transparent); }
+.environment-commit-form button { justify-self: stretch; }
+.environment-commit-form p { margin: 0; overflow-wrap: anywhere; }
 .provider-handoff-instruction { display: grid; gap: 6px; border-left: 2px solid var(--accent); padding: 7px 9px; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .provider-handoff-instruction code { overflow-wrap: anywhere; color: var(--text); }
 .inspector-section { padding: 15px 0; border-top: 1px solid var(--border); }
@@ -520,6 +527,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .inbox-item.read { opacity: .68; }
 .inbox-item-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .inbox-item p { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.commit-approval-preview { margin-top: 8px; border-top: 1px solid var(--border); }
+.commit-approval-preview code { overflow-wrap: anywhere; color: var(--text); font-size: 9px; }
 .inbox-item-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .inbox-item-actions a { color: var(--accent); font-size: 12px; font-weight: 700; }
 
@@ -555,6 +564,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .run-readiness { display: none; }
   .mobile-environment { display: block; margin: 0 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 12px; }
   .mobile-environment .plan-fields > div { grid-template-columns: minmax(76px, .7fr) minmax(0, 1.3fr); }
+  .mobile-environment .environment-commit-form > div { grid-template-columns: 1fr; }
   .runs-list-pane { max-height: 310px; border-right: 0; border-bottom: 1px solid var(--border); }
   .run-detail-header { padding: 12px 14px; }
   .title-line h1 { font-size: 18px; }
