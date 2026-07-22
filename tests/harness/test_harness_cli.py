@@ -428,6 +428,74 @@ def test_cli_integration_flow_matches_api_preview_status_and_native_apply(
     assert applied["flow"]["rollback_available"] is True
 
 
+def test_cli_extension_pack_preview_uses_shared_group_authority(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+
+    class FakeGroups:
+        def __init__(self, data_dir):
+            captured["data_dir"] = str(data_dir)
+
+        def preview(self, request):
+            captured["request"] = request
+            return {
+                "group": {"id": "group_" + "a" * 32},
+                "plan": {
+                    "package": {"id": request["pack_id"]},
+                    "plan_id": "plan_" + "b" * 64,
+                    "compatibility": [
+                        {
+                            "target": "codex",
+                            "status": "supported",
+                            "included": True,
+                        }
+                    ],
+                },
+            }
+
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(cli, "GroupedIntegrationService", FakeGroups)
+
+    assert (
+        cli.main(
+            [
+                "integration",
+                "pack-preview",
+                "--pack-id",
+                "example.portable-pack",
+                "--pack-version",
+                "1.0.0",
+                "--skill-catalog-id",
+                "skill-pin",
+                "--mcp-catalog-id",
+                "mcp-pin",
+                "--mcp-configuration-json",
+                '{"selection":{"kind":"remote"}}',
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    assert json.loads(capsys.readouterr().out)["plan"]["package"]["id"] == (
+        "example.portable-pack"
+    )
+    assert captured["request"] == {
+        "component": "extension_pack",
+        "pack_id": "example.portable-pack",
+        "pack_version": "1.0.0",
+        "skill_catalog_id": "skill-pin",
+        "mcp_catalog_id": "mcp-pin",
+        "scope": "managed_home",
+        "workspace": None,
+        "target_mode": "all_supported",
+        "mcp_configuration": {"selection": {"kind": "remote"}},
+    }
+
+
 def test_cli_doctor_exports_support_report_and_fails_ci_threshold(
     capsys,
     monkeypatch,

@@ -66,6 +66,9 @@ from gpt2giga_harness.integration_flows import (
 )
 from gpt2giga_harness.integration_groups import (
     GroupedIntegrationService,
+    IntegrationGroupConflictError,
+    IntegrationGroupError,
+    IntegrationGroupNotFoundError,
     integration_group_record_to_dict,
 )
 from gpt2giga_harness.integration_scaffold import scaffold_integration_package
@@ -273,6 +276,12 @@ def main(argv: list[str] | None = None) -> int:
     except (IntegrationFlowConflictError, IntegrationFlowError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    except IntegrationGroupNotFoundError as exc:
+        print(f"Unknown integration group: {exc.args[0]}", file=sys.stderr)
+        return 2
+    except (IntegrationGroupConflictError, IntegrationGroupError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -463,6 +472,20 @@ def build_parser() -> argparse.ArgumentParser:
     integration_group_preview.add_argument("--configuration-json", default="{}")
     integration_group_preview.add_argument("--json", action="store_true")
     integration_group_preview.set_defaults(handler=_handle_integration_group_preview)
+    integration_pack_preview = integration_subparsers.add_parser("pack-preview")
+    integration_pack_preview.add_argument("--pack-id", required=True)
+    integration_pack_preview.add_argument("--pack-version", required=True)
+    integration_pack_preview.add_argument("--skill-catalog-id", required=True)
+    integration_pack_preview.add_argument("--mcp-catalog-id", required=True)
+    integration_pack_preview.add_argument(
+        "--scope",
+        default="managed_home",
+        choices=("managed_home", "project"),
+    )
+    integration_pack_preview.add_argument("--workspace")
+    integration_pack_preview.add_argument("--mcp-configuration-json", default="{}")
+    integration_pack_preview.add_argument("--json", action="store_true")
+    integration_pack_preview.set_defaults(handler=_handle_integration_pack_preview)
     integration_group_status = integration_subparsers.add_parser("group-status")
     integration_group_status.add_argument("group_id")
     integration_group_status.add_argument("--json", action="store_true")
@@ -1254,6 +1277,44 @@ def _handle_integration_group_preview(
         print(f"Group: {payload['group']['id']}")
         print(f"Plan: {payload['plan']['plan_id']}")
         print("Targets: " + ", ".join(payload["plan"]["target_ids"]))
+        print(
+            "Next: integration group-apply "
+            f"{payload['group']['id']} --plan-id {payload['plan']['plan_id']} "
+            "--authority <operator>"
+        )
+    return 0
+
+
+def _handle_integration_pack_preview(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    try:
+        mcp_configuration = json.loads(args.mcp_configuration_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("MCP configuration JSON is invalid") from exc
+    payload = GroupedIntegrationService(config.data_dir).preview(
+        {
+            "component": "extension_pack",
+            "pack_id": args.pack_id,
+            "pack_version": args.pack_version,
+            "skill_catalog_id": args.skill_catalog_id,
+            "mcp_catalog_id": args.mcp_catalog_id,
+            "scope": args.scope,
+            "workspace": args.workspace,
+            "target_mode": "all_supported",
+            "mcp_configuration": mcp_configuration,
+        }
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Pack: {payload['plan']['package']['id']}")
+        print(f"Group: {payload['group']['id']}")
+        print(f"Plan: {payload['plan']['plan_id']}")
+        for item in payload["plan"]["compatibility"]:
+            included = "included" if item["included"] else "excluded"
+            print(f"Compatibility: {item['target']} {item['status']} ({included})")
         print(
             "Next: integration group-apply "
             f"{payload['group']['id']} --plan-id {payload['plan']['plan_id']} "

@@ -763,6 +763,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .plugin-library-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 25px 30px 18px; }
 .plugin-library-header h1 { font-size: 26px; line-height: 1.2; letter-spacing: -.025em; }
 .plugin-library-header p { max-width: 720px; margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.plugin-header-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .plugin-add-button { min-width: 118px; flex: none; }
 .plugin-library-layout { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; }
 .plugin-library-browser { min-width: 0; min-height: 0; overflow: auto; padding: 0 24px 32px 30px; }
@@ -857,6 +858,15 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .plugin-add-drawer > header svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .plugin-add-kind { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .plugin-add-kind button.selected { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.extension-pack-intro { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.extension-pack-preview { display: grid; gap: 10px; }
+.extension-pack-matrix { min-width: 0; display: grid; gap: 6px; }
+.extension-pack-row { min-width: 0; display: grid; grid-template-columns: 72px minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 9px; font-size: 10px; }
+.extension-pack-row > * { min-width: 0; overflow-wrap: anywhere; }
+.extension-pack-row span { color: var(--muted); }
+.extension-pack-row b { color: var(--accent); font-size: 9px; text-transform: uppercase; }
+.extension-pack-row.unsupported b, .extension-pack-row.unknown b { color: var(--danger); }
+.extension-pack-summary { margin: 0; color: var(--muted); font-size: 10px; }
 .git-commit { display: grid; gap: 5px; margin: 0; color: var(--muted); font-size: 10px; }
 .git-commit code { overflow-wrap: anywhere; color: var(--text); }
 .git-candidate-preview { min-width: 0; display: grid; gap: 8px; }
@@ -873,6 +883,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .plugin-library-header h1 { font-size: 22px; }
   .plugin-library-header p { font-size: 11.5px; }
   .plugin-add-button { align-self: flex-start; }
+  .plugin-header-actions { align-items: stretch; flex-wrap: wrap; }
   .plugin-library-layout { display: block; }
   .plugin-library-browser { overflow: visible; padding: 0 10px 22px; }
   .plugin-detail-pane { overflow: visible; border-top: 1px solid var(--border); border-left: 0; padding: 20px 14px 28px; }
@@ -896,6 +907,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .plugin-row-action.connected i { width: 8px; height: 8px; }
   .plugin-detail-empty { min-height: 240px; }
   .plugin-add-drawer { border-left: 0; padding: 18px 14px 86px; }
+  .extension-pack-row { grid-template-columns: 64px minmax(0, 1fr) auto; }
+  .extension-pack-row span { grid-column: 2; }
+  .extension-pack-row b { grid-column: 3; grid-row: 1 / span 2; }
 }
 
 @media (max-width: 430px) {

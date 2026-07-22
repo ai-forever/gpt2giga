@@ -121,7 +121,7 @@ def preview_integration_group(
     request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
-    """Persist one exact all-supported target expansion and child preview set."""
+    """Persist one exact all-supported group or portable pack preview set."""
     try:
         return request.app.state.harness_grouped_integration_service.preview(payload)
     except ValueError as exc:
