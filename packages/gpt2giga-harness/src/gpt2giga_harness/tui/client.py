@@ -45,6 +45,11 @@ from gpt2giga_harness.environment_actions import (
     EnvironmentCommitService,
     GovernedEnvironmentCommitService,
 )
+from gpt2giga_harness.environment_push import (
+    EnvironmentPushError,
+    EnvironmentPushService,
+    GovernedEnvironmentPushService,
+)
 from gpt2giga_harness.github_environments import (
     GitHubEnvironmentService,
     GitHubEnvironmentSnapshot,
@@ -291,6 +296,34 @@ class EnvironmentCommitApplySummary:
 
 
 @dataclass(frozen=True)
+class EnvironmentPushPreviewSummary:
+    """Exact local/remote Git state shown before remote-write approval."""
+
+    id: str
+    branch: str
+    head: str
+    diff_sha256: str
+    remote: str
+    upstream: str | None
+    target_branch: str
+    remote_head: str | None
+    repository: str
+    worktree_root: str
+
+
+@dataclass(frozen=True)
+class EnvironmentPushApplySummary:
+    """Governed push outcome for either approval or exact completion."""
+
+    preview: EnvironmentPushPreviewSummary
+    approval: ApprovalSummary | None = None
+    commit_head: str | None = None
+    remote_commit_url: str | None = None
+    run_evidence_url: str | None = None
+    idempotent_replay: bool = False
+
+
+@dataclass(frozen=True)
 class NavigationSnapshot:
     """One authoritative, presentation-bounded TUI resnapshot."""
 
@@ -518,6 +551,20 @@ class WorkbenchClient(Protocol):
     ) -> None:
         """Decide one hash-bound environment approval."""
 
+    async def preview_environment_push(
+        self, workspace: str
+    ) -> EnvironmentPushPreviewSummary:
+        """Create one exact local/remote push preview."""
+
+    async def apply_environment_push(
+        self,
+        preview_id: str,
+        *,
+        workspace: str,
+        session_id: str | None = None,
+    ) -> EnvironmentPushApplySummary:
+        """Request approval or push the exact commit once."""
+
     async def create_session(
         self,
         workspace: str,
@@ -692,6 +739,7 @@ class InProcessWorkbenchClient:
         registry: HarnessRegistry | None = None,
         store: FilesystemHarnessSessionStore | None = None,
         github_environment_service: GitHubEnvironmentService | None = None,
+        environment_push_service: EnvironmentPushService | None = None,
     ) -> None:
         self.config = config
         self.registry = registry or create_default_registry()
@@ -714,6 +762,21 @@ class InProcessWorkbenchClient:
                 PolicyEngine(self.runtime_store),
             )
             if self.environment_commit_service is not None
+            else None
+        )
+        if environment_push_service is None:
+            try:
+                environment_push_service = EnvironmentPushService(config.data_dir)
+            except EnvironmentPushError:
+                environment_push_service = None
+        self.environment_push_service = environment_push_service
+        self.governed_environment_push_service = (
+            GovernedEnvironmentPushService(
+                self.environment_push_service,
+                self.runtime_store,
+                PolicyEngine(self.runtime_store),
+            )
+            if self.environment_push_service is not None
             else None
         )
         self.attachment_store = FilesystemAttachmentStore(config.data_dir)
@@ -801,6 +864,49 @@ class InProcessWorkbenchClient:
         self, approval_id: str, decision: str
     ) -> None:
         self.sessions.decide_approval(approval_id, decision)
+
+    async def preview_environment_push(
+        self, workspace: str
+    ) -> EnvironmentPushPreviewSummary:
+        if self.environment_push_service is None:
+            raise WorkbenchClientError("Git push action is unavailable")
+        preview = await asyncio.to_thread(
+            self.environment_push_service.preview,
+            workspace,
+        )
+        return _environment_push_preview_summary(preview.to_dict())
+
+    async def apply_environment_push(
+        self,
+        preview_id: str,
+        *,
+        workspace: str,
+        session_id: str | None = None,
+    ) -> EnvironmentPushApplySummary:
+        if (
+            self.environment_push_service is None
+            or self.governed_environment_push_service is None
+        ):
+            raise WorkbenchClientError("Git push action is unavailable")
+        preview = self.environment_push_service.get_preview(preview_id)
+        resolved = Path(workspace).expanduser().resolve()
+        root = Path(preview.worktree_root).resolve()
+        if resolved != root and not resolved.is_relative_to(root):
+            raise WorkbenchClientError("workspace changed after push preview")
+        project_id = preview.scope_id
+        if session_id is not None:
+            session = self.store.get_session(session_id)
+            project_id = str(session.metadata.get("project_id") or "") or project_id
+        try:
+            outcome = await asyncio.to_thread(
+                self.governed_environment_push_service.apply_or_request,
+                preview_id,
+                project_id=project_id,
+                session_id=session_id,
+            )
+        except RuntimeError as exc:
+            raise WorkbenchClientError(str(exc)) from exc
+        return _environment_push_outcome_summary(outcome)
 
     async def resources(
         self, session_id: str | None = None
@@ -1673,6 +1779,33 @@ class AttachedWorkbenchClient:
             f"/api/approvals/{_path_identity(approval_id)}/decision",
             {"decision": decision},
         )
+
+    async def preview_environment_push(
+        self, workspace: str
+    ) -> EnvironmentPushPreviewSummary:
+        response = await self._request(
+            "POST",
+            "/api/environment/push/preview",
+            {"workspace": workspace},
+        )
+        return _environment_push_preview_summary(_mapping(response.get("preview")))
+
+    async def apply_environment_push(
+        self,
+        preview_id: str,
+        *,
+        workspace: str,
+        session_id: str | None = None,
+    ) -> EnvironmentPushApplySummary:
+        payload: dict[str, Any] = {
+            "preview_id": preview_id,
+            "workspace": workspace,
+        }
+        if session_id is not None:
+            payload.pop("workspace")
+            payload["session_id"] = session_id
+        response = await self._request("POST", "/api/environment/push/apply", payload)
+        return _environment_push_apply_summary(response)
 
     async def load(
         self,
@@ -3472,6 +3605,24 @@ def _approval_summary(value: Mapping[str, Any]) -> ApprovalSummary:
         details.append("HEAD: " + _display_text(preview.get("head")))
     if preview.get("diff_sha256") is not None:
         details.append("Diff: " + _display_text(preview.get("diff_sha256")))
+    if preview.get("remote") is not None:
+        details.append("Remote: " + _display_text(preview.get("remote")))
+    if preview.get("upstream") is not None:
+        details.append("Upstream: " + _display_text(preview.get("upstream")))
+    if preview.get("target_branch") is not None:
+        details.append("Target: " + _display_text(preview.get("target_branch")))
+    permissions = preview.get("permissions")
+    if isinstance(permissions, Mapping):
+        granted = sorted(
+            str(key) for key, enabled in permissions.items() if enabled is True
+        )
+        blocked = sorted(
+            str(key) for key, enabled in permissions.items() if enabled is False
+        )
+        if granted:
+            details.append("Permits: " + ", ".join(granted))
+        if blocked:
+            details.append("Forbids: " + ", ".join(blocked))
     return ApprovalSummary(
         id=_required_identity(value.get("id"), "approval id"),
         action=_display_text(value.get("action") or "approval"),
@@ -3540,6 +3691,65 @@ def _environment_commit_outcome_summary(outcome: Any) -> EnvironmentCommitApplyS
         ),
         commit_head=(
             outcome.result.commit_head if outcome.result is not None else None
+        ),
+        idempotent_replay=outcome.idempotent_replay,
+    )
+
+
+def _environment_push_preview_summary(
+    value: Mapping[str, Any],
+) -> EnvironmentPushPreviewSummary:
+    repository = _mapping(value.get("repository"))
+    return EnvironmentPushPreviewSummary(
+        id=_required_identity(value.get("id"), "push preview id"),
+        branch=_display_text(value.get("branch") or "detached"),
+        head=_required_identity(value.get("head"), "push head"),
+        diff_sha256=_required_identity(value.get("diff_sha256"), "diff hash"),
+        remote=_display_text(value.get("remote") or "unavailable"),
+        upstream=_optional_text(value.get("upstream")),
+        target_branch=_display_text(value.get("target_branch") or "unavailable"),
+        remote_head=_optional_text(value.get("remote_head")),
+        repository=_display_text(repository.get("name_with_owner") or "unavailable"),
+        worktree_root=_display_text(value.get("worktree_root") or ""),
+    )
+
+
+def _environment_push_apply_summary(
+    value: Mapping[str, Any],
+) -> EnvironmentPushApplySummary:
+    preview = _environment_push_preview_summary(_mapping(value.get("preview")))
+    approval_payload = value.get("approval")
+    result = _mapping(value.get("result"))
+    return EnvironmentPushApplySummary(
+        preview=preview,
+        approval=(
+            _approval_summary(approval_payload)
+            if isinstance(approval_payload, Mapping)
+            else None
+        ),
+        commit_head=_optional_text(result.get("commit_head")),
+        remote_commit_url=_optional_text(result.get("remote_commit_url")),
+        run_evidence_url=_optional_text(result.get("run_evidence_url")),
+        idempotent_replay=bool(value.get("idempotent_replay", False)),
+    )
+
+
+def _environment_push_outcome_summary(outcome: Any) -> EnvironmentPushApplySummary:
+    return EnvironmentPushApplySummary(
+        preview=_environment_push_preview_summary(outcome.preview.to_dict()),
+        approval=(
+            _approval_summary(approval_request_to_dict(outcome.approval))
+            if outcome.approval is not None
+            else None
+        ),
+        commit_head=(
+            outcome.result.commit_head if outcome.result is not None else None
+        ),
+        remote_commit_url=(
+            outcome.result.remote_commit_url if outcome.result is not None else None
+        ),
+        run_evidence_url=(
+            outcome.result.run_evidence_url if outcome.result is not None else None
         ),
         idempotent_replay=outcome.idempotent_replay,
     )

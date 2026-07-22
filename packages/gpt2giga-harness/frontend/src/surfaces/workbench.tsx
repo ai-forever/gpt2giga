@@ -14,6 +14,9 @@ import {
   type EnvironmentCommitApplyResponse,
   type EnvironmentCommitPreview,
   type EnvironmentCommitPreviewResponse,
+  type EnvironmentPushApplyResponse,
+  type EnvironmentPushPreview,
+  type EnvironmentPushPreviewResponse,
   type EventProjection,
   type EventPayloadResponse,
   fetchCockpit,
@@ -153,11 +156,21 @@ type EnvironmentCommitAction = {
   submit: () => void;
 };
 
+type EnvironmentPushAction = {
+  error: boolean;
+  notice: string | null;
+  pending: boolean;
+  preview: EnvironmentPushPreview | undefined;
+  result: EnvironmentPushApplyResponse["result"] | undefined;
+  submit: () => void;
+};
+
 function EnvironmentCard({
   className = "",
   environment,
   error,
   commitAction,
+  pushAction,
   locale,
   pending,
 }: {
@@ -165,6 +178,7 @@ function EnvironmentCard({
   environment: EnvironmentView | undefined;
   error: boolean;
   commitAction: EnvironmentCommitAction;
+  pushAction: EnvironmentPushAction;
   locale: LocalePreference;
   pending: boolean;
 }) {
@@ -253,6 +267,40 @@ function EnvironmentCard({
           </p>
         )}
       </form>
+      <section className="environment-push-action">
+        {pushAction.preview === undefined ? null : (
+          <dl className="plan-fields">
+            <div><dt>Remote</dt><dd>{pushAction.preview.remote}</dd></div>
+            <div><dt>Upstream</dt><dd>{pushAction.preview.upstream ?? "new"}</dd></div>
+            <div><dt>{locale === "ru" ? "Целевая ветка" : "Target branch"}</dt><dd>{pushAction.preview.target_branch}</dd></div>
+            <div><dt>HEAD</dt><dd><code>{pushAction.preview.head.slice(0, 12)}</code></dd></div>
+            <div><dt>Remote HEAD</dt><dd><code>{pushAction.preview.remote_head?.slice(0, 12) ?? "new"}</code></dd></div>
+          </dl>
+        )}
+        <button
+          className="primary-button"
+          disabled={environment?.push !== "ready" || pushAction.pending}
+          onClick={pushAction.submit}
+          type="button"
+        >
+          {message(locale, pushAction.preview === undefined ? "environmentPush" : "apply")}
+        </button>
+        {pushAction.notice === null ? null : (
+          <p className={pushAction.error ? "mutation-error" : "mutation-success"}>
+            {pushAction.notice}
+          </p>
+        )}
+        {pushAction.result === undefined ? null : (
+          <div className="environment-push-links">
+            <a href={pushAction.result.remote_commit_url} rel="noreferrer" target="_blank">
+              {locale === "ru" ? "Удалённый коммит" : "Remote commit"}
+            </a>
+            <a href={pushAction.result.run_evidence_url} rel="noreferrer" target="_blank">
+              {locale === "ru" ? "Проверки и запуски" : "Checks and runs"}
+            </a>
+          </div>
+        )}
+      </section>
     </section>
   );
 }
@@ -280,6 +328,9 @@ export function WorkbenchSurface() {
   });
   const [environmentCommitPreview, setEnvironmentCommitPreview] = useState<EnvironmentCommitPreview>();
   const [environmentCommitNotice, setEnvironmentCommitNotice] = useState<string | null>(null);
+  const [environmentPushPreview, setEnvironmentPushPreview] = useState<EnvironmentPushPreview>();
+  const [environmentPushResult, setEnvironmentPushResult] = useState<EnvironmentPushApplyResponse["result"]>();
+  const [environmentPushNotice, setEnvironmentPushNotice] = useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const rememberedRunPreferences = useMemo(loadRunPreferences, []);
   const [runConfig, setRunConfig] = useState<RunConfig>(rememberedRunPreferences.config);
@@ -508,6 +559,40 @@ export function WorkbenchSurface() {
       setEnvironmentCommitDraft((current) => ({ ...current, message: "" }));
       setEnvironmentCommitNotice(
         `${message(locale, "environmentCommit")}: ${response.result.commit_head.slice(0, 8)}`,
+      );
+      await queryClient.invalidateQueries({ queryKey: requestKeys.environment(sessionId ?? "pending") });
+    },
+  });
+  const environmentPush = useMutation({
+    mutationFn: async () => {
+      if (sessionId === undefined) throw new Error("Session is not selected");
+      const preview = environmentPushPreview ?? (
+        await mutateCockpit<EnvironmentPushPreviewResponse>(
+          "/api/environment/push/preview",
+          { session_id: sessionId },
+        )
+      ).preview;
+      return mutateCockpit<EnvironmentPushApplyResponse>(
+        "/api/environment/push/apply",
+        { preview_id: preview.id, session_id: sessionId },
+      );
+    },
+    onSuccess: async (response) => {
+      if (response.result === undefined) {
+        setEnvironmentPushPreview(response.preview);
+        setEnvironmentPushResult(undefined);
+        setEnvironmentPushNotice(
+          locale === "ru"
+            ? "Подтвердите точный push во Inbox и примените снова."
+            : "Approve the exact push in Inbox, then apply again.",
+        );
+        openInbox("approvals");
+        return;
+      }
+      setEnvironmentPushPreview(undefined);
+      setEnvironmentPushResult(response.result);
+      setEnvironmentPushNotice(
+        `${message(locale, "environmentPush")}: ${response.result.commit_head.slice(0, 8)}`,
       );
       await queryClient.invalidateQueries({ queryKey: requestKeys.environment(sessionId ?? "pending") });
     },
@@ -789,6 +874,16 @@ export function WorkbenchSurface() {
       environmentCommit.reset();
     },
     submit: () => environmentCommit.mutate(),
+  };
+  const environmentPushAction: EnvironmentPushAction = {
+    error: environmentPush.isError,
+    notice: environmentPush.isError
+      ? (environmentPush.error instanceof Error ? environmentPush.error.message : "Push failed")
+      : environmentPushNotice,
+    pending: environmentPush.isPending,
+    preview: environmentPushPreview,
+    result: environmentPushResult,
+    submit: () => environmentPush.mutate(),
   };
   const selectedHarness = harnesses.data?.harnesses.find(
     (harness) => harness.spec.id === runConfig.harnessId,
@@ -1134,6 +1229,7 @@ export function WorkbenchSurface() {
             <EnvironmentCard
               className="mobile-environment"
               commitAction={environmentCommitAction}
+              pushAction={environmentPushAction}
               environment={environmentView}
               error={environment.isError}
               locale={locale}
@@ -1689,6 +1785,7 @@ export function WorkbenchSurface() {
             </div>
             <EnvironmentCard
               commitAction={environmentCommitAction}
+              pushAction={environmentPushAction}
               environment={environmentView}
               error={environment.isError}
               locale={locale}

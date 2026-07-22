@@ -439,6 +439,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .environment-commit-form input:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 20%, transparent); }
 .environment-commit-form button { justify-self: stretch; }
 .environment-commit-form p { margin: 0; overflow-wrap: anywhere; }
+.environment-push-action { display: grid; gap: 9px; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.environment-push-action > button { justify-self: stretch; }
+.environment-push-action p { margin: 0; overflow-wrap: anywhere; }
+.environment-push-links { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 11px; }
+.environment-push-links a { color: var(--accent); overflow-wrap: anywhere; }
 .provider-handoff-instruction { display: grid; gap: 6px; border-left: 2px solid var(--accent); padding: 7px 9px; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .provider-handoff-instruction code { overflow-wrap: anywhere; color: var(--text); }
 .inspector-section { padding: 15px 0; border-top: 1px solid var(--border); }

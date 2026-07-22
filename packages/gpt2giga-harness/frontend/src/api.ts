@@ -123,6 +123,52 @@ export interface EnvironmentCommitApplyResponse {
   idempotent_replay?: boolean;
 }
 
+export interface EnvironmentPushPreview {
+  id: string;
+  repository: { host: string; name_with_owner: string };
+  branch: string;
+  head: string;
+  diff_sha256: string;
+  remote: string;
+  upstream: string | null;
+  target_branch: string;
+  remote_ref: string;
+  remote_head: string | null;
+  permissions: {
+    network_connect: boolean;
+    remote_write: boolean;
+    create_remote_branch: boolean;
+    set_upstream: boolean;
+    force_update: boolean;
+    delete_remote_branch: boolean;
+    follow_tags: boolean;
+    execute_hooks: boolean;
+  };
+  worktree_root: string;
+}
+
+export interface EnvironmentPushPreviewResponse {
+  preview: EnvironmentPushPreview;
+}
+
+export interface EnvironmentPushApplyResponse {
+  approval_required?: boolean;
+  approval?: ApprovalRequest;
+  preview: EnvironmentPushPreview;
+  result?: {
+    preview_id: string;
+    commit_head: string;
+    remote: string;
+    target_branch: string;
+    remote_commit_url: string;
+    run_evidence_url: string;
+    upstream_configured: boolean;
+    completed_at: string;
+    recovered: boolean;
+  };
+  idempotent_replay?: boolean;
+}
+
 export interface GitHubCountRollup {
   status: string;
   total: number;

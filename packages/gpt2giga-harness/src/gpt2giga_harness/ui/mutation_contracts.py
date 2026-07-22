@@ -18,6 +18,7 @@ from gpt2giga_harness.runtime.policy import (
     PermissionAction,
 )
 from gpt2giga_harness.environment_actions import ENVIRONMENT_COMMIT_OWNER
+from gpt2giga_harness.environment_push import ENVIRONMENT_PUSH_OWNER
 
 UNSAFE_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -234,6 +235,15 @@ CONFORMANCE_EVIDENCE = {
                 "tests/harness/test_environment_actions.py::test_environment_commit_api_requires_exact_approval_and_is_idempotent",
                 "tests/harness/test_environment_actions.py::test_environment_commit_rejects_stale_preview_before_approval_consumption",
                 "tests/harness/test_environment_actions.py::test_environment_commit_validation_errors_are_content_free",
+            ),
+        ),
+        ConformanceEvidence(
+            id="policy.environment_push",
+            behaviors=frozenset(ConformanceBehavior),
+            test_nodes=(
+                "tests/harness/test_environment_push.py::test_environment_push_api_requires_exact_approval_and_is_idempotent",
+                "tests/harness/test_environment_push.py::test_environment_push_rejects_local_and_remote_staleness_before_approval",
+                "tests/harness/test_environment_push.py::test_environment_push_disables_hooks_and_rejects_push_url_override",
             ),
         ),
         ConformanceEvidence(
@@ -635,6 +645,23 @@ MUTATION_ROUTE_CONTRACTS = (
         ENVIRONMENT_COMMIT_OWNER,
         actions=(PermissionAction.GIT_COMMIT,),
         evidence=(*_POLICY, "policy.environment_commit"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/push/preview",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "environment.push_preview",
+        evidence=(*_AUTH, "policy.environment_push"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/push/apply",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.POLICY_ENGINE,
+        ENVIRONMENT_PUSH_OWNER,
+        actions=(PermissionAction.GIT_PUSH,),
+        evidence=(*_POLICY, "policy.environment_push"),
     ),
     _route(
         "POST",

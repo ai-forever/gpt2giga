@@ -26,6 +26,8 @@ from gpt2giga_harness.tui.client import (
     AttachmentSummary,
     EnvironmentCommitApplySummary,
     EnvironmentCommitPreviewSummary,
+    EnvironmentPushApplySummary,
+    EnvironmentPushPreviewSummary,
     EnvironmentSummary,
     FileCandidate,
     HandoffPreview,
@@ -70,6 +72,19 @@ class FakeClient:
             "feat: exact TUI commit",
             "TUI Operator",
             "tui@example.com",
+            "/tmp/demo",
+        )
+        self.environment_push_approved = False
+        self.environment_push_preview = EnvironmentPushPreviewSummary(
+            "push_" + "e" * 64,
+            "main",
+            "a" * 40,
+            "d" * 64,
+            "origin",
+            "origin/main",
+            "main",
+            "9" * 40,
+            "fixture/repository",
             "/tmp/demo",
         )
         self.native_calls: list[tuple[str, object]] = []
@@ -236,9 +251,54 @@ class FakeClient:
         )
 
     async def decide_environment_approval(self, approval_id, decision):
-        assert approval_id == "approval_commit"
+        assert approval_id in {"approval_commit", "approval_push"}
         self.decisions.append(decision)
-        self.environment_commit_approved = decision == "allow_once"
+        if approval_id == "approval_commit":
+            self.environment_commit_approved = decision == "allow_once"
+        else:
+            self.environment_push_approved = decision == "allow_once"
+
+    async def preview_environment_push(self, workspace):
+        assert workspace == "/tmp/demo"
+        return self.environment_push_preview
+
+    async def apply_environment_push(self, preview_id, *, workspace, session_id=None):
+        assert preview_id == self.environment_push_preview.id
+        assert workspace == "/tmp/demo"
+        assert session_id == "sess_1"
+        if self.environment_push_approved:
+            return EnvironmentPushApplySummary(
+                self.environment_push_preview,
+                commit_head="a" * 40,
+                remote_commit_url="https://github.com/fixture/repository/commit/"
+                + "a" * 40,
+                run_evidence_url="https://github.com/fixture/repository/commit/"
+                + "a" * 40
+                + "/checks",
+            )
+        return EnvironmentPushApplySummary(
+            self.environment_push_preview,
+            approval=ApprovalSummary(
+                "approval_push",
+                "git.push",
+                "Push the exact reviewed commit to the exact remote branch.",
+                "pending",
+                enforcement="enforced_by_harness",
+                enforcement_owner="environment.push",
+                policy_source="profile:interactive",
+                mutation_class="git.push",
+                network="remote write",
+                details=(
+                    "HEAD: " + "a" * 40,
+                    "Diff: " + "d" * 64,
+                    "Remote: origin",
+                    "Upstream: origin/main",
+                    "Target: main",
+                    "Permits: network_connect, remote_write",
+                    "Forbids: delete_remote_branch, force_update",
+                ),
+            ),
+        )
 
     async def create_session(self, workspace, *, title=None, **intent):
         self.created += 1
@@ -565,6 +625,29 @@ async def test_tui_commit_command_previews_approves_and_applies_exact_state():
 
         assert client.decisions == ["allow_once"]
         assert "Commit created: bbbbbbbb" in str(app.query_one("#status").render())
+
+
+@pytest.mark.anyio
+async def test_tui_push_command_previews_approves_and_applies_exact_remote_state():
+    client = FakeClient()
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await app._execute_registered_command("environment-push")
+        await pilot.pause()
+
+        approval_detail = str(app.screen.query_one("#approval-detail").render())
+        assert "Remote: origin" in approval_detail
+        assert "Upstream: origin/main" in approval_detail
+        assert "Target: main" in approval_detail
+        assert "Permits: network_connect, remote_write" in approval_detail
+        assert "Forbids: delete_remote_branch, force_update" in approval_detail
+        await pilot.click("#approval-allow-once")
+        await pilot.pause()
+
+        assert client.decisions == ["allow_once"]
+        assert "Commit pushed: aaaaaaaa" in str(app.query_one("#status").render())
 
 
 @pytest.mark.anyio

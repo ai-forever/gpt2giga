@@ -29,6 +29,8 @@ from gpt2giga_harness.tui.client import (
     ApprovalSummary,
     EnvironmentCommitApplySummary,
     EnvironmentCommitPreviewSummary,
+    EnvironmentPushApplySummary,
+    EnvironmentPushPreviewSummary,
     FileCandidate,
     HandoffPreview,
     MAX_NATIVE_SCROLLBACK_CHARS,
@@ -1298,6 +1300,8 @@ class WorkbenchTui(App[None]):
         self._commit_draft: dict[str, str] = {}
         self._commit_preview: EnvironmentCommitPreviewSummary | None = None
         self._commit_approval: ApprovalSummary | None = None
+        self._push_preview: EnvironmentPushPreviewSummary | None = None
+        self._push_approval: ApprovalSummary | None = None
         self.sub_title = self.t("app.subtitle")
 
     def compose(self) -> ComposeResult:
@@ -1660,6 +1664,90 @@ class WorkbenchTui(App[None]):
             self._show_error(exc)
             return
         await self._handle_environment_commit_outcome(outcome)
+
+    async def action_environment_push(self) -> None:
+        if self.snapshot is None or not self.snapshot.environment.push_ready:
+            self._set_status(self.t("environment.push.not_ready"))
+            return
+        self._push_preview = None
+        self._push_approval = None
+        try:
+            preview = await self.client.preview_environment_push(
+                self.snapshot.project.root
+            )
+            self._push_preview = preview
+            outcome = await self.client.apply_environment_push(
+                preview.id,
+                workspace=self.snapshot.project.root,
+                session_id=self.selected_session_id,
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        await self._handle_environment_push_outcome(outcome)
+
+    async def _handle_environment_push_outcome(
+        self, outcome: EnvironmentPushApplySummary
+    ) -> None:
+        if outcome.commit_head is not None:
+            self._push_approval = None
+            await self._reload()
+            self._set_status(
+                self.t("environment.push.completed").format(
+                    head=outcome.commit_head[:8]
+                )
+            )
+            return
+        if outcome.approval is None:
+            self._set_status(self.t("status.error"))
+            return
+        self._push_approval = outcome.approval
+        preview = outcome.preview
+        binding = RunActionBinding(
+            session_id=self.selected_session_id or "environment",
+            run_id="environment-push",
+            revision=preview.diff_sha256,
+            generation=0,
+            idempotency_key=preview.id,
+        )
+        self.push_screen(
+            ApprovalScreen(
+                outcome.approval,
+                binding,
+                title=self.t("environment.push.approval"),
+                allow_once=self.t("approval.allow_once"),
+                allow_run=self.t("approval.allow_run"),
+                deny=self.t("button.deny"),
+                cancel=self.t("dialog.cancel"),
+            ),
+            self._environment_push_approval_decided,
+        )
+
+    async def _environment_push_approval_decided(self, decision: str | None) -> None:
+        preview = self._push_preview
+        approval = self._push_approval
+        if (
+            decision is None
+            or preview is None
+            or approval is None
+            or self.snapshot is None
+        ):
+            return
+        try:
+            await self.client.decide_environment_approval(approval.id, decision)
+            if decision == "deny":
+                self._push_approval = None
+                self._set_status(self.t("environment.push.denied"))
+                return
+            outcome = await self.client.apply_environment_push(
+                preview.id,
+                workspace=self.snapshot.project.root,
+                session_id=self.selected_session_id,
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        await self._handle_environment_push_outcome(outcome)
 
     def action_choose_project(self) -> None:
         self.push_screen(

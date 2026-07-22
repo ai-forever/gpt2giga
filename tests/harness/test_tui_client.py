@@ -14,6 +14,8 @@ import pytest
 from gpt2giga_harness import entrypoint
 from gpt2giga_harness import environment_actions
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.environment_push import EnvironmentPushService
+from gpt2giga_harness.environments import HostedRepositoryHint
 from gpt2giga_harness.sessions.models import HarnessMessage, HarnessStoredEvent
 from gpt2giga_harness.sessions.store import new_id, utc_now
 from gpt2giga_harness.terminal_dispatch import TerminalContext
@@ -185,6 +187,65 @@ async def test_in_process_client_uses_governed_environment_commit_authority(tmp_
     assert replay.commit_head == committed.commit_head
     assert replay.idempotent_replay is True
     assert _git_output(repository, "rev-list", "--count", "HEAD") == "2"
+
+
+@pytest.mark.anyio
+async def test_in_process_client_uses_governed_environment_push_authority(tmp_path):
+    remote = tmp_path / "remote.git"
+    repository = tmp_path / "repository"
+    _git(tmp_path, "init", "--bare", "-q", "--initial-branch=main", str(remote))
+    _git(tmp_path, "init", "-q", "--initial-branch=main", str(repository))
+    _git(repository, "config", "user.name", "Fixture")
+    _git(repository, "config", "user.email", "fixture@example.com")
+    tracked = repository / "tracked.txt"
+    tracked.write_text("one\n", encoding="utf-8")
+    _git(repository, "add", "tracked.txt")
+    _git(repository, "commit", "-qm", "fixture")
+    _git(repository, "remote", "add", "origin", str(remote))
+    _git(repository, "push", "-qu", "origin", "main")
+    tracked.write_text("one\ntwo\n", encoding="utf-8")
+    _git(repository, "add", "tracked.txt")
+    _git(repository, "commit", "-qm", "ahead")
+    state = tmp_path / "state"
+    push_service = EnvironmentPushService(
+        state,
+        repository_resolver=lambda _snapshot: HostedRepositoryHint(
+            "github.com", "fixture/repository"
+        ),
+    )
+    client = InProcessWorkbenchClient(
+        HarnessConfig(data_dir=str(state)),
+        environment_push_service=push_service,
+    )
+    session = client.sessions.create_session({"workspace": str(repository)})
+
+    preview = await client.preview_environment_push(str(repository))
+    requested = await client.apply_environment_push(
+        preview.id,
+        workspace=str(repository),
+        session_id=session.id,
+    )
+
+    assert requested.approval is not None
+    assert requested.approval.action == "git.push"
+    assert "Remote: origin" in requested.approval.details
+    await client.decide_environment_approval(requested.approval.id, "allow_once")
+    pushed = await client.apply_environment_push(
+        preview.id,
+        workspace=str(repository),
+        session_id=session.id,
+    )
+    replay = await client.apply_environment_push(
+        preview.id,
+        workspace=str(repository),
+        session_id=session.id,
+    )
+
+    assert pushed.commit_head == _git_output(remote, "rev-parse", "refs/heads/main")
+    assert pushed.remote_commit_url is not None
+    assert pushed.run_evidence_url == f"{pushed.remote_commit_url}/checks"
+    assert replay.commit_head == pushed.commit_head
+    assert replay.idempotent_replay is True
 
 
 @pytest.mark.anyio

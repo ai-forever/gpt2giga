@@ -19,6 +19,11 @@ const CommitApprovalPreview = lazy(async () => {
   return { default: module.CommitApprovalPreview };
 });
 
+const PushApprovalPreview = lazy(async () => {
+  const module = await import("../inspectors/InspectorFrame");
+  return { default: module.PushApprovalPreview };
+});
+
 export default function InboxDrawer({
   kind,
   onClose,
@@ -94,6 +99,11 @@ export default function InboxDrawer({
                 {approval.action === "git.commit" && (
                   <Suspense fallback={null}>
                     <CommitApprovalPreview preview={approval.preview} />
+                  </Suspense>
+                )}
+                {approval.action === "git.push" && (
+                  <Suspense fallback={null}>
+                    <PushApprovalPreview preview={approval.preview} />
                   </Suspense>
                 )}
                 {approval.status === "pending" ? (
