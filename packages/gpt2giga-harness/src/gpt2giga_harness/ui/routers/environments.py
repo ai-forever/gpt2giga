@@ -14,6 +14,7 @@ from gpt2giga_harness.environment_actions import (
     EnvironmentCommitError,
 )
 from gpt2giga_harness.environment_push import EnvironmentPushError
+from gpt2giga_harness.environment_pull_requests import EnvironmentPullRequestError
 from gpt2giga_harness.environments import (
     EnvironmentCaptureError,
     GitEnvironmentProvider,
@@ -135,6 +136,94 @@ async def preview_environment_push(
             "binding_sha256": approval_binding_digest(preview.approval_binding),
             "session_id": session.id if session is not None else None,
         },
+    }
+
+
+@router.post("/api/environment/pull-request/preview")
+async def preview_environment_pull_request(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Persist one immutable local/remote/hosted-bound PR preview."""
+    workspace, session = _commit_workspace(request, payload)
+    service = request.app.state.harness_environment_pull_request_service
+    if service is None:
+        raise _pull_request_unavailable()
+    try:
+        preview = await run_in_threadpool(
+            service.preview,
+            workspace,
+            title=payload.get("title", ""),
+            body=payload.get("body", ""),
+            base_branch=payload.get("base_branch"),
+        )
+    except EnvironmentPullRequestError as exc:
+        raise _pull_request_http_error(exc) from exc
+    return {
+        "preview": preview.to_dict(),
+        "approval": {
+            "required": True,
+            "action": PermissionAction.GITHUB_PULL_REQUEST_CREATE.value,
+            "binding_sha256": approval_binding_digest(preview.approval_binding),
+            "session_id": session.id if session is not None else None,
+        },
+    }
+
+
+@router.post("/api/environment/pull-request/apply", response_model=None)
+async def apply_environment_pull_request(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any] | JSONResponse:
+    """Create one approved pull request exactly once."""
+    preview_id = payload.get("preview_id")
+    if not isinstance(preview_id, str):
+        raise HTTPException(status_code=422, detail="preview_id is required")
+    service = request.app.state.harness_environment_pull_request_service
+    coordinator = request.app.state.harness_governed_environment_pull_request_service
+    if service is None:
+        raise _pull_request_unavailable()
+    if coordinator is None:
+        raise HTTPException(status_code=409, detail="Durable runtime is unavailable")
+    try:
+        preview = service.get_preview(preview_id)
+        _, session = _commit_workspace(
+            request,
+            payload,
+            expected_worktree=preview.worktree_root,
+            workspace_optional=True,
+        )
+    except EnvironmentPullRequestError as exc:
+        raise _pull_request_http_error(exc) from exc
+    project_id = preview.scope_id
+    if session is not None:
+        project_id = str(session.metadata.get("project_id") or "") or preview.scope_id
+    try:
+        outcome = await run_in_threadpool(
+            coordinator.apply_or_request,
+            preview.id,
+            project_id=project_id,
+            session_id=session.id if session is not None else None,
+        )
+    except EnvironmentPullRequestError as exc:
+        raise _pull_request_http_error(exc) from exc
+    if outcome.approval is not None:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "approval_required": True,
+                "approval": approval_request_to_dict(outcome.approval),
+                "preview": outcome.preview.to_dict(),
+            },
+        )
+    if outcome.result is None:
+        raise HTTPException(
+            status_code=409, detail="Pull-request result is unavailable"
+        )
+    return {
+        "preview": outcome.preview.to_dict(),
+        "result": outcome.result.to_dict(),
+        "idempotent_replay": outcome.idempotent_replay,
     }
 
 
@@ -340,6 +429,38 @@ def _push_http_error(exc: EnvironmentPushError) -> HTTPException:
     )
     return HTTPException(
         status_code=status, detail={"code": exc.code, "message": str(exc)}
+    )
+
+
+def _pull_request_http_error(exc: EnvironmentPullRequestError) -> HTTPException:
+    status = (
+        422
+        if exc.code
+        in {
+            "preview_invalid",
+            "ref_invalid",
+            "title_invalid",
+            "body_invalid",
+            "base_matches_source",
+        }
+        else 404
+        if exc.code == "preview_not_found"
+        else 403
+        if exc.code in {"policy_denied", "permission_denied"}
+        else 409
+    )
+    return HTTPException(
+        status_code=status, detail={"code": exc.code, "message": str(exc)}
+    )
+
+
+def _pull_request_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "pull_request_unavailable",
+            "message": "Pull-request creation is unavailable.",
+        },
     )
 
 

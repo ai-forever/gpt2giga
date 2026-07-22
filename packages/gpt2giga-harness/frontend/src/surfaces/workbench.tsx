@@ -17,6 +17,9 @@ import {
   type EnvironmentPushApplyResponse,
   type EnvironmentPushPreview,
   type EnvironmentPushPreviewResponse,
+  type EnvironmentPullRequestApplyResponse,
+  type EnvironmentPullRequestPreview,
+  type EnvironmentPullRequestPreviewResponse,
   type EventProjection,
   type EventPayloadResponse,
   fetchCockpit,
@@ -165,12 +168,30 @@ type EnvironmentPushAction = {
   submit: () => void;
 };
 
+type EnvironmentPullRequestDraft = {
+  baseBranch: string;
+  body: string;
+  title: string;
+};
+
+type EnvironmentPullRequestAction = {
+  draft: EnvironmentPullRequestDraft;
+  error: boolean;
+  notice: string | null;
+  pending: boolean;
+  preview: EnvironmentPullRequestPreview | undefined;
+  result: EnvironmentPullRequestApplyResponse["result"] | undefined;
+  setField: (field: keyof EnvironmentPullRequestDraft, value: string) => void;
+  submit: () => void;
+};
+
 function EnvironmentCard({
   className = "",
   environment,
   error,
   commitAction,
   pushAction,
+  pullRequestAction,
   locale,
   pending,
 }: {
@@ -179,6 +200,7 @@ function EnvironmentCard({
   error: boolean;
   commitAction: EnvironmentCommitAction;
   pushAction: EnvironmentPushAction;
+  pullRequestAction: EnvironmentPullRequestAction;
   locale: LocalePreference;
   pending: boolean;
 }) {
@@ -301,6 +323,74 @@ function EnvironmentCard({
           </div>
         )}
       </section>
+      <form
+        className="environment-pull-request-action"
+        onSubmit={(event) => {
+          event.preventDefault();
+          pullRequestAction.submit();
+        }}
+      >
+        <label>
+          <span>{locale === "ru" ? "Заголовок pull request" : "Pull-request title"}</span>
+          <input
+            disabled={environment?.push !== "ready" || pullRequestAction.pending}
+            maxLength={256}
+            onChange={(event) => pullRequestAction.setField("title", event.target.value)}
+            required
+            value={pullRequestAction.draft.title}
+          />
+        </label>
+        <label>
+          <span>{locale === "ru" ? "Описание" : "Body"}</span>
+          <textarea
+            disabled={environment?.push !== "ready" || pullRequestAction.pending}
+            maxLength={16384}
+            onChange={(event) => pullRequestAction.setField("body", event.target.value)}
+            value={pullRequestAction.draft.body}
+          />
+        </label>
+        <label>
+          <span>{locale === "ru" ? "Базовая ветка" : "Base branch"}</span>
+          <input
+            disabled={environment?.push !== "ready" || pullRequestAction.pending}
+            maxLength={512}
+            onChange={(event) => pullRequestAction.setField("baseBranch", event.target.value)}
+            placeholder={locale === "ru" ? "по умолчанию" : "repository default"}
+            value={pullRequestAction.draft.baseBranch}
+          />
+        </label>
+        {pullRequestAction.preview === undefined ? null : (
+          <dl className="plan-fields">
+            <div><dt>{locale === "ru" ? "Репозиторий" : "Repository"}</dt><dd>{pullRequestAction.preview.repository.name_with_owner}</dd></div>
+            <div><dt>{locale === "ru" ? "Исходная ветка" : "Source branch"}</dt><dd>{pullRequestAction.preview.source_branch}</dd></div>
+            <div><dt>{locale === "ru" ? "Базовая ветка" : "Base branch"}</dt><dd>{pullRequestAction.preview.base_branch}</dd></div>
+            <div><dt>HEAD</dt><dd><code>{pullRequestAction.preview.source_head.slice(0, 12)}</code></dd></div>
+            <div><dt>Base HEAD</dt><dd><code>{pullRequestAction.preview.base_head.slice(0, 12)}</code></dd></div>
+          </dl>
+        )}
+        <button
+          className="primary-button"
+          disabled={environment?.push !== "ready" || pullRequestAction.pending}
+          type="submit"
+        >
+          {pullRequestAction.preview === undefined
+            ? (locale === "ru" ? "Создать pull request" : "Create pull request")
+            : message(locale, "apply")}
+        </button>
+        {pullRequestAction.notice === null ? null : (
+          <p className={pullRequestAction.error ? "mutation-error" : "mutation-success"}>
+            {pullRequestAction.notice}
+          </p>
+        )}
+        {pullRequestAction.result === undefined ? null : (
+          <div className="environment-push-links">
+            <a href={pullRequestAction.result.pull_request_url} rel="noreferrer" target="_blank">PR #{pullRequestAction.result.number}</a>
+            <a href={pullRequestAction.result.commit_url} rel="noreferrer" target="_blank">Commit</a>
+            <a href={pullRequestAction.result.checks_url} rel="noreferrer" target="_blank">Checks</a>
+            <a href={pullRequestAction.result.run_evidence_url} rel="noreferrer" target="_blank">Actions</a>
+          </div>
+        )}
+      </form>
     </section>
   );
 }
@@ -331,6 +421,14 @@ export function WorkbenchSurface() {
   const [environmentPushPreview, setEnvironmentPushPreview] = useState<EnvironmentPushPreview>();
   const [environmentPushResult, setEnvironmentPushResult] = useState<EnvironmentPushApplyResponse["result"]>();
   const [environmentPushNotice, setEnvironmentPushNotice] = useState<string | null>(null);
+  const [environmentPullRequestDraft, setEnvironmentPullRequestDraft] = useState<EnvironmentPullRequestDraft>({
+    baseBranch: "",
+    body: "",
+    title: "",
+  });
+  const [environmentPullRequestPreview, setEnvironmentPullRequestPreview] = useState<EnvironmentPullRequestPreview>();
+  const [environmentPullRequestResult, setEnvironmentPullRequestResult] = useState<EnvironmentPullRequestApplyResponse["result"]>();
+  const [environmentPullRequestNotice, setEnvironmentPullRequestNotice] = useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const rememberedRunPreferences = useMemo(loadRunPreferences, []);
   const [runConfig, setRunConfig] = useState<RunConfig>(rememberedRunPreferences.config);
@@ -594,6 +692,43 @@ export function WorkbenchSurface() {
       setEnvironmentPushNotice(
         `${message(locale, "environmentPush")}: ${response.result.commit_head.slice(0, 8)}`,
       );
+      await queryClient.invalidateQueries({ queryKey: requestKeys.environment(sessionId ?? "pending") });
+    },
+  });
+  const environmentPullRequest = useMutation({
+    mutationFn: async () => {
+      if (sessionId === undefined) throw new Error("Session is not selected");
+      const preview = environmentPullRequestPreview ?? (
+        await mutateCockpit<EnvironmentPullRequestPreviewResponse>(
+          "/api/environment/pull-request/preview",
+          {
+            session_id: sessionId,
+            title: environmentPullRequestDraft.title,
+            body: environmentPullRequestDraft.body,
+            base_branch: environmentPullRequestDraft.baseBranch || undefined,
+          },
+        )
+      ).preview;
+      return mutateCockpit<EnvironmentPullRequestApplyResponse>(
+        "/api/environment/pull-request/apply",
+        { preview_id: preview.id, session_id: sessionId },
+      );
+    },
+    onSuccess: async (response) => {
+      if (response.result === undefined) {
+        setEnvironmentPullRequestPreview(response.preview);
+        setEnvironmentPullRequestResult(undefined);
+        setEnvironmentPullRequestNotice(
+          locale === "ru"
+            ? "Подтвердите точный pull request во Inbox и примените снова."
+            : "Approve the exact pull request in Inbox, then apply again.",
+        );
+        openInbox("approvals");
+        return;
+      }
+      setEnvironmentPullRequestPreview(undefined);
+      setEnvironmentPullRequestResult(response.result);
+      setEnvironmentPullRequestNotice(`PR #${response.result.number}`);
       await queryClient.invalidateQueries({ queryKey: requestKeys.environment(sessionId ?? "pending") });
     },
   });
@@ -884,6 +1019,25 @@ export function WorkbenchSurface() {
     preview: environmentPushPreview,
     result: environmentPushResult,
     submit: () => environmentPush.mutate(),
+  };
+  const environmentPullRequestAction: EnvironmentPullRequestAction = {
+    draft: environmentPullRequestDraft,
+    error: environmentPullRequest.isError,
+    notice: environmentPullRequest.isError
+      ? (environmentPullRequest.error instanceof Error
+        ? environmentPullRequest.error.message
+        : "Pull-request creation failed")
+      : environmentPullRequestNotice,
+    pending: environmentPullRequest.isPending,
+    preview: environmentPullRequestPreview,
+    result: environmentPullRequestResult,
+    setField: (field, value) => {
+      setEnvironmentPullRequestDraft((current) => ({ ...current, [field]: value }));
+      setEnvironmentPullRequestPreview(undefined);
+      setEnvironmentPullRequestNotice(null);
+      environmentPullRequest.reset();
+    },
+    submit: () => environmentPullRequest.mutate(),
   };
   const selectedHarness = harnesses.data?.harnesses.find(
     (harness) => harness.spec.id === runConfig.harnessId,
@@ -1230,6 +1384,7 @@ export function WorkbenchSurface() {
               className="mobile-environment"
               commitAction={environmentCommitAction}
               pushAction={environmentPushAction}
+              pullRequestAction={environmentPullRequestAction}
               environment={environmentView}
               error={environment.isError}
               locale={locale}
@@ -1786,6 +1941,7 @@ export function WorkbenchSurface() {
             <EnvironmentCard
               commitAction={environmentCommitAction}
               pushAction={environmentPushAction}
+              pullRequestAction={environmentPullRequestAction}
               environment={environmentView}
               error={environment.isError}
               locale={locale}

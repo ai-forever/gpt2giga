@@ -19,6 +19,9 @@ from gpt2giga_harness.runtime.policy import (
 )
 from gpt2giga_harness.environment_actions import ENVIRONMENT_COMMIT_OWNER
 from gpt2giga_harness.environment_push import ENVIRONMENT_PUSH_OWNER
+from gpt2giga_harness.environment_pull_requests import (
+    ENVIRONMENT_PULL_REQUEST_OWNER,
+)
 
 UNSAFE_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -244,6 +247,15 @@ CONFORMANCE_EVIDENCE = {
                 "tests/harness/test_environment_push.py::test_environment_push_api_requires_exact_approval_and_is_idempotent",
                 "tests/harness/test_environment_push.py::test_environment_push_rejects_local_and_remote_staleness_before_approval",
                 "tests/harness/test_environment_push.py::test_environment_push_disables_hooks_and_rejects_push_url_override",
+            ),
+        ),
+        ConformanceEvidence(
+            id="policy.environment_pull_request",
+            behaviors=frozenset(ConformanceBehavior),
+            test_nodes=(
+                "tests/harness/test_environment_pull_requests.py::test_environment_pull_request_api_requires_distinct_approval_and_replays",
+                "tests/harness/test_environment_pull_requests.py::test_environment_pull_request_rejects_stale_remote_before_approval",
+                "tests/harness/test_environment_pull_requests.py::test_environment_pull_request_recovers_network_loss_after_hosted_write",
             ),
         ),
         ConformanceEvidence(
@@ -662,6 +674,23 @@ MUTATION_ROUTE_CONTRACTS = (
         ENVIRONMENT_PUSH_OWNER,
         actions=(PermissionAction.GIT_PUSH,),
         evidence=(*_POLICY, "policy.environment_push"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/pull-request/preview",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "environment.pull_request_preview",
+        evidence=(*_AUTH, "policy.environment_pull_request"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/pull-request/apply",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.POLICY_ENGINE,
+        ENVIRONMENT_PULL_REQUEST_OWNER,
+        actions=(PermissionAction.GITHUB_PULL_REQUEST_CREATE,),
+        evidence=(*_POLICY, "policy.environment_pull_request"),
     ),
     _route(
         "POST",

@@ -50,6 +50,11 @@ from gpt2giga_harness.environment_push import (
     EnvironmentPushService,
     GovernedEnvironmentPushService,
 )
+from gpt2giga_harness.environment_pull_requests import (
+    EnvironmentPullRequestError,
+    EnvironmentPullRequestService,
+    GovernedEnvironmentPullRequestService,
+)
 from gpt2giga_harness.github_environments import (
     GitHubEnvironmentService,
     GitHubEnvironmentSnapshot,
@@ -324,6 +329,39 @@ class EnvironmentPushApplySummary:
 
 
 @dataclass(frozen=True)
+class EnvironmentPullRequestPreviewSummary:
+    """Exact hosted PR content and immutable source/base state."""
+
+    id: str
+    repository: str
+    remote: str
+    source_branch: str
+    source_head: str
+    source_remote_head: str
+    base_branch: str
+    base_head: str
+    diff_sha256: str
+    title: str
+    body: str
+    worktree_root: str
+
+
+@dataclass(frozen=True)
+class EnvironmentPullRequestApplySummary:
+    """Governed PR outcome for approval or exact hosted completion."""
+
+    preview: EnvironmentPullRequestPreviewSummary
+    approval: ApprovalSummary | None = None
+    number: int | None = None
+    commit_head: str | None = None
+    pull_request_url: str | None = None
+    commit_url: str | None = None
+    checks_url: str | None = None
+    run_evidence_url: str | None = None
+    idempotent_replay: bool = False
+
+
+@dataclass(frozen=True)
 class NavigationSnapshot:
     """One authoritative, presentation-bounded TUI resnapshot."""
 
@@ -565,6 +603,25 @@ class WorkbenchClient(Protocol):
     ) -> EnvironmentPushApplySummary:
         """Request approval or push the exact commit once."""
 
+    async def preview_environment_pull_request(
+        self,
+        workspace: str,
+        *,
+        title: str,
+        body: str,
+        base_branch: str | None = None,
+    ) -> EnvironmentPullRequestPreviewSummary:
+        """Create one exact hosted pull-request preview."""
+
+    async def apply_environment_pull_request(
+        self,
+        preview_id: str,
+        *,
+        workspace: str,
+        session_id: str | None = None,
+    ) -> EnvironmentPullRequestApplySummary:
+        """Request approval or create the exact pull request once."""
+
     async def create_session(
         self,
         workspace: str,
@@ -740,6 +797,7 @@ class InProcessWorkbenchClient:
         store: FilesystemHarnessSessionStore | None = None,
         github_environment_service: GitHubEnvironmentService | None = None,
         environment_push_service: EnvironmentPushService | None = None,
+        environment_pull_request_service: EnvironmentPullRequestService | None = None,
     ) -> None:
         self.config = config
         self.registry = registry or create_default_registry()
@@ -777,6 +835,23 @@ class InProcessWorkbenchClient:
                 PolicyEngine(self.runtime_store),
             )
             if self.environment_push_service is not None
+            else None
+        )
+        if environment_pull_request_service is None:
+            try:
+                environment_pull_request_service = EnvironmentPullRequestService(
+                    config.data_dir
+                )
+            except EnvironmentPullRequestError:
+                environment_pull_request_service = None
+        self.environment_pull_request_service = environment_pull_request_service
+        self.governed_environment_pull_request_service = (
+            GovernedEnvironmentPullRequestService(
+                self.environment_pull_request_service,
+                self.runtime_store,
+                PolicyEngine(self.runtime_store),
+            )
+            if self.environment_pull_request_service is not None
             else None
         )
         self.attachment_store = FilesystemAttachmentStore(config.data_dir)
@@ -907,6 +982,57 @@ class InProcessWorkbenchClient:
         except RuntimeError as exc:
             raise WorkbenchClientError(str(exc)) from exc
         return _environment_push_outcome_summary(outcome)
+
+    async def preview_environment_pull_request(
+        self,
+        workspace: str,
+        *,
+        title: str,
+        body: str,
+        base_branch: str | None = None,
+    ) -> EnvironmentPullRequestPreviewSummary:
+        if self.environment_pull_request_service is None:
+            raise WorkbenchClientError("Pull-request action is unavailable")
+        preview = await asyncio.to_thread(
+            self.environment_pull_request_service.preview,
+            workspace,
+            title=title,
+            body=body,
+            base_branch=base_branch,
+        )
+        return _environment_pull_request_preview_summary(preview.to_dict())
+
+    async def apply_environment_pull_request(
+        self,
+        preview_id: str,
+        *,
+        workspace: str,
+        session_id: str | None = None,
+    ) -> EnvironmentPullRequestApplySummary:
+        if (
+            self.environment_pull_request_service is None
+            or self.governed_environment_pull_request_service is None
+        ):
+            raise WorkbenchClientError("Pull-request action is unavailable")
+        preview = self.environment_pull_request_service.get_preview(preview_id)
+        resolved = Path(workspace).expanduser().resolve()
+        root = Path(preview.worktree_root).resolve()
+        if resolved != root and not resolved.is_relative_to(root):
+            raise WorkbenchClientError("workspace changed after pull-request preview")
+        project_id = preview.scope_id
+        if session_id is not None:
+            session = self.store.get_session(session_id)
+            project_id = str(session.metadata.get("project_id") or "") or project_id
+        try:
+            outcome = await asyncio.to_thread(
+                self.governed_environment_pull_request_service.apply_or_request,
+                preview_id,
+                project_id=project_id,
+                session_id=session_id,
+            )
+        except RuntimeError as exc:
+            raise WorkbenchClientError(str(exc)) from exc
+        return _environment_pull_request_outcome_summary(outcome)
 
     async def resources(
         self, session_id: str | None = None
@@ -1806,6 +1932,47 @@ class AttachedWorkbenchClient:
             payload["session_id"] = session_id
         response = await self._request("POST", "/api/environment/push/apply", payload)
         return _environment_push_apply_summary(response)
+
+    async def preview_environment_pull_request(
+        self,
+        workspace: str,
+        *,
+        title: str,
+        body: str,
+        base_branch: str | None = None,
+    ) -> EnvironmentPullRequestPreviewSummary:
+        payload: dict[str, Any] = {
+            "workspace": workspace,
+            "title": title,
+            "body": body,
+        }
+        if base_branch is not None:
+            payload["base_branch"] = base_branch
+        response = await self._request(
+            "POST", "/api/environment/pull-request/preview", payload
+        )
+        return _environment_pull_request_preview_summary(
+            _mapping(response.get("preview"))
+        )
+
+    async def apply_environment_pull_request(
+        self,
+        preview_id: str,
+        *,
+        workspace: str,
+        session_id: str | None = None,
+    ) -> EnvironmentPullRequestApplySummary:
+        payload: dict[str, Any] = {
+            "preview_id": preview_id,
+            "workspace": workspace,
+        }
+        if session_id is not None:
+            payload.pop("workspace")
+            payload["session_id"] = session_id
+        response = await self._request(
+            "POST", "/api/environment/pull-request/apply", payload
+        )
+        return _environment_pull_request_apply_summary(response)
 
     async def load(
         self,
@@ -3611,6 +3778,30 @@ def _approval_summary(value: Mapping[str, Any]) -> ApprovalSummary:
         details.append("Upstream: " + _display_text(preview.get("upstream")))
     if preview.get("target_branch") is not None:
         details.append("Target: " + _display_text(preview.get("target_branch")))
+    repository = preview.get("repository")
+    if isinstance(repository, Mapping):
+        details.append(
+            "Repository: "
+            + _display_text(repository.get("name_with_owner") or "unavailable")
+        )
+    if preview.get("source_branch") is not None:
+        details.append(
+            "Source: "
+            + _display_text(preview.get("source_branch"))
+            + " @ "
+            + _display_text(preview.get("source_head"))
+        )
+    if preview.get("base_branch") is not None:
+        details.append(
+            "Base: "
+            + _display_text(preview.get("base_branch"))
+            + " @ "
+            + _display_text(preview.get("base_head"))
+        )
+    if preview.get("title") is not None:
+        details.append("Title: " + _display_text(preview.get("title")))
+    if preview.get("body") is not None:
+        details.append("Body: " + _display_text(preview.get("body")))
     permissions = preview.get("permissions")
     if isinstance(permissions, Mapping):
         granted = sorted(
@@ -3751,6 +3942,75 @@ def _environment_push_outcome_summary(outcome: Any) -> EnvironmentPushApplySumma
         run_evidence_url=(
             outcome.result.run_evidence_url if outcome.result is not None else None
         ),
+        idempotent_replay=outcome.idempotent_replay,
+    )
+
+
+def _environment_pull_request_preview_summary(
+    value: Mapping[str, Any],
+) -> EnvironmentPullRequestPreviewSummary:
+    repository = _mapping(value.get("repository"))
+    return EnvironmentPullRequestPreviewSummary(
+        id=_required_identity(value.get("id"), "pull-request preview id"),
+        repository=_display_text(repository.get("name_with_owner") or "unavailable"),
+        remote=_display_text(value.get("remote") or "unavailable"),
+        source_branch=_display_text(value.get("source_branch") or "unavailable"),
+        source_head=_required_identity(value.get("source_head"), "source head"),
+        source_remote_head=_required_identity(
+            value.get("source_remote_head"), "remote source head"
+        ),
+        base_branch=_display_text(value.get("base_branch") or "unavailable"),
+        base_head=_required_identity(value.get("base_head"), "base head"),
+        diff_sha256=_required_identity(value.get("diff_sha256"), "diff hash"),
+        title=_display_text(value.get("title") or ""),
+        body=_display_text(value.get("body") or ""),
+        worktree_root=_display_text(value.get("worktree_root") or ""),
+    )
+
+
+def _environment_pull_request_apply_summary(
+    value: Mapping[str, Any],
+) -> EnvironmentPullRequestApplySummary:
+    preview = _environment_pull_request_preview_summary(_mapping(value.get("preview")))
+    approval_payload = value.get("approval")
+    result = _mapping(value.get("result"))
+    number = result.get("number")
+    return EnvironmentPullRequestApplySummary(
+        preview=preview,
+        approval=(
+            _approval_summary(approval_payload)
+            if isinstance(approval_payload, Mapping)
+            else None
+        ),
+        number=(
+            number if isinstance(number, int) and not isinstance(number, bool) else None
+        ),
+        commit_head=_optional_text(result.get("commit_head")),
+        pull_request_url=_optional_text(result.get("pull_request_url")),
+        commit_url=_optional_text(result.get("commit_url")),
+        checks_url=_optional_text(result.get("checks_url")),
+        run_evidence_url=_optional_text(result.get("run_evidence_url")),
+        idempotent_replay=bool(value.get("idempotent_replay", False)),
+    )
+
+
+def _environment_pull_request_outcome_summary(
+    outcome: Any,
+) -> EnvironmentPullRequestApplySummary:
+    result = outcome.result
+    return EnvironmentPullRequestApplySummary(
+        preview=_environment_pull_request_preview_summary(outcome.preview.to_dict()),
+        approval=(
+            _approval_summary(approval_request_to_dict(outcome.approval))
+            if outcome.approval is not None
+            else None
+        ),
+        number=result.number if result is not None else None,
+        commit_head=result.commit_head if result is not None else None,
+        pull_request_url=result.pull_request_url if result is not None else None,
+        commit_url=result.commit_url if result is not None else None,
+        checks_url=result.checks_url if result is not None else None,
+        run_evidence_url=result.run_evidence_url if result is not None else None,
         idempotent_replay=outcome.idempotent_replay,
     )
 

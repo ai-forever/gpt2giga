@@ -169,6 +169,14 @@ COMMAND_REGISTRY: tuple[CommandSpec, ...] = (
         requires_session=True,
     ),
     CommandSpec(
+        "environment-pull-request",
+        "/pr",
+        "environment_pull_request",
+        "command.environment_pull_request",
+        "command.environment_pull_request.help",
+        requires_session=True,
+    ),
+    CommandSpec(
         "files", "/files", "files", "command.files", "command.files.help", "a", True
     ),
     CommandSpec(

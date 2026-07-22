@@ -169,6 +169,46 @@ export interface EnvironmentPushApplyResponse {
   idempotent_replay?: boolean;
 }
 
+export interface EnvironmentPullRequestPreview {
+  id: string;
+  repository: { host: string; name_with_owner: string; url: string };
+  remote: string;
+  source_branch: string;
+  source_head: string;
+  source_remote_head: string;
+  base_branch: string;
+  base_head: string;
+  diff_sha256: string;
+  title: string;
+  body: string;
+  worktree_root: string;
+}
+
+export interface EnvironmentPullRequestPreviewResponse {
+  preview: EnvironmentPullRequestPreview;
+}
+
+export interface EnvironmentPullRequestApplyResponse {
+  approval_required?: boolean;
+  approval?: ApprovalRequest;
+  preview: EnvironmentPullRequestPreview;
+  result?: {
+    preview_id: string;
+    number: number;
+    state: string;
+    source_branch: string;
+    base_branch: string;
+    commit_head: string;
+    pull_request_url: string;
+    commit_url: string;
+    checks_url: string;
+    run_evidence_url: string;
+    completed_at: string;
+    recovered: boolean;
+  };
+  idempotent_replay?: boolean;
+}
+
 export interface GitHubCountRollup {
   status: string;
   total: number;

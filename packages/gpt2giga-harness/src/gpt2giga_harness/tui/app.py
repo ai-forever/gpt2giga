@@ -31,6 +31,8 @@ from gpt2giga_harness.tui.client import (
     EnvironmentCommitPreviewSummary,
     EnvironmentPushApplySummary,
     EnvironmentPushPreviewSummary,
+    EnvironmentPullRequestApplySummary,
+    EnvironmentPullRequestPreviewSummary,
     FileCandidate,
     HandoffPreview,
     MAX_NATIVE_SCROLLBACK_CHARS,
@@ -1302,6 +1304,9 @@ class WorkbenchTui(App[None]):
         self._commit_approval: ApprovalSummary | None = None
         self._push_preview: EnvironmentPushPreviewSummary | None = None
         self._push_approval: ApprovalSummary | None = None
+        self._pull_request_draft: dict[str, str] = {}
+        self._pull_request_preview: EnvironmentPullRequestPreviewSummary | None = None
+        self._pull_request_approval: ApprovalSummary | None = None
         self.sub_title = self.t("app.subtitle")
 
     def compose(self) -> ComposeResult:
@@ -1748,6 +1753,121 @@ class WorkbenchTui(App[None]):
             self._show_error(exc)
             return
         await self._handle_environment_push_outcome(outcome)
+
+    def action_environment_pull_request(self) -> None:
+        if self.snapshot is None or not self.snapshot.environment.push_ready:
+            self._set_status(self.t("environment.pull_request.not_ready"))
+            return
+        self._pull_request_draft = {}
+        self._pull_request_preview = None
+        self._pull_request_approval = None
+        self.push_screen(
+            TextPrompt(
+                self.t("environment.pull_request.title"),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            self._pull_request_title_chosen,
+        )
+
+    def _pull_request_title_chosen(self, value: str | None) -> None:
+        if not value:
+            return
+        self._pull_request_draft["title"] = value
+        self.push_screen(
+            TextPrompt(
+                self.t("environment.pull_request.body"),
+                self.t("dialog.confirm"),
+                self.t("dialog.cancel"),
+            ),
+            self._pull_request_body_chosen,
+        )
+
+    async def _pull_request_body_chosen(self, value: str | None) -> None:
+        if value is None or self.snapshot is None:
+            return
+        self._pull_request_draft["body"] = value
+        try:
+            preview = await self.client.preview_environment_pull_request(
+                self.snapshot.project.root,
+                title=self._pull_request_draft["title"],
+                body=value,
+            )
+            self._pull_request_preview = preview
+            outcome = await self.client.apply_environment_pull_request(
+                preview.id,
+                workspace=self.snapshot.project.root,
+                session_id=self.selected_session_id,
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        await self._handle_environment_pull_request_outcome(outcome)
+
+    async def _handle_environment_pull_request_outcome(
+        self, outcome: EnvironmentPullRequestApplySummary
+    ) -> None:
+        if outcome.number is not None:
+            self._pull_request_approval = None
+            await self._reload()
+            self._set_status(
+                self.t("environment.pull_request.completed").format(
+                    number=outcome.number
+                )
+            )
+            return
+        if outcome.approval is None:
+            self._set_status(self.t("status.error"))
+            return
+        self._pull_request_approval = outcome.approval
+        preview = outcome.preview
+        binding = RunActionBinding(
+            session_id=self.selected_session_id or "environment",
+            run_id="environment-pull-request",
+            revision=preview.diff_sha256,
+            generation=0,
+            idempotency_key=preview.id,
+        )
+        self.push_screen(
+            ApprovalScreen(
+                outcome.approval,
+                binding,
+                title=self.t("environment.pull_request.approval"),
+                allow_once=self.t("approval.allow_once"),
+                allow_run=self.t("approval.allow_run"),
+                deny=self.t("button.deny"),
+                cancel=self.t("dialog.cancel"),
+            ),
+            self._environment_pull_request_approval_decided,
+        )
+
+    async def _environment_pull_request_approval_decided(
+        self, decision: str | None
+    ) -> None:
+        preview = self._pull_request_preview
+        approval = self._pull_request_approval
+        if (
+            decision is None
+            or preview is None
+            or approval is None
+            or self.snapshot is None
+        ):
+            return
+        try:
+            await self.client.decide_environment_approval(approval.id, decision)
+            if decision == "deny":
+                self._pull_request_approval = None
+                self._set_status(self.t("environment.pull_request.denied"))
+                return
+            outcome = await self.client.apply_environment_pull_request(
+                preview.id,
+                workspace=self.snapshot.project.root,
+                session_id=self.selected_session_id,
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        await self._handle_environment_pull_request_outcome(outcome)
 
     def action_choose_project(self) -> None:
         self.push_screen(

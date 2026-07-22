@@ -28,6 +28,8 @@ from gpt2giga_harness.tui.client import (
     EnvironmentCommitPreviewSummary,
     EnvironmentPushApplySummary,
     EnvironmentPushPreviewSummary,
+    EnvironmentPullRequestApplySummary,
+    EnvironmentPullRequestPreviewSummary,
     EnvironmentSummary,
     FileCandidate,
     HandoffPreview,
@@ -85,6 +87,21 @@ class FakeClient:
             "main",
             "9" * 40,
             "fixture/repository",
+            "/tmp/demo",
+        )
+        self.environment_pull_request_approved = False
+        self.environment_pull_request_preview = EnvironmentPullRequestPreviewSummary(
+            "pull_request_" + "f" * 64,
+            "fixture/repository",
+            "origin",
+            "feature/pr",
+            "a" * 40,
+            "a" * 40,
+            "main",
+            "9" * 40,
+            "d" * 64,
+            "Exact TUI PR",
+            "Reviewed body",
             "/tmp/demo",
         )
         self.native_calls: list[tuple[str, object]] = []
@@ -251,12 +268,18 @@ class FakeClient:
         )
 
     async def decide_environment_approval(self, approval_id, decision):
-        assert approval_id in {"approval_commit", "approval_push"}
+        assert approval_id in {
+            "approval_commit",
+            "approval_push",
+            "approval_pull_request",
+        }
         self.decisions.append(decision)
         if approval_id == "approval_commit":
             self.environment_commit_approved = decision == "allow_once"
-        else:
+        elif approval_id == "approval_push":
             self.environment_push_approved = decision == "allow_once"
+        else:
+            self.environment_pull_request_approved = decision == "allow_once"
 
     async def preview_environment_push(self, workspace):
         assert workspace == "/tmp/demo"
@@ -296,6 +319,58 @@ class FakeClient:
                     "Target: main",
                     "Permits: network_connect, remote_write",
                     "Forbids: delete_remote_branch, force_update",
+                ),
+            ),
+        )
+
+    async def preview_environment_pull_request(
+        self, workspace, *, title, body, base_branch=None
+    ):
+        assert workspace == "/tmp/demo"
+        assert base_branch is None
+        self.environment_pull_request_preview = replace(
+            self.environment_pull_request_preview,
+            title=title,
+            body=body,
+        )
+        return self.environment_pull_request_preview
+
+    async def apply_environment_pull_request(
+        self, preview_id, *, workspace, session_id=None
+    ):
+        assert preview_id == self.environment_pull_request_preview.id
+        assert workspace == "/tmp/demo"
+        assert session_id == "sess_1"
+        if self.environment_pull_request_approved:
+            return EnvironmentPullRequestApplySummary(
+                self.environment_pull_request_preview,
+                number=17,
+                commit_head="a" * 40,
+                pull_request_url="https://github.com/fixture/repository/pull/17",
+                commit_url="https://github.com/fixture/repository/commit/" + "a" * 40,
+                checks_url="https://github.com/fixture/repository/pull/17/checks",
+                run_evidence_url="https://github.com/fixture/repository/actions?query=branch%3Afeature%2Fpr",
+            )
+        return EnvironmentPullRequestApplySummary(
+            self.environment_pull_request_preview,
+            approval=ApprovalSummary(
+                "approval_pull_request",
+                "github.pull_request.create",
+                "Create the exact reviewed pull request in the exact repository.",
+                "pending",
+                enforcement="enforced_by_harness",
+                enforcement_owner="environment.pull_request",
+                policy_source="profile:interactive",
+                mutation_class="github.pull_request.create",
+                network="hosted write",
+                details=(
+                    "Repository: fixture/repository",
+                    "Source: feature/pr @ " + "a" * 40,
+                    "Base: main @ " + "9" * 40,
+                    "Title: Exact TUI PR",
+                    "Body: Reviewed body",
+                    "Permits: create_pull_request, hosted_write, network_connect",
+                    "Forbids: merge_pull_request, push_commits, update_pull_request",
                 ),
             ),
         )
@@ -648,6 +723,33 @@ async def test_tui_push_command_previews_approves_and_applies_exact_remote_state
 
         assert client.decisions == ["allow_once"]
         assert "Commit pushed: aaaaaaaa" in str(app.query_one("#status").render())
+
+
+@pytest.mark.anyio
+async def test_tui_pull_request_command_previews_approves_and_applies_exact_state():
+    client = FakeClient()
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await app._execute_registered_command("environment-pull-request")
+        await pilot.press(*"Exact TUI PR")
+        await pilot.press("enter")
+        await pilot.press(*"Reviewed body")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        approval_detail = str(app.screen.query_one("#approval-detail").render())
+        assert "Repository: fixture/repository" in approval_detail
+        assert "Source: feature/pr @ " + "a" * 40 in approval_detail
+        assert "Base: main @ " + "9" * 40 in approval_detail
+        assert "Title: Exact TUI PR" in approval_detail
+        assert "Body: Reviewed body" in approval_detail
+        await pilot.click("#approval-allow-once")
+        await pilot.pause()
+
+        assert client.decisions == ["allow_once"]
+        assert "Pull request created: #17" in str(app.query_one("#status").render())
 
 
 @pytest.mark.anyio

@@ -79,6 +79,11 @@ from gpt2giga_harness.environment_push import (
     EnvironmentPushService,
     GovernedEnvironmentPushService,
 )
+from gpt2giga_harness.environment_pull_requests import (
+    EnvironmentPullRequestError,
+    EnvironmentPullRequestService,
+    GovernedEnvironmentPullRequestService,
+)
 from gpt2giga_harness.harnesses.attachment_plan import attachment_capability_error
 from gpt2giga_harness.evals import (
     EvalRunNotFoundError,
@@ -344,6 +349,7 @@ def create_app(
     github_environment_service: GitHubEnvironmentService | None = None,
     environment_commit_service: EnvironmentCommitService | None = None,
     environment_push_service: EnvironmentPushService | None = None,
+    environment_pull_request_service: EnvironmentPullRequestService | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
@@ -393,6 +399,13 @@ def create_app(
             environment_push_service = EnvironmentPushService(config.data_dir)
         except EnvironmentPushError:
             environment_push_service = None
+    if environment_pull_request_service is None:
+        try:
+            environment_pull_request_service = EnvironmentPullRequestService(
+                config.data_dir
+            )
+        except EnvironmentPullRequestError:
+            environment_pull_request_service = None
     grouped_integration_service = (
         grouped_integration_service
         or GroupedIntegrationService(
@@ -514,6 +527,18 @@ def create_app(
             policy_engine,
         )
         if runtime_store is not None and environment_push_service is not None
+        else None
+    )
+    app.state.harness_environment_pull_request_service = (
+        environment_pull_request_service
+    )
+    app.state.harness_governed_environment_pull_request_service = (
+        GovernedEnvironmentPullRequestService(
+            environment_pull_request_service,
+            runtime_store,
+            policy_engine,
+        )
+        if runtime_store is not None and environment_pull_request_service is not None
         else None
     )
 
