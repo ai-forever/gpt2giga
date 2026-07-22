@@ -20,6 +20,37 @@ export interface SessionSummary {
   tags?: string[];
 }
 
+export interface EnvironmentResponse {
+  environment: {
+    schema_version: number;
+    provider_id: string;
+    repository_root: string;
+    worktree_root: string;
+    branch: string | null;
+    detached: boolean;
+    head: string | null;
+    base_identity: string | null;
+    upstream: string | null;
+    ahead: number;
+    behind: number;
+    remote: string | null;
+    staged_count: number;
+    unstaged_count: number;
+    untracked_count: number;
+    additions: number;
+    deletions: number;
+    changed_paths: string[];
+    changed_paths_truncated: boolean;
+    diff_sha256: string;
+    captured_at: string;
+    push_ready: boolean;
+    push_blocker: string | null;
+  };
+  commit: { blocker: string | null; ready: boolean };
+  issue_pr: { status: string };
+  freshness: { captured_at: string; status: string };
+}
+
 export interface MessageProjection {
   id: string;
   run_id?: string | null;

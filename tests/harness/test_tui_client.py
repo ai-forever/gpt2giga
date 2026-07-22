@@ -412,6 +412,40 @@ async def test_attach_client_uses_existing_api_contract(monkeypatch):
                 "flows": [{"id": "flow_1", "status": "verified"}],
                 "content_free": True,
             }
+        if path.startswith("/api/environment?"):
+            return {
+                "environment": {
+                    "schema_version": 1,
+                    "provider_id": "git",
+                    "repository_root": "/tmp/demo",
+                    "worktree_root": "/tmp/demo",
+                    "branch": "main",
+                    "detached": False,
+                    "head": "a" * 40,
+                    "base_identity": "a" * 40,
+                    "upstream": "origin/main",
+                    "ahead": 0,
+                    "behind": 0,
+                    "remote": "origin",
+                    "staged_count": 1,
+                    "unstaged_count": 0,
+                    "untracked_count": 0,
+                    "additions": 2,
+                    "deletions": 0,
+                    "changed_paths": ["README.md"],
+                    "changed_paths_truncated": False,
+                    "diff_sha256": "b" * 64,
+                    "captured_at": "2026-07-22T00:00:00Z",
+                    "push_ready": True,
+                    "push_blocker": None,
+                },
+                "commit": {"ready": True, "blocker": None},
+                "issue_pr": {"status": "not_connected"},
+                "freshness": {
+                    "status": "fresh",
+                    "captured_at": "2026-07-22T00:00:00Z",
+                },
+            }
         if path == "/api/preflight/run":
             return {
                 "preflight": {
@@ -455,6 +489,8 @@ async def test_attach_client_uses_existing_api_contract(monkeypatch):
     assert snapshot.selected_session_id == "sess_1"
     assert snapshot.readiness.status == "ready"
     assert snapshot.integrations.verified_count == 1
+    assert snapshot.environment.branch == "main"
+    assert snapshot.environment.commit_ready is True
     assert created.id == "sess_2"
     assert (
         "POST",

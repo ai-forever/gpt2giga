@@ -26,6 +26,7 @@ import {
 } from "../api";
 import { MessageMarkdown } from "../message-markdown";
 import { generatedFileProjection } from "../generated-image";
+import { projectEnvironment, type EnvironmentView } from "../environment-model";
 import {
   latestEditableUserMessageId,
   projectActiveMessageTimeline,
@@ -36,7 +37,9 @@ import {
 } from "../message-actions";
 import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
+import type { LocalePreference } from "../preferences";
 import {
+  environmentOptions,
   requestKeys,
   refreshSessionAfterRunStart,
   refreshSessionRevision,
@@ -131,6 +134,47 @@ type ProviderHandoffPreview = {
   };
 };
 
+function EnvironmentCard({
+  className = "",
+  environment,
+  error,
+  locale,
+  pending,
+}: {
+  className?: string;
+  environment: EnvironmentView | undefined;
+  error: boolean;
+  locale: LocalePreference;
+  pending: boolean;
+}) {
+  return (
+    <section
+      className={`inspector-section environment-card ${className}`.trim()}
+      data-state={environment?.status ?? "unavailable"}
+    >
+      <div className="environment-heading">
+        <h3>{message(locale, "environment")}</h3>
+        <span>{environment?.status ?? "unavailable"}</span>
+      </div>
+      {environment === undefined ? (
+        <span className={error ? "mutation-error" : "muted-copy"}>
+          {pending ? "…" : message(locale, "environmentUnavailable")}
+        </span>
+      ) : (
+        <dl className="plan-fields">
+          <div><dt>{message(locale, "changes")}</dt><dd>{environment.changes}</dd></div>
+          <div><dt>{message(locale, "worktree")}</dt><dd title={environment.worktree}>{environment.worktree}</dd></div>
+          <div><dt>{message(locale, "environmentBranch")}</dt><dd>{environment.branch} · {environment.head}</dd></div>
+          <div><dt>{message(locale, "environmentCommit")}</dt><dd>{environment.commit}</dd></div>
+          <div><dt>{message(locale, "environmentPush")}</dt><dd>{environment.push}</dd></div>
+          <div><dt>{message(locale, "environmentIssuePr")}</dt><dd>{environment.issuePr}</dd></div>
+          <div><dt>{message(locale, "environmentCaptured")}</dt><dd>{formatTimestamp(environment.capturedAt, locale)}</dd></div>
+        </dl>
+      )}
+    </section>
+  );
+}
+
 export function WorkbenchSurface() {
   const params = useParams({ strict: false });
   const sessionId =
@@ -191,6 +235,10 @@ export function WorkbenchSurface() {
   const settings = useQuery(settingsOptions());
   const overview = useQuery({
     ...sessionOverviewOptions(sessionId ?? "pending"),
+    enabled: sessionId !== undefined,
+  });
+  const environment = useQuery({
+    ...environmentOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
   });
   const messages = useQuery({
@@ -596,6 +644,9 @@ export function WorkbenchSurface() {
     gridTemplateColumns: `${leftOpen ? `${leftWidth}px 8px` : "44px"} minmax(360px, 1fr) ${rightOpen ? `8px ${rightWidth}px` : "44px"}`,
   };
   const stage = runStage(retainedLatestRun);
+  const environmentView = environment.data === undefined
+    ? undefined
+    : projectEnvironment(environment.data, { failedRefresh: environment.isError });
   const selectedHarness = harnesses.data?.harnesses.find(
     (harness) => harness.spec.id === runConfig.harnessId,
   );
@@ -937,6 +988,13 @@ export function WorkbenchSurface() {
                 </button>
               </div>
             </header>
+            <EnvironmentCard
+              className="mobile-environment"
+              environment={environmentView}
+              error={environment.isError}
+              locale={locale}
+              pending={environment.isPending}
+            />
             <section className="message-region" aria-label={message(locale, "sessionMessages")}>
               {messages.isPending ? <ListSkeleton rows={4} /> : null}
               {messages.isError ? <ReadError locale={locale} /> : null}
@@ -1485,6 +1543,12 @@ export function WorkbenchSurface() {
                 <code>{selectedTransport.remediation}</code>
               ) : null}
             </div>
+            <EnvironmentCard
+              environment={environmentView}
+              error={environment.isError}
+              locale={locale}
+              pending={environment.isPending}
+            />
             <section className="inspector-section">
               <h3>{message(locale, "executionPlan")}</h3>
               <dl className="plan-fields">

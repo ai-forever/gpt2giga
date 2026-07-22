@@ -67,6 +67,7 @@ from gpt2giga_harness.ui.routers.workbench_state import (
 from gpt2giga_harness.ui.routers.workbench_resources import (
     router as workbench_resources_router,
 )
+from gpt2giga_harness.ui.routers.environments import router as environments_router
 from gpt2giga_harness.harnesses.attachment_plan import attachment_capability_error
 from gpt2giga_harness.evals import (
     EvalRunNotFoundError,
@@ -3362,6 +3363,7 @@ def create_app(
     app.include_router(approvals_router)
     app.include_router(cockpit_router)
     app.include_router(evaluate_router)
+    app.include_router(environments_router)
     app.include_router(integrations_router)
     app.include_router(tools_router)
     app.include_router(tui_actions_router)

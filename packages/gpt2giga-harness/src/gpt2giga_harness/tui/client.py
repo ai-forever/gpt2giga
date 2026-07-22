@@ -35,6 +35,11 @@ from gpt2giga_harness.claude_handoff import (
     claude_handoff_plan_to_dict,
 )
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.environments import (
+    EnvironmentCaptureError,
+    EnvironmentSnapshot,
+    GitEnvironmentProvider,
+)
 from gpt2giga_harness.integration_flows import IntegrationFlowService
 from gpt2giga_harness.project import (
     HarnessProject,
@@ -224,6 +229,28 @@ class IntegrationSummary:
 
 
 @dataclass(frozen=True)
+class EnvironmentSummary:
+    """Bounded presentation of one canonical local Git environment."""
+
+    status: str
+    branch: str | None = None
+    detached: bool = False
+    head: str | None = None
+    worktree_root: str | None = None
+    staged_count: int = 0
+    unstaged_count: int = 0
+    untracked_count: int = 0
+    additions: int = 0
+    deletions: int = 0
+    commit_ready: bool = False
+    push_ready: bool = False
+    push_blocker: str | None = None
+    captured_at: str | None = None
+    issue_pr_status: str = "not_connected"
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class NavigationSnapshot:
     """One authoritative, presentation-bounded TUI resnapshot."""
 
@@ -235,6 +262,7 @@ class NavigationSnapshot:
     harnesses: tuple[HarnessSummary, ...]
     readiness: ReadinessSummary
     integrations: IntegrationSummary = IntegrationSummary("unknown", 0, 0, 0)
+    environment: EnvironmentSummary = EnvironmentSummary("unavailable")
 
 
 @dataclass(frozen=True)
@@ -692,6 +720,7 @@ class InProcessWorkbenchClient:
             for harness in self.registry.list()
         )
         readiness = self._readiness(project, selected, harnesses)
+        environment = _capture_environment_summary(project.root)
         projects = self._projects(project)
         project_summary = next(item for item in projects if item.id == project.id)
         return NavigationSnapshot(
@@ -703,6 +732,7 @@ class InProcessWorkbenchClient:
             harnesses=harnesses,
             readiness=readiness,
             integrations=_in_process_integration_summary(self.integration_service),
+            environment=environment,
         )
 
     async def create_session(
@@ -1531,6 +1561,14 @@ class AttachedWorkbenchClient:
             },
         )
         readiness = _mapping(_mapping(preflight.get("preflight")).get("readiness"))
+        try:
+            environment_payload = await self._request(
+                "GET",
+                f"/api/environment?{urlencode({'workspace': project_data.get('root') or workspace or ''})}",
+            )
+            environment = _environment_summary_from_mapping(environment_payload)
+        except (TypeError, ValueError, WorkbenchClientError) as exc:
+            environment = EnvironmentSummary("unavailable", reason=str(exc)[:240])
         project = _project_summary_from_mapping(
             project_data,
             session_count=len(session_items),
@@ -1550,6 +1588,7 @@ class AttachedWorkbenchClient:
                 model=model,
             ),
             integrations=_integration_summary_from_mapping(integration_payload),
+            environment=environment,
         )
 
     async def create_session(
@@ -2198,6 +2237,50 @@ def _integration_summary_from_mapping(data: Mapping[str, Any]) -> IntegrationSum
         str(item.get("status") or "") in {"verified", "active"} for item in flows
     )
     return IntegrationSummary("ready", len(catalog), len(flows), verified)
+
+
+def _capture_environment_summary(workspace: str) -> EnvironmentSummary:
+    try:
+        return _environment_summary_from_snapshot(
+            GitEnvironmentProvider().snapshot(workspace)
+        )
+    except EnvironmentCaptureError as exc:
+        return EnvironmentSummary("unavailable", reason=str(exc))
+
+
+def _environment_summary_from_snapshot(
+    snapshot: EnvironmentSnapshot,
+) -> EnvironmentSummary:
+    return EnvironmentSummary(
+        status="fresh",
+        branch=snapshot.branch,
+        detached=snapshot.detached,
+        head=snapshot.head,
+        worktree_root=snapshot.worktree_root,
+        staged_count=snapshot.staged_count,
+        unstaged_count=snapshot.unstaged_count,
+        untracked_count=snapshot.untracked_count,
+        additions=snapshot.additions,
+        deletions=snapshot.deletions,
+        commit_ready=snapshot.staged_count > 0,
+        push_ready=snapshot.push_ready,
+        push_blocker=snapshot.push_blocker,
+        captured_at=snapshot.captured_at,
+    )
+
+
+def _environment_summary_from_mapping(data: Mapping[str, Any]) -> EnvironmentSummary:
+    snapshot = EnvironmentSnapshot.from_dict(_mapping(data.get("environment")))
+    summary = _environment_summary_from_snapshot(snapshot)
+    freshness = _mapping(data.get("freshness"))
+    issue_pr = _mapping(data.get("issue_pr"))
+    commit = _mapping(data.get("commit"))
+    return replace(
+        summary,
+        status=str(freshness.get("status") or "stale"),
+        commit_ready=bool(commit.get("ready")),
+        issue_pr_status=str(issue_pr.get("status") or "not_connected"),
+    )
 
 
 def _session_workspace(session: HarnessSession) -> str:

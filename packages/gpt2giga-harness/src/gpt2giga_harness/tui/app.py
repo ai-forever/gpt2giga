@@ -1129,7 +1129,7 @@ class WorkbenchTui(App[None]):
     }
     #readiness {
         height: auto;
-        max-height: 9;
+        max-height: 13;
     }
     #timeline {
         height: 1fr;
@@ -2683,6 +2683,30 @@ class WorkbenchTui(App[None]):
         readiness = snapshot.readiness
         model = readiness.model or "—"
         findings = ", ".join(readiness.findings) or "—"
+        environment = snapshot.environment
+        branch = environment.branch or ("detached" if environment.detached else "—")
+        head = environment.head[:8] if environment.head else "—"
+        changes = (
+            f"{environment.staged_count} {self.t('environment.staged')} · "
+            f"{environment.unstaged_count} {self.t('environment.unstaged')} · "
+            f"{environment.untracked_count} {self.t('environment.untracked')} · "
+            f"+{environment.additions}/-{environment.deletions}"
+        )
+        commit = (
+            self.t("status.ready")
+            if environment.commit_ready
+            else self.t("environment.no_staged")
+        )
+        push = (
+            self.t("status.ready")
+            if environment.push_ready
+            else (environment.push_blocker or "blocked")
+        )
+        issue_pr = (
+            self.t("environment.not_connected")
+            if environment.issue_pr_status == "not_connected"
+            else environment.issue_pr_status
+        )
         content = "\n".join(
             (
                 f"{snapshot.project.name}",
@@ -2698,7 +2722,14 @@ class WorkbenchTui(App[None]):
                     f"flows {snapshot.integrations.flow_count} · "
                     f"verified {snapshot.integrations.verified_count}"
                 ),
-                "Environment: deferred to Phase N6",
+                (
+                    f"{self.t('label.environment')}: "
+                    f"{self.t(f'environment.status.{environment.status}')} · "
+                    f"{environment.worktree_root or self.t('environment.status.unavailable')}"
+                ),
+                f"Git: {branch} @ {head} · {changes}",
+                f"{self.t('label.commit')}: {commit} · {self.t('label.push')}: {push}",
+                f"{self.t('label.issue_pr')}: {issue_pr} · {self.t('label.captured')}: {environment.captured_at or '—'}",
                 f"Findings: {findings}",
             )
         )

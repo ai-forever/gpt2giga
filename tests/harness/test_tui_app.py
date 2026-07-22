@@ -24,6 +24,7 @@ from gpt2giga_harness.tui.client import (
     ApprovalSummary,
     ArtifactSummary,
     AttachmentSummary,
+    EnvironmentSummary,
     FileCandidate,
     HandoffPreview,
     HarnessSummary,
@@ -138,6 +139,20 @@ class FakeClient:
                 "local",
                 "one_shot",
                 (),
+            ),
+            environment=EnvironmentSummary(
+                "fresh",
+                branch="main",
+                head="a" * 40,
+                worktree_root="/tmp/demo",
+                staged_count=1,
+                unstaged_count=2,
+                untracked_count=3,
+                additions=12,
+                deletions=3,
+                commit_ready=True,
+                push_ready=True,
+                captured_at="2026-07-22T00:00:00Z",
             ),
         )
 
@@ -433,6 +448,10 @@ async def test_tui_renders_keyboard_navigation_without_horizontal_overflow(size)
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         assert "Provider: pending execution snapshot" in str(
+            app.query_one("#readiness").render()
+        )
+        assert "Git: main @ aaaaaaaa" in str(app.query_one("#readiness").render())
+        assert "Commit: Ready · Push: Ready" in str(
             app.query_one("#readiness").render()
         )
         assert app.query_one("#body").has_class("narrow") is (size[0] < 84)

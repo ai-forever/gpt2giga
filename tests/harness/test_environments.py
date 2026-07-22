@@ -4,9 +4,11 @@ from dataclasses import replace
 from datetime import datetime, timezone
 import subprocess
 
+from fastapi.testclient import TestClient
 import pytest
 
 from gpt2giga_harness import environments as environment_module
+from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.environments import (
     ENVIRONMENT_PROVIDER_ENTRY_POINTS,
     MAX_CHANGED_PATHS,
@@ -17,6 +19,8 @@ from gpt2giga_harness.environments import (
     git_environment_provider_plugin,
 )
 from gpt2giga_harness.registries import RegistryCollisionError
+from gpt2giga_harness.registry import create_default_registry
+from gpt2giga_harness.ui.app import create_app
 
 
 CAPTURED_AT = datetime(2026, 7, 22, 8, 30, tzinfo=timezone.utc)
@@ -166,6 +170,34 @@ def test_environment_provider_entry_points_use_neutral_registry_kernel(monkeypat
                 descriptor=replace(plugin.descriptor, display_name="Other Git"),
             )
         )
+
+
+def test_environment_api_projects_readiness_and_fails_closed(tmp_path):
+    repository = tmp_path / "repository"
+    _init_repository(repository)
+    (repository / "tracked.txt").write_text("one\ntwo\n", encoding="utf-8")
+    _git(repository, "add", "tracked.txt")
+    client = TestClient(
+        create_app(
+            HarnessConfig(data_dir=str(tmp_path / "state")),
+            registry=create_default_registry(include_entry_points=False),
+        )
+    )
+
+    response = client.get("/api/environment", params={"workspace": str(repository)})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["environment"]["branch"]
+    assert payload["environment"]["staged_count"] == 1
+    assert payload["commit"] == {"ready": True, "blocker": None}
+    assert payload["issue_pr"] == {"status": "not_connected"}
+    assert payload["freshness"]["status"] == "fresh"
+
+    unavailable = client.get("/api/environment", params={"workspace": str(tmp_path)})
+    assert unavailable.status_code == 409
+    assert unavailable.json()["detail"]["code"] == "not_git_repository"
+    assert str(tmp_path) not in unavailable.text
 
 
 def _init_repository(path):

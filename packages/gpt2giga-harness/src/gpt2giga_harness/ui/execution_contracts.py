@@ -109,6 +109,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/evals/runs/{eval_run_id}"),
         ("GET", "/api/evaluate"),
         ("GET", "/api/evaluate/{eval_name}/matrix"),
+        ("GET", "/api/environment"),
         ("GET", "/api/files/generated/{run_key}/{filename}"),
         ("GET", "/api/files/preview"),
         ("GET", "/api/harnesses"),
@@ -224,6 +225,7 @@ _SUBPROCESS_PREFIXES = (
 )
 _SUBPROCESS_EXACT = frozenset(
     {
+        ("GET", "/api/environment"),
         ("POST", "/api/project/init"),
         ("POST", "/api/integrations/git/inspect"),
         ("POST", "/api/run"),
