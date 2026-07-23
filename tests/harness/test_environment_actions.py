@@ -239,6 +239,46 @@ def test_ui_starts_without_git_and_commit_preview_fails_closed(tmp_path, monkeyp
     assert preview.json()["detail"]["code"] == "git_unavailable"
 
 
+def test_bounded_git_command_preserves_exit_status_after_broken_stdin_pipe(
+    monkeypatch,
+):
+    class EmptyStream:
+        def read(self, _size):
+            return b""
+
+    class BrokenPipeStdin:
+        def write(self, _value):
+            raise BrokenPipeError
+
+        def close(self):
+            raise AssertionError("close must not run after a failed write")
+
+    class StubProcess:
+        stdin = BrokenPipeStdin()
+        stdout = EmptyStream()
+        stderr = EmptyStream()
+
+        def wait(self, timeout):
+            assert timeout == environment_actions.GIT_MUTATION_TIMEOUT_SECONDS
+            return 7
+
+    monkeypatch.setattr(
+        environment_actions.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: StubProcess(),
+    )
+
+    result = environment_actions._run_bounded(
+        ("git", "commit-tree"),
+        environment={"PATH": "/fixture/bin"},
+        input_bytes=b"commit message",
+    )
+
+    assert result.returncode == 7
+    assert result.stdout == b""
+    assert result.stderr == b""
+
+
 def _repository(tmp_path: Path) -> Path:
     repository = tmp_path / "repository"
     _git(tmp_path, "init", "-q", str(repository))

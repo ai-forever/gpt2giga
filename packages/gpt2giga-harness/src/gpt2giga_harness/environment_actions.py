@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -578,11 +579,9 @@ def _run_bounded(
     for thread in threads:
         thread.start()
     if input_bytes is not None and process.stdin is not None:
-        try:
+        with suppress(BrokenPipeError):
             process.stdin.write(input_bytes)
             process.stdin.close()
-        except BrokenPipeError:
-            pass
     try:
         returncode = process.wait(timeout=GIT_MUTATION_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
