@@ -1,4 +1,4 @@
-import type { HarnessOption } from "./api";
+import type { HarnessOption, RunPreflightResponse } from "./api";
 
 export type InvocationMode = "headless" | "native";
 export type ExecutionTransport = "native_structured" | "native_terminal" | "one_shot";
@@ -54,6 +54,23 @@ export function capabilityPresentation(capability: string): {
   return {
     label: "Direct chat",
     detail: "Calls the selected model route without a coding-agent workspace loop.",
+  };
+}
+
+export function permissionSimulationHighlights(
+  simulation: RunPreflightResponse["preflight"]["permission_simulation"],
+): {
+  approvalCount: number;
+  blockedCount: number;
+  evidence: string;
+  unknownCount: number;
+} | null {
+  if (simulation === undefined) return null;
+  return {
+    approvalCount: simulation.summary.approval_required,
+    blockedCount: simulation.blocked_actions.length,
+    evidence: simulation.simulation_hash.slice(0, 12),
+    unknownCount: simulation.summary.unknown,
   };
 }
 

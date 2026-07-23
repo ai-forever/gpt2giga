@@ -257,6 +257,7 @@ def test_cli_harness_run_json_includes_selected_execution_readiness(capsys):
 
     payload = json.loads(capsys.readouterr().out)
     readiness = payload["raw"]["preflight"]["readiness"]
+    simulation = payload["raw"]["preflight"]["permission_simulation"]
     assert exit_code == 0
     assert readiness["ok"] is True
     assert readiness["plan"] == {
@@ -276,6 +277,10 @@ def test_cli_harness_run_json_includes_selected_execution_readiness(capsys):
         "invocation-mode",
         "delivery",
     }
+    assert simulation["route_snapshot"]["harness_id"] == "echo"
+    assert simulation["route_snapshot"]["execution_transport"] == "one_shot"
+    assert simulation["side_effect_free"] is True
+    assert simulation["provider_safety_proven"] is False
 
 
 def test_cli_session_application_flow_create_turn_events_and_approve(

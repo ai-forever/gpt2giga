@@ -140,6 +140,7 @@ from gpt2giga_harness.preflight import (
     format_preflight_block_message,
     preflight_report_to_dict,
 )
+from gpt2giga_harness.permission_simulator import build_permission_simulation
 from gpt2giga_harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
 from gpt2giga_harness.plugins import (
     harness_validation_report_to_dict,
@@ -3090,6 +3091,16 @@ def _run_harness(
         prompt=request.prompt,
         workspace=request.workspace,
         data_dir=config.data_dir,
+        permission_simulation=build_permission_simulation(
+            spec=spec,
+            execution_transport=execution_transport,
+            invocation_mode=invocation_mode.value,
+            permission_profile_id="interactive",
+            mode=request.mode,
+            workspace=request.workspace,
+            api_mode=request.api_mode.value,
+            model=request.model or config.default_model,
+        ).to_dict(),
         readiness=build_execution_readiness(
             config,
             registry,

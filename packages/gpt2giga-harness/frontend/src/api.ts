@@ -927,6 +927,35 @@ export interface RunPreflightResponse {
     max_severity: string;
     findings: Array<{ id: string; severity: string; message: string }>;
     readiness?: { status?: string; findings?: unknown[] };
+    permission_simulation?: {
+      simulation_hash: string;
+      block_run: boolean;
+      blocked_actions: string[];
+      approval_points: string[];
+      summary: {
+        allowed: number;
+        approval_required: number;
+        denied: number;
+        unknown: number;
+      };
+      route_snapshot: {
+        snapshot_hash: string;
+        harness_id: string;
+        execution_transport: string;
+        extension_count: number;
+      };
+      outcomes: Array<{
+        domain: string;
+        action: string | null;
+        prediction: string;
+        occurrence: string;
+        control_owner: string;
+        reason_code: string;
+      }>;
+      content_free: boolean;
+      side_effect_free: boolean;
+      provider_safety_proven: boolean;
+    };
   };
 }
 

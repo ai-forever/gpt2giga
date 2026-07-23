@@ -377,6 +377,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .attachment-chip button { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; padding: 0; }
 .preview-execution { display: grid; gap: 3px; border-bottom: 1px solid color-mix(in srgb, var(--success) 35%, var(--border)); background: color-mix(in srgb, var(--success) 8%, var(--surface)); padding: 9px 12px; color: var(--text); font-size: 11px; }
 .preview-execution.blocked { border-color: color-mix(in srgb, var(--danger) 42%, var(--border)); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }.preview-execution small { color: var(--muted); font-size: 9px; }
+.preview-execution .permission-simulation-summary { overflow-wrap: anywhere; color: var(--text-secondary); }
 .composer textarea { width: 100%; min-height: 82px; max-height: min(260px, 40vh); resize: vertical; overflow-y: auto; border: 0; outline: 0; background: transparent; color: var(--text); padding: 14px 16px; font-size: 14px; line-height: 1.5; }
 .workspace-file-picker { max-height: 220px; overflow-y: auto; display: grid; gap: 2px; border-top: 1px solid var(--border); background: var(--surface); padding: 7px; }
 .workspace-file-picker > div { display: flex; justify-content: space-between; gap: 8px; padding: 4px 7px 6px; }.workspace-file-picker > div small { color: var(--muted); font-size: 9px; }

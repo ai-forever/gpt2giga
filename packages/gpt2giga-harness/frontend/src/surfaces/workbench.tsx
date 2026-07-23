@@ -91,6 +91,7 @@ import {
   type ExecutionTransport,
   invocationModeForTransport,
   normalizeExecutionSelection,
+  permissionSimulationHighlights,
 } from "../workbench-execution";
 
 const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
@@ -453,6 +454,9 @@ export function WorkbenchSurface() {
   const [composerCaret, setComposerCaret] = useState(0);
   const [atSelection, setAtSelection] = useState(0);
   const [previewReport, setPreviewReport] = useState<RunPreflightResponse["preflight"] | null>(null);
+  const permissionHighlights = permissionSimulationHighlights(
+    previewReport?.permission_simulation,
+  );
   const [startedRuns, setStartedRuns] = useState<Record<string, string>>({});
   const [startedNativeProcesses, setStartedNativeProcesses] = useState<Record<string, string>>({});
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => new Set());
@@ -1534,6 +1538,11 @@ export function WorkbenchSurface() {
                   <small>
                     {message(locale, "previewExecutionEvidence")} · {previewReport.findings.length} {message(locale, "previewFindings")}
                   </small>
+                  {permissionHighlights === null ? null : (
+                    <small className="permission-simulation-summary">
+                      {message(locale, "permissionSimulation")} · {permissionHighlights.approvalCount} {message(locale, "approvalRequired")} · {permissionHighlights.unknownCount} {message(locale, "permissionSimulationUnknown")} · {message(locale, "permissionSimulationEvidence")} {permissionHighlights.evidence}
+                    </small>
+                  )}
                 </div>
               )}
               {attachments.data?.attachments.length ? (

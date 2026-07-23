@@ -37,6 +37,10 @@ from gpt2giga_harness.preflight import (
     build_preflight_report,
     preflight_report_to_dict,
 )
+from gpt2giga_harness.permission_simulator import (
+    build_permission_simulation,
+    extension_permission_contract,
+)
 from gpt2giga_harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
 from gpt2giga_harness.provenance import (
     build_run_provenance,
@@ -48,6 +52,7 @@ from gpt2giga_harness.runtime.structured import (
     DurableStructuredHarness,
     requested_execution_transport,
 )
+from gpt2giga_harness.runtime.policy import PermissionAction, permission_profile
 from gpt2giga_harness.sessions.conversation import (
     active_conversation_messages,
     edited_message_metadata,
@@ -179,6 +184,7 @@ class HarnessSessionRunner:
             else ()
         )
         project_memory = self._load_project_memory(options["workspace"])
+        permission_simulation = self._permission_simulation(options)
         return build_preflight_report(
             prompt=options["prompt"],
             workspace=options["workspace"],
@@ -188,6 +194,7 @@ class HarnessSessionRunner:
             data_dir=self.config.data_dir,
             max_history_messages=MAX_HISTORY_MESSAGES,
             readiness=self._execution_readiness(options, durable=durable),
+            permission_simulation=permission_simulation,
         )
 
     def create_session(
@@ -404,6 +411,7 @@ class HarnessSessionRunner:
                     break
         if readiness is None:
             readiness = self._execution_readiness(options, durable=durable)
+        permission_simulation = self._permission_simulation(options)
         preflight = build_preflight_report(
             prompt=options["prompt"],
             workspace=options["workspace"],
@@ -413,6 +421,7 @@ class HarnessSessionRunner:
             data_dir=self.config.data_dir,
             max_history_messages=MAX_HISTORY_MESSAGES,
             readiness=readiness,
+            permission_simulation=permission_simulation,
         )
         if preflight.hard_block:
             raise PreflightBlockedError(preflight)
@@ -994,6 +1003,14 @@ class HarnessSessionRunner:
         workspace_policy = parse_workspace_policy(
             payload.get("workspace_policy") or extra.get("workspace_policy")
         )
+        origin = str(extra.get("permission_origin") or "interactive")
+        selected_permission_profile = permission_profile(
+            payload.get("permission_profile"),
+            origin=origin,
+        )
+        required_permission_actions = _permission_actions(
+            extra.get("required_permission_actions")
+        )
         return {
             "prompt": prompt,
             "harness_id": harness_id,
@@ -1011,6 +1028,9 @@ class HarnessSessionRunner:
             "native_session_id": _optional_text(payload.get("native_session_id")),
             "attachment_ids": attachment_ids,
             "workspace_policy": workspace_policy,
+            "permission_profile": selected_permission_profile.id,
+            "permission_origin": origin,
+            "required_permission_actions": required_permission_actions,
             "agent_id": _optional_text(payload.get("agent_id")),
             "agent_profile_snapshot": (
                 dict(payload["agent_profile_snapshot"])
@@ -1058,6 +1078,101 @@ class HarnessSessionRunner:
             durable=durable,
             dry_run=bool(_mapping(options["extra"]).get("dry_run")),
         )
+
+    def _permission_simulation(
+        self,
+        options: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Project effective policy without resolving secrets or starting tools."""
+        transport = options.get("execution_transport")
+        if not isinstance(transport, ExecutionTransport):
+            transport = (
+                ExecutionTransport.NATIVE_TERMINAL
+                if options["invocation_mode"].value == "native"
+                else ExecutionTransport.ONE_SHOT
+            )
+        extensions = tuple(
+            extension_permission_contract(item)
+            for item in self._permission_extension_descriptors(options)
+        )
+        return build_permission_simulation(
+            spec=self.registry.get(str(options["harness_id"])).spec(),
+            execution_transport=transport,
+            invocation_mode=options["invocation_mode"].value,
+            permission_profile_id=str(options["permission_profile"]),
+            mode=str(options["mode"]),
+            workspace=options.get("workspace"),
+            api_mode=options["api_mode"].value,
+            model=options.get("model"),
+            extensions=extensions,
+            required_actions=options["required_permission_actions"],
+            origin=str(options["permission_origin"]),
+        ).to_dict()
+
+    def _permission_extension_descriptors(
+        self,
+        options: Mapping[str, Any],
+    ) -> tuple[Any, ...]:
+        """Read exact selected MCP declarations without freezing or resolving them."""
+        extra = _mapping(options.get("extra"))
+        reference = extra.get("managed_mcp_snapshot")
+        store = HeadlessManagedMCPSnapshotStore(self.config.data_dir)
+        if isinstance(reference, Mapping):
+            snapshot = store.load(reference)
+            if snapshot.harness_id != options["harness_id"]:
+                raise ValueError("Managed MCP snapshot harness does not match run")
+            project = resolve_project(
+                options.get("workspace"),
+                data_dir=self.config.data_dir,
+                load_config_name=False,
+            )
+            if snapshot.project_id != project.id:
+                raise ValueError("Managed MCP snapshot project does not match run")
+            return tuple(snapshot.descriptors)
+        tool_ids = _managed_tool_ids(extra.get("tool_ids"))
+        if not tool_ids:
+            return ()
+        if options["invocation_mode"].value != "headless":
+            raise ValueError(
+                "Managed MCP run snapshots currently require headless mode"
+            )
+        harness_id = str(options["harness_id"])
+        if harness_id not in {"codex-cli", "claude-code", "gemini-cli"}:
+            raise ValueError(f"{harness_id} does not support managed MCP snapshots")
+        project = resolve_project(
+            options.get("workspace"),
+            data_dir=self.config.data_dir,
+            load_config_name=False,
+        )
+        loaded = load_project_config(project.root)
+        descriptors, errors = build_mcp_inventory(loaded.tool_profiles)
+        selected_errors = {
+            str(item.get("server_id")): str(item.get("error"))
+            for item in errors
+            if str(item.get("server_id")) in tool_ids
+        }
+        if selected_errors:
+            details = "; ".join(
+                f"{server_id}: {selected_errors[server_id]}"
+                for server_id in sorted(selected_errors)
+            )
+            raise ValueError(f"Managed MCP inventory is invalid: {details}")
+        by_id = {item.id: item for item in descriptors}
+        missing = sorted(set(tool_ids) - set(by_id))
+        if missing:
+            raise ValueError(f"Managed MCP servers not found: {', '.join(missing)}")
+        selected = tuple(by_id[server_id] for server_id in tool_ids)
+        for descriptor in selected:
+            if not descriptor.enabled:
+                raise ValueError(f"Managed MCP server is disabled: {descriptor.id}")
+            if not descriptor.trusted:
+                raise ValueError(f"Managed MCP server is not trusted: {descriptor.id}")
+            if descriptor.harnesses and harness_id not in descriptor.harnesses:
+                raise ValueError(
+                    f"Managed MCP server {descriptor.id} is incompatible with "
+                    f"{harness_id}"
+                )
+        return selected
 
     def _schedule_session_title(
         self,
@@ -1661,6 +1776,18 @@ def _managed_tool_ids(value: Any) -> tuple[str, ...]:
         if server_id not in result:
             result.append(server_id)
     return tuple(result)
+
+
+def _permission_actions(value: Any) -> tuple[PermissionAction, ...]:
+    """Parse an optional strengthening-only route requirement list."""
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("required_permission_actions must be a list")
+    parsed = tuple(PermissionAction(str(item)) for item in value)
+    if len(set(parsed)) != len(parsed):
+        raise ValueError("required_permission_actions contains duplicates")
+    return tuple(sorted(parsed, key=lambda item: item.value))
 
 
 def _run_attachment_metadata(

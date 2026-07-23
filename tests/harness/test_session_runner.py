@@ -113,6 +113,23 @@ def test_session_runner_blocks_private_key_before_harness_invocation():
     assert "private_key_material" in str(exc_info.value)
 
 
+def test_session_runner_blocks_denied_required_permission_before_invocation():
+    harness = _CaptureHarness()
+    runner = _runner(harness)
+
+    with pytest.raises(PreflightBlockedError, match="git.push"):
+        runner.create_and_run(
+            {
+                "harness_id": "capture",
+                "prompt": "publish",
+                "permission_profile": "unattended",
+                "extra": {"required_permission_actions": ["git.push"]},
+            }
+        )
+
+    assert harness.last_request is None
+
+
 def test_session_runner_persists_structured_thread_and_rejects_identity_change(
     tmp_path,
 ):

@@ -118,6 +118,7 @@ class HarnessPreflightReport:
     findings: tuple[HarnessPreflightFinding, ...]
     context_budget: ContextBudgetEstimate
     readiness: Mapping[str, Any] = field(default_factory=dict)
+    permission_simulation: Mapping[str, Any] = field(default_factory=dict)
 
 
 def build_preflight_report(
@@ -131,6 +132,7 @@ def build_preflight_report(
     limits: AttachmentLimits | None = None,
     max_history_messages: int = DEFAULT_MAX_HISTORY_MESSAGES,
     readiness: Mapping[str, Any] | None = None,
+    permission_simulation: Mapping[str, Any] | None = None,
 ) -> HarnessPreflightReport:
     """Build a redacted pre-run safety and budget report."""
     attachment_limits = limits or AttachmentLimits()
@@ -184,12 +186,16 @@ def build_preflight_report(
     _extend_findings(findings, _budget_findings(budget))
     findings = _with_stable_ids(findings)
     readiness_payload = dict(readiness or {})
+    permission_payload = dict(permission_simulation or {})
     readiness_blocked = bool(readiness_payload.get("blocked"))
-    hard_block = readiness_blocked or any(
-        finding.severity == SEVERITY_BLOCK for finding in findings
+    permission_blocked = bool(permission_payload.get("block_run"))
+    hard_block = (
+        readiness_blocked
+        or permission_blocked
+        or any(finding.severity == SEVERITY_BLOCK for finding in findings)
     )
     max_severity = _max_severity(findings)
-    if readiness_blocked:
+    if readiness_blocked or permission_blocked:
         max_severity = SEVERITY_BLOCK
     elif (readiness_payload.get("summary") or {}).get(
         "degraded"
@@ -202,6 +208,7 @@ def build_preflight_report(
         findings=tuple(findings),
         context_budget=budget,
         readiness=readiness_payload,
+        permission_simulation=permission_payload,
     )
 
 
@@ -290,6 +297,7 @@ def preflight_report_to_dict(report: HarnessPreflightReport) -> dict[str, Any]:
         ],
         "context_budget": context_budget_to_dict(report.context_budget),
         "readiness": dict(report.readiness),
+        "permission_simulation": dict(report.permission_simulation),
     }
 
 
@@ -330,6 +338,18 @@ def format_preflight_block_message(report: HarnessPreflightReport) -> str:
         for finding in report.readiness.get("findings") or ()
         if isinstance(finding, Mapping) and finding.get("status") == "blocked"
     )
+    blocked_actions = sorted(
+        str(action)
+        for action in report.permission_simulation.get("blocked_actions") or ()
+        if str(action)
+    )
+    if blocked_actions:
+        return (
+            "Preflight blocked this run before invoking a harness. "
+            "The selected permission profile denies required route actions ("
+            + ", ".join(blocked_actions)
+            + ")."
+        )
     if readiness_ids and not codes:
         return (
             "Preflight blocked this run before invoking a harness. "

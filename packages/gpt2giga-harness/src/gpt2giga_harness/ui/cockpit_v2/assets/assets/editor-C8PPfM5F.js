@@ -1,1 +1,0 @@
-import{t as e}from"./jsx-runtime-DUAcabCT.js";import{A as t}from"./index-CvnCS3Hj.js";import{InspectorFrame as n}from"./InspectorFrame-Dc5EqmwZ.js";var r=e();function i({locale:e}){return(0,r.jsx)(n,{locale:e,title:t(e,`editor`),children:t(e,`editorDescription`)})}export{i as EditorInspector};
