@@ -29,6 +29,7 @@ from gpt2giga.common.streaming import (
 )
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
+from gpt2giga.models.lar1 import LAR1Metadata, LAR1Settings
 from gpt2giga.openapi_specs.openai import chat_completions_openapi_extra
 from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS
 from gpt2giga.protocol.response import adapt_chat_completion_to_chat_shape
@@ -47,6 +48,7 @@ from gpt2giga.protocols.openai import (
     normalized_stream_event_to_openai_sse,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
+from gpt2giga.routers.lar1_router import classify_request, resolve_route_model
 from gpt2giga.routers.openai.helpers import populate_giga_functions
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
@@ -64,6 +66,9 @@ router = APIRouter(tags=[OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS])
 async def chat_completions(request: Request):
     """Create a chat completion."""
     data = await read_request_json(request)
+    data, lar1_decision = await _apply_lar1_routing(data, request.app.state)
+    if lar1_decision is not None:
+        update_request_context(metadata={"lar1_decision": lar1_decision})
     conversation_turn = await stitch_chat_payload(request, data, protocol="openai")
     request_data = deepcopy(data)
     request_options = extract_gigachat_request_options(request, data)
@@ -756,3 +761,48 @@ def _string_or_none(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+async def _apply_lar1_routing(
+    data: dict[str, Any],
+    state: Any,
+) -> tuple[dict[str, Any], str | None]:
+    """Extract LAR-1 metadata, classify, and apply the selected GigaChat model."""
+    lar1_settings = _lar1_settings_from_state(state)
+    if not lar1_settings.enabled:
+        return data, None
+
+    metadata = data.get("metadata", {})
+    if not isinstance(metadata, dict):
+        return data, None
+
+    lar1_raw = metadata.get("lar1")
+    if not lar1_raw:
+        return data, None
+
+    logger = getattr(state, "logger", None)
+    try:
+        lar1 = LAR1Metadata.model_validate(lar1_raw)
+        route = classify_request(lar1, lar1_settings.thresholds())
+        model = resolve_route_model(route, lar1_settings)
+        if logger is not None:
+            logger.info(
+                "[LAR-1] confidence={}, evidence={} → {} (model={})",
+                lar1.confidence,
+                [item.value for item in lar1.evidence],
+                route,
+                model,
+            )
+        data["model"] = model
+        return data, route
+    except Exception as exc:
+        if logger is not None:
+            logger.warning("[LAR-1] Parse error: {}", exc)
+        return data, None
+
+
+def _lar1_settings_from_state(state: Any) -> LAR1Settings:
+    cached = getattr(state, "lar1_settings", None)
+    if isinstance(cached, LAR1Settings):
+        return cached
+    return LAR1Settings()
