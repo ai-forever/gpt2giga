@@ -46,6 +46,8 @@ from gpt2giga_harness.workflows import (
     WorkflowCoordinator,
     WorkflowHandoffManager,
     WorkflowRepository,
+    WorkflowSubmissionConflictError,
+    WorkflowWorkerUnavailableError,
     discover_workflows,
     load_workflow,
     parse_workflow_definition,
@@ -363,13 +365,25 @@ def workflow_run(
             inputs=dict(payload.inputs),
             prompt=_optional_text(payload.prompt),
             idempotency_key=payload.idempotency_key,
+            worker_online=_worker_online(request),
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow not found") from exc
+    except WorkflowSubmissionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WorkflowWorkerUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     steps = coordinator.repository.list_steps(run.id)
     return {"run": workflow_run_to_dict(run, steps)}
+
+
+def _worker_online(request: Request) -> bool:
+    schedule_service = request.app.state.harness_schedule_service
+    if schedule_service is None:
+        raise HTTPException(status_code=409, detail="Durable runtime is unavailable")
+    return bool(schedule_service.worker_health()["online"])
 
 
 @router.get("/api/workflow-runs/{run_id}")

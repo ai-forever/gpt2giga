@@ -21,9 +21,11 @@ def test_local_shell_issues_strict_httponly_session_cookie():
     )
 
     denied = client.get("/api/defaults")
+    automation_denied = client.get("/api/automation")
     response = client.get("/")
 
     assert denied.status_code == 401
+    assert automation_denied.status_code == 401
     assert response.status_code == 200
     assert response.history[0].headers["location"] == "/cockpit-v2/work"
     cookie = response.history[0].headers["set-cookie"]

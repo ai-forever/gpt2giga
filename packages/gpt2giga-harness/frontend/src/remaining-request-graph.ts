@@ -263,12 +263,30 @@ export function automationSurfaceOptions() {
   return queryOptions({
     queryKey: remainingRequestKeys.automation(),
     queryFn: async ({ signal }) => {
-      const [agents, workflows, schedules] = await Promise.all([
+      const [agents, workflows, automation] = await Promise.all([
         fetchCockpit<unknown>("/api/agents", signal),
         fetchCockpit<unknown>("/api/workflows", signal),
-        fetchCockpit<unknown>("/api/schedules", signal),
+        fetchCockpit<unknown>("/api/automation", signal),
       ]);
-      return projectAutomation(agents, workflows, schedules);
+      return projectAutomation(agents, workflows, automation);
+    },
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (
+        data === undefined ||
+        !data.workerOnline ||
+        data.workflows.some((item) =>
+          ["queued", "running", "waiting_approval"].includes(
+            item.lastRunStatus ?? "",
+          ),
+        ) ||
+        data.schedules.some((item) =>
+          ["queued", "running"].includes(item.status),
+        )
+      ) {
+        return 2_000;
+      }
+      return false;
     },
     staleTime: 10_000,
   });

@@ -24,6 +24,20 @@ describe("Automation action contracts", () => {
       prompt: "required",
     });
     expect(
+      planAutomationAction("workflows", {
+        id: "review",
+        title: "Review",
+        trigger: "manual",
+        stepCount: 2,
+        lastRunStatus: null,
+        lastRunAt: null,
+        workerOnline: false,
+      }),
+    ).toMatchObject({
+      kind: "workflow_run",
+      disabledReason: "worker_offline",
+    });
+    expect(
       planAutomationAction("schedules", {
         id: "nightly",
         title: "Nightly",

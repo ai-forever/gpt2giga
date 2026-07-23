@@ -1073,7 +1073,25 @@ async function writeCockpit<T>(
 
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    throw new CockpitApiError(response.status, await response.text());
+    const body = await response.text();
+    let detail = body;
+    try {
+      const parsed = JSON.parse(body) as unknown;
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "detail" in parsed &&
+        typeof parsed.detail === "string"
+      ) {
+        detail = parsed.detail;
+      }
+    } catch {
+      // Preserve non-JSON server errors as returned.
+    }
+    throw new CockpitApiError(
+      response.status,
+      detail || `Request failed with HTTP ${response.status}.`,
+    );
   }
   return (await response.json()) as T;
 }

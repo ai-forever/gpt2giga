@@ -74,7 +74,15 @@ function AutomationList({ section, query, selectedId }: {
   const locale = preferences.locale;
   if (query.isPending) return <LoadingRows />;
   if (query.isError || query.data === undefined) {
-    return <div className="error-state">{message(locale, "boundedDataUnavailable")}</div>;
+    return (
+      <div className="error-state" role="alert">
+        <strong>{message(locale, "boundedDataUnavailable")}</strong>
+        <span>{query.error?.message}</span>
+        <button onClick={() => void query.refetch()} type="button">
+          {message(locale, "retry")}
+        </button>
+      </div>
+    );
   }
   const rows = query.data[section];
   return (
@@ -83,10 +91,14 @@ function AutomationList({ section, query, selectedId }: {
         <div>
           <span className="section-kicker">{message(locale, section)}</span>
           <strong>{rows.length} {message(locale, "retainedItems")}</strong>
+          <span className="worker-readiness" data-status={query.data.workerOnline ? "ready" : "offline"}>
+            {message(locale, query.data.workerOnline ? "workerReady" : "workerOffline")}
+          </span>
         </div>
-        <a className="primary-link" data-legacy-transition="true" href={section === "agents" ? "/agents" : section === "schedules" ? "/scheduled" : "/workflows"}>
-          {message(locale, "openLegacyAuthoring")}
-        </a>
+        <div className="authoring-unavailable" role="note">
+          <button disabled type="button">{message(locale, "authoringUnavailable")}</button>
+          <span>{message(locale, "authoringDeferredRecovery")}</span>
+        </div>
       </div>
       {rows.length === 0 ? (
         <div className="empty-state">{message(locale, "noItems")}</div>
@@ -201,6 +213,10 @@ function AutomationDetailSelection({
   if (plan === null) return null;
   const promptMissing = plan.prompt === "required" && !prompt.trim();
   const disabledReason = plan.disabledReason;
+  const disabledReasonText =
+    disabledReason === "worker_offline"
+      ? message(locale, "workerOfflineRecovery")
+      : disabledReason;
   const submit = () => {
     if (run.isPending || disabledReason !== null || promptMissing) return;
     submissionKey.current ??= createAutomationSubmissionKey(section, selected.id);
@@ -222,7 +238,7 @@ function AutomationDetailSelection({
         {Object.entries(selected).filter(([key]) => !["id", "title", "queueable", "tested", "unavailableReason"].includes(key)).slice(0, 5).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value === null ? "—" : String(value)}</dd></div>)}
       </dl>
       {plan.prompt !== "none" ? <label className="field-control">{message(locale, plan.prompt === "required" ? "runPrompt" : "optionalRunPrompt")}<textarea value={prompt} onChange={(event) => updatePrompt(event.target.value)} placeholder={message(locale, "composerPlaceholder")} /></label> : null}
-      {disabledReason ? <p className="action-unavailable" role="note">{message(locale, "actionUnavailable")} {disabledReason}</p> : null}
+      {disabledReasonText ? <p className="action-unavailable" role="note">{message(locale, "actionUnavailable")} {disabledReasonText}</p> : null}
       <button className="primary-button" disabled={run.isPending || disabledReason !== null || promptMissing} onClick={submit} type="button">{message(locale, run.isPending ? "loading" : plan.labelKey)}</button>
       {run.isError ? <p className="mutation-error" role="alert">{run.error.message}</p> : null}
       {run.isSuccess ? <AutomationActionReceipt identity={run.data} /> : null}
