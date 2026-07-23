@@ -1116,7 +1116,14 @@ class HarnessSessionRunner:
         shared_parent_session_id = _optional_text(
             session.metadata.get("arena_parent_session_id")
         )
-        allowed_session_ids = {session_id, shared_parent_session_id}
+        shared_attachment_session_id = _optional_text(
+            session.metadata.get("shared_attachment_session_id")
+        )
+        allowed_session_ids = {
+            session_id,
+            shared_parent_session_id,
+            shared_attachment_session_id,
+        }
         attachments: list[HarnessAttachment] = []
         for attachment_id in attachment_ids:
             try:

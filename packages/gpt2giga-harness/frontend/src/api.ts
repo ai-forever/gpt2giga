@@ -414,6 +414,88 @@ export interface RunTraceResponse {
   live: boolean;
 }
 
+export type TraceReplayAxis = "model" | "provider" | "harness" | "extensions";
+
+export interface TraceReplayManifest {
+  schema_version: number;
+  source_run_id: string;
+  source_session_id: string;
+  task_sha256: string;
+  source_evidence_sha256: string;
+  axis: TraceReplayAxis;
+  source_dimensions: Record<TraceReplayAxis, unknown>;
+  target_dimensions: Record<TraceReplayAxis, unknown>;
+  fixed_dimensions: Record<string, unknown>;
+  unchanged_snapshot_sha256: string;
+  created_at: string;
+  manifest_sha256: string;
+  content_free: true;
+}
+
+export interface TraceReplayPreviewResponse {
+  manifest: TraceReplayManifest;
+  admission: { admitted: boolean; reason_code: string | null };
+  execution: {
+    new_session: boolean;
+    workspace_policy: string;
+    provider_session: string;
+    external_telemetry_required: boolean;
+    automatic_apply: boolean;
+  };
+}
+
+export interface TraceReplayProjection {
+  schema_version: number;
+  manifest: TraceReplayManifest;
+  source: TraceReplayRunRef;
+  destination: TraceReplayRunRef;
+  source_evidence_current: boolean;
+  snapshot_equality: {
+    status: "pending" | "verified" | "mismatch";
+    changed_axes: TraceReplayAxis[];
+    unchanged_verified: boolean;
+    target_verified: boolean;
+  };
+  comparison_status: "pending" | "ready";
+  comparison: {
+    semantic: TraceReplayPair;
+    tools: TraceReplayPair;
+    diff: TraceReplayPair;
+    latency: TraceReplayNumericPair;
+    cost: TraceReplayCostPair;
+  };
+  external_telemetry_required: boolean;
+  automatic_apply: boolean;
+}
+
+interface TraceReplayRunRef {
+  run_id: string;
+  session_id: string;
+  status: string;
+  harness_id: string;
+  model: string | null;
+  workspace_isolated: boolean;
+}
+
+interface TraceReplayPair {
+  source: Record<string, unknown>;
+  target: Record<string, unknown> | null;
+  changed: boolean | null;
+}
+
+interface TraceReplayNumericPair {
+  source: number | null;
+  target: number | null;
+  delta: number | null;
+  unit: string;
+}
+
+interface TraceReplayCostPair {
+  source: { value: number | null; unit: string | null; confidence: string };
+  target: { value: number | null; unit: string | null; confidence: string } | null;
+  delta: number | null;
+}
+
 export interface ApprovalInboxResponse {
   approvals: ApprovalRequest[];
   pending_count: number;

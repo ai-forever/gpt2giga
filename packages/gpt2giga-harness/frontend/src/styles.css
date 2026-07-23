@@ -527,6 +527,19 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .field-control textarea { min-height: 100px; resize: vertical; }
 .reuse-form { display: grid; grid-template-columns: 150px minmax(180px, 1fr) auto; align-items: end; gap: 10px; }
 .reuse-panel > p { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.reuse-stack { display: grid; gap: 18px; }
+.trace-replay-panel { min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--surface-muted) 28%, var(--surface)); padding: 15px; }
+.trace-replay-panel h3 { margin: 3px 0 0; font-size: 15px; }
+.trace-replay-panel > div > p { max-width: 720px; margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.trace-replay-review { display: grid; gap: 12px; border-top: 1px solid var(--border); padding-top: 14px; }
+.trace-replay-review .compact-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.trace-replay-review .primary-button { justify-self: start; }
+.trace-replay-comparison { min-width: 0; margin-top: 14px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--surface); }
+.trace-replay-comparison .review-summary { flex-wrap: wrap; }
+.trace-replay-table { max-width: 100%; overflow-x: auto; }
+.trace-replay-row { min-width: 560px; display: grid; grid-template-columns: minmax(96px, .8fr) repeat(3, minmax(120px, 1fr)); gap: 10px; border-top: 1px solid var(--border); padding: 9px 11px; font-size: 10px; }
+.trace-replay-row.heading { border-top: 0; background: var(--surface-muted); color: var(--muted); font-weight: 750; text-transform: uppercase; }
+.trace-replay-row span { min-width: 0; overflow-wrap: anywhere; }
 .explanation-row { display: grid; gap: 5px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .explanation-row strong { font-size: 11px; }.explanation-row p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .stream-card { display: grid; gap: 5px; margin-top: 14px; border: 1px solid var(--border); border-radius: 7px; padding: 12px; font-size: 11px; text-transform: capitalize; }
@@ -587,6 +600,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .timeline-row { grid-template-columns: 12px minmax(0, 1fr) auto; }
   .timeline-row > span, .timeline-row > time { display: none; }
   .reuse-form { grid-template-columns: 1fr; }
+  .trace-replay-panel { padding: 12px; }
+  .trace-replay-review .compact-fields { grid-template-columns: 1fr; }
 }
 
 /* UX-04 backend-owned Settings */

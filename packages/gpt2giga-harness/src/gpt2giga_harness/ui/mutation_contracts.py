@@ -184,6 +184,21 @@ CONFORMANCE_EVIDENCE = {
             ),
         ),
         ConformanceEvidence(
+            id="trace_replay.manifest",
+            behaviors=frozenset(
+                {
+                    ConformanceBehavior.ALLOW,
+                    ConformanceBehavior.DENY,
+                    ConformanceBehavior.STALE_OR_REBOUND,
+                    ConformanceBehavior.REDACTION,
+                }
+            ),
+            test_nodes=(
+                "tests/harness/test_trace_replay.py::test_trace_replay_api_binds_one_axis_to_new_session_and_comparison",
+                "tests/harness/test_trace_replay.py::test_trace_replay_rejects_stale_multi_axis_and_provider_authority",
+            ),
+        ),
+        ConformanceEvidence(
             id="external.native_control",
             behaviors=frozenset(
                 {
@@ -319,6 +334,7 @@ _NATIVE_CONTROL = (*_AUTH, "external.native_control")
 _POLICY = (*_AUTH, "policy.lifecycle")
 _PROVIDER_SETTINGS = (*_AUTH, "provider.settings")
 _INTEGRATION_FLOW = (*_AUTH, "integrations.flow")
+_TRACE_REPLAY = (*_AUTH, "trace_replay.manifest")
 
 
 def _route(
@@ -599,12 +615,21 @@ MUTATION_ROUTE_CONTRACTS = (
             "/api/agents/{agent_id}/run",
             "/api/workflows/{workflow_id}/run",
             "/api/schedules/{schedule_id}/test-now",
+            "/api/runs/{run_id}/trace-replays",
         ),
         MutationClass.GOVERNED_EXTERNAL_EFFECT,
         EnforcementControl.SELECTED_PLAN_PREFLIGHT,
         "execution.selected_plan",
         actions=(PermissionAction.PROCESS_SPAWN,),
         evidence=_EXTERNAL,
+    ),
+    _route(
+        "POST",
+        "/api/runs/{run_id}/trace-replays/preview",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "trace_replay.manifest",
+        evidence=_TRACE_REPLAY,
     ),
     *_many(
         "POST",

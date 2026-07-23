@@ -146,6 +146,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/runs/{run_id}/summary"),
         ("GET", "/api/runs/{run_id}/support-bundle"),
         ("GET", "/api/runs/{run_id}/trace"),
+        ("GET", "/api/runs/{run_id}/trace-replay"),
         ("GET", "/api/schedules"),
         ("GET", "/api/schedules/{schedule_id}"),
         ("GET", "/api/settings"),
@@ -252,6 +253,7 @@ _DURABLE_JOB_IDENTITIES = frozenset(
         ("POST", "/api/evals/{eval_name}/runs"),
         ("POST", "/api/runs/{run_id}/fork"),
         ("POST", "/api/runs/{run_id}/replay"),
+        ("POST", "/api/runs/{run_id}/trace-replays"),
         ("POST", "/api/schedules/{schedule_id}/run-now"),
         ("POST", "/api/schedules/{schedule_id}/test-now"),
         ("POST", "/api/sessions/run"),
@@ -265,6 +267,7 @@ _SYNC_DURABLE_SUBMISSIONS = frozenset(
     {
         ("POST", "/api/runs/{run_id}/fork"),
         ("POST", "/api/runs/{run_id}/replay"),
+        ("POST", "/api/runs/{run_id}/trace-replays"),
         ("POST", "/api/sessions/run"),
         ("POST", "/api/sessions/{session_id}/run"),
     }
