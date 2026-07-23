@@ -263,6 +263,11 @@ def test_doctor_report_is_redacted_actionable_and_workspace_scoped(
     assert by_id["durable-worker"]["remediation"][0]["command"] == "giga worker start"
     assert by_id["managed-homes"]["evidence"]["storage_writable"] is True
     assert by_id["managed-mcp-snapshots"]["evidence"]["stored"] == 0
+    assert by_id["provider-profiles"]["evidence"]["values_resolved"] is False
+    assert by_id["extensions"]["evidence"]["installation_authorized"] is False
+    assert by_id["github-cli"]["evidence"]["network_contacted"] is False
+    assert by_id["optional-dependencies"]["status"] == "ready"
+    assert by_id["support-export"]["evidence"]["mode"] == "0600"
 
 
 def test_doctor_reads_worker_status_without_rewriting_runtime_state(

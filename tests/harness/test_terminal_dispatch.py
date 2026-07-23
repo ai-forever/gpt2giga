@@ -51,6 +51,7 @@ def test_interactive_human_paths_target_the_canonical_tui(argv):
 @pytest.mark.parametrize(
     "argv",
     (
+        ("bootstrap", "preview"),
         ("doctor",),
         ("completion", "bash"),
         ("config", "path"),

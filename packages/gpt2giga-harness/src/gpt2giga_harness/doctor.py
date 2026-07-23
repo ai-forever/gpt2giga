@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shutil
 import sqlite3
 import tempfile
 from typing import Any, Mapping
@@ -21,8 +22,11 @@ from gpt2giga_harness.config import (
     pass_model_env_note,
 )
 from gpt2giga_harness.managed_mcp import HeadlessManagedMCPSnapshotStore
+from gpt2giga_harness.integration_catalog import IntegrationCatalogStore
+from gpt2giga_harness.integration_flows import IntegrationFlowService
 from gpt2giga_harness.native_cli_contracts import WORKBENCH_INTEGRATION_SPECS
 from gpt2giga_harness.project import load_project_config, resolve_project
+from gpt2giga_harness.provider_settings import ProviderSettingsService
 from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga_harness.runtime.store import RUNTIME_DB_NAME
 from gpt2giga_harness.types import AvailabilityStatus, redact_secrets
@@ -67,6 +71,7 @@ def build_doctor_report(
     checks.append(_worker_check(config))
     checks.append(_managed_homes_check(config))
     checks.append(_managed_mcp_check(config))
+    checks.extend(_bootstrap_discovery_checks(config))
     if registry.discovery_errors:
         checks.append(
             _check(
@@ -533,7 +538,7 @@ def _workspace_checks(
             load_config_name=False,
         )
         project_config = load_project_config(project.root)
-    except (OSError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         return [
             _check(
                 "workspace",
@@ -720,6 +725,189 @@ def _managed_mcp_check(config: HarnessConfig) -> dict[str, Any]:
     )
 
 
+def _bootstrap_discovery_checks(config: HarnessConfig) -> list[dict[str, Any]]:
+    """Return bounded local discovery used by doctor and reviewed bootstrap."""
+    checks = [
+        _github_cli_check(),
+        _optional_dependencies_check(),
+        _support_export_check(),
+    ]
+    try:
+        providers = ProviderSettingsService(str(config.data_dir)).list()
+        configured = providers.get("providers") or []
+        ownership_counts: dict[str, int] = {}
+        for provider in configured:
+            if not isinstance(provider, Mapping):
+                continue
+            authentication = provider.get("authentication")
+            if not isinstance(authentication, Mapping):
+                continue
+            ownership = str(authentication.get("ownership") or "unknown")
+            ownership_counts[ownership] = ownership_counts.get(ownership, 0) + 1
+        checks.append(
+            _check(
+                "provider-profiles",
+                "bootstrap",
+                "ready",
+                (
+                    f"Provider profiles: {len(configured)} configured; "
+                    f"{len(providers.get('templates') or ())} templates"
+                ),
+                evidence={
+                    "configured": len(configured),
+                    "templates": len(providers.get("templates") or ()),
+                    "authentication_ownership": ownership_counts,
+                    "native_cli_authentication": {
+                        namespace: {
+                            "ownership": "provider_native",
+                            "status": "not_checked",
+                        }
+                        for namespace in sorted(WORKBENCH_INTEGRATION_SPECS)
+                    },
+                    "values_resolved": False,
+                },
+                remediation=(
+                    _remedy(
+                        "Review provider profiles and reference-only authentication.",
+                        "giga provider list --json",
+                    ),
+                ),
+            )
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        checks.append(
+            _check(
+                "provider-profiles",
+                "bootstrap",
+                "degraded",
+                "Provider profiles: local registry is unreadable",
+                evidence={"error": str(exc), "values_resolved": False},
+                remediation=(
+                    _remedy(
+                        "Inspect the local provider registry without resolving secrets.",
+                        "giga provider list --json",
+                    ),
+                ),
+            )
+        )
+    try:
+        catalog = IntegrationCatalogStore(config.data_dir).list()
+        flows = IntegrationFlowService(config.data_dir).list()
+        statuses: dict[str, int] = {}
+        for flow in flows:
+            status = flow.status.value
+            statuses[status] = statuses.get(status, 0) + 1
+        checks.append(
+            _check(
+                "extensions",
+                "bootstrap",
+                "ready",
+                (
+                    f"Extensions: {len(catalog)} cached catalog entries; "
+                    f"{len(flows)} retained flow(s)"
+                ),
+                evidence={
+                    "catalog_entries": len(catalog),
+                    "retained_flows": len(flows),
+                    "flow_statuses": statuses,
+                    "installation_authorized": False,
+                },
+                remediation=(
+                    _remedy(
+                        "Review extension compatibility and retained flow state.",
+                        "giga integration list --json",
+                    ),
+                ),
+            )
+        )
+    except (OSError, ValueError) as exc:
+        checks.append(
+            _check(
+                "extensions",
+                "bootstrap",
+                "degraded",
+                "Extensions: local catalog or flow state is unreadable",
+                evidence={"error": str(exc), "installation_authorized": False},
+                remediation=(
+                    _remedy(
+                        "Inspect local integration state before any setup action.",
+                        "giga integration list --json",
+                    ),
+                ),
+            )
+        )
+    return checks
+
+
+def _github_cli_check() -> dict[str, Any]:
+    executable = shutil.which("gh")
+    return _check(
+        "github-cli",
+        "bootstrap",
+        "ready" if executable else "degraded",
+        (
+            "GitHub CLI: installed; authentication not checked"
+            if executable
+            else "GitHub CLI: not installed"
+        ),
+        evidence={
+            "installed": executable is not None,
+            "authentication_status": "not_checked",
+            "network_contacted": False,
+        },
+        remediation=(
+            _remedy(
+                (
+                    "Inspect local GitHub authentication explicitly."
+                    if executable
+                    else "Install GitHub CLI, then authenticate explicitly."
+                ),
+                "gh auth status" if executable else "giga doctor --json",
+            ),
+        ),
+    )
+
+
+def _optional_dependencies_check() -> dict[str, Any]:
+    packages = {
+        name: _optional_package_version(name)
+        for name in ("claude-agent-sdk", "gigachat", "gpt2giga")
+    }
+    available = sum(value != "unknown" for value in packages.values())
+    return _check(
+        "optional-dependencies",
+        "bootstrap",
+        "ready",
+        f"Optional dependencies: {available}/{len(packages)} installed",
+        evidence={
+            "packages": packages,
+            "required_for_base_install": False,
+        },
+        remediation=(
+            _remedy(
+                "Install only the reviewed optional capability you intend to use.",
+                "giga doctor --json",
+            ),
+        ),
+    )
+
+
+def _support_export_check() -> dict[str, Any]:
+    return _check(
+        "support-export",
+        "bootstrap",
+        "ready",
+        "Support export: private canonical JSON is available",
+        evidence={"content_free": True, "mode": "0600", "atomic": True},
+        remediation=(
+            _remedy(
+                "Export the current redacted report for support.",
+                "giga doctor --json --output doctor-support.json",
+            ),
+        ),
+    )
+
+
 def _read_worker_state(data_dir: str | Path) -> dict[str, Any]:
     path = Path(data_dir).expanduser() / RUNTIME_DB_NAME
     if not path.is_file():
@@ -803,6 +991,13 @@ def _sanitize_report(value: Any) -> Any:
 
 
 def _package_version(distribution: str) -> str:
+    try:
+        return version(distribution)
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _optional_package_version(distribution: str) -> str:
     try:
         return version(distribution)
     except PackageNotFoundError:
