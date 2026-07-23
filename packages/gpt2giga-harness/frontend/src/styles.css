@@ -876,6 +876,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .plugin-facts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 10.5px; text-align: right; }
 .plugin-detail-actions { display: grid; gap: 10px; margin-top: 2px; border-top: 1px solid var(--border); padding-top: 18px; }
 .plugin-detail-actions > .primary-button { width: 100%; min-height: 40px; }
+.plugin-lifecycle-actions { display: grid; gap: 10px; }
+.plugin-lifecycle-actions h3 { margin: 0; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.plugin-lifecycle-actions .plugin-approval-panel > span { color: var(--muted); font-size: 12px; line-height: 1.45; }
 .plugin-connected-notice { min-height: 40px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--success) 48%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--success) 8%, var(--surface)); color: var(--text); font-size: 11px; font-weight: 750; }
 .plugin-unavailable-note { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .plugin-approval-panel { display: grid; gap: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); padding: 14px; }

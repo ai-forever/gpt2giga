@@ -52,6 +52,9 @@ export interface IntegrationFlowInventory {
   }>;
   flows: IntegrationFlowSummary[];
   groups: IntegrationGroupSummary[];
+  installations: IntegrationLifecycleInstallation[];
+  capability_matrix: IntegrationLifecycleTargetCapability[];
+  operations: IntegrationLifecycleOperation[];
   content_free: true;
 }
 
@@ -141,6 +144,96 @@ export interface IntegrationFlowSummary {
   verification_status: string;
   rollback_available: boolean;
   events: Array<{ stage: string; status: string; occurred_at: string; code: string | null }>;
+}
+
+export type IntegrationLifecycleAction = "enable" | "disable" | "uninstall" | "delete_definition";
+
+export interface IntegrationLifecycleInstallation {
+  flow_id: string;
+  package_id: string;
+  package_version: string;
+  target_id: string;
+  scope: string;
+  state: "definition_only" | "enabled" | "disabled" | "uninstalled" | "definition_deleted";
+  enabled: boolean;
+  installed: boolean;
+  revision: number;
+  catalog_id: string | null;
+  last_operation_id: string | null;
+  updated_at: string;
+  content_free: true;
+}
+
+export interface IntegrationLifecycleTargetCapability {
+  target_id: string;
+  component_types: string[];
+  actions: Array<{
+    action: IntegrationLifecycleAction | "rollback";
+    supported: boolean;
+    reason: string | null;
+  }>;
+  content_free: true;
+}
+
+export interface IntegrationLifecycleOperation {
+  id: string;
+  plan_id: string;
+  kind: "flow" | "group";
+  target_id: string;
+  action: IntegrationLifecycleAction;
+  flow_ids: string[];
+  expected_revisions: Record<string, number>;
+  status: string;
+  confirmation_required: boolean;
+  confirmation_id: string;
+  active_session_count: number;
+  completed_flow_ids: string[];
+  receipt_id: string | null;
+  recovery_actions: string[];
+  error_code: string | null;
+  created_at: string;
+  updated_at: string;
+  content_free: true;
+}
+
+export interface IntegrationLifecyclePlan {
+  plan_id: string;
+  kind: "flow" | "group";
+  target_id: string;
+  action: IntegrationLifecycleAction;
+  expected_revisions: Record<string, number>;
+  confirmation_required: boolean;
+  confirmation_id: string;
+  active_session_count: number;
+  active_sessions_retain_revision: boolean;
+  effects: Array<{
+    flow_id: string;
+    package_id: string;
+    target_id: string;
+    scope: string;
+    mutation: "admission_state_only" | "installer_owned_material_only" | "user_owned_definition_only";
+    active_session_count: number;
+    content_free: true;
+  }>;
+  approval_required: true;
+  content_free: true;
+}
+
+export interface IntegrationLifecyclePreviewResponse {
+  operation: IntegrationLifecycleOperation;
+  plan: IntegrationLifecyclePlan;
+}
+
+export interface IntegrationLifecycleMutationResponse {
+  operation: IntegrationLifecycleOperation;
+  receipt: {
+    id: string;
+    action: IntegrationLifecycleAction;
+    outcome: string;
+    completed_flow_ids: string[];
+    recovery_actions: string[];
+    content_free: true;
+  };
 }
 
 export interface IntegrationFlowPlan {

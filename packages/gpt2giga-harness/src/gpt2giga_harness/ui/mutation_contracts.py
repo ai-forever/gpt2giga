@@ -570,6 +570,25 @@ MUTATION_ROUTE_CONTRACTS = (
     *_many(
         "POST",
         (
+            "/api/integrations/flows/{flow_id}/lifecycle/preview",
+            "/api/integrations/groups/{group_id}/lifecycle/preview",
+        ),
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "integration_lifecycle.preview",
+        evidence=_INTEGRATION_FLOW,
+    ),
+    _route(
+        "POST",
+        "/api/integrations/lifecycle/{operation_id}/apply",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.REVIEW_BINDING,
+        "integration_lifecycle.exact_plan",
+        evidence=_INTEGRATION_FLOW,
+    ),
+    *_many(
+        "POST",
+        (
             "/api/integrations/flows/{flow_id}/apply",
             "/api/integrations/flows/{flow_id}/rollback",
         ),

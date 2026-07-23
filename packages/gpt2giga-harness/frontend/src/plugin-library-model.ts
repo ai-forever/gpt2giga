@@ -2,6 +2,7 @@ import type {
   IntegrationGroupSummary,
   IntegrationFlowInventory,
   IntegrationFlowSummary,
+  IntegrationLifecycleInstallation,
   IntegrationSearchResponse,
 } from "./remaining-request-graph";
 import type { McpProjection } from "./surface-projections";
@@ -24,6 +25,7 @@ export interface PluginLibraryItem {
   status: string;
   flow: IntegrationFlowSummary | null;
   group: IntegrationGroupSummary | null;
+  lifecycle: IntegrationLifecycleInstallation | null;
   mcp: McpProjection | null;
   description: string | null;
   previewId: string | null;
@@ -39,15 +41,24 @@ export function buildPluginLibrary(
 ): PluginLibraryItem[] {
   const latestFlows = latestFlowsByPackageTarget(inventory.flows);
   const latestGroups = latestGroupsByPackage(inventory.groups);
+  const lifecycleByFlow = new Map(
+    (inventory.installations ?? []).map((item) => [item.flow_id, item]),
+  );
   const catalogPackages = new Set(inventory.catalog.map((item) => item.package_id));
   const items: PluginLibraryItem[] = inventory.catalog.map((entry) => {
     const flows = entry.target_ids
       .map((targetId) => latestFlows.get(flowKey(entry.package_id, targetId)))
       .filter((flow): flow is IntegrationFlowSummary => flow !== undefined);
-    const connectedFlows = flows.filter((flow) => flow.status === "verified");
+    const connectedFlows = flows.filter(
+      (flow) => lifecycleByFlow.get(flow.id)?.enabled ?? flow.status === "verified",
+    );
     const latestFlow = newestFlow(flows);
+    const latestLifecycle = latestFlow ? lifecycleByFlow.get(latestFlow.id) ?? null : null;
     const latestGroup = latestGroups.get(entry.package_id) ?? null;
-    const groupedConnected = latestGroup?.status === "verified";
+    const groupedConnected = latestGroup?.status === "verified"
+      && latestGroup.children.every(
+        (child) => lifecycleByFlow.get(child.flow_id)?.enabled ?? child.status === "verified",
+      );
     return {
       id: `catalog:${entry.catalog_id}`,
       category: categoryFor(entry.component_types, entry.target_ids),
@@ -60,9 +71,10 @@ export function buildPluginLibrary(
       targetIds: [...entry.target_ids].sort(),
       connectedTargetIds: connectedFlows.map((flow) => flow.target_id).sort(),
       connected: connectedFlows.length > 0 || groupedConnected,
-      status: latestGroup?.status ?? latestFlow?.status ?? "available",
+      status: latestLifecycle?.state ?? latestGroup?.status ?? latestFlow?.status ?? "available",
       flow: latestFlow ?? null,
       group: latestGroup,
+      lifecycle: latestLifecycle,
       mcp: null,
       description: entry.discovery?.name ?? null,
       previewId: entry.component_types.includes("skill") && entry.version !== "discovery"
@@ -84,8 +96,11 @@ export function buildPluginLibrary(
   }
   for (const [packageId, flows] of uncataloguedFlows) {
     const latestFlow = newestFlow(flows);
-    const connectedFlows = flows.filter((flow) => flow.status === "verified");
+    const connectedFlows = flows.filter(
+      (flow) => lifecycleByFlow.get(flow.id)?.enabled ?? flow.status === "verified",
+    );
     const targetIds = flows.map((flow) => flow.target_id).sort();
+    const latestLifecycle = latestFlow ? lifecycleByFlow.get(latestFlow.id) ?? null : null;
     items.push({
       id: `package:${packageId}`,
       category: categoryFor([], targetIds),
@@ -98,9 +113,10 @@ export function buildPluginLibrary(
       targetIds,
       connectedTargetIds: connectedFlows.map((flow) => flow.target_id).sort(),
       connected: connectedFlows.length > 0,
-      status: latestFlow?.status ?? "available",
+      status: latestLifecycle?.state ?? latestFlow?.status ?? "available",
       flow: latestFlow ?? null,
       group: latestGroups.get(packageId) ?? null,
+      lifecycle: latestLifecycle,
       mcp: null,
       description: null,
       previewId: null,
@@ -127,6 +143,7 @@ export function buildPluginLibrary(
       status: mcp.status,
       flow: null,
       group: null,
+      lifecycle: null,
       mcp,
       description: null,
       previewId: null,
@@ -153,6 +170,7 @@ export function buildPluginLibrary(
       status: "verified",
       flow: null,
       group: null,
+      lifecycle: null,
       mcp: null,
       description: skill.description,
       previewId: skill.preview_id,
@@ -188,6 +206,7 @@ export function buildRemotePluginLibrary(search: IntegrationSearchResponse | und
     status: "available",
     flow: null,
     group: null,
+    lifecycle: null,
     mcp: null,
     description: item.upstream_audit,
     previewId: null,

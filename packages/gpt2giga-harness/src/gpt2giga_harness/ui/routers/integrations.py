@@ -18,6 +18,11 @@ from gpt2giga_harness.integration_groups import (
     IntegrationGroupNotFoundError,
     integration_group_record_to_dict,
 )
+from gpt2giga_harness.integration_lifecycle import (
+    IntegrationLifecycleConflictError,
+    IntegrationLifecycleError,
+    IntegrationLifecycleNotFoundError,
+)
 from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 
 
@@ -35,6 +40,9 @@ def integration_inventory(request: Request) -> dict[str, Any]:
         integration_group_record_to_dict(item)
         for item in request.app.state.harness_grouped_integration_service.list()
     ]
+    inventory.update(
+        request.app.state.harness_integration_lifecycle_service.inventory()
+    )
     return inventory
 
 
@@ -206,6 +214,31 @@ def rollback_integration_group(group_id: str, request: Request) -> dict[str, Any
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/api/integrations/groups/{group_id}/lifecycle/preview")
+def preview_group_lifecycle(
+    group_id: str,
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Preview one distinct lifecycle verb across every verified group child."""
+    action = payload.get("action")
+    if not isinstance(action, str):
+        raise HTTPException(status_code=422, detail="action is required")
+    try:
+        return request.app.state.harness_integration_lifecycle_service.preview_group(
+            group_id,
+            action,
+        )
+    except IntegrationGroupNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="integration group not found"
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IntegrationLifecycleConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/api/integrations/preview")
 def preview_integration(
     request: Request,
@@ -278,4 +311,70 @@ def rollback_integration(flow_id: str, request: Request) -> dict[str, Any]:
     except (ValueError, IntegrationFlowConflictError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except IntegrationFlowError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/api/integrations/flows/{flow_id}/lifecycle/preview")
+def preview_flow_lifecycle(
+    flow_id: str,
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Preview one exact enable, disable, uninstall, or definition delete."""
+    action = payload.get("action")
+    if not isinstance(action, str):
+        raise HTTPException(status_code=422, detail="action is required")
+    try:
+        return request.app.state.harness_integration_lifecycle_service.preview_flow(
+            flow_id,
+            action,
+        )
+    except IntegrationFlowNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="integration flow not found"
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IntegrationLifecycleConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/api/integrations/lifecycle/{operation_id}/apply")
+def apply_integration_lifecycle(
+    operation_id: str,
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Apply an exact approved lifecycle preview and return a recovery receipt."""
+    plan_id = payload.get("plan_id")
+    authority = payload.get("authority")
+    expected_revisions = payload.get("expected_revisions")
+    if (
+        not isinstance(plan_id, str)
+        or not isinstance(authority, str)
+        or not isinstance(expected_revisions, dict)
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="plan_id, authority, and expected_revisions are required",
+        )
+    confirm_id = payload.get("confirm_id")
+    if confirm_id is not None and not isinstance(confirm_id, str):
+        raise HTTPException(status_code=422, detail="confirm_id must be a string")
+    try:
+        return request.app.state.harness_integration_lifecycle_service.apply(
+            operation_id,
+            plan_id=plan_id,
+            authority=authority,
+            expected_revisions=expected_revisions,
+            confirm_id=confirm_id,
+            allow_user_home=payload.get("allow_user_home") is True,
+        )
+    except IntegrationLifecycleNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="integration lifecycle operation not found"
+        ) from exc
+    except (ValueError, IntegrationLifecycleConflictError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except IntegrationLifecycleError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

@@ -31,6 +31,9 @@ import {
   remainingRequestKeys,
   type IntegrationGroupMutationResponse,
   type IntegrationGroupPreviewResponse,
+  type IntegrationLifecycleAction,
+  type IntegrationLifecycleMutationResponse,
+  type IntegrationLifecyclePreviewResponse,
   type IntegrationFlowInventory,
   type IntegrationFlowMutationResponse,
   type IntegrationFlowPreviewResponse,
@@ -525,6 +528,7 @@ function PluginConnectionPanel({
             {message(locale, "rollback")}
           </button>
         ) : null}
+        {item.lifecycle ? <LifecycleControls item={item} /> : null}
         {rollback.isError ? <p className="mutation-error" role="alert">{rollback.error.message}</p> : null}
         {groupRollback.isError ? <p className="mutation-error" role="alert">{groupRollback.error.message}</p> : null}
       </div>
@@ -541,6 +545,22 @@ function PluginConnectionPanel({
         <button disabled={groupRecover.isPending} onClick={() => groupRecover.mutate()} type="button">
           {message(locale, "retrySafeRecovery")}
         </button>
+      </div>
+    );
+  }
+
+  if (item.lifecycle && ["disabled", "uninstalled"].includes(item.lifecycle.state)) {
+    return (
+      <div className="plugin-detail-actions">
+        <StatusBadge status={item.lifecycle.state} />
+        {item.lifecycle.state === "disabled" ? (
+          <p className="plugin-unavailable-note">
+            {locale === "ru"
+              ? "Интеграция сохранена, но исключена из новых сессий."
+              : "The integration is retained but excluded from new sessions."}
+          </p>
+        ) : null}
+        <LifecycleControls item={item} />
       </div>
     );
   }
@@ -636,6 +656,113 @@ function PluginConnectionPanel({
       {groupPreview.isError ? <p className="mutation-error" role="alert">{groupPreview.error.message}</p> : null}
       {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
     </div>
+  );
+}
+
+function LifecycleControls({ item }: { item: PluginLibraryItem }) {
+  const { preferences } = usePreferences();
+  const locale = preferences.locale;
+  const queryClient = useQueryClient();
+  const [action, setAction] = useState<IntegrationLifecycleAction | null>(null);
+  const [confirmId, setConfirmId] = useState("");
+  const preview = useMutation({
+    mutationFn: (selected: IntegrationLifecycleAction) => {
+      if (!item.flow) throw new Error("No installed integration revision is available");
+      const useGroup = Boolean(item.group) && selected !== "delete_definition";
+      const path = useGroup
+        ? `/api/integrations/groups/${encodeURIComponent(item.group!.id)}/lifecycle/preview`
+        : `/api/integrations/flows/${encodeURIComponent(item.flow.id)}/lifecycle/preview`;
+      return mutateCockpit<IntegrationLifecyclePreviewResponse>(path, { action: selected });
+    },
+    onSuccess: (_data, selected) => {
+      setAction(selected);
+      setConfirmId("");
+    },
+  });
+  const apply = useMutation({
+    mutationFn: () => {
+      if (!preview.data) throw new Error("Preview the lifecycle action first");
+      return mutateCockpit<IntegrationLifecycleMutationResponse>(
+        `/api/integrations/lifecycle/${encodeURIComponent(preview.data.operation.id)}/apply`,
+        {
+          plan_id: preview.data.plan.plan_id,
+          authority: "cockpit-operator",
+          expected_revisions: preview.data.plan.expected_revisions,
+          confirm_id: preview.data.plan.confirmation_required ? confirmId : undefined,
+        },
+      );
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: remainingRequestKeys.integrationFlows() });
+    },
+  });
+  if (!item.lifecycle) return null;
+  const actions: IntegrationLifecycleAction[] = item.lifecycle.state === "enabled"
+    ? ["disable", "uninstall"]
+    : item.lifecycle.state === "disabled"
+      ? ["enable", "uninstall"]
+      : item.lifecycle.state === "uninstalled"
+        && ["git", "local"].includes(item.catalogSourceType ?? "")
+        ? ["delete_definition"]
+        : [];
+  return (
+    <section className="plugin-lifecycle-actions">
+      <h3>{locale === "ru" ? "Жизненный цикл" : "Lifecycle"}</h3>
+      <div className="plugin-connect-choices">
+        {actions.map((candidate) => (
+          <button
+            className={["uninstall", "delete_definition"].includes(candidate) ? "danger-button" : ""}
+            disabled={preview.isPending || apply.isPending}
+            key={candidate}
+            onClick={() => preview.mutate(candidate)}
+            type="button"
+          >
+            {lifecycleActionLabel(locale, candidate)}
+          </button>
+        ))}
+      </div>
+      {preview.data && action ? (
+        <div className="plugin-approval-panel">
+          <strong>{lifecycleActionLabel(locale, action)}</strong>
+          <span>
+            {preview.data.plan.effects.length} {locale === "ru" ? "целей" : "targets"}
+            {preview.data.plan.active_session_count > 0
+              ? ` · ${preview.data.plan.active_session_count} ${locale === "ru" ? "активных сессий сохранят ревизию" : "active sessions retain the revision"}`
+              : ""}
+          </span>
+          {preview.data.plan.confirmation_required ? (
+            <label className="field-control">
+              {locale === "ru"
+                ? `Введите ${preview.data.plan.confirmation_id} для подтверждения`
+                : `Type ${preview.data.plan.confirmation_id} to confirm`}
+              <input onChange={(event) => setConfirmId(event.target.value)} value={confirmId} />
+            </label>
+          ) : null}
+          <button
+            className={preview.data.plan.confirmation_required ? "danger-button" : "primary-button"}
+            disabled={
+              apply.isPending
+              || (preview.data.plan.confirmation_required
+                && confirmId !== preview.data.plan.confirmation_id)
+            }
+            onClick={() => apply.mutate()}
+            type="button"
+          >
+            {locale === "ru" ? "Подтвердить действие" : "Approve action"}
+          </button>
+        </div>
+      ) : null}
+      {apply.data ? (
+        <p className={apply.data.operation.status === "succeeded" ? "mutation-success" : "mutation-error"} role="status">
+          {apply.data.operation.status}
+          {apply.data.receipt.recovery_actions.length
+            ? ` · ${apply.data.receipt.recovery_actions.join(", ")}`
+            : ""}
+        </p>
+      ) : null}
+      {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
+      {apply.isError ? <p className="mutation-error" role="alert">{apply.error.message}</p> : null}
+    </section>
   );
 }
 
@@ -1176,6 +1303,19 @@ function sourceStatusLabel(locale: "en" | "ru", status: string) {
   return message(locale, "sourceUnavailable");
 }
 
+function lifecycleActionLabel(
+  locale: "en" | "ru",
+  action: IntegrationLifecycleAction,
+) {
+  const labels: Record<IntegrationLifecycleAction, { en: string; ru: string }> = {
+    enable: { en: "Enable", ru: "Включить" },
+    disable: { en: "Disable", ru: "Отключить" },
+    uninstall: { en: "Uninstall", ru: "Удалить установку" },
+    delete_definition: { en: "Delete definition", ru: "Удалить определение" },
+  };
+  return labels[action][locale];
+}
+
 function statusLabel(locale: "en" | "ru", status: string) {
   const labels: Record<string, { en: string; ru: string }> = {
     available: { en: "Available", ru: "Доступно" },
@@ -1183,6 +1323,9 @@ function statusLabel(locale: "en" | "ru", status: string) {
     failed: { en: "Failed", ru: "Ошибка" },
     handoff_required: { en: "Continue in provider", ru: "Продолжить у провайдера" },
     compensated: { en: "Safely compensated", ru: "Безопасно компенсировано" },
+    disabled: { en: "Disabled", ru: "Отключено" },
+    uninstalled: { en: "Uninstalled", ru: "Установка удалена" },
+    definition_deleted: { en: "Definition deleted", ru: "Определение удалено" },
     repair_required: { en: "Repair required", ru: "Требуется восстановление" },
     rolled_back: { en: "Not connected", ru: "Не подключено" },
     verified: { en: "Connected", ru: "Подключено" },

@@ -374,6 +374,64 @@ class IntegrationCatalogStore:
             None,
         )
 
+    def delete_definition(
+        self,
+        catalog_id: str,
+        *,
+        expected_revision: int,
+    ) -> CatalogEntry:
+        """Delete one exact user-owned catalog definition after dependency checks."""
+        _validate_identity(catalog_id, field_name="catalog id")
+        if (
+            isinstance(expected_revision, bool)
+            or not isinstance(expected_revision, int)
+            or expected_revision < 0
+        ):
+            raise ValueError("catalog expected revision is invalid")
+        self._ensure_root()
+        with exclusive_file_lock(self.path):
+            snapshot = self._read_unlocked()
+            if snapshot.revision != expected_revision:
+                raise CatalogConflictError(
+                    "catalog changed after definition deletion preview"
+                )
+            entry = next(
+                (item for item in snapshot.entries if item.catalog_id == catalog_id),
+                None,
+            )
+            if entry is None:
+                raise CatalogConflictError("catalog definition was not found")
+            if entry.source_type not in {
+                CatalogSourceType.GIT,
+                CatalogSourceType.LOCAL,
+            }:
+                raise CatalogConflictError(
+                    "only user-owned Git or local definitions can be deleted"
+                )
+            remaining = tuple(
+                item for item in snapshot.entries if item.catalog_id != catalog_id
+            )
+            sources = tuple(
+                replace(
+                    source,
+                    entry_count=sum(
+                        item.source_id == source.source_id for item in remaining
+                    ),
+                )
+                if source.source_id == entry.source_id
+                else source
+                for source in snapshot.sources
+            )
+            self._write_unlocked(
+                CatalogSnapshot(
+                    revision=snapshot.revision + 1,
+                    updated_at=_format_timestamp(self._now()),
+                    entries=remaining,
+                    sources=sources,
+                )
+            )
+            return entry
+
     def import_package(
         self,
         package: IntegrationPackage,

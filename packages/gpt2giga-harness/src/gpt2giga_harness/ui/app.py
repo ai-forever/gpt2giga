@@ -113,6 +113,7 @@ from gpt2giga_harness.editor import (
 from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.integration_flows import IntegrationFlowService
 from gpt2giga_harness.integration_groups import GroupedIntegrationService
+from gpt2giga_harness.integration_lifecycle import IntegrationLifecycleService
 from gpt2giga_harness.skill_library import SkillLibraryService
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
@@ -358,6 +359,7 @@ def create_app(
     provider_settings_service: ProviderSettingsService | None = None,
     integration_flow_service: IntegrationFlowService | None = None,
     grouped_integration_service: GroupedIntegrationService | None = None,
+    integration_lifecycle_service: IntegrationLifecycleService | None = None,
     skill_library_service: SkillLibraryService | None = None,
     github_environment_service: GitHubEnvironmentService | None = None,
     environment_commit_service: EnvironmentCommitService | None = None,
@@ -424,6 +426,14 @@ def create_app(
         or GroupedIntegrationService(
             config.data_dir,
             flow_service=integration_flow_service,
+        )
+    )
+    integration_lifecycle_service = (
+        integration_lifecycle_service
+        or IntegrationLifecycleService(
+            config.data_dir,
+            flow_service=integration_flow_service,
+            group_service=grouped_integration_service,
         )
     )
     runner = HarnessSessionRunner(
@@ -529,6 +539,7 @@ def create_app(
     app.state.harness_provider_settings_service = provider_settings_service
     app.state.harness_integration_flow_service = integration_flow_service
     app.state.harness_grouped_integration_service = grouped_integration_service
+    app.state.harness_integration_lifecycle_service = integration_lifecycle_service
     app.state.harness_skill_library_service = skill_library_service
     app.state.harness_github_environment_service = github_environment_service
     app.state.harness_environment_commit_service = environment_commit_service

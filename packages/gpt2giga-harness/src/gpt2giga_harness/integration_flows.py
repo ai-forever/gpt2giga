@@ -619,6 +619,106 @@ class IntegrationFlowService:
                 "integration rollback failed; details were omitted"
             ) from exc
 
+    def uninstall_owned(
+        self,
+        flow_id: str,
+        *,
+        receipt_id: str,
+        authority: str,
+        allow_user_home: bool = False,
+    ) -> dict[str, Any]:
+        """Remove only material owned by one exact verified installation."""
+        record = self.get(flow_id)
+        _validate_identity(authority, field_name="approval authority")
+        if (
+            record.status is not IntegrationFlowStatus.VERIFIED
+            or record.receipt_id is None
+            or record.receipt_id != receipt_id
+        ):
+            raise IntegrationFlowConflictError(
+                "uninstall requires the exact verified installation receipt"
+            )
+        target = _target(record.target_id)
+        root = self._target_root(record.request, target, create=False)
+        package = self._resolve_package(
+            record.request,
+            record.source,
+            target,
+            record.scope,
+        )
+        try:
+            if target.id in _SKILL_TARGETS:
+                result = self._skill_installer(record.request, root).rollback(
+                    receipt_id
+                )
+                outcome = result.status
+            elif target.id == HARNESS_MANAGED_MCP_TARGET_ID:
+                result = self._managed_mcp_inventory.rollback(receipt_id)
+                outcome = result.status
+            elif target.id in _MCP_TARGET_IDS:
+                driver = self._mcp_driver_provider(target.id)
+                plan = driver.preview_uninstall(receipt_id)
+                result = driver.uninstall(
+                    plan,
+                    InstallationApproval(
+                        plan_id=plan.plan_id,
+                        authority=authority,
+                        allow_user_home=allow_user_home,
+                    ),
+                )
+                outcome = result.status
+            elif target.id in _PLUGIN_TARGET_IDS:
+                driver = self._plugin_driver(target.id, root, record.scope)
+                native_request = self._plugin_request(
+                    record.request,
+                    package,
+                    target.id,
+                    root,
+                    record.scope,
+                )
+                plan = driver.preview_uninstall(native_request)
+                if target.id == CODEX_PLUGIN_TARGET_ID:
+                    approval = CodexPluginApproval(
+                        plan_id=plan.plan_id,
+                        authority=authority,
+                        native_consent_acknowledged=True,
+                        allow_user_home=allow_user_home,
+                    )
+                elif target.id == CLAUDE_PLUGIN_TARGET_ID:
+                    approval = ClaudePluginApproval(
+                        plan_id=plan.plan_id,
+                        authority=authority,
+                        native_consent_acknowledged=True,
+                        allow_user_home=allow_user_home,
+                    )
+                else:
+                    approval = GeminiExtensionApproval(
+                        plan_id=plan.plan_id,
+                        authority=authority,
+                        native_consent_acknowledged=True,
+                        source_trust_acknowledged=True,
+                        allow_user_home=allow_user_home,
+                    )
+                result = driver.uninstall(native_request, plan, approval)
+                outcome = result.status
+            else:
+                raise IntegrationFlowConflictError(
+                    "selected target has no application-owned uninstall surface"
+                )
+            return {
+                "flow_id": record.id,
+                "receipt_id": receipt_id,
+                "status": str(outcome),
+                "installer_owned_only": True,
+                "content_free": True,
+            }
+        except IntegrationFlowConflictError:
+            raise
+        except Exception as exc:
+            raise IntegrationFlowError(
+                "integration uninstall failed; details were omitted"
+            ) from exc
+
     def _resolve_preview(
         self,
         request: Mapping[str, Any],
