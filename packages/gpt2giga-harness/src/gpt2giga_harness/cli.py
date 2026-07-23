@@ -143,6 +143,10 @@ from gpt2giga_harness.preflight import (
     preflight_report_to_dict,
 )
 from gpt2giga_harness.permission_simulator import build_permission_simulation
+from gpt2giga_harness.performance_baseline import (
+    run_performance_baseline,
+    write_performance_report,
+)
 from gpt2giga_harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
 from gpt2giga_harness.plugins import (
     harness_validation_report_to_dict,
@@ -740,6 +744,22 @@ def build_parser() -> argparse.ArgumentParser:
     worker_idle.add_argument("--lease-seconds", type=float, default=15.0)
     worker_idle.add_argument("--heartbeat-seconds", type=float, default=2.0)
     worker_idle.set_defaults(handler=_handle_worker_stop_on_idle)
+
+    benchmark = subparsers.add_parser("benchmark")
+    benchmark_subparsers = benchmark.add_subparsers(dest="benchmark_command")
+    benchmark_performance = benchmark_subparsers.add_parser("performance")
+    benchmark_performance.add_argument(
+        "--profile",
+        choices=("ci-smoke", "local-detail"),
+        default="ci-smoke",
+    )
+    benchmark_performance.add_argument("--samples", type=int, default=5)
+    benchmark_performance.add_argument(
+        "--output",
+        default=None,
+        help="Atomically write a private canonical JSON report",
+    )
+    benchmark_performance.set_defaults(handler=_handle_benchmark_performance)
 
     schedule = subparsers.add_parser("schedule")
     schedule_subparsers = schedule.add_subparsers(dest="schedule_command")
@@ -2225,6 +2245,23 @@ def _handle_worker_stop_on_idle(args: argparse.Namespace, config: HarnessConfig)
     )
     print(f"Worker {worker.worker_id} stopped after idle timeout.")
     return 0
+
+
+def _handle_benchmark_performance(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    del config
+    report = run_performance_baseline(
+        samples=args.samples,
+        profile=args.profile,
+    )
+    if args.output:
+        write_performance_report(args.output, report)
+        print(f"Wrote private performance report to {Path(args.output).expanduser()}")
+    else:
+        _print_json(report)
+    return 0 if report["status"] == "passed" else 1
 
 
 def _handle_schedule_list(args: argparse.Namespace, config: HarnessConfig) -> int:
