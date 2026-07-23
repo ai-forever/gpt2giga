@@ -996,6 +996,17 @@ def test_arena_api_creates_child_runs_without_shared_history(tmp_path):
     arena = response.json()["arena"]
     assert arena["status"] == "succeeded"
     assert arena["session"]["id"] == arena["session_id"]
+    assert len(arena["review"]["task_sha256"]) == 64
+    assert len(arena["review"]["candidate_set_sha256"]) == 64
+    assert arena["review"]["verdict"] is None
+    assert all(
+        len(candidate["configuration_sha256"]) == 64
+        for candidate in arena["review"]["candidates"]
+    )
+    assert all(
+        candidate["cost"]["confidence"] == "unknown"
+        for candidate in arena["review"]["candidates"]
+    )
     assert [child["harness_id"] for child in arena["child_runs"]] == [
         "arena-first",
         "arena-second",
@@ -1078,11 +1089,86 @@ def test_arena_children_run_concurrently_and_follow_up_in_isolated_sessions(tmp_
 
     assert (
         "/api/arena/runs/{arena_id}/verdict"
-        not in client.get("/openapi.json").json()["paths"]
+        in client.get("/openapi.json").json()["paths"]
     )
     assert retried.status_code == 200
     assert len(first.requests) == 3
     assert len(second.requests) == 2
+
+
+def test_arena_verdict_binds_exact_candidates_and_selected_promotion(tmp_path):
+    registry = HarnessRegistry()
+    registry.register(_ArenaCaptureHarness("arena-reviewed-a"))
+    registry.register(_ArenaCaptureHarness("arena-reviewed-b"))
+    client = _client(
+        config=HarnessConfig(data_dir=str(tmp_path / "data")),
+        registry=registry,
+        store=InMemoryHarnessSessionStore(),
+    )
+    created = client.post(
+        "/api/arena/runs",
+        json={
+            "prompt": "review the same task",
+            "harness_ids": ["arena-reviewed-a", "arena-reviewed-b"],
+        },
+    ).json()["arena"]
+    review = created["review"]
+    payload = {
+        "candidate_set_sha256": review["candidate_set_sha256"],
+        "selected_child_index": 1,
+        "scores": [
+            {"child_index": 0, "score": 0.75},
+            {"child_index": 1, "score": 0.9},
+        ],
+    }
+
+    stale = client.post(
+        f"/api/arena/runs/{created['id']}/verdict",
+        json={**payload, "candidate_set_sha256": "0" * 64},
+    )
+    decided = client.post(
+        f"/api/arena/runs/{created['id']}/verdict",
+        json=payload,
+    )
+    repeated = client.post(
+        f"/api/arena/runs/{created['id']}/verdict",
+        json=payload,
+    )
+
+    assert stale.status_code == 409
+    assert decided.status_code == 200
+    assert repeated.status_code == 200
+    verdict = decided.json()["arena"]["review"]["verdict"]
+    selected_run_id = created["child_runs"][1]["run_id"]
+    assert verdict["current"] is True
+    assert verdict["selected_run_id"] == selected_run_id
+    assert len(verdict["verdict_sha256"]) == 64
+    assert verdict["promotion"] == {
+        "selected_run_id": selected_run_id,
+        "configuration_preview_url": (
+            f"/api/runs/{selected_run_id}/promotions/preview"
+        ),
+        "artifact_review_url": f"/api/runs/{selected_run_id}/diff",
+        "run_url": f"/cockpit-v2/runs/{selected_run_id}",
+        "automatic_apply": False,
+    }
+    assert (
+        repeated.json()["arena"]["review"]["verdict"]["verdict_sha256"]
+        == verdict["verdict_sha256"]
+    )
+    assert (
+        client.post(
+            f"/api/arena/runs/{created['id']}/turns",
+            json={"prompt": "mutate the reviewed comparison"},
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            f"/api/arena/runs/{created['id']}/children/0/retry",
+        ).status_code
+        == 409
+    )
 
 
 def test_arena_workspace_files_share_one_frozen_attachment_identity(tmp_path):

@@ -60,6 +60,13 @@ describe("Arena model", () => {
         created_at: "now",
         updated_at: "now",
         metadata: {},
+        review: {
+          schema_version: 1,
+          task_sha256: "a".repeat(64),
+          candidate_set_sha256: "b".repeat(64),
+          candidates: [],
+          verdict: null,
+        },
         child_runs: [
           { harness_id: "a", index: 0, session_id: "sa", run_id: "ra", status: "running", run: { id: "ra", session_id: "sa", status: "running", updated_at: "now" } },
           { harness_id: "b", index: 1, session_id: "sb", run_id: "rb", status: "running", run: { id: "rb", session_id: "sb", status: "running", updated_at: "now" } },

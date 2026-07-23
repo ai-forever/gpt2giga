@@ -21,14 +21,18 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from gpt2giga_harness.arena import (
     ArenaNotFoundError,
+    ArenaReviewConflictError,
     FilesystemHarnessArenaStore,
     HarnessArenaChildRun,
     HarnessArenaRun,
     arena_child_to_dict,
+    arena_has_verdict,
+    arena_review_projection,
     arena_to_dict,
     continue_arena,
     queue_arena,
     queue_arena_follow_up,
+    record_arena_verdict,
     run_arena,
 )
 from gpt2giga_harness.application import SessionApplicationService
@@ -3146,6 +3150,10 @@ def create_app(
     ) -> dict[str, Any]:
         try:
             arena = await run_in_threadpool(arena_store.get, arena_id)
+            if arena_has_verdict(arena):
+                raise ArenaReviewConflictError(
+                    "arena verdict is immutable; start a new comparison"
+                )
             payload = dict(payload)
             if not str(payload.get("prompt") or "").strip():
                 raise ValueError("prompt is required")
@@ -3196,9 +3204,32 @@ def create_app(
             )
         except ArenaNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        except ArenaReviewConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (AttachmentValidationError, SessionNotFoundError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return await run_in_threadpool(_arena_response, arena, store)
+
+    @app.post("/api/arena/runs/{arena_id}/verdict")
+    def create_arena_verdict(
+        arena_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            arena = arena_store.get(arena_id)
+            arena = record_arena_verdict(
+                arena_store=arena_store,
+                session_store=store,
+                arena=arena,
+                payload=payload,
+            )
+        except ArenaNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        except ArenaReviewConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _arena_response(arena, store)
 
     @app.post("/api/arena/runs/{arena_id}/children/{child_index}/retry")
     async def retry_arena_child(
@@ -3207,6 +3238,10 @@ def create_app(
     ) -> dict[str, Any]:
         try:
             arena = await run_in_threadpool(arena_store.get, arena_id)
+            if arena_has_verdict(arena):
+                raise ArenaReviewConflictError(
+                    "arena verdict is immutable; start a new comparison"
+                )
             child = next(item for item in arena.child_runs if item.index == child_index)
             if child.run_id is None or child.session_id is None:
                 raise ValueError("arena child has not started")
@@ -3299,6 +3334,8 @@ def create_app(
             arena = arena_store.upsert_child(arena.id, replacement)
         except ArenaNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        except ArenaReviewConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (RunNotFoundError, StopIteration) as exc:
             raise HTTPException(
                 status_code=404, detail="Arena child not found"
@@ -3776,6 +3813,7 @@ def _arena_response(
     payload["child_runs"] = [
         _arena_child_response(child, store) for child in arena.child_runs
     ]
+    payload["review"] = arena_review_projection(arena, store)
     try:
         payload["session"] = _session_summary(store, arena.session_id)
     except SessionNotFoundError:

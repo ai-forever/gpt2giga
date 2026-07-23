@@ -409,6 +409,14 @@ MUTATION_ROUTE_CONTRACTS = (
         evidence=_PROVIDER_SETTINGS,
     ),
     _route(
+        "POST",
+        "/api/arena/runs/{arena_id}/verdict",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "arena.reviewed_verdict",
+        evidence=_OPTIMISTIC,
+    ),
+    _route(
         "PATCH",
         "/api/providers/{provider_id}",
         MutationClass.LOCAL_STATE,
