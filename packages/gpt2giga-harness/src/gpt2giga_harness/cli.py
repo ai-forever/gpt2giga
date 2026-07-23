@@ -39,6 +39,7 @@ from gpt2giga_harness.capability_matrix import (
     render_adapter_capability_matrix_markdown,
 )
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.completion import SHELLS, render_completion
 from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
 from gpt2giga_harness.doctor import (
     build_doctor_report,
@@ -65,6 +66,9 @@ from gpt2giga_harness.integration_flows import (
 )
 from gpt2giga_harness.integration_groups import (
     GroupedIntegrationService,
+    IntegrationGroupConflictError,
+    IntegrationGroupError,
+    IntegrationGroupNotFoundError,
     integration_group_record_to_dict,
 )
 from gpt2giga_harness.integration_scaffold import scaffold_integration_package
@@ -272,6 +276,12 @@ def main(argv: list[str] | None = None) -> int:
     except (IntegrationFlowConflictError, IntegrationFlowError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    except IntegrationGroupNotFoundError as exc:
+        print(f"Unknown integration group: {exc.args[0]}", file=sys.stderr)
+        return 2
+    except (IntegrationGroupConflictError, IntegrationGroupError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -287,8 +297,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Start a local gpt2giga sidecar if the proxy is down",
     )
+    common.add_argument(
+        "--non-interactive",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Keep this invocation on the automation/admin command surface",
+    )
 
     parser = argparse.ArgumentParser(prog="giga")
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Keep this invocation on the automation/admin command surface",
+    )
     parser.add_argument(
         "--version",
         action="version",
@@ -311,6 +332,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Return 1 when the selected CI readiness threshold is reached",
     )
     doctor.set_defaults(handler=_handle_doctor)
+
+    completion = subparsers.add_parser(
+        "completion",
+        help="Print shell completion for the stable giga command boundary",
+    )
+    completion.add_argument("shell", choices=SHELLS)
+    completion.set_defaults(handler=_handle_completion)
 
     config_parser = subparsers.add_parser("config")
     config_subparsers = config_parser.add_subparsers(dest="config_command")
@@ -444,6 +472,20 @@ def build_parser() -> argparse.ArgumentParser:
     integration_group_preview.add_argument("--configuration-json", default="{}")
     integration_group_preview.add_argument("--json", action="store_true")
     integration_group_preview.set_defaults(handler=_handle_integration_group_preview)
+    integration_pack_preview = integration_subparsers.add_parser("pack-preview")
+    integration_pack_preview.add_argument("--pack-id", required=True)
+    integration_pack_preview.add_argument("--pack-version", required=True)
+    integration_pack_preview.add_argument("--skill-catalog-id", required=True)
+    integration_pack_preview.add_argument("--mcp-catalog-id", required=True)
+    integration_pack_preview.add_argument(
+        "--scope",
+        default="managed_home",
+        choices=("managed_home", "project"),
+    )
+    integration_pack_preview.add_argument("--workspace")
+    integration_pack_preview.add_argument("--mcp-configuration-json", default="{}")
+    integration_pack_preview.add_argument("--json", action="store_true")
+    integration_pack_preview.set_defaults(handler=_handle_integration_pack_preview)
     integration_group_status = integration_subparsers.add_parser("group-status")
     integration_group_status.add_argument("group_id")
     integration_group_status.add_argument("--json", action="store_true")
@@ -969,6 +1011,12 @@ def _handle_doctor(args: argparse.Namespace, config: HarnessConfig) -> int:
     return 0
 
 
+def _handle_completion(args: argparse.Namespace, config: HarnessConfig) -> int:
+    del config
+    print(render_completion(args.shell), end="")
+    return 0
+
+
 def _handle_project_info(args: argparse.Namespace, config: HarnessConfig) -> int:
     payload = _project_payload(
         workspace=args.workspace,
@@ -1229,6 +1277,44 @@ def _handle_integration_group_preview(
         print(f"Group: {payload['group']['id']}")
         print(f"Plan: {payload['plan']['plan_id']}")
         print("Targets: " + ", ".join(payload["plan"]["target_ids"]))
+        print(
+            "Next: integration group-apply "
+            f"{payload['group']['id']} --plan-id {payload['plan']['plan_id']} "
+            "--authority <operator>"
+        )
+    return 0
+
+
+def _handle_integration_pack_preview(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    try:
+        mcp_configuration = json.loads(args.mcp_configuration_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("MCP configuration JSON is invalid") from exc
+    payload = GroupedIntegrationService(config.data_dir).preview(
+        {
+            "component": "extension_pack",
+            "pack_id": args.pack_id,
+            "pack_version": args.pack_version,
+            "skill_catalog_id": args.skill_catalog_id,
+            "mcp_catalog_id": args.mcp_catalog_id,
+            "scope": args.scope,
+            "workspace": args.workspace,
+            "target_mode": "all_supported",
+            "mcp_configuration": mcp_configuration,
+        }
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Pack: {payload['plan']['package']['id']}")
+        print(f"Group: {payload['group']['id']}")
+        print(f"Plan: {payload['plan']['plan_id']}")
+        for item in payload["plan"]["compatibility"]:
+            included = "included" if item["included"] else "excluded"
+            print(f"Compatibility: {item['target']} {item['status']} ({included})")
         print(
             "Next: integration group-apply "
             f"{payload['group']['id']} --plan-id {payload['plan']['plan_id']} "

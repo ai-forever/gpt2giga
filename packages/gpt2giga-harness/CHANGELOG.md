@@ -5,6 +5,23 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.4.0a1] - 2026-07-23
+
+### Добавлено
+- **Канонический терминальный Workbench**: bare `giga` запускает встроенный Textual TUI с навигацией по проектам и сессиям, созданием и продолжением диалогов, потоковыми событиями, evidence/resources, approvals, handoff и изолированным native terminal; attach mode подключается к уже запущенному Harness без неявного fallback.
+- **Provider-native CLI facade**: буквальные пространства `giga codex|claude|gemini` сохраняют provider-owned argv, stdin/stdout/stderr, JSON/JSONL, сигналы и exit status на L0, используют явный terminal handoff на L1 и допускают L2 Workbench только по проверенным контрактам Codex, Claude и Gemini; `giga completion` и doctor показывают стабильную границу и локальное состояние transport.
+- **Git и GitHub environments**: Workbench и TUI показывают bounded snapshot ветки, HEAD, worktree, staged/unstaged/untracked state, upstream и read-only GitHub checks/runs; commit, non-force push и создание pull request выполняются только через отдельные immutable preview и approval, связанные с точным локальным и remote state.
+- **Portable Extension Packs**: один exact-version plan может собрать проверенный Skill и MCP package для всех совместимых Codex, Claude, Gemini и Harness-managed targets с матрицей совместимости, явными permissions и компенсируемыми apply/recovery/rollback.
+- **Reviewed Arena verdicts**: завершённое сравнение принимает оценки всех кандидатов и одного выбранного победителя, связывает решение с точным hash набора evidence и показывает eligibility выбранного run для promotion; verdict неизменяем, а изменившиеся кандидаты требуют нового сравнения.
+
+### Изменено
+- **TUI входит в базовый пакет**: Textual теперь является проверенной прямой runtime dependency, `giga tui` остаётся compatibility alias, а интерактивные `chat`, `run --agent` и выбранные `session` actions переходят в единый TUI; JSON, dry-run, pipe/redirect, CI и административные команды остаются неинтерактивными.
+- **Единый Workbench protocol**: TUI, Cockpit и native integration packs используют общие action events, resource projections, session state и terminal dispatch вместо параллельных transcript/runtime реализаций.
+
+### Исправлено
+- **Fail-closed native и GitHub paths**: неподдерживаемый structured transport деградирует без поломки opaque passthrough, а auth, repository mismatch, remote race, network-loss и permission failures GitHub классифицируются без утечки command output или credentials.
+- **Terminal UX и lifecycle**: исправлены запуск канонического TUI, управление active session, bounded streaming, keyboard/mouse interactions, terminal resize/cancel и завершение процессов без потери machine-readable CLI контрактов.
+
 ## [0.3.0a1] - 2026-07-20
 
 ### Добавлено
@@ -138,6 +155,7 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
+[0.4.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.3.0a1...gpt2giga-harness-v0.4.0a1
 [0.3.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.2.0a1...gpt2giga-harness-v0.3.0a1
 [0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.1.0b1...gpt2giga-harness-v0.2.0a1
 [0.1.0b1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.1.0b1

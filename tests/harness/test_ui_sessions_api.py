@@ -86,6 +86,94 @@ def test_sessions_api_create_list_get_update_delete():
     assert deleted.json() == {"deleted": True}
 
 
+def test_session_navigation_api_binds_revision_and_replays_idempotently():
+    client = _client()
+    created = client.post(
+        "/api/sessions",
+        json={"title": "Bound session", "harness_id": "echo"},
+    ).json()["session"]
+    session_id = created["id"]
+    store = client.app.state.harness_session_store
+    store.update_session(
+        session_id,
+        metadata={
+            "project_id": "project-bound",
+            "native_session_reference": {
+                "authority": "codex",
+                "native_id": "thread-bound",
+                "operation": "resume",
+                "revision": 7,
+            },
+        },
+    )
+    summary = client.get(f"/api/sessions/{session_id}/navigation-preview").json()[
+        "session"
+    ]
+    binding = {
+        "session_revision": summary["session_revision"],
+        "session_generation": summary["session_generation"],
+        "session_lease": summary["session_lease"],
+        "idempotency_key": "rename-bound-once",
+    }
+
+    first = client.post(
+        f"/api/sessions/{session_id}/navigation-update",
+        json={**binding, "title": "Renamed once"},
+    )
+    replay = client.post(
+        f"/api/sessions/{session_id}/navigation-update",
+        json={**binding, "title": "Different retry payload"},
+    )
+    stale = client.post(
+        f"/api/sessions/{session_id}/navigation-update",
+        json={**binding, "idempotency_key": "stale-binding", "title": "Lost"},
+    )
+
+    assert first.status_code == 200
+    assert replay.json() == first.json()
+    assert first.json()["session"]["native_session_reference"] == {
+        "authority": "codex",
+        "native_id": "thread-bound",
+        "operation": "resume",
+        "revision": 7,
+    }
+    assert stale.status_code == 409
+    assert "resnapshot" in stale.json()["detail"]
+
+
+def test_session_navigation_export_never_derives_paths_from_request_data(tmp_path):
+    data_dir = tmp_path / "data"
+    client = _client(config=HarnessConfig(data_dir=str(data_dir)))
+    created = client.post(
+        "/api/sessions",
+        json={"title": "Safe export", "harness_id": "echo"},
+    ).json()["session"]
+    session_id = created["id"]
+    summary = client.get(f"/api/sessions/{session_id}/navigation-preview").json()[
+        "session"
+    ]
+    binding = {
+        "session_revision": summary["session_revision"],
+        "session_generation": summary["session_generation"],
+        "session_lease": summary["session_lease"],
+        "idempotency_key": "../../outside-export",
+    }
+
+    response = client.post(
+        f"/api/sessions/{session_id}/navigation-export", json=binding
+    )
+    replay = client.post(f"/api/sessions/{session_id}/navigation-export", json=binding)
+
+    assert response.status_code == 200
+    assert replay.json() == response.json()
+    path = Path(response.json()["export"]["path"])
+    assert path.parent == data_dir / "exports"
+    assert path.name.startswith("session-")
+    assert path.suffix == ".md"
+    assert path.is_file()
+    assert not (tmp_path / "outside-export").exists()
+
+
 def test_sessions_api_filters_by_project_id(tmp_path):
     client = _client()
     first_workspace = tmp_path / "first"
@@ -159,6 +247,44 @@ def test_sessions_api_events_polling_after_id():
 
     assert response.status_code == 200
     assert response.json()["events"][0]["id"] != first_event_id
+
+
+def test_interactive_run_actions_reject_stale_binding_and_missing_owner():
+    client = _client()
+    completed = client.post(
+        "/api/sessions/run",
+        json={"harness_id": "echo", "prompt": "binding"},
+    ).json()
+    run_id = completed["run"]["id"]
+    session_id = completed["session"]["id"]
+    projection = client.get(f"/api/cockpit/runs/{run_id}").json()
+    binding = {
+        "run_id": run_id,
+        "session_id": session_id,
+        "revision": projection["snapshot_revision"],
+        "generation": 1,
+        "idempotency_key": "tui_action_1",
+    }
+
+    stale = client.post(
+        f"/api/runs/{run_id}/steer",
+        json={**binding, "revision": "0" * 64, "content": "stale"},
+    )
+    owner_lost = client.post(
+        f"/api/runs/{run_id}/steer",
+        json={**binding, "content": "continue"},
+    )
+    unsupported_input = client.post(
+        f"/api/runs/{run_id}/input",
+        json={**binding, "input_id": "input_1", "answer": "yes"},
+    )
+
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == "Run revision changed"
+    assert owner_lost.status_code == 409
+    assert "owner is unavailable" in owner_lost.json()["detail"]
+    assert unsupported_input.status_code == 409
+    assert "does not expose" in unsupported_input.json()["detail"]
 
 
 def test_session_update_stream_replays_title_revision_and_closes_on_delete():
@@ -870,6 +996,17 @@ def test_arena_api_creates_child_runs_without_shared_history(tmp_path):
     arena = response.json()["arena"]
     assert arena["status"] == "succeeded"
     assert arena["session"]["id"] == arena["session_id"]
+    assert len(arena["review"]["task_sha256"]) == 64
+    assert len(arena["review"]["candidate_set_sha256"]) == 64
+    assert arena["review"]["verdict"] is None
+    assert all(
+        len(candidate["configuration_sha256"]) == 64
+        for candidate in arena["review"]["candidates"]
+    )
+    assert all(
+        candidate["cost"]["confidence"] == "unknown"
+        for candidate in arena["review"]["candidates"]
+    )
     assert [child["harness_id"] for child in arena["child_runs"]] == [
         "arena-first",
         "arena-second",
@@ -952,11 +1089,86 @@ def test_arena_children_run_concurrently_and_follow_up_in_isolated_sessions(tmp_
 
     assert (
         "/api/arena/runs/{arena_id}/verdict"
-        not in client.get("/openapi.json").json()["paths"]
+        in client.get("/openapi.json").json()["paths"]
     )
     assert retried.status_code == 200
     assert len(first.requests) == 3
     assert len(second.requests) == 2
+
+
+def test_arena_verdict_binds_exact_candidates_and_selected_promotion(tmp_path):
+    registry = HarnessRegistry()
+    registry.register(_ArenaCaptureHarness("arena-reviewed-a"))
+    registry.register(_ArenaCaptureHarness("arena-reviewed-b"))
+    client = _client(
+        config=HarnessConfig(data_dir=str(tmp_path / "data")),
+        registry=registry,
+        store=InMemoryHarnessSessionStore(),
+    )
+    created = client.post(
+        "/api/arena/runs",
+        json={
+            "prompt": "review the same task",
+            "harness_ids": ["arena-reviewed-a", "arena-reviewed-b"],
+        },
+    ).json()["arena"]
+    review = created["review"]
+    payload = {
+        "candidate_set_sha256": review["candidate_set_sha256"],
+        "selected_child_index": 1,
+        "scores": [
+            {"child_index": 0, "score": 0.75},
+            {"child_index": 1, "score": 0.9},
+        ],
+    }
+
+    stale = client.post(
+        f"/api/arena/runs/{created['id']}/verdict",
+        json={**payload, "candidate_set_sha256": "0" * 64},
+    )
+    decided = client.post(
+        f"/api/arena/runs/{created['id']}/verdict",
+        json=payload,
+    )
+    repeated = client.post(
+        f"/api/arena/runs/{created['id']}/verdict",
+        json=payload,
+    )
+
+    assert stale.status_code == 409
+    assert decided.status_code == 200
+    assert repeated.status_code == 200
+    verdict = decided.json()["arena"]["review"]["verdict"]
+    selected_run_id = created["child_runs"][1]["run_id"]
+    assert verdict["current"] is True
+    assert verdict["selected_run_id"] == selected_run_id
+    assert len(verdict["verdict_sha256"]) == 64
+    assert verdict["promotion"] == {
+        "selected_run_id": selected_run_id,
+        "configuration_preview_url": (
+            f"/api/runs/{selected_run_id}/promotions/preview"
+        ),
+        "artifact_review_url": f"/api/runs/{selected_run_id}/diff",
+        "run_url": f"/cockpit-v2/runs/{selected_run_id}",
+        "automatic_apply": False,
+    }
+    assert (
+        repeated.json()["arena"]["review"]["verdict"]["verdict_sha256"]
+        == verdict["verdict_sha256"]
+    )
+    assert (
+        client.post(
+            f"/api/arena/runs/{created['id']}/turns",
+            json={"prompt": "mutate the reviewed comparison"},
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            f"/api/arena/runs/{created['id']}/children/0/retry",
+        ).status_code
+        == 409
+    )
 
 
 def test_arena_workspace_files_share_one_frozen_attachment_identity(tmp_path):

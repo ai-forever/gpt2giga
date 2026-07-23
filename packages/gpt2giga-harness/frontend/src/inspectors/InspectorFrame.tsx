@@ -20,3 +20,78 @@ export function InspectorFrame({
     </section>
   );
 }
+
+export function CommitApprovalPreview({ preview }: { preview?: Record<string, unknown> }) {
+  const author = preview?.author;
+  const authorRecord = typeof author === "object" && author !== null
+    ? author as Record<string, unknown>
+    : {};
+  const head = typeof preview?.head === "string" ? preview.head : "unborn";
+  const diff = typeof preview?.diff_sha256 === "string" ? preview.diff_sha256 : "unavailable";
+  return (
+    <dl className="compact-fields commit-approval-preview">
+      <div><dt>Author</dt><dd>{String(authorRecord.name ?? "unknown")} &lt;{String(authorRecord.email ?? "unknown")}&gt;</dd></div>
+      <div><dt>Message</dt><dd>{String(preview?.message ?? "")}</dd></div>
+      <div><dt>HEAD</dt><dd><code>{head}</code></dd></div>
+      <div><dt>Diff</dt><dd><code>{diff}</code></dd></div>
+    </dl>
+  );
+}
+
+export function PushApprovalPreview({ preview }: { preview?: Record<string, unknown> }) {
+  const permissions = preview?.permissions;
+  const permissionRecord = typeof permissions === "object" && permissions !== null
+    ? permissions as Record<string, unknown>
+    : {};
+  const permits = Object.entries(permissionRecord)
+    .filter(([, enabled]) => enabled === true)
+    .map(([name]) => name)
+    .join(", ");
+  const forbids = Object.entries(permissionRecord)
+    .filter(([, enabled]) => enabled === false)
+    .map(([name]) => name)
+    .join(", ");
+  return (
+    <dl className="compact-fields commit-approval-preview">
+      <div><dt>Remote</dt><dd>{String(preview?.remote ?? "unavailable")}</dd></div>
+      <div><dt>Upstream</dt><dd>{String(preview?.upstream ?? "new")}</dd></div>
+      <div><dt>Target</dt><dd>{String(preview?.target_branch ?? "unavailable")}</dd></div>
+      <div><dt>HEAD</dt><dd><code>{String(preview?.head ?? "unavailable")}</code></dd></div>
+      <div><dt>Remote HEAD</dt><dd><code>{String(preview?.remote_head ?? "new branch")}</code></dd></div>
+      <div><dt>Permits</dt><dd>{permits || "none"}</dd></div>
+      <div><dt>Forbids</dt><dd>{forbids || "none"}</dd></div>
+    </dl>
+  );
+}
+
+export function PullRequestApprovalPreview({ preview }: { preview?: Record<string, unknown> }) {
+  const repository = preview?.repository;
+  const repositoryRecord = typeof repository === "object" && repository !== null
+    ? repository as Record<string, unknown>
+    : {};
+  const permissions = preview?.permissions;
+  const permissionRecord = typeof permissions === "object" && permissions !== null
+    ? permissions as Record<string, unknown>
+    : {};
+  const permits = Object.entries(permissionRecord)
+    .filter(([, enabled]) => enabled === true)
+    .map(([name]) => name)
+    .join(", ");
+  const forbids = Object.entries(permissionRecord)
+    .filter(([, enabled]) => enabled === false)
+    .map(([name]) => name)
+    .join(", ");
+  return (
+    <dl className="compact-fields commit-approval-preview">
+      <div><dt>Repository</dt><dd>{String(repositoryRecord.name_with_owner ?? "unavailable")}</dd></div>
+      <div><dt>Source</dt><dd>{String(preview?.source_branch ?? "unavailable")}</dd></div>
+      <div><dt>Base</dt><dd>{String(preview?.base_branch ?? "unavailable")}</dd></div>
+      <div><dt>HEAD</dt><dd><code>{String(preview?.source_head ?? "unavailable")}</code></dd></div>
+      <div><dt>Base HEAD</dt><dd><code>{String(preview?.base_head ?? "unavailable")}</code></dd></div>
+      <div><dt>Title</dt><dd>{String(preview?.title ?? "")}</dd></div>
+      <div><dt>Body</dt><dd>{String(preview?.body ?? "")}</dd></div>
+      <div><dt>Permits</dt><dd>{permits || "none"}</dd></div>
+      <div><dt>Forbids</dt><dd>{forbids || "none"}</dd></div>
+    </dl>
+  );
+}

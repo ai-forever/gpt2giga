@@ -23,6 +23,7 @@ from gpt2giga_harness.runtime.store import (
     InvalidStateTransitionError,
     RuntimeCoordinationStore,
 )
+from gpt2giga_harness.ui.routers.tui_actions import validate_run_action_binding
 
 
 router = APIRouter(route_class=ConformantAPIRoute)
@@ -79,6 +80,13 @@ def decide_approval(
 ) -> dict[str, Any]:
     """Persist one user decision and requeue or cancel a gated pre-spawn job."""
     try:
+        binding = payload.get("run_binding")
+        if isinstance(binding, dict):
+            approval = _runtime_store(request).get_approval_request(approval_id)
+            if not approval.run_id:
+                raise ValueError("approval has no run binding")
+            run = request.app.state.harness_session_store.get_run(approval.run_id)
+            validate_run_action_binding(run, binding)
         decision = ApprovalDecision(str(payload.get("decision") or ""))
         expiry = payload.get("expires_in_seconds")
         project_expiry = float(expiry) if expiry is not None else None

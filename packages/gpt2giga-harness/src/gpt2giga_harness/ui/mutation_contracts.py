@@ -17,6 +17,11 @@ from gpt2giga_harness.runtime.policy import (
     SCHEDULE_RUN_NOW_OWNER,
     PermissionAction,
 )
+from gpt2giga_harness.environment_actions import ENVIRONMENT_COMMIT_OWNER
+from gpt2giga_harness.environment_push import ENVIRONMENT_PUSH_OWNER
+from gpt2giga_harness.environment_pull_requests import (
+    ENVIRONMENT_PULL_REQUEST_OWNER,
+)
 
 UNSAFE_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -190,6 +195,7 @@ CONFORMANCE_EVIDENCE = {
             test_nodes=(
                 "tests/harness/test_native_process_api.py::test_native_process_api_start_poll_input_and_stop",
                 "tests/harness/test_native_process_api.py::test_native_process_resize_api_validates_terminal_limits",
+                "tests/harness/test_ui_sessions_api.py::test_interactive_run_actions_reject_stale_binding_and_missing_owner",
             ),
         ),
         ConformanceEvidence(
@@ -223,6 +229,33 @@ CONFORMANCE_EVIDENCE = {
             behaviors=frozenset({ConformanceBehavior.ALLOW, ConformanceBehavior.ASK}),
             test_nodes=(
                 "tests/harness/test_schedules.py::test_schedule_api_requires_exact_test_hash_and_online_worker",
+            ),
+        ),
+        ConformanceEvidence(
+            id="policy.environment_commit",
+            behaviors=frozenset(ConformanceBehavior),
+            test_nodes=(
+                "tests/harness/test_environment_actions.py::test_environment_commit_api_requires_exact_approval_and_is_idempotent",
+                "tests/harness/test_environment_actions.py::test_environment_commit_rejects_stale_preview_before_approval_consumption",
+                "tests/harness/test_environment_actions.py::test_environment_commit_validation_errors_are_content_free",
+            ),
+        ),
+        ConformanceEvidence(
+            id="policy.environment_push",
+            behaviors=frozenset(ConformanceBehavior),
+            test_nodes=(
+                "tests/harness/test_environment_push.py::test_environment_push_api_requires_exact_approval_and_is_idempotent",
+                "tests/harness/test_environment_push.py::test_environment_push_rejects_local_and_remote_staleness_before_approval",
+                "tests/harness/test_environment_push.py::test_environment_push_disables_hooks_and_rejects_push_url_override",
+            ),
+        ),
+        ConformanceEvidence(
+            id="policy.environment_pull_request",
+            behaviors=frozenset(ConformanceBehavior),
+            test_nodes=(
+                "tests/harness/test_environment_pull_requests.py::test_environment_pull_request_api_requires_distinct_approval_and_replays",
+                "tests/harness/test_environment_pull_requests.py::test_environment_pull_request_rejects_stale_remote_before_approval",
+                "tests/harness/test_environment_pull_requests.py::test_environment_pull_request_recovers_network_loss_after_hosted_write",
             ),
         ),
         ConformanceEvidence(
@@ -376,6 +409,14 @@ MUTATION_ROUTE_CONTRACTS = (
         evidence=_PROVIDER_SETTINGS,
     ),
     _route(
+        "POST",
+        "/api/arena/runs/{arena_id}/verdict",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "arena.reviewed_verdict",
+        evidence=_OPTIMISTIC,
+    ),
+    _route(
         "PATCH",
         "/api/providers/{provider_id}",
         MutationClass.LOCAL_STATE,
@@ -440,11 +481,40 @@ MUTATION_ROUTE_CONTRACTS = (
         evidence=_OPTIMISTIC,
     ),
     _route(
+        "POST",
+        "/api/workbench/tasks/{task_id}/cancel",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "workbench_tasks.exact_owner_lease",
+        evidence=_OPTIMISTIC,
+    ),
+    *_many(
+        "POST",
+        (
+            "/api/sessions/{session_id}/navigation-update",
+            "/api/sessions/{session_id}/navigation-delete",
+            "/api/sessions/{session_id}/navigation-fork",
+            "/api/sessions/{session_id}/navigation-export",
+        ),
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "session_navigation.exact_revision",
+        evidence=_OPTIMISTIC,
+    ),
+    _route(
         "PUT",
         "/api/workflows/{workflow_id}",
         MutationClass.LOCAL_STATE,
         EnforcementControl.OPTIMISTIC_LOCAL_STATE,
         "workflow_catalog.save",
+        evidence=_OPTIMISTIC,
+    ),
+    _route(
+        "PUT",
+        "/api/workbench/preferences",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "workbench_preferences.exact_revision",
         evidence=_OPTIMISTIC,
     ),
     _route(
@@ -541,6 +611,9 @@ MUTATION_ROUTE_CONTRACTS = (
         (
             "/api/native/processes/{process_id}/input",
             "/api/native/processes/{process_id}/resize",
+            "/api/workbench/processes/{process_id}/stop",
+            "/api/runs/{run_id}/input",
+            "/api/runs/{run_id}/steer",
         ),
         MutationClass.GOVERNED_EXTERNAL_EFFECT,
         EnforcementControl.EXPLICIT_OPERATOR_ACTION,
@@ -575,6 +648,57 @@ MUTATION_ROUTE_CONTRACTS = (
         NATIVE_PROCESS_SPAWN_OWNER,
         actions=(PermissionAction.PROCESS_SPAWN,),
         evidence=(*_POLICY, "policy.native_process"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/commit/preview",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "environment.commit_preview",
+        evidence=(*_AUTH, "policy.environment_commit"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/commit/apply",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.POLICY_ENGINE,
+        ENVIRONMENT_COMMIT_OWNER,
+        actions=(PermissionAction.GIT_COMMIT,),
+        evidence=(*_POLICY, "policy.environment_commit"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/push/preview",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "environment.push_preview",
+        evidence=(*_AUTH, "policy.environment_push"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/push/apply",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.POLICY_ENGINE,
+        ENVIRONMENT_PUSH_OWNER,
+        actions=(PermissionAction.GIT_PUSH,),
+        evidence=(*_POLICY, "policy.environment_push"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/pull-request/preview",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "environment.pull_request_preview",
+        evidence=(*_AUTH, "policy.environment_pull_request"),
+    ),
+    _route(
+        "POST",
+        "/api/environment/pull-request/apply",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.POLICY_ENGINE,
+        ENVIRONMENT_PULL_REQUEST_OWNER,
+        actions=(PermissionAction.GITHUB_PULL_REQUEST_CREATE,),
+        evidence=(*_POLICY, "policy.environment_pull_request"),
     ),
     _route(
         "POST",

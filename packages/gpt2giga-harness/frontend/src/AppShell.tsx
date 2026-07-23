@@ -1,8 +1,8 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { InboxDrawer, type InboxKind } from "./components/InboxDrawer";
+import type { InboxKind } from "./components/InboxDrawer";
 import { PrimaryRailBrand, PrimaryRailIcon } from "./components/PrimaryRailIcon";
 import { message } from "./messages";
 import { primarySurfaces, surfaceForPath } from "./navigation";
@@ -16,6 +16,8 @@ import {
 } from "./preferences";
 import { approvalsOptions, attentionOptions, requestKeys } from "./request-graph";
 import { observeRunsCenterUpdates } from "./runs-center-update-stream";
+
+const InboxDrawer = lazy(() => import("./components/InboxDrawer"));
 
 function ApprovalIcon() {
   return (
@@ -167,7 +169,11 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
-      {inbox === null ? null : <InboxDrawer kind={inbox} onClose={() => setInbox(null)} />}
+      {inbox === null ? null : (
+        <Suspense fallback={null}>
+          <InboxDrawer kind={inbox} onClose={() => setInbox(null)} />
+        </Suspense>
+      )}
       </div>
     </PreferencesContext.Provider>
   );

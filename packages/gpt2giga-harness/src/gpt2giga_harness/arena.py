@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -19,13 +20,20 @@ from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions.models import HarnessRun
-from gpt2giga_harness.sessions.store import SessionNotFoundError
+from gpt2giga_harness.sessions.store import HarnessSessionStore, SessionNotFoundError
 from gpt2giga_harness.types import GigaChatApiMode, parse_api_mode
 from gpt2giga_harness.workspace import resolve_workspace
 
 
 class ArenaNotFoundError(KeyError):
     """Raised when an arena run does not exist."""
+
+
+class ArenaReviewConflictError(ValueError):
+    """Raised when reviewed Arena evidence no longer matches current runs."""
+
+
+ARENA_REVIEW_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -109,7 +117,13 @@ class FilesystemHarnessArenaStore:
             execution_transport=request.execution_transport,
             created_at=now,
             updated_at=now,
-            metadata=_redacted_mapping(request.extra),
+            metadata={
+                **_redacted_mapping(request.extra),
+                "reviewed_arena": {
+                    "schema_version": ARENA_REVIEW_SCHEMA_VERSION,
+                    "task_sha256": _arena_task_sha256(request),
+                },
+            },
         )
         self.save(arena)
         return arena
@@ -172,6 +186,43 @@ class FilesystemHarnessArenaStore:
                 status=_arena_status(
                     tuple(children), expected_count=len(arena.harness_ids)
                 ),
+                updated_at=utc_now(),
+            )
+            _write_json_atomic(path, arena_to_dict(updated))
+        return updated
+
+    def record_verdict(
+        self,
+        arena_id: str,
+        *,
+        candidate_set_sha256: str,
+        selected_child_index: int,
+        selected_run_id: str,
+        scores: tuple[Mapping[str, Any], ...],
+        verdict_sha256: str,
+    ) -> HarnessArenaRun:
+        """Atomically persist one immutable operator verdict."""
+        path = self._path(arena_id)
+        with exclusive_file_lock(path):
+            arena = arena_from_dict(json.loads(path.read_text(encoding="utf-8")))
+            reviewed = dict(_mapping(arena.metadata.get("reviewed_arena")))
+            existing = _mapping(reviewed.get("verdict"))
+            if existing:
+                if existing.get("verdict_sha256") != verdict_sha256:
+                    raise ArenaReviewConflictError("arena verdict is already immutable")
+                return arena
+            reviewed["verdict"] = {
+                "schema_version": ARENA_REVIEW_SCHEMA_VERSION,
+                "candidate_set_sha256": candidate_set_sha256,
+                "selected_child_index": selected_child_index,
+                "selected_run_id": selected_run_id,
+                "scores": [dict(item) for item in scores],
+                "decided_at": utc_now(),
+                "verdict_sha256": verdict_sha256,
+            }
+            updated = replace(
+                arena,
+                metadata={**dict(arena.metadata), "reviewed_arena": reviewed},
                 updated_at=utc_now(),
             )
             _write_json_atomic(path, arena_to_dict(updated))
@@ -391,6 +442,84 @@ def sync_durable_arena_child(
             run,
             result_text,
         ),
+    )
+
+
+def arena_has_verdict(arena: HarnessArenaRun) -> bool:
+    """Return whether an immutable reviewed verdict already exists."""
+    reviewed = _mapping(arena.metadata.get("reviewed_arena"))
+    return bool(_mapping(reviewed.get("verdict")))
+
+
+def arena_review_projection(
+    arena: HarnessArenaRun,
+    store: HarnessSessionStore,
+) -> dict[str, Any]:
+    """Project immutable task, candidate, verdict, and promotion evidence."""
+    reviewed = _mapping(arena.metadata.get("reviewed_arena"))
+    task_sha256 = str(reviewed.get("task_sha256") or "")
+    candidates = [_arena_candidate_evidence(child, store) for child in arena.child_runs]
+    candidate_set_sha256 = _mapping_sha256(
+        {
+            "schema_version": ARENA_REVIEW_SCHEMA_VERSION,
+            "arena_id": arena.id,
+            "task_sha256": task_sha256,
+            "candidates": candidates,
+        }
+    )
+    verdict = dict(_mapping(reviewed.get("verdict")))
+    if verdict:
+        verdict["current"] = verdict.get("candidate_set_sha256") == candidate_set_sha256
+        selected_run_id = str(verdict.get("selected_run_id") or "")
+        verdict["promotion"] = _arena_promotion_projection(selected_run_id)
+    return {
+        "schema_version": ARENA_REVIEW_SCHEMA_VERSION,
+        "task_sha256": task_sha256,
+        "candidate_set_sha256": candidate_set_sha256,
+        "candidates": candidates,
+        "verdict": verdict or None,
+    }
+
+
+def record_arena_verdict(
+    *,
+    arena_store: FilesystemHarnessArenaStore,
+    session_store: HarnessSessionStore,
+    arena: HarnessArenaRun,
+    payload: Mapping[str, Any],
+) -> HarnessArenaRun:
+    """Validate and persist one exact operator-scored Arena verdict."""
+    if arena.status not in {"succeeded", "partial", "failed", "canceled"}:
+        raise ValueError("arena candidates are still active")
+    review = arena_review_projection(arena, session_store)
+    expected = str(payload.get("candidate_set_sha256") or "")
+    if not expected or expected != review["candidate_set_sha256"]:
+        raise ArenaReviewConflictError("arena candidate evidence changed")
+    selected_index = _bounded_child_index(payload.get("selected_child_index"))
+    candidates = review["candidates"]
+    selected = next(
+        (item for item in candidates if item["child_index"] == selected_index),
+        None,
+    )
+    if selected is None:
+        raise ValueError("selected_child_index is not an arena candidate")
+    if selected["status"] != "succeeded" or not selected["run_id"]:
+        raise ValueError("only a succeeded candidate can be selected")
+    scores = _arena_scores(payload.get("scores"), candidates)
+    verdict_payload = {
+        "schema_version": ARENA_REVIEW_SCHEMA_VERSION,
+        "candidate_set_sha256": expected,
+        "selected_child_index": selected_index,
+        "selected_run_id": selected["run_id"],
+        "scores": [dict(item) for item in scores],
+    }
+    return arena_store.record_verdict(
+        arena.id,
+        candidate_set_sha256=expected,
+        selected_child_index=selected_index,
+        selected_run_id=str(selected["run_id"]),
+        scores=scores,
+        verdict_sha256=_mapping_sha256(verdict_payload),
     )
 
 
@@ -747,6 +876,164 @@ def _redacted_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
     if isinstance(redacted, Mapping):
         return dict(redacted)
     return {}
+
+
+def _arena_task_sha256(request: HarnessArenaRequest) -> str:
+    return _mapping_sha256(
+        {
+            "schema_version": ARENA_REVIEW_SCHEMA_VERSION,
+            "prompt": request.prompt,
+            "model": request.model,
+            "api_mode": request.api_mode.value,
+            "mode": request.mode,
+            "workspace": request.workspace,
+            "attachment_ids": list(request.attachment_ids),
+            "workspace_policy": request.workspace_policy,
+            "execution_transport": (
+                request.execution_transport.value
+                if request.execution_transport is not None
+                else None
+            ),
+        }
+    )
+
+
+def _arena_candidate_evidence(
+    child: HarnessArenaChildRun,
+    store: HarnessSessionStore,
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "child_index": child.index,
+        "harness_id": child.harness_id,
+        "session_id": child.session_id,
+        "run_id": child.run_id,
+        "status": child.status,
+        "configuration_sha256": None,
+        "artifact_sha256": None,
+        "metrics": {},
+        "cost": {"confidence": "unknown", "value": None, "unit": None},
+    }
+    if child.run_id is None:
+        return evidence
+    try:
+        run = store.get_run(child.run_id)
+    except (KeyError, SessionNotFoundError):
+        return evidence
+    metadata = dict(run.metadata)
+    usage = _mapping(metadata.get("usage"))
+    evidence["configuration_sha256"] = _mapping_sha256(
+        {
+            "harness_id": run.harness_id,
+            "model": run.model,
+            "api_mode": run.api_mode.value,
+            "mode": run.mode,
+            "invocation_mode": run.invocation_mode.value,
+            "workspace_policy": _mapping(metadata.get("workspace_execution")).get(
+                "requested_policy"
+            ),
+        }
+    )
+    workspace_execution = _mapping(metadata.get("workspace_execution"))
+    patch = workspace_execution.get("patch")
+    if isinstance(patch, str) and patch and patch != "No diff captured.":
+        evidence["artifact_sha256"] = hashlib.sha256(patch.encode("utf-8")).hexdigest()
+    metrics: dict[str, Any] = {}
+    for key in ("input_tokens", "output_tokens", "total_tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            metrics[key] = value
+    changed_files = workspace_execution.get("changed_files")
+    if isinstance(changed_files, list):
+        metrics["changed_files"] = len(changed_files)
+    duration_ms = _run_duration_ms(run)
+    if duration_ms is not None:
+        metrics["duration_ms"] = duration_ms
+    evidence["metrics"] = metrics
+    cost = usage.get("cost_usd", metadata.get("cost_usd"))
+    if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+        evidence["cost"] = {
+            "confidence": "exact",
+            "value": float(cost),
+            "unit": "USD",
+        }
+    return evidence
+
+
+def _run_duration_ms(run: HarnessRun) -> int | None:
+    from datetime import datetime
+
+    if not run.started_at or not run.finished_at:
+        return None
+    try:
+        started = datetime.fromisoformat(run.started_at.replace("Z", "+00:00"))
+        finished = datetime.fromisoformat(run.finished_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return max(int((finished - started).total_seconds() * 1000), 0)
+
+
+def _arena_scores(
+    value: Any,
+    candidates: list[dict[str, Any]],
+) -> tuple[Mapping[str, Any], ...]:
+    if not isinstance(value, list):
+        raise ValueError("scores must be a list")
+    expected = {int(item["child_index"]) for item in candidates}
+    parsed: dict[int, float] = {}
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise ValueError("scores must contain objects")
+        index = _bounded_child_index(item.get("child_index"))
+        score = item.get("score")
+        if (
+            not isinstance(score, (int, float))
+            or isinstance(score, bool)
+            or not 0 <= float(score) <= 1
+        ):
+            raise ValueError("every score must be between 0 and 1")
+        if index in parsed:
+            raise ValueError("scores contain a duplicate child_index")
+        parsed[index] = round(float(score), 6)
+    if set(parsed) != expected:
+        raise ValueError("scores must cover every arena candidate exactly once")
+    return tuple(
+        {"child_index": index, "score": parsed[index]} for index in sorted(parsed)
+    )
+
+
+def _bounded_child_index(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("selected_child_index must be an integer")
+    try:
+        index = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("selected_child_index must be an integer") from exc
+    if index < 0 or index > 31:
+        raise ValueError("selected_child_index is out of bounds")
+    return index
+
+
+def _arena_promotion_projection(run_id: str) -> dict[str, Any]:
+    if not run_id:
+        return {}
+    return {
+        "selected_run_id": run_id,
+        "configuration_preview_url": f"/api/runs/{run_id}/promotions/preview",
+        "artifact_review_url": f"/api/runs/{run_id}/diff",
+        "run_url": f"/cockpit-v2/runs/{run_id}",
+        "automatic_apply": False,
+    }
+
+
+def _mapping_sha256(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        dict(value),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:

@@ -170,6 +170,37 @@ def test_session_runner_persists_structured_thread_and_rejects_identity_change(
     assert len(runner.store.list_messages(session.id)) == 4
 
 
+@pytest.mark.parametrize("operation", ("resume", "fork"))
+def test_codex_native_deep_link_seeds_exact_app_server_identity(tmp_path, operation):
+    harness = _StructuredThreadHarness()
+    runner = _runner(harness, data_dir=tmp_path / "data")
+    session = runner.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+        default_model="GigaChat-2-Max",
+    )
+
+    runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "codex-cli",
+            "prompt": "continue",
+            "model": "GigaChat-2-Max",
+            "native_session_id": "native-thread-fixture",
+            "extra": {"native_session_operation": operation},
+        },
+    )
+
+    continuation = harness.requests[0].extra["continuation"]
+    assert continuation["action"] == operation
+    if operation == "resume":
+        assert continuation["link"]["thread_id"] == "native-thread-fixture"
+        assert continuation["fork_thread_id"] is None
+    else:
+        assert continuation["link"] is None
+        assert continuation["fork_thread_id"] == "native-thread-fixture"
+
+
 def test_session_runner_edit_forks_codex_before_the_replaced_turn(tmp_path):
     harness = _StructuredThreadHarness()
     runner = _runner(harness, data_dir=tmp_path / "data")

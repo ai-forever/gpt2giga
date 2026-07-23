@@ -21,14 +21,18 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from gpt2giga_harness.arena import (
     ArenaNotFoundError,
+    ArenaReviewConflictError,
     FilesystemHarnessArenaStore,
     HarnessArenaChildRun,
     HarnessArenaRun,
     arena_child_to_dict,
+    arena_has_verdict,
+    arena_review_projection,
     arena_to_dict,
     continue_arena,
     queue_arena,
     queue_arena_follow_up,
+    record_arena_verdict,
     run_arena,
 )
 from gpt2giga_harness.application import SessionApplicationService
@@ -45,6 +49,7 @@ from gpt2giga_harness.attachments import (
     render_attachments_for_harness,
     render_plan_to_dict,
 )
+from gpt2giga_harness.attachments.limits import normalize_workspace_file
 from gpt2giga_harness.config import (
     DEFAULT_MODEL_HINTS,
     HarnessConfig,
@@ -60,6 +65,29 @@ from gpt2giga_harness.ui.async_execution import (
     stop_monitor,
 )
 from gpt2giga_harness.ui.execution_contracts import install_execution_contracts
+from gpt2giga_harness.ui.routers.workbench_state import (
+    router as workbench_state_router,
+)
+from gpt2giga_harness.ui.routers.workbench_resources import (
+    router as workbench_resources_router,
+)
+from gpt2giga_harness.ui.routers.environments import router as environments_router
+from gpt2giga_harness.github_environments import GitHubEnvironmentService
+from gpt2giga_harness.environment_actions import (
+    EnvironmentCommitError,
+    EnvironmentCommitService,
+    GovernedEnvironmentCommitService,
+)
+from gpt2giga_harness.environment_push import (
+    EnvironmentPushError,
+    EnvironmentPushService,
+    GovernedEnvironmentPushService,
+)
+from gpt2giga_harness.environment_pull_requests import (
+    EnvironmentPullRequestError,
+    EnvironmentPullRequestService,
+    GovernedEnvironmentPullRequestService,
+)
 from gpt2giga_harness.harnesses.attachment_plan import attachment_capability_error
 from gpt2giga_harness.evals import (
     EvalRunNotFoundError,
@@ -188,6 +216,7 @@ from gpt2giga_harness.runtime.store import JobNotFoundError, RuntimeCoordination
 from gpt2giga_harness.runtime.worker import DurableJobDispatcher
 from gpt2giga_harness.schedules import ScheduleService
 from gpt2giga_harness.session_runner import HarnessSessionRunner
+from gpt2giga_harness.session_exports import write_session_export
 from gpt2giga_harness.sessions import (
     FilesystemHarnessSessionStore,
     HarnessSessionStore,
@@ -219,6 +248,7 @@ from gpt2giga_harness.cli_capabilities import (
     CliCapabilitySnapshot,
     cli_capability_snapshot_to_dict,
 )
+from gpt2giga_harness.workbench_protocol import WorkbenchBackbone
 from gpt2giga_harness.claude_handoff import (
     ClaudeHandoffError,
     claude_execution_surfaces_to_dict,
@@ -257,6 +287,10 @@ from gpt2giga_harness.ui.routers.provider_handoffs import (
     create_provider_handoff_router,
 )
 from gpt2giga_harness.ui.routers.tools import router as tools_router
+from gpt2giga_harness.ui.routers.tui_actions import (
+    router as tui_actions_router,
+    validate_run_action_binding,
+)
 from gpt2giga_harness.ui.routers.workflows import router as workflows_router
 from gpt2giga_harness.ui.routers.shell import create_shell_router
 from gpt2giga_harness.ui.security import (
@@ -280,11 +314,22 @@ from gpt2giga_harness.workspace import (
     workspace_tree,
 )
 from gpt2giga_harness.workbench_execution import workbench_transport_projection
+from gpt2giga_harness.workbench_resources import (
+    WorkbenchPreferenceStore,
+    WorkbenchResourceService,
+)
 
 
 NATIVE_SUBMIT_KEY_DELAY_SECONDS = 0.05
 RUN_EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
 RUN_EVENT_STREAM_POLL_SECONDS = 0.1
+TUI_FILE_PREVIEW_BYTES = 8 * 1024
+TUI_FILE_PREVIEW_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+TUI_NAVIGATION_TERMINAL_RE = re.compile(
+    r"\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)?|P.*?(?:\x1b\\|$)|\[[0-?]*[ -/]*[@-~]|[@-_])",
+    re.DOTALL,
+)
+TUI_NAVIGATION_BIDI_RE = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
 
 
 @dataclass
@@ -305,6 +350,10 @@ def create_app(
     integration_flow_service: IntegrationFlowService | None = None,
     grouped_integration_service: GroupedIntegrationService | None = None,
     skill_library_service: SkillLibraryService | None = None,
+    github_environment_service: GitHubEnvironmentService | None = None,
+    environment_commit_service: EnvironmentCommitService | None = None,
+    environment_push_service: EnvironmentPushService | None = None,
+    environment_pull_request_service: EnvironmentPullRequestService | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
@@ -341,6 +390,26 @@ def create_app(
     skill_library_service = skill_library_service or SkillLibraryService(
         config.data_dir
     )
+    github_environment_service = (
+        github_environment_service or GitHubEnvironmentService()
+    )
+    if environment_commit_service is None:
+        try:
+            environment_commit_service = EnvironmentCommitService(config.data_dir)
+        except EnvironmentCommitError:
+            environment_commit_service = None
+    if environment_push_service is None:
+        try:
+            environment_push_service = EnvironmentPushService(config.data_dir)
+        except EnvironmentPushError:
+            environment_push_service = None
+    if environment_pull_request_service is None:
+        try:
+            environment_pull_request_service = EnvironmentPullRequestService(
+                config.data_dir
+            )
+        except EnvironmentPullRequestError:
+            environment_pull_request_service = None
     grouped_integration_service = (
         grouped_integration_service
         or GroupedIntegrationService(
@@ -373,8 +442,16 @@ def create_app(
     )
     policy_engine = PolicyEngine(runtime_store)
     active_headless_runs: dict[str, _ActiveHeadlessRun] = {}
+    session_navigation_mutations: dict[str, dict[str, Any]] = {}
     async_diagnostics = AsyncExecutionDiagnostics()
     run_event_broker = getattr(store, "event_broker", RunEventBroker())
+    workbench_backbone = WorkbenchBackbone()
+    workbench_resources = WorkbenchResourceService(
+        session_store=store,
+        runtime_store=runtime_store,
+        preference_store=WorkbenchPreferenceStore(config.data_dir),
+        integration_service=integration_flow_service,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -428,11 +505,46 @@ def create_app(
     app.state.harness_native_process_manager = native_process_manager
     app.state.harness_async_diagnostics = async_diagnostics
     app.state.harness_run_event_broker = run_event_broker
+    app.state.harness_workbench_backbone = workbench_backbone
+    app.state.harness_workbench_resources = workbench_resources
     app.state.harness_settings_store = settings_store
     app.state.harness_provider_settings_service = provider_settings_service
     app.state.harness_integration_flow_service = integration_flow_service
     app.state.harness_grouped_integration_service = grouped_integration_service
     app.state.harness_skill_library_service = skill_library_service
+    app.state.harness_github_environment_service = github_environment_service
+    app.state.harness_environment_commit_service = environment_commit_service
+    app.state.harness_governed_environment_commit_service = (
+        GovernedEnvironmentCommitService(
+            environment_commit_service,
+            runtime_store,
+            policy_engine,
+        )
+        if runtime_store is not None and environment_commit_service is not None
+        else None
+    )
+    app.state.harness_environment_push_service = environment_push_service
+    app.state.harness_governed_environment_push_service = (
+        GovernedEnvironmentPushService(
+            environment_push_service,
+            runtime_store,
+            policy_engine,
+        )
+        if runtime_store is not None and environment_push_service is not None
+        else None
+    )
+    app.state.harness_environment_pull_request_service = (
+        environment_pull_request_service
+    )
+    app.state.harness_governed_environment_pull_request_service = (
+        GovernedEnvironmentPullRequestService(
+            environment_pull_request_service,
+            runtime_store,
+            policy_engine,
+        )
+        if runtime_store is not None and environment_pull_request_service is not None
+        else None
+    )
 
     def _approval_gate(
         action: PermissionAction,
@@ -1914,6 +2026,126 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"session": _session_summary(store, session.id)}
 
+    @app.get("/api/sessions/{session_id}/navigation-preview")
+    def session_navigation_preview(
+        session_id: str,
+        q: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        try:
+            session = store.get_session(session_id)
+            messages = store.list_messages(session_id)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        needle = (_optional_text(q) or "").casefold()
+        matches = [
+            item for item in messages if not needle or needle in item.content.casefold()
+        ]
+        selected = matches[-100:]
+        return {
+            "session": _session_summary(store, session.id),
+            "transcript": [_navigation_message_preview(item) for item in selected],
+            "match_count": len(matches),
+            "truncated": len(matches) > len(selected),
+        }
+
+    @app.post("/api/sessions/{session_id}/navigation-update")
+    def session_navigation_update(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        cached = _navigation_cached(session_navigation_mutations, payload, "update")
+        if cached is not None:
+            return cached
+        _validate_navigation_binding(store, session_id, payload)
+        patch = _session_patch(payload)
+        try:
+            updated = store.update_session_if_revision(
+                session_id,
+                _required_text(payload.get("session_revision"), "session_revision"),
+                **patch,
+            )
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        if updated is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Session changed; authoritative resnapshot required",
+            )
+        response = {"session": _session_summary(store, updated.id)}
+        _cache_navigation_response(
+            session_navigation_mutations, payload, response, "update"
+        )
+        return response
+
+    @app.post("/api/sessions/{session_id}/navigation-delete")
+    def session_navigation_delete(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        cached = _navigation_cached(session_navigation_mutations, payload, "delete")
+        if cached is not None:
+            return cached
+        summary = _validate_navigation_binding(store, session_id, payload)
+        if summary.get("session_lease") is not None:
+            raise HTTPException(
+                status_code=409, detail="Active session lease blocks destructive action"
+            )
+        if not store.delete_session_if_revision(
+            session_id,
+            _required_text(payload.get("session_revision"), "session_revision"),
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Session changed; authoritative resnapshot required",
+            )
+        response = {"deleted": True}
+        _cache_navigation_response(
+            session_navigation_mutations, payload, response, "delete"
+        )
+        return response
+
+    @app.post("/api/sessions/{session_id}/navigation-fork")
+    def session_navigation_fork(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        cached = _navigation_cached(session_navigation_mutations, payload, "fork")
+        if cached is not None:
+            return cached
+        _validate_navigation_binding(store, session_id, payload)
+        fork = _fork_session_from_session(store, session_id)
+        response = {"session": _session_summary(store, fork.id)}
+        _cache_navigation_response(
+            session_navigation_mutations, payload, response, "fork"
+        )
+        return response
+
+    @app.post("/api/sessions/{session_id}/navigation-export")
+    def session_navigation_export(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        cached = _navigation_cached(session_navigation_mutations, payload, "export")
+        if cached is not None:
+            return cached
+        _validate_navigation_binding(store, session_id, payload)
+        session = store.get_session(session_id)
+        messages = store.list_messages(session_id)
+        path = write_session_export(
+            Path(config.data_dir) / "exports",
+            _navigation_export_text(session, messages),
+        )
+        response = {
+            "export": {
+                "path": str(path),
+                "message_count": len(messages),
+            }
+        }
+        _cache_navigation_response(
+            session_navigation_mutations, payload, response, "export"
+        )
+        return response
+
     @app.delete("/api/sessions/{session_id}")
     def delete_session(session_id: str) -> dict[str, Any]:
         try:
@@ -1994,6 +2226,46 @@ def create_app(
             "files": files,
             "bounded": True,
         }
+
+    @app.get("/api/sessions/{session_id}/attachments/workspace/preview")
+    def preview_session_workspace_attachment(
+        session_id: str,
+        path: str = Query(min_length=1),
+    ) -> dict[str, Any]:
+        """Return a bounded terminal-safe text preview for one safe candidate."""
+        try:
+            session = store.get_session(session_id)
+            workspace_root = _attachment_workspace(session, {})
+            limits = _attachment_limits(session, workspace_root=workspace_root)
+            metadata = workspace_file_metadata(
+                workspace_root,
+                path,
+                limits=limits,
+            )
+            preview = {
+                "status": "unsupported",
+                "text": "Preview is unavailable for this file type.",
+                "truncated": False,
+            }
+            if metadata["kind"] == "text":
+                resolved, _relative = normalize_workspace_file(
+                    workspace_root, path, limits
+                )
+                raw = resolved.read_bytes()[: TUI_FILE_PREVIEW_BYTES + 1]
+                text = raw[:TUI_FILE_PREVIEW_BYTES].decode("utf-8", errors="replace")
+                truncated = len(raw) > TUI_FILE_PREVIEW_BYTES
+                preview = {
+                    "status": "truncated" if truncated else "ready",
+                    "text": TUI_FILE_PREVIEW_CONTROL_RE.sub("�", text).replace(
+                        "\r", ""
+                    ),
+                    "truncated": truncated,
+                }
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except (AttachmentValidationError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"file": metadata, "preview": preview, "bounded": True}
 
     @app.get("/api/sessions/{session_id}/attachments")
     def session_attachments(session_id: str) -> dict[str, Any]:
@@ -2301,11 +2573,15 @@ def create_app(
         )
 
     @app.post("/api/runs/{run_id}/cancel")
-    def cancel_run(run_id: str) -> dict[str, Any]:
+    def cancel_run(
+        run_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
         except RunNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Run not found") from exc
+        validate_run_action_binding(run, payload)
         if _run_status_is_terminal(run.status):
             return {
                 "cancel_requested": False,
@@ -2543,9 +2819,13 @@ def create_app(
         return response
 
     @app.post("/api/runs/{run_id}/fork")
-    def fork_run(run_id: str) -> dict[str, Any]:
+    def fork_run(
+        run_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
+            validate_run_action_binding(run, payload)
             session = _fork_session_from_run(store, run)
             bundle = store.get_session_bundle(session.id)
         except RunNotFoundError as exc:
@@ -2870,6 +3150,10 @@ def create_app(
     ) -> dict[str, Any]:
         try:
             arena = await run_in_threadpool(arena_store.get, arena_id)
+            if arena_has_verdict(arena):
+                raise ArenaReviewConflictError(
+                    "arena verdict is immutable; start a new comparison"
+                )
             payload = dict(payload)
             if not str(payload.get("prompt") or "").strip():
                 raise ValueError("prompt is required")
@@ -2920,9 +3204,32 @@ def create_app(
             )
         except ArenaNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        except ArenaReviewConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (AttachmentValidationError, SessionNotFoundError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return await run_in_threadpool(_arena_response, arena, store)
+
+    @app.post("/api/arena/runs/{arena_id}/verdict")
+    def create_arena_verdict(
+        arena_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            arena = arena_store.get(arena_id)
+            arena = record_arena_verdict(
+                arena_store=arena_store,
+                session_store=store,
+                arena=arena,
+                payload=payload,
+            )
+        except ArenaNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        except ArenaReviewConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _arena_response(arena, store)
 
     @app.post("/api/arena/runs/{arena_id}/children/{child_index}/retry")
     async def retry_arena_child(
@@ -2931,6 +3238,10 @@ def create_app(
     ) -> dict[str, Any]:
         try:
             arena = await run_in_threadpool(arena_store.get, arena_id)
+            if arena_has_verdict(arena):
+                raise ArenaReviewConflictError(
+                    "arena verdict is immutable; start a new comparison"
+                )
             child = next(item for item in arena.child_runs if item.index == child_index)
             if child.run_id is None or child.session_id is None:
                 raise ValueError("arena child has not started")
@@ -3023,6 +3334,8 @@ def create_app(
             arena = arena_store.upsert_child(arena.id, replacement)
         except ArenaNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Arena run not found") from exc
+        except ArenaReviewConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (RunNotFoundError, StopIteration) as exc:
             raise HTTPException(
                 status_code=404, detail="Arena child not found"
@@ -3160,8 +3473,12 @@ def create_app(
     app.include_router(approvals_router)
     app.include_router(cockpit_router)
     app.include_router(evaluate_router)
+    app.include_router(environments_router)
     app.include_router(integrations_router)
     app.include_router(tools_router)
+    app.include_router(tui_actions_router)
+    app.include_router(workbench_state_router)
+    app.include_router(workbench_resources_router)
     app.include_router(workflows_router)
     app.include_router(runs_router)
     app.include_router(schedules_router)
@@ -3496,6 +3813,7 @@ def _arena_response(
     payload["child_runs"] = [
         _arena_child_response(child, store) for child in arena.child_runs
     ]
+    payload["review"] = arena_review_projection(arena, store)
     try:
         payload["session"] = _session_summary(store, arena.session_id)
     except SessionNotFoundError:
@@ -5385,6 +5703,12 @@ def _session_summary(
     if messages:
         preview = " ".join(messages[-1].content.split())[:120]
     last_status = runs[-1].status if runs else None
+    active_runs = [
+        run.id
+        for run in runs
+        if run.status not in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}
+    ]
+    native_reference = _navigation_native_reference(session)
     payload = session_to_dict(session)
     project_id = _optional_text(session.metadata.get("project_id"))
     payload.update(
@@ -5401,9 +5725,183 @@ def _session_summary(
                 if project_id
                 else None
             ),
+            "native_session_reference": native_reference,
+            "session_revision": session.updated_at,
+            "session_generation": _navigation_generation(native_reference),
+            "session_lease": active_runs[-1] if active_runs else None,
         }
     )
     return payload
+
+
+def _navigation_native_reference(session: HarnessSession) -> dict[str, Any]:
+    explicit = session.metadata.get("native_session_reference")
+    if isinstance(explicit, Mapping):
+        return dict(explicit)
+    structured = session.metadata.get("structured_session_link")
+    if isinstance(structured, Mapping):
+        return {
+            "authority": structured.get("provider")
+            or structured.get("authority")
+            or session.native.get("harness_id"),
+            "native_id": structured.get("thread_id")
+            or structured.get("session_id")
+            or structured.get("native_session_id"),
+            "operation": structured.get("operation") or "resume",
+            "revision": structured.get("revision"),
+            "link_hash": structured.get("link_hash"),
+        }
+    return dict(session.native)
+
+
+def _navigation_generation(reference: Mapping[str, Any]) -> int:
+    revision = reference.get("revision")
+    if isinstance(revision, int) and revision >= 0:
+        return revision
+    link_hash = _optional_text(reference.get("link_hash"))
+    if not link_hash:
+        return 0
+    return int(hashlib.sha256(link_hash.encode("utf-8")).hexdigest()[:8], 16)
+
+
+def _validate_navigation_binding(
+    store: HarnessSessionStore,
+    session_id: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        summary = _session_summary(store, session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+    expected = (
+        _required_text(payload.get("session_revision"), "session_revision"),
+        _navigation_non_negative_int(
+            payload.get("session_generation"), "session_generation"
+        ),
+        _optional_text(payload.get("session_lease")),
+    )
+    current = (
+        summary["session_revision"],
+        summary["session_generation"],
+        summary["session_lease"],
+    )
+    if expected != current:
+        raise HTTPException(
+            status_code=409,
+            detail="Session changed; authoritative resnapshot required",
+        )
+    _required_text(payload.get("idempotency_key"), "idempotency_key")
+    return summary
+
+
+def _navigation_cached(
+    cache: Mapping[str, dict[str, Any]],
+    payload: Mapping[str, Any],
+    action: str,
+) -> dict[str, Any] | None:
+    key = _optional_text(payload.get("idempotency_key"))
+    return cache.get(f"{action}:{key}") if key else None
+
+
+def _cache_navigation_response(
+    cache: dict[str, dict[str, Any]],
+    payload: Mapping[str, Any],
+    response: dict[str, Any],
+    action: str,
+) -> None:
+    key = _required_text(payload.get("idempotency_key"), "idempotency_key")
+    if len(cache) >= 512:
+        cache.pop(next(iter(cache)))
+    cache[f"{action}:{key}"] = response
+
+
+def _navigation_message_preview(message: HarnessMessage) -> str:
+    content = _navigation_safe_text(message.content)[:512]
+    return f"{_navigation_safe_text(message.role).upper()} · {message.created_at}\n{content}"
+
+
+def _navigation_export_text(
+    session: HarnessSession, messages: tuple[HarnessMessage, ...]
+) -> str:
+    transcript = "\n\n".join(
+        f"## {_navigation_safe_text(item.role).title()} · {item.created_at}\n\n"
+        f"{_navigation_safe_text(item.content)}"
+        for item in messages
+    )
+    return (
+        f"# {_navigation_safe_text(session.title)}\n\n"
+        f"Session: `{session.id}`  \n"
+        "Workspace: conversation context only; filesystem restore is not included.\n\n"
+        f"{transcript}\n"
+    )
+
+
+def _navigation_safe_text(value: Any) -> str:
+    text = TUI_NAVIGATION_TERMINAL_RE.sub("⟦terminal-control⟧", str(value))
+    text = TUI_FILE_PREVIEW_CONTROL_RE.sub("�", text)
+    return TUI_NAVIGATION_BIDI_RE.sub("�", text)
+
+
+def _navigation_non_negative_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise HTTPException(status_code=400, detail=f"{field_name} must be an integer")
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail=f"{field_name} must be an integer"
+        ) from exc
+    if result < 0:
+        raise HTTPException(
+            status_code=400, detail=f"{field_name} must be non-negative"
+        )
+    return result
+
+
+def _fork_session_from_session(
+    store: HarnessSessionStore, session_id: str
+) -> HarnessSession:
+    source = store.get_session(session_id)
+    reference = _navigation_native_reference(source)
+    metadata = {
+        **dict(source.metadata),
+        "forked_from_session_id": source.id,
+        "fork_semantics": "harness_replay",
+    }
+    metadata.pop("structured_session_link", None)
+    if reference:
+        metadata["native_session_reference"] = {
+            "authority": reference.get("authority"),
+            "native_id": reference.get("native_id")
+            or reference.get("session_id")
+            or reference.get("id"),
+            "workspace": source.workspace,
+            "operation": "fork",
+        }
+    fork = store.create_session(
+        title=f"Fork: {source.title}",
+        workspace=source.workspace,
+        default_harness_id=source.default_harness_id,
+        default_model=source.default_model,
+        default_api_mode=source.default_api_mode,
+        default_mode=source.default_mode,
+        metadata=metadata,
+    )
+    for message in store.list_messages(source.id):
+        store.append_message(
+            replace(
+                message,
+                id=new_id("msg"),
+                session_id=fork.id,
+                run_id=None,
+                created_at=utc_now(),
+                metadata={
+                    **dict(message.metadata),
+                    "forked_from_message_id": message.id,
+                },
+            )
+        )
+    return fork
 
 
 def _session_patch(payload: dict[str, Any]) -> dict[str, Any]:

@@ -460,6 +460,12 @@ class IntegrationFlowService:
         self._put(record)
         return {"flow": integration_flow_record_to_dict(record), "plan": plan}
 
+    def probe(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Resolve one immutable package without persisting an approval flow."""
+        request = _normalize_request(payload)
+        resolved = self._resolve_preview(request)
+        return {"plan": _public_plan(request, resolved)}
+
     def apply(
         self,
         flow_id: str,

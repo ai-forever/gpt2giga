@@ -110,6 +110,7 @@ CLI_PROBE_CONTRACTS = {
         ),
         optional_tokens=(
             "--acp",
+            "--experimental-acp",
             "--prompt-interactive",
             "--list-sessions",
             "--resume",

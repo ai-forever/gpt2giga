@@ -17,6 +17,7 @@ BASE_REQUIREMENTS = (
     "pyyaml>=6.0,<7",
     "python-dateutil>=2.9.0,<3",
     "starlette>=1.1,<2",
+    "textual>=8.2.8,<9",
     "tomli>=2.0,<3; python_version < '3.11'",
     "uvicorn>=0.41.0,<1",
 )
