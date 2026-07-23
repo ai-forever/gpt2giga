@@ -312,10 +312,13 @@ def test_split_install_and_namespace_migration_are_documented():
     harness_guide = (REPO_ROOT / "docs/harness.md").read_text(encoding="utf-8")
     root_instructions = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     harness_instructions = (HARNESS_MEMBER / "AGENTS.md").read_text(encoding="utf-8")
+    harness_version = _load_toml(HARNESS_MEMBER / "pyproject.toml")["project"][
+        "version"
+    ]
 
     for guide in (readme, quickstart):
         assert "uv tool install --prerelease allow gpt2giga" in guide
-        assert "uv tool install --prerelease allow gpt2giga-harness" in guide
+        assert f"uv tool install 'gpt2giga-harness=={harness_version}'" in guide
         assert "gpt2giga_harness" in guide
 
     assert "Migration from the Combined Prerelease" in harness_guide

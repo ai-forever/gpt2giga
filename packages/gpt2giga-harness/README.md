@@ -5,7 +5,7 @@ distribution provides the `giga` and `gpt2giga-harness` commands, the
 `gpt2giga_harness` Python namespace, a durable local worker, and the packaged
 Project Cockpit web UI.
 
-> **Alpha preview:** the `0.3.x` storage, API, adapter, and automation contracts
+> **Alpha preview:** the `0.4.x` storage, API, adapter, and automation contracts
 > are stabilizing but may still change between prereleases. Use supervised local
 > workflows first. The package metadata in the current checkout is the source of
 > truth for the supported gateway requirement.
@@ -15,7 +15,7 @@ Project Cockpit web UI.
 Install the published prerelease from your package index:
 
 ```sh
-uv tool install --prerelease allow gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
 giga doctor
 giga --version
 giga
@@ -25,7 +25,7 @@ giga ui
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```sh
-uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.4.0a1'
 ```
 
 The standard install includes the terminal workbench. Start it from the project
@@ -99,7 +99,7 @@ If you installed the earlier optional-TUI prerelease, upgrade the existing tool;
 do not keep or add a `[tui]` extra:
 
 ```sh
-uv tool upgrade --prerelease allow gpt2giga-harness
+uv tool install --force 'gpt2giga-harness==0.4.0a1'
 giga --version
 giga
 ```
@@ -124,7 +124,7 @@ giga ui
 Keep that environment active when you `cd` to the project you want to manage.
 On Windows PowerShell, activate `.venv\Scripts\Activate.ps1` instead.
 
-The current `gpt2giga-harness==0.3.0a1` metadata keeps
+The current `gpt2giga-harness==0.4.0a1` metadata keeps
 `gpt2giga==0.2.4a1` in the `gpt2giga` optional extra. Installing only
 `gpt2giga` never adds Harness commands or the `gpt2giga_harness` namespace.
 
@@ -238,6 +238,36 @@ giga session list
 giga native list
 giga worker status
 ```
+
+## Review Git and GitHub changes
+
+For a session backed by a Git workspace, TUI and Cockpit show a bounded
+environment snapshot: worktree identity, branch and HEAD, staged, unstaged, and
+untracked counts, upstream readiness, and optional read-only GitHub pull-request
+and checks/runs status. The snapshot never includes diff contents, remote
+credentials, or raw `git`/`gh` output.
+
+Workbench can create one exact staged commit, perform one non-force push, and
+create one GitHub pull request. Each mutation is two phase: first review the
+HEAD/diff or local/remote-bound preview, then approve that exact action in the
+Inbox and apply it. A changed checkout, moved remote, detached HEAD, repository
+mismatch, stale approval, or unsupported hosted state fails closed. The TUI
+exposes the same flows through `/commit`, `/push`, and `/pr`; it does not stage
+files, force-push, merge, or bypass provider-owned branch protection.
+
+Git inspection and local commits require `git`. Read-only GitHub enrichment and
+pull-request creation require an authenticated `gh` executable for the exact
+repository derived from the configured remote. Authentication and permission
+failures are projected as content-free reason codes.
+
+## Review Arena candidates
+
+After all Arena candidates finish, Cockpit can score each result from 0 to 1 and
+select one succeeded candidate. **Record verdict** binds those scores and the
+winner to the exact candidate evidence-set hash. The verdict is immutable:
+follow-up, retry, or changed evidence requires a new comparison. Harness exposes
+promotion links for the selected run, but never applies its patch or promotes
+configuration automatically.
 
 ## Provider-neutral routes
 
@@ -421,6 +451,32 @@ a new immutable pin, preview, and approval. Federated discovery never implies
 Plugin installation or network authority; Plugin execution requires an exact
 reviewed manifest, and real user homes are never the default mutation scope.
 
+Portable Extension Packs combine one reviewed Skill and one reviewed MCP catalog
+entry under an exact pack id/version. Preview computes a per-provider
+compatibility matrix and expands only supported Codex, Claude, Gemini, and
+Harness-managed targets into one recoverable compensating transaction:
+
+```sh
+giga integration pack-preview \
+  --pack-id workspace.extension-pack \
+  --pack-version 1.0.0 \
+  --skill-catalog-id <skill-catalog-id> \
+  --mcp-catalog-id <mcp-catalog-id> \
+  --scope managed_home \
+  --json
+giga integration group-apply <group-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --allow-network \
+  --ack-native-consent \
+  --json
+```
+
+An incompatible provider is reported and excluded, never silently coerced.
+Apply remains bound to the previewed children, permissions, immutable package
+integrity, and exact MCP configuration; recovery and rollback use the normal
+group lifecycle.
+
 The equivalent API begins at `GET /api/integrations`, with single-target flows
 under `/api/integrations/flows` and grouped flows under
 `/api/integrations/groups`.
@@ -496,7 +552,7 @@ migration:
 ```sh
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install --prerelease allow gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
 giga doctor
 ```
 

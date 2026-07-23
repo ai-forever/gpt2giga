@@ -65,18 +65,18 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-The current Unified Harness alpha line is `0.3.0a1`. Install the local control
+The current Unified Harness alpha line is `0.4.0a1`. Install the local control
 plane from your package index with:
 
 ```sh
-uv tool install --prerelease allow gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
 giga doctor
 giga --version
 giga ui
 ```
 
-Install `gpt2giga-harness[gpt2giga]` instead when this environment should also
-provide Direct Chat and the local `gpt2giga` provider preset.
+Install `gpt2giga-harness[gpt2giga]==0.4.0a1` instead when this environment
+should also provide Direct Chat and the local `gpt2giga` provider preset.
 
 The [Unified Harness guide](harness.md) also documents the always-available
 source-checkout path for development and prerelease evaluation.

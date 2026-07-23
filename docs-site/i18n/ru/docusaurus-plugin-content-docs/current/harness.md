@@ -2,7 +2,7 @@
 
 :::warning[Альфа-превью — prerelease]
 
-Линейка `gpt2giga-harness` 0.3.x — alpha-preview для тестирования и обратной
+Линейка `gpt2giga-harness` 0.4.x — alpha-preview для тестирования и обратной
 связи. UI, CLI, YAML-файлы проекта, схема runtime-хранилища и процесс обновления
 могут меняться. Используйте Harness локально, для контролируемой работы под
 наблюдением, а не как критичный production-сервис или удалённую multi-user
@@ -101,8 +101,8 @@ Node.js runtime, credentials или provider config. `uv tool` и `pipx` соз�
 изолированное окружение Harness:
 
 ```sh
-uv tool install --prerelease allow gpt2giga-harness
-pipx install --pip-args='--pre' gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
+pipx install 'gpt2giga-harness==0.4.0a1'
 ```
 
 Существующий prerelease с optional TUI обновляйте на месте без extra `[tui]`.
@@ -112,10 +112,10 @@ pipx install --pip-args='--pre' gpt2giga-harness
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool upgrade --prerelease allow gpt2giga-harness
+uv tool install --force 'gpt2giga-harness==0.4.0a1'
 uv tool install --force 'gpt2giga-harness==<previous-version>'
 uv tool uninstall gpt2giga-harness
-uv tool install --prerelease allow gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
 ```
 
 Удаление пакета не удаляет `~/.gpt2giga/harness`, проектные `.giga/` или
@@ -174,17 +174,17 @@ giga harness list
 короткий вариант:
 
 ```bash
-uv tool install --prerelease allow gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
 giga doctor
 ```
 
 Для Direct Chat и provider preset `gpt2giga` установите явный extra:
 
 ```bash
-uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.4.0a1'
 ```
 
-Текущий дистрибутив `gpt2giga-harness==0.3.0a1` добавляет команды `giga` и
+Текущий дистрибутив `gpt2giga-harness==0.4.0a1` добавляет команды `giga` и
 `gpt2giga-harness`; его явный extra `gpt2giga` закрепляет
 `gpt2giga==0.2.4a1`.
 
@@ -197,7 +197,7 @@ CLI будет недоступен, но не сломает остальной
 
 #### Базовая установка и опциональные providers
 
-Provider-neutral базовый distribution содержит восемь проверенных прямых
+Provider-neutral базовый distribution содержит девять проверенных прямых
 runtime dependencies. В release CI Harness wheel устанавливается с Python
 3.10–3.14 под Linux, macOS и Windows, проходит terminal-command smoke, после
 чего versioned audit завершается ошибкой, если resolved environment превышает
@@ -250,7 +250,7 @@ bytes, exit code и разделение stdout/stderr CLI.
 пакет и удалите `[tui]` из команд установки:
 
 ```bash
-uv tool upgrade --prerelease allow gpt2giga-harness
+uv tool install --force 'gpt2giga-harness==0.4.0a1'
 giga --version
 giga
 ```
@@ -746,6 +746,34 @@ recoverable compensating transaction, а не filesystem-atomic write: при
 показывает verification и repair-required state; rollback отказывается менять
 чужие или изменённые после установки файлы.
 
+Portable Extension Pack связывает один проверенный Skill и один MCP catalog
+entry с точными pack id и semantic version. Preview строит content-free матрицу
+совместимости для Codex, Claude, Gemini и Harness-managed targets, явно исключает
+несовместимые providers и собирает поддерживаемые child plans в одну
+восстанавливаемую группу:
+
+```bash
+giga integration pack-preview \
+  --pack-id workspace.extension-pack \
+  --pack-version 1.0.0 \
+  --skill-catalog-id <skill-catalog-id> \
+  --mcp-catalog-id <mcp-catalog-id> \
+  --scope managed_home \
+  --json
+giga integration group-apply <group-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --allow-network \
+  --ack-native-consent \
+  --json
+```
+
+Plan связывает immutable package integrity, точную MCP configuration,
+permissions, native consent, включённые targets и все child plan ids. Apply не
+может расширить этот набор; recovery и rollback используют обычный grouped
+lifecycle. В Cockpit тот же flow называется **Portable Extension Pack** и
+показывает compatibility matrix до approval.
+
 Те же inventory и lifecycle доступны через `GET /api/integrations`,
 `POST /api/integrations/preview`, apply/rollback routes
 `/api/integrations/flows/{flow_id}` и соответствующие routes
@@ -771,11 +799,52 @@ Baseline — локальный versioned reference, а не гарантия к
 сравнивайте результаты после изменения CLI/model/route как одну и ту же серию:
 UI пометит такой baseline несовместимым.
 
+### Git и GitHub environments
+
+Для session с Git workspace Workbench и TUI показывают bounded snapshot:
+worktree, branch и HEAD, количество staged, unstaged и untracked файлов,
+upstream/base/ahead readiness и credential-free подсказку hosted repository.
+При наличии аутентифицированного `gh` Harness добавляет read-only статус GitHub
+pull request, связанных issues, checks и последних Actions runs только для
+точного repository. Diff contents, remote credentials и raw command output в
+snapshot не попадают.
+
+Workbench может создать один точный staged commit, выполнить один non-force push
+и создать один GitHub pull request. Каждая мутация проходит три шага:
+
+1. сохранение preview, связанного с точным HEAD/diff или local/remote state;
+2. approval именно этого действия во Inbox;
+3. повторная проверка state и применение того же preview.
+
+Commit hooks не запускаются, push hooks отключены, force push и `pushurl`
+override отклоняются. Новый upstream задаётся только если был показан в preview.
+Для pull request исходная ветка должна быть attached и уже находиться на
+проверенном remote HEAD. Изменившийся checkout или remote, detached HEAD,
+repository mismatch, устаревший approval и неоднозначный network failure
+fail-closed либо сверяются с content-free evidence. В TUI доступны те же
+операции `/commit`, `/push` и `/pr`; UI не добавляет файлы в index, не выполняет
+merge и не обходит branch protection.
+
+Аутентифицированные API routes:
+
+```text
+GET  /api/environment?session_id=...
+POST /api/environment/commit/preview
+POST /api/environment/commit/apply
+POST /api/environment/push/preview
+POST /api/environment/push/apply
+POST /api/environment/pull-request/preview
+POST /api/environment/pull-request/apply
+```
+
 ### PR artifacts, provenance и replay
 
-Run может собрать diff, patch, summary, test evidence и PR-ready metadata, но
-не выполняет скрытый push/merge. Provenance связывает immutable execution
-snapshot, attempt, workspace, model, adapter evidence, approvals и artifacts.
+Run может собрать локальный diff, patch, summary, test evidence и PR-ready
+metadata. Создание и просмотр этого artifact не выполняют hosted write. Поздний
+GitHub push или pull request — отдельное environment action со своим immutable
+preview и approval; GitLab writes пока не поддерживаются. Provenance связывает
+execution snapshot, attempt, workspace, model, adapter evidence, approvals и
+artifacts.
 
 ```bash
 giga runtime inspect --json
@@ -887,6 +956,14 @@ UI состоит из **Work**, **Runs**, **Native**, **Arena**, **Approvals**,
 timeline. Smart Router объясняет выбор adapter/model и не скрывает unavailable
 capabilities. Arena создаёт независимые child jobs и workspaces, чтобы один
 участник не менял контекст другого.
+
+После завершения всех candidates Cockpit позволяет выставить каждому score от 0
+до 1 и выбрать один успешный результат. **Record verdict** связывает полный
+набор оценок и выбранный run с точным hash candidate evidence. Повтор того же
+запроса idempotent, но изменившийся набор candidates отклоняется, а записанный
+verdict неизменяем: follow-up или retry требуют нового Arena comparison.
+Выбранный run получает ссылки на сохранённое evidence и preview promotion;
+Harness не применяет patch и не выполняет promotion автоматически.
 
 После начала первого run Work постепенно показывает компактный путь Run →
 Evidence → Approval/worktree → Reuse/automation. Пока run активен, evidence остаётся pending.
@@ -1413,11 +1490,11 @@ project state:
 ```bash
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install --prerelease allow gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
 giga doctor
 ```
 
-Текущая metadata `gpt2giga-harness==0.3.0a1` сохраняет
+Текущая metadata `gpt2giga-harness==0.4.0a1` сохраняет
 `gpt2giga==0.2.4a1` в явном optional extra `gpt2giga`. Старый import
 `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не

@@ -5,10 +5,26 @@ All notable changes to gpt2giga-harness are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0a1] - 2026-07-23
+
+### Added
+- **Canonical terminal Workbench**: bare `giga` now starts the built-in Textual TUI with project/session navigation, conversation creation and resume, streaming events, evidence/resources, approvals, handoffs, and a contained native terminal; attach mode connects to an existing Harness without an implicit fallback.
+- **Provider-native CLI facade**: literal `giga codex|claude|gemini` namespaces preserve provider-owned argv, stdin/stdout/stderr, JSON/JSONL, signals, and exit status at L0, use an explicit terminal handoff at L1, and admit the L2 Workbench only through reviewed Codex, Claude, and Gemini contracts; `giga completion` and doctor expose the stable boundary and local transport state.
+- **Git and GitHub environments**: Workbench and TUI show a bounded branch, HEAD, worktree, staged/unstaged/untracked, upstream, and read-only GitHub checks/runs snapshot; commit, non-force push, and pull-request creation require separate immutable previews and approvals bound to exact local and remote state.
+- **Portable Extension Packs**: one exact-version plan can combine a reviewed Skill and MCP package across every compatible Codex, Claude, Gemini, and Harness-managed target with a compatibility matrix, explicit permissions, and compensating apply/recovery/rollback.
+- **Reviewed Arena verdicts**: a completed comparison accepts scores for every candidate and one selected winner, binds the decision to the exact evidence-set hash, and exposes the selected run's promotion eligibility; verdicts are immutable and changed candidates require a new comparison.
+
+### Changed
+- **TUI in the base package**: Textual is now a reviewed direct runtime dependency, `giga tui` remains a compatibility alias, and interactive `chat`, `run --agent`, and selected `session` actions deep-link into one TUI; JSON, dry-run, pipes/redirects, CI, and administrative commands remain non-interactive.
+- **Shared Workbench protocol**: TUI, Cockpit, and native integration packs now use common action events, resource projections, session state, and terminal dispatch instead of parallel transcript/runtime implementations.
+
+### Fixed
+- **Fail-closed native and GitHub paths**: unsupported structured transports degrade without breaking opaque passthrough, while GitHub authentication, repository mismatch, remote race, network-loss, and permission failures are classified without leaking command output or credentials.
+- **Terminal UX and lifecycle**: fixed canonical TUI startup, active-session control, bounded streaming, keyboard/mouse interactions, terminal resize/cancel, and process completion without changing machine-readable CLI contracts.
+
 ## [0.3.0a1] - 2026-07-20
 
 ### Added
-- **Provider-native CLI completion**: root help now teaches the literal `giga codex|claude|gemini` prefix contract, `giga completion` emits conservative Bash/Zsh/Fish/PowerShell completion without parsing provider suffixes, and doctor reports executable/version plus L0/L1/L2 transport degradation and remediation.
 - **Provider-neutral providers and routes**: added user profiles for OpenAI-, Anthropic-, and Gemini-compatible APIs, per-route model defaults, reference-only authentication, bounded health/model discovery, and an optional `gpt2giga` preset instead of a mandatory Harness-to-gateway coupling.
 - **Safe provider migration**: legacy defaults can be converted only after a deterministic dry run and a verified pre-upgrade backup; migration revalidates source state under a lock, retains a journal, and permits rollback only by restoring the original archive.
 - **Skills, Plugins, and MCP library**: added an offline-first catalog, portable Skills, a first-party starter pack, Codex/Claude/Gemini MCP targets, Codex/Claude Plugins, Gemini extensions, and a preview SDK for external adapter/integration packages.
@@ -140,6 +156,7 @@ considered stable.
 
 ---
 
+[0.4.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.3.0a1...gpt2giga-harness-v0.4.0a1
 [0.3.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.2.0a1...gpt2giga-harness-v0.3.0a1
 [0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.1.0b1...gpt2giga-harness-v0.2.0a1
 [0.1.0b1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.0.1a3...gpt2giga-harness-v0.1.0b1
