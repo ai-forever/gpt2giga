@@ -15,7 +15,7 @@ Project Cockpit web UI.
 Install the published prerelease from your package index:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.4.0a1'
+uv tool install 'gpt2giga-harness==0.4.1a1'
 giga doctor
 giga --version
 giga
@@ -25,7 +25,7 @@ giga ui
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```sh
-uv tool install 'gpt2giga-harness[gpt2giga]==0.4.0a1'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.4.1a1'
 ```
 
 The standard install includes the terminal workbench. Start it from the project
@@ -99,7 +99,7 @@ If you installed the earlier optional-TUI prerelease, upgrade the existing tool;
 do not keep or add a `[tui]` extra:
 
 ```sh
-uv tool install --force 'gpt2giga-harness==0.4.0a1'
+uv tool install --force 'gpt2giga-harness==0.4.1a1'
 giga --version
 giga
 ```
@@ -124,7 +124,7 @@ giga ui
 Keep that environment active when you `cd` to the project you want to manage.
 On Windows PowerShell, activate `.venv\Scripts\Activate.ps1` instead.
 
-The current `gpt2giga-harness==0.4.0a1` metadata keeps
+The current `gpt2giga-harness==0.4.1a1` metadata keeps
 `gpt2giga==0.2.4a1` in the `gpt2giga` optional extra. Installing only
 `gpt2giga` never adds Harness commands or the `gpt2giga_harness` namespace.
 
@@ -177,6 +177,54 @@ and synchronous or durable delivery path. Missing required capabilities block;
 degraded capabilities include the same bounded remediation commands as doctor.
 Unrelated proxy, external-CLI, or worker failures do not block the independent
 local Echo path.
+
+## Review bootstrap and execution contracts
+
+The first-run bootstrap is a separate reviewed workflow from `giga init`.
+Preview is side-effect-free and returns an exact `plan_id`; apply accepts only
+that current plan and the explicitly selected reversible steps:
+
+```sh
+giga bootstrap preview --workspace . --json
+giga bootstrap apply <plan_id> --workspace . --all-reversible --json
+giga bootstrap status <application_id> --json
+giga bootstrap rollback <application_id> --workspace . --json
+```
+
+Rollback removes only unchanged files and directories created by that
+application. It fails closed if the workspace, data root, or generated content
+has changed.
+
+Before model-backed compatibility tests, run the bounded offline guardian:
+
+```sh
+giga compatibility check --json
+```
+
+It validates the reviewed native CLI windows, native protocol admissions,
+Adapter and Integration SDK/schema versions, and marketplace source contracts
+without starting a provider or installing an integration. A blocked fixture
+returns exit code 1.
+
+Every CLI and Workbench preflight also includes a content-free permission
+simulation for the exact Harness, route, transport, workspace policy, and
+selected extensions. It distinguishes allowed, approval-required, denied,
+unknown, runtime-dependent, and provider-owned actions; a denial blocks startup
+instead of relying on a later provider failure.
+
+Runs Center can create a Trace-to-Replay comparison by changing exactly one
+model, provider, Harness, or extensions axis. Preview binds the source evidence
+and unchanged dimensions to a manifest hash; the replay starts in a new session
+and never applies changes automatically. For a transfer that should not execute
+the target, create a truthful handoff capsule:
+
+```sh
+giga handoff capsule <run_id> --target-harness <harness_id> --json
+```
+
+The capsule contains bounded task/evidence identities, environment state,
+pending approvals, and explicit continuity limits. It does not copy secrets,
+start either Harness, or claim that provider-owned history can be resumed.
 
 For a credential-free tour, copy the
 [first-run demo](../../examples/harness/first-run-demo/README.md). It keeps
@@ -552,7 +600,7 @@ migration:
 ```sh
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.4.0a1'
+uv tool install 'gpt2giga-harness==0.4.1a1'
 giga doctor
 ```
 

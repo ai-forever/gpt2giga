@@ -101,8 +101,8 @@ Node.js runtime, credentials или provider config. `uv tool` и `pipx` соз�
 изолированное окружение Harness:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.4.0a1'
-pipx install 'gpt2giga-harness==0.4.0a1'
+uv tool install 'gpt2giga-harness==0.4.1a1'
+pipx install 'gpt2giga-harness==0.4.1a1'
 ```
 
 Существующий prerelease с optional TUI обновляйте на месте без extra `[tui]`.
@@ -112,10 +112,10 @@ pipx install 'gpt2giga-harness==0.4.0a1'
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool install --force 'gpt2giga-harness==0.4.0a1'
+uv tool install --force 'gpt2giga-harness==0.4.1a1'
 uv tool install --force 'gpt2giga-harness==<previous-version>'
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.4.0a1'
+uv tool install 'gpt2giga-harness==0.4.1a1'
 ```
 
 Удаление пакета не удаляет `~/.gpt2giga/harness`, проектные `.giga/` или
@@ -174,17 +174,17 @@ giga harness list
 короткий вариант:
 
 ```bash
-uv tool install 'gpt2giga-harness==0.4.0a1'
+uv tool install 'gpt2giga-harness==0.4.1a1'
 giga doctor
 ```
 
 Для Direct Chat и provider preset `gpt2giga` установите явный extra:
 
 ```bash
-uv tool install 'gpt2giga-harness[gpt2giga]==0.4.0a1'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.4.1a1'
 ```
 
-Текущий дистрибутив `gpt2giga-harness==0.4.0a1` добавляет команды `giga` и
+Текущий дистрибутив `gpt2giga-harness==0.4.1a1` добавляет команды `giga` и
 `gpt2giga-harness`; его явный extra `gpt2giga` закрепляет
 `gpt2giga==0.2.4a1`.
 
@@ -250,7 +250,7 @@ bytes, exit code и разделение stdout/stderr CLI.
 пакет и удалите `[tui]` из команд установки:
 
 ```bash
-uv tool install --force 'gpt2giga-harness==0.4.0a1'
+uv tool install --force 'gpt2giga-harness==0.4.1a1'
 giga --version
 giga
 ```
@@ -661,6 +661,68 @@ redaction-safe remediation message и command. Нерелевантные сбо
 Ошибка preflight не должна оставлять process, worktree или временный managed
 home. Existing external proxy никогда не останавливается Harness; созданный им
 loopback sidecar имеет явный ownership и очищается при failed startup.
+
+### Проверяемый bootstrap и execution assurance
+
+`giga bootstrap` даёт проверяемый first-run путь, не смешивая discovery и
+изменения. Preview запускает doctor в read-only режиме и возвращает
+детерминированный `plan_id`; apply принимает только этот актуальный plan и явно
+выбранные обратимые шаги:
+
+```bash
+giga bootstrap preview --workspace . --json
+giga bootstrap apply <plan_id> --workspace . --all-reversible --json
+giga bootstrap status <application_id> --json
+giga bootstrap rollback <application_id> --workspace . --json
+```
+
+Журнал application хранит только ограниченные identities и пути, созданные
+Harness. Rollback удаляет объект, только пока он совпадает с журналом, и
+останавливается безопасным отказом при изменении workspace, data root или
+созданного содержимого. Bootstrap не устанавливает providers, не разрешает
+credentials, не запускает внешние процессы и не включает schedules.
+
+Перед model-backed матрицей запустите side-effect-free compatibility guardian:
+
+```bash
+giga compatibility check --json
+giga compatibility check --harness codex-cli --json
+```
+
+Guardian проверяет зафиксированные окна Codex, Claude и Gemini CLI, допуск
+native protocols, версии Adapter/Integration SDK и schemas, а также marketplace
+source contracts. Он не запускает providers или integrations и возвращает код
+1, если обязательный fixture заблокирован. Cockpit получает тот же read-only
+report через `GET /api/compatibility/guardian`.
+
+Preflight каждого run также строит content-free симуляцию permissions для
+точного Harness, provider route, execution transport, workspace policy и
+snapshot расширений. Filesystem, command, network, secret, integration,
+provider и Git/GitHub actions классифицируются как allowed,
+approval-required, denied или unknown, а также как pre-start,
+runtime-dependent или provider-owned. Обязательный deny блокирует запуск;
+runtime-dependent и provider-owned действия не выдаются за гарантированное
+разрешение.
+
+Runs Center может создать Trace-to-Replay comparison, изменив ровно одну ось:
+model, provider, Harness или extensions. Preview связывает сохранённое source
+evidence и все неизменённые измерения с hash. Запуск проверенного manifest
+создаёт новую session, использует существующего execution owner и никогда
+автоматически не применяет patch. Сохранённое сравнение показывает
+нормализованные outcome, usage, tools, artifacts, environment и evidence deltas
+без обязательной external telemetry.
+
+Для передачи без запуска target создайте truthful handoff capsule:
+
+```bash
+giga handoff capsule <run_id> --target-harness <harness_id> --json
+```
+
+Capsule — проверяемый content-free snapshot identities задачи и evidence, Git
+environment, pending approvals, target compatibility и ограничений continuity.
+Он не запускает target и не утверждает, что provider-owned history можно
+продолжить. Runs Center и
+`GET /api/runs/{run_id}/handoff-capsule` используют тот же контракт.
 
 ### Tool Profiles и MCP
 
@@ -1490,11 +1552,11 @@ project state:
 ```bash
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.4.0a1'
+uv tool install 'gpt2giga-harness==0.4.1a1'
 giga doctor
 ```
 
-Текущая metadata `gpt2giga-harness==0.4.0a1` сохраняет
+Текущая metadata `gpt2giga-harness==0.4.1a1` сохраняет
 `gpt2giga==0.2.4a1` в явном optional extra `gpt2giga`. Старый import
 `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
