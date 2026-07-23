@@ -102,8 +102,8 @@ binary, Node.js runtime, credentials, or provider configuration. Both `uv tool`
 and `pipx` create an isolated Harness environment:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.4.0a1'
-pipx install 'gpt2giga-harness==0.4.0a1'
+uv tool install 'gpt2giga-harness==0.4.1a1'
+pipx install 'gpt2giga-harness==0.4.1a1'
 ```
 
 Upgrade an existing optional-TUI prerelease in place; do not retain or add a
@@ -113,10 +113,10 @@ archive when a state migration occurred:
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool install --force 'gpt2giga-harness==0.4.0a1'
+uv tool install --force 'gpt2giga-harness==0.4.1a1'
 uv tool install --force 'gpt2giga-harness==<previous-version>'
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.4.0a1'
+uv tool install 'gpt2giga-harness==0.4.1a1'
 ```
 
 Uninstalling the package does not delete `~/.gpt2giga/harness`, project
@@ -172,17 +172,17 @@ If the standalone preview is available in your package index, the shorter
 install path is:
 
 ```bash
-uv tool install 'gpt2giga-harness==0.4.0a1'
+uv tool install 'gpt2giga-harness==0.4.1a1'
 giga doctor
 ```
 
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```bash
-uv tool install 'gpt2giga-harness[gpt2giga]==0.4.0a1'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.4.1a1'
 ```
 
-The current `gpt2giga-harness==0.4.0a1` distribution provides the `giga` and
+The current `gpt2giga-harness==0.4.1a1` distribution provides the `giga` and
 `gpt2giga-harness` commands; its explicit `gpt2giga` extra pins
 `gpt2giga==0.2.4a1`.
 
@@ -247,7 +247,7 @@ To migrate from the optional-TUI prerelease, upgrade the standard package and
 remove `[tui]` from install commands:
 
 ```bash
-uv tool install --force 'gpt2giga-harness==0.4.0a1'
+uv tool install --force 'gpt2giga-harness==0.4.1a1'
 giga --version
 giga
 ```
@@ -944,6 +944,67 @@ previous chat turns, and truncation warnings.
 For attachment findings, the UI can remove the file from the current composer
 selection or send only an `@path` reference. `Continue anyway` is shown only for
 warning-level findings, not hard blocks.
+
+### Reviewed bootstrap and execution assurance
+
+`giga bootstrap` provides an auditable first-run path without merging discovery
+and mutation. Preview runs doctor read-only and returns a deterministic
+`plan_id`; apply accepts only that current plan and explicitly selected
+reversible steps:
+
+```bash
+giga bootstrap preview --workspace . --json
+giga bootstrap apply <plan_id> --workspace . --all-reversible --json
+giga bootstrap status <application_id> --json
+giga bootstrap rollback <application_id> --workspace . --json
+```
+
+The application journal records only bounded identities and paths created by
+Harness. Rollback removes an item only while it still matches that journal and
+fails closed if the workspace, data root, or generated content has changed.
+Bootstrap never installs providers, resolves credentials, starts external
+processes, or enables schedules.
+
+Run the side-effect-free compatibility guardian before a model-backed matrix:
+
+```bash
+giga compatibility check --json
+giga compatibility check --harness codex-cli --json
+```
+
+The guardian checks the reviewed Codex, Claude, and Gemini CLI windows, native
+protocol admissions, Adapter and Integration SDK/schema versions, and
+marketplace source contracts. It does not start providers or integrations and
+returns exit code 1 when a required fixture is blocked. Cockpit uses the same
+read-only report from `GET /api/compatibility/guardian`.
+
+Each run preflight also projects a content-free permission simulation for the
+exact Harness, provider route, execution transport, workspace policy, and
+extension snapshot. Filesystem, command, network, secret, integration,
+provider, and Git/GitHub actions are classified as allowed,
+approval-required, denied, or unknown and as pre-start, runtime-dependent, or
+provider-owned. A denied required action blocks startup; runtime-dependent and
+provider-owned actions are never presented as guaranteed grants.
+
+Runs Center can create a Trace-to-Replay comparison that changes exactly one
+model, provider, Harness, or extensions axis. Preview hashes the retained source
+evidence and every unchanged dimension. Starting the reviewed manifest creates
+a new session, uses the existing execution authority, and never applies a patch
+automatically. The retained comparison reports normalized outcome, usage, tool,
+artifact, environment, and evidence deltas without requiring external
+telemetry.
+
+For a transfer without target execution, create a truthful handoff capsule:
+
+```bash
+giga handoff capsule <run_id> --target-harness <harness_id> --json
+```
+
+The capsule is a verifiable content-free snapshot of the task and evidence
+identities, Git environment, pending approvals, target compatibility, and
+continuity limits. It neither starts the target nor claims that provider-owned
+history can be resumed. Runs Center and
+`GET /api/runs/{run_id}/handoff-capsule` expose the same contract.
 
 ### Tool Profiles
 
@@ -2635,7 +2696,7 @@ Remove the old combined wheel before installing the split packages so stale
 
 ```bash
 python -m pip uninstall -y gpt2giga gpt2giga-harness
-python -m pip install 'gpt2giga-harness==0.4.0a1'
+python -m pip install 'gpt2giga-harness==0.4.1a1'
 ```
 
 For `uv` tool installations, recreate both tool environments:
@@ -2644,10 +2705,10 @@ For `uv` tool installations, recreate both tool environments:
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
 uv tool install --prerelease allow gpt2giga
-uv tool install 'gpt2giga-harness==0.4.0a1'
+uv tool install 'gpt2giga-harness==0.4.1a1'
 ```
 
-The current `gpt2giga-harness==0.4.0a1` metadata keeps
+The current `gpt2giga-harness==0.4.1a1` metadata keeps
 `gpt2giga==0.2.4a1` in the explicit `gpt2giga` optional extra.
 
 This package migration does not move or rewrite Harness state. Existing

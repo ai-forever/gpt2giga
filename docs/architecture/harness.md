@@ -187,6 +187,7 @@ are intentionally disabled.
 | `GET /api/harnesses` | Lists built-in and plugin adapters with availability, capabilities, native support, and compatibility evidence. |
 | `GET /api/models` | Proxies a safe model inventory for the model picker without making the browser call the gateway directly. |
 | `POST /api/preflight/run` | Checks prompt size, workspace, attachments, route, executable, and other blockers before submission. |
+| `GET /api/compatibility/guardian` | Runs bounded offline fixtures for native CLI windows, provider protocols, SDK/schema versions, and marketplace contracts without starting providers or integrations. |
 | `POST /api/route/recommendation` | Computes a deterministic advisory harness/mode recommendation; it does not call an LLM or grant edit permission. |
 
 ### Project, workspace, memory, and editor integration
@@ -242,6 +243,8 @@ arbitrary edit, shell, filesystem, or network effects retry-safe.
 | `GET /api/runs/{run_id}/provenance` | Returns the reproducibility envelope: adapter, route, binary/schema evidence, request hashes, and environment-safe metadata. |
 | `GET /api/runs/{run_id}/support-bundle` | Returns a content-free, redaction-safe diagnostic bundle for one run; it is not the private state backup format. |
 | `POST /api/runs/{run_id}/replay`<br />`POST /api/runs/{run_id}/fork` | Re-executes a captured safe request in the same session, or branches history into a new session. |
+| `POST /api/runs/{run_id}/trace-replays/preview`<br />`POST /api/runs/{run_id}/trace-replays`<br />`GET /api/runs/{run_id}/trace-replay` | Previews one content-addressed one-axis replay, starts only the exact reviewed manifest in a new session, and reads the retained source/destination comparison. |
+| `GET /api/runs/{run_id}/handoff-capsule` | Builds a bounded content-free cross-Harness transfer snapshot with task/evidence identity, environment, approvals, compatibility, and truthful continuity limits without starting the target. |
 | `GET /api/runs/{run_id}/diff`<br />`GET /api/runs/{run_id}/patch`<br />`GET /api/runs/{run_id}/pr` | Presents an isolated edit as structured diff metadata, raw patch text, or a PR-ready artifact. |
 | `POST /api/runs/{run_id}/apply`<br />`POST /api/runs/{run_id}/branch` | Applies the reviewed patch or creates a local branch only after policy approval and Git safety checks. |
 | `POST /api/runs/{run_id}/discard`<br />`POST /api/runs/{run_id}/open-worktree` | Deletes an isolated worktree or asks the local editor to open it without touching the source checkout. |

@@ -1,6 +1,6 @@
 [project]
 name = "gpt2giga-harness"
-version = "0.4.0a1"
+version = "0.4.1a1"
 description = "Local agentic control plane for gpt2giga"
 authors = [{ name = "Ruslan Yakupov", email = "rusyak1999@gmail.com" }]
 requires-python = ">=3.10,<4,<3.15"
