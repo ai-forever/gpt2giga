@@ -307,6 +307,26 @@ class FilesystemHarnessSessionStore:
         self.event_broker.publish_runs_center()
         return updated
 
+    def update_session_if_revision(
+        self,
+        session_id: str,
+        expected_updated_at: str,
+        **patch: Any,
+    ) -> HarnessSession | None:
+        """Atomically patch one session only at the presented revision."""
+        session_dir = self._session_dir(session_id)
+        path = session_dir / MANIFEST_FILE
+        with exclusive_file_lock(path):
+            session = session_from_dict(_read_json(path))
+            if session.updated_at != expected_updated_at:
+                return None
+            updated = _patch_session(session, patch)
+            _write_json_atomic_unlocked(path, session_to_dict(updated))
+        if self._read_index is not None:
+            self._read_index.upsert_session(updated)
+        self.event_broker.publish_runs_center()
+        return updated
+
     def delete_session(self, session_id: str) -> None:
         session_dir = self._session_dir(session_id)
         if not session_dir.exists():
@@ -318,6 +338,29 @@ class FilesystemHarnessSessionStore:
             self._read_index.delete_session(session_id)
         self.event_broker.publish_session(session_id)
         self.event_broker.publish_runs_center()
+
+    def delete_session_if_revision(
+        self,
+        session_id: str,
+        expected_updated_at: str,
+    ) -> bool:
+        session_dir = self._session_dir(session_id)
+        path = session_dir / MANIFEST_FILE
+        if not session_dir.exists():
+            self._remove_index_entry(session_id)
+            raise SessionNotFoundError(session_id)
+        with exclusive_file_lock(path):
+            session = session_from_dict(_read_json(path))
+            if session.updated_at != expected_updated_at:
+                return False
+            path.replace(session_dir / ".deleted-session.json")
+        shutil.rmtree(session_dir)
+        self._remove_index_entry(session_id)
+        if self._read_index is not None:
+            self._read_index.delete_session(session_id)
+        self.event_broker.publish_session(session_id)
+        self.event_broker.publish_runs_center()
+        return True
 
     def archive_session(
         self,

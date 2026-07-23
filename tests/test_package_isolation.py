@@ -40,6 +40,7 @@ IMPORT_DISTRIBUTIONS = {
     "gpt2giga": "gpt2giga",
     "pydantic": "pydantic",
     "starlette": "starlette",
+    "textual": "textual",
     "tomli": "tomli",
     "uvicorn": "uvicorn",
     "yaml": "pyyaml",
@@ -206,6 +207,7 @@ import gpt2giga_harness
 from gpt2giga_harness.cli import build_parser
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.doctor import write_doctor_support_report
+from gpt2giga_harness.environments import EnvironmentProviderRegistry
 from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.skills_catalog_proxy import create_skills_catalog_proxy_app
 from gpt2giga_harness.skills_catalog_proxy_client import SkillsCatalogProxyFetcher
@@ -234,6 +236,13 @@ assert any(
     and "extra ==" in requirement
     for requirement in requirements
 )
+assert any(
+    requirement.startswith("textual")
+    and ">=8.2.8" in requirement
+    and "extra ==" not in requirement
+    for requirement in requirements
+)
+assert "tui" not in harness_distribution.metadata.get_all("Provides-Extra", [])
 scripts = {
     entry.name: entry.value
     for entry in harness_distribution.entry_points
@@ -244,6 +253,18 @@ assert scripts == {
     "giga-skills-catalog-proxy": "gpt2giga_harness.skills_catalog_proxy:main",
     "gpt2giga-harness": "gpt2giga_harness.entrypoint:main",
 }
+environment_entry_points = {
+    entry.name: entry.value
+    for entry in harness_distribution.entry_points
+    if entry.group == "agent_workbench.environment_providers.v1"
+}
+assert environment_entry_points == {
+    "git": "gpt2giga_harness.environments:git_environment_provider_plugin"
+}
+environment_registry = EnvironmentProviderRegistry.with_builtins()
+environment_registry.load_entry_points()
+assert [item.id for item in environment_registry.list()] == ["git"]
+assert environment_registry.discovery_errors == []
 proxy_client = TestClient(create_skills_catalog_proxy_app())
 assert proxy_client.get("/healthz").json()["read_only"] is True
 assert SkillsCatalogProxyFetcher("https://proxy.example").proxy_origin == (

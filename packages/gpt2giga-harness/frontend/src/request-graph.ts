@@ -8,6 +8,7 @@ import {
   type ApprovalInboxResponse,
   type AttachmentsResponse,
   type AttentionInboxResponse,
+  type EnvironmentResponse,
   fetchCockpit,
   type HarnessesResponse,
   type ModelsResponse,
@@ -51,6 +52,8 @@ export const requestKeys = {
   runsCenter: () => [...rootKey, "runs-center"] as const,
   approvals: () => [...rootKey, "approvals"] as const,
   attention: () => [...rootKey, "attention"] as const,
+  environment: (sessionId: string) =>
+    [...requestKeys.sessionScope(sessionId), "environment"] as const,
   runScope: (runId: string) => [...rootKey, "run", runId] as const,
   runOverview: (runId: string) =>
     [...requestKeys.runScope(runId), "overview"] as const,
@@ -144,6 +147,19 @@ export function sessionOverviewOptions(sessionId: string) {
         signal,
       ),
     staleTime: 10_000,
+  });
+}
+
+export function environmentOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: requestKeys.environment(sessionId),
+    queryFn: ({ signal }) =>
+      fetchCockpit<EnvironmentResponse>(
+        withQuery("/api/environment", { session_id: sessionId }),
+        signal,
+      ),
+    refetchInterval: 30_000,
+    staleTime: 15_000,
   });
 }
 

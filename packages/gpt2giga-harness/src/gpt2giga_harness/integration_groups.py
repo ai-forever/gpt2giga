@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from gpt2giga_harness.external_mcp import HARNESS_MANAGED_MCP_TARGET_ID
 from gpt2giga_harness.integration_flows import (
+    IntegrationFlowError,
     IntegrationFlowService,
     IntegrationFlowStatus,
     _public_plan as _child_public_plan,
@@ -39,6 +40,8 @@ MAX_INTEGRATION_GROUPS = 200
 _GROUP_ID_RE = re.compile(r"group_[0-9a-f]{32}\Z")
 _PLAN_ID_RE = re.compile(r"plan_[0-9a-f]{64}\Z")
 _AUTHORITY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+~-]{0,255}\Z")
+_PACK_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
+_PACK_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?\Z")
 _SKILL_TARGETS = (
     CODEX_SKILL_TARGET_ID,
     CLAUDE_SKILL_TARGET_ID,
@@ -49,6 +52,12 @@ _MCP_TARGETS = (
     "claude-mcp",
     "gemini-mcp",
     HARNESS_MANAGED_MCP_TARGET_ID,
+)
+_PACK_TARGETS = (
+    ("codex", CODEX_SKILL_TARGET_ID, "codex-mcp"),
+    ("claude", CLAUDE_SKILL_TARGET_ID, "claude-mcp"),
+    ("gemini", GEMINI_SKILL_TARGET_ID, "gemini-mcp"),
+    ("harness", None, HARNESS_MANAGED_MCP_TARGET_ID),
 )
 
 
@@ -154,6 +163,8 @@ class GroupedIntegrationService:
         """Preview every explicit supported target before any target mutation."""
         request = _normalize_request(payload)
         self.flows.inventory()
+        if request["component"] == "extension_pack":
+            return self._preview_extension_pack(request)
         entry = self.flows.catalog.get(request["catalog_id"])
         if entry is None:
             raise ValueError("group catalog selection was not found")
@@ -259,6 +270,188 @@ class GroupedIntegrationService:
             "group": integration_group_record_to_dict(record),
             "plan": _public_plan(record, previews),
         }
+
+    def _preview_extension_pack(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        """Compile one reviewed Skill and MCP pin into compatible target children."""
+        skill_entry = self.flows.catalog.get(request["skill_catalog_id"])
+        mcp_entry = self.flows.catalog.get(request["mcp_catalog_id"])
+        if skill_entry is None or skill_entry.package is None:
+            raise ValueError("extension pack Skill selection was not found")
+        if {item.type for item in skill_entry.package.components} != {
+            IntegrationComponentType.SKILL
+        }:
+            raise ValueError("extension pack Skill selection is not portable")
+        if mcp_entry is None or mcp_entry.mcp_response is None:
+            raise ValueError("extension pack MCP selection was not found")
+
+        declared_skill_targets = {
+            item.target_id for item in skill_entry.package.compatibility
+        }
+        previews: list[dict[str, Any]] = []
+        compatibility: list[dict[str, Any]] = []
+        for target, skill_target, mcp_target in _PACK_TARGETS:
+            components: dict[str, dict[str, Any]] = {}
+            target_previews: list[dict[str, Any]] = []
+            if skill_target is None:
+                components["skill"] = _compatibility_item(
+                    "not_applicable", None, "target_has_no_skill_surface"
+                )
+            elif skill_target not in declared_skill_targets:
+                components["skill"] = _compatibility_item(
+                    "unsupported", skill_target, "package_target_not_declared"
+                )
+            else:
+                skill_preview, skill_compatibility = self._preview_pack_child(
+                    request,
+                    catalog_id=request["skill_catalog_id"],
+                    target_id=skill_target,
+                    configuration={},
+                )
+                components["skill"] = skill_compatibility
+                if skill_preview is not None:
+                    target_previews.append(skill_preview)
+
+            mcp_preview, mcp_compatibility = self._preview_pack_child(
+                request,
+                catalog_id=request["mcp_catalog_id"],
+                target_id=mcp_target,
+                configuration=request["mcp_configuration"],
+            )
+            components["mcp"] = mcp_compatibility
+            if mcp_preview is not None:
+                target_previews.append(mcp_preview)
+
+            applicable = [
+                item
+                for item in components.values()
+                if item["status"] != "not_applicable"
+            ]
+            included = bool(applicable) and all(
+                item["status"] == "supported" for item in applicable
+            )
+            status = _target_compatibility_status(applicable)
+            compatibility.append(
+                {
+                    "target": target,
+                    "status": status,
+                    "included": included,
+                    "components": components,
+                }
+            )
+            if included:
+                previews.extend(
+                    self.flows.preview(item["request"]) for item in target_previews
+                )
+
+        if not any(
+            item["included"] and item["target"] != "harness" for item in compatibility
+        ):
+            raise ValueError("extension pack has no compatible native agent target")
+
+        pack_semantic = {
+            "schema_version": INTEGRATION_GROUP_SCHEMA_VERSION,
+            "pack_id": request["pack_id"],
+            "pack_version": request["pack_version"],
+            "skill_catalog_id": request["skill_catalog_id"],
+            "skill_manifest_sha256": integration_package_semantic_hash(
+                skill_entry.package
+            ),
+            "mcp_catalog_id": request["mcp_catalog_id"],
+            "mcp_content_sha256": mcp_entry.content_hash,
+            "mcp_configuration_sha256": _json_hash(request["mcp_configuration"]),
+        }
+        manifest_hash = _json_hash(pack_semantic)
+        catalog_id = f"pack:{manifest_hash}"
+        semantic = {
+            "schema_version": INTEGRATION_GROUP_SCHEMA_VERSION,
+            "source": "catalog",
+            "catalog_id": catalog_id,
+            "package_id": request["pack_id"],
+            "package_version": request["pack_version"],
+            "manifest_sha256": manifest_hash,
+            "component": "extension_pack",
+            "target_mode": "all_supported",
+            "target_ids": [item["plan"]["target"]["id"] for item in previews],
+            "scope": request["scope"],
+            "workspace": request.get("workspace"),
+            "compatibility": compatibility,
+            "children": [
+                {
+                    "target_id": item["plan"]["target"]["id"],
+                    "flow_id": item["flow"]["id"],
+                    "plan_id": item["plan"]["plan_id"],
+                }
+                for item in previews
+            ],
+        }
+        plan_id = f"plan_{_json_hash(semantic)}"
+        timestamp = self._timestamp()
+        stored_request = {**request, "compatibility": compatibility}
+        record = IntegrationGroupRecord(
+            id=f"group_{uuid4().hex}",
+            plan_id=plan_id,
+            status=IntegrationGroupStatus.AWAITING_APPROVAL,
+            component="extension_pack",
+            source="catalog",
+            catalog_id=catalog_id,
+            package_id=request["pack_id"],
+            package_version=request["pack_version"],
+            manifest_sha256=manifest_hash,
+            target_mode="all_supported",
+            target_ids=tuple(item["plan"]["target"]["id"] for item in previews),
+            request=stored_request,
+            children=tuple(
+                IntegrationGroupChild(
+                    target_id=item["plan"]["target"]["id"],
+                    scope=item["plan"]["target"]["scope"],
+                    flow_id=item["flow"]["id"],
+                    plan_id=item["plan"]["plan_id"],
+                    status=item["flow"]["status"],
+                )
+                for item in previews
+            ),
+            aggregate_risk=_aggregate_risk(previews),
+            approval_hash=None,
+            repair_actions=(),
+            error_code=None,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        self._put(record)
+        return {
+            "group": integration_group_record_to_dict(record),
+            "plan": _public_plan(record, previews, compatibility=compatibility),
+        }
+
+    def _preview_pack_child(
+        self,
+        request: Mapping[str, Any],
+        *,
+        catalog_id: str,
+        target_id: str,
+        configuration: Mapping[str, Any],
+    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        payload = {
+            "source": "catalog",
+            "catalog_id": catalog_id,
+            "target_id": target_id,
+            "scope": request["scope"],
+            "workspace": request.get("workspace"),
+            "configuration": configuration,
+        }
+        try:
+            probe = self.flows.probe(payload)
+        except (IntegrationFlowError, ValueError) as exc:
+            return None, _compatibility_item(
+                _compatibility_failure_status(exc),
+                target_id,
+                _compatibility_failure_reason(exc),
+            )
+        if not probe["plan"]["target"]["executable"]:
+            return None, _compatibility_item(
+                "unsupported", target_id, "target_requires_provider_handoff"
+            )
+        return {"request": payload}, _compatibility_item("supported", target_id, None)
 
     def apply(
         self,
@@ -560,7 +753,7 @@ class GroupedIntegrationService:
 
 def integration_group_record_to_dict(record: IntegrationGroupRecord) -> dict[str, Any]:
     """Return one content-free group lifecycle projection."""
-    return {
+    projection = {
         "id": record.id,
         "plan_id": record.plan_id,
         "status": record.status.value,
@@ -594,10 +787,19 @@ def integration_group_record_to_dict(record: IntegrationGroupRecord) -> dict[str
         "rollback_available": record.status is IntegrationGroupStatus.VERIFIED,
         "content_free": True,
     }
+    if record.component == "extension_pack":
+        projection["catalog_ids"] = {
+            "skill": record.request["skill_catalog_id"],
+            "mcp": record.request["mcp_catalog_id"],
+        }
+    return projection
 
 
 def _public_plan(
-    record: IntegrationGroupRecord, previews: list[dict[str, Any]]
+    record: IntegrationGroupRecord,
+    previews: list[dict[str, Any]],
+    *,
+    compatibility: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     permissions = {
         "network": any(item["plan"]["permissions"]["network"] for item in previews),
@@ -606,7 +808,7 @@ def _public_plan(
         ),
         "user_home": any(item["plan"]["permissions"]["user_home"] for item in previews),
     }
-    return {
+    plan = {
         "plan_id": record.plan_id,
         "package": {
             "id": record.package_id,
@@ -634,28 +836,48 @@ def _public_plan(
         "approval_required": True,
         "content_free": True,
     }
+    if compatibility is not None:
+        plan["compatibility"] = compatibility
+        plan["catalog_ids"] = {
+            "skill": record.request["skill_catalog_id"],
+            "mcp": record.request["mcp_catalog_id"],
+        }
+    return plan
 
 
-def _normalize_request(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _normalize_request(
+    payload: Mapping[str, Any], *, persisted: bool = False
+) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         raise ValueError("integration group request must be an object")
-    allowed = {
+    common = {
         "source",
-        "catalog_id",
         "scope",
         "workspace",
-        "configuration",
         "target_mode",
     }
+    is_pack = payload.get("component") == "extension_pack" or any(
+        key in payload for key in ("pack_id", "skill_catalog_id", "mcp_catalog_id")
+    )
+    if is_pack:
+        allowed = common | {
+            "component",
+            "pack_id",
+            "pack_version",
+            "skill_catalog_id",
+            "mcp_catalog_id",
+            "mcp_configuration",
+        }
+        if persisted:
+            allowed.add("compatibility")
+    else:
+        allowed = common | {"catalog_id", "configuration", "component"}
     if set(payload) - allowed:
         raise ValueError("integration group request contains unknown fields")
     if payload.get("source", "catalog") != "catalog":
         raise ValueError("all-target groups require a reviewed catalog source")
     if payload.get("target_mode", "all_supported") != "all_supported":
         raise ValueError("integration group target_mode must be all_supported")
-    catalog_id = str(payload.get("catalog_id") or "")
-    if not catalog_id or len(catalog_id) > 256:
-        raise ValueError("integration group catalog_id is invalid")
     scope = InstallationScope(str(payload.get("scope") or "managed_home"))
     if scope is InstallationScope.USER_HOME:
         raise ValueError("all-target user-home expansion is not implicit")
@@ -666,11 +888,50 @@ def _normalize_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         workspace = str(Path(workspace).expanduser().resolve())
     elif workspace is not None:
         raise ValueError("managed-home group cannot include a workspace")
+    if is_pack:
+        pack_id = str(payload.get("pack_id") or "")
+        pack_version = str(payload.get("pack_version") or "")
+        skill_catalog_id = str(payload.get("skill_catalog_id") or "")
+        mcp_catalog_id = str(payload.get("mcp_catalog_id") or "")
+        if not _PACK_ID_RE.fullmatch(pack_id):
+            raise ValueError("extension pack id is invalid")
+        if not _PACK_VERSION_RE.fullmatch(pack_version):
+            raise ValueError("extension pack version must be exact semver")
+        if not skill_catalog_id or len(skill_catalog_id) > 256:
+            raise ValueError("extension pack Skill catalog id is invalid")
+        if not mcp_catalog_id or len(mcp_catalog_id) > 256:
+            raise ValueError("extension pack MCP catalog id is invalid")
+        mcp_configuration = payload.get("mcp_configuration", {})
+        if not isinstance(mcp_configuration, Mapping):
+            raise ValueError("extension pack MCP configuration must be an object")
+        normalized = {
+            "source": "catalog",
+            "component": "extension_pack",
+            "pack_id": pack_id,
+            "pack_version": pack_version,
+            "skill_catalog_id": skill_catalog_id,
+            "mcp_catalog_id": mcp_catalog_id,
+            "scope": scope.value,
+            "workspace": workspace,
+            "mcp_configuration": _json_value(mcp_configuration),
+            "target_mode": "all_supported",
+        }
+        if persisted:
+            compatibility = payload.get("compatibility")
+            if not isinstance(compatibility, list):
+                raise ValueError("extension pack compatibility state is invalid")
+            normalized["compatibility"] = _json_value(compatibility)
+        return normalized
+
+    catalog_id = str(payload.get("catalog_id") or "")
+    if not catalog_id or len(catalog_id) > 256:
+        raise ValueError("integration group catalog_id is invalid")
     configuration = payload.get("configuration", {})
     if not isinstance(configuration, Mapping):
         raise ValueError("integration group configuration must be an object")
     return {
         "source": "catalog",
+        "component": "single",
         "catalog_id": catalog_id,
         "scope": scope.value,
         "workspace": workspace,
@@ -685,6 +946,36 @@ def _aggregate_risk(previews: list[dict[str, Any]]) -> str:
         if decision in decisions:
             return decision
     return sorted(decisions)[0] if decisions else "review_required"
+
+
+def _compatibility_item(
+    status: str, target_id: str | None, reason_code: str | None
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "target_id": target_id,
+        "reason_code": reason_code,
+        "content_free": True,
+    }
+
+
+def _compatibility_failure_status(exc: Exception) -> str:
+    return "unknown" if isinstance(exc, IntegrationFlowError) else "unsupported"
+
+
+def _compatibility_failure_reason(exc: Exception) -> str:
+    if isinstance(exc, IntegrationFlowError):
+        return "target_probe_failed"
+    return "incompatible_or_unavailable"
+
+
+def _target_compatibility_status(items: list[Mapping[str, Any]]) -> str:
+    statuses = {str(item["status"]) for item in items}
+    if statuses == {"supported"}:
+        return "supported"
+    if "unknown" in statuses:
+        return "unknown"
+    return "unsupported"
 
 
 def _record_plan_id(record: IntegrationGroupRecord) -> str:
@@ -709,6 +1000,8 @@ def _record_plan_id(record: IntegrationGroupRecord) -> str:
             for item in record.children
         ],
     }
+    if record.component == "extension_pack":
+        semantic["compatibility"] = record.request["compatibility"]
     return f"plan_{_json_hash(semantic)}"
 
 
@@ -736,7 +1029,7 @@ def _record_from_dict(value: Any) -> IntegrationGroupRecord:
             manifest_sha256=str(value["manifest_sha256"]),
             target_mode=str(value["target_mode"]),
             target_ids=tuple(str(item) for item in value["target_ids"]),
-            request=_normalize_request(value["request"]),
+            request=_normalize_request(value["request"], persisted=True),
             children=tuple(
                 IntegrationGroupChild(
                     target_id=str(item["target_id"]),

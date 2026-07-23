@@ -149,8 +149,8 @@ jobs:
       fail-fast: false
       matrix:
         package: [gateway, harness]
-        # Clean installs only need the declared Python range boundaries.
-        python-version: ["3.10", "3.14"]
+        # The canonical TUI dependency is resolved across every supported minor.
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout repository
@@ -218,7 +218,64 @@ jobs:
           .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, os, gpt2giga, gpt2giga_harness; from gpt2giga_harness.ui.cockpit_v2 import load_cockpit_v2_manifest; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert m.version('gpt2giga-harness') == os.environ['HARNESS_VERSION']; assert r.files('gpt2giga_harness.ui').joinpath('assets/index.html').is_file(); assert load_cockpit_v2_manifest().entry == 'index.html'"
           .venv-artifact/bin/gpt2giga --help
           .venv-artifact/bin/giga --help
+          .venv-artifact/bin/giga --version
           .venv-artifact/bin/gpt2giga-harness --help
+
+  harness-terminal-artifact-smoke:
+    name: Harness terminal wheel on ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Build standard Harness wheel
+        run: uv build --package gpt2giga-harness --wheel --no-sources --out-dir dist/terminal-smoke
+
+      - name: Install standard wheel in a clean environment
+        run: |
+          uv venv --python ${{ matrix.python-version }} .venv-terminal
+          uv pip install --python .venv-terminal dist/terminal-smoke/gpt2giga_harness-*.whl
+
+      - name: Smoke TUI metadata, deep links, and machine CLI
+        run: |
+          uv run --python .venv-terminal --no-project python -I -c "import importlib.metadata as m; assert any(r.casefold().startswith('textual') for r in m.requires('gpt2giga-harness')); assert all(x != 'tui' for x in (m.metadata('gpt2giga-harness').get_all('Provides-Extra') or ()))"
+          uv run --python .venv-terminal --no-project python -I -c "from gpt2giga_harness.terminal_dispatch import TerminalContext, plan_terminal_dispatch; from gpt2giga_harness.terminal_intent import parse_tui_launch_intent; p=plan_terminal_dispatch(('run','--agent','codex','inspect'), context=TerminalContext(True,True,True,'xterm-256color')); i,_=parse_tui_launch_intent(('run','--agent','codex','inspect')); assert p.initialize_textual and i.harness_id == 'codex-cli' and i.prompt == 'inspect'"
+          uv run --python .venv-terminal --no-project giga --help
+          uv run --python .venv-terminal --no-project giga --version
+          uv run --python .venv-terminal --no-project giga --non-interactive --help
+
+      - name: Smoke in-place upgrade and exact-wheel rollback mechanics
+        run: |
+          uv pip install --python .venv-terminal --reinstall dist/terminal-smoke/gpt2giga_harness-*.whl
+          uv run --python .venv-terminal --no-project giga --version
+          uv pip uninstall --python .venv-terminal gpt2giga-harness
+          uv pip install --python .venv-terminal dist/terminal-smoke/gpt2giga_harness-*.whl
+          uv run --python .venv-terminal --no-project giga --version
+
+      - name: Smoke uninstall
+        run: |
+          uv pip uninstall --python .venv-terminal gpt2giga-harness
+          uv run --python .venv-terminal --no-project python -I -c "import importlib.util; assert importlib.util.find_spec('gpt2giga_harness') is None"
 
 
   coverage-badge:

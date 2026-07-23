@@ -109,6 +109,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/evals/runs/{eval_run_id}"),
         ("GET", "/api/evaluate"),
         ("GET", "/api/evaluate/{eval_name}/matrix"),
+        ("GET", "/api/environment"),
         ("GET", "/api/files/generated/{run_key}/{filename}"),
         ("GET", "/api/files/preview"),
         ("GET", "/api/harnesses"),
@@ -150,12 +151,16 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/settings"),
         ("GET", "/api/sessions"),
         ("GET", "/api/sessions/{session_id}"),
+        ("GET", "/api/sessions/{session_id}/navigation-preview"),
         ("GET", "/api/sessions/{session_id}/attachments"),
+        ("GET", "/api/sessions/{session_id}/attachments/workspace/preview"),
         ("GET", "/api/sessions/{session_id}/attachments/workspace/search"),
         ("GET", "/api/sessions/{session_id}/events"),
         ("GET", "/api/tool-servers"),
         ("GET", "/api/tool-servers/{server_id}"),
         ("GET", "/api/tools"),
+        ("GET", "/api/workbench/state"),
+        ("GET", "/api/workbench/resources"),
         ("GET", "/api/workflow-runs/{run_id}"),
         ("GET", "/api/workflow-runs/{run_id}/handoffs"),
         ("GET", "/api/workflows"),
@@ -188,6 +193,7 @@ _STREAMS = frozenset(
 _EVENT_LOOP_SAFE = frozenset(
     {
         ("GET", "/api/policy/profiles"),
+        ("GET", "/api/workbench/state"),
         ("GET", "/healthz"),
         ("GET", "/openapi.json"),
         ("POST", "/auth/session"),
@@ -219,6 +225,13 @@ _SUBPROCESS_PREFIXES = (
 )
 _SUBPROCESS_EXACT = frozenset(
     {
+        ("GET", "/api/environment"),
+        ("POST", "/api/environment/commit/apply"),
+        ("POST", "/api/environment/commit/preview"),
+        ("POST", "/api/environment/push/apply"),
+        ("POST", "/api/environment/push/preview"),
+        ("POST", "/api/environment/pull-request/apply"),
+        ("POST", "/api/environment/pull-request/preview"),
         ("POST", "/api/project/init"),
         ("POST", "/api/integrations/git/inspect"),
         ("POST", "/api/run"),
@@ -258,6 +271,13 @@ _SYNC_DURABLE_SUBMISSIONS = frozenset(
 )
 _NATIVE_ASYNC = frozenset(
     {
+        ("GET", "/api/environment"),
+        ("POST", "/api/environment/commit/apply"),
+        ("POST", "/api/environment/commit/preview"),
+        ("POST", "/api/environment/push/apply"),
+        ("POST", "/api/environment/push/preview"),
+        ("POST", "/api/environment/pull-request/apply"),
+        ("POST", "/api/environment/pull-request/preview"),
         ("GET", "/api/integrations/search"),
         ("POST", "/api/integrations/git/inspect"),
         ("POST", "/api/native/processes/{process_id}/input"),
@@ -285,6 +305,7 @@ _OPAQUE_CURSOR_IDENTITIES = frozenset(
         ("GET", "/api/cockpit/sessions/{session_id}/events"),
         ("GET", "/api/cockpit/sessions/{session_id}/messages"),
         ("GET", "/api/cockpit/sessions/{session_id}/runs"),
+        ("GET", "/api/workbench/state"),
     }
 )
 

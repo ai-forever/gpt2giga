@@ -2,7 +2,7 @@
 
 :::warning[Alpha preview — prerelease]
 
-The `gpt2giga-harness` 0.3.x line is an alpha preview for testing and feedback.
+The `gpt2giga-harness` 0.4.x line is an alpha preview for testing and feedback.
 The UI, CLI, project YAML, runtime schema, and upgrade behavior can change while
 the product is being developed. Use it for local evaluation and supervised
 workflows, not as a production-critical or unattended multi-user service.
@@ -46,6 +46,82 @@ permission models, and output formats. Unified Harness adds a common layer for:
 This separation matters: an approval shown by Unified Harness covers actions it
 owns, such as spawning a run or applying a captured patch. It cannot claim to
 observe every internal action performed by a black-box external CLI.
+
+## Native CLI prefix contract
+
+The native compatibility rule is literal: add exactly `giga` before the
+provider command. Harness does not invent one shared execution grammar.
+
+```sh
+giga codex exec --json "inspect this repository"
+giga claude -p "inspect this repository"
+giga gemini -p "inspect this repository"
+```
+
+After the provider token, argv is opaque. Provider-scoped `--help` and
+`--version`, stdin, stdout/stderr placement, raw bytes, JSON/JSONL, `--`,
+signals, and exit status stay native. Unknown commands and flags therefore keep
+working without waiting for a Harness parser update.
+
+| Situation | Example | Result |
+| --- | --- | --- |
+| Human TTY | `giga codex` | Admitted Workbench L2, or a visible provider-owned L1 handoff on drift. |
+| Pipe/stdin | `printf 'task' \| giga claude -p -` | Native L0 descriptors and bytes. |
+| Redirect | `giga gemini -p task >result.txt` | Provider stdout is written directly. |
+| JSON | `giga codex exec --json task` | Provider JSON/JSONL remains unchanged. |
+| CI | `CI=1 giga gemini -p task` | Prompt-free native L0 execution. |
+| Resume | `giga codex resume --last` | Exact provider selector; admitted L2 or visible L1. |
+| Structured drift | version outside the reviewed window | Only L2 degrades; valid L0 commands remain available. |
+| Missing runtime | `giga claude --version` without Claude | Actionable startup failure before provider side effects. |
+
+Inspect the local truth with `giga doctor --json`. Each native provider entry
+reports the executable and source, version evidence, L0/L1/L2 state, structured
+transport, fallback, degradation reason, and remediation. The report is
+content-free and does not retain provider argv, prompts, or output.
+
+### Shell completion
+
+Generate completion for the stable Harness boundary and source it according to
+your shell's normal startup conventions:
+
+```sh
+giga completion bash
+giga completion zsh
+giga completion fish
+giga completion powershell
+```
+
+The scripts intentionally do not mirror upstream provider parsers. Once
+`codex`, `claude`, or `gemini` is selected, the suffix and `--` remain untouched
+and the shell's default completion applies.
+
+### Install, migrate, and roll back
+
+The standard wheel/sdist contains the TUI and native facade but no provider
+binary, Node.js runtime, credentials, or provider configuration. Both `uv tool`
+and `pipx` create an isolated Harness environment:
+
+```sh
+uv tool install 'gpt2giga-harness==0.4.0a1'
+pipx install 'gpt2giga-harness==0.4.0a1'
+```
+
+Upgrade an existing optional-TUI prerelease in place; do not retain or add a
+`[tui]` extra. Before an upgrade, back up user-owned Harness state. Rollback is
+an exact package reinstall plus restoration of a verified pre-upgrade state
+archive when a state migration occurred:
+
+```sh
+giga state backup /safe/path/harness-before-upgrade.zip
+uv tool install --force 'gpt2giga-harness==0.4.0a1'
+uv tool install --force 'gpt2giga-harness==<previous-version>'
+uv tool uninstall gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
+```
+
+Uninstalling the package does not delete `~/.gpt2giga/harness`, project
+`.giga/`, or native provider homes. Harness never reverse-migrates provider
+configuration or installs/authenticates a provider runtime.
 
 ## Is the prerelease preview for you?
 
@@ -96,17 +172,17 @@ If the standalone preview is available in your package index, the shorter
 install path is:
 
 ```bash
-uv tool install --prerelease allow gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
 giga doctor
 ```
 
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```bash
-uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.4.0a1'
 ```
 
-The current `gpt2giga-harness==0.3.0a1` distribution provides the `giga` and
+The current `gpt2giga-harness==0.4.0a1` distribution provides the `giga` and
 `gpt2giga-harness` commands; its explicit `gpt2giga` extra pins
 `gpt2giga==0.2.4a1`.
 
@@ -120,11 +196,11 @@ stay disabled rather than breaking the cockpit.
 
 #### Base install and optional providers
 
-The provider-neutral base distribution has eight reviewed direct runtime
-dependencies. Release CI installs the Harness wheel in clean Python 3.10 and
-3.14 environments and runs a versioned audit that fails if the resolved
-environment exceeds 64 distributions or includes packages from these optional
-integration families:
+The provider-neutral base distribution has nine reviewed direct runtime
+dependencies. Release CI installs the Harness wheel on Python 3.10–3.14 across
+Linux, macOS, and Windows, runs terminal-command smoke, and runs a versioned
+audit that fails if the resolved environment exceeds 64 distributions or
+includes packages from these optional integration families:
 
 - the `gpt2giga`/GigaChat provider preset;
 - Office document readers and writers;
@@ -150,6 +226,36 @@ python -I -m gpt2giga_harness.base_install --json
 The source-checkout `uv sync --all-packages --all-extras --dev` command installs
 development tooling and repository integration fixtures, so it is not a base
 footprint measurement.
+
+#### Terminal TUI and automation cutover
+
+The standard install includes the canonical terminal workbench. Bare `giga` and
+the compatibility alias `giga tui` open it on a supported interactive terminal.
+Human `giga chat`, `giga run --agent`, and `giga session list|show|create|turn`
+deep-link into the same TUI while preserving the explicit workspace, session,
+Harness, model, mode, transport, and prompt intent.
+
+Use the non-interactive CLI for scripts and administration. `--non-interactive`,
+`--json`, `--dry-run`, redirected streams, pipes, CI, help/version, admin
+commands, and session event/approval inspection do not initialize Textual,
+prompt, or emit terminal-control sequences. `giga open ...` remains an explicit
+external handoff. An explicitly requested TUI fails before import under
+`TERM=dumb` or an unsupported terminal; a redirected human command keeps its
+established CLI schema, bytes, exit code, and stdout/stderr discipline.
+
+To migrate from the optional-TUI prerelease, upgrade the standard package and
+remove `[tui]` from install commands:
+
+```bash
+uv tool install --force 'gpt2giga-harness==0.4.0a1'
+giga --version
+giga
+```
+
+Rollback installs the exact previously reviewed version with `uv tool install
+--force 'gpt2giga-harness==<previous-version>'`. `uv tool uninstall
+gpt2giga-harness` removes the package and commands but does not delete the
+user-owned Harness runtime data.
 
 ### 2. Initialize a disposable or test project
 
@@ -1047,6 +1153,34 @@ failure rolls back owned, verified children in reverse order or records exact
 repair actions for `group-recover`. Status exposes verification and
 repair-required state; rollback refuses unowned or drifted files.
 
+Portable Extension Packs bind one reviewed Skill and one reviewed MCP catalog
+entry to an exact pack id and semantic version. Preview builds a content-free
+compatibility matrix for Codex, Claude, Gemini, and Harness-managed targets,
+excludes incompatible providers explicitly, and compiles every supported child
+into one recoverable group plan:
+
+```bash
+giga integration pack-preview \
+  --pack-id workspace.extension-pack \
+  --pack-version 1.0.0 \
+  --skill-catalog-id <skill-catalog-id> \
+  --mcp-catalog-id <mcp-catalog-id> \
+  --scope managed_home \
+  --json
+giga integration group-apply <group-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --allow-network \
+  --ack-native-consent \
+  --json
+```
+
+The plan binds immutable package integrity, exact MCP configuration,
+permissions, native consent, included targets, and all child plan ids. Apply
+cannot widen that set. Recovery and rollback use the same grouped lifecycle.
+Cockpit exposes the flow as **Portable Extension Pack** with the compatibility
+matrix visible before approval.
+
 The same inventory and lifecycle are available through `GET /api/integrations`,
 `POST /api/integrations/preview`, the `/api/integrations/flows/{flow_id}`
 apply/rollback routes, and the corresponding `/api/integrations/groups` routes.
@@ -1181,13 +1315,54 @@ deep link to `Evaluate`; project-wide specs, matrices, trends, flakes, baselines
 and run controls live in the top-level Eval Lab. Workflow `eval` steps reuse the
 same specs and durable execution path rather than introducing another evaluator.
 
+### Git and GitHub environments
+
+For a session with a Git workspace, Workbench and TUI show a bounded environment
+snapshot containing the worktree identity, branch and HEAD, staged, unstaged,
+and untracked counts, upstream/base/ahead readiness, and credential-free hosted
+repository hint. With an authenticated `gh` executable, Harness can enrich that
+snapshot with read-only GitHub pull-request, linked issue, checks, and recent
+Actions status for the exact repository. Diff contents, remote credentials, and
+raw command output are not included.
+
+Workbench can create one exact staged commit, perform one non-force push, and
+create one GitHub pull request. Every mutation is two phase:
+
+1. preview and persist the exact HEAD/diff or local/remote-bound operation;
+2. approve that exact action in the Inbox;
+3. apply the same preview after state is revalidated.
+
+Commit hooks are not executed. Push hooks are disabled, force push and
+`pushurl` overrides are rejected, and a new upstream is configured only when it
+was part of the preview. Pull-request creation requires the source branch to be
+attached and already present at the reviewed remote head. Changed local or
+remote state, detached HEAD, repository mismatch, stale approval, unsupported
+hosted state, and ambiguous network failure all fail closed or reconcile to
+content-free evidence. The TUI exposes the same operations through `/commit`,
+`/push`, and `/pr`; neither UI stages files, merges a pull request, or bypasses
+branch protection.
+
+The authenticated API surface is:
+
+```text
+GET  /api/environment?session_id=...
+POST /api/environment/commit/preview
+POST /api/environment/commit/apply
+POST /api/environment/push/preview
+POST /api/environment/push/apply
+POST /api/environment/pull-request/preview
+POST /api/environment/pull-request/apply
+```
+
 ### PR Artifacts
 
 Every completed run gets a local PR artifact in `run.metadata.pr_artifact`. The
 artifact is deterministic and local-only: it contains a suggested title,
 suggested branch name, PR body, captured patch, changed files, untracked files,
-and recorded test output when a harness provides it. No hosted GitHub or GitLab
-write is attempted by this milestone.
+and recorded test output when a harness provides it. Producing or inspecting
+this artifact does not perform a hosted write. A later GitHub push or pull
+request is a separate environment action with its own immutable preview and
+approval as described above; GitLab writes are not supported.
 
 Inspect artifacts from the CLI:
 
@@ -1841,6 +2016,7 @@ The API surface is:
 POST /api/arena/runs
 GET  /api/arena/runs/{arena_id}
 GET  /api/arena/runs/{arena_id}/events/stream
+POST /api/arena/runs/{arena_id}/verdict
 ```
 
 Arena parent records live under:
@@ -1853,6 +2029,15 @@ Each child is still a regular `HarnessRun`, with raw request/response records,
 messages, events, attachment metadata, and worktree metadata where applicable.
 Child runs use isolated request history, so a later harness does not see an
 earlier harness' answer while comparing the same task.
+
+After every child reaches a terminal state, Cockpit can assign a score from 0
+to 1 to each candidate and select one succeeded winner. **Record verdict**
+binds the complete score set and selected run to the exact candidate evidence
+hash. Repeating the same request is idempotent, but a changed candidate set is
+rejected and a recorded verdict is immutable: further turns or retries require
+a new Arena comparison. The selected run receives links to its retained
+evidence and configuration-promotion preview; Harness never applies a patch or
+promotes it automatically.
 
 ## Worktree-Safe Edit Flow
 
@@ -2450,7 +2635,7 @@ Remove the old combined wheel before installing the split packages so stale
 
 ```bash
 python -m pip uninstall -y gpt2giga gpt2giga-harness
-python -m pip install --pre gpt2giga-harness
+python -m pip install 'gpt2giga-harness==0.4.0a1'
 ```
 
 For `uv` tool installations, recreate both tool environments:
@@ -2459,10 +2644,10 @@ For `uv` tool installations, recreate both tool environments:
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
 uv tool install --prerelease allow gpt2giga
-uv tool install --prerelease allow gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
 ```
 
-The current `gpt2giga-harness==0.3.0a1` metadata keeps
+The current `gpt2giga-harness==0.4.0a1` metadata keeps
 `gpt2giga==0.2.4a1` in the explicit `gpt2giga` optional extra.
 
 This package migration does not move or rewrite Harness state. Existing

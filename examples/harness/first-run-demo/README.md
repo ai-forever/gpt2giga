@@ -15,6 +15,9 @@ export GPT2GIGA_HARNESS_DATA_DIR="$PWD/.local/harness"
 
 giga init --name harness-first-run-demo
 giga doctor .
+# On a supported interactive terminal, this opens the built-in TUI:
+giga
+# The demo below is intentionally machine-readable and never opens Textual:
 giga harness run echo \
   --no-start-proxy \
   --workspace . \
@@ -33,6 +36,12 @@ report `"status": "passed"`, with two passing cases and no failed cases.
 `giga doctor .` may report degraded optional proxy or external-CLI capabilities;
 each such check includes its remediation, while the local Echo path remains
 available.
+
+Human `giga chat`, `giga run --agent`, and selected `giga session` commands now
+deep-link into the same built-in TUI when all standard streams are attached to
+a supported terminal. Add `--non-interactive`, `--json`, or `--dry-run` for
+scripts, or use redirects/pipes/CI; those routes preserve the automation CLI
+and do not initialize Textual.
 
 What the setup changes:
 

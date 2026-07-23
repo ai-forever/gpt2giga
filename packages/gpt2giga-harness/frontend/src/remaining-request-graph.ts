@@ -110,6 +110,7 @@ export interface IntegrationGroupSummary {
   component: string;
   source: string;
   catalog_id: string;
+  catalog_ids?: { skill: string; mcp: string };
   package_id: string;
   package_version: string;
   target_mode: "all_supported";
@@ -178,6 +179,7 @@ export interface IntegrationFlowMutationResponse {
 
 export interface IntegrationGroupPlan {
   plan_id: string;
+  package: { id: string; version: string; manifest_sha256: string };
   component: string;
   target_mode: "all_supported";
   target_ids: string[];
@@ -191,6 +193,26 @@ export interface IntegrationGroupPlan {
     restart_required: boolean;
     verification_steps: string[];
     rollback_steps: string[];
+  }>;
+  catalog_ids?: { skill: string; mcp: string };
+  compatibility?: Array<{
+    target: "codex" | "claude" | "gemini" | "harness";
+    status: "supported" | "unsupported" | "unknown";
+    included: boolean;
+    components: {
+      skill: {
+        status: "supported" | "unsupported" | "unknown" | "not_applicable";
+        target_id: string | null;
+        reason_code: string | null;
+        content_free: true;
+      };
+      mcp: {
+        status: "supported" | "unsupported" | "unknown";
+        target_id: string;
+        reason_code: string | null;
+        content_free: true;
+      };
+    };
   }>;
   atomicity: "recoverable_compensating_transaction";
 }

@@ -146,6 +146,34 @@ def test_group_api_keeps_all_target_preview_apply_recovery_and_rollback_equivale
     assert rolled_back.json()["group"]["status"] == "rolled_back"
 
 
+def test_extension_pack_api_rejects_unreviewed_fields_without_echoing_content(
+    tmp_path,
+):
+    client = TestClient(
+        create_app(
+            HarnessConfig(data_dir=str(tmp_path / "data")),
+            registry=create_default_registry(include_entry_points=False),
+        )
+    )
+
+    response = client.post(
+        "/api/integrations/groups/preview",
+        json={
+            "component": "extension_pack",
+            "pack_id": "INVALID secret-value-canary",
+            "pack_version": "1.0.0",
+            "skill_catalog_id": "skill-pin",
+            "mcp_catalog_id": "mcp-pin",
+            "scope": "managed_home",
+            "mcp_configuration": {},
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "extension pack id is invalid"
+    assert "secret-value-canary" not in response.text
+
+
 def _supported_skill(target_id: str) -> SkillCapabilitySnapshot:
     return SkillCapabilitySnapshot(
         target_id=target_id,

@@ -159,6 +159,26 @@ def test_filesystem_store_lists_newest_first_and_archive_filter(tmp_path):
     ]
 
 
+def test_filesystem_store_session_revision_mutations_fail_closed(tmp_path):
+    store = FilesystemHarnessSessionStore(tmp_path)
+    session = store.create_session(title="bound")
+
+    assert (
+        store.update_session_if_revision(session.id, "stale-revision", title="lost")
+        is None
+    )
+    updated = store.update_session_if_revision(
+        session.id, session.updated_at, title="accepted"
+    )
+    assert updated is not None
+    assert updated.title == "accepted"
+    assert store.delete_session_if_revision(session.id, session.updated_at) is False
+    assert store.delete_session_if_revision(session.id, updated.updated_at) is True
+    assert session.id not in {
+        item.id for item in store.list_sessions(include_archived=True)
+    }
+
+
 def test_filesystem_store_filters_by_project_id_without_hiding_legacy(tmp_path):
     store = FilesystemHarnessSessionStore(tmp_path)
     first = store.create_session(

@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 
 import { fetchCockpit, mutateCockpit } from "../api";
 import { LoadingRows, StatusBadge } from "../components/OperationalSurface";
+import {
+  extensionPackCatalogOptions,
+  includedExtensionPackTargets,
+  parseExtensionPackConfiguration,
+} from "../extension-pack-model";
 import { message } from "../messages";
 import {
   buildPluginLibrary,
@@ -57,6 +62,7 @@ export function IntegrationsSurface() {
   const [harnessFilter, setHarnessFilter] = useState<"all" | "codex" | "claude" | "gemini" | "harness">("all");
   const [remoteSearch, setRemoteSearch] = useState("");
   const [addItem, setAddItem] = useState<PluginLibraryItem | null | true>(null);
+  const [packOpen, setPackOpen] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(() => setRemoteSearch(search.trim()), 350);
     return () => window.clearTimeout(timer);
@@ -101,9 +107,14 @@ export function IntegrationsSurface() {
           <h1>{message(locale, "plugins")}</h1>
           <p>{message(locale, "pluginLibraryDescription")}</p>
         </div>
-        <button className="primary-button plugin-add-button" onClick={() => setAddItem(true)} type="button">
-          + {addLabel(locale, category)}
-        </button>
+        <div className="plugin-header-actions">
+          <button onClick={() => setPackOpen(true)} type="button">
+            {locale === "ru" ? "Собрать pack" : "Build pack"}
+          </button>
+          <button className="primary-button plugin-add-button" onClick={() => setAddItem(true)} type="button">
+            + {addLabel(locale, category)}
+          </button>
+        </div>
       </header>
       <div className="plugin-library-layout">
         <section className="plugin-library-browser">
@@ -218,6 +229,12 @@ export function IntegrationsSurface() {
           inventory={integrationQuery.data}
           onClose={() => setAddItem(null)}
           seed={addItem === true ? null : addItem}
+        />
+      ) : null}
+      {packOpen && integrationQuery.data ? (
+        <ExtensionPackDrawer
+          inventory={integrationQuery.data}
+          onClose={() => setPackOpen(false)}
         />
       ) : null}
     </div>
@@ -612,6 +629,159 @@ function PluginConnectionPanel({
       ) : null}
       {groupPreview.isError ? <p className="mutation-error" role="alert">{groupPreview.error.message}</p> : null}
       {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
+    </div>
+  );
+}
+
+function ExtensionPackDrawer({
+  inventory,
+  onClose,
+}: {
+  inventory: IntegrationFlowInventory;
+  onClose: () => void;
+}) {
+  const { preferences } = usePreferences();
+  const locale = preferences.locale;
+  const queryClient = useQueryClient();
+  const { skills: skillEntries, mcp: mcpEntries } = extensionPackCatalogOptions(inventory);
+  const [packId, setPackId] = useState("workspace.extension-pack");
+  const [packVersion, setPackVersion] = useState("1.0.0");
+  const [skillCatalogId, setSkillCatalogId] = useState(skillEntries[0]?.catalog_id ?? "");
+  const [mcpCatalogId, setMcpCatalogId] = useState(mcpEntries[0]?.catalog_id ?? "");
+  const [scope, setScope] = useState<"managed_home" | "project">("managed_home");
+  const [workspace, setWorkspace] = useState("");
+  const [mcpConfiguration, setMcpConfiguration] = useState('{"selection":{"kind":"remote"}}');
+  const [allowNetwork, setAllowNetwork] = useState(false);
+  const [nativeConsent, setNativeConsent] = useState(false);
+  const preview = useMutation({
+    mutationFn: () => {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = parseExtensionPackConfiguration(mcpConfiguration);
+      } catch {
+        throw new Error(locale === "ru" ? "Некорректный JSON конфигурации MCP" : "MCP configuration JSON is invalid");
+      }
+      return mutateCockpit<IntegrationGroupPreviewResponse>("/api/integrations/groups/preview", {
+        component: "extension_pack",
+        pack_id: packId,
+        pack_version: packVersion,
+        skill_catalog_id: skillCatalogId,
+        mcp_catalog_id: mcpCatalogId,
+        scope,
+        workspace: scope === "project" ? workspace : undefined,
+        target_mode: "all_supported",
+        mcp_configuration: parsed,
+      });
+    },
+  });
+  const apply = useMutation({
+    mutationFn: () => {
+      if (!preview.data) throw new Error("Preview the extension pack first");
+      return mutateCockpit<IntegrationGroupMutationResponse>(
+        `/api/integrations/groups/${encodeURIComponent(preview.data.group.id)}/apply`,
+        {
+          plan_id: preview.data.plan.plan_id,
+          authority: "cockpit-operator",
+          allow_network: allowNetwork,
+          native_consent_acknowledged: nativeConsent,
+        },
+      );
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: remainingRequestKeys.integrationFlows() });
+    },
+  });
+  const rollback = useMutation({
+    mutationFn: () => {
+      const groupId = apply.data?.group.id;
+      if (!groupId) throw new Error("No verified extension pack is available");
+      return mutateCockpit<IntegrationGroupMutationResponse>(
+        `/api/integrations/groups/${encodeURIComponent(groupId)}/rollback`,
+        {},
+      );
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: remainingRequestKeys.integrationFlows() });
+    },
+  });
+  const compatible = preview.data?.plan.compatibility ?? [];
+  const includedTargets = preview.data ? includedExtensionPackTargets(preview.data.plan) : [];
+  const canPreview = Boolean(
+    packId && packVersion && skillCatalogId && mcpCatalogId
+      && (scope === "managed_home" || workspace.trim()),
+  );
+
+  return (
+    <div className="plugin-add-backdrop" onMouseDown={onClose} role="presentation">
+      <section aria-label={locale === "ru" ? "Portable Extension Pack" : "Portable Extension Pack"} aria-modal="true" className="plugin-add-drawer extension-pack-drawer" onMouseDown={(event) => event.stopPropagation()} role="dialog">
+        <header>
+          <div><span className="section-kicker">N7 workflow</span><h2>Portable Extension Pack</h2></div>
+          <button aria-label={message(locale, "closeDetails")} onClick={onClose} type="button"><CloseIcon /></button>
+        </header>
+        <p className="extension-pack-intro">
+          {locale === "ru"
+            ? "Определите Skill и MCP один раз. Workbench покажет совместимость и создаст одну компенсируемую установку для всех поддерживаемых целей."
+            : "Define one Skill and MCP once. Workbench shows compatibility and creates one compensating installation for every supported target."}
+        </p>
+        {skillEntries.length === 0 || mcpEntries.length === 0 ? (
+          <p className="mutation-error" role="alert">
+            {locale === "ru" ? "Нужны reviewed Skill и MCP в локальном каталоге." : "A reviewed Skill and MCP are required in the local catalog."}
+          </p>
+        ) : null}
+        <div className="wizard-fields">
+          <label className="field-control">Pack ID<input onChange={(event) => { setPackId(event.target.value); preview.reset(); }} value={packId} /></label>
+          <label className="field-control">{message(locale, "version")}<input onChange={(event) => { setPackVersion(event.target.value); preview.reset(); }} value={packVersion} /></label>
+        </div>
+        <label className="field-control">Skill
+          <select onChange={(event) => { setSkillCatalogId(event.target.value); preview.reset(); }} value={skillCatalogId}>
+            {skillEntries.map((item) => <option key={item.catalog_id} value={item.catalog_id}>{item.package_id} · {item.version}</option>)}
+          </select>
+        </label>
+        <label className="field-control">MCP
+          <select onChange={(event) => { setMcpCatalogId(event.target.value); preview.reset(); }} value={mcpCatalogId}>
+            {mcpEntries.map((item) => <option key={item.catalog_id} value={item.catalog_id}>{item.package_id} · {item.version}</option>)}
+          </select>
+        </label>
+        <div className="wizard-fields">
+          <label className="field-control">{message(locale, "scope")}
+            <select onChange={(event) => { setScope(event.target.value as typeof scope); preview.reset(); }} value={scope}>
+              <option value="managed_home">managed_home</option><option value="project">project</option>
+            </select>
+          </label>
+          {scope === "project" ? <label className="field-control">Workspace<input onChange={(event) => { setWorkspace(event.target.value); preview.reset(); }} value={workspace} /></label> : <span />}
+        </div>
+        <label className="field-control">MCP configuration JSON
+          <textarea onChange={(event) => { setMcpConfiguration(event.target.value); preview.reset(); }} rows={5} spellCheck={false} value={mcpConfiguration} />
+        </label>
+        <button disabled={!canPreview || preview.isPending || skillEntries.length === 0 || mcpEntries.length === 0} onClick={() => preview.mutate()} type="button">
+          {locale === "ru" ? "Проверить совместимость" : "Preview compatibility"}
+        </button>
+        {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
+        {preview.data ? (
+          <section className="integration-preview extension-pack-preview">
+            <div className="integration-preview-heading"><h2>{preview.data.plan.package.id}</h2><StatusBadge status={preview.data.plan.aggregate_risk} /></div>
+            <div className="extension-pack-matrix" role="table" aria-label={message(locale, "compatibility")}>
+              {compatible.map((item) => (
+                <div className={`extension-pack-row ${item.status}`} key={item.target} role="row">
+                  <strong role="cell">{targetLabel(item.target)}</strong>
+                  <span role="cell">Skill: {item.components.skill.status}</span>
+                  <span role="cell">MCP: {item.components.mcp.status}</span>
+                  <b role="cell">{item.included ? (locale === "ru" ? "включено" : "included") : (locale === "ru" ? "исключено" : "excluded")}</b>
+                </div>
+              ))}
+            </div>
+            <p className="extension-pack-summary">{includedTargets.length} {locale === "ru" ? "целей" : "targets"} · {preview.data.plan.children.length} {locale === "ru" ? "проекций · одна компенсируемая транзакция" : "projections · one compensating transaction"}</p>
+            {preview.data.plan.permissions.network ? <label className="check-control"><input checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} type="checkbox" />{message(locale, "allowNetwork")}</label> : null}
+            {preview.data.plan.permissions.native_consent ? <label className="check-control"><input checked={nativeConsent} onChange={(event) => setNativeConsent(event.target.checked)} type="checkbox" />{message(locale, "nativeConsent")}</label> : null}
+            <button className="primary-button" disabled={apply.isPending} onClick={() => apply.mutate()} type="button">{locale === "ru" ? "Одобрить и установить pack" : "Approve and install pack"}</button>
+            {apply.data ? <p className="mutation-success" role="status">{statusLabel(locale, apply.data.group.status)}</p> : null}
+            {apply.data?.group.rollback_available ? <button disabled={rollback.isPending} onClick={() => rollback.mutate()} type="button">{message(locale, "rollback")}</button> : null}
+            {apply.isError ? <p className="mutation-error" role="alert">{apply.error.message}</p> : null}
+            {rollback.data ? <p className="mutation-success" role="status">{statusLabel(locale, rollback.data.group.status)}</p> : null}
+            {rollback.isError ? <p className="mutation-error" role="alert">{rollback.error.message}</p> : null}
+          </section>
+        ) : null}
+      </section>
     </div>
   );
 }

@@ -5,7 +5,7 @@ distribution provides the `giga` and `gpt2giga-harness` commands, the
 `gpt2giga_harness` Python namespace, a durable local worker, and the packaged
 Project Cockpit web UI.
 
-> **Alpha preview:** the `0.3.x` storage, API, adapter, and automation contracts
+> **Alpha preview:** the `0.4.x` storage, API, adapter, and automation contracts
 > are stabilizing but may still change between prereleases. Use supervised local
 > workflows first. The package metadata in the current checkout is the source of
 > truth for the supported gateway requirement.
@@ -15,17 +15,99 @@ Project Cockpit web UI.
 Install the published prerelease from your package index:
 
 ```sh
-uv tool install --prerelease allow gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
 giga doctor
 giga --version
+giga
 giga ui
 ```
 
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```sh
-uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.4.0a1'
 ```
+
+The standard install includes the terminal workbench. Start it from the project
+you want to manage:
+
+```sh
+giga
+```
+
+The default TUI mode composes the existing Harness application in-process: it
+does not open a browser or start FastAPI/uvicorn. It provides keyboard-first
+project and session navigation, session creation/resume, and an explicit
+provider/Harness/model/transport readiness panel. Use `giga --attach
+http://127.0.0.1:8091` only when an existing Harness UI/worker already owns the
+runtime. Attach mode uses the same cookie/bootstrap-authenticated REST contracts
+as Cockpit and never falls back silently to in-process mode. English and Russian
+presentation catalogs are available through `--locale en|ru`.
+
+Bare `giga` is the canonical TUI entry point; `giga tui` remains a compatibility
+alias but is not a separate product surface. Root `--help`, `--version`, and TUI
+options are owned by the same low-overhead TUI entry point without importing
+Textual for metadata-only requests. On a supported interactive terminal, `chat`,
+`run --agent`, and `session list|show|create|turn` deep-link into that same TUI
+with their workspace, session, Harness, model, mode, transport, and prompt intent
+preserved. There is no parallel transcript renderer.
+
+| Command shape | Owner |
+| --- | --- |
+| bare `giga`, `giga tui`, human `chat`, `run --agent`, and selected `session` actions | built-in TUI |
+| `--non-interactive`, `--json`, `--dry-run`, redirects, pipes, CI, admin commands, and session event/approval inspection | non-interactive CLI |
+| `giga open ...` | explicit external handoff |
+
+Machine routes never initialize Textual, prompt, or emit terminal control
+sequences. `TERM=dumb` and unsupported terminals fail closed for an explicitly
+requested TUI; redirected human commands retain their established CLI bytes,
+schemas, exit codes, and stdout/stderr behavior.
+
+## Prefix native agent commands
+
+Add exactly `giga` before a Codex CLI, Claude Code, or Gemini CLI command:
+
+```sh
+giga codex exec --json "inspect this repository"
+giga claude -p "inspect this repository"
+giga gemini -p "inspect this repository"
+```
+
+There is no common `exec` verb: everything after `codex`, `claude`, or `gemini`
+remains provider-owned. This includes `--help`, `--version`, stdin, stdout,
+stderr, JSON/JSONL, `--`, signals, and exit status. On an admitted human TTY,
+known session workflows may open the canonical Workbench; structured-version
+drift degrades visibly to a provider-owned terminal handoff and never disables
+otherwise valid native passthrough.
+
+Generate conservative root completion without copying upstream parsers:
+
+```sh
+giga completion bash
+giga completion zsh
+giga completion fish
+giga completion powershell
+```
+
+The generated scripts complete only the stable Harness boundary. Provider
+suffixes, including unknown future flags and `--`, are left to the provider and
+the shell's default completion behavior. `giga doctor --json` reports each
+runtime's executable, version, L0/L1/L2 state, structured transport,
+degradation, and remediation without storing prompts or provider output.
+
+If you installed the earlier optional-TUI prerelease, upgrade the existing tool;
+do not keep or add a `[tui]` extra:
+
+```sh
+uv tool install --force 'gpt2giga-harness==0.4.0a1'
+giga --version
+giga
+```
+
+Rollback uses the exact previously reviewed version, for example `uv tool
+install --force 'gpt2giga-harness==<previous-version>'`. Remove the preview with
+`uv tool uninstall gpt2giga-harness`; runtime state remains under the user-owned
+Harness data directory and is not deleted by package uninstall.
 
 For development or when the prerelease is not yet mirrored by your package
 index, run it from a source checkout:
@@ -42,18 +124,19 @@ giga ui
 Keep that environment active when you `cd` to the project you want to manage.
 On Windows PowerShell, activate `.venv\Scripts\Activate.ps1` instead.
 
-The current `gpt2giga-harness==0.3.0a1` metadata keeps
+The current `gpt2giga-harness==0.4.0a1` metadata keeps
 `gpt2giga==0.2.4a1` in the `gpt2giga` optional extra. Installing only
 `gpt2giga` never adds Harness commands or the `gpt2giga_harness` namespace.
 
-The provider-neutral base Harness install is intentionally limited to eight
+The provider-neutral base Harness install is intentionally limited to nine
 reviewed direct runtime distributions. A clean installed-artifact audit fails
 if the resolved environment grows beyond 64 distributions or pulls in the
 `gpt2giga`/GigaChat provider preset, Office document libraries, remote-channel
 SDKs, external client frameworks, or sandbox-provider SDKs. Those capabilities
 must arrive through an explicit extra, separately installed provider, or
 Harness plugin; they are not silently enabled by the base package. Release CI
-runs the same audit on clean Python 3.10 and 3.14 environments:
+runs the audit plus installed terminal-command smoke on clean Python 3.10–3.14
+environments across Linux, macOS, and Windows:
 
 ```sh
 python -I -m gpt2giga_harness.base_install --json
@@ -155,6 +238,36 @@ giga session list
 giga native list
 giga worker status
 ```
+
+## Review Git and GitHub changes
+
+For a session backed by a Git workspace, TUI and Cockpit show a bounded
+environment snapshot: worktree identity, branch and HEAD, staged, unstaged, and
+untracked counts, upstream readiness, and optional read-only GitHub pull-request
+and checks/runs status. The snapshot never includes diff contents, remote
+credentials, or raw `git`/`gh` output.
+
+Workbench can create one exact staged commit, perform one non-force push, and
+create one GitHub pull request. Each mutation is two phase: first review the
+HEAD/diff or local/remote-bound preview, then approve that exact action in the
+Inbox and apply it. A changed checkout, moved remote, detached HEAD, repository
+mismatch, stale approval, or unsupported hosted state fails closed. The TUI
+exposes the same flows through `/commit`, `/push`, and `/pr`; it does not stage
+files, force-push, merge, or bypass provider-owned branch protection.
+
+Git inspection and local commits require `git`. Read-only GitHub enrichment and
+pull-request creation require an authenticated `gh` executable for the exact
+repository derived from the configured remote. Authentication and permission
+failures are projected as content-free reason codes.
+
+## Review Arena candidates
+
+After all Arena candidates finish, Cockpit can score each result from 0 to 1 and
+select one succeeded candidate. **Record verdict** binds those scores and the
+winner to the exact candidate evidence-set hash. The verdict is immutable:
+follow-up, retry, or changed evidence requires a new comparison. Harness exposes
+promotion links for the selected run, but never applies its patch or promotes
+configuration automatically.
 
 ## Provider-neutral routes
 
@@ -338,6 +451,32 @@ a new immutable pin, preview, and approval. Federated discovery never implies
 Plugin installation or network authority; Plugin execution requires an exact
 reviewed manifest, and real user homes are never the default mutation scope.
 
+Portable Extension Packs combine one reviewed Skill and one reviewed MCP catalog
+entry under an exact pack id/version. Preview computes a per-provider
+compatibility matrix and expands only supported Codex, Claude, Gemini, and
+Harness-managed targets into one recoverable compensating transaction:
+
+```sh
+giga integration pack-preview \
+  --pack-id workspace.extension-pack \
+  --pack-version 1.0.0 \
+  --skill-catalog-id <skill-catalog-id> \
+  --mcp-catalog-id <mcp-catalog-id> \
+  --scope managed_home \
+  --json
+giga integration group-apply <group-id> \
+  --plan-id <plan-id> \
+  --authority <operator> \
+  --allow-network \
+  --ack-native-consent \
+  --json
+```
+
+An incompatible provider is reported and excluded, never silently coerced.
+Apply remains bound to the previewed children, permissions, immutable package
+integrity, and exact MCP configuration; recovery and rollback use the normal
+group lifecycle.
+
 The equivalent API begins at `GET /api/integrations`, with single-target flows
 under `/api/integrations/flows` and grouped flows under
 `/api/integrations/groups`.
@@ -413,7 +552,7 @@ migration:
 ```sh
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install --prerelease allow gpt2giga-harness
+uv tool install 'gpt2giga-harness==0.4.0a1'
 giga doctor
 ```
 

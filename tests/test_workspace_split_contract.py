@@ -132,6 +132,7 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
     }
     entry_point_groups = harness_metadata["entry-points"]
     assert set(entry_point_groups) == {
+        "agent_workbench.environment_providers.v1",
         "agent_workbench.harness_adapters.v1",
         "agent_workbench.provider_adapters.v1",
         "gpt2giga.harnesses",
@@ -162,6 +163,9 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
         target.startswith("gpt2giga_harness.provider_profiles:")
         for target in provider_entry_points.values()
     )
+    assert entry_point_groups["agent_workbench.environment_providers.v1"] == {
+        "git": "gpt2giga_harness.environments:git_environment_provider_plugin"
+    }
 
     gateway_source = GATEWAY_MEMBER / "src/gpt2giga"
     harness_source = HARNESS_MEMBER / "src/gpt2giga_harness"
@@ -189,7 +193,7 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert "package: [gateway, harness]" in workflow
     assert "- '!packages/**/*.md'" in workflow
     assert 'python-version: ["3.10", "3.13", "3.14"]' in workflow
-    assert 'python-version: ["3.10", "3.14"]' in workflow
+    assert 'python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]' in workflow
     assert "uv build --package gpt2giga --wheel --sdist --no-sources" in workflow
     assert (
         "uv build --package gpt2giga-harness --wheel --sdist --no-sources" in workflow
@@ -205,6 +209,7 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert harness_version not in workflow
     assert ".venv-artifact/bin/gpt2giga --help" in workflow
     assert ".venv-artifact/bin/giga --help" in workflow
+    assert ".venv-artifact/bin/giga --version" in workflow
     assert ".venv-artifact/bin/gpt2giga-harness --help" in workflow
     assert "python -I -m gpt2giga_harness.base_install --json" in workflow
     assert (
@@ -271,7 +276,7 @@ def test_release_workflow_routes_and_publishes_both_workspace_members():
     assert (
         "uv build --package gpt2giga-harness --wheel --sdist --no-sources" in workflow
     )
-    assert workflow.count("uses: actions/attest-build-provenance@v3") == 2
+    assert workflow.count("uses: actions/attest-build-provenance@v4") == 2
     assert "subject-path: dist/gpt2giga/*" in workflow
     assert "subject-path: dist/gpt2giga-harness/*" in workflow
     assert workflow.count("\\( -name '*.whl' -o -name '*.tar.gz' \\)") == 2
@@ -307,10 +312,13 @@ def test_split_install_and_namespace_migration_are_documented():
     harness_guide = (REPO_ROOT / "docs/harness.md").read_text(encoding="utf-8")
     root_instructions = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     harness_instructions = (HARNESS_MEMBER / "AGENTS.md").read_text(encoding="utf-8")
+    harness_version = _load_toml(HARNESS_MEMBER / "pyproject.toml")["project"][
+        "version"
+    ]
 
     for guide in (readme, quickstart):
         assert "uv tool install --prerelease allow gpt2giga" in guide
-        assert "uv tool install --prerelease allow gpt2giga-harness" in guide
+        assert f"uv tool install 'gpt2giga-harness=={harness_version}'" in guide
         assert "gpt2giga_harness" in guide
 
     assert "Migration from the Combined Prerelease" in harness_guide

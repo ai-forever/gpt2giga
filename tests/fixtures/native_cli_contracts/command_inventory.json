@@ -1,0 +1,116 @@
+{
+  "schema": "gpt2giga-native-cli-split-contracts-v2",
+  "reviewed_on": "2026-07-21",
+  "content_free": true,
+  "authority": {
+    "execution": false,
+    "install": false,
+    "authentication": false,
+    "update": false,
+    "mutation": false
+  },
+  "providers": {
+    "codex": {
+      "native_namespace": {
+        "executable": "codex",
+        "posix_strategy": "exec_replace",
+        "windows_executable_strategy": "create_process_inherited_console",
+        "windows_shim_strategy": "reviewed_cmd_token_encoder"
+      },
+      "integration": {
+        "harness_id": "codex-cli",
+        "version_window": ["0.144.0", "0.145.0"],
+        "repository": "openai/codex",
+        "release_tag": "rust-v0.144.5",
+        "release_url": "https://github.com/openai/codex/releases/tag/rust-v0.144.5",
+        "commit": "87db9bc18ba5bc82c1cb4e4381b44f693ee35623",
+        "intent_patterns": ["codex.root", "codex.resume", "codex.fork"],
+        "command_classes": ["human_root", "human_resume", "human_fork", "headless", "protocol", "administration", "external_ui", "metadata", "unknown_native"],
+        "output_families": ["terminal", "text", "json", "jsonl", "protocol_bytes", "unknown"],
+        "tty_behavior": "affirmative_human_tty_only",
+        "capability_status": {
+          "approval.decide": "ready",
+          "session.fork.native": "ready",
+          "session.resume.native": "ready",
+          "turn.cancel": "ready",
+          "turn.steer": "ready"
+        },
+        "help_byte_digests": {
+          "version": {"bytes": 14, "sha256": "8aaf15cd3e282d1fcd934ada0f304305a698f022b939ef5f1c9294fc48a6cf46"},
+          "root-help": {"bytes": 24, "sha256": "aa6b30335d32ccf6da79acf502a6de551d32ffbeff2f01037e8de66bb21811c2"},
+          "app-server-help": {"bytes": 30, "sha256": "264e9099f77ace7c43580b337d34670f4f7e0649c48280c0fb55aba53ec336de"}
+        }
+      }
+    },
+    "claude": {
+      "native_namespace": {
+        "executable": "claude",
+        "posix_strategy": "exec_replace",
+        "windows_executable_strategy": "create_process_inherited_console",
+        "windows_shim_strategy": "reviewed_cmd_token_encoder"
+      },
+      "integration": {
+        "harness_id": "claude-code",
+        "version_window": ["2.1.0", "2.2.0"],
+        "repository": "anthropics/claude-code",
+        "release_tag": "v2.1.212",
+        "release_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.212",
+        "commit": "67f390c9a0b1440d369aebe2ff6a5023db35bf8e",
+        "intent_patterns": ["claude.root", "claude.prompt", "claude.continue", "claude.resume", "claude.control"],
+        "command_classes": ["human_root", "human_prompt", "human_resume", "human_control", "headless", "protocol", "administration", "external_ui", "metadata", "unknown_native"],
+        "output_families": ["terminal", "text", "json", "jsonl", "protocol_bytes", "unknown"],
+        "tty_behavior": "headless_flag_precedes_human_selectors",
+        "capability_status": {
+          "session.continue.native": "degraded",
+          "session.resume.native": "degraded",
+          "session.fork.native": "degraded",
+          "approval.provider_owned": "ready",
+          "one_shot.events.decode": "ready",
+          "handoff.remote_control": "degraded"
+        },
+        "help_byte_digests": {
+          "version": {"bytes": 15, "sha256": "e86740780c6343c8f5d57367fff51a48b585b8fb2bc0b78ede981e24fbcf56df"},
+          "root-help": {"bytes": 25, "sha256": "1aa12264f5708a1076a4ab7c21eeb8fb6b61cdf0d5bfba76b3077d80605bc2be"}
+        }
+      }
+    },
+    "gemini": {
+      "native_namespace": {
+        "executable": "gemini",
+        "posix_strategy": "exec_replace",
+        "windows_executable_strategy": "create_process_inherited_console",
+        "windows_shim_strategy": "reviewed_cmd_token_encoder"
+      },
+      "integration": {
+        "harness_id": "gemini-cli",
+        "version_window": ["0.46.0", "0.47.0"],
+        "repository": "google-gemini/gemini-cli",
+        "release_tag": "v0.46.0",
+        "release_url": "https://github.com/google-gemini/gemini-cli/releases/tag/v0.46.0",
+        "commit": "85b0c55c126a4992b51d140e357ae9db5f9c2d7f",
+        "intent_patterns": ["gemini.root", "gemini.prompt", "gemini.interactive", "gemini.resume"],
+        "command_classes": ["human_root", "human_prompt", "human_resume", "headless", "protocol", "administration", "metadata", "unknown_native"],
+        "output_families": ["terminal", "text", "json", "jsonl", "protocol_bytes", "unknown"],
+        "tty_behavior": "non_tty_is_native_headless",
+        "capability_status": {
+          "session.resume.native": "experimental",
+          "approval.decide": "experimental",
+          "structured.events.decode": "ready",
+          "one_shot.events.decode": "ready",
+          "control.approval.set": "degraded",
+          "control.policy.set": "degraded",
+          "control.sandbox.set": "degraded"
+        },
+        "help_byte_digests": {
+          "version": {"bytes": 14, "sha256": "f46fd09b66de81455cc5698e0ca42db1571353d226855efa02d1a9e651933755"},
+          "root-help": {"bytes": 25, "sha256": "2ed84cde397ce222a25310b305b469036793aeb79cf3206c06dfcb407dbb1592"}
+        }
+      }
+    }
+  },
+  "capture": {
+    "source": "hermetic_fixture",
+    "raw_output_retained": false,
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

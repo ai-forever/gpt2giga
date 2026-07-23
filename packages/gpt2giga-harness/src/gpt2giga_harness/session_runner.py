@@ -1410,6 +1410,25 @@ def _continuation_plan(
         )
         link = _mapping(session.metadata.get("app_server_thread"))
         fork = _mapping(session.metadata.get("app_server_fork"))
+        native_operation = str(
+            request.extra.get("native_session_operation") or ""
+        ).strip()
+        if request.native_session_id and not link and not fork:
+            if native_operation == "resume":
+                link = {
+                    "schema_version": 1,
+                    "protocol": "codex-app-server-json-rpc-v2",
+                    "thread_id": request.native_session_id,
+                    "snapshot": execution_snapshot,
+                    "snapshot_hash": execution_snapshot["snapshot_hash"],
+                    "runtime_status": "external",
+                }
+            elif native_operation == "fork":
+                fork = {"thread_id": request.native_session_id}
+            else:
+                raise ValueError(
+                    "Codex native session identity requires resume or fork"
+                )
         if edit_source is not None:
             link = _mapping(edit_source.get("link"))
             fork = (
@@ -1427,7 +1446,15 @@ def _continuation_plan(
                     "Codex app-server continuation changed route, model, workspace, "
                     "permission mode, managed home, or tool snapshot; fork explicitly."
                 )
-        action = "fork" if fork else ("continue" if link else "start")
+        action = (
+            "fork"
+            if fork
+            else "resume"
+            if native_operation == "resume" and link
+            else "continue"
+            if link
+            else "start"
+        )
         return {
             "strategy": HeadlessContinuationStrategy.STRUCTURED_THREAD.value,
             "supported": True,

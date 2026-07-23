@@ -4,12 +4,83 @@ import stat
 from gpt2giga_harness import doctor, proxy
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.doctor import (
+    _native_facade_evidence,
     build_doctor_report,
+    format_doctor_report,
     run_doctor,
     write_doctor_support_report,
 )
 from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
+
+
+def test_native_facade_doctor_evidence_keeps_l0_ready_when_l2_drifts():
+    evidence = _native_facade_evidence(
+        "codex",
+        probe_status="degraded",
+        compatible=False,
+        version="0.145.0",
+        version_status="above_window",
+        executable="/tmp/codex",
+        executable_source="path",
+    )
+
+    assert evidence["levels"] == {
+        "L0": "ready",
+        "L1": "ready",
+        "L2": "degraded",
+    }
+    assert evidence["transport"] == "app-server"
+    assert evidence["degradation"] == "structured_above_window"
+    assert "L0 remains available" in evidence["remediation"]
+
+
+def test_native_facade_doctor_evidence_reports_truthful_claude_l1():
+    evidence = _native_facade_evidence(
+        "claude",
+        probe_status="supported",
+        compatible=True,
+        version="2.1.0",
+        version_status="in_window",
+        executable="/tmp/claude",
+        executable_source="configured",
+    )
+
+    assert evidence["levels"]["L0"] == "ready"
+    assert evidence["levels"]["L1"] == "ready"
+    assert evidence["levels"]["L2"] == "degraded"
+    assert evidence["transport"] is None
+    assert evidence["degradation"] == "provider_owned_l1"
+
+
+def test_doctor_text_formats_native_facade_levels_and_remediation():
+    output = format_doctor_report(
+        {
+            "summary": {"ready": 0, "degraded": 1, "blocked": 0},
+            "checks": [
+                {
+                    "status": "degraded",
+                    "summary": "Harness / codex-cli: degraded",
+                    "evidence": {
+                        "native_facade": _native_facade_evidence(
+                            "codex",
+                            probe_status="degraded",
+                            compatible=False,
+                            version="0.145.0",
+                            version_status="above_window",
+                            executable="/tmp/codex",
+                            executable_source="path",
+                        )
+                    },
+                }
+            ],
+        }
+    )
+
+    assert "L0=ready; L1=ready; L2=degraded" in output
+    assert "transport=app-server" in output
+    assert "Degradation: structured_above_window" in output
+    assert "L0 remains available" in output
 
 
 def test_probe_json_route_treats_validation_error_as_reachable(monkeypatch):
