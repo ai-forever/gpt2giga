@@ -1046,6 +1046,14 @@ export async function patchCockpit<T>(
   return writeCockpit<T>(path, "PATCH", body, signal);
 }
 
+export async function putCockpit<T>(
+  path: string,
+  body: Readonly<Record<string, unknown>>,
+  signal?: AbortSignal,
+): Promise<T> {
+  return writeCockpit<T>(path, "PUT", body, signal);
+}
+
 export async function deleteCockpit<T>(
   path: string,
   signal?: AbortSignal,
@@ -1055,7 +1063,7 @@ export async function deleteCockpit<T>(
 
 async function writeCockpit<T>(
   path: string,
-  method: "DELETE" | "PATCH" | "POST",
+  method: "DELETE" | "PATCH" | "POST" | "PUT",
   body?: Readonly<Record<string, unknown>>,
   signal?: AbortSignal,
 ): Promise<T> {

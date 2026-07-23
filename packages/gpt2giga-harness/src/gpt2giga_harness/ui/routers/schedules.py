@@ -21,6 +21,7 @@ from gpt2giga_harness.runtime.policy import (
     approval_request_to_dict,
 )
 from gpt2giga_harness.schedules import (
+    ScheduleConflictError,
     ScheduleError,
     build_schedule_definition,
     next_occurrences,
@@ -104,7 +105,16 @@ def schedule_update(
         raise HTTPException(status_code=409, detail="schedule id cannot be renamed")
     project = _project(request, payload.get("workspace"))
     try:
+        expected_hash = payload.get("expected_hash")
+        if expected_hash is not None:
+            current = _service(request).detail(project, schedule_id)
+            if current["definition"]["source_hash"] != expected_hash:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Schedule changed since it was loaded",
+                )
         draft_payload = {**payload, "id": schedule_id}
+        draft_payload.pop("expected_hash", None)
         draft = build_schedule_definition(project, draft_payload)
         gated = _authorize(
             request,
@@ -119,7 +129,13 @@ def schedule_update(
         )
         if gated is not None:
             return gated
-        return _service(request).upsert(project, draft_payload)
+        return _service(request).upsert(
+            project,
+            draft_payload,
+            expected_hash=expected_hash,
+        )
+    except ScheduleConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (KeyError, ScheduleError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -129,14 +145,76 @@ def schedule_delete(
     schedule_id: str,
     request: Request,
     workspace: str | None = Query(default=None),
+    expected_hash: str | None = Query(default=None),
+    confirm_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
     """Delete the shareable definition while retaining SQLite audit history."""
     project = _project(request, workspace)
     service = _service(request)
     try:
-        return service.archive(project, schedule_id)
+        if expected_hash is not None or confirm_id is not None:
+            detail = service.detail(project, schedule_id)
+            if detail["definition"]["source_hash"] != expected_hash:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Schedule changed since the delete preview; reload before deleting"
+                    ),
+                )
+            if confirm_id != schedule_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="confirm_id must exactly match the schedule id",
+                )
+        return service.archive(
+            project,
+            schedule_id,
+            expected_hash=expected_hash,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Schedule not found") from exc
+    except ScheduleConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/api/schedules/{schedule_id}/delete-preview")
+def schedule_delete_preview(
+    schedule_id: str,
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Preview the exact schedule revision and retained occurrence history."""
+    try:
+        detail = _service(request).detail(
+            _project(request, payload.get("workspace")), schedule_id
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Schedule not found") from exc
+    state = detail.get("state") or {}
+    dependents = [
+        {
+            "kind": "occurrence",
+            "id": item["id"],
+            "status": item["status"],
+        }
+        for item in detail.get("occurrences") or ()
+    ]
+    return {
+        "kind": "schedule",
+        "id": schedule_id,
+        "source_hash": detail["definition"]["source_hash"],
+        "dependents": dependents,
+        "active_dependents": [
+            item
+            for item in dependents
+            if item["status"] not in {"succeeded", "failed", "canceled"}
+        ],
+        "state": {
+            "status": state.get("status"),
+            "enabled": bool(state.get("enabled")),
+        },
+        "confirmation_required": True,
+    }
 
 
 @router.post("/api/schedules/{schedule_id}/test-now")

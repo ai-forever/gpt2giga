@@ -17,6 +17,7 @@ from gpt2giga_harness.promotions import (
     promotion_to_dict,
 )
 from gpt2giga_harness.authoring import AuthoringConflictError
+from gpt2giga_harness.authoring import ProjectAuthoringService, content_hash
 from gpt2giga_harness.sessions.store import RunNotFoundError
 from gpt2giga_harness.runtime.models import ApprovalStatus
 from gpt2giga_harness.runtime.policy import (
@@ -35,6 +36,7 @@ from gpt2giga_harness.worktrees import (
     review_run_diff,
 )
 from gpt2giga_harness.workflow_catalog import (
+    delete_workflow,
     duplicate_workflow,
     save_workflow,
     template_source,
@@ -43,6 +45,7 @@ from gpt2giga_harness.workflow_catalog import (
     workflow_templates,
 )
 from gpt2giga_harness.workflows import (
+    WORKFLOW_DIRECTORY,
     WorkflowCoordinator,
     WorkflowHandoffManager,
     WorkflowRepository,
@@ -97,6 +100,26 @@ class WorkflowDuplicateRequest(BaseModel):
 
     workspace: str | None = None
     new_id: str = Field(min_length=2, max_length=64)
+
+
+class WorkflowDraftRequest(BaseModel):
+    """Optimistic workflow authoring preview or apply request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace: str | None = None
+    content: str = Field(min_length=1)
+    expected_hash: str | None = None
+
+
+class WorkflowDeleteRequest(BaseModel):
+    """Exact reviewed workflow deletion request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace: str | None = None
+    expected_hash: str | None = None
+    confirm_id: str | None = None
 
 
 class WorkflowImportRequest(BaseModel):
@@ -308,6 +331,152 @@ def workflow_save(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return workflow_catalog_detail(project.root, definition.id)
+
+
+@router.post("/api/workflows/{workflow_id}/draft")
+def workflow_draft(
+    workflow_id: str,
+    request: Request,
+    payload: WorkflowDraftRequest = Body(...),
+) -> dict[str, Any]:
+    """Preview a validated create or edit without mutating project state."""
+    project = _project(request, payload.workspace)
+    relative = WORKFLOW_DIRECTORY / f"{workflow_id}.yaml"
+    try:
+        draft = ProjectAuthoringService(project.root).draft(
+            relative,
+            payload.content,
+            validate=lambda content: parse_workflow_definition(
+                content, allow_unknown=True
+            ),
+            expected_hash=payload.expected_hash,
+        )
+        if draft.value.id != workflow_id:
+            raise ValueError("Workflow id cannot be renamed in place")
+    except AuthoringConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "workflow": workflow_definition_to_dict(draft.value),
+        "plan": workflow_plan(draft.value),
+        "relative_path": draft.relative_path,
+        "source_hash": draft.source_hash,
+        "redacted_diff": draft.redacted_diff,
+    }
+
+
+@router.post("/api/workflows/{workflow_id}/apply")
+def workflow_apply(
+    workflow_id: str,
+    request: Request,
+    payload: WorkflowDraftRequest = Body(...),
+) -> dict[str, Any]:
+    """Apply the exact workflow revision after the optimistic preview check."""
+    project = _project(request, payload.workspace)
+    workflow_draft(workflow_id, request, payload)
+    try:
+        definition = save_workflow(
+            project.root,
+            payload.content,
+            expected_hash=payload.expected_hash,
+            expected_id=workflow_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"applied": True, **workflow_catalog_detail(project.root, definition.id)}
+
+
+@router.post("/api/workflows/{workflow_id}/delete-preview")
+def workflow_delete_preview(
+    workflow_id: str,
+    request: Request,
+    payload: WorkflowDeleteRequest = Body(default_factory=WorkflowDeleteRequest),
+) -> dict[str, Any]:
+    """Preview saved schedules and retained runs affected by deletion."""
+    project = _project(request, payload.workspace)
+    try:
+        source = workflow_source(project.root, workflow_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Workflow not found") from exc
+    schedule_service = request.app.state.harness_schedule_service
+    schedule_dependents = [
+        {
+            "kind": "schedule",
+            "id": item["definition"]["id"],
+            "status": str((item.get("state") or {}).get("status") or "unknown"),
+        }
+        for item in schedule_service.list(project)
+        if item["definition"]["target"]["kind"] == "workflow"
+        and item["definition"]["target"]["id"] == workflow_id
+        and str((item.get("state") or {}).get("status")) != "archived"
+    ]
+    runs = WorkflowRepository(_runtime_store(request)).list_runs(
+        workflow_id=workflow_id,
+        project_id=project.id,
+    )
+    run_dependents = [
+        {"kind": "run", "id": run.id, "status": run.status.value} for run in runs
+    ]
+    return {
+        "kind": "workflow",
+        "id": workflow_id,
+        "source_hash": content_hash(source),
+        "dependents": [*schedule_dependents, *run_dependents],
+        "active_dependents": [
+            item
+            for item in [*schedule_dependents, *run_dependents]
+            if item["status"]
+            not in {"archived", "succeeded", "failed", "canceled", "complete"}
+        ],
+        "confirmation_required": True,
+    }
+
+
+@router.post("/api/workflows/{workflow_id}/delete")
+def workflow_delete(
+    workflow_id: str,
+    request: Request,
+    payload: WorkflowDeleteRequest = Body(...),
+) -> dict[str, Any]:
+    """Delete one exact workflow revision while retaining history and runs."""
+    preview = workflow_delete_preview(workflow_id, request, payload)
+    schedule_dependents = [
+        item for item in preview["active_dependents"] if item["kind"] == "schedule"
+    ]
+    if schedule_dependents:
+        raise HTTPException(
+            status_code=409,
+            detail="Workflow has dependent schedules; delete or retarget them first",
+        )
+    if payload.expected_hash != preview["source_hash"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Workflow changed since the delete preview; reload before deleting",
+        )
+    if payload.confirm_id != workflow_id:
+        raise HTTPException(
+            status_code=400,
+            detail="confirm_id must exactly match the workflow id",
+        )
+    project = _project(request, payload.workspace)
+    try:
+        delete_workflow(
+            project.root,
+            workflow_id,
+            expected_hash=payload.expected_hash,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Workflow not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "deleted": True,
+        "kind": "workflow",
+        "id": workflow_id,
+        "source_hash": payload.expected_hash,
+        "retained_dependents": preview["dependents"],
+    }
 
 
 @router.post("/api/workflows/{workflow_id}/duplicate", status_code=201)

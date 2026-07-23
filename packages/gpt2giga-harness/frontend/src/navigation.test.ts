@@ -113,7 +113,7 @@ describe("Cockpit V2 route contract", () => {
     );
 
     expect(automationSource).not.toContain('data-legacy-transition="true"');
-    expect(automationSource).toContain('className="authoring-unavailable"');
+    expect(automationSource).toContain("<AutomationAuthoringDrawer");
     expect(evaluationSource).toContain('data-legacy-transition="true"');
   });
 });

@@ -280,3 +280,78 @@ def test_workflow_catalog_api_edits_histories_duplicates_imports_and_exports(
         assert exported.status_code == 200
         assert "attachment;" in exported.headers["content-disposition"]
         assert exported.text.startswith("id: review-copy")
+
+
+def test_workflow_native_authoring_previews_applies_and_retains_delete_history(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    init_project_config(workspace)
+    config = HarnessConfig(
+        data_dir=str(tmp_path / "data"),
+        proxy_url="http://127.0.0.1:9",
+        auto_start_proxy=False,
+    )
+    content = "\n".join(
+        [
+            "id: native-flow",
+            "title: Native flow",
+            "version: '1.0.0'",
+            "steps:",
+            "  - id: keep",
+            "    kind: transform",
+            "    transform: identity",
+            "",
+        ]
+    )
+
+    with TestClient(create_app(config)) as client:
+        preview = client.post(
+            "/api/workflows/native-flow/draft",
+            json={"workspace": str(workspace), "content": content},
+        )
+        assert preview.status_code == 200
+        assert preview.json()["plan"]["step_count"] == 1
+        assert preview.json()["redacted_diff"].startswith("--- ")
+
+        applied = client.post(
+            "/api/workflows/native-flow/apply",
+            json={
+                "workspace": str(workspace),
+                "content": content,
+                "expected_hash": preview.json()["source_hash"],
+            },
+        )
+        assert applied.status_code == 200
+        source_hash = applied.json()["workflow"]["source_hash"]
+
+        delete_preview = client.post(
+            "/api/workflows/native-flow/delete-preview",
+            json={"workspace": str(workspace)},
+        )
+        assert delete_preview.status_code == 200
+        assert delete_preview.json()["source_hash"] == source_hash
+        assert delete_preview.json()["dependents"] == []
+
+        stale = client.post(
+            "/api/workflows/native-flow/delete",
+            json={
+                "workspace": str(workspace),
+                "expected_hash": "stale",
+                "confirm_id": "native-flow",
+            },
+        )
+        assert stale.status_code == 409
+
+        deleted = client.post(
+            "/api/workflows/native-flow/delete",
+            json={
+                "workspace": str(workspace),
+                "expected_hash": source_hash,
+                "confirm_id": "native-flow",
+            },
+        )
+        assert deleted.status_code == 200
+        history = workspace / ".giga" / "workflows" / ".history" / "native-flow"
+        assert len(list(history.glob("*.yaml"))) == 1

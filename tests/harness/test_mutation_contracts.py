@@ -22,7 +22,7 @@ def test_public_unsafe_routes_have_complete_authoritative_mutation_contract(tmp_
         registry=create_default_registry(include_entry_points=False),
     )
 
-    assert len(MUTATION_ROUTE_CONTRACTS) == 110
+    assert len(MUTATION_ROUTE_CONTRACTS) == 117
     assert {contract.mutation_class for contract in MUTATION_ROUTE_CONTRACTS} == set(
         MutationClass
     )
