@@ -141,6 +141,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/runs/{run_id}/diff"),
         ("GET", "/api/runs/{run_id}/events/stream"),
         ("GET", "/api/runs/{run_id}/events/{event_id}"),
+        ("GET", "/api/runs/{run_id}/handoff-capsule"),
         ("GET", "/api/runs/{run_id}/patch"),
         ("GET", "/api/runs/{run_id}/pr"),
         ("GET", "/api/runs/{run_id}/provenance"),

@@ -52,6 +52,7 @@ def test_interactive_human_paths_target_the_canonical_tui(argv):
     "argv",
     (
         ("bootstrap", "preview"),
+        ("handoff", "capsule", "run_1", "--target-harness", "codex-cli"),
         ("doctor",),
         ("completion", "bash"),
         ("config", "path"),

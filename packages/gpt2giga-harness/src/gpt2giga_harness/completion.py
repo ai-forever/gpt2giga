@@ -8,7 +8,7 @@ from typing import Final
 SHELLS: Final = ("bash", "zsh", "fish", "powershell")
 
 _ROOT_COMMANDS = (
-    "agent bootstrap chat completion config doctor eval harness init integration memory "
+    "agent bootstrap chat completion config doctor eval handoff harness init integration memory "
     "native open preset project provider run runtime schedule session state tui "
     "ui worker workflow codex claude gemini"
 )
@@ -36,7 +36,7 @@ _giga() {{
 compdef _giga giga gpt2giga-harness
 """,
     "fish": """# giga completion for Fish
-complete -c giga -f -n '__fish_use_subcommand' -a 'agent bootstrap chat completion config doctor eval harness init integration memory native open preset project provider run runtime schedule session state tui ui worker workflow codex claude gemini'
+complete -c giga -f -n '__fish_use_subcommand' -a 'agent bootstrap chat completion config doctor eval handoff harness init integration memory native open preset project provider run runtime schedule session state tui ui worker workflow codex claude gemini'
 complete -c gpt2giga-harness -w giga
 """,
     "powershell": f"""# giga completion for PowerShell

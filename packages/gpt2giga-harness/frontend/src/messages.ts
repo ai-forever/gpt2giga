@@ -515,6 +515,16 @@ const catalogs = {
     destination: "Destination",
     delta: "Delta",
     extensions: "Extensions",
+    handoffCapsule: "Cross-Harness handoff",
+    handoffCapsuleTitle: "Build a truthful evidence capsule",
+    handoffCapsuleDetail:
+      "Bundle content-free run, diff, artifact, tool, approval, and Environment identities for another Harness without moving a native session.",
+    targetHarness: "Target Harness",
+    selectHarness: "Select a Harness",
+    buildHandoffCapsule: "Build handoff capsule",
+    handoffContinuityWarning:
+      "Evidence only: the target must start or explicitly import a new session. Native provider identity is not transferred.",
+    artifacts: "artifacts",
     newWorkflow: "New workflow",
     noEvaluationResults: "No evaluation results yet. Run an eval from a retained specification.",
     openAuthoring: "Open authoring",
@@ -1070,6 +1080,16 @@ const catalogs = {
     destination: "Назначение",
     delta: "Разница",
     extensions: "Extensions",
+    handoffCapsule: "Передача между Harness",
+    handoffCapsuleTitle: "Собрать честную evidence-капсулу",
+    handoffCapsuleDetail:
+      "Объединяет content-free identity запуска, diff, artifacts, tools, approvals и Environment для другого Harness без переноса native-сессии.",
+    targetHarness: "Целевой Harness",
+    selectHarness: "Выберите Harness",
+    buildHandoffCapsule: "Собрать handoff-капсулу",
+    handoffContinuityWarning:
+      "Только evidence: целевой Harness должен начать или явно импортировать новую сессию. Native identity провайдера не переносится.",
+    artifacts: "artifacts",
     newWorkflow: "Новый workflow",
     noEvaluationResults: "Результатов оценки пока нет. Запустите eval из сохранённой спецификации.",
     openAuthoring: "Открыть редактирование",

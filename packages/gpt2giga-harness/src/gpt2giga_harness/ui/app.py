@@ -218,6 +218,7 @@ from gpt2giga_harness.schedules import ScheduleService
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.session_exports import write_session_export
 from gpt2giga_harness.trace_replay import TraceReplayService
+from gpt2giga_harness.handoff_capsules import HandoffCapsuleService
 from gpt2giga_harness.sessions import (
     FilesystemHarnessSessionStore,
     HarnessSessionStore,
@@ -287,6 +288,9 @@ from gpt2giga_harness.ui.routers.cockpit import router as cockpit_router
 from gpt2giga_harness.ui.routers.compatibility import router as compatibility_router
 from gpt2giga_harness.ui.routers.evaluate import router as evaluate_router
 from gpt2giga_harness.ui.routers.files import create_file_preview_router
+from gpt2giga_harness.ui.routers.handoff_capsules import (
+    router as handoff_capsules_router,
+)
 from gpt2giga_harness.ui.routers.integrations import router as integrations_router
 from gpt2giga_harness.ui.routers.provider_handoffs import (
     create_provider_handoff_router,
@@ -493,6 +497,11 @@ def create_app(
     app.state.harness_trace_replay_service = TraceReplayService(
         runner,
         dispatcher=durable_dispatcher,
+    )
+    app.state.harness_handoff_capsule_service = HandoffCapsuleService(
+        store=store,
+        registry=registry,
+        runtime_store=runtime_store,
     )
     app.state.harness_policy_engine = policy_engine
     app.state.harness_attachment_store = attachment_store
@@ -3492,6 +3501,7 @@ def create_app(
     app.include_router(workflows_router)
     app.include_router(runs_router)
     app.include_router(trace_replays_router)
+    app.include_router(handoff_capsules_router)
     app.include_router(schedules_router)
     app.include_router(settings_router)
     app.include_router(create_file_preview_router(config.data_dir))

@@ -3,16 +3,20 @@ import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  fetchCockpit,
+  type HandoffCapsuleResponse,
   mutateCockpit,
   type ApprovalRequest,
   type TextProjection,
   type TraceReplayAxis,
   type TraceReplayPreviewResponse,
   type TraceReplayProjection,
+  withQuery,
 } from "../api";
 import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
 import {
+  harnessesOptions,
   requestKeys,
   runCenterSummaryOptions,
   runOverviewOptions,
@@ -297,6 +301,11 @@ export function RunsSurface() {
                 {tab === "reuse" ? (
                   <div className="reuse-stack">
                     <TraceReplayPanel locale={locale} runId={selectedRunId} />
+                    <HandoffCapsulePanel
+                      locale={locale}
+                      runId={selectedRunId}
+                      sourceHarnessId={selected.run?.harness_id ?? ""}
+                    />
                     <ReusePanel
                       applyPending={applyPromotion.isPending}
                       kind={promotionKind}
@@ -348,6 +357,107 @@ export function RunsSurface() {
         )}
       </main>
     </div>
+  );
+}
+
+function HandoffCapsulePanel({
+  locale,
+  runId,
+  sourceHarnessId,
+}: {
+  locale: "en" | "ru";
+  runId: string;
+  sourceHarnessId: string;
+}) {
+  const harnesses = useQuery(harnessesOptions());
+  const [targetHarnessId, setTargetHarnessId] = useState("");
+  const [capsule, setCapsule] = useState<HandoffCapsuleResponse["capsule"] | null>(
+    null,
+  );
+  useEffect(() => {
+    setCapsule(null);
+    setTargetHarnessId("");
+  }, [runId]);
+  const targets =
+    harnesses.data?.harnesses.filter(
+      (item) => item.spec.id !== sourceHarnessId,
+    ) ?? [];
+  const previewCapsule = useMutation({
+    mutationFn: () =>
+      fetchCockpit<HandoffCapsuleResponse>(
+        withQuery(`/api/runs/${encodeURIComponent(runId)}/handoff-capsule`, {
+          target_harness_id: targetHarnessId,
+        }),
+      ),
+    onSuccess: ({ capsule: next }) => setCapsule(next),
+  });
+  return (
+    <section className="trace-replay-panel handoff-capsule-panel">
+      <div>
+        <span className="section-kicker">{message(locale, "handoffCapsule")}</span>
+        <h3>{message(locale, "handoffCapsuleTitle")}</h3>
+        <p>{message(locale, "handoffCapsuleDetail")}</p>
+      </div>
+      <div className="reuse-form">
+        <label className="field-control">
+          <span>{message(locale, "targetHarness")}</span>
+          <select
+            onChange={(event) => {
+              setTargetHarnessId(event.target.value);
+              setCapsule(null);
+            }}
+            value={targetHarnessId}
+          >
+            <option value="">{message(locale, "selectHarness")}</option>
+            {targets.map((item) => (
+              <option key={item.spec.id} value={item.spec.id}>
+                {item.spec.title ?? item.spec.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          disabled={previewCapsule.isPending || !targetHarnessId}
+          onClick={() => previewCapsule.mutate()}
+          type="button"
+        >
+          {message(locale, "buildHandoffCapsule")}
+        </button>
+      </div>
+      {previewCapsule.error === null ? null : (
+        <p className="mutation-error" role="alert">
+          {previewCapsule.error.message}
+        </p>
+      )}
+      {capsule === null ? null : (
+        <div className="trace-replay-review">
+          <dl className="compact-fields">
+            <div>
+              <dt>{message(locale, "manifest")}</dt>
+              <dd className="mono">{shortId(capsule.capsule_sha256)}</dd>
+            </div>
+            <div>
+              <dt>{message(locale, "destination")}</dt>
+              <dd>{capsule.provenance.target.harness_id}</dd>
+            </div>
+            <div>
+              <dt>{message(locale, "evidence")}</dt>
+              <dd>
+                {capsule.summary.artifact_count} {message(locale, "artifacts")}
+              </dd>
+            </div>
+            <div>
+              <dt>{message(locale, "environment")}</dt>
+              <dd className="mono">
+                {capsule.environment.branch ?? "detached"} ·{" "}
+                {shortId(capsule.environment.head)}
+              </dd>
+            </div>
+          </dl>
+          <p role="status">{message(locale, "handoffContinuityWarning")}</p>
+        </div>
+      )}
+    </section>
   );
 }
 

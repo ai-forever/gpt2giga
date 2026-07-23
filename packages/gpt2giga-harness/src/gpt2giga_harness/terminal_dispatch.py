@@ -153,6 +153,7 @@ AUTOMATION_ROOT_COMMANDS = frozenset(
         "doctor",
         "eval",
         "harness",
+        "handoff",
         "init",
         "integration",
         "memory",

@@ -80,6 +80,7 @@ from gpt2giga_harness.integration_sdk import (
     load_integration_package_document,
     run_integration_conformance,
 )
+from gpt2giga_harness.handoff_capsules import HandoffCapsuleService
 from gpt2giga_harness.executables import (
     executable_resolution_to_dict,
     set_user_executable,
@@ -371,6 +372,14 @@ def build_parser() -> argparse.ArgumentParser:
     compatibility_check.add_argument("--harness", action="append", default=[])
     compatibility_check.add_argument("--json", action="store_true")
     compatibility_check.set_defaults(handler=_handle_compatibility_check)
+
+    handoff = subparsers.add_parser("handoff", parents=[common])
+    handoff_subparsers = handoff.add_subparsers(dest="handoff_command")
+    handoff_capsule = handoff_subparsers.add_parser("capsule")
+    handoff_capsule.add_argument("run_id")
+    handoff_capsule.add_argument("--target-harness", required=True)
+    handoff_capsule.add_argument("--json", action="store_true")
+    handoff_capsule.set_defaults(handler=_handle_handoff_capsule)
 
     completion = subparsers.add_parser(
         "completion",
@@ -1117,6 +1126,39 @@ def _handle_compatibility_check(
                 f"({fixture['category']}/{fixture['code']})"
             )
     return 0 if report["ok"] else 1
+
+
+def _handle_handoff_capsule(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    store = FilesystemHarnessSessionStore(config.data_dir)
+    service = HandoffCapsuleService(
+        store=store,
+        registry=create_default_registry(),
+        runtime_store=RuntimeCoordinationStore(config.data_dir),
+    )
+    capsule = service.build(args.run_id, args.target_harness)
+    if args.json:
+        _print_json({"capsule": capsule})
+    else:
+        summary = capsule["summary"]
+        provenance = capsule["provenance"]
+        print(
+            "Handoff capsule: "
+            f"{capsule['capsule_id']} "
+            f"({provenance['source']['harness_id']} -> "
+            f"{provenance['target']['harness_id']})"
+        )
+        print(
+            f"Artifacts: {summary['artifact_count']}; "
+            f"pending approvals: {summary['pending_approval_count']}; "
+            f"unresolved questions: {summary['unresolved_question_count']}"
+        )
+        print(
+            "Continuity: evidence handoff only; native session identity is not moved."
+        )
+    return 0
 
 
 def _handle_completion(args: argparse.Namespace, config: HarnessConfig) -> int:
