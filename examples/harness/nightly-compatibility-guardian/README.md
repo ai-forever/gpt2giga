@@ -35,6 +35,7 @@ The example requires configured Codex, Claude, and Gemini CLIs plus a running
 ## 2. Review the packaged contract
 
 ```bash
+giga compatibility check --json
 giga doctor .
 giga agent list --workspace .
 giga workflow validate \
@@ -49,6 +50,13 @@ giga schedule preview \
   --workspace . \
   --json
 ```
+
+The first command is the side-effect-free N7-05 product fixture: it checks the
+reviewed Codex/Claude/Gemini CLI windows, native protocol admissions, Adapter
+and Integration SDK/schema versions, and marketplace source contracts. It
+returns non-zero before provider execution when any required contract drifts.
+The scheduled eval then owns the model-backed checks; a model failure is never
+used to hide an adapter, provider, extension, or environment failure.
 
 The preview captures an immutable snapshot and hash of the eval. The generated
 `.giga/schedules/` definition is ignored in this disposable example because it

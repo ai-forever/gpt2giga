@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from gpt2giga_harness import proxy
 from gpt2giga_harness.config import HarnessConfig
+from gpt2giga_harness.compatibility_guardian import compatibility_readiness_check
 from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.doctor import (
     _gigachat_check,
@@ -66,6 +67,9 @@ def build_execution_readiness(
         if check["id"] == f"harness-{harness_id}"
     )
     checks.append(_required_check(harness_check, block_when_unready=True))
+    guardian_check = compatibility_readiness_check(harness)
+    if guardian_check is not None:
+        checks.append(guardian_check)
     checks.append(
         _invocation_check(
             harness_id=harness_id,

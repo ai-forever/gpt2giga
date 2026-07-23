@@ -1,11 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { mutateCockpit, type ApprovalRequest, type TextProjection } from "../api";
+import {
+  fetchCockpit,
+  type HandoffCapsuleResponse,
+  mutateCockpit,
+  type ApprovalRequest,
+  type TextProjection,
+  type TraceReplayAxis,
+  type TraceReplayPreviewResponse,
+  type TraceReplayProjection,
+  withQuery,
+} from "../api";
 import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
 import {
+  harnessesOptions,
   requestKeys,
   runCenterSummaryOptions,
   runOverviewOptions,
@@ -21,6 +32,10 @@ import {
   statusTone,
 } from "../surface-model";
 import { useRunEventStream } from "../stream-store";
+import {
+  traceReplayComparisonRows,
+  traceReplayTargetPlaceholder,
+} from "../trace-replay-model";
 
 type RunTab = "timeline" | "evidence" | "review" | "reuse";
 
@@ -284,18 +299,26 @@ export function RunsSurface() {
                   />
                 ) : null}
                 {tab === "reuse" ? (
-                  <ReusePanel
-                    applyPending={applyPromotion.isPending}
-                    kind={promotionKind}
-                    locale={locale}
-                    onApply={() => applyPromotion.mutate()}
-                    onKind={setPromotionKind}
-                    onPreview={() => previewPromotion.mutate()}
-                    onTargetId={setTargetId}
-                    preview={promotion}
-                    previewPending={previewPromotion.isPending}
-                    targetId={targetId}
-                  />
+                  <div className="reuse-stack">
+                    <TraceReplayPanel locale={locale} runId={selectedRunId} />
+                    <HandoffCapsulePanel
+                      locale={locale}
+                      runId={selectedRunId}
+                      sourceHarnessId={selected.run?.harness_id ?? ""}
+                    />
+                    <ReusePanel
+                      applyPending={applyPromotion.isPending}
+                      kind={promotionKind}
+                      locale={locale}
+                      onApply={() => applyPromotion.mutate()}
+                      onKind={setPromotionKind}
+                      onPreview={() => previewPromotion.mutate()}
+                      onTargetId={setTargetId}
+                      preview={promotion}
+                      previewPending={previewPromotion.isPending}
+                      targetId={targetId}
+                    />
+                  </div>
                 ) : null}
               </section>
               <aside className="run-context-panel">
@@ -334,6 +357,253 @@ export function RunsSurface() {
         )}
       </main>
     </div>
+  );
+}
+
+function HandoffCapsulePanel({
+  locale,
+  runId,
+  sourceHarnessId,
+}: {
+  locale: "en" | "ru";
+  runId: string;
+  sourceHarnessId: string;
+}) {
+  const harnesses = useQuery(harnessesOptions());
+  const [targetHarnessId, setTargetHarnessId] = useState("");
+  const [capsule, setCapsule] = useState<HandoffCapsuleResponse["capsule"] | null>(
+    null,
+  );
+  useEffect(() => {
+    setCapsule(null);
+    setTargetHarnessId("");
+  }, [runId]);
+  const targets =
+    harnesses.data?.harnesses.filter(
+      (item) => item.spec.id !== sourceHarnessId,
+    ) ?? [];
+  const previewCapsule = useMutation({
+    mutationFn: () =>
+      fetchCockpit<HandoffCapsuleResponse>(
+        withQuery(`/api/runs/${encodeURIComponent(runId)}/handoff-capsule`, {
+          target_harness_id: targetHarnessId,
+        }),
+      ),
+    onSuccess: ({ capsule: next }) => setCapsule(next),
+  });
+  return (
+    <section className="trace-replay-panel handoff-capsule-panel">
+      <div>
+        <span className="section-kicker">{message(locale, "handoffCapsule")}</span>
+        <h3>{message(locale, "handoffCapsuleTitle")}</h3>
+        <p>{message(locale, "handoffCapsuleDetail")}</p>
+      </div>
+      <div className="reuse-form">
+        <label className="field-control">
+          <span>{message(locale, "targetHarness")}</span>
+          <select
+            onChange={(event) => {
+              setTargetHarnessId(event.target.value);
+              setCapsule(null);
+            }}
+            value={targetHarnessId}
+          >
+            <option value="">{message(locale, "selectHarness")}</option>
+            {targets.map((item) => (
+              <option key={item.spec.id} value={item.spec.id}>
+                {item.spec.title ?? item.spec.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          disabled={previewCapsule.isPending || !targetHarnessId}
+          onClick={() => previewCapsule.mutate()}
+          type="button"
+        >
+          {message(locale, "buildHandoffCapsule")}
+        </button>
+      </div>
+      {previewCapsule.error === null ? null : (
+        <p className="mutation-error" role="alert">
+          {previewCapsule.error.message}
+        </p>
+      )}
+      {capsule === null ? null : (
+        <div className="trace-replay-review">
+          <dl className="compact-fields">
+            <div>
+              <dt>{message(locale, "manifest")}</dt>
+              <dd className="mono">{shortId(capsule.capsule_sha256)}</dd>
+            </div>
+            <div>
+              <dt>{message(locale, "destination")}</dt>
+              <dd>{capsule.provenance.target.harness_id}</dd>
+            </div>
+            <div>
+              <dt>{message(locale, "evidence")}</dt>
+              <dd>
+                {capsule.summary.artifact_count} {message(locale, "artifacts")}
+              </dd>
+            </div>
+            <div>
+              <dt>{message(locale, "environment")}</dt>
+              <dd className="mono">
+                {capsule.environment.branch ?? "detached"} ·{" "}
+                {shortId(capsule.environment.head)}
+              </dd>
+            </div>
+          </dl>
+          <p role="status">{message(locale, "handoffContinuityWarning")}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TraceReplayPanel({
+  locale,
+  runId,
+}: {
+  locale: "en" | "ru";
+  runId: string;
+}) {
+  const queryClient = useQueryClient();
+  const [axis, setAxis] = useState<TraceReplayAxis>("model");
+  const [target, setTarget] = useState("");
+  const [preview, setPreview] = useState<TraceReplayPreviewResponse | null>(null);
+  const [projection, setProjection] = useState<TraceReplayProjection | null>(null);
+  useEffect(() => {
+    setPreview(null);
+    setProjection(null);
+    setTarget("");
+  }, [runId]);
+  const previewReplay = useMutation({
+    mutationFn: () =>
+      mutateCockpit<TraceReplayPreviewResponse>(
+        `/api/runs/${encodeURIComponent(runId)}/trace-replays/preview`,
+        { axis, target: target.trim() },
+      ),
+    onSuccess: (response) => {
+      setPreview(response);
+      setProjection(null);
+    },
+  });
+  const startReplay = useMutation({
+    mutationFn: () => {
+      if (preview === null) throw new Error("Trace replay preview is unavailable");
+      return mutateCockpit<TraceReplayProjection>(
+        `/api/runs/${encodeURIComponent(runId)}/trace-replays`,
+        {
+          axis,
+          manifest_sha256: preview.manifest.manifest_sha256,
+          target: target.trim(),
+        },
+      );
+    },
+    onSuccess: async (response) => {
+      setProjection(response);
+      await queryClient.invalidateQueries({ queryKey: requestKeys.runsCenter() });
+    },
+  });
+  const rows = projection === null ? [] : traceReplayComparisonRows(projection);
+  const error = previewReplay.error ?? startReplay.error;
+  return (
+    <section className="trace-replay-panel">
+      <div>
+        <span className="section-kicker">{message(locale, "traceReplay")}</span>
+        <h3>{message(locale, "traceReplayTitle")}</h3>
+        <p>{message(locale, "traceReplayDetail")}</p>
+      </div>
+      <div className="reuse-form trace-replay-form">
+        <label className="field-control">
+          <span>{message(locale, "traceReplayAxis")}</span>
+          <select
+            onChange={(event) => {
+              setAxis(event.target.value as TraceReplayAxis);
+              setPreview(null);
+              setProjection(null);
+              setTarget("");
+            }}
+            value={axis}
+          >
+            <option value="model">{message(locale, "model")}</option>
+            <option value="provider">{message(locale, "provider")}</option>
+            <option value="harness">{message(locale, "harness")}</option>
+            <option value="extensions">{message(locale, "extensions")}</option>
+          </select>
+        </label>
+        <label className="field-control">
+          <span>{message(locale, "traceReplayTarget")}</span>
+          <input
+            onChange={(event) => {
+              setTarget(event.target.value);
+              setPreview(null);
+              setProjection(null);
+            }}
+            placeholder={traceReplayTargetPlaceholder(axis)}
+            value={target}
+          />
+        </label>
+        <button
+          disabled={previewReplay.isPending || !target.trim()}
+          onClick={() => previewReplay.mutate()}
+          type="button"
+        >
+          {message(locale, "previewTraceReplay")}
+        </button>
+      </div>
+      {error === null ? null : <p className="mutation-error" role="alert">{error.message}</p>}
+      {preview === null ? null : (
+        <div className="trace-replay-review">
+          <dl className="compact-fields">
+            <div><dt>{message(locale, "changedAxis")}</dt><dd>{preview.manifest.axis}</dd></div>
+            <div><dt>{message(locale, "unchangedSnapshot")}</dt><dd className="mono">{shortId(preview.manifest.unchanged_snapshot_sha256)}</dd></div>
+            <div><dt>{message(locale, "manifest")}</dt><dd className="mono">{shortId(preview.manifest.manifest_sha256)}</dd></div>
+            <div><dt>{message(locale, "isolation")}</dt><dd>{preview.execution.workspace_policy} · {preview.execution.provider_session}</dd></div>
+          </dl>
+          {preview.admission.admitted ? (
+            <button
+              className="primary-button"
+              disabled={startReplay.isPending}
+              onClick={() => startReplay.mutate()}
+              type="button"
+            >
+              {message(locale, "startTraceReplay")}
+            </button>
+          ) : (
+            <p className="mutation-error" role="status">{preview.admission.reason_code}</p>
+          )}
+        </div>
+      )}
+      {projection === null ? null : (
+        <div className="trace-replay-comparison">
+          <div className="review-summary">
+            <strong>{message(locale, "traceReplayComparison")}</strong>
+            <span>{projection.snapshot_equality.status} · {message(locale, "changedAxis")}: {projection.manifest.axis}</span>
+            <Link params={{ runId: projection.destination.run_id }} to="/cockpit-v2/runs/$runId">
+              {message(locale, "openReplayRun")} ↗
+            </Link>
+          </div>
+          <div className="trace-replay-table" role="table">
+            <div className="trace-replay-row heading" role="row">
+              <span>{message(locale, "evidence")}</span>
+              <span>{message(locale, "source")}</span>
+              <span>{message(locale, "destination")}</span>
+              <span>{message(locale, "delta")}</span>
+            </div>
+            {rows.map((row) => (
+              <div className="trace-replay-row" key={row.key} role="row">
+                <strong>{message(locale, row.key)}</strong>
+                <span>{row.source}</span>
+                <span>{row.target}</span>
+                <span>{row.delta}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

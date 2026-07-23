@@ -104,6 +104,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ),
         ("GET", "/api/cockpit/sessions/{session_id}/runs"),
         ("GET", "/api/cockpit/sessions/{session_id}/updates/stream"),
+        ("GET", "/api/compatibility/guardian"),
         ("GET", "/api/defaults"),
         ("GET", "/api/evals"),
         ("GET", "/api/evals/runs/{eval_run_id}"),
@@ -140,12 +141,14 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/runs/{run_id}/diff"),
         ("GET", "/api/runs/{run_id}/events/stream"),
         ("GET", "/api/runs/{run_id}/events/{event_id}"),
+        ("GET", "/api/runs/{run_id}/handoff-capsule"),
         ("GET", "/api/runs/{run_id}/patch"),
         ("GET", "/api/runs/{run_id}/pr"),
         ("GET", "/api/runs/{run_id}/provenance"),
         ("GET", "/api/runs/{run_id}/summary"),
         ("GET", "/api/runs/{run_id}/support-bundle"),
         ("GET", "/api/runs/{run_id}/trace"),
+        ("GET", "/api/runs/{run_id}/trace-replay"),
         ("GET", "/api/schedules"),
         ("GET", "/api/schedules/{schedule_id}"),
         ("GET", "/api/settings"),
@@ -225,6 +228,7 @@ _SUBPROCESS_PREFIXES = (
 )
 _SUBPROCESS_EXACT = frozenset(
     {
+        ("GET", "/api/compatibility/guardian"),
         ("GET", "/api/environment"),
         ("POST", "/api/environment/commit/apply"),
         ("POST", "/api/environment/commit/preview"),
@@ -252,6 +256,7 @@ _DURABLE_JOB_IDENTITIES = frozenset(
         ("POST", "/api/evals/{eval_name}/runs"),
         ("POST", "/api/runs/{run_id}/fork"),
         ("POST", "/api/runs/{run_id}/replay"),
+        ("POST", "/api/runs/{run_id}/trace-replays"),
         ("POST", "/api/schedules/{schedule_id}/run-now"),
         ("POST", "/api/schedules/{schedule_id}/test-now"),
         ("POST", "/api/sessions/run"),
@@ -265,6 +270,7 @@ _SYNC_DURABLE_SUBMISSIONS = frozenset(
     {
         ("POST", "/api/runs/{run_id}/fork"),
         ("POST", "/api/runs/{run_id}/replay"),
+        ("POST", "/api/runs/{run_id}/trace-replays"),
         ("POST", "/api/sessions/run"),
         ("POST", "/api/sessions/{session_id}/run"),
     }

@@ -414,6 +414,88 @@ export interface RunTraceResponse {
   live: boolean;
 }
 
+export type TraceReplayAxis = "model" | "provider" | "harness" | "extensions";
+
+export interface TraceReplayManifest {
+  schema_version: number;
+  source_run_id: string;
+  source_session_id: string;
+  task_sha256: string;
+  source_evidence_sha256: string;
+  axis: TraceReplayAxis;
+  source_dimensions: Record<TraceReplayAxis, unknown>;
+  target_dimensions: Record<TraceReplayAxis, unknown>;
+  fixed_dimensions: Record<string, unknown>;
+  unchanged_snapshot_sha256: string;
+  created_at: string;
+  manifest_sha256: string;
+  content_free: true;
+}
+
+export interface TraceReplayPreviewResponse {
+  manifest: TraceReplayManifest;
+  admission: { admitted: boolean; reason_code: string | null };
+  execution: {
+    new_session: boolean;
+    workspace_policy: string;
+    provider_session: string;
+    external_telemetry_required: boolean;
+    automatic_apply: boolean;
+  };
+}
+
+export interface TraceReplayProjection {
+  schema_version: number;
+  manifest: TraceReplayManifest;
+  source: TraceReplayRunRef;
+  destination: TraceReplayRunRef;
+  source_evidence_current: boolean;
+  snapshot_equality: {
+    status: "pending" | "verified" | "mismatch";
+    changed_axes: TraceReplayAxis[];
+    unchanged_verified: boolean;
+    target_verified: boolean;
+  };
+  comparison_status: "pending" | "ready";
+  comparison: {
+    semantic: TraceReplayPair;
+    tools: TraceReplayPair;
+    diff: TraceReplayPair;
+    latency: TraceReplayNumericPair;
+    cost: TraceReplayCostPair;
+  };
+  external_telemetry_required: boolean;
+  automatic_apply: boolean;
+}
+
+interface TraceReplayRunRef {
+  run_id: string;
+  session_id: string;
+  status: string;
+  harness_id: string;
+  model: string | null;
+  workspace_isolated: boolean;
+}
+
+interface TraceReplayPair {
+  source: Record<string, unknown>;
+  target: Record<string, unknown> | null;
+  changed: boolean | null;
+}
+
+interface TraceReplayNumericPair {
+  source: number | null;
+  target: number | null;
+  delta: number | null;
+  unit: string;
+}
+
+interface TraceReplayCostPair {
+  source: { value: number | null; unit: string | null; confidence: string };
+  target: { value: number | null; unit: string | null; confidence: string } | null;
+  delta: number | null;
+}
+
 export interface ApprovalInboxResponse {
   approvals: ApprovalRequest[];
   pending_count: number;
@@ -497,6 +579,33 @@ export interface HarnessOption {
 export interface HarnessesResponse {
   harnesses: HarnessOption[];
   discovery_errors?: string[];
+}
+
+export interface HandoffCapsuleResponse {
+  capsule: {
+    capsule_id: string;
+    capsule_sha256: string;
+    content_free: true;
+    summary: {
+      artifact_count: number;
+      pending_approval_count: number;
+      unresolved_question_count: number;
+    };
+    provenance: {
+      source: { harness_id: string };
+      target: { harness_id: string; session_requirement: string };
+    };
+    environment: {
+      branch: string | null;
+      head: string | null;
+      snapshot_sha256: string;
+    };
+    continuity: {
+      native_session_identity_preserved: false;
+      provider_session_identity_preserved: false;
+      claim: "evidence_handoff_only";
+    };
+  };
 }
 
 export interface ModelsResponse {
@@ -845,6 +954,35 @@ export interface RunPreflightResponse {
     max_severity: string;
     findings: Array<{ id: string; severity: string; message: string }>;
     readiness?: { status?: string; findings?: unknown[] };
+    permission_simulation?: {
+      simulation_hash: string;
+      block_run: boolean;
+      blocked_actions: string[];
+      approval_points: string[];
+      summary: {
+        allowed: number;
+        approval_required: number;
+        denied: number;
+        unknown: number;
+      };
+      route_snapshot: {
+        snapshot_hash: string;
+        harness_id: string;
+        execution_transport: string;
+        extension_count: number;
+      };
+      outcomes: Array<{
+        domain: string;
+        action: string | null;
+        prediction: string;
+        occurrence: string;
+        control_owner: string;
+        reason_code: string;
+      }>;
+      content_free: boolean;
+      side_effect_free: boolean;
+      provider_safety_proven: boolean;
+    };
   };
 }
 

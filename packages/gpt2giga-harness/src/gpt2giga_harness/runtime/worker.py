@@ -92,6 +92,11 @@ class DurableJobDispatcher:
     ) -> DurableSubmission:
         """Submit a durable job through the selected permission profile."""
         payload = _prepare_durable_payload(payload)
+        extra = (
+            dict(payload["extra"]) if isinstance(payload.get("extra"), Mapping) else {}
+        )
+        extra["permission_origin"] = origin
+        payload["extra"] = extra
         session = self.runner.store.get_session(session_id)
         harness_id = str(payload.get("harness_id") or session.default_harness_id)
         payload = prepare_durable_structured_admission(

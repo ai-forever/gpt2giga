@@ -8,6 +8,7 @@ import {
   consumeAtQuery,
   invocationModeForTransport,
   normalizeExecutionSelection,
+  permissionSimulationHighlights,
 } from "./workbench-execution";
 
 function harness(overrides: Partial<HarnessOption> = {}): HarnessOption {
@@ -64,6 +65,37 @@ describe("Workbench execution semantics", () => {
   it("presents capabilities as operator concepts", () => {
     expect(capabilityPresentation("agent_cli").label).toBe("Coding agent");
     expect(capabilityPresentation("chat_completions").label).toBe("Direct chat");
+  });
+
+  it("summarizes content-free permission evidence without hiding unknowns", () => {
+    expect(permissionSimulationHighlights({
+      approval_points: ["mcp.tool.call"],
+      block_run: false,
+      blocked_actions: [],
+      content_free: true,
+      outcomes: [],
+      provider_safety_proven: false,
+      route_snapshot: {
+        execution_transport: "native_structured",
+        extension_count: 1,
+        harness_id: "codex-cli",
+        snapshot_hash: "b".repeat(64),
+      },
+      side_effect_free: true,
+      simulation_hash: "a".repeat(64),
+      summary: {
+        allowed: 3,
+        approval_required: 1,
+        denied: 0,
+        unknown: 2,
+      },
+    })).toEqual({
+      approvalCount: 1,
+      blockedCount: 0,
+      evidence: "aaaaaaaaaaaa",
+      unknownCount: 2,
+    });
+    expect(permissionSimulationHighlights(undefined)).toBeNull();
   });
 
   it("finds and consumes only the active at-file token", () => {

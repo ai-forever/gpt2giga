@@ -119,9 +119,17 @@ class _StructuredNativeHarness(BaseHarness):
             version="0.144.5",
             parsed_version="0.144.5",
             command=("codex",),
-            capabilities={"app-server": True},
-            event_schema="codex-app-server-v1",
+            capabilities={
+                "--json": True,
+                "--sandbox": True,
+                "--ephemeral": True,
+                "app-server": True,
+            },
+            event_schema="codex-exec-jsonl-v1",
             history_schema="codex-session-jsonl-v1",
+            version_window_status="in_window",
+            minimum_version="0.144.0",
+            maximum_version_exclusive="0.145.0",
         )
 
     def availability(self) -> Availability:
