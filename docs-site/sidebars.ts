@@ -41,6 +41,7 @@ const sidebars: SidebarsConfig = {
       collapsible: false,
       items: [
         'architecture/harness',
+        'architecture/product-capability-admission-adr',
         'architecture/normalized-messages',
         'architecture/logging-and-observability',
         'architecture/how-to-add-provider',
