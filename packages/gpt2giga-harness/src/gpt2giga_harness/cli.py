@@ -27,6 +27,7 @@ from gpt2giga_harness.adapter_sdk import (
     run_adapter_conformance,
 )
 from gpt2giga_harness.application import SessionApplicationService
+from gpt2giga_harness.bootstrap import BootstrapService
 from gpt2giga_harness.agents import (
     agent_profile_to_dict,
     agent_run_payload,
@@ -41,6 +42,7 @@ from gpt2giga_harness.capability_matrix import (
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.completion import SHELLS, render_completion
 from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
+from gpt2giga_harness.compatibility_guardian import run_compatibility_guardian
 from gpt2giga_harness.doctor import (
     build_doctor_report,
     format_doctor_report,
@@ -78,6 +80,7 @@ from gpt2giga_harness.integration_sdk import (
     load_integration_package_document,
     run_integration_conformance,
 )
+from gpt2giga_harness.handoff_capsules import HandoffCapsuleService
 from gpt2giga_harness.executables import (
     executable_resolution_to_dict,
     set_user_executable,
@@ -139,6 +142,7 @@ from gpt2giga_harness.preflight import (
     format_preflight_block_message,
     preflight_report_to_dict,
 )
+from gpt2giga_harness.permission_simulator import build_permission_simulation
 from gpt2giga_harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
 from gpt2giga_harness.plugins import (
     harness_validation_report_to_dict,
@@ -332,6 +336,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="Return 1 when the selected CI readiness threshold is reached",
     )
     doctor.set_defaults(handler=_handle_doctor)
+
+    bootstrap = subparsers.add_parser("bootstrap", parents=[common])
+    bootstrap_subparsers = bootstrap.add_subparsers(dest="bootstrap_command")
+
+    bootstrap_preview = bootstrap_subparsers.add_parser("preview")
+    bootstrap_preview.add_argument("--workspace", default=None)
+    bootstrap_preview.add_argument("--json", action="store_true")
+    bootstrap_preview.set_defaults(handler=_handle_bootstrap_preview)
+
+    bootstrap_apply = bootstrap_subparsers.add_parser("apply")
+    bootstrap_apply.add_argument("plan_id")
+    bootstrap_apply.add_argument("--workspace", default=None)
+    bootstrap_apply.add_argument("--step", action="append", default=[])
+    bootstrap_apply.add_argument("--all-reversible", action="store_true")
+    bootstrap_apply.add_argument("--json", action="store_true")
+    bootstrap_apply.set_defaults(handler=_handle_bootstrap_apply)
+
+    bootstrap_status = bootstrap_subparsers.add_parser("status")
+    bootstrap_status.add_argument("application_id")
+    bootstrap_status.add_argument("--json", action="store_true")
+    bootstrap_status.set_defaults(handler=_handle_bootstrap_status)
+
+    bootstrap_rollback = bootstrap_subparsers.add_parser("rollback")
+    bootstrap_rollback.add_argument("application_id")
+    bootstrap_rollback.add_argument("--workspace", default=None)
+    bootstrap_rollback.add_argument("--json", action="store_true")
+    bootstrap_rollback.set_defaults(handler=_handle_bootstrap_rollback)
+
+    compatibility = subparsers.add_parser("compatibility")
+    compatibility_subparsers = compatibility.add_subparsers(
+        dest="compatibility_command"
+    )
+    compatibility_check = compatibility_subparsers.add_parser("check")
+    compatibility_check.add_argument("--harness", action="append", default=[])
+    compatibility_check.add_argument("--json", action="store_true")
+    compatibility_check.set_defaults(handler=_handle_compatibility_check)
+
+    handoff = subparsers.add_parser("handoff", parents=[common])
+    handoff_subparsers = handoff.add_subparsers(dest="handoff_command")
+    handoff_capsule = handoff_subparsers.add_parser("capsule")
+    handoff_capsule.add_argument("run_id")
+    handoff_capsule.add_argument("--target-harness", required=True)
+    handoff_capsule.add_argument("--json", action="store_true")
+    handoff_capsule.set_defaults(handler=_handle_handoff_capsule)
 
     completion = subparsers.add_parser(
         "completion",
@@ -1008,6 +1056,108 @@ def _handle_doctor(args: argparse.Namespace, config: HarnessConfig) -> int:
         return 1
     if args.fail_on == "degraded" and (blocked or degraded):
         return 1
+    return 0
+
+
+def _handle_bootstrap_preview(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = BootstrapService(config).preview(workspace=args.workspace)
+    _print_bootstrap(payload, as_json=args.json)
+    return 0
+
+
+def _handle_bootstrap_apply(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = BootstrapService(config).apply(
+        plan_id=args.plan_id,
+        selected_steps=tuple(args.step),
+        all_reversible=args.all_reversible,
+        workspace=args.workspace,
+    )
+    _print_bootstrap(payload, as_json=args.json)
+    return 0
+
+
+def _handle_bootstrap_status(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = BootstrapService(config).status(args.application_id)
+    _print_bootstrap(payload, as_json=args.json)
+    return 0
+
+
+def _handle_bootstrap_rollback(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    payload = BootstrapService(config).rollback(
+        args.application_id,
+        workspace=args.workspace,
+    )
+    _print_bootstrap(payload, as_json=args.json)
+    return 0
+
+
+def _handle_compatibility_check(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    del config
+    report = run_compatibility_guardian(
+        create_default_registry(),
+        harness_ids=tuple(args.harness) or None,
+    )
+    if args.json:
+        _print_json(report)
+    else:
+        print(
+            "Compatibility guardian: "
+            f"{report['status']} ({report['summary']['passed']} passed, "
+            f"{report['summary']['blocked']} blocked)"
+        )
+        for fixture in report["fixtures"]:
+            print(
+                f"- {fixture['id']}: {fixture['status']} "
+                f"({fixture['category']}/{fixture['code']})"
+            )
+    return 0 if report["ok"] else 1
+
+
+def _handle_handoff_capsule(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    store = FilesystemHarnessSessionStore(config.data_dir)
+    service = HandoffCapsuleService(
+        store=store,
+        registry=create_default_registry(),
+        runtime_store=RuntimeCoordinationStore(config.data_dir),
+    )
+    capsule = service.build(args.run_id, args.target_harness)
+    if args.json:
+        _print_json({"capsule": capsule})
+    else:
+        summary = capsule["summary"]
+        provenance = capsule["provenance"]
+        print(
+            "Handoff capsule: "
+            f"{capsule['capsule_id']} "
+            f"({provenance['source']['harness_id']} -> "
+            f"{provenance['target']['harness_id']})"
+        )
+        print(
+            f"Artifacts: {summary['artifact_count']}; "
+            f"pending approvals: {summary['pending_approval_count']}; "
+            f"unresolved questions: {summary['unresolved_question_count']}"
+        )
+        print(
+            "Continuity: evidence handoff only; native session identity is not moved."
+        )
     return 0
 
 
@@ -3018,6 +3168,16 @@ def _run_harness(
         prompt=request.prompt,
         workspace=request.workspace,
         data_dir=config.data_dir,
+        permission_simulation=build_permission_simulation(
+            spec=spec,
+            execution_transport=execution_transport,
+            invocation_mode=invocation_mode.value,
+            permission_profile_id="interactive",
+            mode=request.mode,
+            workspace=request.workspace,
+            api_mode=request.api_mode.value,
+            model=request.model or config.default_model,
+        ).to_dict(),
         readiness=build_execution_readiness(
             config,
             registry,
@@ -3139,6 +3299,28 @@ def _print_readiness_remediation(payload: Mapping[str, Any]) -> None:
 
 def _print_json(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2))
+
+
+def _print_bootstrap(payload: Mapping[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        _print_json(payload)
+        return
+    plan = payload.get("plan")
+    if isinstance(plan, Mapping):
+        print(f"Bootstrap plan: {plan.get('plan_id')}")
+        for step in plan.get("steps") or ():
+            if not isinstance(step, Mapping):
+                continue
+            status = "available" if step.get("available") else "not needed"
+            print(f"- {step.get('id')}: {status}")
+        print(f"Support export: {plan.get('support_export')}")
+        return
+    print(
+        "Bootstrap application: "
+        f"{payload.get('application_id')} ({payload.get('status')})"
+    )
+    if payload.get("rollback_available"):
+        print(f"Rollback: giga bootstrap rollback {payload.get('application_id')}")
 
 
 def _print_editor_open(payload: Mapping[str, Any], *, as_json: bool) -> None:

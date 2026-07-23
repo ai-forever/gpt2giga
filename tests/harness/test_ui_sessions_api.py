@@ -721,6 +721,13 @@ def test_preflight_api_reports_large_attachment_warning(tmp_path):
     }
     assert preflight["readiness"]["summary"]["blocked"] == 0
     assert preflight["readiness"]["summary"]["degraded"] == 1
+    simulation = preflight["permission_simulation"]
+    assert simulation["side_effect_free"] is True
+    assert simulation["content_free"] is True
+    assert simulation["provider_safety_proven"] is False
+    assert simulation["route_snapshot"]["harness_id"] == "echo"
+    assert simulation["route_snapshot"]["execution_transport"] == "one_shot"
+    assert simulation["block_run"] is False
     worker_finding = next(
         item
         for item in preflight["readiness"]["findings"]
@@ -734,6 +741,34 @@ def test_preflight_api_reports_large_attachment_warning(tmp_path):
     assert finding["severity"] == "warning"
     assert "continue" in finding["actions"]
     assert "exclude_attachment" in finding["actions"]
+
+
+def test_preflight_api_blocks_an_explicit_action_denied_by_selected_policy():
+    harness = _ArenaCaptureHarness("permission-preview")
+    registry = HarnessRegistry()
+    registry.register(harness)
+    store = InMemoryHarnessSessionStore()
+    client = _client(registry=registry, store=store)
+    session = store.create_session(default_harness_id="permission-preview")
+
+    response = client.post(
+        "/api/preflight/run",
+        json={
+            "session_id": session.id,
+            "harness_id": "permission-preview",
+            "permission_profile": "unattended",
+            "prompt": "preview only",
+            "extra": {"required_permission_actions": ["git.push"]},
+        },
+    )
+
+    assert response.status_code == 200
+    preflight = response.json()["preflight"]
+    assert preflight["hard_block"] is True
+    assert preflight["permission_simulation"]["block_run"] is True
+    assert preflight["permission_simulation"]["blocked_actions"] == ["git.push"]
+    assert harness.requests == []
+    assert store.list_runs(session.id) == ()
 
 
 def test_preview_execution_does_not_invoke_harness_or_create_run():

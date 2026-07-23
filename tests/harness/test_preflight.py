@@ -6,6 +6,7 @@ from gpt2giga_harness.preflight import (
     ACTION_EXCLUDE_ATTACHMENT,
     build_preflight_report,
     preflight_report_to_dict,
+    format_preflight_block_message,
 )
 from gpt2giga_harness.sessions.models import HarnessMessage
 
@@ -109,6 +110,25 @@ def test_preflight_estimates_history_truncation():
     assert report.context_budget.previous_message_count == 25
     assert report.context_budget.included_previous_message_count == 19
     assert "history_truncation" in {finding.code for finding in report.findings}
+
+
+def test_preflight_hard_blocks_a_denied_permission_simulation():
+    report = build_preflight_report(
+        prompt="run",
+        workspace=None,
+        permission_simulation={
+            "block_run": True,
+            "blocked_actions": ["git.push"],
+        },
+    )
+
+    assert report.hard_block is True
+    assert report.max_severity == "block"
+    assert preflight_report_to_dict(report)["permission_simulation"] == {
+        "block_run": True,
+        "blocked_actions": ["git.push"],
+    }
+    assert "git.push" in format_preflight_block_message(report)
 
 
 def _attachment(

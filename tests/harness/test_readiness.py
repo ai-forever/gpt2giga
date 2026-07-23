@@ -68,6 +68,50 @@ def test_echo_readiness_ignores_proxy_and_worker_for_synchronous_run(
     }
 
 
+def test_guardian_drift_blocks_selected_execution_before_spawn(
+    monkeypatch,
+    tmp_path,
+):
+    registry = HarnessRegistry()
+    registry.register(_EchoHarness())
+    monkeypatch.setattr(
+        readiness,
+        "compatibility_readiness_check",
+        lambda _harness: {
+            "id": "compatibility-guardian",
+            "status": "blocked",
+            "summary": "Selected adapter is outside the reviewed contract.",
+            "required": True,
+            "remediation": [],
+            "evidence": {
+                "reason_codes": ["native_cli_contract_drift"],
+                "snapshot_hash": "a" * 64,
+            },
+        },
+    )
+
+    report = build_execution_readiness(
+        HarnessConfig(data_dir=str(tmp_path / "state")),
+        registry,
+        harness_id="echo",
+        invocation_mode=HarnessInvocationMode.HEADLESS,
+        api_mode=GigaChatApiMode.V2,
+        model=None,
+        mode="read",
+        workspace=str(tmp_path),
+        workspace_policy=WorkspacePolicy.AUTO,
+        durable=False,
+    )
+
+    guardian = next(
+        item for item in report["findings"] if item["id"] == "compatibility-guardian"
+    )
+    assert report["blocked"] is True
+    assert report["ok"] is False
+    assert guardian["status"] == "blocked"
+    assert guardian["evidence"]["reason_codes"] == ["native_cli_contract_drift"]
+
+
 def test_selected_agent_readiness_blocks_only_required_missing_capabilities(
     monkeypatch,
     tmp_path,
