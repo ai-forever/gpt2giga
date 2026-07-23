@@ -42,6 +42,7 @@ from gpt2giga_harness.capability_matrix import (
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.completion import SHELLS, render_completion
 from gpt2giga_harness.cli_capabilities import cli_capability_snapshot_to_dict
+from gpt2giga_harness.compatibility_guardian import run_compatibility_guardian
 from gpt2giga_harness.doctor import (
     build_doctor_report,
     format_doctor_report,
@@ -361,6 +362,15 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap_rollback.add_argument("--workspace", default=None)
     bootstrap_rollback.add_argument("--json", action="store_true")
     bootstrap_rollback.set_defaults(handler=_handle_bootstrap_rollback)
+
+    compatibility = subparsers.add_parser("compatibility")
+    compatibility_subparsers = compatibility.add_subparsers(
+        dest="compatibility_command"
+    )
+    compatibility_check = compatibility_subparsers.add_parser("check")
+    compatibility_check.add_argument("--harness", action="append", default=[])
+    compatibility_check.add_argument("--json", action="store_true")
+    compatibility_check.set_defaults(handler=_handle_compatibility_check)
 
     completion = subparsers.add_parser(
         "completion",
@@ -1082,6 +1092,31 @@ def _handle_bootstrap_rollback(
     )
     _print_bootstrap(payload, as_json=args.json)
     return 0
+
+
+def _handle_compatibility_check(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    del config
+    report = run_compatibility_guardian(
+        create_default_registry(),
+        harness_ids=tuple(args.harness) or None,
+    )
+    if args.json:
+        _print_json(report)
+    else:
+        print(
+            "Compatibility guardian: "
+            f"{report['status']} ({report['summary']['passed']} passed, "
+            f"{report['summary']['blocked']} blocked)"
+        )
+        for fixture in report["fixtures"]:
+            print(
+                f"- {fixture['id']}: {fixture['status']} "
+                f"({fixture['category']}/{fixture['code']})"
+            )
+    return 0 if report["ok"] else 1
 
 
 def _handle_completion(args: argparse.Namespace, config: HarnessConfig) -> int:

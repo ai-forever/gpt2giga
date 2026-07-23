@@ -284,6 +284,7 @@ from gpt2giga_harness.ui.routers.agents import router as agents_router
 from gpt2giga_harness.ui.routers.automation import router as automation_router
 from gpt2giga_harness.ui.routers.approvals import router as approvals_router
 from gpt2giga_harness.ui.routers.cockpit import router as cockpit_router
+from gpt2giga_harness.ui.routers.compatibility import router as compatibility_router
 from gpt2giga_harness.ui.routers.evaluate import router as evaluate_router
 from gpt2giga_harness.ui.routers.files import create_file_preview_router
 from gpt2giga_harness.ui.routers.integrations import router as integrations_router
@@ -3480,6 +3481,7 @@ def create_app(
     app.include_router(automation_router)
     app.include_router(approvals_router)
     app.include_router(cockpit_router)
+    app.include_router(compatibility_router)
     app.include_router(evaluate_router)
     app.include_router(environments_router)
     app.include_router(integrations_router)

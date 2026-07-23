@@ -147,6 +147,7 @@ AUTOMATION_ROOT_COMMANDS = frozenset(
     {
         "agent",
         "bootstrap",
+        "compatibility",
         "config",
         "completion",
         "doctor",

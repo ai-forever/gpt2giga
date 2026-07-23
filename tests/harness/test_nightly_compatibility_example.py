@@ -29,6 +29,7 @@ from gpt2giga_harness.schedules import (
 )
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga_harness.structured_sessions import AdapterCapabilitySnapshot
 from gpt2giga_harness.types import (
     Availability,
     HarnessCapability,
@@ -68,19 +69,95 @@ class _CompatibilityHarness(BaseHarness):
         return Availability.available("hermetic compatibility adapter")
 
     def capability_probe(self) -> CliCapabilitySnapshot:
+        contract = {
+            "codex-cli": {
+                "version": "0.144.5",
+                "minimum": "0.144.0",
+                "maximum": "0.145.0",
+                "event": "codex-exec-jsonl-v1",
+                "history": "codex-session-jsonl-v1",
+                "capabilities": ("--json", "--sandbox", "--ephemeral", "app-server"),
+            },
+            "claude-code": {
+                "version": "2.1.9",
+                "minimum": "2.1.0",
+                "maximum": "2.2.0",
+                "event": "claude-stream-json-v1",
+                "history": "claude-project-jsonl-v1",
+                "capabilities": (
+                    "--output-format",
+                    "stream-json",
+                    "--permission-mode",
+                    "--no-session-persistence",
+                ),
+            },
+            "gemini-cli": {
+                "version": "0.46.2",
+                "minimum": "0.46.0",
+                "maximum": "0.47.0",
+                "event": "gemini-stream-json-v1",
+                "history": "gemini-checkpoint-jsonl-v1",
+                "capabilities": (
+                    "--output-format",
+                    "stream-json",
+                    "--approval-mode",
+                    "--skip-trust",
+                    "--acp",
+                    "--experimental-acp",
+                ),
+            },
+        }[self.harness_id]
         return CliCapabilitySnapshot(
             harness_id=self.harness_id,
             status="supported",
-            version="1.2.3",
-            parsed_version="1.2.3",
+            version=contract["version"],
+            parsed_version=contract["version"],
             command=(self.harness_id,),
-            capabilities={},
-            event_schema=f"{self.harness_id}-events-v1",
-            history_schema=f"{self.harness_id}-history-v1",
+            capabilities={item: True for item in contract["capabilities"]},
+            event_schema=contract["event"],
+            history_schema=contract["history"],
             native_event_schema="raw-terminal-v1",
             native_structured_events=False,
             evidence="hermetic example probe",
+            version_window_status="in_window",
+            minimum_version=contract["minimum"],
+            maximum_version_exclusive=contract["maximum"],
         )
+
+    def durable_structured_capabilities(self) -> AdapterCapabilitySnapshot:
+        protocol = {
+            "codex-cli": "codex-app-server-json-rpc-v2",
+            "gemini-cli": "agent-client-protocol",
+        }.get(self.harness_id, "not-applicable")
+        return AdapterCapabilitySnapshot(
+            adapter_id=self.harness_id,
+            adapter_version="0.4.0",
+            protocol=protocol,
+            protocol_version="2" if self.harness_id == "codex-cli" else "1",
+            structured_events=True,
+            partial_output=True,
+            interactive_input=False,
+            live_approvals=True,
+            durable_approval=True,
+            interrupt=True,
+            steer=True,
+            resume=True,
+            fork=False,
+            session_list=False,
+            session_close=False,
+            native_auth=False,
+            provider_ui_handoff=False,
+            dynamic_model=False,
+            dynamic_mcp=False,
+            recovery_after_process_loss=True,
+        )
+
+    def run_durable_structured(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        return self.run(request, context)
 
     def run(
         self,
@@ -109,6 +186,7 @@ def test_nightly_guardian_runs_headless_and_surfaces_only_regression_attention(
     readme = (workspace / "README.md").read_text(encoding="utf-8")
     assert "/api/workflows/nightly-compatibility-guardian/run" in readme
     assert "Run workflow" in readme
+    assert "giga compatibility check --json" in readme
     _git(workspace, "init", "-b", "main")
     _git(workspace, "config", "user.email", "harness-example@example.invalid")
     _git(workspace, "config", "user.name", "Harness Example")
@@ -186,9 +264,9 @@ def test_nightly_guardian_runs_headless_and_surfaces_only_regression_attention(
     assert baseline_run.status == "passed"
     baseline = eval_store.pin_baseline(project, baseline_run)
     assert [item["binary_version"] for item in baseline["adapter_dimensions"]] == [
-        "1.2.3",
-        "1.2.3",
-        "1.2.3",
+        "0.144.5",
+        "2.1.9",
+        "0.46.2",
     ]
 
     service.upsert(project, payload)

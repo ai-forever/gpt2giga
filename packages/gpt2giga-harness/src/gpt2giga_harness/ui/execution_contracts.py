@@ -104,6 +104,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ),
         ("GET", "/api/cockpit/sessions/{session_id}/runs"),
         ("GET", "/api/cockpit/sessions/{session_id}/updates/stream"),
+        ("GET", "/api/compatibility/guardian"),
         ("GET", "/api/defaults"),
         ("GET", "/api/evals"),
         ("GET", "/api/evals/runs/{eval_run_id}"),
@@ -226,6 +227,7 @@ _SUBPROCESS_PREFIXES = (
 )
 _SUBPROCESS_EXACT = frozenset(
     {
+        ("GET", "/api/compatibility/guardian"),
         ("GET", "/api/environment"),
         ("POST", "/api/environment/commit/apply"),
         ("POST", "/api/environment/commit/preview"),

@@ -10,6 +10,8 @@ The guardian uses one reviewed matrix:
 
 Every eval run records adapter version and event-schema dimensions. Compare a
 run only with a pinned baseline whose adapter dimensions match exactly.
+Run `giga compatibility check --json` before the model-backed matrix so native
+CLI, provider protocol, SDK/schema, and marketplace drift fails closed first.
 
 Classify failed cells as exactly one of:
 
