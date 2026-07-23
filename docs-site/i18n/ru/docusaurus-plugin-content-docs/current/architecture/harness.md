@@ -186,6 +186,7 @@ JSON-схема FastAPI доступна по `/openapi.json`; Swagger и ReDoc 
 | `GET /api/harnesses` | Перечисляет встроенные и plugin-адаптеры, их availability, capabilities, native support и compatibility evidence. |
 | `GET /api/models` | Даёт model picker безопасный список моделей, не заставляя браузер обращаться к шлюзу напрямую. |
 | `POST /api/preflight/run` | Проверяет prompt, workspace, attachments, route, executable и блокирующие условия до отправки. |
+| `GET /api/compatibility/guardian` | Запускает bounded offline fixtures для окон native CLI, provider protocols, версий SDK/schema и marketplace contracts без запуска providers или integrations. |
 | `POST /api/route/recommendation` | Детерминированно рекомендует harness/mode; не вызывает LLM и не выдаёт edit-разрешение. |
 
 ### Project, workspace, memory и редактор
@@ -242,6 +243,8 @@ network effects.
 | `GET /api/runs/{run_id}/provenance` | Возвращает adapter, route, binary/schema evidence, request hashes и безопасные metadata для воспроизводимости. |
 | `GET /api/runs/{run_id}/support-bundle` | Возвращает content-free redaction-safe diagnostics одного run; это не формат private state backup. |
 | `POST /api/runs/{run_id}/replay`<br />`POST /api/runs/{run_id}/fork` | Повторяет безопасно сохранённый запрос в той же session или отделяет историю в новую session. |
+| `POST /api/runs/{run_id}/trace-replays/preview`<br />`POST /api/runs/{run_id}/trace-replays`<br />`GET /api/runs/{run_id}/trace-replay` | Показывают content-addressed preview one-axis replay, запускают в новой session только точный проверенный manifest и читают сохранённое сравнение source/destination. |
+| `GET /api/runs/{run_id}/handoff-capsule` | Строит bounded content-free snapshot передачи между Harness с identities задачи/evidence, environment, approvals, compatibility и честными ограничениями continuity, не запуская target. |
 | `GET /api/runs/{run_id}/diff`<br />`GET /api/runs/{run_id}/patch`<br />`GET /api/runs/{run_id}/pr` | Показывают isolated edit как structured diff, raw patch или PR-ready artifact. |
 | `POST /api/runs/{run_id}/apply`<br />`POST /api/runs/{run_id}/branch` | Применяют reviewed patch или создают local branch только после approval и Git safety checks. |
 | `POST /api/runs/{run_id}/discard`<br />`POST /api/runs/{run_id}/open-worktree` | Удаляют isolated worktree или открывают его в редакторе, не меняя source checkout. |

@@ -5,6 +5,15 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.4.1a1] - 2026-07-23
+
+### Добавлено
+- **Trace-to-Replay comparisons**: Runs Center может повторить сохранённую задачу в новой session, изменив ровно одну ось — model, provider, Harness или extensions — и показать content-addressed сравнение исходного и нового run без автоматического применения изменений.
+- **Reviewed first-run bootstrap**: `giga bootstrap preview|apply|status|rollback` отделяет read-only discovery от явно выбранных обратимых шагов, связывает apply с точным plan hash и откатывает только неизменённые пути, созданные Harness.
+- **Симуляция permissions**: preflight CLI и Workbench заранее показывают effective filesystem, command, network, secret, integration, provider и Git/GitHub permissions для точного route snapshot; deny блокирует запуск, а runtime-dependent и provider-owned действия не выдаются за гарантированное разрешение.
+- **Compatibility guardian**: `giga compatibility check --json` и read-only API проверяют зафиксированные окна Codex, Claude и Gemini CLI, native protocols, Adapter/Integration SDK schemas и marketplace contracts до model-backed execution.
+- **Truthful handoff capsules**: `giga handoff capsule` и Runs Center создают проверяемый content-free снимок задачи, evidence, environment, pending approvals и ограничений continuity для передачи между Harness без запуска target или заявления ложного resume.
+
 ## [0.4.0a1] - 2026-07-23
 
 ### Добавлено
@@ -155,6 +164,7 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
+[0.4.1a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.4.0a1...gpt2giga-harness-v0.4.1a1
 [0.4.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.3.0a1...gpt2giga-harness-v0.4.0a1
 [0.3.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.2.0a1...gpt2giga-harness-v0.3.0a1
 [0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.1.0b1...gpt2giga-harness-v0.2.0a1
