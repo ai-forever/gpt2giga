@@ -42,6 +42,7 @@ class MCPTransport(str, Enum):
 
     STDIO = "stdio"
     STREAMABLE_HTTP = "streamable_http"
+    SSE = "sse"
 
 
 class MCPProbeStatus(str, Enum):
@@ -82,8 +83,11 @@ class ToolServerDescriptor:
             raise ValueError("MCP server id and title must not be empty")
         if self.transport is MCPTransport.STDIO and not self.command:
             raise ValueError("stdio MCP servers require command")
-        if self.transport is MCPTransport.STREAMABLE_HTTP and not self.url:
-            raise ValueError("streamable HTTP MCP servers require url")
+        if (
+            self.transport in {MCPTransport.STREAMABLE_HTTP, MCPTransport.SSE}
+            and not self.url
+        ):
+            raise ValueError("remote MCP servers require url")
         if self.url:
             parsed_url = urlsplit(self.url)
             if (
@@ -91,11 +95,10 @@ class ToolServerDescriptor:
                 or not parsed_url.hostname
                 or parsed_url.username
                 or parsed_url.password
-                or parsed_url.query
                 or parsed_url.fragment
             ):
                 raise ValueError(
-                    "MCP url must be an http(s) endpoint without userinfo, query, or fragment"
+                    "MCP url must be an http(s) endpoint without userinfo or fragment"
                 )
         if any(_is_sensitive_arg(item) for item in self.args):
             raise ValueError("sensitive MCP args must use an env/header secret_ref")
@@ -223,6 +226,8 @@ def probe_mcp_server(
         headers = _resolve_values(descriptor.headers, resolver, owner=owner)
         if descriptor.transport is MCPTransport.STDIO:
             responses = _probe_stdio(descriptor, env)
+        elif descriptor.transport is MCPTransport.SSE:
+            raise ValueError("legacy SSE MCP probing requires a provider-native target")
         else:
             responses = _probe_http(descriptor, headers)
         initialize, raw_tools, raw_resources, raw_prompts = responses

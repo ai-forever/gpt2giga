@@ -161,7 +161,12 @@ export interface IntegrationFlowPlan {
     user_home: boolean;
     requirements: Array<{ id: string; type: string; reason: string }>;
   };
-  configuration: { diff: string[]; restart_required: boolean; fields: string[] };
+  configuration: {
+    diff: string[];
+    restart_required: boolean;
+    fields: string[];
+    preview: Record<string, unknown>;
+  };
   verification_steps: string[];
   rollback_steps: string[];
   handoff_reason: string | null;

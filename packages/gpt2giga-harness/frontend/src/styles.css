@@ -727,6 +727,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .wizard-description { max-width: 720px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .wizard-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
 .wizard-fields .span-two { grid-column: 1 / -1; }
+.mcp-configuration-preview { margin: 12px 0; }
+.mcp-configuration-preview summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 700; }
+.mcp-configuration-preview pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .integration-preview { margin-top: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-raised); padding: 16px; }
 .integration-preview-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .integration-preview-heading h2 { margin: 4px 0 0; overflow-wrap: anywhere; font-size: 16px; }

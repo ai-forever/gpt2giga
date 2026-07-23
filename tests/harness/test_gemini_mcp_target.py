@@ -121,6 +121,7 @@ def test_gemini_mcp_lifecycle_is_exact_reversible_and_transport_truthful(tmp_pat
     assert config["mcpServers"][request.package.id] == {
         "command": "fixture-mcp",
         "args": ["--readonly"],
+        "cwd": "tools/server",
         "env": {"FIXTURE_TOKEN": "${FIXTURE_TOKEN}"},
         "timeout": 10_000,
         "trust": False,
@@ -386,6 +387,7 @@ def _request(
             transport=GeminiMCPTransport.STDIO,
             command="fixture-mcp",
             args=("--readonly",),
+            cwd="tools/server",
             env_vars=("FIXTURE_TOKEN",),
             description="Fixture MCP",
             include_tools=("ping",),

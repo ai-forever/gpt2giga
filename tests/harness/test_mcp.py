@@ -231,6 +231,29 @@ def test_streamable_http_discovery_accepts_json_and_session_header(monkeypatch):
     assert calls[-1][0]["method"] == "DELETE"
 
 
+def test_legacy_sse_probe_fails_closed_before_network(monkeypatch):
+    descriptor = descriptor_from_profile(
+        "legacy-sse",
+        ProjectToolProfile(
+            enabled=True,
+            config={
+                "transport": "sse",
+                "url": "https://mcp.example.test/events",
+            },
+        ),
+    )
+
+    def unexpected_http_probe(*_args, **_kwargs):
+        raise AssertionError("legacy SSE must not use streamable HTTP probing")
+
+    monkeypatch.setattr("gpt2giga_harness.mcp._probe_http", unexpected_http_probe)
+
+    result = probe_mcp_server(descriptor, CompositeSecretResolver())
+
+    assert result.status is MCPProbeStatus.UNHEALTHY
+    assert result.error == "legacy SSE MCP probing requires a provider-native target"
+
+
 def test_missing_secret_blocks_probe_without_leaking_reference_value():
     profile = ProjectToolProfile(
         enabled=True,

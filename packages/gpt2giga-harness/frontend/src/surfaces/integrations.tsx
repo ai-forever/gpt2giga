@@ -11,6 +11,12 @@ import {
 } from "../extension-pack-model";
 import { message } from "../messages";
 import {
+  buildMCPAuthoringConfiguration,
+  supportedMCPTransports,
+  supportsMCPAuthoringCwd,
+  type MCPAuthoringTransport,
+} from "../mcp-authoring-model";
+import {
   buildPluginLibrary,
   buildRemotePluginLibrary,
   filterPluginLibrary,
@@ -809,9 +815,16 @@ function AddIntegrationDrawer({
   const [catalogId, setCatalogId] = useState("");
   const [targetId, setTargetId] = useState("");
   const [scope, setScope] = useState("managed_home");
+  const [workspace, setWorkspace] = useState("");
   const [packageId, setPackageId] = useState("custom-mcp");
-  const [transport, setTransport] = useState("stdio");
-  const [command, setCommand] = useState("custom-mcp");
+  const [transport, setTransport] = useState<MCPAuthoringTransport>("stdio");
+  const [executable, setExecutable] = useState("custom-mcp");
+  const [argvText, setArgvText] = useState("");
+  const [cwd, setCwd] = useState("");
+  const [environmentText, setEnvironmentText] = useState("");
+  const [url, setUrl] = useState("https://");
+  const [headersText, setHeadersText] = useState("");
+  const [authorizationEnvironment, setAuthorizationEnvironment] = useState("");
   const [allowNetwork, setAllowNetwork] = useState(false);
   const [nativeConsent, setNativeConsent] = useState(false);
   const inspect = useMutation({
@@ -858,6 +871,10 @@ function AddIntegrationDrawer({
   const selectedScope = selectedTarget?.scopes.includes(scope)
     ? scope
     : selectedTarget?.scopes[0] ?? "managed_home";
+  const availableTransports = supportedMCPTransports(selectedTarget?.id ?? "");
+  const selectedTransport = availableTransports.includes(transport)
+    ? transport
+    : availableTransports[0];
   const preview = useMutation({
     mutationFn: () => {
       if (!selectedTarget) throw new Error("No compatible target is available");
@@ -868,18 +885,27 @@ function AddIntegrationDrawer({
         : mode === "mcp"
           ? "raw_descriptor"
           : sourceForManifest(selectedCandidate?.manifest);
+      const mcpConfiguration = mode === "mcp"
+        ? buildMCPAuthoringConfiguration({
+          transport: selectedTransport,
+          executable,
+          argvText,
+          cwd: supportsMCPAuthoringCwd(selectedTarget.id) ? cwd : "",
+          environmentText,
+          url,
+          headersText,
+          authorizationEnvironment,
+        })
+        : undefined;
       return mutateCockpit<IntegrationFlowPreviewResponse>("/api/integrations/preview", {
         source,
         catalog_id: mode === "skills" ? catalogId : undefined,
         manifest: mode === "plugins" ? selectedCandidate?.manifest : undefined,
         target_id: selectedTarget.id,
         scope: selectedScope,
+        workspace: selectedScope === "project" ? workspace : undefined,
         package_id: mode === "mcp" ? packageId : undefined,
-        configuration: mode === "mcp" ? {
-          transport,
-          command: transport === "stdio" ? command : undefined,
-          url: transport === "stdio" ? undefined : command,
-        } : {
+        configuration: mcpConfiguration ?? {
           plugin_name: selectedCandidate?.title,
           sparse: selectedCandidate?.relative_dir && selectedCandidate.relative_dir !== "."
             ? [selectedCandidate.relative_dir]
@@ -888,6 +914,11 @@ function AddIntegrationDrawer({
       });
     },
   });
+  const resetPreviewState = () => {
+    preview.reset();
+    setAllowNetwork(false);
+    setNativeConsent(false);
+  };
   const apply = useMutation({
     mutationFn: () => {
       if (!preview.data) throw new Error("Preview the installation first");
@@ -916,7 +947,7 @@ function AddIntegrationDrawer({
         {category === "all" ? (
           <div className="plugin-add-kind">
             {(["skills", "plugins", "mcp"] as const).map((item) => (
-              <button className={mode === item ? "selected" : ""} key={item} onClick={() => { setMode(item); preview.reset(); }} type="button">
+              <button className={mode === item ? "selected" : ""} key={item} onClick={() => { setMode(item); resetPreviewState(); }} type="button">
                 {typeLabel(locale, item)}
               </button>
             ))}
@@ -935,7 +966,7 @@ function AddIntegrationDrawer({
             {inspect.data ? <p className="git-commit"><strong>{message(locale, "resolvedCommit")}</strong><code>{inspect.data.commit}</code></p> : null}
             {candidates.length > 0 ? (
               <label className="field-control">{message(locale, "selectCandidate")}
-                <select onChange={(event) => { setSelectedCandidateId(event.target.value); setCatalogId(""); preview.reset(); }} value={selectedCandidate?.id ?? ""}>
+                <select onChange={(event) => { setSelectedCandidateId(event.target.value); setCatalogId(""); resetPreviewState(); }} value={selectedCandidate?.id ?? ""}>
                   {candidates.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.relative_dir}</option>)}
                 </select>
               </label>
@@ -950,21 +981,73 @@ function AddIntegrationDrawer({
           </>
         ) : (
           <>
-            <label className="field-control">{message(locale, "packageId")}<input onChange={(event) => setPackageId(event.target.value)} value={packageId} /></label>
-            <label className="field-control">{message(locale, "transport")}<select onChange={(event) => setTransport(event.target.value)} value={transport}><option value="stdio">stdio</option><option value="streamable_http">streamable HTTP</option><option value="sse">SSE</option></select></label>
-            <label className="field-control">{transport === "stdio" ? message(locale, "command") : "HTTPS URL"}<input onChange={(event) => setCommand(event.target.value)} value={command} /></label>
+            <label className="field-control">{message(locale, "packageId")}<input onChange={(event) => { setPackageId(event.target.value); resetPreviewState(); }} value={packageId} /></label>
+            <label className="field-control">{message(locale, "transport")}
+              <select onChange={(event) => { setTransport(event.target.value as MCPAuthoringTransport); resetPreviewState(); }} value={selectedTransport}>
+                {availableTransports.map((item) => <option key={item} value={item}>{item === "streamable_http" ? "streamable HTTP" : item.toUpperCase()}</option>)}
+              </select>
+            </label>
+            {selectedTransport === "stdio" ? (
+              <>
+                <label className="field-control">
+                  {locale === "ru" ? "Исполняемый файл" : "Executable"}
+                  <input onChange={(event) => { setExecutable(event.target.value); resetPreviewState(); }} placeholder="custom-mcp" value={executable} />
+                </label>
+                <label className="field-control">
+                  {locale === "ru" ? "Аргументы (по одному на строку)" : "Arguments (one per line)"}
+                  <textarea onChange={(event) => { setArgvText(event.target.value); resetPreviewState(); }} rows={3} spellCheck={false} value={argvText} />
+                </label>
+                {supportsMCPAuthoringCwd(selectedTarget?.id ?? "") ? (
+                  <label className="field-control">
+                    {locale === "ru" ? "Рабочий каталог (относительный, необязательно)" : "Working directory (relative, optional)"}
+                    <input onChange={(event) => { setCwd(event.target.value); resetPreviewState(); }} placeholder="tools/server" value={cwd} />
+                  </label>
+                ) : null}
+                <label className="field-control">
+                  {locale === "ru" ? "SecretRef окружения (имена, по одному на строку)" : "Environment SecretRefs (names, one per line)"}
+                  <textarea onChange={(event) => { setEnvironmentText(event.target.value); resetPreviewState(); }} placeholder="MCP_TOKEN" rows={3} spellCheck={false} value={environmentText} />
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="field-control">
+                  HTTPS URL
+                  <input onChange={(event) => { setUrl(event.target.value); resetPreviewState(); }} placeholder="https://mcp.example/v1" type="url" value={url} />
+                </label>
+                <label className="field-control">
+                  {locale === "ru" ? "Header SecretRefs (Header=ENV, по одному на строку)" : "Header SecretRefs (Header=ENV, one per line)"}
+                  <textarea onChange={(event) => { setHeadersText(event.target.value); resetPreviewState(); }} placeholder="X-Tenant=TENANT_ID" rows={3} spellCheck={false} value={headersText} />
+                </label>
+                <label className="field-control">
+                  {locale === "ru" ? "Authorization SecretRef (имя ENV, необязательно)" : "Authorization SecretRef (ENV name, optional)"}
+                  <input onChange={(event) => { setAuthorizationEnvironment(event.target.value); resetPreviewState(); }} placeholder="MCP_AUTHORIZATION" value={authorizationEnvironment} />
+                </label>
+              </>
+            )}
           </>
         )}
         <div className="wizard-fields">
-          <label className="field-control">{message(locale, "target")}<select onChange={(event) => { setTargetId(event.target.value); preview.reset(); }} value={selectedTarget?.id ?? ""}>{targets.map((target) => <option key={target.id} value={target.id}>{targetLabel(target.id)}</option>)}</select></label>
-          <label className="field-control">{message(locale, "scope")}<select onChange={(event) => { setScope(event.target.value); preview.reset(); }} value={selectedScope}>{selectedTarget?.scopes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label className="field-control">{message(locale, "target")}<select onChange={(event) => { setTargetId(event.target.value); resetPreviewState(); }} value={selectedTarget?.id ?? ""}>{targets.map((target) => <option key={target.id} value={target.id}>{targetLabel(target.id)}</option>)}</select></label>
+          <label className="field-control">{message(locale, "scope")}<select onChange={(event) => { setScope(event.target.value); resetPreviewState(); }} value={selectedScope}>{selectedTarget?.scopes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          {mode === "mcp" && selectedScope === "project" ? (
+            <label className="field-control span-two">
+              Workspace
+              <input onChange={(event) => { setWorkspace(event.target.value); resetPreviewState(); }} placeholder="/path/to/project" value={workspace} />
+            </label>
+          ) : null}
         </div>
-        <button disabled={preview.isPending || (mode === "skills" && !catalogId) || (mode === "plugins" && !selectedCandidate?.manifest)} onClick={() => preview.mutate()} type="button">{message(locale, "previewInstall")}</button>
+        <button disabled={preview.isPending || (mode === "skills" && !catalogId) || (mode === "plugins" && !selectedCandidate?.manifest) || (mode === "mcp" && selectedScope === "project" && !workspace.trim())} onClick={() => preview.mutate()} type="button">{message(locale, "previewInstall")}</button>
         {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
         {preview.data ? (
           <section className="integration-preview">
             <div className="integration-preview-heading"><h2>{preview.data.plan.package.id}</h2><StatusBadge status={preview.data.plan.risk.decision} /></div>
             <dl className="plugin-facts"><div><dt>{message(locale, "target")}</dt><dd>{targetLabel(preview.data.plan.target.id)}</dd></div><div><dt>{message(locale, "configurationDiff")}</dt><dd>{preview.data.plan.configuration.diff.length}</dd></div><div><dt>{message(locale, "permissions")}</dt><dd>{preview.data.plan.permissions.requirements.map((item) => item.type).join(", ") || message(locale, "noExtraPermissions")}</dd></div></dl>
+            {mode === "mcp" ? (
+              <details className="mcp-configuration-preview">
+                <summary>{locale === "ru" ? "Точная нормализованная конфигурация" : "Exact normalized configuration"}</summary>
+                <pre>{JSON.stringify(preview.data.plan.configuration.preview, null, 2)}</pre>
+              </details>
+            ) : null}
             {preview.data.plan.permissions.network ? <label className="check-control"><input checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} type="checkbox" />{message(locale, "allowNetwork")}</label> : null}
             {preview.data.plan.permissions.native_consent ? <label className="check-control"><input checked={nativeConsent} onChange={(event) => setNativeConsent(event.target.checked)} type="checkbox" />{message(locale, "nativeConsent")}</label> : null}
             <button className="primary-button" disabled={apply.isPending} onClick={() => apply.mutate()} type="button">{message(locale, "approveAndApply")}</button>
