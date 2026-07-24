@@ -46,7 +46,7 @@ import {
   type MessageActionKind,
   type ResolvedMessageAction,
 } from "../message-actions";
-import { message } from "../messages";
+import { message, type MessageKey } from "../messages";
 import { usePreferences } from "../preferences-context";
 import type { LocalePreference } from "../preferences";
 import { integrationFlowOptions } from "../remaining-request-graph";
@@ -79,6 +79,12 @@ import {
   skillMentionOptions,
   type SkillMention,
 } from "../skill-mentions";
+import {
+  admittedBuiltinToolSelection,
+  composerToolCatalog,
+  type ComposerToolCategory,
+  type ComposerToolOption,
+} from "../tool-selection";
 import {
   formatTimestamp,
   latestRun,
@@ -122,7 +128,6 @@ type ReasoningEffort = "high" | "low" | "medium";
 type AdvancedRunConfig = {
   dryRun: boolean;
   permissionProfile: string;
-  stream: boolean;
   workspacePolicy: string;
 };
 
@@ -153,6 +158,13 @@ const builtinToolLabels: Record<string, string> = {
   model_3d_generate: "3D generation",
   url_content_extraction: "URL content",
   web_search: "Web search",
+};
+const toolCategoryMessageKeys: Record<ComposerToolCategory, MessageKey> = {
+  agent: "toolCategoryAgent",
+  gigachat: "toolCategoryGigachat",
+  mcp: "toolCategoryMcp",
+  plugin: "toolCategoryPlugin",
+  skill: "toolCategorySkill",
 };
 const emptyStringList: readonly string[] = [];
 const activeRunStatusGroups = new Set(["approval-needed", "blocked", "queued", "running"]);
@@ -478,13 +490,14 @@ export function WorkbenchSurface() {
   const [advancedConfig, setAdvancedConfig] = useState<AdvancedRunConfig>({
     dryRun: false,
     permissionProfile: "interactive",
-    stream: true,
     workspacePolicy: "auto",
   });
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [builtinTools, setBuiltinTools] = useState<string[]>([]);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const [toolPickerOpen, setToolPickerOpen] = useState(false);
+  const [toolSearch, setToolSearch] = useState("");
   const [draggingFiles, setDraggingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -590,7 +603,6 @@ export function WorkbenchSurface() {
     setAdvancedConfig((current) => ({
       ...current,
       permissionProfile: defaults.permission_profile,
-      stream: defaults.stream,
       workspacePolicy: defaults.workspace_policy,
     }));
   }, [sessionId, settings.data]);
@@ -823,7 +835,7 @@ export function WorkbenchSurface() {
         api_mode: runConfig.apiMode,
         attachment_ids: draftAttachments.map((attachment) => attachment.id),
         authority: productSelection.authority,
-        builtin_tools: runConfig.apiMode === "v2" ? builtinTools : [],
+        builtin_tools: admittedBuiltinTools,
         extra: {
           ...(editingMessageId === undefined ? {} : { edit_message_id: editingMessageId }),
           generate_session_title: session.title === "Untitled session",
@@ -843,7 +855,6 @@ export function WorkbenchSurface() {
           runConfig.harnessId,
         ),
         session_id: sessionId,
-        stream: advancedConfig.stream,
         task_intent: productSelection.intent,
         workbench_kind: productSelection.kind,
         workspace: session.workspace_bound ? undefined : ".",
@@ -1133,6 +1144,47 @@ export function WorkbenchSurface() {
     runConfig.apiMode === "v2" &&
     productSelection.kind === "direct_chat" &&
     supportedBuiltinTools.length > 0;
+  const admittedBuiltinTools = useMemo(
+    () => admittedBuiltinToolSelection(
+      builtinTools,
+      supportedBuiltinTools,
+      runConfig.apiMode,
+      productSelection.kind,
+    ),
+    [builtinTools, productSelection.kind, runConfig.apiMode, supportedBuiltinTools],
+  );
+  const toolSkillMentions = useMemo(
+    () => skillMentionOptions(
+      integrations.data,
+      runConfig.harnessId,
+      toolSearch,
+    ),
+    [integrations.data, runConfig.harnessId, toolSearch],
+  );
+  const toolGroups = useMemo(
+    () => composerToolCatalog({
+      apiMode: runConfig.apiMode,
+      builtinTools: admittedBuiltinTools,
+      harnessId: runConfig.harnessId,
+      inventory: integrations.data,
+      kind: productSelection.kind,
+      query: toolSearch,
+      selectedSkillIds: new Set(selectedSkills.map((skill) => skill.id)),
+      skillMentions: toolSkillMentions,
+      supportedBuiltinTools,
+    }),
+    [
+      admittedBuiltinTools,
+      integrations.data,
+      productSelection.kind,
+      runConfig.apiMode,
+      runConfig.harnessId,
+      selectedSkills,
+      supportedBuiltinTools,
+      toolSearch,
+      toolSkillMentions,
+    ],
+  );
   const modelSuggestions = models.data?.models ?? [];
   const streamPresentation = useMemo(
     () => projectWorkbenchStream(
@@ -1177,9 +1229,18 @@ export function WorkbenchSurface() {
 
   useEffect(() => {
     const supported = new Set(supportedBuiltinTools);
-    setBuiltinTools((current) => current.filter((tool) => supported.has(tool)));
+    setBuiltinTools((current) => (
+      builtinToolsAvailable
+        ? current.filter((tool) => supported.has(tool))
+        : []
+    ));
     setProductSelection((current) => normalizeProductSelection(selectedHarness, current));
-  }, [runConfig.harnessId, selectedHarness, supportedBuiltinTools]);
+  }, [
+    builtinToolsAvailable,
+    runConfig.harnessId,
+    selectedHarness,
+    supportedBuiltinTools,
+  ]);
 
   useEffect(() => {
     setAtSelection(0);
@@ -1338,6 +1399,25 @@ export function WorkbenchSurface() {
     const candidate = atCandidates[index];
     if (candidate?.kind === "skill") chooseSkill(candidate.skill);
     if (candidate?.kind === "file") chooseWorkspaceFile(candidate.file.path);
+  };
+  const toggleComposerTool = (option: ComposerToolOption) => {
+    if (!option.selectable || option.value === null) return;
+    const value = option.value;
+    if (option.category === "gigachat") {
+      setBuiltinTools((current) => (
+        current.includes(value)
+          ? current.filter((tool) => tool !== value)
+          : [...current, value]
+      ));
+      return;
+    }
+    const skill = toolSkillMentions.find((candidate) => candidate.id === value);
+    if (skill === undefined) return;
+    setSelectedSkills((current) => (
+      current.some((candidate) => candidate.id === skill.id)
+        ? current.filter((candidate) => candidate.id !== skill.id)
+        : [...current, skill]
+    ));
   };
 
   return (
@@ -1677,7 +1757,7 @@ export function WorkbenchSurface() {
               className={[
                 "composer",
                 draggingFiles ? "dragging-files" : "",
-                modelMenuOpen || plusMenuOpen ? "popover-open" : "",
+                modelMenuOpen || plusMenuOpen || toolPickerOpen ? "popover-open" : "",
               ].filter(Boolean).join(" ")}
               onDragEnter={(event) => {
                 event.preventDefault();
@@ -1721,15 +1801,27 @@ export function WorkbenchSurface() {
                   )}
                 </div>
               )}
-              {selectedSkills.length > 0 ? (
-                <div className="attachment-chips" aria-label={message(locale, "attachedFiles")}>
+              {selectedSkills.length > 0 || admittedBuiltinTools.length > 0 ? (
+                <div className="attachment-chips" aria-label={message(locale, "selectedTools")}>
+                  {admittedBuiltinTools.map((tool) => (
+                    <span className="attachment-chip tool-selection-chip" key={tool}>
+                      <span aria-hidden="true">⌁</span>
+                      <span>{builtinToolLabels[tool] ?? tool}</span>
+                      <small>GigaChat</small>
+                      <button
+                        aria-label={`${message(locale, "removeTool")} ${builtinToolLabels[tool] ?? tool}`}
+                        onClick={() => setBuiltinTools((current) => current.filter((item) => item !== tool))}
+                        type="button"
+                      >×</button>
+                    </span>
+                  ))}
                   {selectedSkills.map((skill) => (
                     <span className="attachment-chip skill-mention-chip" key={skill.id}>
                       <span aria-hidden="true">✦</span>
                       <span title={`${skill.source} · ${skill.nativeName}`}>{skill.mention}</span>
                       <small>{skill.source}</small>
                       <button
-                        aria-label={`${locale === "ru" ? "Убрать" : "Remove"} ${skill.mention}`}
+                        aria-label={`${message(locale, "removeTool")} ${skill.mention}`}
                         onClick={() => setSelectedSkills((current) => current.filter((item) => item.id !== skill.id))}
                         type="button"
                       >×</button>
@@ -1744,6 +1836,73 @@ export function WorkbenchSurface() {
                   onRemove={(attachmentId) => removeAttachment.mutate(attachmentId)}
                   removePending={removeAttachment.isPending}
                 />
+              ) : null}
+              {toolPickerOpen ? (
+                <section
+                  aria-label={message(locale, "toolPickerTitle")}
+                  className="composer-tool-picker"
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setToolPickerOpen(false);
+                    }
+                  }}
+                  role="dialog"
+                >
+                  <header>
+                    <div>
+                      <strong>{message(locale, "toolPickerTitle")}</strong>
+                      <span>{message(locale, "toolPickerHint")}</span>
+                    </div>
+                    <button
+                      aria-label={message(locale, "close")}
+                      onClick={() => setToolPickerOpen(false)}
+                      type="button"
+                    >×</button>
+                  </header>
+                  <label className="tool-picker-search">
+                    <span className="sr-only">{message(locale, "searchTools")}</span>
+                    <input
+                      autoFocus
+                      onChange={(event) => setToolSearch(event.target.value)}
+                      placeholder={message(locale, "searchTools")}
+                      type="search"
+                      value={toolSearch}
+                    />
+                  </label>
+                  <div className="tool-picker-results">
+                    {toolGroups.length === 0 ? (
+                      <p className="empty-state">{message(locale, "noToolsFound")}</p>
+                    ) : toolGroups.map((group) => (
+                      <section className="tool-picker-group" key={group.category}>
+                        <h3>{message(locale, toolCategoryMessageKeys[group.category])}</h3>
+                        <div>
+                          {group.options.map((option) => (
+                            <button
+                              aria-disabled={!option.selectable}
+                              aria-pressed={option.selectable ? option.selected : undefined}
+                              className={[
+                                "tool-picker-option",
+                                option.selected ? "selected" : "",
+                                option.selectable ? "" : "unavailable",
+                              ].filter(Boolean).join(" ")}
+                              key={option.id}
+                              onClick={() => toggleComposerTool(option)}
+                              type="button"
+                            >
+                              <span aria-hidden="true">{option.selected ? "✓" : option.selectable ? "+" : "·"}</span>
+                              <span>
+                                <strong>{option.label}</strong>
+                                <small>{option.detail}</small>
+                                {option.reason === null ? null : <em>{option.reason}</em>}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                </section>
               ) : null}
               <textarea
                 aria-label={message(locale, "composerPlaceholder")}
@@ -1924,34 +2083,8 @@ export function WorkbenchSurface() {
                       <input checked={advancedConfig.dryRun} onChange={(event) => setAdvancedConfig((current) => ({ ...current, dryRun: event.target.checked }))} type="checkbox" />
                       <span><strong>{message(locale, "previewExecution")}</strong><small>{message(locale, "previewExecutionHint")}</small></span>
                     </label>
-                    <label>
-                      <input checked={advancedConfig.stream} onChange={(event) => setAdvancedConfig((current) => ({ ...current, stream: event.target.checked }))} type="checkbox" />
-                      <span><strong>{message(locale, "streamResponse")}</strong></span>
-                    </label>
                   </fieldset>
-                  <fieldset className="builtin-tools-panel">
-                    <legend>{message(locale, "builtinTools")}</legend>
-                    <div>
-                      {Object.entries(builtinToolLabels).map(([tool, label]) => (
-                        <label className="builtin-tool-choice" key={tool}>
-                          <input
-                            checked={builtinTools.includes(tool)}
-                            disabled={!builtinToolsAvailable || !supportedBuiltinTools.includes(tool)}
-                            onChange={(event) => setBuiltinTools((current) => event.target.checked
-                              ? [...current, tool]
-                              : current.filter((item) => item !== tool))}
-                            type="checkbox"
-                          />
-                          <span>{label}</span>
-                        </label>
-                      ))}
-                    </div>
-                    <p>
-                      {builtinToolsAvailable
-                        ? message(locale, "builtinToolsHint")
-                        : message(locale, "builtinToolsUnavailable")}
-                    </p>
-                  </fieldset>
+                  <p className="runtime-owned-copy">{message(locale, "streamRuntimeOwned")}</p>
                 </section>
               ) : null}
               <div className="composer-footer">
@@ -1986,9 +2119,13 @@ export function WorkbenchSurface() {
                             <span aria-hidden="true">◇</span>
                             <span><strong>{message(locale, "attachFiles")}</strong><small>{message(locale, "attachFilesHint")}</small></span>
                           </button>
-                          <button onClick={() => { setPlusMenuOpen(false); setAdvancedOpen(true); }} role="menuitem" type="button">
+                          <button onClick={() => {
+                            setPlusMenuOpen(false);
+                            setToolPickerOpen(true);
+                            setToolSearch("");
+                          }} role="menuitem" type="button">
                             <span aria-hidden="true">✦</span>
-                            <span><strong>{message(locale, "builtinTools")}</strong><small>{message(locale, "builtinToolsMenuHint")}</small></span>
+                            <span><strong>{message(locale, "toolsAndIntegrations")}</strong><small>{message(locale, "toolPickerMenuHint")}</small></span>
                           </button>
                         </div>
                       ) : null}
@@ -2092,11 +2229,11 @@ export function WorkbenchSurface() {
                     </label>
                     <button
                       aria-expanded={advancedOpen}
-                      className={builtinTools.length > 0 ? "advanced-button active" : "advanced-button"}
+                      className={advancedConfig.dryRun ? "advanced-button active" : "advanced-button"}
                       onClick={() => setAdvancedOpen((open) => !open)}
                       type="button"
                     >
-                      {message(locale, "advanced")}{builtinTools.length > 0 ? ` · ${builtinTools.length}` : ""}
+                      {message(locale, "advanced")}
                     </button>
                   </div>
                   <span className={`stream-indicator ${stream.status}`}>

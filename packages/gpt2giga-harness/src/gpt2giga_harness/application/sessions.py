@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from gpt2giga_harness.runtime.capabilities import negotiate_execution_capabilities
 from gpt2giga_harness.runtime.models import RuntimeJob
 from gpt2giga_harness.runtime.policy import ApprovalDecision, ApprovalRequest
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
@@ -107,6 +108,9 @@ class SessionApplicationService:
             effective_payload["capability"] = admission.capability.value
             effective_payload["mode"] = admission.mode
             effective_payload["invocation_mode"] = admission.invocation_mode
+            effective_payload["stream"] = negotiate_execution_capabilities(
+                harness
+            ).streaming
         else:
             effective_payload.setdefault("invocation_mode", admission.invocation_mode)
         effective_payload["execution_transport"] = admission.transport.value

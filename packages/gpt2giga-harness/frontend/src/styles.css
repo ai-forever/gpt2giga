@@ -377,12 +377,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .developer-options legend { color: var(--muted); padding: 0 4px; font-size: 9px; font-weight: 750; text-transform: uppercase; }
 .developer-options label { display: flex; align-items: flex-start; gap: 7px; color: var(--text); font-size: 10px; }
 .developer-options label > span { display: grid; gap: 2px; }.developer-options small { color: var(--muted); font-weight: 500; }
-.builtin-tool-choice { display: flex; align-items: center; gap: 6px; }
-.builtin-tools-panel { margin: 0; border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; }
-.builtin-tools-panel legend { color: var(--muted); padding: 0 4px; font-size: 9px; font-weight: 750; text-transform: uppercase; }
-.builtin-tools-panel > div { display: flex; flex-wrap: wrap; gap: 8px 14px; }
-.builtin-tool-choice { font-size: 10px; font-weight: 650; }.builtin-tool-choice:has(input:disabled) { opacity: .48; }
-.builtin-tools-panel p { margin: 8px 0 0; color: var(--muted); font-size: 9px; }
+.runtime-owned-copy { margin: 9px 0 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
 .attachment-chips { display: flex; gap: 6px; overflow-x: auto; padding: 8px 10px 0; }
 .attachment-chip { min-width: 0; max-width: 240px; display: flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-muted); padding: 4px 5px 4px 8px; color: var(--muted); font-size: 10px; }
 .attachment-chip > span:nth-child(2) { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
@@ -390,6 +385,20 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .attachment-chip button { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; padding: 0; }
 .attachment-chip.skill-mention-chip { border-color: color-mix(in srgb, var(--accent) 38%, var(--border)); background: color-mix(in srgb, var(--accent-soft) 42%, var(--surface)); }
 .attachment-chip.skill-mention-chip > span:first-child, .attachment-chip.skill-mention-chip > span:nth-child(2) { color: var(--accent); }
+.attachment-chip.tool-selection-chip { border-color: color-mix(in srgb, var(--success) 38%, var(--border)); background: color-mix(in srgb, var(--success) 7%, var(--surface)); }
+.attachment-chip.tool-selection-chip > span:first-child { color: var(--success); }
+.composer-tool-picker { max-height: min(420px, 58vh); overflow: hidden; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 8px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface-muted) 36%, var(--surface)); padding: 10px 12px; }
+.composer-tool-picker > header { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.composer-tool-picker > header > div { min-width: 0; display: grid; gap: 2px; }.composer-tool-picker > header strong { font-size: 12px; }.composer-tool-picker > header span { color: var(--muted); font-size: 9px; line-height: 1.4; }
+.composer-tool-picker > header button { width: 27px; height: 27px; flex: none; display: grid; place-items: center; padding: 0; }
+.tool-picker-search input { width: 100%; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 0 10px; color: var(--text); font-size: 11px; }
+.tool-picker-results { min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 9px; padding-right: 2px; }
+.tool-picker-group { min-width: 0; display: grid; gap: 5px; }.tool-picker-group h3 { margin: 0; color: var(--muted); font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+.tool-picker-group > div { display: grid; gap: 4px; }
+.tool-picker-option { width: 100%; min-width: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: start; gap: 7px; border-color: var(--border); background: var(--surface); padding: 7px; text-align: left; }
+.tool-picker-option > span:first-child { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 6px; background: var(--surface-muted); color: var(--accent); font-size: 12px; }
+.tool-picker-option > span:last-child { min-width: 0; display: grid; gap: 2px; }.tool-picker-option strong { overflow-wrap: anywhere; color: var(--text); font-size: 10px; }.tool-picker-option small, .tool-picker-option em { overflow-wrap: anywhere; color: var(--muted); font-size: 8px; font-style: normal; line-height: 1.35; }
+.tool-picker-option em { color: var(--warning); }.tool-picker-option.selected { border-color: var(--accent); background: var(--accent-soft); }.tool-picker-option.unavailable { cursor: default; opacity: .72; }
 .attachment-gallery { min-width: 0; display: flex; flex-wrap: wrap; gap: 8px; margin: 9px 0 3px; }
 .composer > .attachment-gallery { overflow-x: auto; flex-wrap: nowrap; margin: 0; padding: 9px 11px 2px; }
 .attachment-preview-card, .attachment-file-card { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
@@ -675,6 +684,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .settings-field-grid input:disabled, .settings-field-grid select:disabled { background: var(--surface-muted); }
 .settings-field-grid .settings-checkbox { min-height: 38px; display: flex; align-items: center; flex-direction: row; gap: 8px; border: 1px solid var(--border); border-radius: 6px; padding: 0 10px; color: var(--text); }
 .settings-field-grid .settings-checkbox input { width: 15px; height: 15px; }
+.runtime-owned-setting { min-width: 0; display: grid; gap: 3px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-muted); padding: 8px 10px; }.runtime-owned-setting strong { color: var(--text); font-size: 10px; }.runtime-owned-setting span { color: var(--muted); font-size: 9px; line-height: 1.4; }
 .settings-section > button { margin-top: 13px; }
 .settings-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--border); }
 .settings-facts > div { min-width: 0; display: grid; gap: 4px; background: var(--surface); padding: 10px 12px; }
@@ -728,6 +738,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 }
 @media (max-width: 520px) {
   .advanced-config-grid { grid-template-columns: 1fr; }
+  .tool-picker-results { grid-template-columns: 1fr; }
   .developer-options { display: grid; }
   .workspace-file-picker > div, .workspace-file-picker > button { align-items: flex-start; flex-direction: column; gap: 3px; }
 }

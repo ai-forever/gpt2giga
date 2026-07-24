@@ -25,6 +25,8 @@ describe("backend-owned Settings contract", () => {
     expect(source).toContain('patchCockpit<SettingsSaveResponse>("/api/settings/defaults"');
     expect(source).toContain("default_title_model");
     expect(source).toContain("execution_transport");
+    expect(source).not.toContain('checked={draft.stream}');
+    expect(source).toContain('message(locale, "streamRuntimeOwned")');
     expect(source).toContain('message(locale, "chatModel")');
     expect(source).toContain('message(locale, "titleModel")');
     expect(source).toContain('mutateCockpit<ProviderMutationResponse>("/api/providers"');

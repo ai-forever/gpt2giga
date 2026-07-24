@@ -459,7 +459,10 @@ export function SettingsSurface() {
                   <option value="plan">plan</option><option value="act">act</option>
                 </select>
               </label>
-              <label className="settings-checkbox"><input checked={draft.stream} onChange={(event) => setDraft({ ...draft, stream: event.target.checked })} type="checkbox" />{message(locale, "streamResponse")}</label>
+              <div className="runtime-owned-setting">
+                <strong>{message(locale, "streamRuntimeOwnedTitle")}</strong>
+                <span>{message(locale, "streamRuntimeOwned")}</span>
+              </div>
             </div>
             <Boundary source="harness_settings" effect="new_runs" />
           </SettingsSection>

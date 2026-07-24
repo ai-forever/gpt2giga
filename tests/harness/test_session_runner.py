@@ -301,6 +301,23 @@ def test_session_runner_rejects_builtin_tools_for_v1():
         )
 
 
+def test_session_runner_rejects_unknown_builtin_tool_before_harness_call():
+    harness = _CaptureHarness()
+    runner = _runner(harness)
+
+    with pytest.raises(ValueError, match="Unsupported built-in tool: unknown"):
+        runner.create_and_run(
+            {
+                "harness_id": "capture",
+                "prompt": "search",
+                "api_mode": "v2",
+                "builtin_tools": ["unknown"],
+            }
+        )
+
+    assert harness.last_request is None
+
+
 def test_managed_mcp_snapshot_is_bound_to_provenance_and_reused_for_replay(tmp_path):
     workspace = tmp_path / "project"
     config_path = workspace / ".giga" / "harness.toml"
