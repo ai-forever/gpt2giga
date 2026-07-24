@@ -21,8 +21,7 @@ from gpt2giga_harness.sessions.models import (
 )
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
 from gpt2giga_harness.settings import HarnessSettingsStore
-from gpt2giga_harness.execution import ExecutionTransport
-from gpt2giga_harness.workbench_execution import effective_workbench_transport
+from gpt2giga_harness.workbench_execution import admit_workbench_execution
 
 
 class DurableRuntimeUnavailableError(RuntimeError):
@@ -99,19 +98,20 @@ class SessionApplicationService:
             or defaults.default_harness_id
         )
         harness = self.runner.registry.get(harness_id)
-        transport = effective_workbench_transport(
+        admission = admit_workbench_execution(
             harness,
             payload,
             configured_default=defaults.execution_transport,
         )
-        effective_payload["execution_transport"] = transport.value
-        if "invocation_mode" not in effective_payload:
-            effective_payload["invocation_mode"] = (
-                "native"
-                if transport is ExecutionTransport.NATIVE_TERMINAL
-                else "headless"
-            )
+        if admission.input_source != "legacy_machine":
+            effective_payload["capability"] = admission.capability.value
+            effective_payload["mode"] = admission.mode
+            effective_payload["invocation_mode"] = admission.invocation_mode
+        else:
+            effective_payload.setdefault("invocation_mode", admission.invocation_mode)
+        effective_payload["execution_transport"] = admission.transport.value
         extra = _mapping(payload.get("extra"))
+        extra["workbench_admission"] = admission.to_dict()
         if (
             bool(extra.get("generate_session_title"))
             and _optional_text(extra.get("session_title_model")) is None

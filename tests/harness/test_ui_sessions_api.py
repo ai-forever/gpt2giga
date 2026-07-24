@@ -349,13 +349,40 @@ def test_sessions_api_start_run_returns_stream_urls_and_sse_replay():
 
     started = client.post(
         "/api/sessions/run/start",
-        json={"harness_id": "echo", "prompt": "hello", "stream": True},
+        json={
+            "authority": "read_only",
+            "harness_id": "echo",
+            "prompt": "hello",
+            "stream": True,
+            "task_intent": "ask",
+            "workbench_kind": "direct_chat",
+        },
     )
 
     assert started.status_code == 200
     body = started.json()
     assert body["run"]["id"].startswith("run_")
     assert body["run"]["metadata"]["execution_transport"] == "one_shot"
+    assert body["run"]["metadata"]["workbench_admission"] == {
+        "schema_version": 1,
+        "kind": "direct_chat",
+        "intent": "ask",
+        "authority": "read_only",
+        "capability": "chat_completions",
+        "status": "available",
+        "why": ["admitted_provider_path:direct_chat"],
+        "recovery": [],
+        "input_source": "product",
+        "mode": "plan",
+        "diagnostics": {
+            "content_free": True,
+            "harness_id": "echo",
+            "provider_path": "direct_chat",
+            "execution_transport": "one_shot",
+            "provider_native_continuity": False,
+            "fallback": None,
+        },
+    }
     assert body["stream_url"] == f"/api/runs/{body['run']['id']}/events/stream"
     assert body["cancel_url"] == f"/api/runs/{body['run']['id']}/cancel"
 

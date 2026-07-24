@@ -329,7 +329,10 @@ from gpt2giga_harness.workspace import (
     workspace_file_metadata,
     workspace_tree,
 )
-from gpt2giga_harness.workbench_execution import workbench_transport_projection
+from gpt2giga_harness.workbench_execution import (
+    workbench_admission_projection,
+    workbench_transport_projection,
+)
 from gpt2giga_harness.workbench_resources import (
     WorkbenchPreferenceStore,
     WorkbenchResourceService,
@@ -698,6 +701,7 @@ def create_app(
                     ),
                     "provider_handoff": provider_handoff,
                     "execution_surfaces": execution_surfaces,
+                    "workbench_admission": workbench_admission_projection(harness),
                     "workbench_transport": workbench_transport_projection(harness),
                     "validation": harness_validation_report_to_dict(validation),
                 }

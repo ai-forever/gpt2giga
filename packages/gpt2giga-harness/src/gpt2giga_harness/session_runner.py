@@ -309,6 +309,7 @@ class HarnessSessionRunner:
                 ),
                 **edited_message_metadata(_edit_message_id(options)),
                 **_agent_metadata(options),
+                **_workbench_admission_metadata(options),
             },
         )
         user_message = self.store.append_message(
@@ -457,6 +458,7 @@ class HarnessSessionRunner:
                 else {}
             ),
             **_agent_metadata(options),
+            **_workbench_admission_metadata(options),
         }
         edit_message_id = _edit_message_id(options)
         if edit_message_id is not None:
@@ -1974,6 +1976,14 @@ def _agent_metadata(options: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(execution_plan, Mapping):
         metadata["agent_execution_plan"] = dict(execution_plan)
     return metadata
+
+
+def _workbench_admission_metadata(options: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain the content-free product admission receipt on each run."""
+    admission = _mapping(_mapping(options.get("extra")).get("workbench_admission"))
+    if admission.get("schema_version") != 1:
+        return {}
+    return {"workbench_admission": dict(admission)}
 
 
 def _request_extra(

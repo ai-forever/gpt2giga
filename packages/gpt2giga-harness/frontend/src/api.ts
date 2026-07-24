@@ -563,6 +563,15 @@ export interface HarnessOption {
     durable: false;
     content_free: true;
   } | null;
+  workbench_admission?: {
+    schema_version: number;
+    modes: Array<{
+      id: "coding_agent" | "direct_chat";
+      status: "available" | "degraded" | "blocked";
+      why: string[];
+      recovery: string[];
+    }>;
+  };
   workbench_transport?: {
     default: "native_structured" | "native_terminal" | "one_shot";
     options: Array<{
@@ -661,6 +670,7 @@ export interface SettingsResponse {
       title: string;
       native_supported: boolean;
       status: string;
+      workbench_admission?: NonNullable<HarnessOption["workbench_admission"]>;
       workbench_transport: NonNullable<HarnessOption["workbench_transport"]>;
     }>;
     sources: Record<string, string>;

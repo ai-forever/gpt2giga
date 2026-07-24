@@ -3,12 +3,17 @@ import { describe, expect, it } from "vitest";
 import type { HarnessOption } from "./api";
 import {
   activeAtQuery,
+  admittedExecutionTransport,
   availableExecutionTransports,
   capabilityPresentation,
   consumeAtQuery,
   invocationModeForTransport,
+  legacyModeForProductSelection,
+  migrateLegacyProductSelection,
   normalizeExecutionSelection,
+  normalizeProductSelection,
   permissionSimulationHighlights,
+  workbenchKindForHarness,
 } from "./workbench-execution";
 
 function harness(overrides: Partial<HarnessOption> = {}): HarnessOption {
@@ -65,6 +70,45 @@ describe("Workbench execution semantics", () => {
   it("presents capabilities as operator concepts", () => {
     expect(capabilityPresentation("agent_cli").label).toBe("Coding agent");
     expect(capabilityPresentation("chat_completions").label).toBe("Direct chat");
+  });
+
+  it("migrates saved profiles deterministically and keeps transport derived", () => {
+    expect(migrateLegacyProductSelection("plan", "coding_agent")).toEqual({
+      authority: "read_only",
+      intent: "ask",
+      kind: "coding_agent",
+    });
+    expect(migrateLegacyProductSelection("read", "coding_agent").intent).toBe("review");
+    expect(migrateLegacyProductSelection("edit", "coding_agent").authority).toBe(
+      "workspace_write",
+    );
+    expect(legacyModeForProductSelection({
+      authority: "read_only",
+      intent: "change",
+      kind: "coding_agent",
+    })).toBe("read");
+    expect(admittedExecutionTransport(harness(), "coding_agent")).toBe(
+      "native_structured",
+    );
+    expect(admittedExecutionTransport(harness(), "direct_chat")).toBe("one_shot");
+  });
+
+  it("normalizes product mode to the selected harness capability", () => {
+    const direct = harness({
+      spec: { id: "direct-chat", capabilities: ["chat_completions"] },
+    });
+    const current = {
+      authority: "workspace_write" as const,
+      intent: "change" as const,
+      kind: "coding_agent" as const,
+    };
+
+    expect(workbenchKindForHarness(direct)).toBe("direct_chat");
+    expect(normalizeProductSelection(direct, current)).toEqual({
+      ...current,
+      kind: "direct_chat",
+    });
+    expect(normalizeProductSelection(undefined, current)).toEqual(current);
   });
 
   it("summarizes content-free permission evidence without hiding unknowns", () => {

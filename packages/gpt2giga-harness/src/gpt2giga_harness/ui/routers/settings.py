@@ -29,7 +29,10 @@ from gpt2giga_harness.settings import (
 )
 from gpt2giga_harness.types import parse_api_mode
 from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
-from gpt2giga_harness.workbench_execution import workbench_transport_projection
+from gpt2giga_harness.workbench_execution import (
+    workbench_admission_projection,
+    workbench_transport_projection,
+)
 
 
 router = APIRouter(route_class=ConformantAPIRoute)
@@ -64,6 +67,7 @@ def settings_read_model(
                 "title": spec.title,
                 "native_supported": spec.supports_native_sessions,
                 "status": availability.status.value,
+                "workbench_admission": workbench_admission_projection(harness),
                 "workbench_transport": workbench_transport_projection(harness),
             }
         )

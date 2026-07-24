@@ -27,7 +27,6 @@ import {
   fetchCockpit,
   type FullMessageResponse,
   mutateCockpit,
-  type NativeStartResponse,
   patchCockpit,
   type RunPreflightResponse,
   type RunStartResponse,
@@ -99,12 +98,14 @@ import {
 } from "../workbench-model";
 import {
   activeAtQuery,
-  availableExecutionTransports,
+  admittedExecutionTransport,
   consumeAtQuery,
-  type ExecutionTransport,
-  invocationModeForTransport,
-  normalizeExecutionSelection,
+  legacyModeForProductSelection,
+  migrateLegacyProductSelection,
+  normalizeProductSelection,
   permissionSimulationHighlights,
+  type ProductExecutionSelection,
+  type WorkbenchKind,
 } from "../workbench-execution";
 
 const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
@@ -119,9 +120,7 @@ type MessageAction = {
 type RunConfig = { apiMode: string; harnessId: string; mode: string; model: string };
 type ReasoningEffort = "high" | "low" | "medium";
 type AdvancedRunConfig = {
-  capability: string;
   dryRun: boolean;
-  executionTransport: ExecutionTransport;
   permissionProfile: string;
   stream: boolean;
   workspacePolicy: string;
@@ -146,7 +145,7 @@ function DeleteSessionIcon() {
 
 type StartResult =
   | { kind: "preview"; report: RunPreflightResponse["preflight"] }
-  | { kind: "run"; processId?: string; run: RunStartResponse["run"] };
+  | { kind: "run"; run: RunStartResponse["run"] };
 
 const builtinToolLabels: Record<string, string> = {
   code_interpreter: "Code interpreter",
@@ -465,13 +464,19 @@ export function WorkbenchSurface() {
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const rememberedRunPreferences = useMemo(loadRunPreferences, []);
   const [runConfig, setRunConfig] = useState<RunConfig>(rememberedRunPreferences.config);
+  const [productSelection, setProductSelection] = useState<ProductExecutionSelection>(
+    () => migrateLegacyProductSelection(
+      rememberedRunPreferences.config.mode,
+      rememberedRunPreferences.config.harnessId === "direct-chat"
+        ? "direct_chat"
+        : "coding_agent",
+    ),
+  );
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
     rememberedRunPreferences.reasoningEffort,
   );
   const [advancedConfig, setAdvancedConfig] = useState<AdvancedRunConfig>({
-    capability: "chat_completions",
     dryRun: false,
-    executionTransport: "native_structured",
     permissionProfile: "interactive",
     stream: true,
     workspacePolicy: "auto",
@@ -490,7 +495,6 @@ export function WorkbenchSurface() {
     previewReport?.permission_simulation,
   );
   const [startedRuns, setStartedRuns] = useState<Record<string, string>>({});
-  const [startedNativeProcesses, setStartedNativeProcesses] = useState<Record<string, string>>({});
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => new Set());
   const [completionNotices, setCompletionNotices] = useState<CompletionNotice[]>([]);
   const previousRunStatuses = useRef(new Map<string, string>());
@@ -554,9 +558,7 @@ export function WorkbenchSurface() {
     ),
     [attachments.data?.attachments, messages.data?.messages],
   );
-  const latestUserMessageId = advancedConfig.executionTransport === "native_terminal"
-    ? undefined
-    : latestEditableUserMessageId(activeMessages);
+  const latestUserMessageId = latestEditableUserMessageId(activeMessages);
   const visibleMessages = useMemo(
     () => timelineWhileEditing(activeMessages, editingMessageId),
     [activeMessages, editingMessageId],
@@ -578,10 +580,15 @@ export function WorkbenchSurface() {
         mode: defaults.mode,
         model: defaults.default_model ?? "",
       });
+      setProductSelection(migrateLegacyProductSelection(
+        defaults.mode,
+        defaults.default_harness_id === "direct-chat"
+          ? "direct_chat"
+          : "coding_agent",
+      ));
     }
     setAdvancedConfig((current) => ({
       ...current,
-      executionTransport: defaults.execution_transport as ExecutionTransport,
       permissionProfile: defaults.permission_profile,
       stream: defaults.stream,
       workspacePolicy: defaults.workspace_policy,
@@ -626,6 +633,12 @@ export function WorkbenchSurface() {
       mode: session.default_mode ?? current.mode,
       model: session.default_model ?? current.model,
     }));
+    setProductSelection((current) => migrateLegacyProductSelection(
+      session.default_mode,
+      session.default_harness_id === "direct-chat"
+        ? "direct_chat"
+        : current.kind,
+    ));
   }, [
     overview.data?.session.default_api_mode,
     overview.data?.session.default_harness_id,
@@ -809,8 +822,8 @@ export function WorkbenchSurface() {
       const payload = {
         api_mode: runConfig.apiMode,
         attachment_ids: draftAttachments.map((attachment) => attachment.id),
+        authority: productSelection.authority,
         builtin_tools: runConfig.apiMode === "v2" ? builtinTools : [],
-        capability: advancedConfig.capability,
         extra: {
           ...(editingMessageId === undefined ? {} : { edit_message_id: editingMessageId }),
           generate_session_title: session.title === "Untitled session",
@@ -822,9 +835,6 @@ export function WorkbenchSurface() {
             : {}),
         },
         harness_id: runConfig.harnessId,
-        execution_transport: advancedConfig.executionTransport,
-        invocation_mode: invocationModeForTransport(advancedConfig.executionTransport),
-        mode: runConfig.mode,
         model: runConfig.model.trim() || null,
         permission_profile: advancedConfig.permissionProfile,
         prompt: promptWithSkillMentions(
@@ -834,6 +844,8 @@ export function WorkbenchSurface() {
         ),
         session_id: sessionId,
         stream: advancedConfig.stream,
+        task_intent: productSelection.intent,
+        workbench_kind: productSelection.kind,
         workspace: session.workspace_bound ? undefined : ".",
         workspace_policy: advancedConfig.workspacePolicy,
       };
@@ -843,19 +855,6 @@ export function WorkbenchSurface() {
           dry_run: true,
         });
         return { kind: "preview", report: response.preflight };
-      }
-      if (advancedConfig.executionTransport === "native_terminal") {
-        if (editingMessageId !== undefined) {
-          throw new Error("Editing retained messages is unavailable for native terminal sessions.");
-        }
-        const response = await mutateCockpit<NativeStartResponse>(
-          "/api/native/processes/start",
-          { ...payload, action: "start" },
-        );
-        if (response.run === undefined || response.process === undefined) {
-          throw new Error("Native execution requires approval before it can start.");
-        }
-        return { kind: "run", processId: response.process.id, run: response.run };
       }
       const response = await mutateCockpit<RunStartResponse>(
         `/api/sessions/${encodeURIComponent(sessionId)}/run/start`,
@@ -871,12 +870,6 @@ export function WorkbenchSurface() {
       const { run } = result;
       setPreviewReport(null);
       setStartedRuns((current) => ({ ...current, [run.session_id]: run.id }));
-      if (result.processId !== undefined) {
-        setStartedNativeProcesses((current) => ({
-          ...current,
-          [run.id]: result.processId!,
-        }));
-      }
       previousRunStatuses.current.set(run.id, run.status);
       await refreshSessionAfterRunStart(queryClient, run.session_id);
       setEditingMessageId(undefined);
@@ -1104,21 +1097,41 @@ export function WorkbenchSurface() {
   const selectedHarness = harnesses.data?.harnesses.find(
     (harness) => harness.spec.id === runConfig.harnessId,
   );
-  const executionTransports = availableExecutionTransports(selectedHarness);
-  const selectedTransport = selectedHarness?.workbench_transport?.options.find(
-    (option) => option.id === advancedConfig.executionTransport,
+  const admittedTransport = admittedExecutionTransport(
+    selectedHarness,
+    productSelection.kind,
   );
+  const selectedTransport = selectedHarness?.workbench_transport?.options.find(
+    (option) => option.id === admittedTransport,
+  );
+  const selectedAdmission = selectedHarness?.workbench_admission?.modes.find(
+    (mode) => mode.id === productSelection.kind,
+  );
+  const authorityLimitsChange =
+    productSelection.intent === "change"
+    && productSelection.authority === "read_only";
+  const admissionStatus = selectedAdmission?.status === "blocked"
+    ? "blocked"
+    : selectedAdmission?.status === "degraded" || authorityLimitsChange
+      ? "degraded"
+      : "available";
+  const admissionReasons = [
+    ...(selectedAdmission?.why ?? []),
+    ...(authorityLimitsChange
+      ? ["change_intent_limited_by_read_only_authority"]
+      : []),
+  ];
   const providerHandoffActions = [
     ...(selectedHarness?.provider_handoff?.available_actions ?? []),
     ...(selectedHarness?.provider_handoff?.degraded_actions ?? []),
   ];
-  const capabilityCopy = advancedConfig.capability === "agent_cli"
+  const capabilityCopy = productSelection.kind === "coding_agent"
     ? { label: message(locale, "codingAgent"), detail: message(locale, "codingAgentHint") }
     : { label: message(locale, "directChat"), detail: message(locale, "directChatHint") };
   const supportedBuiltinTools = selectedHarness?.spec.supported_builtin_tools ?? emptyStringList;
   const builtinToolsAvailable =
     runConfig.apiMode === "v2" &&
-    advancedConfig.executionTransport === "one_shot" &&
+    productSelection.kind === "direct_chat" &&
     supportedBuiltinTools.length > 0;
   const modelSuggestions = models.data?.models ?? [];
   const streamPresentation = useMemo(
@@ -1160,17 +1173,12 @@ export function WorkbenchSurface() {
   );
   const selectedRun = (runs.data?.runs ?? []).find((run) => run.id === selectedRunId);
   const selectedNativeProcessId =
-    (selectedRunId === undefined ? undefined : startedNativeProcesses[selectedRunId]) ??
-    selectedRun?.native_process_id ??
-    undefined;
+    selectedRun?.native_process_id ?? undefined;
 
   useEffect(() => {
     const supported = new Set(supportedBuiltinTools);
     setBuiltinTools((current) => current.filter((tool) => supported.has(tool)));
-    setAdvancedConfig((current) => ({
-      ...current,
-      ...normalizeExecutionSelection(selectedHarness, current),
-    }));
+    setProductSelection((current) => normalizeProductSelection(selectedHarness, current));
   }, [runConfig.harnessId, selectedHarness, supportedBuiltinTools]);
 
   useEffect(() => {
@@ -1266,6 +1274,47 @@ export function WorkbenchSurface() {
   ) => {
     setRunConfig((current) => ({ ...current, [key]: value }));
     if (persistKey !== undefined) saveRunConfig.mutate({ [persistKey]: value || null });
+  };
+  const updateProductSelection = (
+    patch: Partial<ProductExecutionSelection>,
+  ) => {
+    const next = { ...productSelection, ...patch };
+    setProductSelection(next);
+    setConfig(
+      "mode",
+      legacyModeForProductSelection(next),
+      "default_mode",
+    );
+  };
+  const selectWorkbenchKind = (kind: WorkbenchKind) => {
+    const requiredCapability =
+      kind === "coding_agent" ? "agent_cli" : "chat_completions";
+    const compatibleHarnesses = harnesses.data?.harnesses.filter(
+      (harness) =>
+        harness.spec.capabilities?.includes(requiredCapability)
+        && harness.availability?.status !== "unavailable",
+    );
+    const preferredHarnessId =
+      kind === "coding_agent" ? "codex-cli" : "direct-chat";
+    const compatibleHarness =
+      compatibleHarnesses?.find(
+        (harness) => harness.spec.id === runConfig.harnessId,
+      )
+      ?? compatibleHarnesses?.find(
+        (harness) => harness.spec.id === preferredHarnessId,
+      )
+      ?? compatibleHarnesses?.[0];
+    setProductSelection((current) => ({ ...current, kind }));
+    if (
+      compatibleHarness !== undefined
+      && compatibleHarness.spec.id !== runConfig.harnessId
+    ) {
+      setConfig(
+        "harnessId",
+        compatibleHarness.spec.id,
+        "default_harness_id",
+      );
+    }
   };
   const workspaceFileCandidates = workspaceFiles.data?.files ?? [];
   const atCandidates = [
@@ -1821,39 +1870,31 @@ export function WorkbenchSurface() {
                     <button aria-label={message(locale, "close")} onClick={() => setAdvancedOpen(false)} type="button">×</button>
                   </div>
                   <div className="advanced-config-grid">
-                    <label>
-                      <span>{message(locale, "executionTransport")}</span>
-                      <select
-                        onChange={(event) => {
-                          const executionTransport = event.target.value as ExecutionTransport;
-                          setAdvancedConfig((current) => ({
-                            ...current,
-                            executionTransport,
-                          }));
-                          if (executionTransport === "native_terminal") {
-                            setEditingMessageId(undefined);
-                          }
-                        }}
-                        value={advancedConfig.executionTransport}
-                      >
-                        {executionTransports.map((transport) => (
-                          <option key={transport} value={transport}>
-                            {message(locale, transport === "native_structured" ? "nativeStructured" : transport === "native_terminal" ? "nativeTerminal" : "oneShot")}
-                          </option>
-                        ))}
-                      </select>
-                      {selectedTransport?.blocker ? (
-                        <small className="transport-remediation">
-                          <span>{selectedTransport.detail}</span>
-                          {selectedTransport.remediation ? <code>{selectedTransport.remediation}</code> : null}
-                        </small>
-                      ) : null}
-                    </label>
+                    <div className="capability-summary">
+                      <span>{message(locale, "advancedDiagnostics")}</span>
+                      <strong>{message(locale, "whyThisMode")}</strong>
+                      <small>{selectedTransport?.detail ?? message(locale, "fastApiAuthority")}</small>
+                      <code>{admittedTransport}</code>
+                      {admissionReasons.map((reason) => (
+                        <small key={reason}>{reason.replaceAll("_", " ")}</small>
+                      ))}
+                    </div>
                     <div className="capability-summary">
                       <span>{message(locale, "capability")}</span>
                       <strong>{capabilityCopy.label}</strong>
                       <small>{capabilityCopy.detail}</small>
                     </div>
+                    <label>
+                      <span>{message(locale, "apiMode")}</span>
+                      <select
+                        disabled={selectedHarness?.spec.supports_api_mode_selection === false}
+                        onChange={(event) => setConfig("apiMode", event.target.value, "default_api_mode")}
+                        value={runConfig.apiMode}
+                      >
+                        <option value="v2">/v2</option>
+                        <option value="v1">/v1</option>
+                      </select>
+                    </label>
                     <label>
                       <span>{message(locale, "workspacePolicy")}</span>
                       <select
@@ -1953,6 +1994,19 @@ export function WorkbenchSurface() {
                       ) : null}
                     </div>
                     <label className="compact-control">
+                      <span>{message(locale, "taskType")}</span>
+                      <select
+                        aria-label={message(locale, "taskType")}
+                        onChange={(event) => selectWorkbenchKind(
+                          event.target.value as WorkbenchKind,
+                        )}
+                        value={productSelection.kind}
+                      >
+                        <option value="coding_agent">{message(locale, "codingAgent")}</option>
+                        <option value="direct_chat">{message(locale, "directChat")}</option>
+                      </select>
+                    </label>
+                    <label className="compact-control">
                       <span>{message(locale, "harness")}</span>
                       <select
                         aria-label={message(locale, "harness")}
@@ -1968,18 +2022,6 @@ export function WorkbenchSurface() {
                             {harness.spec.title || harness.spec.id}
                           </option>
                         )) ?? <option value={runConfig.harnessId}>{runConfig.harnessId}</option>}
-                      </select>
-                    </label>
-                    <label className="compact-control api-control">
-                      <span>{message(locale, "apiMode")}</span>
-                      <select
-                        aria-label={message(locale, "apiMode")}
-                        disabled={selectedHarness?.spec.supports_api_mode_selection === false}
-                        onChange={(event) => setConfig("apiMode", event.target.value, "default_api_mode")}
-                        value={runConfig.apiMode}
-                      >
-                        <option value="v2">/v2</option>
-                        <option value="v1">/v1</option>
                       </select>
                     </label>
                     <div className="compact-control model-control">
@@ -2022,15 +2064,30 @@ export function WorkbenchSurface() {
                       </label>
                     ) : null}
                     <label className="compact-control mode-control">
-                      <span>{message(locale, "mode")}</span>
+                      <span>{message(locale, "intent")}</span>
                       <select
-                        aria-label={message(locale, "mode")}
-                        onChange={(event) => setConfig("mode", event.target.value, "default_mode")}
-                        value={runConfig.mode}
+                        aria-label={message(locale, "intent")}
+                        onChange={(event) => updateProductSelection({
+                          intent: event.target.value as ProductExecutionSelection["intent"],
+                        })}
+                        value={productSelection.intent}
                       >
-                        <option value="plan">plan</option>
-                        <option value="read">read</option>
-                        <option value="edit">edit</option>
+                        <option value="ask">{message(locale, "ask")}</option>
+                        <option value="review">{message(locale, "review")}</option>
+                        <option value="change">{message(locale, "change")}</option>
+                      </select>
+                    </label>
+                    <label className="compact-control mode-control">
+                      <span>{message(locale, "authority")}</span>
+                      <select
+                        aria-label={message(locale, "authority")}
+                        onChange={(event) => updateProductSelection({
+                          authority: event.target.value as ProductExecutionSelection["authority"],
+                        })}
+                        value={productSelection.authority}
+                      >
+                        <option value="read_only">{message(locale, "readOnly")}</option>
+                        <option value="workspace_write">{message(locale, "workspaceWrite")}</option>
                       </select>
                     </label>
                     <button
@@ -2089,8 +2146,8 @@ export function WorkbenchSurface() {
               </div>
               <button aria-label={message(locale, "collapse")} onClick={() => setRightOpen(false)} type="button">×</button>
             </div>
-            <div className={selectedTransport?.status === "blocked" || previewReport?.hard_block ? "readiness-callout blocked" : "readiness-callout success"}>
-              <strong>{message(locale, selectedTransport?.status === "blocked" || previewReport?.hard_block ? "blocked" : "ready")}</strong>
+            <div className={selectedTransport?.status === "blocked" || admissionStatus === "blocked" || previewReport?.hard_block ? "readiness-callout blocked" : admissionStatus === "degraded" ? "readiness-callout degraded" : "readiness-callout success"}>
+              <strong>{message(locale, selectedTransport?.status === "blocked" || admissionStatus === "blocked" || previewReport?.hard_block ? "blocked" : admissionStatus === "degraded" ? "degraded" : "ready")}</strong>
               <span>{selectedTransport?.detail ?? message(locale, "fastApiAuthority")}</span>
               {selectedTransport?.status === "blocked" && selectedTransport.remediation ? (
                 <code>{selectedTransport.remediation}</code>
@@ -2108,11 +2165,12 @@ export function WorkbenchSurface() {
             <section className="inspector-section">
               <h3>{message(locale, "executionPlan")}</h3>
               <dl className="plan-fields">
-                <div><dt>{message(locale, "mode")}</dt><dd>{runConfig.mode}</dd></div>
+                <div><dt>{message(locale, "taskType")}</dt><dd>{capabilityCopy.label}</dd></div>
+                <div><dt>{message(locale, "intent")}</dt><dd>{message(locale, productSelection.intent)}</dd></div>
+                <div><dt>{message(locale, "authority")}</dt><dd>{message(locale, productSelection.authority === "read_only" ? "readOnly" : "workspaceWrite")}</dd></div>
                 <div><dt>{message(locale, "workspacePolicy")}</dt><dd>{message(locale, "workspacePolicyValue")}</dd></div>
                 <div><dt>{message(locale, "route")}</dt><dd>{runConfig.model || "GigaChat"} · /{runConfig.apiMode}</dd></div>
                 <div><dt>{message(locale, "harness")}</dt><dd>{runConfig.harnessId}</dd></div>
-                <div><dt>{message(locale, "executionTransport")}</dt><dd>{advancedConfig.executionTransport}</dd></div>
               </dl>
             </section>
             {selectedRun?.provider_session ? (

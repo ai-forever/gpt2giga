@@ -67,12 +67,24 @@ def test_harness_projection_distinguishes_handoff_and_blocked_embedding(
     }
     assert transport_by_id["native_structured"]["status"] == "blocked"
     assert transport_by_id["native_structured"]["provider_native_continuity"] is False
+    admission_by_id = {
+        item["id"]: item for item in claude["workbench_admission"]["modes"]
+    }
+    assert admission_by_id["coding_agent"]["status"] == "degraded"
+    assert admission_by_id["coding_agent"]["why"] == [
+        "provider_native_continuity_unavailable",
+        "admitted_provider_path:claude_provider_owned_one_shot",
+    ]
     direct = next(
         item
         for item in response.json()["harnesses"]
         if item["spec"]["id"] == "direct-chat"
     )
     assert direct["workbench_transport"]["default"] == "one_shot"
+    direct_admission = {
+        item["id"]: item for item in direct["workbench_admission"]["modes"]
+    }
+    assert direct_admission["direct_chat"]["status"] == "available"
 
 
 def test_handoff_preview_api_degrades_unknown_harness_and_platform(
