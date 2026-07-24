@@ -199,6 +199,7 @@ from gpt2giga_harness.sessions.models import (
 )
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import new_id, utc_now
+from gpt2giga_harness.session_titles import provider_native_title_metadata
 from gpt2giga_harness.state_backup import (
     create_state_backup,
     restore_state_backup,
@@ -2426,7 +2427,7 @@ def _handle_native_import(args: argparse.Namespace, config: HarnessConfig) -> in
     session_store = FilesystemHarnessSessionStore(config.data_dir)
     snapshot = ref.execution_snapshot
     session = session_store.create_session(
-        title=f"Imported: {ref.title}",
+        title=ref.title,
         workspace=ref.workspace,
         default_harness_id=ref.harness_id,
         default_model=(
@@ -2442,7 +2443,11 @@ def _handle_native_import(args: argparse.Namespace, config: HarnessConfig) -> in
             "native_ref_id": ref.id,
             "native_session_id": ref.native_session_id,
         },
-        metadata=_native_import_session_metadata(ref),
+        metadata=provider_native_title_metadata(
+            _native_import_session_metadata(ref),
+            provider=ref.harness_id,
+            source_id=ref.native_session_id or ref.id,
+        ),
     )
     messages = []
     skipped_count = 0

@@ -322,8 +322,12 @@ def test_cli_session_application_flow_create_turn_events_and_approve(
 
     assert cli.main(["session", "events", submitted["run"]["id"], "--json"]) == 0
     events = json.loads(capsys.readouterr().out)["events"]
-    assert [event["type"] for event in events] == ["approval_requested"]
-    approval_id = events[0]["payload"]["approval_id"]
+    assert [event["type"] for event in events] == [
+        "session.updated",
+        "approval_requested",
+    ]
+    assert events[0]["payload"]["title"]["provenance"] == "fallback"
+    approval_id = events[1]["payload"]["approval_id"]
 
     assert (
         cli.main(
@@ -1391,6 +1395,11 @@ def test_cli_native_sync_list_and_import_json(monkeypatch, capsys, tmp_path):
 
     assert import_code == 0
     assert import_payload["session"]["default_harness_id"] == "fake-cli"
+    assert import_payload["session"]["title"] == "Fake native session"
+    assert (
+        import_payload["session"]["metadata"]["title_state"]["provenance"]
+        == "provider_native"
+    )
     assert import_payload["imported_message_count"] == 2
     assert import_payload["skipped_item_count"] == 1
     assert [message["role"] for message in import_payload["messages"]] == [

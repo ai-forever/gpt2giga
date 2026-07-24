@@ -247,6 +247,12 @@ from gpt2giga_harness.sessions.models import (
     session_to_dict,
 )
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
+from gpt2giga_harness.session_titles import (
+    apply_provider_native_title,
+    manual_title_metadata,
+    provider_native_title_metadata,
+    title_diagnostics,
+)
 from gpt2giga_harness.cli_capabilities import (
     CliCapabilitySnapshot,
     cli_capability_snapshot_to_dict,
@@ -1471,7 +1477,11 @@ def create_app(
                 "native_session_id": ref.native_session_id,
                 "status": ref.status.value,
             },
-            metadata=_native_import_session_metadata(ref),
+            metadata=provider_native_title_metadata(
+                _native_import_session_metadata(ref),
+                provider=ref.harness_id,
+                source_id=ref.native_session_id or ref.id,
+            ),
         )
         messages = []
         skipped_count = 0
@@ -1713,13 +1723,28 @@ def create_app(
                 "default_mode": options["mode"],
                 "workspace": options["source_workspace"],
             }
-            if (
-                session.title == "Untitled session"
-                and options["action"] == "start"
-                and options["prompt"]
+            updated_session = store.update_session(session.id, **session_patch)
+            if options["action"] == "resume" and isinstance(
+                options.get("native_ref"), NativeSessionRef
             ):
-                session_patch["title"] = title_from_prompt(options["prompt"])
-            store.update_session(session.id, **session_patch)
+                native_ref = options["native_ref"]
+                runner.apply_native_session_title(
+                    session_id=session.id,
+                    run_id=run.id,
+                    title=native_ref.title,
+                    provider=native_ref.harness_id,
+                    source_id=native_ref.native_session_id or native_ref.id,
+                )
+            elif options["action"] == "start" and options["prompt"]:
+                runner.schedule_session_title(
+                    updated_session,
+                    run.id,
+                    {
+                        "prompt": options["prompt"],
+                        "model": options["model"],
+                        "extra": _metadata_mapping(effective_payload.get("extra")),
+                    },
+                )
             store.append_event(
                 HarnessStoredEvent(
                     id=new_id("evt"),
@@ -2461,7 +2486,7 @@ def create_app(
             session = await run_in_threadpool(
                 session_service.create_session,
                 payload,
-                title_from_turn=True,
+                title_from_turn=False,
                 validate_harness=True,
             )
             run = await _start_headless_run(session.id, payload)
@@ -5060,6 +5085,31 @@ def _sync_native_process_transcript(
     if len(candidates) != 1:
         return run
     ref = candidates[0]
+    title_updated = apply_provider_native_title(
+        store,
+        run.session_id,
+        title=ref.title,
+        run_id=run.id,
+        provider=ref.harness_id,
+        source_id=ref.native_session_id or ref.id,
+    )
+    if title_updated is not None:
+        store.append_event(
+            HarnessStoredEvent(
+                id=new_id("evt"),
+                session_id=run.session_id,
+                run_id=run.id,
+                type=HarnessEventType.SESSION_UPDATED.value,
+                message="Session title revision stored.",
+                payload={
+                    "session_id": run.session_id,
+                    "revision": title_updated.updated_at,
+                    "changed_fields": ["title"],
+                    "title": title_diagnostics(title_updated),
+                },
+                created_at=utc_now(),
+            )
+        )
     if native_index_store is not None:
         ref = native_index_store.upsert_ref(
             ref,
@@ -5761,6 +5811,7 @@ def _session_summary(
             "session_revision": session.updated_at,
             "session_generation": _navigation_generation(native_reference),
             "session_lease": active_runs[-1] if active_runs else None,
+            "title_diagnostics": title_diagnostics(session),
         }
     )
     return payload
@@ -5950,6 +6001,8 @@ def _session_patch(payload: dict[str, Any]) -> dict[str, Any]:
         "metadata",
     }
     patch = {key: payload[key] for key in allowed if key in payload}
+    if "title" in patch and isinstance(patch.get("metadata"), Mapping):
+        patch["metadata"] = manual_title_metadata(patch["metadata"])
     if "workspace" in patch:
         patch["workspace"] = resolve_workspace(_optional_text(patch["workspace"]))
     if "default_api_mode" in patch:

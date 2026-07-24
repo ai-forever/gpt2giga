@@ -33,6 +33,7 @@ from gpt2giga_harness.sessions import (
     FilesystemHarnessSessionStore,
     InMemoryHarnessSessionStore,
 )
+from gpt2giga_harness.session_titles import title_diagnostics
 from gpt2giga_harness.types import (
     GigaChatApiMode,
     HarnessContext,
@@ -379,7 +380,6 @@ def test_native_process_syncs_assistant_message_while_running(
     connector = TranscriptConnector()
     client, store = _client(tmp_path, connector)
     session = store.create_session(
-        title="Native transcript",
         workspace=str(tmp_path),
         default_harness_id=harness_id,
     )
@@ -425,6 +425,9 @@ def test_native_process_syncs_assistant_message_while_running(
     assert links[-1].native_ref_id == native_ref_id
     assert links[-1].native_session_id == native_session_id
     assert links[-1].metadata["auto_reconciled"] is True
+    titled = store.get_session(session.id)
+    assert titled.title == "Live native session"
+    assert title_diagnostics(titled)["provenance"] == "provider_native"
 
 
 def test_native_process_auto_reconciles_codex_history_ref(tmp_path):

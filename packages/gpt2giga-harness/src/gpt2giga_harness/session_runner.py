@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import threading
+import time
 from typing import Any, Mapping
 
 from gpt2giga_harness import proxy
@@ -73,6 +74,13 @@ from gpt2giga_harness.sessions.store import (
     new_id,
     title_from_prompt,
     utc_now,
+)
+from gpt2giga_harness.session_titles import (
+    SessionTitleGeneration,
+    apply_provider_native_title,
+    claim_fallback_title,
+    complete_fallback_title,
+    title_diagnostics,
 )
 from gpt2giga_harness.types import (
     GigaChatApiMode,
@@ -230,11 +238,8 @@ class HarnessSessionRunner:
     ) -> HarnessSessionRunResult:
         """Create a session from a prompt and immediately run it."""
         options = self._run_options(payload, session=None)
-        title = _optional_text(payload.get("title")) or title_from_prompt(
-            options["prompt"]
-        )
         session = self.create_session(
-            title=title,
+            title=_optional_text(payload.get("title")),
             workspace=options["workspace"],
             default_harness_id=options["harness_id"],
             default_model=options["model"],
@@ -330,12 +335,6 @@ class HarnessSessionRunner:
             default_api_mode=options["api_mode"],
             default_mode=options["mode"],
             workspace=options["workspace"],
-            title=(
-                title_from_prompt(options["prompt"])
-                if session.title == "Untitled session"
-                and not _generate_session_title_requested(options["extra"])
-                else session.title
-            ),
         )
         self._schedule_session_title(session, run.id, options)
         return QueuedHarnessRun(
@@ -919,7 +918,8 @@ class HarnessSessionRunner:
             options["workspace"],
             data_dir=self.config.data_dir,
         )
-        session_metadata = {**session.metadata, **project_metadata}
+        latest_session = self.store.get_session(session.id)
+        session_metadata = {**latest_session.metadata, **project_metadata}
         if isinstance(app_server_thread, Mapping) and app_server_thread:
             session_metadata["app_server_thread"] = dict(app_server_thread)
             session_metadata.pop("app_server_fork", None)
@@ -927,12 +927,20 @@ class HarnessSessionRunner:
             session_metadata["structured_session_link"] = dict(structured_session_link)
         if session_metadata:
             session_patch["metadata"] = session_metadata
-        if (
-            session.title == "Untitled session"
-            and not _generate_session_title_requested(options["extra"])
-        ):
-            session_patch["title"] = title_from_prompt(options["prompt"])
         updated_session = self.store.update_session(session.id, **session_patch)
+        native_title = _provider_native_title(result)
+        if native_title is not None:
+            native_updated = apply_provider_native_title(
+                self.store,
+                session.id,
+                title=native_title[0],
+                run_id=run.id,
+                provider=options["harness_id"],
+                source_id=native_title[1],
+            )
+            if native_updated is not None:
+                self._append_title_event(native_updated, run.id)
+                updated_session = native_updated
         self._append_event(
             session.id,
             run.id,
@@ -1193,47 +1201,100 @@ class HarnessSessionRunner:
         run_id: str,
         options: Mapping[str, Any],
     ) -> None:
-        """Generate the first UI title off the run's critical path."""
-        if session.title != "Untitled session" or not _generate_session_title_requested(
-            options["extra"]
-        ):
+        """Settle one first-turn title without delaying provider execution."""
+        if session.title != "Untitled session":
             return
         prompt = str(options["prompt"])
+        generation_requested = _generate_session_title_requested(options["extra"])
         model = (
-            _optional_text(options["extra"].get("session_title_model"))
-            or _optional_text(options.get("model"))
-            or self.config.default_model
+            (
+                _optional_text(options["extra"].get("session_title_model"))
+                or _optional_text(options.get("model"))
+                or self.config.default_model
+            )
+            if generation_requested
+            else None
         )
+        timeout_seconds = min(self.config.timeout_seconds, 15.0)
+        claim = claim_fallback_title(
+            self.store,
+            session.id,
+            run_id=run_id,
+            model=model,
+            timeout_seconds=timeout_seconds,
+        )
+        if claim is None:
+            return
 
         def generate() -> None:
             try:
-                title = _generate_session_title(self.config, prompt, model=model)
-                updated = self.store.update_session_if_title(
-                    session.id,
-                    "Untitled session",
-                    title=title,
+                generation = _generate_session_title(
+                    self.config,
+                    prompt,
+                    model=model,
+                    generation_requested=generation_requested,
+                    timeout_seconds=timeout_seconds,
                 )
+                updated = complete_fallback_title(self.store, claim, generation)
                 if updated is None:
                     return
-                self._append_event(
-                    session.id,
-                    run_id,
-                    HarnessEventType.SESSION_UPDATED.value,
-                    "Session title revision stored.",
-                    {
-                        "session_id": session.id,
-                        "revision": updated.updated_at,
-                        "changed_fields": ["title"],
-                    },
-                )
+                self._append_title_event(updated, run_id)
             except (OSError, SessionNotFoundError, ValueError):
                 return
 
+        if not generation_requested:
+            generate()
+            return
         threading.Thread(
             target=generate,
             name=f"harness-session-title-{session.id}",
             daemon=True,
         ).start()
+
+    def schedule_session_title(
+        self,
+        session: HarnessSession,
+        run_id: str,
+        options: Mapping[str, Any],
+    ) -> None:
+        """Schedule the shared title contract for non-runner native paths."""
+        self._schedule_session_title(session, run_id, options)
+
+    def apply_native_session_title(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        title: str,
+        provider: str,
+        source_id: str | None,
+    ) -> HarnessSession | None:
+        """Apply one discovered provider-native title and publish its revision."""
+        updated = apply_provider_native_title(
+            self.store,
+            session_id,
+            title=title,
+            run_id=run_id,
+            provider=provider,
+            source_id=source_id,
+        )
+        if updated is not None:
+            self._append_title_event(updated, run_id)
+        return updated
+
+    def _append_title_event(self, session: HarnessSession, run_id: str) -> None:
+        self._append_event(
+            session.id,
+            run_id,
+            HarnessEventType.SESSION_UPDATED.value,
+            "Session title revision stored.",
+            {
+                "session_id": session.id,
+                "revision": session.updated_at,
+                "changed_fields": ["title"],
+                "title": title_diagnostics(session),
+            },
+        )
 
     def _load_attachments(
         self,
@@ -1714,11 +1775,27 @@ def _generate_session_title(
     prompt: str,
     *,
     model: str | None,
-) -> str:
+    generation_requested: bool,
+    timeout_seconds: float,
+) -> SessionTitleGeneration:
     """Generate a compact title through the local proxy with a safe fallback."""
+    started_at = time.monotonic()
     fallback = title_from_prompt(prompt)
+    if not generation_requested:
+        return SessionTitleGeneration(
+            title=fallback,
+            status="disabled",
+            duration_ms=(time.monotonic() - started_at) * 1000,
+            usage={},
+        )
     if model is None:
-        return fallback
+        return SessionTitleGeneration(
+            title=fallback,
+            status="offline",
+            duration_ms=(time.monotonic() - started_at) * 1000,
+            usage={},
+            failure_kind="model_unavailable",
+        )
     payload = {
         "model": model,
         "messages": [
@@ -1741,12 +1818,73 @@ def _generate_session_title(
             proxy.build_chat_completions_url(config.proxy_url, GigaChatApiMode.V2),
             payload=payload,
             api_key=api_key,
-            timeout=min(config.timeout_seconds, 15.0),
+            timeout=timeout_seconds,
         )
-    except (OSError, proxy.ProxyRequestError, ValueError):
-        return fallback
+    except (OSError, proxy.ProxyRequestError, ValueError) as exc:
+        return SessionTitleGeneration(
+            title=fallback,
+            status="failed",
+            duration_ms=(time.monotonic() - started_at) * 1000,
+            usage={},
+            failure_kind=type(exc).__name__,
+        )
     generated = proxy.extract_text(response).strip().strip("\"'`").strip()
-    return title_from_prompt(generated) if generated else fallback
+    return SessionTitleGeneration(
+        title=title_from_prompt(generated) if generated else fallback,
+        status="succeeded" if generated else "failed",
+        duration_ms=(time.monotonic() - started_at) * 1000,
+        usage=_title_usage(response),
+        failure_kind=None if generated else "empty_response",
+    )
+
+
+def _title_usage(response: Mapping[str, Any]) -> dict[str, int]:
+    usage = _mapping(response.get("usage"))
+    aliases = {
+        "prompt_tokens": "input_tokens",
+        "input_tokens": "input_tokens",
+        "completion_tokens": "output_tokens",
+        "output_tokens": "output_tokens",
+        "total_tokens": "total_tokens",
+    }
+    result: dict[str, int] = {}
+    for source, target in aliases.items():
+        value = usage.get(source)
+        if (
+            target not in result
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and value >= 0
+        ):
+            result[target] = value
+    return result
+
+
+def _provider_native_title(result: Any) -> tuple[str, str | None] | None:
+    raw = _mapping(result.raw)
+    title = _optional_text(raw.get("provider_session_title"))
+    source_id = _optional_text(raw.get("provider_session_id"))
+    if title is not None:
+        return title, source_id
+    for event in reversed(tuple(result.events)):
+        if event.type not in {
+            "session.title.updated",
+            "thread.title.updated",
+            "thread.name.updated",
+        }:
+            continue
+        payload = _mapping(event.payload)
+        title = _optional_text(payload.get("title") or payload.get("name"))
+        if title is not None:
+            return (
+                title,
+                _optional_text(
+                    payload.get("session_id")
+                    or payload.get("thread_id")
+                    or payload.get("native_session_id")
+                ),
+            )
+    return None
 
 
 def _optional_text(value: Any) -> str | None:

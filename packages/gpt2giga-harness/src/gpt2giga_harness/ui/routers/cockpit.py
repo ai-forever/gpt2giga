@@ -36,6 +36,7 @@ from gpt2giga_harness.sessions.store import (
     RunNotFoundError,
     SessionNotFoundError,
 )
+from gpt2giga_harness.session_titles import title_diagnostics
 from gpt2giga_harness.ui.async_execution import (
     ConformantAPIRoute,
     run_stream_offload,
@@ -585,6 +586,7 @@ def _session_summary(session: HarnessSession) -> dict[str, Any]:
         "tags": [_bounded_text(item, 128) for item in session.tags[:20]],
         "project_id": str(session.metadata.get("project_id") or "") or None,
         "workspace_bound": session.workspace is not None,
+        "title_diagnostics": title_diagnostics(session),
     }
 
 

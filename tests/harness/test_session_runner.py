@@ -15,6 +15,7 @@ from gpt2giga_harness.project import project_id_for_root, resolve_project
 from gpt2giga_harness.project_memory import FilesystemProjectMemoryStore
 from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.session_runner import HarnessSessionRunner
+from gpt2giga_harness.session_titles import title_diagnostics
 from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
 from gpt2giga_harness.sessions.conversation import active_conversation_messages
 from gpt2giga_harness.sessions.models import HarnessMessage
@@ -562,7 +563,14 @@ def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):
         )
         request_started.set()
         assert release_request.wait(timeout=2)
-        return {"choices": [{"message": {"content": "Починить стрим чата"}}]}
+        return {
+            "choices": [{"message": {"content": "Починить стрим чата"}}],
+            "usage": {
+                "prompt_tokens": 14,
+                "completion_tokens": 5,
+                "total_tokens": 19,
+            },
+        }
 
     monkeypatch.setattr(
         "gpt2giga_harness.session_runner.proxy.request_json", request_json
@@ -590,6 +598,18 @@ def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):
         assert time.monotonic() < deadline
         time.sleep(0.01)
     assert runner.store.get_session(session.id).title == "Починить стрим чата"
+    assert title_diagnostics(runner.store.get_session(session.id)) == {
+        "schema_version": 1,
+        "provenance": "fallback",
+        "status": "succeeded",
+        "source": "bounded_fallback",
+        "bound_run_id": result.run.id,
+        "model": "GigaChat-3-Lightning",
+        "timeout_seconds": 15.0,
+        "duration_ms": pytest.approx(0, abs=2000),
+        "usage": {"input_tokens": 14, "output_tokens": 5, "total_tokens": 19},
+        "cost": {"knowledge": "unknown"},
+    }
     deadline = time.monotonic() + 2
     while not any(
         event.type == "session.updated"
@@ -638,6 +658,11 @@ def test_session_title_proxy_failure_publishes_deterministic_fallback(monkeypatc
         assert time.monotonic() < deadline
         time.sleep(0.01)
     assert runner.store.get_session(session.id).title == prompt
+    diagnostics = title_diagnostics(runner.store.get_session(session.id))
+    assert diagnostics["provenance"] == "fallback"
+    assert diagnostics["status"] == "failed"
+    assert diagnostics["failure_kind"] == "OSError"
+    assert diagnostics["cost"] == {"knowledge": "unknown"}
     while not any(
         event.type == "session.updated" and event.run_id == result.run.id
         for event in runner.store.list_events(session.id)
@@ -675,6 +700,10 @@ def test_delayed_session_title_never_overwrites_user_rename(monkeypatch):
     _wait_for_session_title_thread(session.id)
 
     assert runner.store.get_session(session.id).title == "User rename"
+    assert (
+        title_diagnostics(runner.store.get_session(session.id))["provenance"]
+        == "manual"
+    )
     assert not any(
         event.type == "session.updated"
         for event in runner.store.list_events(session.id)
@@ -725,6 +754,27 @@ def _wait_for_session_title_thread(session_id: str) -> None:
             return
         thread.join(timeout=0.05)
         assert time.monotonic() < deadline
+
+
+def test_provider_native_title_wins_over_local_fallback():
+    runner = _runner(_NativeTitleHarness())
+    session = runner.create_session(default_harness_id="capture")
+
+    result = runner.run_in_session(
+        session.id,
+        {"harness_id": "capture", "prompt": "Local fallback prompt"},
+    )
+
+    assert result.session.title == "Native provider title"
+    diagnostics = title_diagnostics(result.session)
+    assert diagnostics["provenance"] == "provider_native"
+    assert diagnostics["source"] == "capture"
+    assert diagnostics["source_id"] == "provider-session-1"
+    assert [
+        event.payload["title"]["provenance"]
+        for event in result.bundle.events
+        if event.type == "session.updated"
+    ] == ["fallback", "provider_native"]
 
 
 def test_session_runner_create_session_records_project_metadata(tmp_path):
@@ -916,6 +966,25 @@ class _CaptureHarness(BaseHarness):
             ok=True,
             text=f"answer: {request.prompt}",
             raw={"request_id": "ok"},
+            command=("capture", request.prompt),
+        )
+
+
+class _NativeTitleHarness(_CaptureHarness):
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        del context
+        self.last_request = request
+        return HarnessResult(
+            ok=True,
+            text=f"answer: {request.prompt}",
+            raw={
+                "provider_session_title": "Native provider title",
+                "provider_session_id": "provider-session-1",
+            },
             command=("capture", request.prompt),
         )
 

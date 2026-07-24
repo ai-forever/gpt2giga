@@ -196,6 +196,8 @@ def test_native_session_import_creates_normalized_session_and_link(tmp_path):
     body = imported.json()
     session_id = body["session"]["id"]
     assert body["session"]["default_harness_id"] == "codex-cli"
+    assert body["session"]["title"] == ref.title
+    assert body["session"]["title_diagnostics"]["provenance"] == "provider_native"
     assert body["session"]["metadata"]["source"] == "native_import"
     assert [message["role"] for message in body["messages"]] == [
         "user",
