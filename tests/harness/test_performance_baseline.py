@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import stat
+import subprocess
+import sys
 
 import pytest
 
@@ -13,6 +15,27 @@ from gpt2giga_harness.performance_baseline import (
     SCHEMA_VERSION,
     run_performance_baseline,
 )
+
+
+def test_cli_import_does_not_load_testclient_backend():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys, warnings; "
+                "from starlette.exceptions import StarletteDeprecationWarning; "
+                "warnings.simplefilter('error', StarletteDeprecationWarning); "
+                "import gpt2giga_harness.cli; "
+                "assert 'fastapi.testclient' not in sys.modules"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_performance_baseline_is_bounded_content_free_and_machine_readable():

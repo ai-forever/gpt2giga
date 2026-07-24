@@ -18,8 +18,6 @@ import tempfile
 import time
 from typing import Any, Final
 
-from fastapi.testclient import TestClient
-
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.ui.app import create_app
@@ -442,6 +440,8 @@ def _probe_worker_runtime(root: Path) -> Mapping[str, float]:
 
 
 def _probe_web_api(root: Path) -> Mapping[str, float]:
+    from fastapi.testclient import TestClient
+
     started = time.perf_counter_ns()
     config = HarnessConfig(data_dir=root / "api")
     app = create_app(
