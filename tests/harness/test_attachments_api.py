@@ -107,6 +107,31 @@ def test_attachments_api_creates_workspace_reference(tmp_path):
     assert "no stored blob" in blob.json()["detail"]
 
 
+def test_workspace_image_attachment_url_serves_preview_content(tmp_path):
+    data_dir = tmp_path / "data"
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    source = workspace / "image.png"
+    source.write_bytes(PNG_BYTES)
+    client = _client(data_dir)
+    session_id = _create_session(client, workspace=str(workspace))
+
+    response = client.post(
+        f"/api/sessions/{session_id}/attachments/workspace",
+        json={"path": "image.png"},
+    )
+
+    assert response.status_code == 200
+    attachment = response.json()["attachment"]
+    assert attachment["mime_type"] == "image/png"
+    assert attachment["url"] == f"/api/attachments/{attachment['id']}"
+
+    preview = client.get(attachment["url"])
+    assert preview.status_code == 200
+    assert preview.content == PNG_BYTES
+    assert preview.headers["content-type"] == "image/png"
+
+
 def test_session_attachment_search_is_bounded_and_hides_workspace_root(tmp_path):
     data_dir = tmp_path / "data"
     workspace = tmp_path / "repo"

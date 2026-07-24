@@ -177,6 +177,7 @@ def upload_file(
     timeout: float = 60.0,
 ) -> dict[str, Any]:
     """Upload one file through the OpenAI-compatible GigaChat Files route."""
+    del api_mode
     safe_filename = filename.replace("\r", "").replace("\n", "") or "attachment"
     boundary = f"gpt2giga-{secrets.token_hex(16)}"
     body = (
@@ -197,7 +198,7 @@ def upload_file(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
         headers["x-api-key"] = api_key
-    url = f"{proxy_url.rstrip('/')}/{api_mode.value}/files"
+    url = f"{proxy_url.rstrip('/')}/v1/files"
     request = Request(url, data=body, headers=headers, method="POST")
     try:
         with urlopen(request, timeout=timeout) as response:

@@ -9,7 +9,7 @@ from gpt2giga_harness import proxy
 from gpt2giga_harness.types import GigaChatApiMode, HarnessContext
 
 
-def test_upload_file_sends_multipart_to_versioned_files_route(monkeypatch):
+def test_upload_file_sends_multipart_to_stable_v1_files_route(monkeypatch):
     captured = {}
 
     class FakeResponse:
@@ -48,7 +48,7 @@ def test_upload_file_sends_multipart_to_versioned_files_route(monkeypatch):
     parts = list(message.iter_parts())
 
     assert result == {"id": "file-pdf-1"}
-    assert request.full_url == "http://127.0.0.1:8090/v2/files"
+    assert request.full_url == "http://127.0.0.1:8090/v1/files"
     assert request.get_header("Authorization") == "Bearer proxy-key"
     assert parts[0].get_payload(decode=True) == b"assistants"
     assert parts[1].get_filename() == "Отчёт.pdf"

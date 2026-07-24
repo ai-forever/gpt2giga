@@ -2350,10 +2350,31 @@ def create_app(
     def attachment_blob(attachment_id: str) -> Response:
         try:
             attachment = attachment_store.get_attachment(attachment_id)
-            data = attachment_store.read_blob(attachment_id)
+            if attachment.storage_path:
+                data = attachment_store.read_blob(attachment_id)
+            elif attachment.workspace_path and attachment.mime_type.startswith(
+                "image/"
+            ):
+                session = store.get_session(attachment.session_id)
+                workspace_root = _attachment_workspace(session, {})
+                resolved, _relative = normalize_workspace_file(
+                    workspace_root,
+                    attachment.workspace_path,
+                    _attachment_limits(session, workspace_root=workspace_root),
+                )
+                data = resolved.read_bytes()
+            else:
+                raise AttachmentValidationError("Attachment has no stored blob")
         except AttachmentNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Attachment not found") from exc
-        except AttachmentValidationError as exc:
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except OSError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Attachment content is unavailable",
+            ) from exc
+        except (AttachmentValidationError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return Response(
             content=data,
