@@ -206,7 +206,7 @@ def test_codex_cli_uploads_planned_document_before_execution(tmp_path, monkeypat
     assert error is None
     assert file_ids == ("file-pdf-1",)
     assert uploads[0][1]["content"] == b"%PDF-1.7\nfixture"
-    assert uploads[0][1]["content_type"] == "application/pdf"
+    assert "content_type" not in uploads[0][1]
     assert events[0].type == "attachment_uploaded"
 
 

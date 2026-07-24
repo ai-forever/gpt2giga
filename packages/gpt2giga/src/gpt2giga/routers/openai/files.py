@@ -47,7 +47,7 @@ async def create_file(request: Request):
     request_options = extract_gigachat_request_options(request)
     async with gigachat_request_options(giga_client, request_options):
         uploaded = await giga_client.aupload_file(
-            (upload["filename"], upload["content"], upload["content_type"]),
+            (upload["filename"], upload["content"]),
             purpose=map_openai_file_purpose(purpose),
         )
 

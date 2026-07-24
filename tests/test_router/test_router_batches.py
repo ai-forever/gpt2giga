@@ -57,13 +57,13 @@ class FakeGigaChat:
         self.batches = {}
         self.last_batch_content = None
         self.last_batch_method = None
-        self.last_uploaded_content_type = None
+        self.last_uploaded_file = None
         self._created_at = 100
 
     async def aupload_file(self, file, purpose):
-        filename, content, content_type = file
+        filename, content = file
         file_id = f"file-{len(self.files) + 1}"
-        self.last_uploaded_content_type = content_type
+        self.last_uploaded_file = file
         uploaded = FakeUploadedFile(
             id=file_id,
             object="file",
@@ -239,7 +239,7 @@ def test_files_endpoints_roundtrip_when_router_is_mounted_directly():
     assert deleted.json() == {"id": file_id, "deleted": True, "object": "file"}
 
 
-def test_files_endpoint_infers_json_content_type_for_jsonl_uploads_directly():
+def test_files_endpoint_lets_sdk_infer_content_type_from_filename():
     app = make_app_with_files_and_batches()
     giga_client = app.state.gigachat_client
     client = TestClient(app)
@@ -257,7 +257,10 @@ def test_files_endpoint_infers_json_content_type_for_jsonl_uploads_directly():
     )
 
     assert response.status_code == 200
-    assert giga_client.last_uploaded_content_type == "application/json"
+    assert giga_client.last_uploaded_file == (
+        "input.jsonl",
+        b'{"hello":"world"}\n',
+    )
 
 
 def test_batches_endpoints_translate_openai_flow_when_router_is_mounted_directly():

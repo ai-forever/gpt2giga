@@ -171,7 +171,6 @@ def upload_file(
     *,
     filename: str,
     content: bytes,
-    content_type: str,
     api_key: str | None = None,
     purpose: str = "assistants",
     timeout: float = 60.0,
@@ -186,8 +185,7 @@ def upload_file(
         f"{purpose}\r\n"
         f"--{boundary}\r\n"
         'Content-Disposition: form-data; name="file"; '
-        f"filename*=UTF-8''{quote(safe_filename)}\r\n"
-        f"Content-Type: {content_type or 'application/octet-stream'}\r\n\r\n"
+        f"filename*=UTF-8''{quote(safe_filename)}\r\n\r\n"
     ).encode("utf-8")
     body += content
     body += f"\r\n--{boundary}--\r\n".encode("ascii")

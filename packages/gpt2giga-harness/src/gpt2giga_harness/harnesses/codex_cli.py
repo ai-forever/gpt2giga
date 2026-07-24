@@ -527,9 +527,6 @@ def _upload_gigachat_attachments(
                 request.api_mode,
                 filename=filename,
                 content=content,
-                content_type=str(
-                    attachment.get("mime_type") or "application/octet-stream"
-                ),
                 api_key=context.api_key
                 or proxy.cached_sidecar_api_key(context.proxy_url),
                 timeout=context.timeout_seconds,

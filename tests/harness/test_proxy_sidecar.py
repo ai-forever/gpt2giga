@@ -34,7 +34,6 @@ def test_upload_file_sends_multipart_to_stable_v1_files_route(monkeypatch):
         GigaChatApiMode.V2,
         filename="Отчёт.pdf",
         content=b"%PDF-1.7\nfixture",
-        content_type="application/pdf",
         api_key="proxy-key",
         timeout=12,
     )
@@ -52,7 +51,7 @@ def test_upload_file_sends_multipart_to_stable_v1_files_route(monkeypatch):
     assert request.get_header("Authorization") == "Bearer proxy-key"
     assert parts[0].get_payload(decode=True) == b"assistants"
     assert parts[1].get_filename() == "Отчёт.pdf"
-    assert parts[1].get_content_type() == "application/pdf"
+    assert parts[1].get("content-type") is None
     assert parts[1].get_payload(decode=True) == b"%PDF-1.7\nfixture"
 
 
