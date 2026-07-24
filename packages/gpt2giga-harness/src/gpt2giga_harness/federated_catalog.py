@@ -1157,13 +1157,32 @@ def _parse_neuraldeep_item(
         component=component,
         source_present=source_present,
         observed_at=observed_at,
-        detail_url=f"{NEURALDEEP_ORIGIN}/{component.value}/{urllib_parse.quote(name, safe='')}",
+        detail_url=(
+            f"{NEURALDEEP_ORIGIN}/{component.value}/"
+            f"{urllib_parse.quote(_neuraldeep_detail_slug(upstream_id, name, component), safe='')}"
+        ),
         artifact_url=artifact_url,
         curated=featured or mapping.get("source") == "curated",
         popularity=installs,
         upstream_audit="reported_approved" if status == "approved" else None,
         relative_path=relative_path,
     )
+
+
+def _neuraldeep_detail_slug(
+    upstream_id: str,
+    name: str,
+    component: FederatedCatalogComponent,
+) -> str:
+    identity_slug = upstream_id.rsplit(":", 1)[-1].lower()
+    if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", identity_slug):
+        return identity_slug
+    name_slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    if component is FederatedCatalogComponent.MCP:
+        name_slug = name_slug.removesuffix("-mcp")
+    if not name_slug:
+        raise _FederatedFailure("source.invalid_payload", "DetailSlug")
+    return name_slug
 
 
 def _candidate(

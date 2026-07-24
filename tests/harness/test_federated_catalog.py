@@ -225,6 +225,32 @@ async def test_neuraldeep_direct_get_keeps_skills_and_mcp_separate():
     )
 
 
+async def test_neuraldeep_mcp_detail_uses_the_public_slug():
+    mcp_url = f"{NEURALDEEP_ORIGIN}/skapi/skills?type=mcp"
+    source = NeuralDeepFederatedCatalogSource(
+        fetch=_FixtureFetcher(
+            {
+                mcp_url: [
+                    _neural_item(
+                        upstream_id="curated:gigachat-image",
+                        kind="mcp",
+                    )
+                    | {"name": "GigaChat Image MCP"}
+                ]
+            }
+        ),
+        now=lambda: _NOW,
+    )
+
+    result = await source.refresh(components=(FederatedCatalogComponent.MCP,))
+
+    assert result.success is True
+    assert (
+        result.snapshot.items[0].provenance.detail_url
+        == "https://neuraldeep.ru/mcp/gigachat-image"
+    )
+
+
 @pytest.mark.parametrize("kind", ["plugin", "extension", "harness_adapter", "cli"])
 async def test_federated_sources_fail_closed_for_unsupported_content(kind):
     url = f"{NEURALDEEP_ORIGIN}/skapi/skills?type=skill"

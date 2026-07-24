@@ -61,6 +61,7 @@ from gpt2giga_harness.skills_catalog_proxy_client import SkillsCatalogProxyFetch
 
 
 MAX_ROOT_SKILLS = 512
+MAX_ROOT_PLUGINS = 128
 MAX_GIT_CANDIDATES = 256
 MAX_PREVIEW_CHARS = 40_000
 GIT_TIMEOUT_SECONDS = 90.0
@@ -91,6 +92,21 @@ class _RootSkill:
 
 
 @dataclass(frozen=True)
+class _RootPlugin:
+    id: str
+    name: str
+    title: str
+    description: str
+    version: str
+    target_ids: tuple[str, ...]
+    origin: str
+    invocation: str
+    bundled_skills: tuple[str, ...]
+    default_prompts: tuple[str, ...]
+    repository_url: str | None
+
+
+@dataclass(frozen=True)
 class _GitSnapshot:
     repository_url: str
     requested_ref: str | None
@@ -107,6 +123,7 @@ class SkillLibraryService:
         data_dir: Path,
         *,
         root_skill_roots: Sequence[tuple[Path, Sequence[str], str]] | None = None,
+        root_plugin_roots: Sequence[tuple[Path, str]] | None = None,
         federated_sources: Sequence[FederatedCatalogSource] | None = None,
         git_runner: GitCommandRunner | None = None,
     ) -> None:
@@ -120,6 +137,11 @@ class SkillLibraryService:
             root_skill_roots
             if root_skill_roots is not None
             else _default_root_skill_roots()
+        )
+        self._root_plugin_roots = tuple(
+            root_plugin_roots
+            if root_plugin_roots is not None
+            else _default_root_plugin_roots()
         )
         use_default_sources = federated_sources is None
         self._federated_sources = tuple(
@@ -135,6 +157,10 @@ class SkillLibraryService:
     def root_skills(self) -> list[dict[str, Any]]:
         """Return deduplicated global/native Skill metadata without instructions."""
         return [_root_projection(item) for item in self._scan_root_skills()]
+
+    def root_plugins(self) -> list[dict[str, Any]]:
+        """Return bounded OpenAI-bundled Codex plugin manifest metadata."""
+        return [_root_plugin_projection(item) for item in self._scan_root_plugins()]
 
     async def search(
         self,
@@ -622,6 +648,31 @@ class SkillLibraryService:
                 )
         return tuple(sorted(by_key.values(), key=lambda item: item.name.casefold()))
 
+    def _scan_root_plugins(self) -> tuple[_RootPlugin, ...]:
+        by_name: dict[str, _RootPlugin] = {}
+        for root, origin in self._root_plugin_roots:
+            root = Path(root).expanduser()
+            if not root.is_dir() or root.is_symlink():
+                continue
+            count = 0
+            for manifest_path in sorted(root.rglob(".codex-plugin/plugin.json")):
+                if count >= MAX_ROOT_PLUGINS:
+                    break
+                if _unsafe_path(root, manifest_path):
+                    continue
+                try:
+                    plugin = _root_plugin_from_manifest(
+                        manifest_path,
+                        origin=origin,
+                    )
+                except (OSError, UnicodeError, ValueError):
+                    continue
+                count += 1
+                current = by_name.get(plugin.name)
+                if current is None or plugin.version > current.version:
+                    by_name[plugin.name] = plugin
+        return tuple(sorted(by_name.values(), key=lambda item: item.title.casefold()))
+
     def _candidate_path(self, candidate_id: str) -> Path:
         if not re.fullmatch(r"[0-9a-f]{64}", candidate_id):
             raise ValueError("Git candidate id is invalid")
@@ -706,6 +757,15 @@ def _default_root_skill_roots() -> tuple[tuple[Path, tuple[str, ...], str], ...]
     return tuple(roots)
 
 
+def _default_root_plugin_roots() -> tuple[tuple[Path, str], ...]:
+    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    cache = codex_home / "plugins" / "cache"
+    return (
+        (cache / "openai-primary-runtime", "openai-primary-runtime"),
+        (cache / "openai-bundled", "openai-bundled"),
+    )
+
+
 def _default_sources() -> tuple[FederatedCatalogSource, ...]:
     sources: list[FederatedCatalogSource] = [NeuralDeepFederatedCatalogSource()]
     proxy_origin = os.environ.get("GIGA_SKILLS_PROXY_ORIGIN")
@@ -730,6 +790,92 @@ def _root_projection(item: _RootSkill) -> dict[str, Any]:
         "connected": True,
         "preview_id": item.id,
     }
+
+
+def _root_plugin_projection(item: _RootPlugin) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "title": item.title,
+        "description": item.description,
+        "version": item.version,
+        "target_ids": list(item.target_ids),
+        "origin": item.origin,
+        "source_label": "OpenAI",
+        "scope": "system",
+        "connected": True,
+        "invocation": item.invocation,
+        "bundled_skills": list(item.bundled_skills),
+        "default_prompts": list(item.default_prompts),
+        "repository_url": item.repository_url,
+    }
+
+
+def _root_plugin_from_manifest(
+    manifest_path: Path,
+    *,
+    origin: str,
+) -> _RootPlugin:
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("plugin manifest must be an object")
+    name = str(payload.get("name") or "").strip()
+    version = str(payload.get("version") or "").strip()
+    if not name or not version:
+        raise ValueError("plugin manifest identity is incomplete")
+    raw_interface = payload.get("interface")
+    interface = raw_interface if isinstance(raw_interface, Mapping) else {}
+    title = str(interface.get("displayName") or name).strip()
+    description = str(
+        interface.get("shortDescription") or payload.get("description") or title
+    ).strip()
+    skills_path = payload.get("skills")
+    bundled_skills: list[str] = []
+    if isinstance(skills_path, str) and skills_path.strip():
+        plugin_root = manifest_path.parent.parent.resolve()
+        skills_root = (plugin_root / skills_path).resolve()
+        try:
+            skills_root.relative_to(plugin_root)
+        except ValueError as exc:
+            raise ValueError("plugin skills path escapes the plugin") from exc
+        if skills_root.is_dir() and not skills_root.is_symlink():
+            for skill_md in sorted(skills_root.rglob("SKILL.md"))[:MAX_ROOT_SKILLS]:
+                if _unsafe_path(skills_root, skill_md):
+                    continue
+                try:
+                    skill_name, _ = _skill_metadata(skill_md)
+                except (OSError, UnicodeError, ValueError):
+                    continue
+                bundled_skills.append(skill_name)
+    default_prompts = interface.get("defaultPrompt")
+    prompts = (
+        tuple(
+            str(item).strip()
+            for item in default_prompts[:3]
+            if isinstance(item, str) and item.strip()
+        )
+        if isinstance(default_prompts, list)
+        else ()
+    )
+    digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    repository_url = payload.get("repository")
+    return _RootPlugin(
+        id=f"plugin:{digest}",
+        name=name,
+        title=title,
+        description=description,
+        version=version,
+        target_ids=("codex-plugin",),
+        origin=origin,
+        invocation=f"@{name}",
+        bundled_skills=tuple(sorted(set(bundled_skills))),
+        default_prompts=prompts,
+        repository_url=(
+            repository_url
+            if isinstance(repository_url, str) and repository_url.startswith("https://")
+            else None
+        ),
+    )
 
 
 def _federated_projection(item: FederatedCatalogCandidate) -> dict[str, Any]:

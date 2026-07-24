@@ -71,6 +71,22 @@ export interface IntegrationFlowInventory {
     connected: true;
     preview_id: string;
   }>;
+  root_plugins?: Array<{
+    id: string;
+    name: string;
+    title: string;
+    description: string;
+    version: string;
+    target_ids: string[];
+    origin: string;
+    source_label: string;
+    scope: "system";
+    connected: true;
+    invocation: string;
+    bundled_skills: string[];
+    default_prompts: string[];
+    repository_url: string | null;
+  }>;
   flows: IntegrationFlowSummary[];
   groups: IntegrationGroupSummary[];
   installations: IntegrationLifecycleInstallation[];

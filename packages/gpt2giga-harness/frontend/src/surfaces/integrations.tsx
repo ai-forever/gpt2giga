@@ -185,6 +185,7 @@ export function IntegrationsSurface() {
               <span>{connectedCount} {message(locale, "connectedCount")}</span>
             </div>
           </div>
+          {category === "skills" ? <SkillsShSetupGuide locale={locale} /> : null}
           {externalQuery.data ? (
             <div className="plugin-search-sources" aria-label={message(locale, "searchSources")}>
               <span>{message(locale, "searchSources")}</span>
@@ -264,6 +265,33 @@ export function IntegrationsSurface() {
   );
 }
 
+function SkillsShSetupGuide({ locale }: { locale: "en" | "ru" }) {
+  return (
+    <details className="source-setup-guide">
+      <summary>
+        <span>skills.sh</span>
+        <strong>{locale === "ru" ? "Как подключить источник" : "Connect this source"}</strong>
+      </summary>
+      <div>
+        <p>
+          {locale === "ru"
+            ? "Harness читает только metadata через отдельный read-only proxy. Токен остаётся в proxy и никогда не попадает в browser."
+            : "Harness reads metadata through a separate read-only proxy. The token stays in the proxy and never reaches the browser."}
+        </p>
+        <ol>
+          <li>{locale === "ru" ? "Получите request-scoped Vercel OIDC token." : "Obtain a request-scoped Vercel OIDC token."}</li>
+          <li><code>VERCEL_OIDC_TOKEN=&lt;token&gt; giga-skills-catalog-proxy</code></li>
+          <li><code>GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092 giga ui</code></li>
+          <li>{locale === "ru" ? "Ищите Skill на этой странице; статус skills-sh должен стать ready." : "Search for a Skill here; the skills-sh status should become ready."}</li>
+        </ol>
+        <a href="https://skills.sh/docs/api" rel="noreferrer" target="_blank">
+          {locale === "ru" ? "Открыть API guide skills.sh" : "Open the skills.sh API guide"}
+        </a>
+      </div>
+    </details>
+  );
+}
+
 function PluginRow({
   category,
   item,
@@ -292,6 +320,9 @@ function PluginRow({
         <div>
           <strong>{item.title}</strong>
           <span className="plugin-type-label">{typeLabel(locale, item.category)}</span>
+          <span className="plugin-source-badge">
+            {message(locale, "source")} · {sourceBadgeLabel(locale, item)}
+          </span>
         </div>
         <p>{descriptionFor(locale, item)}</p>
       </div>
@@ -379,7 +410,7 @@ function PluginDetails({
       <dl className="plugin-facts">
         <div>
           <dt>{message(locale, "source")}</dt>
-          <dd>{item.sourceId ?? sourceLabel(locale, item.source)}</dd>
+          <dd>{sourceBadgeLabel(locale, item)}</dd>
         </div>
         <div>
           <dt>{message(locale, "version")}</dt>
@@ -444,6 +475,27 @@ function PluginDetails({
           {skillPreview.isPending ? <LoadingRows /> : null}
           {skillPreview.data ? <pre>{skillPreview.data.markdown}</pre> : null}
           {skillPreview.isError ? <p className="mutation-error">{skillPreview.error.message}</p> : null}
+        </section>
+      ) : null}
+      {item.invocation ? (
+        <section className="plugin-detail-section plugin-invocation">
+          <h3>{locale === "ru" ? "Использование в Work" : "Use in Work"}</h3>
+          <p>
+            {locale === "ru"
+              ? "Введите @ в composer и выберите capability. Harness передаст нативному агенту правильный Skill-вызов."
+              : "Type @ in the composer and choose the capability. Harness sends the native agent the correct Skill invocation."}
+          </p>
+          <code>{item.invocation}</code>
+          {item.bundledSkills.length ? (
+            <span>
+              {locale === "ru" ? "Bundled Skills" : "Bundled Skills"} · {item.bundledSkills.join(", ")}
+            </span>
+          ) : null}
+          {item.defaultPrompts.length ? (
+            <ul>
+              {item.defaultPrompts.map((prompt) => <li key={prompt}>{prompt}</li>)}
+            </ul>
+          ) : null}
         </section>
       ) : null}
       {item.source === "remote" ? (
@@ -1362,6 +1414,19 @@ function sourceLabel(locale: "en" | "ru", source: PluginLibraryItem["source"]) {
   if (source === "root") return message(locale, "rootSkills");
   if (source === "remote") return message(locale, "externalSources");
   return message(locale, "installedPackage");
+}
+
+function sourceBadgeLabel(locale: "en" | "ru", item: PluginLibraryItem) {
+  if (item.sourceId === "neuraldeep") return "NeuralDeep";
+  if (item.sourceId === "skills-sh") return "skills.sh";
+  if (item.sourceId === "codex-root") return "Codex";
+  if (item.sourceId === "claude-root") return "Claude";
+  if (item.sourceId === "gemini-root") return "Gemini";
+  if (item.sourceId === "root") return locale === "ru" ? "Общий" : "Shared";
+  if (item.sourceId) return item.sourceId;
+  if (item.catalogSourceType?.startsWith("openai-")) return "OpenAI";
+  if (item.catalogSourceType === "local_private") return "gpt2giga";
+  return sourceLabel(locale, item.source);
 }
 
 function sourceStatusLabel(locale: "en" | "ru", status: string) {

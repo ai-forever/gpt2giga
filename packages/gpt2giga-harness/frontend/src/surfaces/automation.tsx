@@ -9,6 +9,7 @@ import { useMemo, useRef, useState } from "react";
 
 import { mutateCockpit } from "../api";
 import {
+  automationStarter,
   type AutomationAuthoringRequest,
 } from "../automation-authoring";
 import {
@@ -128,7 +129,11 @@ function AutomationList({ onCreate, section, query, selectedId }: {
         </div>
       </div>
       {rows.length === 0 ? (
-        <div className="empty-state">{message(locale, "noItems")}</div>
+        <AutomationStarterCard
+          locale={locale}
+          onCreate={onCreate}
+          section={section}
+        />
       ) : (
         <div className="operations-table" role="table">
           {rows.map((item) => (
@@ -137,6 +142,60 @@ function AutomationList({ onCreate, section, query, selectedId }: {
         </div>
       )}
     </>
+  );
+}
+
+function AutomationStarterCard({
+  locale,
+  onCreate,
+  section,
+}: {
+  locale: "en" | "ru";
+  onCreate: () => void;
+  section: AutomationSection;
+}) {
+  const starter = automationStarter(section);
+  const command = section === "agents"
+    ? "giga run --agent code-reviewer --workspace . \"Review this change\""
+    : section === "workflows"
+      ? "giga workflow run review-change --workspace . --prompt \"Review this change\""
+      : "giga schedule test-now weekday-review --workspace .";
+  return (
+    <section className="automation-starter-card">
+      <div className="automation-starter-number">{starter.sequence}</div>
+      <div>
+        <span className="section-kicker">
+          {locale === "ru" ? "Готовый пример" : "First-class example"}
+        </span>
+        <h3>{starter.title}</h3>
+        <p>
+          {locale === "ru"
+            ? section === "agents"
+              ? "Read-only Codex-агент, который возвращает конкретные замечания по коду."
+              : section === "workflows"
+                ? "Запускает Code Reviewer с повторно используемой задачей."
+                : "Запускает Review Change по будням в отдельном worktree."
+            : starter.description}
+        </p>
+      </div>
+      <ol>
+        <li>{locale === "ru" ? "Откройте пример и проверьте поля." : "Open the example and review its fields."}</li>
+        <li>{locale === "ru" ? "Нажмите Preview change, затем Apply." : "Choose Preview change, then Apply."}</li>
+        <li>
+          {section === "schedules"
+            ? locale === "ru"
+              ? "Запустите Test schedule и только затем Enable."
+              : "Run Test schedule before choosing Enable."
+            : locale === "ru"
+              ? "Запустите из карточки или той же CLI-командой."
+              : "Run it from the detail card or with the same CLI contract."}
+        </li>
+      </ol>
+      <code>{command}</code>
+      <button className="primary-button" onClick={onCreate} type="button">
+        {locale === "ru" ? `Создать ${starter.title}` : `Create ${starter.title}`}
+      </button>
+    </section>
   );
 }
 

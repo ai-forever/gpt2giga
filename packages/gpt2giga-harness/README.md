@@ -474,6 +474,14 @@ from `~/.agents/skills` and provider-specific Skill homes appear in inventory
 and can be filtered by Codex, Claude, Gemini, or Harness. Override shared roots
 with the OS-path-separated `GIGA_ROOT_SKILLS_DIRS` variable.
 
+System bundles already shipped by OpenAI are projected as read-only Plugins
+with an OpenAI source badge, bundled Skill names, default prompts, and their
+`@name` invocation hint. Type `@` in Work to choose one; for Codex CLI runs the
+composer translates that selection to the native `$name` Skill invocation.
+Every federated result also retains its source badge. The canonical NeuralDeep
+GigaChat Image MCP page is
+[NeuralDeep GigaChat Image MCP](https://neuraldeep.ru/mcp/gigachat-image).
+
 An external Skill must match its reviewed immutable reference and content hash
 before bounded `SKILL.md` validation and target projection. A normalized MCP
 candidate likewise keeps exact package integrity, argv, origins, secret

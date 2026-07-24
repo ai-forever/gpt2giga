@@ -535,6 +535,13 @@ views plus a typed wizard for target, cadence, destination, worktree isolation,
 concurrency, retry/misfire policy, and notifications. It explains the exact-hash
 `Test now` gate and worker-online requirement before enable.
 
+The schedule wizard follows the Codex Scheduled mental model for common cases:
+choose **Once**, **Daily**, **Weekdays**, or **Weekly**, then set the first run,
+IANA timezone, target, prompt, and notification preference. Harness compiles
+those choices into the governed one-shot, fixed-interval, or RRULE contract.
+Use **Custom** and the collapsed **Advanced · JSON** editor only when an
+explicit RRULE or a lower-level policy field is required.
+
 The same area contains the project Attention Inbox. Pending approvals, failed
 durable jobs, and schedules in `needs_attention` are derived from their source
 audit records rather than copied into a second queue. Marking an item read only
@@ -881,6 +888,19 @@ templates: Plan-Implement-Test-Review, Diagnose-Fix-Regression, and
 Issue-Patch-PR Draft. Free-form drag-and-drop graph editing remains deferred;
 step ordering and dependencies stay explicit and validated.
 
+Automation also provides one connected, zero-setup example in every empty
+section:
+
+1. **Code Reviewer** — a read-only Codex agent profile.
+2. **Review Change** — a workflow that invokes `code-reviewer`.
+3. **Weekday Review** — a weekday schedule that targets `review-change`.
+
+Open **Automation → Agents**, create and apply Code Reviewer, then repeat in
+**Workflows**. Run either definition from its detail view. Finally create the
+schedule, use **Test** to bind the exact content hash, and choose **Enable** only
+when a worker is online. The cards also show the equivalent
+`giga run --agent`, `giga workflow`, and `giga schedule` commands for CLI users.
+
 Additional catalog APIs:
 
 - `POST /api/workflows/import`;
@@ -1160,6 +1180,10 @@ export GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092
 giga ui
 ```
 
+The Skills page contains the same setup guide next to the source filter. A
+healthy proxy changes the source from `configuration_required` or `unavailable`
+to `ready`; a retained last-good result remains visibly marked `stale`.
+
 For production, deploy the proxy on Vercel with OIDC Federation enabled and use
 the request-scoped `VERCEL_OIDC_TOKEN`; do not bake a token into an image,
 configuration file, or static environment export. The
@@ -1195,6 +1219,19 @@ OS-path-separated list when the shared roots live elsewhere. Inventory reads
 metadata only; full `SKILL.md` content is loaded for the bounded preview after
 an item is selected.
 
+Harness also scans the system bundles already shipped by OpenAI under the
+`openai-primary-runtime` and `openai-bundled` plugin caches. Capabilities such
+as PDF, Documents, Presentations, and Spreadsheets therefore appear under
+**Plugins** with an **OpenAI** source badge, their bundled Skill names, default
+prompts, and an `@name` invocation hint. This inventory is read-only: Harness
+does not install, enable, or rewrite an OpenAI bundle.
+
+In **Work**, type `@` to select one of these capabilities. For a Codex CLI run,
+Harness stores the explicit choice in the prompt and translates `@pdf` to the
+native `$pdf` Skill invocation. ChatGPT itself uses `@` for Plugins and Skills,
+while native Codex CLI/IDE Skill invocation uses `$`; the Cockpit picker keeps
+the user-facing `@` convention and makes that translation visible.
+
 Harness preserves the last good catalog snapshot when a source is unavailable,
 rate-limited, requires renewed authentication, or returns invalid data. An
 external Skill becomes installable only after its bytes match a reviewed
@@ -1203,6 +1240,10 @@ validation. A NeuralDeep MCP card is localized discovery metadata. It can link
 to an official MCP Registry package only by exact official package name or
 canonical repository identity; the official version, immutable reference, and
 integrity remain authoritative.
+
+Every result row and detail view shows its source bubble, including
+**NeuralDeep**. The canonical GigaChat Image MCP detail page is
+[NeuralDeep GigaChat Image MCP](https://neuraldeep.ru/mcp/gigachat-image).
 
 Inspect the offline inventory, then create a single-target preview:
 

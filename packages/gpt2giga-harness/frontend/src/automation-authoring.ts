@@ -17,20 +17,82 @@ export interface DeletePreview {
   confirmation_required: true;
 }
 
+export interface AutomationStarter {
+  id: string;
+  title: string;
+  description: string;
+  sequence: number;
+}
+
+export type ScheduleCadencePreset =
+  | "daily"
+  | "once"
+  | "weekdays"
+  | "weekly"
+  | "custom";
+
+export interface ScheduleFormDefinition {
+  base: Record<string, unknown>;
+  title: string;
+  targetKind: "agent" | "eval" | "workflow";
+  targetId: string;
+  cadencePreset: ScheduleCadencePreset;
+  timezone: string;
+  startAt: string;
+  weekday: string;
+  customRrule: string;
+  prompt: string;
+  desktopNotifications: boolean;
+}
+
+export function automationStarter(section: AutomationSection): AutomationStarter {
+  if (section === "agents") {
+    return {
+      id: "code-reviewer",
+      title: "Code Reviewer",
+      description: "A read-only Codex agent that returns concrete review findings.",
+      sequence: 1,
+    };
+  }
+  if (section === "workflows") {
+    return {
+      id: "review-change",
+      title: "Review Change",
+      description: "Runs the Code Reviewer agent with a reusable prompt.",
+      sequence: 2,
+    };
+  }
+  return {
+    id: "weekday-review",
+    title: "Weekday Review",
+    description: "Runs the Review Change workflow every weekday in an isolated worktree.",
+    sequence: 3,
+  };
+}
+
 export function defaultDefinition(section: AutomationSection): {
   id: string;
   content: string;
 } {
   if (section === "agents") {
     return {
-      id: "new-agent",
+      id: "code-reviewer",
       content: [
-        "id: new-agent",
-        "title: New Agent",
-        "description: A reusable project agent.",
+        "id: code-reviewer",
+        "title: Code Reviewer",
+        "description: Reviews a change and returns concrete findings without editing files.",
+        "schema_version: 1",
         "harness_id: codex-cli",
-        "mode: plan",
+        "instructions: >-",
+        "  Inspect the requested change, cite exact files, and prioritize correctness,",
+        "  compatibility, and missing tests. Do not edit files.",
+        "api_mode: v2",
+        "invocation_mode: headless",
+        "mode: read",
+        "workspace_policy: current",
+        "permission_profile: unattended",
         "budgets:",
+        "  timeout_seconds: 300",
         "  max_attempts: 1",
         "",
       ].join("\n"),
@@ -38,40 +100,116 @@ export function defaultDefinition(section: AutomationSection): {
   }
   if (section === "workflows") {
     return {
-      id: "new-workflow",
+      id: "review-change",
       content: [
-        "id: new-workflow",
-        "title: New Workflow",
+        "id: review-change",
+        "title: Review Change",
+        "description: Run the reusable Code Reviewer agent.",
+        "schema_version: 1",
         "version: '1.0.0'",
+        "inputs:",
+        "  prompt: Review the current change.",
         "steps:",
-        "  - id: plan",
+        "  - id: review",
         "    kind: agent",
-        "    agent_id: planner",
-        "    prompt: 'Plan: ${prompt}'",
+        "    agent_id: code-reviewer",
+        "    prompt: '${prompt}'",
         "",
       ].join("\n"),
     };
   }
+  const starter = scheduleContentFromForm(
+    "weekday-review",
+    {
+      base: {},
+      title: "Weekday Review",
+      targetKind: "workflow",
+      targetId: "review-change",
+      cadencePreset: "weekdays",
+      timezone: resolvedTimezone(),
+      startAt: nextMorning(),
+      weekday: "MO",
+      customRrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+      prompt: "Review the current change and report actionable findings.",
+      desktopNotifications: true,
+    },
+  );
   return {
-    id: "new-schedule",
-    content: JSON.stringify(
-      {
-        id: "new-schedule",
-        title: "New Schedule",
-        target: { kind: "workflow", id: "review-team" },
-        cadence: {
-          kind: "interval",
-          timezone: "UTC",
-          start_at: "2026-07-24T00:00:00",
-          interval_seconds: 86400,
-        },
-        prompt: "Run the scheduled workflow.",
-        workspace_policy: "worktree",
-      },
-      null,
-      2,
-    ),
+    id: "weekday-review",
+    content: starter,
   };
+}
+
+export function scheduleFormFromContent(content: string): ScheduleFormDefinition {
+  const payload = parseScheduleContent(content);
+  const target = record(payload.target);
+  const cadence = record(payload.cadence);
+  const notifications = record(payload.notifications);
+  const cadenceKind = text(cadence.kind);
+  const rrule = text(cadence.rrule);
+  const interval = Number(cadence.interval_seconds);
+  const cadencePreset: ScheduleCadencePreset =
+    cadenceKind === "once"
+      ? "once"
+      : cadenceKind === "interval" && interval === 86400
+        ? "daily"
+        : rrule === "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+          ? "weekdays"
+          : /^FREQ=WEEKLY;BYDAY=[A-Z]{2}$/.test(rrule)
+            ? "weekly"
+            : "custom";
+  return {
+    base: payload,
+    title: text(payload.title) || text(payload.id),
+    targetKind: ["agent", "eval", "workflow"].includes(text(target.kind))
+      ? (text(target.kind) as ScheduleFormDefinition["targetKind"])
+      : "workflow",
+    targetId: text(target.id),
+    cadencePreset,
+    timezone: text(cadence.timezone) || resolvedTimezone(),
+    startAt: text(cadence.start_at).slice(0, 16) || nextMorning(),
+    weekday: rrule.match(/BYDAY=([A-Z]{2})$/)?.[1] ?? "MO",
+    customRrule: rrule || "FREQ=DAILY",
+    prompt: text(payload.prompt),
+    desktopNotifications: notifications.desktop === true,
+  };
+}
+
+export function scheduleContentFromForm(
+  id: string,
+  form: ScheduleFormDefinition,
+): string {
+  const cadence: Record<string, unknown> = {
+    kind: form.cadencePreset === "once"
+      ? "once"
+      : form.cadencePreset === "daily"
+        ? "interval"
+        : "rrule",
+    timezone: form.timezone,
+    start_at: form.startAt.length === 16 ? `${form.startAt}:00` : form.startAt,
+  };
+  if (form.cadencePreset === "daily") cadence.interval_seconds = 86400;
+  if (form.cadencePreset === "weekdays") {
+    cadence.rrule = "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR";
+  }
+  if (form.cadencePreset === "weekly") {
+    cadence.rrule = `FREQ=WEEKLY;BYDAY=${form.weekday}`;
+  }
+  if (form.cadencePreset === "custom") cadence.rrule = form.customRrule;
+  const payload: Record<string, unknown> = {
+    ...form.base,
+    id,
+    title: form.title,
+    target: { kind: form.targetKind, id: form.targetId },
+    cadence,
+    prompt: form.prompt,
+    workspace_policy: "worktree",
+    notifications: { ...record(form.base.notifications), desktop: form.desktopNotifications },
+  };
+  delete payload.source_hash;
+  delete payload.target_hash;
+  delete payload.target_snapshot;
+  return JSON.stringify(payload, null, 2);
 }
 
 export function sourceFromDetail(
@@ -152,4 +290,16 @@ function text(value: unknown): string {
 
 function nullableText(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
+}
+
+function resolvedTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function nextMorning(): string {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(9, 0, 0, 0);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
 }

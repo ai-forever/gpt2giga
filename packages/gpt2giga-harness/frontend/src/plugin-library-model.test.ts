@@ -226,4 +226,36 @@ describe("plugin library model", () => {
       },
     });
   });
+
+  it("shows OpenAI bundled plugins as built-in Codex capabilities", () => {
+    const items = buildPluginLibrary({
+      ...inventory,
+      root_plugins: [{
+        id: "plugin:pdf",
+        name: "pdf",
+        title: "PDF",
+        description: "Read, create, and verify PDF files",
+        version: "1.0.0",
+        target_ids: ["codex-plugin"],
+        origin: "openai-primary-runtime",
+        source_label: "OpenAI",
+        scope: "system",
+        connected: true,
+        invocation: "@pdf",
+        bundled_skills: ["pdf"],
+        default_prompts: ["Review this PDF"],
+        repository_url: "https://github.com/openai/openai",
+      }],
+    }, []);
+
+    expect(items.find((item) => item.id === "plugin:pdf")).toMatchObject({
+      category: "plugins",
+      connected: true,
+      sourceId: "OpenAI",
+      invocation: "@pdf",
+      bundledSkills: ["pdf"],
+    });
+    expect(filterPluginLibrary(items, "plugins", "", false, "built_in", "codex")
+      .some((item) => item.id === "plugin:pdf")).toBe(true);
+  });
 });

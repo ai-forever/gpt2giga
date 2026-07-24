@@ -35,6 +35,9 @@ export interface PluginLibraryItem {
   sourceId: string | null;
   popularity: number | null;
   provenance: IntegrationSourceProvenance | null;
+  invocation: string | null;
+  bundledSkills: string[];
+  defaultPrompts: string[];
 }
 
 export function buildPluginLibrary(
@@ -98,6 +101,9 @@ export function buildPluginLibrary(
         discovery_location: entry.discovery.discovery_location ?? entry.package_id,
         observed_at: entry.discovery.observed_at ?? "",
       } : null,
+      invocation: null,
+      bundledSkills: [],
+      defaultPrompts: [],
     };
   });
 
@@ -139,6 +145,9 @@ export function buildPluginLibrary(
       sourceId: null,
       popularity: null,
       provenance: null,
+      invocation: null,
+      bundledSkills: [],
+      defaultPrompts: [],
     });
   }
 
@@ -167,6 +176,9 @@ export function buildPluginLibrary(
       sourceId: null,
       popularity: null,
       provenance: null,
+      invocation: null,
+      bundledSkills: [],
+      defaultPrompts: [],
     });
   }
 
@@ -195,6 +207,40 @@ export function buildPluginLibrary(
       sourceId: skill.origin,
       popularity: null,
       provenance: null,
+      invocation: `@${skill.name}`,
+      bundledSkills: [skill.name],
+      defaultPrompts: [],
+    });
+  }
+
+  for (const plugin of inventory.root_plugins ?? []) {
+    items.push({
+      id: plugin.id,
+      category: "plugins",
+      packageId: plugin.name,
+      title: plugin.title,
+      version: plugin.version,
+      source: "root",
+      catalogId: null,
+      catalogSourceType: plugin.origin,
+      targetIds: [...plugin.target_ids].sort(),
+      connectedTargetIds: [...plugin.target_ids].sort(),
+      connected: plugin.connected,
+      status: "available",
+      flow: null,
+      group: null,
+      lifecycle: null,
+      mcp: null,
+      description: plugin.description,
+      previewId: null,
+      artifactUrl: null,
+      detailUrl: plugin.repository_url,
+      sourceId: plugin.source_label,
+      popularity: null,
+      provenance: null,
+      invocation: plugin.invocation,
+      bundledSkills: [...plugin.bundled_skills],
+      defaultPrompts: [...plugin.default_prompts],
     });
   }
 
@@ -243,6 +289,9 @@ export function buildRemotePluginLibrary(search: IntegrationSearchResponse | und
       discovery_location: item.discovery_location ?? `${item.source_id}/${item.upstream_id}`,
       observed_at: item.observed_at ?? "",
     },
+    invocation: null,
+    bundledSkills: [],
+    defaultPrompts: [],
   }));
 }
 
@@ -261,7 +310,10 @@ export function filterPluginLibrary(
     if (harnessFilter !== "all" && !item.targetIds.some((target) => (
       harnessFilter === "harness" ? target.startsWith("harness-") : target.startsWith(`${harnessFilter}-`)
     ))) return false;
-    if (sourceFilter === "built_in" && item.catalogSourceType !== "local_private") return false;
+    if (sourceFilter === "built_in" && (
+      item.catalogSourceType !== "local_private"
+      && !(item.catalogSourceType?.startsWith("openai-") ?? false)
+    )) return false;
     if (sourceFilter === "external" && (
       item.category === "plugins"
       || item.catalogSourceType === null

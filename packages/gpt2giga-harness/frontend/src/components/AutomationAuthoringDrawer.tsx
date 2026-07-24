@@ -5,9 +5,12 @@ import {
   defaultDefinition,
   duplicateDefinition,
   parseScheduleContent,
+  scheduleContentFromForm,
+  scheduleFormFromContent,
   sourceFromDetail,
   type AutomationAuthoringRequest,
   type DeletePreview,
+  type ScheduleFormDefinition,
 } from "../automation-authoring";
 import {
   deleteCockpit,
@@ -103,6 +106,9 @@ function DefinitionEditor({
   const queryClient = useQueryClient();
   const [id, setId] = useState(seed.id);
   const [content, setContent] = useState(seed.content);
+  const [scheduleForm, setScheduleForm] = useState<ScheduleFormDefinition | null>(
+    () => section === "schedules" ? scheduleFormFromContent(seed.content) : null,
+  );
   const preview = useMutation({
     mutationFn: () => previewDefinition(section, id.trim(), content, sourceHash),
   });
@@ -133,6 +139,11 @@ function DefinitionEditor({
     if (preview.data || preview.isError) preview.reset();
     if (apply.data || apply.isError) apply.reset();
   };
+  const updateSchedule = (next: ScheduleFormDefinition, nextId = id) => {
+    setScheduleForm(next);
+    setContent(scheduleContentFromForm(nextId, next));
+    resetPreview();
+  };
 
   return (
     <>
@@ -161,23 +172,57 @@ function DefinitionEditor({
         <input
           disabled={mode === "edit"}
           onChange={(event) => {
-            setId(event.target.value);
+            const nextId = event.target.value;
+            setId(nextId);
+            if (scheduleForm) {
+              setContent(scheduleContentFromForm(nextId, scheduleForm));
+            }
             resetPreview();
           }}
           value={id}
         />
       </label>
-      <label className="field-control authoring-source-field">
-        {message(locale, "authoringSource")}
-        <textarea
-          onChange={(event) => {
-            setContent(event.target.value);
-            resetPreview();
-          }}
-          spellCheck={false}
-          value={content}
-        />
-      </label>
+      {section === "schedules" && scheduleForm ? (
+        <>
+          <ScheduleFormEditor
+            form={scheduleForm}
+            locale={locale}
+            onChange={updateSchedule}
+          />
+          <details className="schedule-advanced-source">
+            <summary>{locale === "ru" ? "Advanced · JSON" : "Advanced · JSON"}</summary>
+            <label className="field-control authoring-source-field">
+              {message(locale, "authoringSource")}
+              <textarea
+                onChange={(event) => {
+                  const nextContent = event.target.value;
+                  setContent(nextContent);
+                  try {
+                    setScheduleForm(scheduleFormFromContent(nextContent));
+                  } catch {
+                    // Keep invalid JSON editable; Preview reports the exact error.
+                  }
+                  resetPreview();
+                }}
+                spellCheck={false}
+                value={content}
+              />
+            </label>
+          </details>
+        </>
+      ) : (
+        <label className="field-control authoring-source-field">
+          {message(locale, "authoringSource")}
+          <textarea
+            onChange={(event) => {
+              setContent(event.target.value);
+              resetPreview();
+            }}
+            spellCheck={false}
+            value={content}
+          />
+        </label>
+      )}
       <div className="authoring-actions">
         <button disabled={preview.isPending || !id.trim() || !content.trim()} onClick={() => preview.mutate()} type="button">
           {message(locale, "authoringPreview")}
@@ -194,6 +239,131 @@ function DefinitionEditor({
       ) : null}
     </>
   );
+}
+
+function ScheduleFormEditor({
+  form,
+  locale,
+  onChange,
+}: {
+  form: ScheduleFormDefinition;
+  locale: "en" | "ru";
+  onChange: (next: ScheduleFormDefinition) => void;
+}) {
+  const update = <Key extends keyof ScheduleFormDefinition>(
+    key: Key,
+    value: ScheduleFormDefinition[Key],
+  ) => onChange({ ...form, [key]: value });
+  return (
+    <div className="schedule-form-editor">
+      <div className="schedule-form-intro">
+        <strong>{locale === "ru" ? "Что запускать и когда" : "What should run, and when"}</strong>
+        <span>
+          {locale === "ru"
+            ? "Как в Codex Scheduled: выберите готовую частоту, время и изолированную цель. RRULE остаётся в Advanced."
+            : "Like Codex Scheduled: choose a familiar cadence, time, and isolated target. RRULE stays under Advanced."}
+        </span>
+      </div>
+      <label className="field-control">
+        {locale === "ru" ? "Название" : "Title"}
+        <input onChange={(event) => update("title", event.target.value)} value={form.title} />
+      </label>
+      <div className="schedule-field-row">
+        <label className="field-control">
+          {locale === "ru" ? "Тип цели" : "Target type"}
+          <select
+            onChange={(event) => update("targetKind", event.target.value as ScheduleFormDefinition["targetKind"])}
+            value={form.targetKind}
+          >
+            <option value="workflow">Workflow</option>
+            <option value="agent">Agent</option>
+            <option value="eval">Eval</option>
+          </select>
+        </label>
+        <label className="field-control">
+          {locale === "ru" ? "ID цели" : "Target id"}
+          <input onChange={(event) => update("targetId", event.target.value)} value={form.targetId} />
+        </label>
+      </div>
+      <fieldset className="schedule-cadence-options">
+        <legend>{locale === "ru" ? "Повтор" : "Repeat"}</legend>
+        {(["once", "daily", "weekdays", "weekly", "custom"] as const).map((preset) => (
+          <button
+            aria-pressed={form.cadencePreset === preset}
+            className={form.cadencePreset === preset ? "selected" : ""}
+            key={preset}
+            onClick={() => update("cadencePreset", preset)}
+            type="button"
+          >
+            {cadenceLabel(locale, preset)}
+          </button>
+        ))}
+      </fieldset>
+      <div className="schedule-field-row">
+        <label className="field-control">
+          {locale === "ru" ? "Первый запуск" : "First run"}
+          <input
+            onChange={(event) => update("startAt", event.target.value)}
+            type="datetime-local"
+            value={form.startAt}
+          />
+        </label>
+        <label className="field-control">
+          {locale === "ru" ? "Часовой пояс IANA" : "IANA timezone"}
+          <input onChange={(event) => update("timezone", event.target.value)} value={form.timezone} />
+        </label>
+      </div>
+      {form.cadencePreset === "weekly" ? (
+        <label className="field-control">
+          {locale === "ru" ? "День недели" : "Weekday"}
+          <select onChange={(event) => update("weekday", event.target.value)} value={form.weekday}>
+            {[
+              ["MO", "Monday"], ["TU", "Tuesday"], ["WE", "Wednesday"],
+              ["TH", "Thursday"], ["FR", "Friday"], ["SA", "Saturday"], ["SU", "Sunday"],
+            ].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+      ) : null}
+      {form.cadencePreset === "custom" ? (
+        <label className="field-control">
+          RRULE
+          <input onChange={(event) => update("customRrule", event.target.value)} value={form.customRrule} />
+        </label>
+      ) : null}
+      <label className="field-control">
+        {locale === "ru" ? "Задача" : "Prompt"}
+        <textarea
+          className="schedule-prompt"
+          onChange={(event) => update("prompt", event.target.value)}
+          value={form.prompt}
+        />
+      </label>
+      <label className="check-control">
+        <input
+          checked={form.desktopNotifications}
+          onChange={(event) => update("desktopNotifications", event.target.checked)}
+          type="checkbox"
+        />
+        {locale === "ru" ? "Показывать desktop notification" : "Show a desktop notification"}
+      </label>
+      <p className="schedule-worktree-note">
+        {locale === "ru"
+          ? "Каждый запуск использует отдельный worktree. Сначала Preview, затем Test schedule, и только после этого Enable."
+          : "Every run uses a separate worktree. Preview first, then Test schedule, and only then Enable."}
+      </p>
+    </div>
+  );
+}
+
+function cadenceLabel(
+  locale: "en" | "ru",
+  cadence: ScheduleFormDefinition["cadencePreset"],
+) {
+  const labels = {
+    en: { once: "Once", daily: "Daily", weekdays: "Weekdays", weekly: "Weekly", custom: "Custom" },
+    ru: { once: "Один раз", daily: "Каждый день", weekdays: "По будням", weekly: "Раз в неделю", custom: "Другое" },
+  };
+  return labels[locale][cadence];
 }
 
 function DeleteDefinition({

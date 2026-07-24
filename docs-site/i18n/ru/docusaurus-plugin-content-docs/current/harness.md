@@ -612,7 +612,7 @@ Absolute executable paths, credentials и runtime ownership остаются н�
 
 ### Повторно используемые Agent Profiles
 
-Agent profile — version-controlled TOML-описание harness, модели, режима
+Agent profile — version-controlled YAML-описание harness, модели, режима
 `plan|read|edit`, workspace policy, timeout/retry и допустимых tools. Профиль не
 может подмешивать произвольные shell flags или literals секретов.
 
@@ -641,6 +641,18 @@ giga workflow run review --workspace . --prompt "Проверь изменени
 Условия, зависимости и retry описываются декларативно. Multi-agent fan-out
 ограничивается coordinator policy; workspace mutation всё равно требует
 worktree isolation и approvals.
+
+В пустых разделах Automation сразу доступна связанная цепочка примеров:
+
+1. **Code Reviewer** — read-only профиль Codex-агента.
+2. **Review Change** — workflow, который вызывает `code-reviewer`.
+3. **Weekday Review** — расписание по рабочим дням для `review-change`.
+
+Откройте **Automation → Agents**, создайте и примените Code Reviewer, затем
+повторите это в **Workflows**. Agent и workflow запускаются из их detail view.
+После этого создайте schedule, выполните **Test** для точного content hash и
+нажмите **Enable**, когда worker online. На каждой карточке также показана
+эквивалентная команда `giga run --agent`, `giga workflow` или `giga schedule`.
 
 ### Project Memory
 
@@ -776,6 +788,11 @@ export GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092
 giga ui
 ```
 
+На странице Skills тот же гайд расположен рядом с фильтром источника. После
+успешного подключения статус меняется с `configuration_required` или
+`unavailable` на `ready`; сохранённый last-good результат явно помечается
+`stale`.
+
 В production включите OIDC Federation в Vercel и используйте request-scoped
 `VERCEL_OIDC_TOKEN`; не сохраняйте токен в image, config или статическом
 environment export. [Контракт API skills.sh](https://www.skills.sh/docs/api)
@@ -794,6 +811,19 @@ cache age, last-good state и ограниченные audit verdicts. Та же
 URL/origin/ref/hash projection входит в точный install preview и retained flow
 receipt.
 
+Harness также читает системные bundles OpenAI из plugin caches
+`openai-primary-runtime` и `openai-bundled`. Поэтому PDF, Documents,
+Presentations и Spreadsheets отображаются в **Plugins** с source badge
+**OpenAI**, именами вложенных Skills, default prompts и подсказкой вызова
+`@name`. Это read-only inventory: Harness не устанавливает, не включает и не
+перезаписывает bundle OpenAI.
+
+В **Work** введите `@`, чтобы выбрать capability. Для запуска через Codex CLI
+Harness сохраняет явный выбор в prompt и преобразует `@pdf` в нативный вызов
+Skill `$pdf`. В ChatGPT Plugins и Skills выбираются через `@`, а в Codex CLI/IDE
+Skills вызываются через `$`; Cockpit сохраняет понятный пользователю picker `@`
+и явно показывает это преобразование.
+
 Если источник недоступен, ограничил частоту запросов, требует обновить
 аутентификацию или вернул некорректные данные, Harness сохраняет последний
 корректный snapshot каталога. Внешний Skill можно установить только после
@@ -803,6 +833,10 @@ receipt.
 Registry только по точному official package name или canonical repository;
 версия, immutable reference и integrity из official Registry остаются
 authoritative.
+
+В каждой строке результата и detail view показан source bubble, включая
+**NeuralDeep**. Каноническая страница GigaChat Image MCP:
+[NeuralDeep GigaChat Image MCP](https://neuraldeep.ru/mcp/gigachat-image).
 
 Сначала изучите offline inventory, затем создайте preview одной цели:
 
@@ -1114,6 +1148,13 @@ Schedule нельзя включить без live worker и успешного 
 content hash. Изменение material field ставит schedule на pause. Occurrence
 history не удаляется при archive, а unattended edit fail-closed без worktree и
 нужных approvals.
+
+Форма Schedule следует модели Codex Scheduled для частых сценариев: выберите
+**Once**, **Daily**, **Weekdays** или **Weekly**, затем задайте первый запуск,
+IANA timezone, target, prompt и уведомление. Harness преобразует эти поля в
+governed one-shot, interval или RRULE. Режим **Custom** и свёрнутый
+**Advanced · JSON** нужны только для явного RRULE или низкоуровневых policy
+fields.
 
 ## Безопасный edit-сценарий
 

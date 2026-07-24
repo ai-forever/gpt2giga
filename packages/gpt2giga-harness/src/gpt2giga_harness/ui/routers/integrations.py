@@ -36,6 +36,9 @@ def integration_inventory(request: Request) -> dict[str, Any]:
     inventory["root_skills"] = (
         request.app.state.harness_skill_library_service.root_skills()
     )
+    inventory["root_plugins"] = (
+        request.app.state.harness_skill_library_service.root_plugins()
+    )
     inventory["groups"] = [
         integration_group_record_to_dict(item)
         for item in request.app.state.harness_grouped_integration_service.list()

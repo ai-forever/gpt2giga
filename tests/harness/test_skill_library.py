@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import hashlib
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -141,6 +142,62 @@ def test_root_inventory_skips_invalid_yaml_without_hiding_valid_skills(tmp_path:
     )
 
     assert [item["name"] for item in service.root_skills()] == ["review-pull-request"]
+
+
+def test_root_plugin_inventory_projects_openai_bundles_and_invocation(tmp_path: Path):
+    root = tmp_path / "openai-primary-runtime"
+    plugin = root / "pdf" / "1.0.0"
+    (plugin / ".codex-plugin").mkdir(parents=True)
+    (plugin / "skills" / "pdf").mkdir(parents=True)
+    (plugin / ".codex-plugin" / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "pdf",
+                "version": "1.0.0",
+                "description": "PDF workflows.",
+                "repository": "https://github.com/openai/openai",
+                "skills": "./skills/",
+                "interface": {
+                    "displayName": "PDF",
+                    "shortDescription": "Read, create, and verify PDF files",
+                    "defaultPrompt": [
+                        "Review this PDF",
+                        "Create a PDF",
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin / "skills" / "pdf" / "SKILL.md").write_text(
+        "---\nname: pdf\ndescription: Work with PDF files.\n---\n\nUse PDF tools.\n",
+        encoding="utf-8",
+    )
+    service = SkillLibraryService(
+        tmp_path / "data",
+        root_skill_roots=(),
+        root_plugin_roots=((root, "openai-primary-runtime"),),
+        federated_sources=(),
+    )
+
+    assert service.root_plugins() == [
+        {
+            "id": service.root_plugins()[0]["id"],
+            "name": "pdf",
+            "title": "PDF",
+            "description": "Read, create, and verify PDF files",
+            "version": "1.0.0",
+            "target_ids": ["codex-plugin"],
+            "origin": "openai-primary-runtime",
+            "source_label": "OpenAI",
+            "scope": "system",
+            "connected": True,
+            "invocation": "@pdf",
+            "bundled_skills": ["pdf"],
+            "default_prompts": ["Review this PDF", "Create a PDF"],
+            "repository_url": "https://github.com/openai/openai",
+        }
+    ]
 
 
 async def test_git_inspection_pins_commit_then_imports_reviewed_skill(tmp_path: Path):

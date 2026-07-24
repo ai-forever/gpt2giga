@@ -47,6 +47,7 @@ import {
 import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
 import type { LocalePreference } from "../preferences";
+import { integrationFlowOptions } from "../remaining-request-graph";
 import {
   environmentOptions,
   requestKeys,
@@ -67,6 +68,11 @@ import {
 import { observeNativeProcess } from "../native-process-stream";
 import { observeSessionUpdates } from "../session-update-stream";
 import { sessionCreationPayload, type SessionCreationIntent } from "../session-creation";
+import {
+  promptWithSkillMentions,
+  skillMentionOptions,
+  type SkillMention,
+} from "../skill-mentions";
 import {
   formatTimestamp,
   latestRun,
@@ -412,6 +418,7 @@ export function WorkbenchSurface() {
   const [leftWidth, setLeftWidth] = useState(() => loadWidth("left", 264));
   const [rightWidth, setRightWidth] = useState(() => loadWidth("right", 320));
   const [prompt, setPrompt] = useState("");
+  const [selectedSkills, setSelectedSkills] = useState<SkillMention[]>([]);
   const [environmentCommitDraft, setEnvironmentCommitDraft] = useState<EnvironmentCommitDraft>({
     authorEmail: "",
     authorName: "",
@@ -475,6 +482,7 @@ export function WorkbenchSurface() {
   const harnesses = useQuery(harnessesOptions());
   const models = useQuery(modelsOptions(runConfig.apiMode));
   const settings = useQuery(settingsOptions());
+  const integrations = useQuery(integrationFlowOptions());
   const overview = useQuery({
     ...sessionOverviewOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
@@ -501,6 +509,11 @@ export function WorkbenchSurface() {
     ...workspaceFilesOptions(sessionId ?? "pending", deferredAtQuery),
     enabled: sessionId !== undefined && atQuery !== null,
   });
+  const availableSkillMentions = skillMentionOptions(
+    integrations.data,
+    runConfig.harnessId,
+    deferredAtQuery,
+  ).filter((skill) => !selectedSkills.some((selected) => selected.id === skill.id));
   const events = useQuery({
     ...sessionEventsOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
@@ -519,6 +532,7 @@ export function WorkbenchSurface() {
 
   useEffect(() => {
     setEditingMessageId(undefined);
+    setSelectedSkills([]);
   }, [sessionId]);
 
   useEffect(() => {
@@ -619,6 +633,7 @@ export function WorkbenchSurface() {
       ),
     onSuccess: ({ session }) => {
       setPrompt("");
+      setSelectedSkills([]);
       setBuiltinTools([]);
       void navigate({
         params: { sessionId: session.id },
@@ -780,7 +795,11 @@ export function WorkbenchSurface() {
         mode: runConfig.mode,
         model: runConfig.model.trim() || null,
         permission_profile: advancedConfig.permissionProfile,
-        prompt: prompt.trim(),
+        prompt: promptWithSkillMentions(
+          prompt,
+          selectedSkills,
+          runConfig.harnessId,
+        ),
         session_id: sessionId,
         stream: advancedConfig.stream,
         workspace: session.workspace_bound ? undefined : ".",
@@ -830,6 +849,7 @@ export function WorkbenchSurface() {
       await refreshSessionAfterRunStart(queryClient, run.session_id);
       setEditingMessageId(undefined);
       setPrompt("");
+      setSelectedSkills([]);
     },
   });
   const messageAction = useMutation({
@@ -1210,9 +1230,27 @@ export function WorkbenchSurface() {
     if (persistKey !== undefined) saveRunConfig.mutate({ [persistKey]: value || null });
   };
   const workspaceFileCandidates = workspaceFiles.data?.files ?? [];
+  const atCandidates = [
+    ...availableSkillMentions.map((skill) => ({ kind: "skill" as const, skill })),
+    ...workspaceFileCandidates.map((file) => ({ kind: "file" as const, file })),
+  ];
   const chooseWorkspaceFile = (path: string) => {
     if (atQuery === null || attachWorkspaceFile.isPending) return;
     attachWorkspaceFile.mutate({ path, token: atQuery });
+  };
+  const chooseSkill = (skill: SkillMention) => {
+    if (atQuery === null) return;
+    const nextPrompt = consumeAtQuery(prompt, atQuery);
+    setSelectedSkills((current) => [...current, skill]);
+    setPrompt(nextPrompt);
+    setComposerCaret(nextPrompt.length);
+    setAtSelection(0);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  };
+  const chooseAtCandidate = (index: number) => {
+    const candidate = atCandidates[index];
+    if (candidate?.kind === "skill") chooseSkill(candidate.skill);
+    if (candidate?.kind === "file") chooseWorkspaceFile(candidate.file.path);
   };
 
   return (
@@ -1545,9 +1583,21 @@ export function WorkbenchSurface() {
                   )}
                 </div>
               )}
-              {attachments.data?.attachments.length ? (
+              {(attachments.data?.attachments.length ?? 0) > 0 || selectedSkills.length > 0 ? (
                 <div className="attachment-chips" aria-label={message(locale, "attachedFiles")}>
-                  {attachments.data.attachments.map((attachment) => (
+                  {selectedSkills.map((skill) => (
+                    <span className="attachment-chip skill-mention-chip" key={skill.id}>
+                      <span aria-hidden="true">✦</span>
+                      <span title={`${skill.source} · ${skill.nativeName}`}>{skill.mention}</span>
+                      <small>{skill.source}</small>
+                      <button
+                        aria-label={`${locale === "ru" ? "Убрать" : "Remove"} ${skill.mention}`}
+                        onClick={() => setSelectedSkills((current) => current.filter((item) => item.id !== skill.id))}
+                        type="button"
+                      >×</button>
+                    </span>
+                  ))}
+                  {attachments.data?.attachments.map((attachment) => (
                     <span className="attachment-chip" key={attachment.id}>
                       <span aria-hidden="true">{attachment.mime_type?.startsWith("image/") ? "▧" : "◇"}</span>
                       <span title={attachment.workspace_path ?? attachment.filename}>
@@ -1575,21 +1625,20 @@ export function WorkbenchSurface() {
                   setPreviewReport(null);
                 }}
                 onKeyDown={(event) => {
-                  if (atQuery !== null && workspaceFileCandidates.length > 0) {
+                  if (atQuery !== null && atCandidates.length > 0) {
                     if (event.key === "ArrowDown") {
                       event.preventDefault();
-                      setAtSelection((current) => (current + 1) % workspaceFileCandidates.length);
+                      setAtSelection((current) => (current + 1) % atCandidates.length);
                       return;
                     }
                     if (event.key === "ArrowUp") {
                       event.preventDefault();
-                      setAtSelection((current) => (current - 1 + workspaceFileCandidates.length) % workspaceFileCandidates.length);
+                      setAtSelection((current) => (current - 1 + atCandidates.length) % atCandidates.length);
                       return;
                     }
                     if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) {
                       event.preventDefault();
-                      const selected = workspaceFileCandidates[atSelection];
-                      if (selected !== undefined) chooseWorkspaceFile(selected.path);
+                      chooseAtCandidate(atSelection);
                       return;
                     }
                   }
@@ -1616,19 +1665,37 @@ export function WorkbenchSurface() {
               {atQuery === null ? null : (
                 <div className="workspace-file-picker" id="workspace-file-picker" role="listbox">
                   <div>
-                    <strong>{message(locale, "workspaceFiles")}</strong>
-                    <small>{message(locale, "workspaceFilesHint")}</small>
+                    <strong>{locale === "ru" ? "Skills, плагины и файлы" : "Skills, plugins, and files"}</strong>
+                    <small>
+                      {locale === "ru"
+                        ? "OpenAI bundled capabilities доступны здесь через @; для Codex Harness передаст нативный $-вызов."
+                        : "OpenAI bundled capabilities are selectable with @; Harness sends Codex the native $ invocation."}
+                    </small>
                   </div>
-                  {workspaceFiles.isPending ? (
-                    <span className="muted-copy">{message(locale, "loading")}</span>
-                  ) : workspaceFiles.isError ? (
-                    <span className="error-state" role="alert">{String(workspaceFiles.error)}</span>
-                  ) : workspaceFileCandidates.length === 0 ? (
-                    <span className="muted-copy">{message(locale, "noWorkspaceFiles")}</span>
-                  ) : workspaceFileCandidates.map((file, index) => (
+                  {availableSkillMentions.map((skill, index) => (
                     <button
                       aria-selected={index === atSelection}
                       className={index === atSelection ? "selected" : ""}
+                      key={skill.id}
+                      onClick={() => chooseSkill(skill)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      role="option"
+                      type="button"
+                    >
+                      <span>{skill.mention}</span>
+                      <small>{skill.source} · Skill</small>
+                    </button>
+                  ))}
+                  {workspaceFiles.isPending && workspaceFileCandidates.length === 0 ? (
+                    <span className="muted-copy">{message(locale, "loading")}</span>
+                  ) : workspaceFiles.isError ? (
+                    <span className="error-state" role="alert">{String(workspaceFiles.error)}</span>
+                  ) : workspaceFileCandidates.length === 0 && availableSkillMentions.length === 0 ? (
+                    <span className="muted-copy">{message(locale, "noWorkspaceFiles")}</span>
+                  ) : workspaceFileCandidates.map((file, index) => (
+                    <button
+                      aria-selected={index + availableSkillMentions.length === atSelection}
+                      className={index + availableSkillMentions.length === atSelection ? "selected" : ""}
                       key={file.path}
                       onClick={() => chooseWorkspaceFile(file.path)}
                       onMouseDown={(event) => event.preventDefault()}
