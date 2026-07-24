@@ -74,7 +74,27 @@ def preview_skill(
         return request.app.state.harness_skill_library_service.preview(preview_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Skill preview not found") from exc
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/api/integrations/source-detail")
+async def integration_source_detail(
+    request: Request,
+    source_id: str = Query(min_length=1, max_length=256),
+    upstream_id: str = Query(min_length=1, max_length=256),
+    include_audit: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Return bounded provenance for one explicitly selected source item."""
+    try:
+        return await request.app.state.harness_skill_library_service.source_detail(
+            source_id,
+            upstream_id,
+            include_audit=include_audit,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Source item not found") from exc
+    except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -86,14 +106,26 @@ async def inspect_git_repository(
     """Resolve a public GitHub repository to one immutable candidate list."""
     repository_url = payload.get("repository_url")
     ref = payload.get("ref")
+    source_id = payload.get("source_id")
+    upstream_id = payload.get("upstream_id")
     if not isinstance(repository_url, str) or not repository_url.strip():
         raise HTTPException(status_code=422, detail="repository_url is required")
     if ref is not None and not isinstance(ref, str):
         raise HTTPException(status_code=422, detail="ref must be a string")
+    if (source_id is None) != (upstream_id is None) or (
+        source_id is not None
+        and (not isinstance(source_id, str) or not isinstance(upstream_id, str))
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="source_id and upstream_id must be strings supplied together",
+        )
     try:
         return await request.app.state.harness_skill_library_service.inspect_git(
             repository_url,
             ref=ref,
+            source_id=source_id,
+            upstream_id=upstream_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

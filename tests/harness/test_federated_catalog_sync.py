@@ -6,8 +6,11 @@ import json
 from fastapi.testclient import TestClient
 
 from gpt2giga_harness.federated_catalog import (
+    FEDERATED_TIMEOUT_SECONDS,
+    MAX_FEDERATED_RESPONSE_BYTES,
     FederatedCatalogComponent,
     FederatedHTTPResponse,
+    FederatedRequest,
     NEURALDEEP_ORIGIN,
     SKILLS_SH_ORIGIN,
     NeuralDeepFederatedCatalogSource,
@@ -90,6 +93,28 @@ async def _token():
     return "fixture-oidc-token"
 
 
+async def test_proxy_client_admits_only_explicit_loopback_http_origin():
+    proxy_url = "http://127.0.0.1:8092/api/v1/skills/search?q=react&limit=1"
+    transport = _FederatedFetcher({proxy_url: {"data": []}})
+    fetcher = SkillsCatalogProxyFetcher(
+        "http://127.0.0.1:8092",
+        fetch=transport,
+    )
+
+    response = await fetcher(
+        FederatedRequest(
+            method="GET",
+            url=f"{SKILLS_SH_ORIGIN}/api/v1/skills/search?q=react&limit=1",
+            headers={"Accept": "application/json"},
+            timeout_seconds=FEDERATED_TIMEOUT_SECONDS,
+            max_response_bytes=MAX_FEDERATED_RESPONSE_BYTES,
+        )
+    )
+
+    assert response.status_code == 200
+    assert transport.calls == [proxy_url]
+
+
 async def test_proxy_to_source_to_offline_catalog_is_atomic_and_install_closed(
     tmp_path,
 ):
@@ -137,6 +162,7 @@ async def test_proxy_to_source_to_offline_catalog_is_atomic_and_install_closed(
     assert state.cursor is None
     assert state.freshness_expires_at == "2026-07-20T10:00:00Z"
     assert proxy_transport.calls == [
+        "https://proxy.test/api/v1/skills/curated",
         "https://proxy.test/api/v1/skills?page=0&per_page=2",
         "https://proxy.test/api/v1/skills/acme/skills/react",
     ]
@@ -156,6 +182,12 @@ async def test_proxy_to_source_to_offline_catalog_is_atomic_and_install_closed(
         "canonical_origin": "https://skills.sh",
         "detail_url": "https://skills.sh/acme/skills/react",
         "artifact_url": "https://github.com/acme/skills",
+        "repository_url": "https://github.com/acme/skills",
+        "observed_at": "2026-07-20T09:00:00Z",
+        "discovery_location": "skills-sh/acme/skills/react",
+        "immutable_ref": "sha256:" + "a" * 64,
+        "content_hash": "a" * 64,
+        "relative_path": "SKILL.md",
         "curated": False,
         "popularity": 12,
         "upstream_audit": "reported_reviewed",

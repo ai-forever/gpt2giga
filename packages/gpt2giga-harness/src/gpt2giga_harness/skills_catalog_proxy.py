@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 import hashlib
@@ -27,6 +27,10 @@ SKILLS_PROXY_TIMEOUT_SECONDS = 20.0
 SKILLS_PROXY_MAX_PAGE_SIZE = 500
 SKILLS_PROXY_MAX_SEARCH_LIMIT = 200
 SKILLS_PROXY_MAX_QUERY_LENGTH = 200
+SKILLS_PROXY_MAX_CACHE_ENTRIES = 128
+SKILLS_PROXY_STALE_IF_ERROR_SECONDS = 3_600
+SKILLS_PROXY_MAX_FILE_PATHS = 512
+SKILLS_PROXY_MAX_AUDITS = 32
 _PATH_PART_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,127}\Z")
 _LIST_ITEM_FIELDS = {
     "id",
@@ -50,6 +54,8 @@ class SkillsCatalogProxySettings:
     listen_host: str = "127.0.0.1"
     listen_port: int = 8092
     rate_limit_per_minute: int = 120
+    max_cache_entries: int = SKILLS_PROXY_MAX_CACHE_ENTRIES
+    stale_if_error_seconds: int = SKILLS_PROXY_STALE_IF_ERROR_SECONDS
 
     def __post_init__(self) -> None:
         if self.listen_host not in {"127.0.0.1", "0.0.0.0", "::1"}:
@@ -66,6 +72,18 @@ class SkillsCatalogProxySettings:
             or not 1 <= self.rate_limit_per_minute <= 600
         ):
             raise ValueError("skills proxy rate limit is invalid")
+        if (
+            isinstance(self.max_cache_entries, bool)
+            or not isinstance(self.max_cache_entries, int)
+            or not 1 <= self.max_cache_entries <= 1_024
+        ):
+            raise ValueError("skills proxy cache bound is invalid")
+        if (
+            isinstance(self.stale_if_error_seconds, bool)
+            or not isinstance(self.stale_if_error_seconds, int)
+            or not 60 <= self.stale_if_error_seconds <= 86_400
+        ):
+            raise ValueError("skills proxy stale window is invalid")
 
     @classmethod
     def from_env(cls) -> SkillsCatalogProxySettings:
@@ -74,6 +92,14 @@ class SkillsCatalogProxySettings:
             listen_host=os.environ.get("GIGA_SKILLS_PROXY_HOST", "127.0.0.1"),
             listen_port=_env_integer("GIGA_SKILLS_PROXY_PORT", 8092),
             rate_limit_per_minute=_env_integer("GIGA_SKILLS_PROXY_RATE_LIMIT", 120),
+            max_cache_entries=_env_integer(
+                "GIGA_SKILLS_PROXY_CACHE_ENTRIES",
+                SKILLS_PROXY_MAX_CACHE_ENTRIES,
+            ),
+            stale_if_error_seconds=_env_integer(
+                "GIGA_SKILLS_PROXY_STALE_IF_ERROR_SECONDS",
+                SKILLS_PROXY_STALE_IF_ERROR_SECONDS,
+            ),
         )
 
 
@@ -122,6 +148,39 @@ class _RateLimiter:
             return True
 
 
+@dataclass(frozen=True)
+class _CacheEntry:
+    payload: dict[str, Any]
+    encoded: bytes
+    stored_at: float
+    max_age: int
+
+
+class _LastGoodCache:
+    def __init__(self, maximum: int) -> None:
+        self._maximum = maximum
+        self._entries: OrderedDict[str, _CacheEntry] = OrderedDict()
+        self._lock = Lock()
+
+    def get(self, key: str) -> _CacheEntry | None:
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is not None:
+                self._entries.move_to_end(key)
+            return entry
+
+    def put(self, key: str, entry: _CacheEntry) -> None:
+        with self._lock:
+            self._entries[key] = entry
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._maximum:
+                self._entries.popitem(last=False)
+
+    def count(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
+
 def create_skills_catalog_proxy_app(
     *,
     settings: SkillsCatalogProxySettings | None = None,
@@ -134,7 +193,13 @@ def create_skills_catalog_proxy_app(
     resolve_token = token_provider or _environment_oidc_token
     transport = upstream or fetch_skills_proxy_upstream
     limiter = _RateLimiter(config.rate_limit_per_minute)
+    cache = _LastGoodCache(config.max_cache_entries)
     clock = monotonic or time.monotonic
+    health_state: dict[str, str | None] = {
+        "last_error_code": None,
+        "last_success_path": None,
+    }
+    health_lock = Lock()
     application = FastAPI(
         title="Harness skills.sh metadata proxy",
         docs_url=None,
@@ -152,14 +217,29 @@ def create_skills_catalog_proxy_app(
 
     @application.get("/healthz")
     async def _health() -> dict[str, Any]:
+        with health_lock:
+            last_error_code = health_state["last_error_code"]
+            last_success_path = health_state["last_success_path"]
+        oidc_configured = token_provider is not None or bool(
+            os.environ.get("VERCEL_OIDC_TOKEN")
+        )
         return {
-            "status": "ready",
+            "status": "ready" if oidc_configured else "configuration_required",
             "upstream_origin": SKILLS_PROXY_UPSTREAM_ORIGIN,
             "read_only": True,
-            "oidc_configured": bool(os.environ.get("VERCEL_OIDC_TOKEN")),
+            "oidc_configured": oidc_configured,
+            "cache_entries": cache.count(),
+            "last_good_available": cache.count() > 0,
+            "last_error_code": last_error_code,
+            "last_success_path": last_success_path,
         }
 
-    async def _proxy(url: str, *, detail: bool = False) -> JSONResponse:
+    async def _proxy(
+        url: str,
+        *,
+        sanitizer: Callable[[Any], dict[str, Any]],
+        max_age: int,
+    ) -> JSONResponse:
         try:
             token = await resolve_token()
             _validate_token(token)
@@ -173,12 +253,44 @@ def create_skills_catalog_proxy_app(
                 max_response_bytes=SKILLS_PROXY_MAX_RESPONSE_BYTES,
             )
             payload = _validated_upstream_payload(response)
-            sanitized = (
-                _sanitize_detail(payload) if detail else _sanitize_listing(payload)
-            )
+            sanitized = sanitizer(payload)
         except _ProxyFailure as exc:
-            return _error_response(exc.status_code, exc.code)
+            with health_lock:
+                health_state["last_error_code"] = exc.code
+            retained = cache.get(url)
+            age = clock() - retained.stored_at if retained is not None else None
+            if (
+                retained is not None
+                and age is not None
+                and 0 <= age <= config.stale_if_error_seconds
+            ):
+                return _success_response(
+                    retained.payload,
+                    retained.encoded,
+                    max_age=0,
+                    cache_status="stale",
+                    age_seconds=int(age),
+                    source_error=exc.code,
+                )
+            return _error_response(exc.status_code, exc.code, headers=exc.headers)
         except Exception:
+            with health_lock:
+                health_state["last_error_code"] = "proxy.upstream_unavailable"
+            retained = cache.get(url)
+            age = clock() - retained.stored_at if retained is not None else None
+            if (
+                retained is not None
+                and age is not None
+                and 0 <= age <= config.stale_if_error_seconds
+            ):
+                return _success_response(
+                    retained.payload,
+                    retained.encoded,
+                    max_age=0,
+                    cache_status="stale",
+                    age_seconds=int(age),
+                    source_error="proxy.upstream_unavailable",
+                )
             return _error_response(502, "proxy.upstream_unavailable")
         encoded = json.dumps(
             sanitized,
@@ -188,14 +300,24 @@ def create_skills_catalog_proxy_app(
         ).encode("utf-8")
         if len(encoded) > SKILLS_PROXY_MAX_RESPONSE_BYTES:
             return _error_response(502, "proxy.response_too_large")
-        etag = '"' + hashlib.sha256(encoded).hexdigest() + '"'
-        return JSONResponse(
-            content=sanitized,
-            headers={
-                "Cache-Control": "public, max-age=60",
-                "ETag": etag,
-                "X-Content-Type-Options": "nosniff",
-            },
+        cache.put(
+            url,
+            _CacheEntry(
+                payload=sanitized,
+                encoded=encoded,
+                stored_at=clock(),
+                max_age=max_age,
+            ),
+        )
+        with health_lock:
+            health_state["last_error_code"] = None
+            health_state["last_success_path"] = urllib_parse.urlsplit(url).path
+        return _success_response(
+            sanitized,
+            encoded,
+            max_age=max_age,
+            cache_status="fresh",
+            age_seconds=0,
         )
 
     @application.get("/api/v1/skills")
@@ -211,7 +333,11 @@ def create_skills_catalog_proxy_app(
         query = urllib_parse.urlencode(
             {"view": view, "page": page, "per_page": per_page}
         )
-        return await _proxy(f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills?{query}")
+        return await _proxy(
+            f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills?{query}",
+            sanitizer=_sanitize_listing,
+            max_age=60,
+        )
 
     @application.get("/api/v1/skills/search")
     async def _search_skills(
@@ -230,7 +356,47 @@ def create_skills_catalog_proxy_app(
             params["owner"] = owner
         query = urllib_parse.urlencode(params)
         return await _proxy(
-            f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills/search?{query}"
+            f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills/search?{query}",
+            sanitizer=_sanitize_listing,
+            max_age=60,
+        )
+
+    @application.get("/api/v1/skills/curated")
+    async def _curated_skills() -> JSONResponse:
+        return await _proxy(
+            f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills/curated",
+            sanitizer=_sanitize_curated,
+            max_age=300,
+        )
+
+    @application.get("/api/v1/skills/audit/{owner}/{repository}/{skill}")
+    async def _github_audit(
+        owner: str,
+        repository: str,
+        skill: str,
+    ) -> JSONResponse:
+        if not all(
+            _PATH_PART_RE.fullmatch(item) for item in (owner, repository, skill)
+        ):
+            return _error_response(400, "proxy.invalid_skill_id")
+        path = "/".join(
+            urllib_parse.quote(item, safe="") for item in (owner, repository, skill)
+        )
+        return await _proxy(
+            f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills/audit/{path}",
+            sanitizer=_sanitize_audit,
+            max_age=300,
+        )
+
+    @application.get("/api/v1/skills/audit/{source}/{skill}")
+    async def _well_known_audit(source: str, skill: str) -> JSONResponse:
+        if not all(_PATH_PART_RE.fullmatch(item) for item in (source, skill)):
+            return _error_response(400, "proxy.invalid_skill_id")
+        path = "/".join(urllib_parse.quote(item, safe="") for item in (source, skill))
+        return await _proxy(
+            f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills/audit/{path}",
+            sanitizer=_sanitize_audit,
+            max_age=300,
         )
 
     @application.get("/api/v1/skills/{owner}/{repository}/{skill}")
@@ -248,7 +414,8 @@ def create_skills_catalog_proxy_app(
         )
         return await _proxy(
             f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills/{path}",
-            detail=True,
+            sanitizer=_sanitize_detail,
+            max_age=300,
         )
 
     @application.get("/api/v1/skills/{source}/{skill}")
@@ -258,7 +425,8 @@ def create_skills_catalog_proxy_app(
         path = "/".join(urllib_parse.quote(item, safe="") for item in (source, skill))
         return await _proxy(
             f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills/{path}",
-            detail=True,
+            sanitizer=_sanitize_detail,
+            max_age=300,
         )
 
     return application
@@ -316,10 +484,17 @@ class _NoRedirectHandler(urllib_request.HTTPRedirectHandler):
 
 
 class _ProxyFailure(RuntimeError):
-    def __init__(self, status_code: int, code: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
         super().__init__(code)
         self.status_code = status_code
         self.code = code
+        self.headers = dict(headers or {})
 
 
 def _validated_upstream_payload(response: SkillsProxyUpstreamResponse) -> Any:
@@ -332,7 +507,21 @@ def _validated_upstream_payload(response: SkillsProxyUpstreamResponse) -> Any:
     if response.status_code in {401, 403}:
         raise _ProxyFailure(503, "proxy.upstream_auth_failed")
     if response.status_code == 429:
-        raise _ProxyFailure(503, "proxy.upstream_rate_limited")
+        retry_after = next(
+            (
+                value
+                for key, value in response.headers.items()
+                if key.casefold() == "retry-after" and value.isdigit()
+            ),
+            None,
+        )
+        raise _ProxyFailure(
+            429,
+            "proxy.upstream_rate_limited",
+            headers={"Retry-After": retry_after} if retry_after is not None else None,
+        )
+    if response.status_code == 404:
+        raise _ProxyFailure(404, "proxy.not_found")
     if not 200 <= response.status_code < 300:
         raise _ProxyFailure(502, "proxy.upstream_failed")
     if (
@@ -400,7 +589,110 @@ def _sanitize_detail(payload: Any) -> dict[str, Any]:
         or re.fullmatch(r"[0-9a-f]{64}", sanitized["hash"]) is None
     ):
         raise _ProxyFailure(502, "proxy.invalid_payload")
+    files = payload.get("files")
+    if files is None:
+        sanitized["files"] = None
+        return sanitized
+    if not isinstance(files, list) or len(files) > SKILLS_PROXY_MAX_FILE_PATHS:
+        raise _ProxyFailure(502, "proxy.invalid_payload")
+    sanitized["files"] = [_sanitize_file_path(item) for item in files]
     return sanitized
+
+
+def _sanitize_file_path(value: Any) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {"path", "contents"}:
+        raise _ProxyFailure(502, "proxy.schema_drift")
+    path = value.get("path")
+    if (
+        not isinstance(path, str)
+        or not 1 <= len(path) <= 512
+        or path.startswith(("/", "\\"))
+        or "\\" in path
+        or any(part in {"", ".", ".."} for part in path.split("/"))
+        or any(ord(char) < 32 for char in path)
+    ):
+        raise _ProxyFailure(502, "proxy.invalid_payload")
+    return {"path": path}
+
+
+def _sanitize_curated(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, Mapping) or set(payload) != {
+        "data",
+        "totalOwners",
+        "totalSkills",
+        "generatedAt",
+    }:
+        raise _ProxyFailure(502, "proxy.schema_drift")
+    owners = payload.get("data")
+    if not isinstance(owners, list) or len(owners) > 1_000:
+        raise _ProxyFailure(502, "proxy.invalid_payload")
+    sanitized_owners = []
+    allowed = {
+        "owner",
+        "totalInstalls",
+        "featuredRepo",
+        "featuredSkill",
+        "skills",
+    }
+    for owner in owners:
+        if not isinstance(owner, Mapping) or set(owner) != allowed:
+            raise _ProxyFailure(502, "proxy.schema_drift")
+        sanitized_owners.append(
+            {
+                "owner": owner["owner"],
+                "totalInstalls": owner["totalInstalls"],
+                "featuredRepo": owner["featuredRepo"],
+                "featuredSkill": owner["featuredSkill"],
+                "skills": _sanitize_items(owner["skills"]),
+            }
+        )
+    return {
+        "data": sanitized_owners,
+        "totalOwners": payload["totalOwners"],
+        "totalSkills": payload["totalSkills"],
+        "generatedAt": payload["generatedAt"],
+    }
+
+
+def _sanitize_audit(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, Mapping) or set(payload) != {
+        "id",
+        "source",
+        "slug",
+        "audits",
+    }:
+        raise _ProxyFailure(502, "proxy.schema_drift")
+    audits = payload.get("audits")
+    if not isinstance(audits, list) or len(audits) > SKILLS_PROXY_MAX_AUDITS:
+        raise _ProxyFailure(502, "proxy.invalid_payload")
+    allowed = {
+        "provider",
+        "slug",
+        "status",
+        "summary",
+        "auditedAt",
+        "riskLevel",
+        "categories",
+    }
+    sanitized_audits = []
+    for audit in audits:
+        if not isinstance(audit, Mapping) or set(audit) - allowed:
+            raise _ProxyFailure(502, "proxy.schema_drift")
+        if audit.get("status") not in {"pass", "warn", "fail"}:
+            raise _ProxyFailure(502, "proxy.invalid_payload")
+        sanitized_audits.append(
+            {
+                key: audit[key]
+                for key in ("provider", "slug", "status", "auditedAt", "riskLevel")
+                if key in audit
+            }
+        )
+    return {
+        "id": payload["id"],
+        "source": payload["source"],
+        "slug": payload["slug"],
+        "audits": sanitized_audits,
+    }
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -443,11 +735,42 @@ def _validate_upstream_url(url: str) -> None:
         raise ValueError("skills proxy upstream URL is invalid")
 
 
-def _error_response(status_code: int, code: str) -> JSONResponse:
+def _success_response(
+    payload: dict[str, Any],
+    encoded: bytes,
+    *,
+    max_age: int,
+    cache_status: str,
+    age_seconds: int,
+    source_error: str | None = None,
+) -> JSONResponse:
+    headers = {
+        "Cache-Control": f"public, max-age={max_age}",
+        "ETag": '"' + hashlib.sha256(encoded).hexdigest() + '"',
+        "X-Content-Type-Options": "nosniff",
+        "X-Giga-Cache-Status": cache_status,
+        "Age": str(age_seconds),
+    }
+    if source_error is not None:
+        headers["X-Giga-Source-Error"] = source_error
+        headers["Warning"] = '110 - "Response is stale"'
+    return JSONResponse(content=payload, headers=headers)
+
+
+def _error_response(
+    status_code: int,
+    code: str,
+    *,
+    headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={"error": code},
-        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            **dict(headers or {}),
+        },
     )
 
 

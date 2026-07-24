@@ -4,6 +4,7 @@ import type {
   IntegrationFlowSummary,
   IntegrationLifecycleInstallation,
   IntegrationSearchResponse,
+  IntegrationSourceProvenance,
 } from "./remaining-request-graph";
 import type { McpProjection } from "./surface-projections";
 
@@ -33,6 +34,7 @@ export interface PluginLibraryItem {
   detailUrl: string | null;
   sourceId: string | null;
   popularity: number | null;
+  provenance: IntegrationSourceProvenance | null;
 }
 
 export function buildPluginLibrary(
@@ -82,8 +84,20 @@ export function buildPluginLibrary(
         : null,
       artifactUrl: entry.discovery?.artifact_url ?? null,
       detailUrl: entry.discovery?.detail_url ?? null,
-      sourceId: entry.discovery ? entry.source_type : null,
+      sourceId: entry.discovery ? entry.source_id ?? entry.source_type : null,
       popularity: entry.discovery?.popularity ?? null,
+      provenance: entry.discovery ? {
+        canonical_source: entry.source_id ?? entry.source_type,
+        upstream_id: entry.discovery.upstream_id ?? entry.package_id,
+        canonical_origin: entry.discovery.canonical_origin ?? "",
+        repository_url: entry.discovery.repository_url,
+        artifact_url: entry.discovery.artifact_url,
+        immutable_ref: entry.discovery.immutable_ref,
+        content_hash: entry.discovery.content_hash,
+        relative_path: entry.discovery.relative_path,
+        discovery_location: entry.discovery.discovery_location ?? entry.package_id,
+        observed_at: entry.discovery.observed_at ?? "",
+      } : null,
     };
   });
 
@@ -124,6 +138,7 @@ export function buildPluginLibrary(
       detailUrl: null,
       sourceId: null,
       popularity: null,
+      provenance: null,
     });
   }
 
@@ -151,6 +166,7 @@ export function buildPluginLibrary(
       detailUrl: null,
       sourceId: null,
       popularity: null,
+      provenance: null,
     });
   }
 
@@ -178,6 +194,7 @@ export function buildPluginLibrary(
       detailUrl: null,
       sourceId: skill.origin,
       popularity: null,
+      provenance: null,
     });
   }
 
@@ -214,6 +231,18 @@ export function buildRemotePluginLibrary(search: IntegrationSearchResponse | und
     detailUrl: item.detail_url,
     sourceId: item.source_id,
     popularity: item.popularity,
+    provenance: {
+      canonical_source: item.source_id,
+      upstream_id: item.upstream_id,
+      canonical_origin: item.canonical_origin ?? "",
+      repository_url: item.artifact_url,
+      artifact_url: item.artifact_url,
+      immutable_ref: null,
+      content_hash: null,
+      relative_path: null,
+      discovery_location: item.discovery_location ?? `${item.source_id}/${item.upstream_id}`,
+      observed_at: item.observed_at ?? "",
+    },
   }));
 }
 

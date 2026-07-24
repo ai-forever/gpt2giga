@@ -1134,9 +1134,33 @@ The **Skills**, **Plugins**, and **MCP** pages each expose their matching
 `skills.sh`, run the metadata proxy and pass its fixed origin to the Harness UI:
 
 ```bash
+export VERCEL_OIDC_TOKEN=<request-scoped-token>
+giga-skills-catalog-proxy
+
+# in the Harness process
 export GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092
 giga ui
 ```
+
+For production, deploy the proxy on Vercel with OIDC Federation enabled and use
+the request-scoped `VERCEL_OIDC_TOKEN`; do not bake a token into an image,
+configuration file, or static environment export. The
+[skills.sh API contract](https://www.skills.sh/docs/api) rotates the token,
+returns `401` for missing or expired authentication, and returns `429` with
+`Retry-After` when rate-limited. `/healthz` reports `configuration_required`
+until OIDC is available. Configure the bounded in-memory last-good cache with
+`GIGA_SKILLS_PROXY_CACHE_ENTRIES` and
+`GIGA_SKILLS_PROXY_STALE_IF_ERROR_SECONDS`. Retained responses are explicitly
+marked `X-Giga-Cache-Status: stale`, expose their `Age`, and never conceal the
+source error.
+
+The fixed-origin proxy supports leaderboard/search, curated results, bounded
+detail file paths, and optional audit metadata. It strips file contents and
+audit summaries before returning data to Harness. Cockpit shows the canonical
+source, upstream ID, repository URL, immutable hash, relative path, discovery
+breadcrumb, last sync, cache age, last-good state, and bounded audit verdicts.
+The same URL/origin/ref/hash projection is included in exact install previews
+and retained flow receipts.
 
 **Add Skill** accepts a public GitHub repository or `/tree/<ref>` URL, pins the
 resolved commit, lists bounded `SKILL.md` candidates, previews the selected

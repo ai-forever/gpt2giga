@@ -172,6 +172,11 @@ class FederatedCatalogMetadata:
     artifact_resolved: bool
     source_present: bool
     install_authorized: bool = False
+    observed_at: str | None = None
+    discovery_location: str | None = None
+    immutable_ref: str | None = None
+    content_hash: str | None = None
+    relative_path: str | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.upstream_id, field_name="federated upstream id")
@@ -204,6 +209,18 @@ class FederatedCatalogMetadata:
             raise ValueError("federated state flags must be booleans")
         if self.install_authorized is not False:
             raise ValueError("federated metadata cannot authorize installation")
+        if self.observed_at is not None:
+            _parse_timestamp(self.observed_at)
+        if self.discovery_location is not None:
+            _validate_bounded_metadata(
+                self.discovery_location, "federated discovery location", 512
+            )
+        if self.immutable_ref is not None:
+            _validate_immutable_ref(self.immutable_ref)
+        if self.content_hash is not None:
+            _validate_hash(self.content_hash, field_name="federated content hash")
+        if self.relative_path is not None:
+            _validate_relative_path(self.relative_path)
 
 
 @dataclass(frozen=True)
@@ -264,8 +281,13 @@ class CatalogEntry:
         if self.package is not None and self.mcp_response is not None:
             raise ValueError("catalog entry cannot contain package and MCP payloads")
         if self.federated is not None:
-            if self.source_type is not CatalogSourceType.FEDERATED_CATALOG:
-                raise ValueError("federated metadata requires a federated source")
+            if self.source_type not in {
+                CatalogSourceType.FEDERATED_CATALOG,
+                CatalogSourceType.GIT,
+            }:
+                raise ValueError(
+                    "federated metadata requires a federated or reviewed Git source"
+                )
             if self.federated.source_present != self.source_present:
                 raise ValueError("federated source presence does not match entry")
             if self.federated.artifact_resolved != (self.package is not None):
@@ -438,6 +460,7 @@ class IntegrationCatalogStore:
         *,
         source_id: str,
         source_type: CatalogSourceType,
+        federated: FederatedCatalogMetadata | None = None,
     ) -> CatalogEntry:
         """Import one reviewed immutable manifest without reading its source."""
         if not isinstance(package, IntegrationPackage):
@@ -459,6 +482,7 @@ class IntegrationCatalogStore:
             first_seen_at=timestamp,
             last_seen_at=timestamp,
             package=package,
+            federated=federated,
         )
         result = self._merge_source(
             source_id=source_id,
@@ -1496,6 +1520,11 @@ def _federated_metadata_to_dict(
         "artifact_resolved": metadata.artifact_resolved,
         "source_present": metadata.source_present,
         "install_authorized": metadata.install_authorized,
+        "observed_at": metadata.observed_at,
+        "discovery_location": metadata.discovery_location,
+        "immutable_ref": metadata.immutable_ref,
+        "content_hash": metadata.content_hash,
+        "relative_path": metadata.relative_path,
     }
 
 
@@ -1516,6 +1545,11 @@ def _federated_metadata_from_dict(value: Any) -> FederatedCatalogMetadata:
             "artifact_resolved",
             "source_present",
             "install_authorized",
+            "observed_at",
+            "discovery_location",
+            "immutable_ref",
+            "content_hash",
+            "relative_path",
         },
         field_name="federated catalog metadata",
     )
@@ -1549,6 +1583,19 @@ def _federated_metadata_from_dict(value: Any) -> FederatedCatalogMetadata:
         ),
         install_authorized=_required_bool(
             mapping.get("install_authorized"), "federated install_authorized"
+        ),
+        observed_at=_optional_text(mapping.get("observed_at"), "federated observed_at"),
+        discovery_location=_optional_text(
+            mapping.get("discovery_location"), "federated discovery location"
+        ),
+        immutable_ref=_optional_text(
+            mapping.get("immutable_ref"), "federated immutable ref"
+        ),
+        content_hash=_optional_text(
+            mapping.get("content_hash"), "federated content hash"
+        ),
+        relative_path=_optional_text(
+            mapping.get("relative_path"), "federated relative path"
         ),
     )
 
@@ -1761,6 +1808,18 @@ def _validate_https_origin(value: Any) -> None:
     parsed = urllib_parse.urlsplit(value)
     if parsed.path or parsed.query:
         raise ValueError("federated HTTPS origin is invalid")
+
+
+def _validate_relative_path(value: Any) -> None:
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 512
+        or value.startswith(("/", "\\"))
+        or "\\" in value
+        or any(part in {"", ".", ".."} for part in value.split("/"))
+        or any(ord(char) < 32 for char in value)
+    ):
+        raise ValueError("federated relative path is invalid")
 
 
 def _validate_hash(value: Any, *, field_name: str) -> None:

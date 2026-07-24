@@ -745,6 +745,36 @@ Apply/rollback managed configuration проходит
 presence источника являются только discovery evidence: они не дают права на
 установку, не разрешают сеть и не заменяют проверку точного artifact.
 
+Для `skills.sh` запустите read-only metadata proxy и передайте Harness его
+фиксированный origin:
+
+```bash
+export VERCEL_OIDC_TOKEN=<request-scoped-token>
+giga-skills-catalog-proxy
+
+# в процессе Harness
+export GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092
+giga ui
+```
+
+В production включите OIDC Federation в Vercel и используйте request-scoped
+`VERCEL_OIDC_TOKEN`; не сохраняйте токен в image, config или статическом
+environment export. [Контракт API skills.sh](https://www.skills.sh/docs/api)
+возвращает `401` для отсутствующего/просроченного токена и `429` с
+`Retry-After` при rate limit. `/healthz` сообщает `configuration_required`,
+пока OIDC не настроен. Ограниченный last-good cache задаётся через
+`GIGA_SKILLS_PROXY_CACHE_ENTRIES` и
+`GIGA_SKILLS_PROXY_STALE_IF_ERROR_SECONDS`; retained response явно помечается
+`X-Giga-Cache-Status: stale`, содержит `Age` и не скрывает ошибку источника.
+
+Proxy поддерживает leaderboard/search, curated results, безопасные пути
+detail/file tree и optional audit metadata. Содержимое файлов и audit summary
+не возвращаются в Harness. Cockpit показывает canonical source, upstream ID,
+repository URL, immutable hash, relative path, discovery breadcrumb, last sync,
+cache age, last-good state и ограниченные audit verdicts. Та же
+URL/origin/ref/hash projection входит в точный install preview и retained flow
+receipt.
+
 Если источник недоступен, ограничил частоту запросов, требует обновить
 аутентификацию или вернул некорректные данные, Harness сохраняет последний
 корректный snapshot каталога. Внешний Skill можно установить только после

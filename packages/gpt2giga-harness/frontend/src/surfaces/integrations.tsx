@@ -38,6 +38,7 @@ import {
   type IntegrationFlowMutationResponse,
   type IntegrationFlowPreviewResponse,
   type IntegrationSearchResponse,
+  type IntegrationSourceDetailResponse,
   type SkillPreviewResponse,
   type GitInspectionResponse,
 } from "../remaining-request-graph";
@@ -193,6 +194,18 @@ export function IntegrationsSurface() {
               ))}
             </div>
           ) : null}
+          {integrationQuery.data?.catalog_sources?.length ? (
+            <div className="plugin-search-sources" aria-label={locale === "ru" ? "Состояние каталога" : "Catalog health"}>
+              <span>{locale === "ru" ? "Каталог" : "Catalog"}</span>
+              {integrationQuery.data.catalog_sources.map((source) => (
+                <span className={`source-status ${source.status}`} key={source.id} title={source.reason_code ?? undefined}>
+                  {source.id}: {sourceStatusLabel(locale, source.status)}
+                  {source.cache_age_seconds !== null ? ` · ${source.cache_age_seconds}s` : ""}
+                  {source.last_good && source.stale ? ` · ${locale === "ru" ? "last-good" : "last-good"}` : ""}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {pending ? <LoadingRows /> : failed ? (
             <div className="error-state">{message(locale, "boundedDataUnavailable")}</div>
           ) : visibleItems.length === 0 ? (
@@ -308,6 +321,23 @@ function PluginDetails({
     ),
     enabled: item.category === "skills" && item.previewId !== null,
   });
+  const sourceDetail = useQuery({
+    queryKey: ["cockpit", "integration-source-detail", item.sourceId, item.packageId],
+    queryFn: ({ signal }) => {
+      const params = new URLSearchParams({
+        source_id: item.sourceId ?? "",
+        upstream_id: item.packageId,
+        include_audit: "true",
+      });
+      return fetchCockpit<IntegrationSourceDetailResponse>(
+        `/api/integrations/source-detail?${params}`,
+        signal,
+      );
+    },
+    enabled: item.source === "remote" && item.sourceId !== null,
+    staleTime: 300_000,
+  });
+  const provenance = sourceDetail.data?.provenance ?? item.provenance;
   return (
     <div className="plugin-detail">
       <Link
@@ -349,6 +379,54 @@ function PluginDetails({
           <dd>{item.connected ? message(locale, "connected") : statusLabel(locale, item.status)}</dd>
         </div>
       </dl>
+      {provenance ? (
+        <section className="plugin-detail-section integration-provenance">
+          <h3>{locale === "ru" ? "Происхождение" : "Provenance"}</h3>
+          <p className="integration-breadcrumb">{provenance.discovery_location}</p>
+          <dl className="plugin-facts">
+            <div><dt>{locale === "ru" ? "Источник" : "Canonical source"}</dt><dd>{provenance.canonical_source}</dd></div>
+            <div><dt>Upstream ID</dt><dd>{provenance.upstream_id}</dd></div>
+            <div><dt>{locale === "ru" ? "Путь" : "Relative path"}</dt><dd>{provenance.relative_path ?? "—"}</dd></div>
+            <div><dt>{locale === "ru" ? "Неизменяемая ссылка" : "Immutable ref"}</dt><dd>{provenance.immutable_ref ?? "—"}</dd></div>
+            <div><dt>SHA-256</dt><dd>{provenance.content_hash ?? "—"}</dd></div>
+            <div><dt>{locale === "ru" ? "Последняя синхронизация" : "Last sync"}</dt><dd>{provenance.observed_at || "—"}</dd></div>
+          </dl>
+          {sourceDetail.data ? (
+            <p className={`source-status ${sourceDetail.data.source_health.status}`}>
+              {sourceStatusLabel(locale, sourceDetail.data.source_health.status)}
+              {sourceDetail.data.source_health.last_good
+                ? ` · ${locale === "ru" ? "последние успешные данные" : "last-good data"}`
+                : ""}
+            </p>
+          ) : null}
+          {sourceDetail.data?.audits.length ? (
+            <ul className="integration-audits">
+              {sourceDetail.data.audits.map((audit) => (
+                <li key={`${audit.provider}:${audit.audited_at}`}>
+                  <strong>{audit.provider}</strong>
+                  <span>{audit.status}{audit.risk_level ? ` · ${audit.risk_level}` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {provenance.file_paths?.length ? (
+            <details className="integration-file-tree">
+              <summary>
+                {locale === "ru" ? "Файлы" : "Files"} · {provenance.file_paths.length}
+              </summary>
+              <ul>
+                {provenance.file_paths.map((path) => <li key={path}>{path}</li>)}
+              </ul>
+            </details>
+          ) : null}
+          {provenance.repository_url ? (
+            <a href={provenance.repository_url} rel="noreferrer" target="_blank">
+              {locale === "ru" ? "Открыть репозиторий" : "Open repository"}
+            </a>
+          ) : null}
+          {sourceDetail.isError ? <p className="mutation-error">{sourceDetail.error.message}</p> : null}
+        </section>
+      ) : null}
       {item.category === "skills" && item.previewId ? (
         <section className="plugin-skill-preview">
           <h3>{message(locale, "skillPreview")}</h3>
@@ -958,6 +1036,8 @@ function AddIntegrationDrawer({
     mutationFn: () => mutateCockpit<GitInspectionResponse>("/api/integrations/git/inspect", {
       repository_url: repositoryUrl,
       ref: ref.trim() || undefined,
+      source_id: seed?.source === "remote" ? seed.sourceId : undefined,
+      upstream_id: seed?.source === "remote" ? seed.packageId : undefined,
     }),
     onSuccess: (data) => setSelectedCandidateId(
       data.candidates.find((item) => item.type === mode.slice(0, -1))?.id
@@ -1297,6 +1377,9 @@ function sourceLabel(locale: "en" | "ru", source: PluginLibraryItem["source"]) {
 
 function sourceStatusLabel(locale: "en" | "ru", status: string) {
   if (status === "ready") return message(locale, "sourceReady");
+  if (status === "stale") {
+    return locale === "ru" ? "Устаревшие данные" : "Stale data";
+  }
   if (status === "configuration_required") {
     return message(locale, "sourceConfigurationRequired");
   }

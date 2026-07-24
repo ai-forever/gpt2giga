@@ -823,6 +823,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .plugin-search-sources { display: flex; align-items: center; gap: 8px; padding: 8px 0; color: var(--muted); font-size: 11px; }
 .plugin-search-sources .source-status { border: 1px solid var(--border); border-radius: 999px; padding: 3px 8px; }
 .plugin-search-sources .source-status.ready { color: var(--success); border-color: color-mix(in srgb, var(--success) 34%, var(--border)); }
+.plugin-search-sources .source-status.stale { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 34%, var(--border)); }
 .plugin-search-sources .source-status.unavailable,
 .plugin-search-sources .source-status.configuration_required { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 34%, var(--border)); }
 .plugin-source-filter { display: flex; align-items: center; gap: 7px; }
@@ -869,6 +870,14 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .plugin-detail-heading h2 { max-width: 100%; overflow: hidden; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-detail-description { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .plugin-detail-section { display: grid; gap: 10px; }
+.integration-breadcrumb { margin: 0; border-radius: 8px; background: var(--surface-raised); padding: 8px 10px; overflow-wrap: anywhere; color: var(--text); font-family: var(--font-mono); font-size: 10px; }
+.integration-provenance > .source-status { justify-self: start; border: 1px solid var(--border); border-radius: 999px; padding: 4px 8px; color: var(--muted); font-size: 10px; }
+.integration-provenance > .source-status.stale { color: var(--warning); }
+.integration-audits { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.integration-audits li { display: flex; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font-size: 10px; }
+.integration-file-tree { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font-size: 10px; }
+.integration-file-tree summary { cursor: pointer; font-weight: 700; }
+.integration-file-tree ul { display: grid; gap: 4px; margin: 8px 0 0; padding-left: 18px; font-family: var(--font-mono); overflow-wrap: anywhere; }
 .plugin-detail-section h3, .plugin-approval-panel h3 { margin: 0; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .plugin-facts { display: grid; gap: 0; margin: 0; border-top: 1px solid var(--border); }
 .plugin-facts > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; border-bottom: 1px solid var(--border); padding: 10px 0; }

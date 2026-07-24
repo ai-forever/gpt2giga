@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
+import hashlib
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.federated_catalog import (
+    FederatedAuditProjection,
     FederatedCatalogCandidate,
     FederatedCatalogComponent,
     FederatedProvenance,
@@ -15,6 +18,7 @@ from gpt2giga_harness.federated_catalog import (
 )
 from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.skill_library import GitCommandResult, SkillLibraryService
+from gpt2giga_harness.integration_flows import IntegrationFlowService
 from gpt2giga_harness.ui.app import create_app
 
 
@@ -63,6 +67,8 @@ class _CatalogSource:
                     detail_url="https://skills.sh/acme/skills/review",
                     artifact_url="https://github.com/acme/skills",
                     artifact_origin="https://github.com",
+                    relative_path="review/SKILL.md",
+                    file_paths=("review/SKILL.md",),
                 ),
                 trust=FederatedTrustProjection(
                     source_present=True,
@@ -70,6 +76,21 @@ class _CatalogSource:
                     popularity=42,
                     upstream_audit=None,
                 ),
+            ),
+        )
+
+    async def detail(self, upstream_id: str):
+        assert upstream_id == "acme/skills/review"
+        return (await self.search("review", limit=10))[0]
+
+    async def audits(self, upstream_id: str):
+        assert upstream_id == "acme/skills/review"
+        return (
+            FederatedAuditProjection(
+                provider="Socket",
+                status="pass",
+                audited_at="2026-07-20T09:35:00Z",
+                risk_level="LOW",
             ),
         )
 
@@ -171,6 +192,78 @@ async def test_git_inspection_pins_commit_then_imports_reviewed_skill(tmp_path: 
     assert calls[1] == ("git", "rev-parse", "HEAD")
 
 
+async def test_remote_provenance_survives_git_import_preview_and_receipt(
+    tmp_path: Path,
+):
+    raw_hash = hashlib.sha256(b"SKILL.md\0" + _GIT_SKILL.encode("utf-8")).hexdigest()
+
+    class _BoundSource(_CatalogSource):
+        async def detail(self, upstream_id: str):
+            candidate = (await self.search("review", limit=10))[0]
+            return replace(
+                candidate,
+                immutable_ref=f"sha256:{raw_hash}",
+                provenance=replace(
+                    candidate.provenance,
+                    relative_path="SKILL.md",
+                    file_paths=("SKILL.md",),
+                ),
+            )
+
+    def git_runner(
+        argv: tuple[str, ...], cwd: Path | None, _timeout: float
+    ) -> GitCommandResult:
+        if argv[:2] == ("git", "clone"):
+            repo = Path(argv[-1])
+            (repo / "review").mkdir(parents=True)
+            (repo / "review" / "SKILL.md").write_text(_GIT_SKILL, encoding="utf-8")
+            (repo / "LICENSE").write_text("MIT", encoding="utf-8")
+            return GitCommandResult(0, "")
+        assert cwd is not None
+        return GitCommandResult(0, _COMMIT + "\n")
+
+    data_dir = tmp_path / "data"
+    library = SkillLibraryService(
+        data_dir,
+        root_skill_roots=(),
+        federated_sources=(_BoundSource(),),
+        git_runner=git_runner,
+    )
+
+    inspection = await library.inspect_git(
+        "https://github.com/acme/skills",
+        source_id="skills-sh",
+        upstream_id="acme/skills/review",
+    )
+    entry = library.import_git_skill(inspection["candidates"][0]["id"])
+    service = IntegrationFlowService(data_dir)
+    preview = service.preview(
+        {
+            "source": "catalog",
+            "catalog_id": entry.catalog_id,
+            "target_id": "codex-skill",
+            "scope": "managed_home",
+        }
+    )
+    applied = service.apply(
+        preview["flow"]["id"],
+        plan_id=preview["plan"]["plan_id"],
+        authority="test-operator",
+    )
+
+    assert entry.federated is not None
+    assert entry.federated.discovery_location == ("skills-sh/acme/skills/review")
+    assert preview["plan"]["package"]["source_provenance"]["immutable_ref"] == (
+        f"sha256:{raw_hash}"
+    )
+    assert preview["flow"]["source_provenance"]["canonical_origin"] == (
+        "https://skills.sh"
+    )
+    assert (
+        applied["flow"]["source_provenance"] == (preview["flow"]["source_provenance"])
+    )
+
+
 def test_integration_library_api_exposes_root_preview_and_remote_search(tmp_path: Path):
     root = tmp_path / "root"
     (root / "review").mkdir(parents=True)
@@ -198,15 +291,36 @@ def test_integration_library_api_exposes_root_preview_and_remote_search(tmp_path
         "/api/integrations/search",
         params={"q": "review", "component": "skill", "limit": 10},
     )
+    detail = client.get(
+        "/api/integrations/source-detail",
+        params={
+            "source_id": "skills-sh",
+            "upstream_id": "acme/skills/review",
+            "include_audit": True,
+        },
+    )
 
     assert inventory.status_code == 200
     assert preview.status_code == 200
     assert preview.json()["markdown"] == _SKILL
     assert search.status_code == 200
     assert search.json()["sources"] == [
-        {"id": "skills-sh", "status": "ready", "error_type": None}
+        {
+            "id": "skills-sh",
+            "status": "ready",
+            "reason_code": None,
+            "cache_status": "live",
+            "cache_age_seconds": None,
+            "last_good": False,
+        }
     ]
     assert search.json()["items"][0]["artifact_url"] == (
         "https://github.com/acme/skills"
     )
     assert search.json()["items"][0]["install_authorized"] is False
+    assert detail.status_code == 200
+    assert detail.json()["provenance"]["discovery_location"] == (
+        "skills-sh/acme/skills/review"
+    )
+    assert detail.json()["provenance"]["relative_path"] == "review/SKILL.md"
+    assert detail.json()["audits"][0]["provider"] == "Socket"

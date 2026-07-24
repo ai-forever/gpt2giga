@@ -16,6 +16,18 @@ const rootKey = ["cockpit", "remaining-surfaces"] as const;
 
 export interface IntegrationFlowInventory {
   sources: Array<{ id: string; network_required: boolean }>;
+  catalog_sources?: Array<{
+    id: string;
+    status: "ready" | "stale" | "unavailable";
+    last_sync_at: string | null;
+    last_attempt_at: string;
+    cache_age_seconds: number | null;
+    last_good: boolean;
+    stale: boolean;
+    reason_code: string | null;
+    next_retry_at: string | null;
+    entry_count: number;
+  }>;
   targets: Array<{
     id: string;
     component_types: string[];
@@ -24,6 +36,7 @@ export interface IntegrationFlowInventory {
   }>;
   catalog: Array<{
     catalog_id: string;
+    source_id?: string;
     package_id: string;
     version: string;
     component_types: string[];
@@ -32,10 +45,18 @@ export interface IntegrationFlowInventory {
     trust_decision: string;
     source_type: string;
     discovery?: {
+      upstream_id?: string;
       name: string;
       component: string;
+      canonical_origin?: string;
       detail_url: string | null;
       artifact_url: string | null;
+      repository_url: string | null;
+      observed_at: string | null;
+      discovery_location: string | null;
+      immutable_ref: string | null;
+      content_hash: string | null;
+      relative_path: string | null;
       popularity: number | null;
       curated: boolean;
     } | null;
@@ -71,10 +92,64 @@ export interface IntegrationSearchResponse {
     curated: boolean;
     popularity: number | null;
     upstream_audit: string | null;
+    canonical_origin?: string;
+    observed_at?: string;
+    discovery_location?: string;
     install_authorized: false;
   }>;
-  sources: Array<{ id: string; status: string; error_type: string | null }>;
+  sources: Array<{
+    id: string;
+    status: string;
+    reason_code?: string | null;
+    error_type?: string | null;
+    cache_status?: string;
+    cache_age_seconds?: number | null;
+    last_good?: boolean;
+  }>;
   install_authorized: false;
+}
+
+export interface IntegrationSourceProvenance {
+  canonical_source: string;
+  upstream_id: string;
+  canonical_origin: string;
+  repository_url: string | null;
+  artifact_url: string | null;
+  immutable_ref: string | null;
+  content_hash: string | null;
+  relative_path: string | null;
+  file_paths?: string[];
+  discovery_location: string;
+  detail_url?: string;
+  observed_at: string;
+  trust?: {
+    curated: boolean;
+    upstream_audit: string | null;
+    source_present: boolean;
+    install_authorized: false;
+  };
+}
+
+export interface IntegrationSourceDetailResponse {
+  id: string;
+  source_id: string;
+  upstream_id: string;
+  title: string;
+  component: "skill" | "mcp";
+  provenance: IntegrationSourceProvenance;
+  audits: Array<{
+    provider: string;
+    status: "pass" | "warn" | "fail";
+    audited_at: string;
+    risk_level: string | null;
+  }>;
+  source_health: {
+    status: "ready" | "stale";
+    cache_status: string;
+    cache_age_seconds: number | null;
+    reason_code: string | null;
+    last_good: boolean;
+  };
 }
 
 export interface SkillPreviewResponse {
@@ -103,6 +178,8 @@ export interface GitInspectionResponse {
     license: string;
     preview_id: string | null;
     manifest: Record<string, unknown> | null;
+    source_provenance?: IntegrationSourceProvenance | null;
+    source_provenance_sha256?: string | null;
   }>;
 }
 
@@ -139,6 +216,7 @@ export interface IntegrationFlowSummary {
   status: string;
   package_id: string;
   package_version: string;
+  source_provenance?: IntegrationSourceProvenance | null;
   target_id: string;
   scope: string;
   verification_status: string;
@@ -245,6 +323,7 @@ export interface IntegrationFlowPlan {
     license: string;
     checksum: string;
     immutable_ref: string;
+    source_provenance?: IntegrationSourceProvenance | null;
   };
   target: { id: string; scope: string; execution_owner: string; executable: boolean };
   risk: { decision: string; install_authorized: false };

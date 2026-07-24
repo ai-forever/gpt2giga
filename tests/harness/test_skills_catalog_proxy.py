@@ -72,7 +72,15 @@ def test_proxy_is_fixed_origin_metadata_only_and_cache_bounded():
 
     assert listing.status_code == 200
     assert detail.status_code == 200
-    assert set(detail.json()) == {"id", "source", "slug", "installs", "hash"}
+    assert set(detail.json()) == {
+        "id",
+        "source",
+        "slug",
+        "installs",
+        "hash",
+        "files",
+    }
+    assert detail.json()["files"] == [{"path": "SKILL.md"}]
     assert "secret-content-canary" not in detail.text
     assert listing.headers["etag"].startswith('"')
     assert listing.headers["cache-control"] == "public, max-age=60"
@@ -82,6 +90,120 @@ def test_proxy_is_fixed_origin_metadata_only_and_cache_bounded():
         for call in upstream.calls
     )
     assert "oidc-secret-canary" not in listing.text + detail.text
+
+
+def test_proxy_labels_stale_last_good_after_rate_limit():
+    url = (
+        f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills?view=all-time&page=0&per_page=1"
+    )
+    responses = [
+        _response(
+            url,
+            {
+                "data": [_skill_item()],
+                "pagination": {
+                    "page": 0,
+                    "perPage": 1,
+                    "total": 1,
+                    "hasMore": False,
+                },
+            },
+        ),
+        SkillsProxyUpstreamResponse(
+            status_code=429,
+            final_url=url,
+            headers={"Retry-After": "12"},
+            body=b'{"error":"rate_limited"}',
+        ),
+    ]
+
+    async def upstream(**_kwargs):
+        return responses.pop(0)
+
+    clock = [10.0]
+    client = TestClient(
+        create_skills_catalog_proxy_app(
+            token_provider=_token,
+            upstream=upstream,
+            monotonic=lambda: clock[0],
+        )
+    )
+
+    fresh = client.get("/api/v1/skills", params={"page": 0, "per_page": 1})
+    clock[0] = 42.0
+    stale = client.get("/api/v1/skills", params={"page": 0, "per_page": 1})
+
+    assert fresh.headers["x-giga-cache-status"] == "fresh"
+    assert stale.status_code == 200
+    assert stale.json() == fresh.json()
+    assert stale.headers["x-giga-cache-status"] == "stale"
+    assert stale.headers["x-giga-source-error"] == "proxy.upstream_rate_limited"
+    assert stale.headers["age"] == "32"
+    assert stale.headers["warning"]
+
+
+def test_proxy_exposes_curated_and_bounded_audit_metadata():
+    curated_url = f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills/curated"
+    audit_url = f"{SKILLS_PROXY_UPSTREAM_ORIGIN}/api/v1/skills/audit/acme/skills/react"
+    upstream = _Upstream(
+        {
+            curated_url: _response(
+                curated_url,
+                {
+                    "data": [
+                        {
+                            "owner": "acme",
+                            "totalInstalls": 12,
+                            "featuredRepo": "skills",
+                            "featuredSkill": "react",
+                            "skills": [_skill_item()],
+                        }
+                    ],
+                    "totalOwners": 1,
+                    "totalSkills": 1,
+                    "generatedAt": "2026-07-24T08:00:00Z",
+                },
+            ),
+            audit_url: _response(
+                audit_url,
+                {
+                    "id": "acme/skills/react",
+                    "source": "acme/skills",
+                    "slug": "react",
+                    "audits": [
+                        {
+                            "provider": "Socket",
+                            "slug": "socket",
+                            "status": "pass",
+                            "summary": "secret-summary-canary",
+                            "auditedAt": "2026-07-24T08:05:00Z",
+                            "riskLevel": "LOW",
+                        }
+                    ],
+                },
+            ),
+        }
+    )
+    client = TestClient(
+        create_skills_catalog_proxy_app(token_provider=_token, upstream=upstream)
+    )
+
+    curated = client.get("/api/v1/skills/curated")
+    audit = client.get("/api/v1/skills/audit/acme/skills/react")
+
+    assert curated.status_code == 200
+    assert curated.json()["data"][0]["skills"][0]["id"] == "acme/skills/react"
+    assert audit.status_code == 200
+    assert audit.json()["audits"] == [
+        {
+            "provider": "Socket",
+            "slug": "socket",
+            "status": "pass",
+            "auditedAt": "2026-07-24T08:05:00Z",
+            "riskLevel": "LOW",
+        }
+    ]
+    assert "secret-summary-canary" not in audit.text
 
 
 def test_proxy_rejects_writes_bad_inputs_and_bounds_rate_without_upstream_calls():

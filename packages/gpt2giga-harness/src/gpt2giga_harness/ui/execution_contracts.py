@@ -117,6 +117,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/health"),
         ("GET", "/api/integrations"),
         ("GET", "/api/integrations/search"),
+        ("GET", "/api/integrations/source-detail"),
         ("GET", "/api/integrations/skills/preview"),
         ("GET", "/api/integrations/flows/{flow_id}"),
         ("GET", "/api/integrations/groups/{group_id}"),
@@ -207,6 +208,7 @@ _NETWORK = frozenset(
     {
         ("GET", "/api/health"),
         ("GET", "/api/integrations/search"),
+        ("GET", "/api/integrations/source-detail"),
         ("GET", "/api/models"),
         ("POST", "/api/providers/{provider_id}/discover"),
         ("POST", "/api/providers/{provider_id}/test"),
@@ -285,6 +287,7 @@ _NATIVE_ASYNC = frozenset(
         ("POST", "/api/environment/pull-request/apply"),
         ("POST", "/api/environment/pull-request/preview"),
         ("GET", "/api/integrations/search"),
+        ("GET", "/api/integrations/source-detail"),
         ("POST", "/api/integrations/git/inspect"),
         ("POST", "/api/native/processes/{process_id}/input"),
     }

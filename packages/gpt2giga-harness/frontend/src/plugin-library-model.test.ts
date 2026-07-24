@@ -196,6 +196,9 @@ describe("plugin library model", () => {
         curated: false,
         popularity: 42,
         upstream_audit: null,
+        canonical_origin: "https://skills.sh",
+        observed_at: "2026-07-24T08:00:00Z",
+        discovery_location: "skills-sh/acme/review",
         install_authorized: false,
       }],
       sources: [{ id: "skills-sh", status: "ready", error_type: null }],
@@ -215,6 +218,12 @@ describe("plugin library model", () => {
       artifactUrl: "https://github.com/acme/review",
       sourceId: "skills-sh",
       popularity: 42,
+      provenance: {
+        canonical_source: "skills-sh",
+        upstream_id: "acme/review",
+        canonical_origin: "https://skills.sh",
+        discovery_location: "skills-sh/acme/review",
+      },
     });
   });
 });

@@ -79,6 +79,7 @@ from gpt2giga_harness.gemini_mcp_target import (
 )
 from gpt2giga_harness.integration_catalog import (
     CatalogEntry,
+    CatalogSourceType,
     IntegrationCatalogStore,
 )
 from gpt2giga_harness.integration_installer import (
@@ -208,6 +209,7 @@ class IntegrationFlowRecord:
     created_at: str
     updated_at: str
     events: tuple[IntegrationFlowEvent, ...]
+    source_provenance: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -224,6 +226,7 @@ class _ResolvedPreview:
     restart_required: bool
     handoff_reason: str | None = None
     configuration_preview: Mapping[str, Any] | None = None
+    source_provenance: Mapping[str, Any] | None = None
 
 
 _SKILL_TARGETS = {
@@ -381,7 +384,9 @@ class IntegrationFlowService:
     def inventory(self) -> dict[str, Any]:
         """Return bounded sources, targets, catalog entries, and recent flows."""
         self._ensure_catalog_seeded()
-        entries = tuple(self.catalog.list())
+        snapshot = self.catalog.snapshot()
+        entries = tuple(snapshot.entries)
+        now = self._now().astimezone(timezone.utc)
         return {
             "schema_version": INTEGRATION_FLOW_SCHEMA_VERSION,
             "sources": [
@@ -396,6 +401,9 @@ class IntegrationFlowService:
                     },
                 }
                 for item in IntegrationFlowSource
+            ],
+            "catalog_sources": [
+                _catalog_source_to_dict(item, now=now) for item in snapshot.sources
             ],
             "targets": [
                 {
@@ -439,6 +447,7 @@ class IntegrationFlowService:
             package_id=resolved.package.id,
             package_version=resolved.package.version,
             manifest_sha256=integration_package_semantic_hash(resolved.package),
+            source_provenance=resolved.source_provenance,
             target_id=resolved.target.id,
             scope=InstallationScope(request["scope"]),
             workspace=request.get("workspace"),
@@ -732,6 +741,7 @@ class IntegrationFlowService:
             raise ValueError("selected target does not support the requested scope")
         root = self._target_root(request, target, create=not existing)
         package = self._resolve_package(request, source, target, scope)
+        source_provenance = self._source_provenance(request)
         _validate_target_compatibility(package, target, scope)
         if target.id in _SKILL_TARGETS:
             skill = self._portable_skill_for_package(package)
@@ -758,6 +768,7 @@ class IntegrationFlowService:
                     for item in native.mutations
                 ),
                 restart_required=generated.restart_required,
+                source_provenance=source_provenance,
             )
         if (
             target.id in _MCP_TARGET_IDS
@@ -801,6 +812,7 @@ class IntegrationFlowService:
                 native_plan_id=native_plan_id,
                 configuration_diff=configuration_diff,
                 restart_required=restart_required,
+                source_provenance=source_provenance,
             )
         if (
             target.id in _MCP_TARGET_IDS
@@ -847,6 +859,7 @@ class IntegrationFlowService:
                     "target": dict(target_preview.configuration),
                     "secret_references": list(target_preview.secret_references),
                 },
+                source_provenance=source_provenance,
             )
         if target.id in _PLUGIN_TARGET_IDS:
             driver = self._plugin_driver(target.id, root, scope)
@@ -866,6 +879,7 @@ class IntegrationFlowService:
                     for item in getattr(native, "command_ids", ())
                 ),
                 restart_required=bool(getattr(native, "restart_required", True)),
+                source_provenance=source_provenance,
             )
         return _ResolvedPreview(
             package=package,
@@ -877,7 +891,32 @@ class IntegrationFlowService:
             configuration_diff=_configuration_diff(request.get("configuration", {})),
             restart_required=True,
             handoff_reason=_handoff_reason(target.id),
+            source_provenance=source_provenance,
         )
+
+    def _source_provenance(
+        self, request: Mapping[str, Any]
+    ) -> Mapping[str, Any] | None:
+        if request.get("source") != IntegrationFlowSource.CATALOG.value:
+            return None
+        catalog_id = str(request.get("catalog_id") or "")
+        entry = self.catalog.get(catalog_id) if catalog_id else None
+        if entry is None or entry.federated is None:
+            return None
+        metadata = entry.federated
+        return {
+            "canonical_source": entry.source_id,
+            "upstream_id": metadata.upstream_id,
+            "canonical_origin": metadata.canonical_origin,
+            "repository_url": metadata.artifact_url,
+            "artifact_url": metadata.artifact_url,
+            "immutable_ref": metadata.immutable_ref or entry.immutable_ref,
+            "content_hash": metadata.content_hash or entry.content_hash,
+            "relative_path": metadata.relative_path,
+            "discovery_location": metadata.discovery_location
+            or f"{entry.source_id}/{metadata.upstream_id}",
+            "observed_at": metadata.observed_at or entry.last_seen_at,
+        }
 
     def _resolve_package(
         self,
@@ -1536,6 +1575,11 @@ def integration_flow_record_to_dict(record: IntegrationFlowRecord) -> dict[str, 
         "package_id": record.package_id,
         "package_version": record.package_version,
         "manifest_sha256": record.manifest_sha256,
+        "source_provenance": (
+            dict(record.source_provenance)
+            if record.source_provenance is not None
+            else None
+        ),
         "target_id": record.target_id,
         "scope": record.scope.value,
         "verification_status": record.verification_status,
@@ -1578,6 +1622,7 @@ def _public_plan(
         "workspace": request.get("workspace"),
         "configuration_sha256": _json_hash(request.get("configuration", {})),
         "native_plan_id": resolved.native_plan_id,
+        "source_provenance": resolved.source_provenance,
     }
     plan_id = f"plan_{_json_hash(semantic)}"
     return {
@@ -1592,6 +1637,11 @@ def _public_plan(
             "immutable_ref": resolved.package.immutable_ref,
             "checksum": resolved.package.checksum,
             "manifest_sha256": integration_package_semantic_hash(resolved.package),
+            "source_provenance": (
+                dict(resolved.source_provenance)
+                if resolved.source_provenance is not None
+                else None
+            ),
         },
         "target": {
             "id": resolved.target.id,
@@ -1857,6 +1907,12 @@ def _catalog_entry_to_dict(entry: CatalogEntry) -> dict[str, Any]:
                 "canonical_origin": federated.canonical_origin,
                 "detail_url": federated.detail_url,
                 "artifact_url": federated.artifact_url,
+                "repository_url": federated.artifact_url,
+                "observed_at": federated.observed_at,
+                "discovery_location": federated.discovery_location,
+                "immutable_ref": federated.immutable_ref,
+                "content_hash": federated.content_hash,
+                "relative_path": federated.relative_path,
                 "curated": federated.curated,
                 "popularity": federated.popularity,
                 "upstream_audit": federated.upstream_audit,
@@ -1867,6 +1923,49 @@ def _catalog_entry_to_dict(entry: CatalogEntry) -> dict[str, Any]:
             if federated is not None
             else None
         ),
+    }
+
+
+def _catalog_source_to_dict(item: Any, *, now: datetime) -> dict[str, Any]:
+    last_success = (
+        datetime.fromisoformat(item.last_success_at.replace("Z", "+00:00"))
+        if item.last_success_at is not None
+        else None
+    )
+    freshness = (
+        datetime.fromisoformat(item.freshness_expires_at.replace("Z", "+00:00"))
+        if item.freshness_expires_at is not None
+        else None
+    )
+    stale = item.last_success_at is not None and (
+        not item.last_attempt_succeeded
+        or (
+            item.source_type is CatalogSourceType.FEDERATED_CATALOG
+            and (freshness is None or freshness <= now)
+        )
+    )
+    return {
+        "id": item.source_id,
+        "status": (
+            "unavailable"
+            if item.last_success_at is None and not item.last_attempt_succeeded
+            else "stale"
+            if stale
+            else "ready"
+        ),
+        "last_sync_at": item.last_success_at,
+        "last_attempt_at": item.last_attempt_at,
+        "cache_age_seconds": (
+            max(0, int((now - last_success).total_seconds()))
+            if last_success is not None
+            else None
+        ),
+        "last_good": item.last_success_at is not None,
+        "stale": stale,
+        "reason_code": item.errors[-1].code if item.errors else None,
+        "next_retry_at": item.next_retry_at,
+        "entry_count": item.entry_count,
+        "content_free": True,
     }
 
 
@@ -1965,6 +2064,9 @@ def _record_from_dict(payload: object) -> IntegrationFlowRecord:
     if not isinstance(payload, Mapping):
         raise IntegrationFlowError("integration flow record is invalid")
     try:
+        source_provenance = payload.get("source_provenance")
+        if source_provenance is not None and not isinstance(source_provenance, Mapping):
+            raise TypeError("source provenance must be an object")
         record = IntegrationFlowRecord(
             id=str(payload["id"]),
             plan_id=str(payload["plan_id"]),
@@ -1973,6 +2075,11 @@ def _record_from_dict(payload: object) -> IntegrationFlowRecord:
             package_id=str(payload["package_id"]),
             package_version=str(payload["package_version"]),
             manifest_sha256=str(payload["manifest_sha256"]),
+            source_provenance=(
+                _json_value(source_provenance)
+                if source_provenance is not None
+                else None
+            ),
             target_id=str(payload["target_id"]),
             scope=InstallationScope(str(payload["scope"])),
             workspace=(str(payload["workspace"]) if payload.get("workspace") else None),
