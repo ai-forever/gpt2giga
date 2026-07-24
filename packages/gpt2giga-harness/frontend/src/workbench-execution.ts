@@ -79,6 +79,17 @@ export function workbenchKindForHarness(
     : "direct_chat";
 }
 
+export function harnessesForWorkbenchKind(
+  harnesses: readonly HarnessOption[],
+  kind: WorkbenchKind,
+): HarnessOption[] {
+  const requiredCapability =
+    kind === "coding_agent" ? "agent_cli" : "chat_completions";
+  return harnesses.filter(
+    (harness) => harness.spec.capabilities?.includes(requiredCapability),
+  );
+}
+
 export function normalizeProductSelection(
   harness: HarnessOption | undefined,
   current: ProductExecutionSelection,

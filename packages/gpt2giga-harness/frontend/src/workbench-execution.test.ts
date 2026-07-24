@@ -7,6 +7,7 @@ import {
   availableExecutionTransports,
   capabilityPresentation,
   consumeAtQuery,
+  harnessesForWorkbenchKind,
   invocationModeForTransport,
   legacyModeForProductSelection,
   migrateLegacyProductSelection,
@@ -118,6 +119,27 @@ describe("Workbench execution semantics", () => {
       kind: "direct_chat",
     });
     expect(normalizeProductSelection(undefined, current)).toEqual(current);
+  });
+
+  it("keeps coding agents and direct-chat harnesses in separate selectors", () => {
+    const harnesses = [
+      harness(),
+      harness({ spec: { id: "claude-code", capabilities: ["agent_cli"] } }),
+      harness({ spec: { id: "gemini-cli", capabilities: ["agent_cli"] } }),
+      harness({ spec: { id: "direct-chat", capabilities: ["chat_completions"] } }),
+      harness({ spec: { id: "echo", capabilities: ["chat_completions"] } }),
+    ];
+
+    expect(
+      harnessesForWorkbenchKind(harnesses, "coding_agent").map(
+        (candidate) => candidate.spec.id,
+      ),
+    ).toEqual(["codex-cli", "claude-code", "gemini-cli"]);
+    expect(
+      harnessesForWorkbenchKind(harnesses, "direct_chat").map(
+        (candidate) => candidate.spec.id,
+      ),
+    ).toEqual(["direct-chat", "echo"]);
   });
 
   it("summarizes content-free permission evidence without hiding unknowns", () => {

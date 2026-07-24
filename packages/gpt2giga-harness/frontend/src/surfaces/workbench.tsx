@@ -106,6 +106,7 @@ import {
   activeAtQuery,
   admittedExecutionTransport,
   consumeAtQuery,
+  harnessesForWorkbenchKind,
   legacyModeForProductSelection,
   normalizeProductSelection,
   permissionSimulationHighlights,
@@ -1133,6 +1134,10 @@ export function WorkbenchSurface() {
   const selectedHarness = harnesses.data?.harnesses.find(
     (harness) => harness.spec.id === runConfig.harnessId,
   );
+  const selectableHarnesses = harnessesForWorkbenchKind(
+    harnesses.data?.harnesses ?? [],
+    productSelection.kind,
+  );
   const admittedTransport = admittedExecutionTransport(
     selectedHarness,
     productSelection.kind,
@@ -1374,12 +1379,11 @@ export function WorkbenchSurface() {
     saveRunConfig.mutate({ workbench_selection: next });
   };
   const selectWorkbenchKind = (kind: WorkbenchKind) => {
-    const requiredCapability =
-      kind === "coding_agent" ? "agent_cli" : "chat_completions";
-    const compatibleHarnesses = harnesses.data?.harnesses.filter(
-      (harness) =>
-        harness.spec.capabilities?.includes(requiredCapability)
-        && harness.availability?.status !== "unavailable",
+    const compatibleHarnesses = harnessesForWorkbenchKind(
+      harnesses.data?.harnesses ?? [],
+      kind,
+    ).filter(
+      (harness) => harness.availability?.status !== "unavailable",
     );
     const preferredHarnessId =
       kind === "coding_agent" ? "codex-cli" : "direct-chat";
@@ -2185,7 +2189,7 @@ export function WorkbenchSurface() {
                         onChange={(event) => setConfig("harnessId", event.target.value, "default_harness_id")}
                         value={runConfig.harnessId}
                       >
-                        {harnesses.data?.harnesses.map((harness) => (
+                        {selectableHarnesses.map((harness) => (
                           <option
                             disabled={harness.availability?.status === "unavailable"}
                             key={harness.spec.id}
@@ -2193,7 +2197,7 @@ export function WorkbenchSurface() {
                           >
                             {harness.spec.title || harness.spec.id}
                           </option>
-                        )) ?? <option value={runConfig.harnessId}>{runConfig.harnessId}</option>}
+                        ))}
                       </select>
                     </label>
                     <div className="compact-control model-control">
