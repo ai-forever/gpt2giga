@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -70,7 +70,11 @@ import {
 } from "../request-graph";
 import { observeNativeProcess } from "../native-process-stream";
 import { observeSessionUpdates } from "../session-update-stream";
-import { sessionCreationPayload, type SessionCreationIntent } from "../session-creation";
+import {
+  sessionCreationPayload,
+  shouldAutomaticallyCreateSession,
+  type SessionCreationIntent,
+} from "../session-creation";
 import {
   promptWithSkillMentions,
   skillMentionOptions,
@@ -122,6 +126,23 @@ type AdvancedRunConfig = {
   stream: boolean;
   workspacePolicy: string;
 };
+
+function ArchiveSessionIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M4 7h16M6 7v12h12V7M9 11h6" />
+      <path d="M5 4h14v3H5z" />
+    </svg>
+  );
+}
+
+function DeleteSessionIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+    </svg>
+  );
+}
 
 type StartResult =
   | { kind: "preview"; report: RunPreflightResponse["preflight"] }
@@ -407,6 +428,7 @@ function EnvironmentCard({
 
 export function WorkbenchSurface() {
   const params = useParams({ strict: false });
+  const routeSearch = useSearch({ strict: false });
   const sessionId =
     "sessionId" in params && typeof params.sessionId === "string"
       ? params.sessionId
@@ -765,12 +787,12 @@ export function WorkbenchSurface() {
 
   useEffect(() => {
     if (
-      sessionId !== undefined
+      !shouldAutomaticallyCreateSession(sessionId, routeSearch)
       || automaticSessionRequested.current
     ) return;
     automaticSessionRequested.current = true;
     createSessionMutate({ kind: "backend-defaults" });
-  }, [createSessionMutate, sessionId]);
+  }, [createSessionMutate, routeSearch, sessionId]);
 
   useEffect(() => {
     if (sessionId === undefined || !overview.isSuccess) return;
@@ -994,7 +1016,13 @@ export function WorkbenchSurface() {
         delete next[id];
         return next;
       });
-      await navigate({ to: "/cockpit-v2/work" });
+      if (id === sessionId) {
+        await navigate({
+          replace: true,
+          search: { fromSessionAction: true },
+          to: "/cockpit-v2/work",
+        });
+      }
       queryClient.removeQueries({ queryKey: requestKeys.sessionScope(id) });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() }),
@@ -1317,7 +1345,7 @@ export function WorkbenchSurface() {
                   const running = runState !== undefined && activeRunStatusGroups.has(runState.status);
                   const unread = unreadSessionIds.has(session.id);
                   return (
-                    <Link
+                    <div
                       className={[
                         "session-row",
                         session.id === sessionId ? "selected" : "",
@@ -1325,29 +1353,68 @@ export function WorkbenchSurface() {
                         unread ? "unread" : "",
                       ].filter(Boolean).join(" ")}
                       key={session.id}
-                      onClick={() => {
-                        setUnreadSessionIds((current) => {
-                          if (!current.has(session.id)) return current;
-                          const next = new Set(current);
-                          next.delete(session.id);
-                          return next;
-                        });
-                      }}
-                      params={{ sessionId: session.id }}
-                      to="/cockpit-v2/work/$sessionId"
                     >
-                      <strong>{session.title}</strong>
-                      <span>
-                        {session.default_harness_id ?? "echo"} · {session.default_api_mode ?? "v2"}
-                      </span>
-                      {running ? (
-                        <span aria-label={message(locale, "running")} className="session-status-icon running-spinner" />
-                      ) : unread ? (
-                        <span aria-label={message(locale, "unreadSession")} className="session-status-icon unread-dot" />
-                      ) : (
-                        <time>{formatTimestamp(session.updated_at, locale)}</time>
-                      )}
-                    </Link>
+                      <Link
+                        className="session-row-link"
+                        onClick={() => {
+                          setUnreadSessionIds((current) => {
+                            if (!current.has(session.id)) return current;
+                            const next = new Set(current);
+                            next.delete(session.id);
+                            return next;
+                          });
+                        }}
+                        params={{ sessionId: session.id }}
+                        to="/cockpit-v2/work/$sessionId"
+                      >
+                        <strong>{session.title}</strong>
+                        <span>
+                          {session.default_harness_id ?? "echo"} · {session.default_api_mode ?? "v2"}
+                        </span>
+                        {running ? (
+                          <span aria-label={message(locale, "running")} className="session-status-icon running-spinner" />
+                        ) : unread ? (
+                          <span aria-label={message(locale, "unreadSession")} className="session-status-icon unread-dot" />
+                        ) : (
+                          <time>{formatTimestamp(session.updated_at, locale)}</time>
+                        )}
+                      </Link>
+                      <div className="session-row-actions">
+                        <button
+                          aria-label={`${message(locale, "archiveSession")}: ${session.title}`}
+                          disabled={changeSession.isPending}
+                          onClick={() => {
+                            changeSession.reset();
+                            setSessionConfirmation({
+                              action: "archive",
+                              id: session.id,
+                              title: session.title,
+                            });
+                          }}
+                          title={message(locale, "archiveSession")}
+                          type="button"
+                        >
+                          <ArchiveSessionIcon />
+                        </button>
+                        <button
+                          aria-label={`${message(locale, "deleteSession")}: ${session.title}`}
+                          className="danger"
+                          disabled={changeSession.isPending}
+                          onClick={() => {
+                            changeSession.reset();
+                            setSessionConfirmation({
+                              action: "delete",
+                              id: session.id,
+                              title: session.title,
+                            });
+                          }}
+                          title={message(locale, "deleteSession")}
+                          type="button"
+                        >
+                          <DeleteSessionIcon />
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </section>
@@ -1370,9 +1437,18 @@ export function WorkbenchSurface() {
       <main className="work-canvas">
         {sessionId === undefined ? (
           <div className="empty-work-canvas">
-            <span className="opening-session-spinner" aria-hidden="true" />
-            <h1>{message(locale, "openingSession")}</h1>
-            {createSession.isError ? (
+            {routeSearch.fromSessionAction === true ? (
+              <>
+                <h1>{message(locale, "noSessionSelected")}</h1>
+                <p>{message(locale, "noSessionSelectedDescription")}</p>
+              </>
+            ) : (
+              <>
+                <span className="opening-session-spinner" aria-hidden="true" />
+                <h1>{message(locale, "openingSession")}</h1>
+              </>
+            )}
+            {routeSearch.fromSessionAction !== true && createSession.isError ? (
               <button
                 onClick={() => createSession.mutate({ kind: "backend-defaults" })}
                 type="button"

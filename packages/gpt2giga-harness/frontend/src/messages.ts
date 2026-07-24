@@ -89,6 +89,9 @@ const catalogs = {
     openOriginal: "Open original",
     headlessApi: "Headless API",
     nativeCli: "Native CLI session",
+    noSessionSelected: "No session selected",
+    noSessionSelectedDescription:
+      "Choose an existing session or create a new one when you are ready.",
     noWorkspaceFiles: "No safe matching workspace files.",
     previewExecution: "Preview execution",
     previewExecutionBlocked: "The selected plan is blocked before execution.",
@@ -679,6 +682,9 @@ const catalogs = {
     directChatHint: "Вызывает выбранный маршрут модели без workspace-цикла агента разработки.",
     headlessApi: "Headless API",
     nativeCli: "Нативная CLI-сессия",
+    noSessionSelected: "Сессия не выбрана",
+    noSessionSelectedDescription:
+      "Выберите существующую сессию или создайте новую, когда будете готовы.",
     noWorkspaceFiles: "Безопасные совпадающие файлы workspace не найдены.",
     previewExecution: "Предпросмотр выполнения",
     previewExecutionBlocked: "Выбранный план заблокирован до выполнения.",
