@@ -3,6 +3,7 @@ import { Link, useRouterState, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchCockpit, mutateCockpit } from "../api";
+import { IntegrationVisual } from "../components/IntegrationVisual";
 import { LoadingRows, StatusBadge } from "../components/OperationalSurface";
 import {
   extensionPackCatalogOptions,
@@ -210,7 +211,7 @@ export function IntegrationsSurface() {
             <div className="error-state">{message(locale, "boundedDataUnavailable")}</div>
           ) : visibleItems.length === 0 ? (
             <div className="plugin-empty-state">
-              <PluginItemIcon category={category === "all" ? "plugins" : category} />
+              <IntegrationVisual category={category === "all" ? "plugins" : category} />
               <strong>{message(locale, "noPluginsFound")}</strong>
               <span>{message(locale, "noPluginsFoundHint")}</span>
             </div>
@@ -238,7 +239,7 @@ export function IntegrationsSurface() {
             />
           ) : (
             <div className="plugin-detail-empty">
-              <PluginItemIcon category="plugins" />
+              <IntegrationVisual category="plugins" />
               <h2>{message(locale, "selectPlugin")}</h2>
               <p>{message(locale, "selectPluginHint")}</p>
             </div>
@@ -281,7 +282,12 @@ function PluginRow({
       search={{ selected: item.id }}
       to={categoryPaths[category]}
     >
-      <PluginItemIcon category={item.category} />
+      <IntegrationVisual
+        category={item.category}
+        label={`${item.title} ${typeLabel(locale, item.category)}`}
+        packageId={item.packageId}
+        title={item.title}
+      />
       <div className="plugin-row-copy">
         <div>
           <strong>{item.title}</strong>
@@ -349,7 +355,12 @@ function PluginDetails({
         <CloseIcon />
       </Link>
       <div className="plugin-detail-heading">
-        <PluginItemIcon category={item.category} />
+        <IntegrationVisual
+          category={item.category}
+          label={`${item.title} ${typeLabel(locale, item.category)}`}
+          packageId={item.packageId}
+          title={item.title}
+        />
         <div>
           <h2>{item.title}</h2>
           <span className="plugin-type-label">{typeLabel(locale, item.category)}</span>
@@ -1275,34 +1286,12 @@ function sourceForManifest(manifest: Record<string, unknown> | null | undefined)
   return "git";
 }
 
-function PluginItemIcon({ category }: { category: PluginItemCategory }) {
-  if (category === "skills") {
-    return <span className="plugin-item-icon skills" aria-hidden="true"><SparklesIcon /></span>;
-  }
-  if (category === "mcp") {
-    return <span className="plugin-item-icon mcp" aria-hidden="true"><CubeIcon /></span>;
-  }
-  return <span className="plugin-item-icon plugins" aria-hidden="true"><PluginIcon /></span>;
-}
-
 function SearchIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>;
 }
 
 function CloseIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>;
-}
-
-function SparklesIcon() {
-  return <svg viewBox="0 0 24 24"><path d="m12 3 1.3 4.2L17.5 9l-4.2 1.8L12 15l-1.3-4.2L6.5 9l4.2-1.8L12 3Z" /><path d="m18 14 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z" /></svg>;
-}
-
-function CubeIcon() {
-  return <svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" /><path d="m4 7.5 8 4.5 8-4.5M12 12v9" /></svg>;
-}
-
-function PluginIcon() {
-  return <svg viewBox="0 0 24 24"><path d="M8.5 4v4.5H4v7h4.5V20h7v-4.5H20v-7h-4.5V4h-7Z" /><path d="M11 4v3M13 17v3M4 12h3M17 12h3" /></svg>;
 }
 
 function categoryLabel(locale: "en" | "ru", category: PluginCategory) {

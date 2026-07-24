@@ -86,7 +86,7 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 3px solid
 .primary-rail { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; align-items: stretch; background: var(--rail); color: var(--rail-text); padding: 18px 10px 14px; z-index: 20; }
 .brand-mark { width: 42px; height: 42px; margin: 0 auto 28px; display: grid; place-items: center; border: 1px solid #c8d0d9; border-radius: 11px; background: #fff; box-shadow: 0 1px 2px #05080c33, inset 0 0 0 1px #ffffff; text-decoration: none; }
 .brand-mark:hover { border-color: #ffffff; box-shadow: 0 0 0 3px #ffffff1f, 0 2px 5px #05080c40; }
-.brand-mark img { display: block; width: 30px; height: 30px; object-fit: contain; }
+.brand-mark picture, .brand-mark img { display: block; width: 30px; height: 30px; object-fit: contain; }
 .primary-rail nav { display: grid; gap: 5px; }
 .rail-link { min-height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border-radius: 9px; color: var(--rail-icon); text-decoration: none; font-size: 10px; font-weight: 650; letter-spacing: 0.01em; transition: background-color 140ms ease, color 140ms ease; }
 .rail-link > span:last-child { width: 100%; min-width: 0; overflow-wrap: anywhere; text-align: center; text-wrap: balance; line-height: 1.15; }
@@ -843,7 +843,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .plugin-item-icon.mcp { background: #2e9e98; }
 .plugin-item-icon.plugins { background: #355eaa; }
 .plugin-item-icon svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.plugin-item-icon.skills svg { fill: color-mix(in srgb, currentColor 14%, transparent); }
+.plugin-item-icon.monogram { font-size: 14px; font-weight: 800; letter-spacing: .04em; }
 .plugin-row-copy { min-width: 0; display: grid; gap: 5px; }
 .plugin-row-copy > div { min-width: 0; display: flex; align-items: center; gap: 8px; }
 .plugin-row-copy strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }

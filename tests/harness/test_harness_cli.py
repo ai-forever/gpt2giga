@@ -85,7 +85,8 @@ def test_cli_version_reports_distribution_version(capsys):
 
     assert raised.value.code == 0
     assert (
-        capsys.readouterr().out == f"gpt2giga-harness {version('gpt2giga-harness')}\n"
+        capsys.readouterr().out
+        == f"GigaLoom {version('gpt2giga-harness')} (gpt2giga-harness)\n"
     )
 
 
@@ -110,7 +111,8 @@ def test_console_entrypoint_reports_version_without_importing_full_cli(
 
     assert "gpt2giga_harness.cli" not in sys.modules
     assert (
-        capsys.readouterr().out == f"gpt2giga-harness {version('gpt2giga-harness')}\n"
+        capsys.readouterr().out
+        == f"GigaLoom {version('gpt2giga-harness')} (gpt2giga-harness)\n"
     )
 
 

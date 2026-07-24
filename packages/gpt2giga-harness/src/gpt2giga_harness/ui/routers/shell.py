@@ -147,7 +147,10 @@ def create_shell_router(security: HarnessUISecurity) -> APIRouter:
         media_types = {
             "app.css": "text/css; charset=utf-8",
             "app.js": "text/javascript; charset=utf-8",
-            "favicon.ico": "image/vnd.microsoft.icon",
+            "brand/gigaloom-mark.svg": "image/svg+xml",
+            "brand/gigaloom-mark-dark.svg": "image/svg+xml",
+            "brand/gigaloom-mask.svg": "image/svg+xml",
+            "brand/gigaloom.webmanifest": "application/manifest+json",
         }
         media_type = media_types.get(asset_name)
         if media_type is None:

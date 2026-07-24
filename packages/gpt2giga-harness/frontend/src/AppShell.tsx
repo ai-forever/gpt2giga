@@ -100,7 +100,7 @@ export function AppShell() {
     <PreferencesContext.Provider value={{ preferences, setLocale, setTheme }}>
       <div className="cockpit-shell">
       <aside className="primary-rail">
-        <Link className="brand-mark" to="/cockpit-v2/work" aria-label="gpt2giga Cockpit V2">
+        <Link className="brand-mark" to="/cockpit-v2/work" aria-label="GigaLoom">
           <PrimaryRailBrand />
         </Link>
         <nav aria-label="Primary navigation">

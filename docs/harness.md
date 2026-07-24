@@ -14,6 +14,24 @@ one place to run a task through direct GigaChat, Codex CLI, Claude Code, Gemini
 CLI, or a plugin harness; compare the results; inspect what happened; and decide
 which changes are allowed back into your project.
 
+The product name shown by the Web UI, TUI, and human-facing CLI output is
+**GigaLoom**. The `giga` command and `gpt2giga-harness` distribution names stay
+unchanged for compatibility.
+
+### Visual identity and icon policy
+
+The GigaLoom loom mark is original project artwork and is not copied from or
+derived from GigaChat branding. Its canonical source is
+`packages/gpt2giga-harness/branding/gigaloom-mark.svg`; the repository license
+governs that source. Run
+`node packages/gpt2giga-harness/branding/generate-assets.mjs` to reproduce its
+light, dark, mask, favicon, manifest, packaged-UI, and documentation variants.
+
+Skills, Plugins, and MCP use curated local pictograms. Unknown integrations use
+a deterministic text monogram. GigaLoom does not fetch remote icons, so catalog
+rendering does not grant an external origin network, tracking, SVG, or content
+authority.
+
 The Harness is not another model and it does not replace the compatibility
 gateway or the agent CLIs. It coordinates them and keeps a normalized local
 record of runs, approvals, artifacts, and reusable project automation.

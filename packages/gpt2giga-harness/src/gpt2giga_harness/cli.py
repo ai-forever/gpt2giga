@@ -321,7 +321,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"gpt2giga-harness {__version__}",
+        version=f"GigaLoom {__version__} (gpt2giga-harness)",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -3004,9 +3004,7 @@ def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
                 "mutating APIs are disabled."
             )
         print(f"Warning: {warning}", file=sys.stderr)
-    print(
-        f"Starting gpt2giga Unified Harness UI at http://{config.ui_host}:{config.ui_port}/"
-    )
+    print(f"Starting GigaLoom UI at http://{config.ui_host}:{config.ui_port}/")
     worker_processes = (
         _start_ui_workers(config, worker_count=args.worker_count)
         if args.start_worker

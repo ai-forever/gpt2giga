@@ -66,7 +66,7 @@ manifest = load_cockpit_v2_manifest()
 assert manifest.entry == "index.html"
 assert any(name.startswith("assets/workbench-") for name in manifest.assets)
 assert any(name.startswith("assets/raw-evidence-") for name in manifest.assets)
-assert "gpt2giga Harness — Cockpit V2" in load_cockpit_v2_shell()
+assert "<title>GigaLoom</title>" in load_cockpit_v2_shell()
 """
     env = os.environ.copy()
     env["PYTHONPATH"] = str(installed_root)

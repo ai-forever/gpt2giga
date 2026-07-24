@@ -1,49 +1,49 @@
 {
   "assets": {
-    "assets/automation-bjqCl5bz.js": {
+    "assets/automation-CkrFLfEs.js": {
       "bytes": 18468,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "2b5bfeafab36ec99314a914d2479ccae5049c59c6dee613973965e041ea06886"
+      "sha256": "1b32359127a379df59158ff881510f6b65e18d04f66aab0efba2161609e3b128"
     },
-    "assets/diff-D9eVKe2k.js": {
+    "assets/diff-CBMPdgFr.js": {
       "bytes": 288,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "860bfa1b014c3cc1658aa2a3f5d31c6bdcbd0d6a3241668de1b81134b000ea63"
+      "sha256": "62afe901c16bd0a2d6ee5584d8c18d9d1eedec12889debc9499bc3a42bd020a0"
     },
-    "assets/editor-D_8TPjsh.js": {
+    "assets/editor-D9P12wep.js": {
       "bytes": 294,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "f93738dd2b7e63d6ad043180e7244eff03983a9015f0fcaf3e688dc439e620a4"
+      "sha256": "bc318bfc1d4cdb7d8e71973b5af257f049883c2bdecf09047f1619bd0dc86b80"
     },
-    "assets/evaluation-Coi8HhR5.js": {
+    "assets/evaluation-Xjo48gOC.js": {
       "bytes": 20258,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "38d56ea339e21350b4282736ed0de7b90ecae370049baafdbdc6e66e733bd60f"
+      "sha256": "90ef58bcdbd9eed94eeefdbcd9825718904516ff4e7906f3979a01635dad744b"
     },
-    "assets/InboxDrawer-DUlpvXfb.js": {
+    "assets/InboxDrawer-DdGauoAN.js": {
       "bytes": 4950,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "dfa4529f385eb1ddd75e79a147fe5c18228958a00aba1a8ec11b73a1740757b8"
+      "sha256": "4fef5e2a9c8bdbd64b3ca97609f8f5466679ec624a491cf40f78b99f4c113ced"
     },
-    "assets/index-Cc2DzNQW.css": {
-      "bytes": 98468,
+    "assets/index-BtcYoIdd.css": {
+      "bytes": 98483,
       "media_type": "text/css; charset=utf-8",
-      "sha256": "3ad49c96e5a5684f3e566fc72f3b52115351267a5fe2b9d657ff065908bba661"
+      "sha256": "c20938073bf13c6e9d1091227b4b24f8a90e3df5293ee844a80088a7012ec358"
     },
-    "assets/index-wvEkmQQj.js": {
-      "bytes": 349293,
+    "assets/index-CwviQgy5.js": {
+      "bytes": 349456,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "a2999a5cf46999d535b96e1e312fe771781b970f4e64f9f23d14d0ab85dcdf89"
+      "sha256": "041c8c1595842fce89f28ac5ade8b9e27ee9a6ef6a7c1fb7c47a8a36dd18c061"
     },
-    "assets/InspectorFrame-DK0qUpND.js": {
+    "assets/InspectorFrame-CtE02TWb.js": {
       "bytes": 3952,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "a768e51d1e7f648dfb1f2cb3a38499a0181b9c166bd94dfab40af9f187b612e7"
+      "sha256": "fff945b0c643c6c4977dabbe82c9cc657aadd06595c830500cb434f59a284d67"
     },
-    "assets/integrations-C_rskLME.js": {
-      "bytes": 51871,
+    "assets/integrations-yAZ2hYJy.js": {
+      "bytes": 52755,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "210fb99317fea17f2024f6b76b2d65931caf66fa0eb0d9dab164c77482332217"
+      "sha256": "6569f3544ac84c8e75de749f9b590aaef936312a85da8facbc59121ad5877784"
     },
     "assets/jsx-runtime-DUAcabCT.js": {
       "bytes": 1066,
@@ -155,10 +155,10 @@
       "media_type": "text/javascript; charset=utf-8",
       "sha256": "2b7d5e179f698a4dbe5505a28ac45909e1a9dde85ee4dc2c5bb32e97dc7988e3"
     },
-    "assets/markdown-DUUPcXmm.js": {
+    "assets/markdown-CByRDiEx.js": {
       "bytes": 952,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "c4c257a25420dcbe6539fb5cab3dc3d5c1360bcfab7fc4bd327fb3fa0f993fd7"
+      "sha256": "0a7ce4cffa5102818f58176177ee153d40126c66d6bafe6e774b01ff8e706f22"
     },
     "assets/markdown-renderer-C96Ys9PE.js": {
       "bytes": 609643,
@@ -170,30 +170,30 @@
       "media_type": "text/css; charset=utf-8",
       "sha256": "6f103585fe43cd57a3ea6d5d1567154b80b835ac57346343b643d1fd3c833a66"
     },
-    "assets/raw-evidence-BVSZEgmT.js": {
+    "assets/raw-evidence--KmQgl57.js": {
       "bytes": 309,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "3277bfa84be5c35c7a466902876a807386c8a9a11eecf845621c2741eebdf846"
+      "sha256": "c5fcae760c493db13f4ffb522246c04bab121dad3a39330fa4d617cd2e24ec27"
     },
     "assets/react-DbyrFoBd.js": {
       "bytes": 7527,
       "media_type": "text/javascript; charset=utf-8",
       "sha256": "94e5cf7525bf06257ed820655b6034fbb97c989bf9dd60bd997fe902a4d37f43"
     },
-    "assets/remaining-request-graph-CyE61wey.js": {
+    "assets/remaining-request-graph-BKcgshIm.js": {
       "bytes": 6132,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "2b5d8e0c8b2928a4b5c635d600cdf94805d4bbf683fd74ae4b85d48597a82736"
+      "sha256": "e5d49488b3968e3800d15dd6c959c6f8039615312d604b94df342ce071158b49"
     },
-    "assets/runs-Bo46tzbU.js": {
+    "assets/runs-WG1FeR_T.js": {
       "bytes": 20325,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "5121fee9c9109a897f7f9a17e365fb869ec444308ab282abe8910a019380ae4d"
+      "sha256": "fd918d0730365535b87fab80ea250585df81897b610c012d99aee40ad66fdb4f"
     },
-    "assets/settings-Bhd4i_Sj.js": {
+    "assets/settings-DQNTO_Fb.js": {
       "bytes": 23020,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "0fc6f90f7e5fce27ab98dfe400c5c35e29b7d12ff1e2376bc52dccb87aa162dc"
+      "sha256": "ad8ecf96ca9f736a146ad245f4137bc38bfbcc61631f780ef240e5b9655d7011"
     },
     "assets/stream-store-BedYT5_w.js": {
       "bytes": 4163,
@@ -205,37 +205,57 @@
       "media_type": "text/javascript; charset=utf-8",
       "sha256": "9a8259a4c8b72b895f82a53afd3f561719541f21a2b1210fdc219c476781d96c"
     },
-    "assets/terminal-lMZhYfKR.js": {
+    "assets/terminal-BWEK53QO.js": {
       "bytes": 300,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "dcdf5777d3631f21d34e4f8650ec45eac06ddc5a9e02a3fcfffc882a2e847a2b"
+      "sha256": "03b4a6b944b1fcb8d2f8c88a38bb347682bad2de114d7ecc0e28a93de77f6f54"
     },
-    "assets/useMutation-BbtIxwed.js": {
+    "assets/useMutation-BnLOHZ5D.js": {
       "bytes": 2280,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "f5ab33f26ae85fdfc8122cd604a6bc78ee4e95be406a411b9553867d2d10d707"
+      "sha256": "f68c0e58e40918fe526cb75d090ea6cae7352b0a88bee495bd9c1f8eccd92e68"
     },
-    "assets/workbench-execution-DIXL6zVS.js": {
-      "bytes": 5948,
-      "media_type": "text/javascript; charset=utf-8",
-      "sha256": "2e700f125503914fb9e187501a66ab74cd51f72da0edf1eb73b40a1a7ab582f7"
-    },
-    "assets/workbench-t0xLt44U.js": {
+    "assets/workbench-D3oH-otX.js": {
       "bytes": 62705,
       "media_type": "text/javascript; charset=utf-8",
-      "sha256": "9352185e74139252745911fbbde01c3649c10da7a5df58b9751df21180703e09"
+      "sha256": "c00d39a4416ef5f566d2f59f058fedb94ecb99b37124ff097d2c3f6eee9ea452"
+    },
+    "assets/workbench-execution-BcKuaHGE.js": {
+      "bytes": 5948,
+      "media_type": "text/javascript; charset=utf-8",
+      "sha256": "bd36c176a002704ba8c77de5f7be9bbd154491329c22eba404a4582de94a6f00"
+    },
+    "brand/gigaloom-mark-dark.svg": {
+      "bytes": 869,
+      "media_type": "image/svg+xml",
+      "sha256": "da414aee8a1069f181acc69a6765b0c407a51f01aa18aff8ffbf4b5f9be0e68b"
+    },
+    "brand/gigaloom-mark.svg": {
+      "bytes": 869,
+      "media_type": "image/svg+xml",
+      "sha256": "f08983e8108a63e6879b96e110582f67ba2e932840576df7864aa23ba6ac4732"
+    },
+    "brand/gigaloom-mask.svg": {
+      "bytes": 769,
+      "media_type": "image/svg+xml",
+      "sha256": "a368cefa4fc5c2adae9ec902c05b02b370602187fd9420ad27a876b45d74a83b"
+    },
+    "brand/gigaloom.webmanifest": {
+      "bytes": 537,
+      "media_type": "application/manifest+json",
+      "sha256": "2757a71268786f24c2c638f752acd6c2cc0d4efa7537b99d52b809f903ccdc7e"
     },
     "index.html": {
-      "bytes": 876,
+      "bytes": 1141,
       "media_type": "text/html; charset=utf-8",
-      "sha256": "e005a814ba20225f3b1943bf36125fe9bf045546ea9152ad6c8537636da12524"
+      "sha256": "1cf5790c0a3c8903b1783ddbf131c73717843bbee8fdf4906aa9a3274b3717ec"
     }
   },
   "entry": "index.html",
   "format_version": "gpt2giga-cockpit-v2-assets-v1",
   "initial": [
-    "assets/index-Cc2DzNQW.css",
-    "assets/index-wvEkmQQj.js",
+    "assets/index-BtcYoIdd.css",
+    "assets/index-CwviQgy5.js",
     "index.html"
   ]
 }
