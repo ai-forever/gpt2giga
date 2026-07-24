@@ -229,6 +229,7 @@ export interface MessageProjection {
   content: TextProjection;
   reasoning?: TextProjection;
   usage?: TokenUsageProjection;
+  attachments?: AttachmentSummary[];
 }
 
 export interface FullMessageResponse {
@@ -802,6 +803,7 @@ export interface AttachmentSummary {
   kind?: string;
   mime_type?: string | null;
   size_bytes: number;
+  url?: string;
   warnings?: string[];
 }
 

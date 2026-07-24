@@ -265,6 +265,13 @@ class HarnessSessionRunner:
         report = self.preflight(payload, session_id=session_id, durable=True)
         if report.hard_block:
             raise PreflightBlockedError(report)
+        attachments = self._load_attachments(
+            session.id,
+            options["attachment_ids"],
+        )
+        attachment_payloads = tuple(
+            _run_attachment_metadata(attachment) for attachment in attachments
+        )
         managed_mcp_snapshot = self._prepare_managed_mcp_snapshot(options)
         _validate_continuation_identity(session, options)
         message_id = new_id("msg")
@@ -289,6 +296,7 @@ class HarnessSessionRunner:
                 ),
                 "preflight": preflight_report_to_dict(report),
                 "durable": True,
+                **_message_attachment_metadata(attachment_payloads),
                 **(
                     {"managed_mcp_snapshot": managed_mcp_snapshot}
                     if managed_mcp_snapshot is not None
@@ -309,7 +317,10 @@ class HarnessSessionRunner:
                 harness_id=options["harness_id"],
                 model=options["model"],
                 api_mode=options["api_mode"],
-                metadata=edited_message_metadata(_edit_message_id(options)),
+                metadata={
+                    **_message_attachment_metadata(attachment_payloads),
+                    **edited_message_metadata(_edit_message_id(options)),
+                },
             )
         )
         updated_session = self.store.update_session(

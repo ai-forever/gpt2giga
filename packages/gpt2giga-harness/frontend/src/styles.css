@@ -378,6 +378,33 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .attachment-chip button { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; padding: 0; }
 .attachment-chip.skill-mention-chip { border-color: color-mix(in srgb, var(--accent) 38%, var(--border)); background: color-mix(in srgb, var(--accent-soft) 42%, var(--surface)); }
 .attachment-chip.skill-mention-chip > span:first-child, .attachment-chip.skill-mention-chip > span:nth-child(2) { color: var(--accent); }
+.attachment-gallery { min-width: 0; display: flex; flex-wrap: wrap; gap: 8px; margin: 9px 0 3px; }
+.composer > .attachment-gallery { overflow-x: auto; flex-wrap: nowrap; margin: 0; padding: 9px 11px 2px; }
+.attachment-preview-card, .attachment-file-card { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
+.attachment-preview-card { width: 148px; flex: 0 0 148px; }
+.attachment-preview-button { width: 100%; display: grid; overflow: hidden; border: 0; border-radius: inherit; background: transparent; padding: 0; color: var(--text); text-align: left; }
+.attachment-preview-button:hover, .attachment-preview-button:focus-visible { background: var(--accent-soft); }
+.attachment-preview-button img { width: 100%; height: 92px; display: block; background: var(--surface); object-fit: cover; }
+.attachment-preview-button > span { min-width: 0; display: grid; gap: 1px; padding: 7px 9px; }
+.attachment-preview-button strong, .attachment-preview-button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-preview-button strong { padding-right: 19px; font-size: 10px; }
+.attachment-preview-button small, .attachment-file-copy small { color: var(--muted); font-size: 8px; }
+.attachment-file-card { width: min(260px, 100%); }
+.attachment-file-copy { min-width: 0; display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: center; gap: 8px; padding: 9px 34px 9px 10px; }
+.attachment-file-copy > span:first-child { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px; background: var(--surface); color: var(--accent); }
+.attachment-file-copy > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.attachment-file-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.attachment-remove { position: absolute; top: 5px; right: 5px; z-index: 2; width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--border) 78%, transparent); border-radius: 50%; background: color-mix(in srgb, var(--surface) 92%, transparent); padding: 0; color: var(--text); box-shadow: 0 2px 8px #080c1238; backdrop-filter: blur(8px); }
+.attachment-remove:hover { border-color: var(--accent); color: var(--accent); }
+.attachment-lightbox { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; background: #080b10d9; padding: clamp(12px, 3vw, 32px); backdrop-filter: blur(8px); }
+.attachment-lightbox-content { width: min(1100px, 100%); max-height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 10px; border: 1px solid color-mix(in srgb, var(--border) 75%, #fff); border-radius: 14px; background: var(--surface); padding: 12px; box-shadow: 0 28px 90px #000a; }
+.attachment-lightbox-content header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.attachment-lightbox-content header > span { min-width: 0; display: grid; gap: 2px; }
+.attachment-lightbox-content header strong, .attachment-lightbox-content header small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-lightbox-content header strong { font-size: 12px; }.attachment-lightbox-content header small { color: var(--muted); font-size: 9px; }
+.attachment-lightbox-content header button { width: 32px; height: 32px; flex: none; display: grid; place-items: center; padding: 0; font-size: 19px; }
+.attachment-lightbox-content > img { width: 100%; max-height: calc(100vh - 170px); display: block; border-radius: 9px; background: #0b0e13; object-fit: contain; }
+.attachment-lightbox-content > a { justify-self: end; color: var(--accent); font-size: 11px; font-weight: 700; text-decoration: none; }
 .preview-execution { display: grid; gap: 3px; border-bottom: 1px solid color-mix(in srgb, var(--success) 35%, var(--border)); background: color-mix(in srgb, var(--success) 8%, var(--surface)); padding: 9px 12px; color: var(--text); font-size: 11px; }
 .preview-execution.blocked { border-color: color-mix(in srgb, var(--danger) 42%, var(--border)); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }.preview-execution small { color: var(--muted); font-size: 9px; }
 .preview-execution .permission-simulation-summary { overflow-wrap: anywhere; color: var(--text-secondary); }
@@ -587,6 +614,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .compact-control { min-width: 88px; }
   .model-control { min-width: 125px; }
   .message-entry { max-width: 94%; }
+  .attachment-preview-card { width: 124px; flex-basis: 124px; }
+  .attachment-preview-button img { height: 78px; }
+  .attachment-lightbox { padding: 8px; }
+  .attachment-lightbox-content { border-radius: 11px; padding: 9px; }
+  .attachment-lightbox-content > img { max-height: calc(100vh - 150px); }
   .advanced-config-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .advanced-composer-panel { max-height: 310px; }
   .plus-menu { width: 220px; }

@@ -7,8 +7,10 @@ import {
 } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import {
+  type AttachmentSummary,
   type AttachmentUploadResponse,
   deleteCockpit,
   type EnvironmentCommitApplyResponse,
@@ -33,6 +35,7 @@ import {
   type TokenUsageProjection,
   withQuery,
 } from "../api";
+import { composerAttachments, isPreviewableImage } from "../attachment-model";
 import { MessageMarkdown } from "../message-markdown";
 import { generatedFileProjection } from "../generated-image";
 import { projectEnvironment, type EnvironmentView } from "../environment-model";
@@ -522,6 +525,13 @@ export function WorkbenchSurface() {
     () => projectActiveMessageTimeline(messages.data?.messages ?? []),
     [messages.data?.messages],
   );
+  const draftAttachments = useMemo(
+    () => composerAttachments(
+      attachments.data?.attachments ?? [],
+      messages.data?.messages ?? [],
+    ),
+    [attachments.data?.attachments, messages.data?.messages],
+  );
   const latestUserMessageId = advancedConfig.executionTransport === "native_terminal"
     ? undefined
     : latestEditableUserMessageId(activeMessages);
@@ -776,7 +786,7 @@ export function WorkbenchSurface() {
       }
       const payload = {
         api_mode: runConfig.apiMode,
-        attachment_ids: attachments.data?.attachments.map((attachment) => attachment.id) ?? [],
+        attachment_ids: draftAttachments.map((attachment) => attachment.id),
         builtin_tools: runConfig.apiMode === "v2" ? builtinTools : [],
         capability: advancedConfig.capability,
         extra: {
@@ -1481,6 +1491,9 @@ export function WorkbenchSurface() {
                     {item.reasoning?.text ? (
                       <ReasoningDisclosure text={item.reasoning.text} locale={locale} />
                     ) : null}
+                    {item.attachments && item.attachments.length > 0 ? (
+                      <AttachmentGallery attachments={item.attachments} locale={locale} />
+                    ) : null}
                     <MessageMarkdown source={item.content.text} />
                     {item.content.truncated ? <span>{message(locale, "boundedPreview")}</span> : null}
                   </article>
@@ -1583,7 +1596,7 @@ export function WorkbenchSurface() {
                   )}
                 </div>
               )}
-              {(attachments.data?.attachments.length ?? 0) > 0 || selectedSkills.length > 0 ? (
+              {selectedSkills.length > 0 ? (
                 <div className="attachment-chips" aria-label={message(locale, "attachedFiles")}>
                   {selectedSkills.map((skill) => (
                     <span className="attachment-chip skill-mention-chip" key={skill.id}>
@@ -1597,22 +1610,15 @@ export function WorkbenchSurface() {
                       >×</button>
                     </span>
                   ))}
-                  {attachments.data?.attachments.map((attachment) => (
-                    <span className="attachment-chip" key={attachment.id}>
-                      <span aria-hidden="true">{attachment.mime_type?.startsWith("image/") ? "▧" : "◇"}</span>
-                      <span title={attachment.workspace_path ?? attachment.filename}>
-                        {attachment.workspace_path ? `@${attachment.workspace_path}` : attachment.filename}
-                      </span>
-                      <small>{formatBytes(attachment.size_bytes)}</small>
-                      <button
-                        aria-label={`${message(locale, "removeAttachment")} ${attachment.filename}`}
-                        disabled={removeAttachment.isPending}
-                        onClick={() => removeAttachment.mutate(attachment.id)}
-                        type="button"
-                      >×</button>
-                    </span>
-                  ))}
                 </div>
+              ) : null}
+              {draftAttachments.length > 0 ? (
+                <AttachmentGallery
+                  attachments={draftAttachments}
+                  locale={locale}
+                  onRemove={(attachmentId) => removeAttachment.mutate(attachmentId)}
+                  removePending={removeAttachment.isPending}
+                />
               ) : null}
               <textarea
                 aria-label={message(locale, "composerPlaceholder")}
@@ -2298,6 +2304,110 @@ function ReasoningDisclosure({
       <summary>{message(locale, "reasoningTrace")}</summary>
       <p>{text}</p>
     </details>
+  );
+}
+
+function AttachmentGallery({
+  attachments,
+  locale,
+  onRemove,
+  removePending = false,
+}: {
+  attachments: readonly AttachmentSummary[];
+  locale: "en" | "ru";
+  onRemove?: (attachmentId: string) => void;
+  removePending?: boolean;
+}) {
+  const [activeAttachment, setActiveAttachment] = useState<AttachmentSummary | null>(null);
+
+  useEffect(() => {
+    if (activeAttachment === null) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActiveAttachment(null);
+    };
+    globalThis.addEventListener("keydown", closeOnEscape);
+    return () => globalThis.removeEventListener("keydown", closeOnEscape);
+  }, [activeAttachment]);
+
+  return (
+    <>
+      <div className="attachment-gallery" aria-label={message(locale, "attachedFiles")}>
+        {attachments.map((attachment) => (
+          <div
+            className={isPreviewableImage(attachment) ? "attachment-preview-card" : "attachment-file-card"}
+            key={attachment.id}
+          >
+            {isPreviewableImage(attachment) ? (
+              <button
+                aria-label={`${message(locale, "openAttachment")} ${attachment.filename}`}
+                className="attachment-preview-button"
+                onClick={() => setActiveAttachment(attachment)}
+                type="button"
+              >
+                <img alt="" src={attachment.url} />
+                <span>
+                  <strong>{attachment.filename}</strong>
+                  <small>{formatBytes(attachment.size_bytes)}</small>
+                </span>
+              </button>
+            ) : (
+              <span className="attachment-file-copy">
+                <span aria-hidden="true">◇</span>
+                <span title={attachment.workspace_path ?? attachment.filename}>
+                  <strong>
+                    {attachment.workspace_path ? `@${attachment.workspace_path}` : attachment.filename}
+                  </strong>
+                  <small>{formatBytes(attachment.size_bytes)}</small>
+                </span>
+              </span>
+            )}
+            {onRemove === undefined ? null : (
+              <button
+                aria-label={`${message(locale, "removeAttachment")} ${attachment.filename}`}
+                className="attachment-remove"
+                disabled={removePending}
+                onClick={() => onRemove(attachment.id)}
+                type="button"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {activeAttachment !== null && isPreviewableImage(activeAttachment)
+        ? createPortal(
+            <div
+              aria-label={`${message(locale, "attachmentPreview")}: ${activeAttachment.filename}`}
+              aria-modal="true"
+              className="attachment-lightbox"
+              onClick={() => setActiveAttachment(null)}
+              role="dialog"
+            >
+              <div className="attachment-lightbox-content" onClick={(event) => event.stopPropagation()}>
+                <header>
+                  <span>
+                    <strong>{activeAttachment.filename}</strong>
+                    <small>{formatBytes(activeAttachment.size_bytes)}</small>
+                  </span>
+                  <button
+                    aria-label={message(locale, "closeAttachmentPreview")}
+                    onClick={() => setActiveAttachment(null)}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </header>
+                <img alt={activeAttachment.filename} src={activeAttachment.url} />
+                <a href={activeAttachment.url} rel="noreferrer" target="_blank">
+                  {message(locale, "openOriginal")} ↗
+                </a>
+              </div>
+            </div>,
+            globalThis.document.body,
+          )
+        : null}
+    </>
   );
 }
 

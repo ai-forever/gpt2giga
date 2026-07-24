@@ -261,6 +261,70 @@ def test_cockpit_message_projection_exposes_content_free_edit_branch_marker(tmp_
     assert "private" not in projected
 
 
+def test_cockpit_message_projection_exposes_safe_retained_attachments(tmp_path):
+    app = _app(tmp_path)
+    store = app.state.harness_session_store
+    session = store.create_session(title="image message")
+    run = _run(store, session.id)
+    store.append_message(
+        HarnessMessage(
+            id="msg_image",
+            session_id=session.id,
+            run_id=run.id,
+            role="user",
+            content="what is on this screenshot?",
+            created_at=utc_now(),
+            metadata={
+                "attachments": [
+                    {
+                        "id": "att_image",
+                        "filename": "screen.png",
+                        "kind": "image",
+                        "mime_type": "image/png",
+                        "size_bytes": 2048,
+                        "storage_path": "/private/blob",
+                        "secret": "not projected",
+                    },
+                    {
+                        "id": "att_workspace",
+                        "filename": "app.py",
+                        "kind": "workspace_file",
+                        "mime_type": "text/x-python",
+                        "size_bytes": 128,
+                        "workspace_path": "src/app.py",
+                    },
+                ],
+            },
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/cockpit/sessions/{session.id}/messages")
+
+    assert response.status_code == 200
+    projected = response.json()["messages"][0]
+    assert projected["attachments"] == [
+        {
+            "id": "att_image",
+            "filename": "screen.png",
+            "kind": "image",
+            "mime_type": "image/png",
+            "size_bytes": 2048,
+            "url": "/api/attachments/att_image",
+        },
+        {
+            "id": "att_workspace",
+            "filename": "app.py",
+            "kind": "workspace_file",
+            "mime_type": "text/x-python",
+            "size_bytes": 128,
+            "workspace_path": "src/app.py",
+        },
+    ]
+    assert "private" not in response.text
+    assert "secret" not in response.text
+
+
 def test_cockpit_run_summary_exposes_bounded_native_and_provider_identity(tmp_path):
     app = _app(tmp_path)
     store = app.state.harness_session_store
