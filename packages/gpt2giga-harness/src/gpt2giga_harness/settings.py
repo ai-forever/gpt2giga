@@ -15,6 +15,7 @@ from gpt2giga_harness.config import (
     DEFAULT_TITLE_MODEL,
     HarnessConfig,
 )
+from gpt2giga_harness.product_capabilities import legacy_mode_compatibility_receipt
 from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.secrets import (
     SecretReference,
@@ -38,6 +39,8 @@ SETTINGS_FIELDS = frozenset(
         "mode",
         "permission_profile",
         "stream",
+        "task_intent",
+        "authority",
         "workspace_policy",
     }
 )
@@ -52,6 +55,8 @@ class HarnessDefaults:
     default_title_model: str | None = DEFAULT_TITLE_MODEL
     default_api_mode: str = "v2"
     mode: str = "plan"
+    task_intent: str = "ask"
+    authority: str = "read_only"
     execution_transport: str = "native_structured"
     invocation_mode: str = "headless"
     workspace_policy: str = "auto"
@@ -100,6 +105,16 @@ class HarnessSettingsStore:
             if field in SETTINGS_FIELDS and field not in locked:
                 values[field] = value
                 sources[field] = "harness_settings"
+        if (
+            "mode" in stored
+            and "task_intent" not in stored
+            and "authority" not in stored
+        ):
+            legacy = legacy_mode_compatibility_receipt(stored["mode"])
+            values["task_intent"] = legacy["intent"]
+            values["authority"] = legacy["authority"]
+            sources["task_intent"] = "legacy_mode_alias"
+            sources["authority"] = "legacy_mode_alias"
         for field in locked:
             sources[field] = "environment"
         defaults = HarnessDefaults(**values)

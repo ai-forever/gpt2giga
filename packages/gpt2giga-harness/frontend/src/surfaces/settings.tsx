@@ -28,6 +28,8 @@ type DefaultsDraft = {
   execution_transport: string;
   invocation_mode: string;
   mode: string;
+  task_intent: "ask" | "review" | "change";
+  authority: "read_only" | "workspace_write";
   permission_profile: string;
   stream: boolean;
   workspace_policy: string;
@@ -454,11 +456,31 @@ export function SettingsSurface() {
                   ))}
                 </select>
               </label>
-              <label>{message(locale, "mode")}
-                <select value={draft.mode} onChange={(event) => setDraft({ ...draft, mode: event.target.value })}>
-                  <option value="plan">plan</option><option value="act">act</option>
+              <label>{message(locale, "intent")}
+                <select value={draft.task_intent} onChange={(event) => setDraft({
+                  ...draft,
+                  task_intent: event.target.value as DefaultsDraft["task_intent"],
+                })}>
+                  <option value="ask">{message(locale, "ask")}</option>
+                  <option value="review">{message(locale, "review")}</option>
+                  <option value="change">{message(locale, "change")}</option>
                 </select>
               </label>
+              <label>{message(locale, "authority")}
+                <select value={draft.authority} onChange={(event) => setDraft({
+                  ...draft,
+                  authority: event.target.value as DefaultsDraft["authority"],
+                })}>
+                  <option value="read_only">{message(locale, "readOnly")}</option>
+                  <option value="workspace_write">{message(locale, "workspaceWrite")}</option>
+                </select>
+              </label>
+              {data.harness_defaults.compatibility.mode === null ? null : (
+                <div className="runtime-owned-setting" role="status">
+                  <strong>{message(locale, "legacyModeWarningTitle")}</strong>
+                  <span>{message(locale, "legacyModeWarning")}</span>
+                </div>
+              )}
               <div className="runtime-owned-setting">
                 <strong>{message(locale, "streamRuntimeOwnedTitle")}</strong>
                 <span>{message(locale, "streamRuntimeOwned")}</span>
@@ -634,6 +656,8 @@ function toDraft(data: SettingsResponse): DefaultsDraft {
     execution_transport: current.execution_transport,
     invocation_mode: current.invocation_mode,
     mode: current.mode,
+    task_intent: current.task_intent,
+    authority: current.authority,
     permission_profile: current.permission_profile,
     stream: current.stream,
     workspace_policy: current.workspace_policy,

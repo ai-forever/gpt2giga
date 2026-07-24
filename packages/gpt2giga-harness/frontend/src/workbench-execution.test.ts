@@ -13,6 +13,7 @@ import {
   normalizeExecutionSelection,
   normalizeProductSelection,
   permissionSimulationHighlights,
+  resolveLegacyProductSelection,
   workbenchKindForHarness,
 } from "./workbench-execution";
 
@@ -82,6 +83,14 @@ describe("Workbench execution semantics", () => {
     expect(migrateLegacyProductSelection("edit", "coding_agent").authority).toBe(
       "workspace_write",
     );
+    expect(resolveLegacyProductSelection("act", "coding_agent")).toEqual({
+      selection: {
+        authority: "read_only",
+        intent: "ask",
+        kind: "coding_agent",
+      },
+      warning: "legacy_mode_unmapped_read_only",
+    });
     expect(legacyModeForProductSelection({
       authority: "read_only",
       intent: "change",

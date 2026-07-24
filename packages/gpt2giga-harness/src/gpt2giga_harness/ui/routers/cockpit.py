@@ -13,6 +13,9 @@ from urllib.parse import quote
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from gpt2giga_harness.product_capabilities import (
+    legacy_mode_compatibility_receipt,
+)
 from gpt2giga_harness.sessions.filesystem import FilesystemHarnessSessionStore
 from gpt2giga_harness.sessions.models import (
     HarnessMessage,
@@ -587,6 +590,33 @@ def _session_summary(session: HarnessSession) -> dict[str, Any]:
         "project_id": str(session.metadata.get("project_id") or "") or None,
         "workspace_bound": session.workspace is not None,
         "title_diagnostics": title_diagnostics(session),
+        "workbench_selection": _workbench_selection(session),
+    }
+
+
+def _workbench_selection(session: HarnessSession) -> dict[str, Any]:
+    retained = session.metadata.get("workbench_selection")
+    if isinstance(retained, Mapping) and retained.get("schema_version") == 1:
+        return {
+            "schema_version": 1,
+            "kind": retained.get("kind"),
+            "intent": retained.get("intent"),
+            "authority": retained.get("authority"),
+            "input_source": retained.get("input_source"),
+            "compatibility_warning": retained.get("compatibility_warning"),
+        }
+    legacy = legacy_mode_compatibility_receipt(session.default_mode)
+    return {
+        "schema_version": 1,
+        "kind": (
+            "direct_chat"
+            if session.default_harness_id == "direct-chat"
+            else "coding_agent"
+        ),
+        "intent": legacy["intent"],
+        "authority": legacy["authority"],
+        "input_source": "legacy_saved_state",
+        "compatibility_warning": legacy["warning"],
     }
 
 

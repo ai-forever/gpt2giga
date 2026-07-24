@@ -394,6 +394,46 @@ def test_sessions_api_start_run_returns_stream_urls_and_sse_replay():
     assert "run_finished" in text
 
 
+def test_session_selection_patch_persists_intent_and_authority_independently():
+    client = _client()
+    created = client.post(
+        "/api/sessions",
+        json={
+            "harness_id": "echo",
+            "workbench_kind": "direct_chat",
+            "task_intent": "change",
+            "authority": "read_only",
+        },
+    )
+    session_id = created.json()["session"]["id"]
+
+    updated = client.patch(
+        f"/api/sessions/{session_id}",
+        json={
+            "workbench_selection": {
+                "kind": "direct_chat",
+                "intent": "review",
+                "authority": "workspace_write",
+            }
+        },
+    )
+
+    assert updated.status_code == 200
+    session = updated.json()["session"]
+    assert session["default_mode"] == "read"
+    assert session["metadata"]["workbench_selection"] == {
+        "schema_version": 1,
+        "kind": "direct_chat",
+        "intent": "review",
+        "authority": "workspace_write",
+        "input_source": "product",
+        "compatibility_warning": None,
+    }
+    cockpit = client.get(f"/api/cockpit/sessions/{session_id}").json()["session"]
+    assert cockpit["workbench_selection"]["intent"] == "review"
+    assert cockpit["workbench_selection"]["authority"] == "workspace_write"
+
+
 def test_headless_run_uses_title_model_from_settings(tmp_path, monkeypatch):
     captured = {}
     requested = threading.Event()

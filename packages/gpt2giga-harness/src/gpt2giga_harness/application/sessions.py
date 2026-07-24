@@ -65,11 +65,50 @@ class SessionApplicationService:
         """Create one session from backend-owned defaults and client overrides."""
         defaults = self.settings_store.load().defaults
         harness_id = str(payload.get("harness_id") or defaults.default_harness_id)
-        if validate_harness:
-            self.runner.registry.get(harness_id)
+        try:
+            harness = self.runner.registry.get(harness_id)
+        except KeyError:
+            if validate_harness:
+                raise
+            harness = None
+        admission = None
+        if harness is not None:
+            admission_payload = dict(payload)
+            product_fields = {"workbench_kind", "task_intent", "authority"}
+            if not (product_fields & set(admission_payload)) and "mode" not in payload:
+                capabilities = {
+                    item.value for item in tuple(harness.spec().capabilities or ())
+                }
+                admission_payload.update(
+                    {
+                        "workbench_kind": (
+                            "coding_agent"
+                            if "agent_cli" in capabilities
+                            else "direct_chat"
+                        ),
+                        "task_intent": defaults.task_intent,
+                        "authority": defaults.authority,
+                    }
+                )
+            admission = admit_workbench_execution(
+                harness,
+                admission_payload,
+                configured_default=defaults.execution_transport,
+            )
         title = _optional_text(payload.get("title"))
         if title is None and title_from_turn:
             title = title_from_prompt(str(payload.get("prompt") or ""))
+        selection_metadata: dict[str, Any] = {}
+        if admission is not None:
+            compatibility = _mapping(admission.diagnostics.get("compatibility"))
+            selection_metadata["workbench_selection"] = {
+                "schema_version": 1,
+                "kind": admission.kind.value,
+                "intent": admission.intent.value,
+                "authority": admission.authority.value,
+                "input_source": admission.input_source,
+                "compatibility_warning": compatibility.get("warning"),
+            }
         return self.runner.create_session(
             title=title,
             workspace=_optional_text(payload.get("workspace")),
@@ -80,7 +119,12 @@ class SessionApplicationService:
                 else defaults.default_model
             ),
             default_api_mode=payload.get("api_mode") or defaults.default_api_mode,
-            default_mode=str(payload.get("mode") or defaults.mode),
+            default_mode=(
+                admission.mode
+                if admission is not None
+                else str(payload.get("mode") or defaults.mode)
+            ),
+            metadata=selection_metadata,
         )
 
     def prepare_turn_payload(

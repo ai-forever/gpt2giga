@@ -18,6 +18,14 @@ export interface SessionSummary {
   pinned: boolean;
   archived: boolean;
   tags?: string[];
+  workbench_selection?: {
+    schema_version: number;
+    kind: "coding_agent" | "direct_chat";
+    intent: "ask" | "review" | "change";
+    authority: "read_only" | "workspace_write";
+    input_source: string;
+    compatibility_warning: string | null;
+  };
 }
 
 export interface EnvironmentResponse {
@@ -660,6 +668,8 @@ export interface SettingsResponse {
     default_title_model: string | null;
     default_api_mode: string;
     mode: string;
+    task_intent: "ask" | "review" | "change";
+    authority: "read_only" | "workspace_write";
     execution_transport: string;
     invocation_mode: string;
     workspace_policy: string;
@@ -676,6 +686,12 @@ export interface SettingsResponse {
     sources: Record<string, string>;
     locked_fields: string[];
     change_effect: "new_runs";
+    compatibility: {
+      mode: {
+        warning: string;
+        value: string;
+      } | null;
+    };
   };
   workspace: {
     project_id: string;

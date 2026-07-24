@@ -235,6 +235,8 @@ def test_settings_defaults_persist_read_back_and_seed_new_sessions(tmp_path):
     assert body["defaults"]["default_harness_id"] == "direct-chat"
     assert body["defaults"]["default_title_model"] == "GigaChat-3-Lightning"
     assert body["defaults"]["execution_transport"] == "one_shot"
+    assert body["defaults"]["task_intent"] == "ask"
+    assert body["defaults"]["authority"] == "read_only"
     assert body["sources"]["default_harness_id"] == "harness_settings"
     assert body["change_effect"] == "new_runs"
     stored = tmp_path / "data" / "settings" / "defaults.json"
@@ -249,6 +251,9 @@ def test_settings_defaults_persist_read_back_and_seed_new_sessions(tmp_path):
     assert read_back["harness_defaults"]["default_title_model"] == (
         "GigaChat-3-Lightning"
     )
+    assert read_back["harness_defaults"]["compatibility"]["mode"]["warning"] == (
+        "legacy_mode_unmapped_read_only"
+    )
 
     created = client.post("/api/sessions", json={})
     assert created.status_code == 200
@@ -256,7 +261,15 @@ def test_settings_defaults_persist_read_back_and_seed_new_sessions(tmp_path):
     assert session["default_harness_id"] == "direct-chat"
     assert session["default_model"] == "GigaChat"
     assert session["default_api_mode"] == "v2"
-    assert session["default_mode"] == "act"
+    assert session["default_mode"] == "plan"
+    assert session["metadata"]["workbench_selection"] == {
+        "schema_version": 1,
+        "kind": "direct_chat",
+        "intent": "ask",
+        "authority": "read_only",
+        "input_source": "product",
+        "compatibility_warning": None,
+    }
 
 
 def test_settings_reject_invalid_harness_invocation_before_persistence(tmp_path):

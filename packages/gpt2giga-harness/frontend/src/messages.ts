@@ -99,6 +99,9 @@ const catalogs = {
     workspaceWrite: "Workspace write",
     advancedDiagnostics: "Advanced diagnostics",
     whyThisMode: "Why this mode",
+    legacyModeWarningTitle: "Legacy mode needs review",
+    legacyModeWarning:
+      "This saved mode was mapped to explicit intent and authority without increasing access. Review both selections before running.",
     downloadFile: "Download file",
     closeHtmlPreview: "Close HTML preview",
     closeAttachmentPreview: "Close attachment preview",
@@ -722,6 +725,9 @@ const catalogs = {
     workspaceWrite: "Запись в workspace",
     advancedDiagnostics: "Расширенная диагностика",
     whyThisMode: "Почему выбран этот режим",
+    legacyModeWarningTitle: "Проверьте устаревший режим",
+    legacyModeWarning:
+      "Сохранённый режим преобразован в явные намерение и полномочия без расширения доступа. Проверьте оба значения перед запуском.",
     headlessApi: "Headless API",
     nativeCli: "Нативная CLI-сессия",
     noSessionSelected: "Сессия не выбрана",

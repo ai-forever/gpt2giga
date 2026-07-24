@@ -60,7 +60,18 @@ An unknown value fails before execution. Compatibility aliases may be removed
 only after tracked callers, stored state, API fixtures, CLI documentation, and
 supported clients have migrated; one released compatibility window and an
 explicit removal notice are required. `plan` and `read` remain distinguishable
-until their callers and artifacts prove that collapsing them is safe.
+because current workflow receipts prove different artifacts: `plan` retains a
+planning artifact while `read` retains `review_findings`. Both still project
+`read_only`; artifact intent does not grant authority.
+
+Every accepted machine alias now emits a schema-v1 compatibility receipt with
+its intent, authority, artifact/router/state characterization, warning, and
+removal gate. Unknown saved values such as the former Settings value `act`
+resolve to `ask` + `read_only` with `legacy_mode_unmapped_read_only`; they are
+never silently treated as workspace-write. The earliest removal version is
+`1.0.0`, and removal additionally requires one released schema-v1 window plus
+zero tracked callers or saved state. The Python manifest and receipt are the
+source of truth; the golden request/receipt fixtures lock the machine contract.
 
 ## Consequences
 

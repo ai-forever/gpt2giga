@@ -15,6 +15,11 @@ from gpt2giga_harness.project import (
     load_project_state,
     resolve_project,
 )
+from gpt2giga_harness.product_capabilities import (
+    AuthorityLevel,
+    TaskIntent,
+    legacy_mode_compatibility_receipt,
+)
 from gpt2giga_harness.provider_settings import (
     ProviderRegistryConflict,
     ProviderSettingsNotFoundError,
@@ -118,6 +123,15 @@ def settings_read_model(
             "sources": dict(snapshot.sources),
             "locked_fields": list(snapshot.locked_fields),
             "change_effect": "new_runs",
+            "compatibility": {
+                "mode": (
+                    legacy_mode_compatibility_receipt(defaults.mode)
+                    if snapshot.sources.get("task_intent") == "legacy_mode_alias"
+                    or snapshot.sources.get("authority") == "legacy_mode_alias"
+                    or defaults.mode not in {"plan", "read", "edit"}
+                    else None
+                )
+            },
         },
         "workspace": {
             "project_id": project.id,
@@ -259,18 +273,32 @@ def update_settings_defaults(
     unknown = sorted(set(patch) - SETTINGS_FIELDS - {"expected_revision"})
     if unknown:
         raise _field_error({field: "unknown setting" for field in unknown})
+    normalized_patch = dict(patch)
+    candidate = {**asdict(current.defaults), **normalized_patch}
+    if {"task_intent", "authority"} & set(normalized_patch):
+        mode = _mode_for_product_defaults(
+            candidate.get("task_intent"),
+            candidate.get("authority"),
+        )
+        if mode is not None:
+            normalized_patch["mode"] = mode
+    elif "mode" in normalized_patch:
+        legacy = legacy_mode_compatibility_receipt(normalized_patch["mode"])
+        normalized_patch["task_intent"] = legacy["intent"]
+        normalized_patch["authority"] = legacy["authority"]
     locked = set(current.locked_fields)
     locked_changes = {
         field: "owned by the environment; restart with a new environment value"
-        for field in patch
-        if field in locked and getattr(current.defaults, field) != patch[field]
+        for field in normalized_patch
+        if field in locked
+        and getattr(current.defaults, field) != normalized_patch[field]
     }
     if locked_changes:
         raise HTTPException(
             status_code=409,
             detail={"code": "environment_owned", "field_errors": locked_changes},
         )
-    values = {**asdict(current.defaults), **dict(patch)}
+    values = {**asdict(current.defaults), **normalized_patch}
     field_errors = _validate_defaults(request, values)
     if field_errors:
         raise _field_error(field_errors)
@@ -335,8 +363,12 @@ def _validate_defaults(request: Request, values: Mapping[str, Any]) -> dict[str,
         errors.setdefault(
             "invocation_mode", f"{transport} requires headless invocation"
         )
-    if values.get("mode") not in {"plan", "act"}:
-        errors["mode"] = "expected plan or act"
+    if values.get("task_intent") not in {item.value for item in TaskIntent}:
+        errors["task_intent"] = "expected ask, review, or change"
+    if values.get("authority") not in {item.value for item in AuthorityLevel}:
+        errors["authority"] = "expected read_only or workspace_write"
+    if values.get("mode") not in {"plan", "read", "edit", "act"}:
+        errors["mode"] = "expected plan, read, or edit"
     if values.get("workspace_policy") not in {"auto", "current", "worktree"}:
         errors["workspace_policy"] = "expected auto, current, or worktree"
     try:
@@ -361,6 +393,17 @@ def _saved_defaults(snapshot: HarnessDefaultsSnapshot) -> dict[str, Any]:
         "locked_fields": list(snapshot.locked_fields),
         "change_effect": "new_runs",
     }
+
+
+def _mode_for_product_defaults(intent: Any, authority: Any) -> str | None:
+    """Project explicit product defaults onto the retained machine alias."""
+    if intent == TaskIntent.ASK.value:
+        return "plan"
+    if intent == TaskIntent.REVIEW.value:
+        return "read"
+    if intent == TaskIntent.CHANGE.value:
+        return "edit" if authority == AuthorityLevel.WORKSPACE_WRITE.value else "read"
+    return None
 
 
 def _field_error(errors: Mapping[str, str]) -> HTTPException:

@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from gpt2giga_harness.product_capabilities import (
@@ -12,8 +15,11 @@ from gpt2giga_harness.product_capabilities import (
     TransportCapability,
     admit_capability_request,
     capability_manifest,
+    legacy_mode_compatibility_receipt,
     migrate_legacy_capability_request,
 )
+
+FIXTURES = Path(__file__).parent / "fixtures" / "product_capabilities"
 
 
 def test_manifest_is_versioned_and_keeps_transport_out_of_task_vocabulary():
@@ -27,6 +33,11 @@ def test_manifest_is_versioned_and_keeps_transport_out_of_task_vocabulary():
     assert set(manifest["integration_lifecycle"]) == {
         item.value for item in IntegrationLifecycle
     }
+    assert [item["value"] for item in manifest["legacy_mode_receipts"]] == [
+        "plan",
+        "read",
+        "edit",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -75,6 +86,36 @@ def test_headless_does_not_guess_a_transport_and_unknown_values_fail_closed():
         )
     with pytest.raises(ProductCapabilityError, match="must be a boolean"):
         migrate_legacy_capability_request({"mode": "read", "stream": "false"})
+
+
+def test_legacy_mode_receipts_keep_intent_distinct_and_unknown_authority_safe():
+    plan = legacy_mode_compatibility_receipt("plan")
+    review = legacy_mode_compatibility_receipt("read")
+    unknown = legacy_mode_compatibility_receipt("act")
+
+    assert plan["authority"] == review["authority"] == "read_only"
+    assert plan["artifacts"] == ["plan"]
+    assert review["artifacts"] == ["review_findings"]
+    assert unknown["status"] == "ambiguous"
+    assert unknown["intent"] == "ask"
+    assert unknown["authority"] == "read_only"
+    assert unknown["warning"] == "legacy_mode_unmapped_read_only"
+    assert unknown["removal"] == {
+        "earliest_version": "1.0.0",
+        "condition": (
+            "one_released_schema_v1_window_and_zero_tracked_callers_or_saved_state"
+        ),
+    }
+
+
+def test_legacy_mode_request_receipts_match_golden_fixtures():
+    fixtures = json.loads(
+        (FIXTURES / "legacy_mode_aliases.json").read_text(encoding="utf-8")
+    )
+
+    assert [
+        legacy_mode_compatibility_receipt(item["request"]["mode"]) for item in fixtures
+    ] == [item["receipt"] for item in fixtures]
 
 
 def test_read_only_authority_rejects_write_tool_before_admission():

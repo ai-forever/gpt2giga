@@ -3,6 +3,11 @@ export interface ConfiguredSessionDefaults {
   harnessId: string;
   mode: string;
   model: string;
+  productSelection: {
+    authority: "read_only" | "workspace_write";
+    intent: "ask" | "review" | "change";
+    kind: "coding_agent" | "direct_chat";
+  };
 }
 
 export type SessionCreationIntent =
@@ -39,6 +44,9 @@ export function sessionCreationPayload(
     harness_id: intent.config.harnessId,
     mode: intent.config.mode,
     model: intent.config.model || null,
+    authority: intent.config.productSelection.authority,
+    task_intent: intent.config.productSelection.intent,
+    workbench_kind: intent.config.productSelection.kind,
     workspace: ".",
   };
 }

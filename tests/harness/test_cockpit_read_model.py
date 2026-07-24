@@ -52,6 +52,10 @@ def test_cockpit_session_pages_are_indexed_cursor_bound_and_etagged(
         assert body["has_more"] is True
         assert body["next_cursor"]
         assert body["order"] == "pinned_desc_updated_at_desc_id_desc"
+        assert all(
+            item["workbench_selection"]["compatibility_warning"] == "legacy_mode_alias"
+            for item in body["sessions"]
+        )
         assert first.headers["etag"] == f'"{body["snapshot_revision"]}"'
         assert (
             client.get(
@@ -87,6 +91,50 @@ def test_cockpit_session_pages_are_indexed_cursor_bound_and_etagged(
 
     monkeypatch.setattr(store, "list_runs", session_run_scan_forbidden)
     assert store.get_run(run.id).id == run.id
+
+
+def test_cockpit_session_projection_preserves_explicit_intent_and_warns_on_unknown(
+    tmp_path,
+):
+    app = _app(tmp_path)
+    store = app.state.harness_session_store
+    explicit = store.create_session(
+        default_mode="read",
+        metadata={
+            "workbench_selection": {
+                "schema_version": 1,
+                "kind": "coding_agent",
+                "intent": "change",
+                "authority": "read_only",
+                "input_source": "product",
+                "compatibility_warning": None,
+            }
+        },
+    )
+    ambiguous = store.create_session(default_mode="act")
+
+    with TestClient(app) as client:
+        explicit_projection = client.get(f"/api/cockpit/sessions/{explicit.id}").json()[
+            "session"
+        ]["workbench_selection"]
+        ambiguous_projection = client.get(
+            f"/api/cockpit/sessions/{ambiguous.id}"
+        ).json()["session"]["workbench_selection"]
+
+    assert explicit_projection == {
+        "schema_version": 1,
+        "kind": "coding_agent",
+        "intent": "change",
+        "authority": "read_only",
+        "input_source": "product",
+        "compatibility_warning": None,
+    }
+    assert ambiguous_projection["intent"] == "ask"
+    assert ambiguous_projection["authority"] == "read_only"
+    assert (
+        ambiguous_projection["compatibility_warning"]
+        == "legacy_mode_unmapped_read_only"
+    )
 
 
 def test_runs_center_generation_advances_for_session_and_run_projections(tmp_path):

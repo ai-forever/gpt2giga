@@ -107,9 +107,9 @@ import {
   admittedExecutionTransport,
   consumeAtQuery,
   legacyModeForProductSelection,
-  migrateLegacyProductSelection,
   normalizeProductSelection,
   permissionSimulationHighlights,
+  resolveLegacyProductSelection,
   type ProductExecutionSelection,
   type WorkbenchKind,
 } from "../workbench-execution";
@@ -475,14 +475,21 @@ export function WorkbenchSurface() {
   const [environmentPullRequestNotice, setEnvironmentPullRequestNotice] = useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const rememberedRunPreferences = useMemo(loadRunPreferences, []);
-  const [runConfig, setRunConfig] = useState<RunConfig>(rememberedRunPreferences.config);
-  const [productSelection, setProductSelection] = useState<ProductExecutionSelection>(
-    () => migrateLegacyProductSelection(
+  const rememberedProductSelection = useMemo(
+    () => resolveLegacyProductSelection(
       rememberedRunPreferences.config.mode,
       rememberedRunPreferences.config.harnessId === "direct-chat"
         ? "direct_chat"
         : "coding_agent",
     ),
+    [rememberedRunPreferences],
+  );
+  const [runConfig, setRunConfig] = useState<RunConfig>(rememberedRunPreferences.config);
+  const [productSelection, setProductSelection] = useState<ProductExecutionSelection>(
+    rememberedProductSelection.selection,
+  );
+  const [legacyModeWarning, setLegacyModeWarning] = useState<string | null>(
+    rememberedProductSelection.warning,
   );
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
     rememberedRunPreferences.reasoningEffort,
@@ -593,12 +600,16 @@ export function WorkbenchSurface() {
         mode: defaults.mode,
         model: defaults.default_model ?? "",
       });
-      setProductSelection(migrateLegacyProductSelection(
-        defaults.mode,
-        defaults.default_harness_id === "direct-chat"
+      setProductSelection({
+        authority: defaults.authority,
+        intent: defaults.task_intent,
+        kind: defaults.default_harness_id === "direct-chat"
           ? "direct_chat"
           : "coding_agent",
-      ));
+      });
+      setLegacyModeWarning(
+        settings.data.harness_defaults.compatibility.mode?.warning ?? null,
+      );
     }
     setAdvancedConfig((current) => ({
       ...current,
@@ -645,18 +656,32 @@ export function WorkbenchSurface() {
       mode: session.default_mode ?? current.mode,
       model: session.default_model ?? current.model,
     }));
-    setProductSelection((current) => migrateLegacyProductSelection(
-      session.default_mode,
-      session.default_harness_id === "direct-chat"
-        ? "direct_chat"
-        : current.kind,
-    ));
+    setProductSelection((current) => {
+      const retained = session.workbench_selection;
+      if (retained !== undefined) {
+        setLegacyModeWarning(retained.compatibility_warning);
+        return {
+          authority: retained.authority,
+          intent: retained.intent,
+          kind: retained.kind,
+        };
+      }
+      const legacy = resolveLegacyProductSelection(
+        session.default_mode,
+        session.default_harness_id === "direct-chat"
+          ? "direct_chat"
+          : current.kind,
+      );
+      setLegacyModeWarning(legacy.warning);
+      return legacy.selection;
+    });
   }, [
     overview.data?.session.default_api_mode,
     overview.data?.session.default_harness_id,
     overview.data?.session.default_mode,
     overview.data?.session.default_model,
     overview.data?.session.id,
+    overview.data?.session.workbench_selection,
   ]);
 
   useEffect(() => {
@@ -1341,11 +1366,12 @@ export function WorkbenchSurface() {
   ) => {
     const next = { ...productSelection, ...patch };
     setProductSelection(next);
-    setConfig(
-      "mode",
-      legacyModeForProductSelection(next),
-      "default_mode",
-    );
+    setLegacyModeWarning(null);
+    setRunConfig((current) => ({
+      ...current,
+      mode: legacyModeForProductSelection(next),
+    }));
+    saveRunConfig.mutate({ workbench_selection: next });
   };
   const selectWorkbenchKind = (kind: WorkbenchKind) => {
     const requiredCapability =
@@ -1440,7 +1466,10 @@ export function WorkbenchSurface() {
           <button
             className="new-session-button"
             disabled={createSession.isPending || !runConfig.model}
-            onClick={() => createSession.mutate({ config: runConfig, kind: "configured" })}
+            onClick={() => createSession.mutate({
+              config: { ...runConfig, productSelection },
+              kind: "configured",
+            })}
             type="button"
           >
             <span aria-hidden="true">＋</span>
@@ -1780,6 +1809,12 @@ export function WorkbenchSurface() {
                 if (prompt.trim() && !startRun.isPending) startRun.mutate();
               }}
             >
+              {legacyModeWarning === null ? null : (
+                <div className="preview-execution blocked" role="status">
+                  <strong>{message(locale, "legacyModeWarningTitle")}</strong>
+                  <span>{message(locale, "legacyModeWarning")}</span>
+                </div>
+              )}
               {previewReport === null ? null : (
                 <div
                   className={previewReport.hard_block ? "preview-execution blocked" : "preview-execution"}

@@ -720,6 +720,8 @@ def create_app(
             "default_model": harness_defaults.default_model,
             "default_api_mode": harness_defaults.default_api_mode,
             "default_mode": harness_defaults.mode,
+            "task_intent": harness_defaults.task_intent,
+            "authority": harness_defaults.authority,
             "execution_transport": harness_defaults.execution_transport,
             "invocation_mode": harness_defaults.invocation_mode,
             "workspace_policy": harness_defaults.workspace_policy,
@@ -2076,7 +2078,8 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
-            patch = _session_patch(payload)
+            current = store.get_session(session_id)
+            patch = _session_patch(payload, session=current)
             session = store.update_session(session_id, **patch)
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
@@ -2115,8 +2118,9 @@ def create_app(
         if cached is not None:
             return cached
         _validate_navigation_binding(store, session_id, payload)
-        patch = _session_patch(payload)
         try:
+            current = store.get_session(session_id)
+            patch = _session_patch(payload, session=current)
             updated = store.update_session_if_revision(
                 session_id,
                 _required_text(payload.get("session_revision"), "session_revision"),
@@ -6012,7 +6016,11 @@ def _fork_session_from_session(
     return fork
 
 
-def _session_patch(payload: dict[str, Any]) -> dict[str, Any]:
+def _session_patch(
+    payload: dict[str, Any],
+    *,
+    session: HarnessSession | None = None,
+) -> dict[str, Any]:
     allowed = {
         "title",
         "workspace",
@@ -6032,6 +6040,39 @@ def _session_patch(payload: dict[str, Any]) -> dict[str, Any]:
         patch["workspace"] = resolve_workspace(_optional_text(patch["workspace"]))
     if "default_api_mode" in patch:
         patch["default_api_mode"] = parse_api_mode(patch["default_api_mode"])
+    if "workbench_selection" in payload:
+        if session is None:
+            raise ValueError("session is required for workbench selection")
+        selection = payload["workbench_selection"]
+        if not isinstance(selection, Mapping):
+            raise ValueError("workbench selection must be an object")
+        kind = str(selection.get("kind") or "")
+        intent = str(selection.get("intent") or "")
+        authority = str(selection.get("authority") or "")
+        if kind not in {"coding_agent", "direct_chat"}:
+            raise ValueError("workbench kind is invalid")
+        if intent not in {"ask", "review", "change"}:
+            raise ValueError("task intent is invalid")
+        if authority not in {"read_only", "workspace_write"}:
+            raise ValueError("authority is invalid")
+        patch["default_mode"] = (
+            "plan"
+            if intent == "ask"
+            else "read"
+            if intent == "review" or authority == "read_only"
+            else "edit"
+        )
+        patch["metadata"] = {
+            **dict(session.metadata),
+            "workbench_selection": {
+                "schema_version": 1,
+                "kind": kind,
+                "intent": intent,
+                "authority": authority,
+                "input_source": "product",
+                "compatibility_warning": None,
+            },
+        }
     return patch
 
 

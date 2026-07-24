@@ -12,6 +12,7 @@ from gpt2giga_harness.product_capabilities import (
     AuthorityLevel,
     ProductCapabilityError,
     TaskIntent,
+    legacy_mode_compatibility_receipt,
     migrate_legacy_capability_request,
 )
 from gpt2giga_harness.runtime.structured import (
@@ -417,6 +418,7 @@ def _admit_legacy_request(
         else WorkbenchKind.DIRECT_CHAT
     )
     mode = str(payload.get("mode") or "plan").strip().lower()
+    compatibility = legacy_mode_compatibility_receipt(mode)
     try:
         migrated = migrate_legacy_capability_request({"mode": mode})
     except ProductCapabilityError:
@@ -429,7 +431,7 @@ def _admit_legacy_request(
         intent = migrated.intent
         authority = migrated.authority
         status = AdmissionStatus.AVAILABLE
-        reasons = ("legacy_profile_migrated",)
+        reasons = ("legacy_profile_migrated", "legacy_mode_alias")
         recovery = ()
     if capability_reason is not None:
         status = AdmissionStatus.DEGRADED
@@ -457,6 +459,7 @@ def _admit_legacy_request(
                 transport is ExecutionTransport.NATIVE_STRUCTURED
             ),
             "fallback": None,
+            "compatibility": compatibility,
         },
         input_source="legacy_machine",
         mode=mode,

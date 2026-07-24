@@ -27,6 +27,11 @@ describe("Workbench session creation", () => {
         harnessId: "codex-cli",
         mode: "plan",
         model: "ConfiguredModel",
+        productSelection: {
+          authority: "read_only",
+          intent: "review",
+          kind: "coding_agent",
+        },
       },
       kind: "configured",
     })).toEqual({
@@ -34,6 +39,9 @@ describe("Workbench session creation", () => {
       harness_id: "codex-cli",
       mode: "plan",
       model: "ConfiguredModel",
+      authority: "read_only",
+      task_intent: "review",
+      workbench_kind: "coding_agent",
       workspace: ".",
     });
   });

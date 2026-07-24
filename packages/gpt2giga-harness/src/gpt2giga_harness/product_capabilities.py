@@ -9,6 +9,10 @@ from typing import Any, Iterable, Mapping
 
 
 PRODUCT_CAPABILITY_SCHEMA_VERSION = 1
+LEGACY_MODE_COMPATIBILITY_EARLIEST_REMOVAL = "1.0.0"
+LEGACY_MODE_COMPATIBILITY_REMOVAL_CONDITION = (
+    "one_released_schema_v1_window_and_zero_tracked_callers_or_saved_state"
+)
 
 
 class ProductCapabilityError(ValueError):
@@ -188,6 +192,45 @@ class LegacyCapabilityMapping:
     note: str = ""
 
 
+@dataclass(frozen=True)
+class LegacyModeCharacterization:
+    """Describe proven behavior that keeps one legacy mode distinct."""
+
+    value: str
+    artifacts: tuple[str, ...]
+    router_branches: tuple[str, ...]
+    permission_projection: AuthorityLevel
+    state_transitions: tuple[str, ...]
+
+
+LEGACY_MODE_CHARACTERIZATIONS = (
+    LegacyModeCharacterization(
+        value="plan",
+        artifacts=("plan",),
+        router_branches=("ask_or_plan",),
+        permission_projection=AuthorityLevel.READ_ONLY,
+        state_transitions=("planning",),
+    ),
+    LegacyModeCharacterization(
+        value="read",
+        artifacts=("review_findings",),
+        router_branches=("review",),
+        permission_projection=AuthorityLevel.READ_ONLY,
+        state_transitions=("reviewing",),
+    ),
+    LegacyModeCharacterization(
+        value="edit",
+        artifacts=("workspace_diff",),
+        router_branches=("change",),
+        permission_projection=AuthorityLevel.WORKSPACE_WRITE,
+        state_transitions=("editing", "promotion_eligible"),
+    ),
+)
+_LEGACY_MODE_CHARACTERIZATION_BY_VALUE = MappingProxyType(
+    {item.value: item for item in LEGACY_MODE_CHARACTERIZATIONS}
+)
+
+
 LEGACY_CAPABILITY_MAPPINGS = (
     LegacyCapabilityMapping(
         field="mode",
@@ -298,6 +341,49 @@ def migrate_legacy_capability_request(
     )
 
 
+def legacy_mode_compatibility_receipt(value: Any) -> dict[str, Any]:
+    """Return a bounded receipt without broadening unknown legacy authority."""
+    normalized = str(value or "plan").strip().lower()
+    removal = {
+        "earliest_version": LEGACY_MODE_COMPATIBILITY_EARLIEST_REMOVAL,
+        "condition": LEGACY_MODE_COMPATIBILITY_REMOVAL_CONDITION,
+    }
+    try:
+        mapping = _legacy_mapping("mode", normalized)
+    except ProductCapabilityError:
+        return {
+            "schema_version": PRODUCT_CAPABILITY_SCHEMA_VERSION,
+            "field": "mode",
+            "value": normalized,
+            "status": "ambiguous",
+            "intent": TaskIntent.ASK.value,
+            "authority": AuthorityLevel.READ_ONLY.value,
+            "warning": "legacy_mode_unmapped_read_only",
+            "artifacts": [],
+            "router_branches": [],
+            "permission_projection": AuthorityLevel.READ_ONLY.value,
+            "state_transitions": [],
+            "removal": removal,
+        }
+    characterization = _LEGACY_MODE_CHARACTERIZATION_BY_VALUE[normalized]
+    return {
+        "schema_version": PRODUCT_CAPABILITY_SCHEMA_VERSION,
+        "field": "mode",
+        "value": normalized,
+        "status": "supported_alias",
+        "intent": mapping.intent.value if mapping.intent is not None else None,
+        "authority": (
+            mapping.authority.value if mapping.authority is not None else None
+        ),
+        "warning": "legacy_mode_alias",
+        "artifacts": list(characterization.artifacts),
+        "router_branches": list(characterization.router_branches),
+        "permission_projection": characterization.permission_projection.value,
+        "state_transitions": list(characterization.state_transitions),
+        "removal": removal,
+    }
+
+
 def admit_capability_request(
     request: CapabilityRequest,
     *,
@@ -399,6 +485,10 @@ def capability_manifest() -> dict[str, Any]:
                 "note": item.note,
             }
             for item in LEGACY_CAPABILITY_MAPPINGS
+        ],
+        "legacy_mode_receipts": [
+            legacy_mode_compatibility_receipt(item.value)
+            for item in LEGACY_MODE_CHARACTERIZATIONS
         ],
     }
 

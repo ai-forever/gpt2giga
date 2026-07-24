@@ -214,6 +214,7 @@ class HarnessSessionRunner:
         default_model: str | None = None,
         default_api_mode: GigaChatApiMode | str | None = None,
         default_mode: str = "plan",
+        metadata: Mapping[str, Any] | None = None,
     ) -> HarnessSession:
         """Create a new empty session."""
         resolved_workspace = resolve_workspace(workspace)
@@ -224,10 +225,13 @@ class HarnessSessionRunner:
             default_model=default_model,
             default_api_mode=parse_api_mode(default_api_mode),
             default_mode=default_mode,
-            metadata=_project_metadata(
-                resolved_workspace,
-                data_dir=self.config.data_dir,
-            ),
+            metadata={
+                **dict(metadata or {}),
+                **_project_metadata(
+                    resolved_workspace,
+                    data_dir=self.config.data_dir,
+                ),
+            },
         )
 
     def create_and_run(
@@ -336,6 +340,10 @@ class HarnessSessionRunner:
             default_api_mode=options["api_mode"],
             default_mode=options["mode"],
             workspace=options["workspace"],
+            metadata={
+                **dict(session.metadata),
+                **_workbench_session_selection_metadata(options),
+            },
         )
         self._schedule_session_title(session, run.id, options)
         return QueuedHarnessRun(
@@ -922,6 +930,7 @@ class HarnessSessionRunner:
         )
         latest_session = self.store.get_session(session.id)
         session_metadata = {**latest_session.metadata, **project_metadata}
+        session_metadata.update(_workbench_session_selection_metadata(options))
         if isinstance(app_server_thread, Mapping) and app_server_thread:
             session_metadata["app_server_thread"] = dict(app_server_thread)
             session_metadata.pop("app_server_fork", None)
@@ -1984,6 +1993,27 @@ def _workbench_admission_metadata(options: Mapping[str, Any]) -> dict[str, Any]:
     if admission.get("schema_version") != 1:
         return {}
     return {"workbench_admission": dict(admission)}
+
+
+def _workbench_session_selection_metadata(
+    options: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Retain explicit intent and authority independently from the mode alias."""
+    admission = _mapping(_mapping(options.get("extra")).get("workbench_admission"))
+    if admission.get("schema_version") != 1:
+        return {}
+    diagnostics = _mapping(admission.get("diagnostics"))
+    compatibility = _mapping(diagnostics.get("compatibility"))
+    return {
+        "workbench_selection": {
+            "schema_version": 1,
+            "kind": admission.get("kind"),
+            "intent": admission.get("intent"),
+            "authority": admission.get("authority"),
+            "input_source": admission.get("input_source"),
+            "compatibility_warning": compatibility.get("warning"),
+        }
+    }
 
 
 def _request_extra(

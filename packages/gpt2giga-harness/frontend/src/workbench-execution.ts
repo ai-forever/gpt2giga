@@ -12,6 +12,11 @@ export interface ProductExecutionSelection {
   kind: WorkbenchKind;
 }
 
+export interface LegacyProductSelectionResolution {
+  selection: ProductExecutionSelection;
+  warning: "legacy_mode_alias" | "legacy_mode_unmapped_read_only";
+}
+
 export interface WorkbenchExecutionSelection {
   capability: string;
   executionTransport: ExecutionTransport;
@@ -89,13 +94,35 @@ export function migrateLegacyProductSelection(
   mode: string | undefined,
   kind: WorkbenchKind,
 ): ProductExecutionSelection {
-  if (mode === "edit" || mode === "act") {
-    return { authority: "workspace_write", intent: "change", kind };
+  return resolveLegacyProductSelection(mode, kind).selection;
+}
+
+export function resolveLegacyProductSelection(
+  mode: string | undefined,
+  kind: WorkbenchKind,
+): LegacyProductSelectionResolution {
+  if (mode === "edit") {
+    return {
+      selection: { authority: "workspace_write", intent: "change", kind },
+      warning: "legacy_mode_alias",
+    };
   }
   if (mode === "read") {
-    return { authority: "read_only", intent: "review", kind };
+    return {
+      selection: { authority: "read_only", intent: "review", kind },
+      warning: "legacy_mode_alias",
+    };
   }
-  return { authority: "read_only", intent: "ask", kind };
+  if (mode === "plan" || mode === undefined) {
+    return {
+      selection: { authority: "read_only", intent: "ask", kind },
+      warning: "legacy_mode_alias",
+    };
+  }
+  return {
+    selection: { authority: "read_only", intent: "ask", kind },
+    warning: "legacy_mode_unmapped_read_only",
+  };
 }
 
 export function legacyModeForProductSelection(
