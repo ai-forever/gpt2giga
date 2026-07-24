@@ -1,10 +1,13 @@
 import sys
+from pathlib import Path
 
 from gpt2giga_harness import proxy
+from gpt2giga_harness.cli_capabilities import CliCapabilitySnapshot
 from gpt2giga_harness.harnesses.agent_cli import run_streaming_command
 from gpt2giga_harness.harnesses.codex_cli import (
     CodexCliHarness,
     _CodexStreamParser,
+    _upload_gigachat_attachments,
     _write_codex_config,
 )
 from gpt2giga_harness.native import HarnessInvocationMode
@@ -144,6 +147,67 @@ def test_codex_cli_applies_fixed_agent_reasoning_config(tmp_path):
     )
 
     assert 'model_reasoning_effort = "high"' in (home / "config.toml").read_text()
+
+
+def test_codex_cli_config_sends_uploaded_file_ids_as_provider_header(tmp_path):
+    home = tmp_path / ".codex"
+
+    _write_codex_config(
+        home,
+        HarnessRequest(prompt="inspect"),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+        attachment_file_ids=("file-pdf-1",),
+    )
+
+    config = (home / "config.toml").read_text()
+    assert 'http_headers = { "x-gpt2giga-attachment-ids" = "file-pdf-1" }' in config
+
+
+def test_codex_cli_uploads_planned_document_before_execution(tmp_path, monkeypatch):
+    document = tmp_path / "report.pdf"
+    document.write_bytes(b"%PDF-1.7\nfixture")
+    uploads = []
+
+    def fake_upload_file(*args, **kwargs):
+        uploads.append((args, kwargs))
+        return {"id": "file-pdf-1"}
+
+    monkeypatch.setattr(proxy, "upload_file", fake_upload_file)
+    request = HarnessRequest(
+        prompt="Read it",
+        attachments=(
+            {
+                "id": "att-pdf",
+                "filename": "report.pdf",
+                "mime_type": "application/pdf",
+                "storage_path": str(document),
+            },
+        ),
+        attachment_render_plan={
+            "metadata": {
+                "deliveries": [
+                    {
+                        "attachment_id": "att-pdf",
+                        "transport": "gigachat_file_upload",
+                    }
+                ]
+            }
+        },
+    )
+
+    file_ids, events, error = _upload_gigachat_attachments(
+        request,
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            api_key="proxy-key",
+        ),
+    )
+
+    assert error is None
+    assert file_ids == ("file-pdf-1",)
+    assert uploads[0][1]["content"] == b"%PDF-1.7\nfixture"
+    assert uploads[0][1]["content_type"] == "application/pdf"
+    assert events[0].type == "attachment_uploaded"
 
 
 def test_codex_stream_parser_normalizes_message_tool_and_usage():
@@ -493,6 +557,159 @@ def test_codex_cli_autostart_uses_generated_proxy_key(monkeypatch):
     assert captured["env"]["GPT2GIGA_API_KEY"] == "generated-proxy-key"
     assert result.events[0].type == "proxy_sidecar"
     assert result.events[0].payload["pid"] == 123
+
+
+def test_codex_pdf_turn_uses_ephemeral_exec_instead_of_sticky_app_server(
+    tmp_path,
+    monkeypatch,
+):
+    document = tmp_path / "report.pdf"
+    document.write_bytes(b"%PDF-1.7\nfixture")
+    captured = {}
+    snapshot = CliCapabilitySnapshot(
+        harness_id="codex-cli",
+        status="supported",
+        version="fixture 1.0",
+        parsed_version="1.0",
+        command=("/tmp/codex-fixture",),
+        capabilities={"app-server": True},
+        event_schema="fixture",
+        history_schema="fixture",
+    )
+    monkeypatch.setattr(
+        CodexCliHarness,
+        "availability",
+        lambda self: Availability.available("codex available"),
+    )
+    monkeypatch.setattr(
+        CodexCliHarness,
+        "capability_probe",
+        lambda self: snapshot,
+    )
+    monkeypatch.setattr(
+        proxy,
+        "ensure_proxy_available",
+        lambda context, api_mode: proxy.ProxyStartup(ok=True, api_key="proxy-key"),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "upload_file",
+        lambda *args, **kwargs: {"id": "file-pdf-1"},
+    )
+
+    def fake_run_command(*, label, command, env, cwd, timeout_seconds):
+        captured["command"] = command
+        captured["config"] = (Path(env["CODEX_HOME"]) / "config.toml").read_text()
+        return HarnessResult(ok=True, text="ok", command=command)
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.harnesses.codex_cli.run_command",
+        fake_run_command,
+    )
+    request = HarnessRequest(
+        prompt="$pdf\n\nWhat is in this file?",
+        attachments=(
+            {
+                "id": "att-pdf",
+                "filename": "report.pdf",
+                "mime_type": "application/pdf",
+                "storage_path": str(document),
+            },
+        ),
+        attachment_render_plan={
+            "metadata": {
+                "deliveries": [
+                    {
+                        "attachment_id": "att-pdf",
+                        "transport": "gigachat_file_upload",
+                        "surfaces": ["headless_one_shot"],
+                    }
+                ]
+            }
+        },
+        extra={"continuation": {"strategy": "structured_thread"}},
+    )
+
+    result = CodexCliHarness().run(
+        request,
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert result.ok is True
+    assert "exec" in captured["command"]
+    assert "app-server" not in captured["command"]
+    assert 'x-gpt2giga-attachment-ids" = "file-pdf-1' in captured["config"]
+    assert any(event.type == "attachment_transport" for event in result.events)
+
+
+def test_codex_image_turn_uses_ephemeral_exec_with_image_flag(monkeypatch):
+    captured = {}
+    snapshot = CliCapabilitySnapshot(
+        harness_id="codex-cli",
+        status="supported",
+        version="fixture 1.0",
+        parsed_version="1.0",
+        command=("/tmp/codex-fixture",),
+        capabilities={"app-server": True, "--image": True},
+        event_schema="fixture",
+        history_schema="fixture",
+    )
+    monkeypatch.setattr(
+        CodexCliHarness,
+        "availability",
+        lambda self: Availability.available("codex available"),
+    )
+    monkeypatch.setattr(
+        CodexCliHarness,
+        "capability_probe",
+        lambda self: snapshot,
+    )
+    monkeypatch.setattr(
+        proxy,
+        "ensure_proxy_available",
+        lambda context, api_mode: proxy.ProxyStartup(ok=True, api_key="proxy-key"),
+    )
+
+    def fake_run_command(*, label, command, env, cwd, timeout_seconds):
+        captured["command"] = command
+        return HarnessResult(ok=True, text="ok", command=command)
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.harnesses.codex_cli.run_command",
+        fake_run_command,
+    )
+    request = HarnessRequest(
+        prompt="What is in the image?",
+        attachment_render_plan={
+            "cli_args": ["--image", "/tmp/screenshot.png"],
+            "metadata": {
+                "deliveries": [
+                    {
+                        "attachment_id": "att-image",
+                        "transport": "cli_image_flag",
+                        "required_cli_capabilities": ["--image"],
+                        "surfaces": ["headless_one_shot", "native"],
+                    }
+                ]
+            },
+        },
+        extra={"continuation": {"strategy": "structured_thread"}},
+    )
+
+    result = CodexCliHarness().run(
+        request,
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert result.ok is True
+    assert "exec" in captured["command"]
+    assert "app-server" not in captured["command"]
+    image_index = captured["command"].index("--image")
+    assert captured["command"][image_index + 1] == "/tmp/screenshot.png"
+    transport_event = next(
+        event for event in result.events if event.type == "attachment_transport"
+    )
+    assert transport_event.payload["transports"] == ["cli_image_flag"]
 
 
 def test_codex_cli_stream_run_uses_streaming_runner(monkeypatch):

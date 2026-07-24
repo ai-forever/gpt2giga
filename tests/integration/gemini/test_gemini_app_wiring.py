@@ -321,20 +321,20 @@ def test_gemini_v1beta_under_version_prefixes_supports_stream_and_models(
     assert '"finishReason": "STOP"' in body
 
 
-def test_gemini_prepared_files_and_batches_are_not_publicly_mounted(monkeypatch):
+def test_gemini_prepared_routes_stay_unmounted_with_openai_files_enabled(monkeypatch):
     app, _fake_client = make_app(monkeypatch)
     paths = app.openapi()["paths"]
 
     assert "/v1beta/files" not in paths
     assert "/v1beta/batches" not in paths
     assert "/v1beta/models/{model}:batchGenerateContent" not in paths
-    assert "/v1/files" not in paths
+    assert "/v1/files" in paths
     assert "/v1/batches" not in paths
     assert "/v1/models/{model}:batchGenerateContent" not in paths
     assert "/v1/v1beta/files" not in paths
     assert "/v1/v1beta/batches" not in paths
     assert "/v1/v1beta/models/{model}:batchGenerateContent" not in paths
-    assert "/v2/files" not in paths
+    assert "/v2/files" in paths
     assert "/v2/batches" not in paths
     assert "/v2/models/{model}:batchGenerateContent" not in paths
     assert "/v2/v1beta/files" not in paths

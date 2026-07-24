@@ -10,7 +10,6 @@ from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.routers.openai import router as openai_router
 from gpt2giga.routers.openai.batches import router as batches_router
-from gpt2giga.routers.openai.files import router as files_router
 
 
 class FakeUploadedFile(BaseModel):
@@ -184,31 +183,27 @@ def make_app():
 
 def make_app_with_files_and_batches():
     app = make_app()
-    app.include_router(files_router)
     app.include_router(batches_router)
     return app
 
 
-def test_files_and_batches_routes_are_disabled_in_openai_router():
+def test_files_routes_are_enabled_but_batches_remain_disabled():
     client = TestClient(make_app())
 
-    assert client.post("/files").status_code == 404
-    assert client.get("/files").status_code == 404
-    assert client.get("/files/file-1").status_code == 404
-    assert client.delete("/files/file-1").status_code == 404
-    assert client.get("/files/file-1/content").status_code == 404
+    assert client.post("/files").status_code == 400
+    assert client.get("/files").status_code == 200
     assert client.post("/batches").status_code == 404
     assert client.get("/batches").status_code == 404
     assert client.get("/batches/batch-1").status_code == 404
     assert client.post("/batches/batch-1/cancel").status_code == 404
 
 
-def test_openapi_omits_files_and_batches_routes_from_openai_router():
+def test_openapi_includes_files_and_omits_batches_routes():
     paths = make_app().openapi()["paths"]
 
-    assert "/files" not in paths
-    assert "/files/{file_id}" not in paths
-    assert "/files/{file_id}/content" not in paths
+    assert "/files" in paths
+    assert "/files/{file_id}" in paths
+    assert "/files/{file_id}/content" in paths
     assert "/batches" not in paths
     assert "/batches/{batch_id}" not in paths
     assert "/batches/{batch_id}/cancel" not in paths

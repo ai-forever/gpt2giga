@@ -615,7 +615,9 @@ class HarnessSessionRunner:
             stream=options["stream"],
             workspace=workspace_execution.request_workspace,
             messages=request_messages,
-            attachments=attachment_payloads,
+            attachments=tuple(
+                attachment_to_dict(attachment) for attachment in attachments
+            ),
             attachment_render_plan=attachment_render_plan_payload,
             builtin_tools=options["builtin_tools"],
             session_id=session.id,

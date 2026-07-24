@@ -106,12 +106,24 @@ class FakeRequestTransformer:
     async def prepare_chat(self, data, giga_client=None):
         return {"contract": "chat-v1"}
 
-    async def prepare_response_chat(self, data, giga_client=None):
-        self.response_chat_calls.append((data, giga_client))
+    async def prepare_response_chat(
+        self,
+        data,
+        giga_client=None,
+        *,
+        attachment_ids=(),
+    ):
+        self.response_chat_calls.append((data, giga_client, attachment_ids))
         return {"contract": "responses-v1"}
 
-    async def prepare_response_chat_completion(self, data, giga_client=None):
-        self.response_chat_completion_calls.append((data, giga_client))
+    async def prepare_response_chat_completion(
+        self,
+        data,
+        giga_client=None,
+        *,
+        attachment_ids=(),
+    ):
+        self.response_chat_completion_calls.append((data, giga_client, attachment_ids))
         return {"contract": "responses-v2"}
 
 
@@ -233,6 +245,47 @@ def test_responses_versioned_prefix_overrides_config(route, expected_mode):
         assert not app.state.request_transformer.response_chat_calls
         assert app.state.request_transformer.response_chat_completion_calls
         assert response.json()["output"][0]["content"][0]["text"] == "ok-v2"
+
+
+def test_responses_forwards_harness_file_ids_with_tool_payload():
+    app = make_app("v2")
+    client = TestClient(app)
+
+    response = client.post(
+        "/responses",
+        headers={"x-gpt2giga-attachment-ids": "file-pdf-1"},
+        json={
+            "model": "gpt-x",
+            "input": "What is in the PDF?",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "plugin_tool",
+                    "description": "Plugin tool",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert app.state.request_transformer.response_chat_completion_calls[0][2] == (
+        "file-pdf-1",
+    )
+
+
+def test_responses_rejects_invalid_harness_file_ids():
+    app = make_app("v2")
+    client = TestClient(app)
+
+    response = client.post(
+        "/responses",
+        headers={"x-gpt2giga-attachment-ids": "../secret"},
+        json={"model": "gpt-x", "input": "hi"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"]["code"] == "invalid_attachment_ids"
 
 
 def test_responses_v2_non_stream_returns_openai_response_object():
