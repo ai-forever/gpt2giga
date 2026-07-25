@@ -58,12 +58,14 @@ class FakeGigaChat:
         self.last_batch_content = None
         self.last_batch_method = None
         self.last_uploaded_file = None
+        self.last_uploaded_purpose = None
         self._created_at = 100
 
     async def aupload_file(self, file, purpose):
         filename, content = file
         file_id = f"file-{len(self.files) + 1}"
         self.last_uploaded_file = file
+        self.last_uploaded_purpose = purpose
         uploaded = FakeUploadedFile(
             id=file_id,
             object="file",
@@ -261,6 +263,22 @@ def test_files_endpoint_lets_sdk_infer_content_type_from_filename():
         "input.jsonl",
         b'{"hello":"world"}\n',
     )
+
+
+def test_files_endpoint_maps_assistants_purpose_to_general_for_gigachat():
+    app = make_app_with_files_and_batches()
+    giga_client = app.state.gigachat_client
+    client = TestClient(app)
+
+    response = client.post(
+        "/files",
+        data={"purpose": "assistants"},
+        files={"file": ("report.pdf", b"%PDF-1.7\nfixture")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["purpose"] == "assistants"
+    assert giga_client.last_uploaded_purpose == "general"
 
 
 def test_batches_endpoints_translate_openai_flow_when_router_is_mounted_directly():
