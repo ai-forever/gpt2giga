@@ -722,6 +722,14 @@ export interface SettingsResponse {
   };
 }
 
+export interface BrowserAccessStatusResponse {
+  local: boolean;
+  authenticated: boolean;
+  claimable: boolean;
+  expires_at: string | null;
+  recovery: string;
+}
+
 export interface SettingsSaveResponse {
   saved: true;
   revision: string;
@@ -1144,6 +1152,7 @@ async function writeCockpit<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
     headers: {
       Accept: "application/json",
+      "X-GigaLoom-CSRF": "1",
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     method,

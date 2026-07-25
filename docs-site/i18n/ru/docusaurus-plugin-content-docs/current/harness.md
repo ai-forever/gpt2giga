@@ -1187,7 +1187,15 @@ issue или диагностический архив.
 
 ## Удалённый доступ
 
-Безопасный режим по умолчанию — `127.0.0.1:8091`. Для non-loopback bind нужны
+Безопасный режим по умолчанию — `127.0.0.1:8091`. Первый OS-local browser claim
+создаёт opaque HttpOnly `SameSite=Strict` сессию со сроком действия; на диске
+остаются только хэши и сроки в приватном server-side state. В Cockpit Settings
+сессию можно ротировать или завершить, а loopback-only recovery отзывает старые
+сессии перед созданием новой. Browser mutations требуют same-origin CSRF marker.
+Локальный access token не попадает в URL, `localStorage`, `sessionStorage`,
+diagnostics, screenshots или project files.
+
+Для non-loopback bind нужны
 явный `--allow-remote`, сильный bootstrap token, список разрешённых hosts и TLS:
 
 ```bash

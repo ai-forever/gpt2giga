@@ -1,3 +1,6 @@
+import json
+import os
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -6,12 +9,16 @@ from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.sessions.store import InMemoryHarnessSessionStore
 from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
 from gpt2giga_harness.ui.app import create_app
+from gpt2giga_harness.ui.local_access import (
+    LocalUIAccessError,
+    LocalUIAccessStore,
+)
 from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 
 
-def test_local_shell_issues_strict_httponly_session_cookie():
+def test_local_shell_issues_strict_httponly_session_cookie(tmp_path):
     app = create_app(
-        HarnessConfig(),
+        HarnessConfig(data_dir=str(tmp_path)),
         registry=create_default_registry(include_entry_points=False),
     )
     client = TestClient(
@@ -36,9 +43,9 @@ def test_local_shell_issues_strict_httponly_session_cookie():
     assert client.get("/api/defaults").status_code == 200
 
 
-def test_local_arena_deep_link_issues_browser_session_cookie():
+def test_local_arena_deep_link_issues_browser_session_cookie(tmp_path):
     app = create_app(
-        HarnessConfig(),
+        HarnessConfig(data_dir=str(tmp_path)),
         registry=create_default_registry(include_entry_points=False),
     )
     client = TestClient(
@@ -59,9 +66,9 @@ def test_local_arena_deep_link_issues_browser_session_cookie():
     "path",
     ["/cockpit-v2/work", "/cockpit-v2/runs/run_123", "/legacy/runs/run_123"],
 )
-def test_local_selectable_shell_deep_links_issue_browser_session_cookie(path):
+def test_local_selectable_shell_deep_links_issue_browser_session_cookie(path, tmp_path):
     app = create_app(
-        HarnessConfig(),
+        HarnessConfig(data_dir=str(tmp_path)),
         registry=create_default_registry(include_entry_points=False),
     )
     client = TestClient(
@@ -108,6 +115,7 @@ def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
         "`/work/${encodeURIComponent(session.id)}`",
         "`/runs/${encodeURIComponent(run.id)}`",
         "headers: { Authorization: `Bearer ${token}` }",
+        '"X-GigaLoom-CSRF": "1"',
     ):
         assert fragment in script
     assert "const secondaryLoads = Promise.all([" in script
@@ -115,6 +123,138 @@ def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
     assert "state.routeLoadKey === routeKey && state.routeLoadPromise" in script
     assert "state.routeLoadedKey === routeKey" in script
     assert "localStorage" not in script
+
+
+def test_local_access_persists_only_hashed_expiring_sessions(tmp_path):
+    now = [1_000.0]
+    store = LocalUIAccessStore(
+        tmp_path,
+        clock=lambda: now[0],
+        session_ttl_seconds=60,
+    )
+
+    session = store.claim()
+
+    assert session is not None
+    state_path = tmp_path / "ui_access" / "state.json"
+    state_text = state_path.read_text()
+    state = json.loads(state_text)
+    assert session.token not in state_text
+    assert state["claimable"] is False
+    assert len(state["sessions"][0]["digest"]) == 64
+    if os.name != "nt":
+        assert state_path.stat().st_mode & 0o777 == 0o600
+    assert LocalUIAccessStore(
+        tmp_path,
+        clock=lambda: now[0],
+        session_ttl_seconds=60,
+    ).authenticate(session.token)
+
+    now[0] = 1_061.0
+
+    assert not store.authenticate(session.token)
+    assert store.status(session.token).expires_at is None
+
+
+def test_local_access_rejects_symlinked_private_state(tmp_path):
+    access_root = tmp_path / "ui_access"
+    access_root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}")
+    try:
+        (access_root / "state.json").symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    with pytest.raises(LocalUIAccessError, match="regular file"):
+        LocalUIAccessStore(tmp_path).claim()
+
+
+def test_local_access_logout_rotate_recovery_and_csrf(tmp_path):
+    config = HarnessConfig(data_dir=str(tmp_path))
+    app = create_app(
+        config,
+        registry=create_default_registry(include_entry_points=False),
+    )
+    client = TestClient(
+        app,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    )
+
+    first = client.get("/")
+    original_cookie = client.cookies.get("gpt2giga_harness_session")
+    status = client.get("/auth/status")
+    csrf_denied = client.post("/auth/local/rotate")
+    rotated = client.post(
+        "/auth/local/rotate",
+        headers={"X-GigaLoom-CSRF": "1"},
+    )
+    rotated_cookie = client.cookies.get("gpt2giga_harness_session")
+
+    assert first.status_code == 200
+    assert original_cookie
+    assert status.json()["authenticated"] is True
+    assert status.json()["local"] is True
+    assert status.json()["expires_at"]
+    unclaimed = TestClient(
+        create_app(
+            config,
+            registry=create_default_registry(include_entry_points=False),
+        ),
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50002),
+    )
+    unclaimed_shell = unclaimed.get("/", follow_redirects=False)
+    assert unclaimed_shell.status_code == 303
+    assert unclaimed_shell.headers["location"] == "/local-access"
+    assert csrf_denied.status_code == 403
+    assert rotated.status_code == 200
+    assert rotated_cookie
+    assert rotated_cookie != original_cookie
+
+    stale = TestClient(
+        create_app(
+            config,
+            registry=create_default_registry(include_entry_points=False),
+        ),
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50001),
+        cookies={"gpt2giga_harness_session": original_cookie},
+    )
+    assert stale.get("/api/defaults").status_code == 401
+
+    logout = client.post(
+        "/auth/logout",
+        headers={"X-GigaLoom-CSRF": "1"},
+    )
+    locked = client.get("/", follow_redirects=False)
+    recovery_page = client.get("/local-access")
+    cross_origin = client.post(
+        "/auth/local/recover",
+        headers={"Origin": "https://attacker.example"},
+        follow_redirects=False,
+    )
+    recovered = client.post(
+        "/auth/local/recover",
+        headers={
+            "Origin": "null",
+            "Sec-Fetch-Site": "same-origin",
+        },
+        follow_redirects=False,
+    )
+
+    assert logout.status_code == 200
+    assert logout.json() == {"authenticated": False}
+    assert locked.status_code == 303
+    assert locked.headers["location"] == "/local-access"
+    assert recovery_page.status_code == 200
+    assert "Recover local GigaLoom access" in recovery_page.text
+    assert "token=" not in recovery_page.text
+    assert cross_origin.status_code == 403
+    assert recovered.status_code == 303
+    assert recovered.headers["location"] == "/cockpit-v2/settings"
+    assert client.get("/api/defaults").status_code == 200
 
 
 def test_ui_security_config_loads_token_and_host_allowlist_without_api_exposure(

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchCockpit } from "./api";
+import { fetchCockpit, mutateCockpit } from "./api";
 
 describe("Cockpit API errors", () => {
   afterEach(() => {
@@ -29,5 +29,24 @@ describe("Cockpit API errors", () => {
         "The durable worker is offline. Start it with `giga worker start`, then retry.",
       status: 409,
     });
+  });
+
+  it("marks browser mutations with the same-origin CSRF header", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mutateCockpit("/api/example", { enabled: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/example",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "X-GigaLoom-CSRF": "1" }),
+        method: "POST",
+      }),
+    );
   });
 });

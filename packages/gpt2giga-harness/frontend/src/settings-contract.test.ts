@@ -11,6 +11,7 @@ describe("backend-owned Settings contract", () => {
   it("renders all accepted categories with Appearance as the local boundary", () => {
     for (const category of [
       "appearance",
+      "localAccess",
       "runtime",
       "providerAccounts",
       "provider",
@@ -38,6 +39,10 @@ describe("backend-owned Settings contract", () => {
     expect(source).toContain("/api/provider-accounts/");
     expect(source).toContain("ProviderAccountCard");
     expect(source).toContain("isolated_home_only");
+    expect(source).toContain("/auth/status");
+    expect(source).toContain("/auth/local/rotate");
+    expect(source).toContain("/auth/logout");
+    expect(source).toContain("os_local_private_store");
   });
 
   it("never creates browser fields for credentials, tokens, or certificates", () => {

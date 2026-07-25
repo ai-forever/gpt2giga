@@ -67,7 +67,7 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
         '<link rel="icon" href="/assets/brand/gigaloom-mark.svg" type="image/svg+xml">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.53"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.54"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200

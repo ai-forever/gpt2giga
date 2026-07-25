@@ -1,1 +1,0 @@
-import{t as e}from"./jsx-runtime-DUAcabCT.js";import{P as t}from"./index-D9QOgJJ0.js";import{InspectorFrame as n}from"./InspectorFrame-BRn-keGR.js";var r=e();function i({locale:e}){return(0,r.jsx)(n,{locale:e,title:t(e,`rawEvidence`),children:t(e,`rawEvidenceDescription`)})}export{i as RawEvidenceInspector};

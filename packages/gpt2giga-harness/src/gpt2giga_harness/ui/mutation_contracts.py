@@ -337,6 +337,21 @@ CONFORMANCE_EVIDENCE = {
                 "tests/harness/test_ui_security.py::test_remote_shell_requires_bootstrap_exchange_for_api_and_sse_cookie",
             ),
         ),
+        ConformanceEvidence(
+            id="auth.local_access",
+            behaviors=frozenset(
+                {
+                    ConformanceBehavior.AUTHENTICATION,
+                    ConformanceBehavior.ALLOW,
+                    ConformanceBehavior.DENY,
+                    ConformanceBehavior.REDACTION,
+                }
+            ),
+            test_nodes=(
+                "tests/harness/test_ui_security.py::test_local_access_logout_rotate_recovery_and_csrf",
+                "tests/harness/test_ui_security.py::test_local_access_persists_only_hashed_expiring_sessions",
+            ),
+        ),
     )
 }
 
@@ -895,6 +910,30 @@ MUTATION_ROUTE_CONTRACTS = (
         EnforcementControl.BOOTSTRAP_AUTH,
         "ui_security.browser_session",
         evidence=("auth.bootstrap",),
+    ),
+    _route(
+        "POST",
+        "/auth/logout",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.AUTHENTICATED_LOCAL_STATE,
+        "ui_security.local_logout",
+        evidence=("auth.local_access",),
+    ),
+    _route(
+        "POST",
+        "/auth/local/rotate",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.AUTHENTICATED_LOCAL_STATE,
+        "ui_security.local_rotate",
+        evidence=("auth.local_access",),
+    ),
+    _route(
+        "POST",
+        "/auth/local/recover",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.BOOTSTRAP_AUTH,
+        "ui_security.local_recovery",
+        evidence=("auth.local_access",),
     ),
 )
 

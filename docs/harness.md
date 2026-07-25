@@ -571,9 +571,16 @@ giga project init
 giga init
 ```
 
-By default the UI binds to `127.0.0.1:8091`. Local requests receive an opaque
-HttpOnly, `SameSite=Strict` browser-session cookie. To bind remotely, configure
-a strong bootstrap token in the environment and opt in explicitly:
+By default the UI binds to `127.0.0.1:8091`. The first OS-local browser claim
+creates an opaque, expiring HttpOnly, `SameSite=Strict` session backed only by
+hashed private state under the Harness data directory. Cockpit Settings can
+rotate or log out that browser session; the loopback-only recovery page revokes
+older sessions before claiming a new one. Browser mutations also require the
+same-origin CSRF marker. No local access token is placed in a URL,
+`localStorage`, `sessionStorage`, diagnostics, screenshots, or project files.
+
+To bind remotely, configure a strong bootstrap token in the environment and opt
+in explicitly:
 
 ```bash
 export GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN="$(openssl rand -hex 32)"
@@ -2014,8 +2021,10 @@ giga session show <session_id> --json
 
 `giga ui` serves the local Harness Control Panel from packaged HTML, CSS, and
 JavaScript assets without a frontend build step, runtime CDN, or network fetch.
-It binds to `127.0.0.1:8091` by default. Remote binding is rejected unless you
-pass `--allow-remote`; usable remote APIs additionally require
+It binds to `127.0.0.1:8091` by default. Local first-run, expiry, rotation,
+logout, and recovery remain server-side OS-local session operations; environment
+variables are not the primary local human access flow. Remote binding is
+rejected unless you pass `--allow-remote`; usable remote APIs additionally require
 `GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN` and TLS termination. The token is exchanged
 for an in-memory browser session and is never stored in project state, history,
 traces, or URLs.

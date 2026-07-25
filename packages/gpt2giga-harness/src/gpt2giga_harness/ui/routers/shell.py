@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
 from urllib.parse import quote, urlparse
 
@@ -10,6 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.ui.routers.schemas import (
+    BrowserAccessStatusResponse,
     BrowserSessionResponse,
     UIHealthResponse,
 )
@@ -43,6 +45,33 @@ _COCKPIT_V2_SHELL_HEADERS = {
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
 }
+_LOCAL_ACCESS_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GigaLoom local access</title>
+  <style>
+    :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #10131a; color: #f4f6fb; }
+    main { width: min(32rem, calc(100vw - 2rem)); box-sizing: border-box; padding: 2rem; border: 1px solid #343b4b; border-radius: 1rem; background: #171c26; }
+    h1 { margin-top: 0; font-size: 1.5rem; }
+    p { color: #b8c0d1; }
+    button { min-height: 2.75rem; padding: .65rem 1rem; border: 0; border-radius: .6rem; background: #77a7ff; color: #08111f; font: inherit; font-weight: 700; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Recover local GigaLoom access</h1>
+    <p>The prior browser session is absent or expired. Continue only from this OS-local loopback UI. Recovery revokes every older local session.</p>
+    <form action="/auth/local/recover" method="post">
+      <button type="submit">Recover this browser</button>
+    </form>
+    <p>No access token is placed in a URL, browser storage, diagnostics, or project files.</p>
+  </main>
+</body>
+</html>
+"""
 
 _LEGACY_ROUTE_REDIRECTS = {
     "": "/cockpit-v2/work",
@@ -119,6 +148,12 @@ def _validated_local_redirect(target: str) -> str:
     return target
 
 
+def _utc_timestamp(value: float | None) -> str | None:
+    if value is None:
+        return None
+    return datetime.fromtimestamp(value, timezone.utc).isoformat()
+
+
 def create_shell_router(security: HarnessUISecurity) -> APIRouter:
     """Create the shell router; include it after every API router."""
     router = APIRouter(route_class=ConformantAPIRoute)
@@ -139,8 +174,84 @@ def create_shell_router(security: HarnessUISecurity) -> APIRouter:
             )
         if not security.bootstrap_matches(authorization):
             raise HTTPException(status_code=401, detail="Invalid bootstrap token")
-        security.set_session_cookie(response)
+        security.set_session_cookie(response, security.issue_remote_session())
         return BrowserSessionResponse()
+
+    @router.get("/auth/status", response_model=BrowserAccessStatusResponse)
+    async def browser_access_status(request: Request) -> BrowserAccessStatusResponse:
+        if not security.local_mode:
+            return BrowserAccessStatusResponse(
+                local=False,
+                authenticated=security.has_session(request),
+                recovery="Remote identity is a separate deployment decision.",
+            )
+        status = security.local_status(request)
+        return BrowserAccessStatusResponse(
+            local=True,
+            authenticated=status.authenticated,
+            claimable=status.claimable,
+            expires_at=_utc_timestamp(status.expires_at),
+            recovery=status.recovery,
+        )
+
+    @router.post("/auth/logout", response_model=BrowserSessionResponse)
+    async def browser_logout(
+        request: Request,
+        response: Response,
+    ) -> BrowserSessionResponse:
+        if security.local_mode:
+            security.logout_local(request)
+        else:
+            security.revoke_remote_session()
+        security.clear_session_cookie(response)
+        return BrowserSessionResponse(authenticated=False)
+
+    @router.post("/auth/local/rotate", response_model=BrowserSessionResponse)
+    async def rotate_local_browser_session(
+        request: Request,
+        response: Response,
+    ) -> BrowserSessionResponse:
+        if not security.local_mode:
+            raise HTTPException(
+                status_code=403,
+                detail="Local access rotation requires a loopback listener",
+            )
+        session = security.rotate_local(request)
+        if session is None:
+            raise HTTPException(status_code=401, detail="Browser session required")
+        security.set_session_cookie(response, session)
+        return BrowserSessionResponse()
+
+    @router.post("/auth/local/recover", include_in_schema=False)
+    async def recover_local_browser_session(request: Request) -> Response:
+        session = security.recover_local(request)
+        if session is None:
+            raise HTTPException(
+                status_code=403,
+                detail="Local recovery requires an explicit same-origin loopback request",
+            )
+        response = RedirectResponse("/cockpit-v2/settings", status_code=303)
+        security.set_session_cookie(response, session)
+        return response
+
+    @router.get("/local-access", include_in_schema=False)
+    async def local_access_page(request: Request) -> Response:
+        if not security.local_mode:
+            raise HTTPException(status_code=404, detail="Page not found")
+        if security.has_session(request):
+            return RedirectResponse("/cockpit-v2/settings", status_code=303)
+        return HTMLResponse(
+            _LOCAL_ACCESS_HTML,
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": (
+                    "default-src 'none'; style-src 'unsafe-inline'; "
+                    "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+                ),
+                "Referrer-Policy": "no-referrer",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @router.get("/assets/{asset_name:path}", include_in_schema=False)
     def ui_asset(asset_name: str) -> Response:

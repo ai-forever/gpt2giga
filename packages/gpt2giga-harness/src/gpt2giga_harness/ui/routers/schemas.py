@@ -19,6 +19,16 @@ class BrowserSessionResponse(BaseModel):
     authenticated: bool = True
 
 
+class BrowserAccessStatusResponse(BaseModel):
+    """Content-free state of the current browser access boundary."""
+
+    local: bool
+    authenticated: bool
+    claimable: bool = False
+    expires_at: str | None = None
+    recovery: str
+
+
 class RunBundleResponse(BaseModel):
     """Persisted session bundle selected by a stable run deep link."""
 

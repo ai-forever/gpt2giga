@@ -159,11 +159,15 @@ the ownership split is stable:
 | Agents, workflows, evals, schedules, prompts, project defaults | `<project>/.giga/` | Reviewable project configuration; never store secrets. |
 | Durable coordination | `~/.gpt2giga/harness/runtime.sqlite3` | Versioned SQLite schema with WAL, migrations, leases, approvals, and audit history. |
 | Sessions, events, raw records, attachments, arenas, eval results | `~/.gpt2giga/harness/...` | Redacted before persistence and bounded on API serialization. |
+| Local UI access | `~/.gpt2giga/harness/ui_access/state.json` | Private `0600` server-side hashes and expiries only; browser cookies and access values are never persisted here. |
 | Native reference index and Harness-managed CLI homes | `~/.gpt2giga/harness/native/...` | Harness may write only its managed homes, never the user's native vendor home. |
 | Isolated edit worktrees | `~/.gpt2giga/harness/worktrees/...` | Applied only after policy, approval, base-commit, and dirty-tree checks. |
 
-The UI binds to loopback by default. `/healthz` is intentionally minimal and
-unauthenticated. Remote binding requires an explicit opt-in, a bootstrap-token
+The UI binds to loopback by default. Its first OS-local claim, expiry, logout,
+rotation, recovery, same-origin checks, and CSRF marker preserve an opaque
+server-side browser-session boundary without a local `.env` token.
+`/healthz` is intentionally minimal and unauthenticated. Remote binding
+requires an explicit opt-in, a bootstrap-token
 exchange through `/auth/session`, an allowed Host, and external TLS termination.
 Secrets and hidden reasoning are removed before persistence and again before
 selected API responses.
@@ -181,6 +185,8 @@ are intentionally disabled.
 | --- | --- |
 | `GET /healthz` | Minimal liveness probe that does not expose project or runtime data. |
 | `POST /auth/session` | Exchanges a configured remote bootstrap bearer token for an in-memory browser-session cookie. |
+| `GET /auth/status`<br />`POST /auth/logout`<br />`POST /auth/local/rotate` | Projects content-free browser-session state and provides authenticated logout or loopback rotation. |
+| `POST /auth/local/recover` | Completes an explicit same-origin loopback recovery and revokes older local sessions; no token is accepted in the URL or form. |
 | `GET /api/health` | Returns richer cockpit readiness, proxy, runtime, and reconciliation state for the authenticated UI. |
 | `GET /api/defaults` | Supplies UI defaults such as model, API mode, timeout, and safe initial choices. |
 | `GET /api/settings`<br />`PATCH /api/settings/defaults` | Reads backend-owned Workbench defaults or updates the default harness, route/model, canonical execution transport, invocation compatibility field, mode, and workspace policy with optimistic validation. |

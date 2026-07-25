@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  type BrowserAccessStatusResponse,
   fetchCockpit,
   mutateCockpit,
   patchCockpit,
@@ -65,6 +66,7 @@ type ProviderDraft = {
 
 const categories = [
   "appearance",
+  "localAccess",
   "runtime",
   "providerAccounts",
   "provider",
@@ -80,6 +82,11 @@ export function SettingsSurface() {
   const locale = preferences.locale;
   const queryClient = useQueryClient();
   const settings = useQuery(settingsOptions());
+  const browserAccess = useQuery({
+    queryKey: ["cockpit", "browser-access"],
+    queryFn: ({ signal }) =>
+      fetchCockpit<BrowserAccessStatusResponse>("/auth/status", signal),
+  });
   const providers = useQuery(providersOptions());
   const providerAccounts = useQuery(providerAccountsOptions());
   const [draft, setDraft] = useState<DefaultsDraft | null>(null);
@@ -120,6 +127,22 @@ export function SettingsSurface() {
   });
   const runtimeCheck = useMutation({
     mutationFn: () => fetchCockpit<Record<string, unknown>>("/api/health"),
+  });
+  const rotateBrowserAccess = useMutation({
+    mutationFn: () =>
+      mutateCockpit<{ authenticated: boolean }>("/auth/local/rotate"),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["cockpit", "browser-access"],
+      });
+    },
+  });
+  const logoutBrowser = useMutation({
+    mutationFn: () =>
+      mutateCockpit<{ authenticated: boolean }>("/auth/logout"),
+    onSuccess: () => {
+      window.location.assign("/local-access");
+    },
   });
   const saveProvider = useMutation({
     mutationFn: (next: ProviderDraft) => {
@@ -193,6 +216,7 @@ export function SettingsSurface() {
 
   if (
     settings.isPending ||
+    browserAccess.isPending ||
     providers.isPending ||
     providerAccounts.isPending ||
     draft === null ||
@@ -202,9 +226,11 @@ export function SettingsSurface() {
   }
   if (
     settings.isError ||
+    browserAccess.isError ||
     providers.isError ||
     providerAccounts.isError ||
     settings.data === undefined ||
+    browserAccess.data === undefined ||
     providers.data === undefined ||
     providerAccounts.data === undefined
   ) {
@@ -263,6 +289,57 @@ export function SettingsSurface() {
               </label>
             </div>
             <Boundary source="browser" effect="live" />
+          </SettingsSection>
+
+          <SettingsSection
+            id="localAccess"
+            title={message(locale, "localAccess")}
+            description={message(locale, "localAccessHint")}
+          >
+            <dl className="settings-facts">
+              <Fact
+                label={message(locale, "accessMode")}
+                value={browserAccess.data.local ? message(locale, "loopbackLocal") : message(locale, "remoteDeployment")}
+              />
+              <Fact
+                label={message(locale, "browserSession")}
+                value={browserAccess.data.authenticated ? message(locale, "active") : message(locale, "expired")}
+              />
+              <Fact
+                label={message(locale, "expiry")}
+                value={browserAccess.data.expires_at ?? message(locale, "noExpiry")}
+                mono
+              />
+            </dl>
+            <p className="muted-copy">{browserAccess.data.recovery}</p>
+            <div className="provider-actions">
+              <button
+                disabled={!browserAccess.data.local || rotateBrowserAccess.isPending}
+                onClick={() => rotateBrowserAccess.mutate()}
+                type="button"
+              >
+                {message(locale, "rotateBrowserSession")}
+              </button>
+              <button
+                className="danger-button"
+                disabled={logoutBrowser.isPending}
+                onClick={() => logoutBrowser.mutate()}
+                type="button"
+              >
+                {message(locale, "logoutBrowser")}
+              </button>
+            </div>
+            {rotateBrowserAccess.isSuccess ? (
+              <p className="mutation-success" role="status">
+                {message(locale, "browserSessionRotated")}
+              </p>
+            ) : null}
+            {rotateBrowserAccess.isError || logoutBrowser.isError ? (
+              <p className="mutation-error" role="alert">
+                {message(locale, "browserAccessActionFailed")}
+              </p>
+            ) : null}
+            <Boundary source="os_local_private_store" effect="current_browser" />
           </SettingsSection>
 
           <SettingsSection id="runtime" title={message(locale, "runtime")} description={message(locale, "runtimeHint")}>

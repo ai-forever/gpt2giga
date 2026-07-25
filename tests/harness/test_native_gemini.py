@@ -119,9 +119,16 @@ def test_gemini_native_checkpoint_scanner_and_preview_import(tmp_path):
             },
         ),
     )
+
+    class UnavailableListing:
+        returncode = 1
+        stdout = ""
+        stderr = ""
+
     connector = GeminiNativeHistoryConnector(
         data_dir=data_dir,
         external_gemini_home=external_home,
+        list_sessions_runner=lambda *_args: UnavailableListing(),
     )
 
     managed_only = connector.discover(
