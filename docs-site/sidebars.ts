@@ -15,6 +15,12 @@ const sidebars: SidebarsConfig = {
           label: 'Unified Harness (alpha)',
           key: 'harness',
         },
+        {
+          type: 'doc',
+          id: 'agents-and-multi-agent',
+          label: 'Agents and multi-agent behavior',
+          key: 'agents-and-multi-agent',
+        },
         'configuration',
       ],
     },

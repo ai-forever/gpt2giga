@@ -17,6 +17,7 @@ http://localhost:8090
 | Behavior of `extra_headers`, `extra_query`, `extra_body`, and optional fields | [Client parameters](client-parameter-compatibility.md) |
 | GigaChat built-in tools and their mapping to OpenAI/Anthropic/Gemini | [Built-in tools](builtin-tools.md) |
 | Alpha-preview project cockpit for agent runs, comparisons, approvals, and workflows | [Unified Harness](harness.md) |
+| Direct Chat, Coding Agents, native Codex subagents, Arena, and Workflows | [Agents and multi-agent behavior](agents-and-multi-agent.md) |
 | Unified Harness components, execution flow, storage, and control-plane API | [Harness architecture](architecture/harness.md) |
 | Environment variables, authentication, limits, metrics, observability | [Configuration](configuration.md) |
 | Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Deployment](deployment.md) |

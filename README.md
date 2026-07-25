@@ -147,6 +147,7 @@ make docs-dev-ru
 | Совместимость SDK `extra_*` и параметров клиентов | [docs/client-parameter-compatibility.md](./docs/client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [docs/builtin-tools.md](./docs/builtin-tools.md) |
 | Local harness CLI/UI для smoke tests и agent CLI adapters | [docs/harness.md](./docs/harness.md) |
+| Direct Chat, Coding Agents, native Codex subagents, Arena и Workflows | [docs/agents-and-multi-agent.md](./docs/agents-and-multi-agent.md) |
 | Переменные окружения, CLI flags, backend modes | [docs/configuration.md](./docs/configuration.md) |
 | Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [docs/deployment.md](./docs/deployment.md) |
 | Logs, metrics, traffic logs, admin API, debug translation | [docs/operations.md](./docs/operations.md) |

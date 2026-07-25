@@ -17,6 +17,7 @@ http://localhost:8090
 | Поведение `extra_headers`, `extra_query`, `extra_body` и необязательных полей | [Параметры клиентов](client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и их сопоставление с OpenAI/Anthropic/Gemini | [Встроенные инструменты](builtin-tools.md) |
 | Альфа-превью локального cockpit для запусков, сравнений, approvals и workflows | [Unified Harness](harness.md) |
+| Direct Chat, Coding Agents, нативные subagents Codex, Arena и Workflows | [Agents и multi-agent поведение](agents-and-multi-agent.md) |
 | Компоненты Unified Harness, поток выполнения, хранение и API управляющего слоя | [Архитектура Harness](architecture/harness.md) |
 | Переменные окружения, аутентификация, лимиты, метрики, наблюдаемость | [Конфигурация](configuration.md) |
 | Профили Compose, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развёртывание](deployment.md) |

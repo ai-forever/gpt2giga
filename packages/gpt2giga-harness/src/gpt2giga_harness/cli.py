@@ -37,7 +37,9 @@ from gpt2giga_harness.agents import (
 )
 from gpt2giga_harness.capability_matrix import (
     build_adapter_capability_matrix,
+    build_agent_surface_capability_matrix,
     render_adapter_capability_matrix_markdown,
+    render_agent_surface_capability_matrix_markdown,
 )
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.completion import SHELLS, render_completion
@@ -1020,6 +1022,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     harness_capabilities = harness_subparsers.add_parser("capabilities")
     harness_capabilities.add_argument("--json", action="store_true")
+    harness_capabilities.add_argument(
+        "--agents",
+        action="store_true",
+        help="Show Direct Chat and coding-agent behavior contracts",
+    )
     harness_capabilities.set_defaults(handler=_handle_harness_capabilities)
 
     harness_inspect = harness_subparsers.add_parser("inspect", parents=[common])
@@ -1274,11 +1281,16 @@ def _handle_harness_capabilities(
     config: HarnessConfig,
 ) -> int:
     registry = create_default_registry(include_entry_points=False)
-    matrix = build_adapter_capability_matrix(registry)
+    if args.agents:
+        matrix = build_agent_surface_capability_matrix(registry)
+        renderer = render_agent_surface_capability_matrix_markdown
+    else:
+        matrix = build_adapter_capability_matrix(registry)
+        renderer = render_adapter_capability_matrix_markdown
     if args.json:
         _print_json(matrix)
     else:
-        print(render_adapter_capability_matrix_markdown(matrix), end="")
+        print(renderer(matrix), end="")
     return 0
 
 

@@ -581,6 +581,20 @@ def test_cli_harness_capabilities_outputs_generated_matrix(capsys):
     assert "# Harness adapter capability matrix" in capsys.readouterr().out
 
 
+def test_cli_harness_capabilities_outputs_agent_surface_matrix(capsys):
+    assert cli.main(["harness", "capabilities", "--agents", "--json"]) == 0
+
+    matrix = json.loads(capsys.readouterr().out)
+    assert [item["id"] for item in matrix["surfaces"]] == [
+        "direct-chat",
+        "codex-cli",
+        "claude-code",
+        "gemini-cli",
+    ]
+    assert cli.main(["harness", "capabilities", "--agents"]) == 0
+    assert "# GigaLoom agent surface capability matrix" in capsys.readouterr().out
+
+
 def test_cli_harness_inspect_json_shows_native_support(capsys):
     exit_code = cli.main(["harness", "inspect", "claude-code", "--json"])
 
