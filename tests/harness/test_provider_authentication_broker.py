@@ -15,6 +15,7 @@ from gpt2giga_harness.provider_authentication_broker import (
     ProviderAuthenticationConflictError,
     ProviderAuthenticationOperationError,
     provider_account_snapshot_to_dict,
+    provider_session_binding_to_dict,
 )
 from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
@@ -109,6 +110,107 @@ def test_broker_projects_only_typed_status_from_isolated_homes(
         for call in runner.calls
     )
     assert all(call.cwd == Path(call.environment["HOME"]) for call in runner.calls)
+
+
+def test_broker_builds_stable_opaque_session_bindings(tmp_path):
+    runner = _Runner(
+        results={
+            ("auth", "status"): AuthenticationCommandResult(
+                0,
+                (
+                    b'{"loggedIn":true,"email":"person@example.test",'
+                    b'"authMethod":"oauth"}'
+                ),
+            )
+        }
+    )
+    broker = _broker(tmp_path, runner)
+
+    first = provider_session_binding_to_dict(broker.session_binding("claude-code"))
+    second = provider_session_binding_to_dict(broker.session_binding("claude-code"))
+    restarted = provider_session_binding_to_dict(
+        _broker(tmp_path, runner).session_binding("claude-code")
+    )
+
+    assert first["account_identity"] == second["account_identity"]
+    assert restarted["account_identity"] == first["account_identity"]
+    assert first["home_identity"] == second["home_identity"]
+    assert first["source_identity"] == second["source_identity"]
+    assert first["identity_evidence"] == "provider_reported"
+    assert first["quota"] == {
+        "ownership": "provider",
+        "status": "provider_owned_unobserved",
+    }
+    assert first["monetary_cost"] == {
+        "ownership": "api_route",
+        "status": "api_route_separate",
+    }
+    serialized = str(first)
+    assert "person@example.test" not in serialized
+    assert str(tmp_path) not in serialized
+    key_path = tmp_path / "provider_authentication" / "binding_identity.key"
+    assert key_path.stat().st_mode & 0o777 == 0o600
+
+    runner.results[("auth", "status")] = AuthenticationCommandResult(
+        0,
+        b'{"loggedIn":true,"email":"other@example.test","authMethod":"oauth"}',
+    )
+    changed = provider_session_binding_to_dict(broker.session_binding("claude-code"))
+    assert changed["account_identity"] != first["account_identity"]
+    assert changed["home_identity"] == first["home_identity"]
+    assert changed["source_identity"] == first["source_identity"]
+
+
+def test_broker_rejects_symlinked_binding_identity_key(tmp_path):
+    runner = _Runner(
+        results={
+            ("login", "status"): AuthenticationCommandResult(
+                0,
+                b"Logged in using ChatGPT",
+            )
+        }
+    )
+    broker = _broker(tmp_path, runner)
+    broker.root.mkdir(parents=True)
+    outside = tmp_path / "outside-key"
+    outside.write_bytes(b"x" * 32)
+    try:
+        (broker.root / "binding_identity.key").symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    with pytest.raises(
+        ProviderAuthenticationOperationError,
+        match="provider_binding_identity_key_invalid",
+    ):
+        broker.session_binding("codex-cli")
+
+    assert outside.read_bytes() == b"x" * 32
+
+
+def test_broker_rotates_opaque_account_identity_after_logout_and_login(tmp_path):
+    runner = _Runner(
+        results={
+            ("login", "status"): AuthenticationCommandResult(
+                0,
+                b"Logged in using ChatGPT",
+            ),
+            ("logout",): AuthenticationCommandResult(0),
+            ("login",): AuthenticationCommandResult(0),
+        }
+    )
+    broker = _broker(tmp_path, runner)
+    before = provider_session_binding_to_dict(broker.session_binding("codex-cli"))
+
+    broker.logout("codex-cli")
+    pending = broker.start("codex-cli")
+    final = _wait_for_attempt(broker, "codex-cli", pending.attempt_id)
+    after = provider_session_binding_to_dict(broker.session_binding("codex-cli"))
+
+    assert final.status is ProviderAccountStatus.READY
+    assert after["account_identity"] != before["account_identity"]
+    assert after["home_identity"] == before["home_identity"]
+    assert after["source_identity"] == before["source_identity"]
 
 
 def test_broker_rejects_concurrent_login_and_cancels_exact_attempt(tmp_path):
@@ -247,6 +349,51 @@ def test_provider_account_api_is_typed_bounded_and_content_free(tmp_path):
     assert unavailable.json()["detail"]["code"] == "login_start_unavailable"
     assert unknown.status_code == 404
     assert unknown.json()["detail"]["code"] == "provider_authentication_unknown"
+
+
+def test_session_api_exposes_account_drift_before_provider_execution(tmp_path):
+    runner = _Runner(
+        results={
+            ("login", "status"): AuthenticationCommandResult(
+                0,
+                b"Logged in using ChatGPT",
+            )
+        }
+    )
+    broker = _broker(tmp_path / "data", runner)
+    store = InMemoryHarnessSessionStore()
+    client = TestClient(
+        create_app(
+            HarnessConfig(data_dir=str(tmp_path / "data")),
+            registry=create_default_registry(include_entry_points=False),
+            store=store,
+            native_login_broker=broker,
+        )
+    )
+    payload = {
+        "harness_id": "codex-cli",
+        "prompt": "dry run",
+        "mode": "plan",
+        "execution_transport": "one_shot",
+        "dry_run": True,
+    }
+
+    first = client.post("/api/sessions/run", json=payload)
+    assert first.status_code == 200
+    session_id = first.json()["session"]["id"]
+    assert first.json()["run"]["metadata"]["provider_account_binding"][
+        "account_identity"
+    ].startswith("account_")
+
+    runner.results[("login", "status")] = AuthenticationCommandResult(1)
+    blocked = client.post(f"/api/sessions/{session_id}/run", json=payload)
+
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["code"] == "provider_account_identity_unavailable"
+    assert blocked.json()["detail"]["status"] == "logged_out"
+    assert blocked.json()["detail"]["execution_authorized"] is False
+    assert len(store.list_runs(session_id)) == 1
+    assert len(store.list_messages(session_id)) == 2
 
 
 class _Call:

@@ -6,11 +6,15 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -23,6 +27,7 @@ from gpt2giga_harness.provider_authentication import (
     ProviderAuthenticationEvidence,
     load_provider_authentication_evidence,
 )
+from gpt2giga_harness.sessions.locking import exclusive_file_lock
 
 AUTH_COMMAND_TIMEOUT_SECONDS = 180.0
 AUTH_STATUS_TIMEOUT_SECONDS = 5.0
@@ -113,6 +118,22 @@ class ProviderAccountSnapshot:
     actions: Mapping[str, bool]
     attempt_id: str | None = None
     home_scope: str = "isolated_provider_owned"
+
+
+@dataclass(frozen=True)
+class ProviderSessionBinding:
+    """Opaque account and home identity admitted for session continuity."""
+
+    provider_id: str
+    account_identity: str
+    home_identity: str
+    source_identity: str
+    identity_evidence: str
+    authentication_method: str | None
+    observed_at: str
+    quota_status: str = "provider_owned_unobserved"
+    monetary_cost_status: str = "api_route_separate"
+    schema_version: int = 1
 
 
 @dataclass
@@ -261,6 +282,52 @@ class NativeLoginBroker:
             self._latest[provider_id] = snapshot
         return snapshot
 
+    def session_binding(self, provider_id: str) -> ProviderSessionBinding | None:
+        """Return an opaque binding only when provider status is currently ready."""
+        snapshot = self.status(provider_id)
+        if snapshot.status is not ProviderAccountStatus.READY:
+            return None
+        key = self._binding_identity_key()
+        home_identity = _opaque_identity(
+            "home",
+            key,
+            provider_id,
+            os.fspath(self._home(provider_id)),
+        )
+        identity_label = snapshot.identity_label or "identity-undisclosed"
+        identity_evidence = (
+            "provider_reported"
+            if snapshot.identity_label is not None
+            else "isolated_home_scoped"
+        )
+        account_identity = _opaque_identity(
+            "account",
+            key,
+            provider_id,
+            home_identity,
+            self._binding_generation(provider_id).hex(),
+            identity_label,
+            snapshot.authentication_method or "method-undisclosed",
+        )
+        source_identity = _opaque_identity(
+            "source",
+            key,
+            provider_id,
+            snapshot.source,
+            snapshot.pinned_cli_version,
+            snapshot.detected_cli_version or "version-undetected",
+            snapshot.version_status,
+        )
+        return ProviderSessionBinding(
+            provider_id=provider_id,
+            account_identity=account_identity,
+            home_identity=home_identity,
+            source_identity=source_identity,
+            identity_evidence=identity_evidence,
+            authentication_method=snapshot.authentication_method,
+            observed_at=snapshot.checked_at,
+        )
+
     def start(self, provider_id: str) -> ProviderAccountSnapshot:
         """Start one bounded provider-owned login attempt in the background."""
         contract = self._contract(provider_id)
@@ -357,6 +424,7 @@ class NativeLoginBroker:
             cancel_event=threading.Event(),
             capture_output=False,
         )
+        self._binding_generation(provider_id, rotate=True)
         if result.timed_out:
             status = ProviderAccountStatus.UNKNOWN
             reason_code = "logout_timed_out"
@@ -418,6 +486,7 @@ class NativeLoginBroker:
             final = self._observe_status(contract, ignore_pending=True)
             if final.status is ProviderAccountStatus.UNKNOWN:
                 final = replace(final, reason_code="provider_login_status_unknown")
+            self._binding_generation(attempt.provider_id, rotate=True)
         final = replace(final, attempt_id=attempt.id)
         with self._lock:
             current = self._attempts.get(attempt.provider_id)
@@ -608,6 +677,63 @@ class NativeLoginBroker:
             environment["GEMINI_TELEMETRY_ENABLED"] = "false"
         return environment
 
+    def _binding_identity_key(self) -> bytes:
+        path = self.root / "binding_identity.key"
+        return self._private_identity_bytes(path)
+
+    def _binding_generation(self, provider_id: str, *, rotate: bool = False) -> bytes:
+        path = self.root / "bindings" / f"{provider_id}.generation"
+        return self._private_identity_bytes(path, rotate=rotate)
+
+    def _private_identity_bytes(self, path: Path, *, rotate: bool = False) -> bytes:
+        with self._lock:
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with exclusive_file_lock(path):
+                file_status = None
+                if not rotate:
+                    try:
+                        file_status = path.lstat()
+                    except FileNotFoundError:
+                        pass
+                if file_status is None:
+                    key = secrets.token_bytes(32)
+                    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+                    descriptor = os.open(
+                        temporary,
+                        os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                        0o600,
+                    )
+                    try:
+                        os.write(descriptor, key)
+                        os.fsync(descriptor)
+                    finally:
+                        os.close(descriptor)
+                    os.replace(temporary, path)
+                else:
+                    if not stat.S_ISREG(file_status.st_mode):
+                        raise ProviderAuthenticationOperationError(
+                            "provider_binding_identity_key_invalid"
+                        )
+                    descriptor = os.open(
+                        path,
+                        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                    )
+                    try:
+                        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                            raise ProviderAuthenticationOperationError(
+                                "provider_binding_identity_key_invalid"
+                            )
+                        if hasattr(os, "fchmod"):
+                            os.fchmod(descriptor, 0o600)
+                        key = os.read(descriptor, 33)
+                    finally:
+                        os.close(descriptor)
+            if len(key) != 32:
+                raise ProviderAuthenticationOperationError(
+                    "provider_binding_identity_key_invalid"
+                )
+            return key
+
 
 def provider_account_snapshot_to_dict(
     snapshot: ProviderAccountSnapshot,
@@ -632,6 +758,36 @@ def provider_account_snapshot_to_dict(
         "home_scope": snapshot.home_scope,
         "credential_values_readable": False,
     }
+
+
+def provider_session_binding_to_dict(
+    binding: ProviderSessionBinding,
+) -> dict[str, Any]:
+    """Serialize a path-free binding with separate quota and cost ownership."""
+    return {
+        "schema_version": binding.schema_version,
+        "provider_id": binding.provider_id,
+        "account_identity": binding.account_identity,
+        "home_identity": binding.home_identity,
+        "source_identity": binding.source_identity,
+        "identity_evidence": binding.identity_evidence,
+        "authentication_method": binding.authentication_method,
+        "observed_at": binding.observed_at,
+        "quota": {
+            "ownership": "provider",
+            "status": binding.quota_status,
+        },
+        "monetary_cost": {
+            "ownership": "api_route",
+            "status": binding.monetary_cost_status,
+        },
+    }
+
+
+def _opaque_identity(prefix: str, key: bytes, *parts: str) -> str:
+    payload = "\0".join(parts).encode("utf-8")
+    digest = hmac.new(key, payload, hashlib.sha256).hexdigest()[:32]
+    return f"{prefix}_{digest}"
 
 
 def _operation_command(provider_id: str, operation: str) -> tuple[str, ...] | None:
@@ -839,8 +995,10 @@ __all__ = [
     "NativeLoginBroker",
     "ProviderAccountSnapshot",
     "ProviderAccountStatus",
+    "ProviderSessionBinding",
     "ProviderAuthenticationBrokerError",
     "ProviderAuthenticationConflictError",
     "ProviderAuthenticationOperationError",
     "provider_account_snapshot_to_dict",
+    "provider_session_binding_to_dict",
 ]

@@ -13,6 +13,12 @@ from gpt2giga_harness.native import HarnessInvocationMode
 from gpt2giga_harness.preflight import PreflightBlockedError
 from gpt2giga_harness.project import project_id_for_root, resolve_project
 from gpt2giga_harness.project_memory import FilesystemProjectMemoryStore
+from gpt2giga_harness.provider_account_sessions import ProviderAccountSessionError
+from gpt2giga_harness.provider_authentication_broker import (
+    ProviderAccountSnapshot,
+    ProviderAccountStatus,
+    ProviderSessionBinding,
+)
 from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.session_titles import title_diagnostics
@@ -186,6 +192,101 @@ def test_session_runner_persists_structured_thread_and_rejects_identity_change(
     assert len(harness.requests) == 2
     assert len(runner.store.list_runs(session.id)) == 2
     assert len(runner.store.list_messages(session.id)) == 4
+
+
+def test_session_runner_binds_account_and_rejects_drift_before_execution(tmp_path):
+    harness = _StructuredThreadHarness()
+    account_provider = _AccountProvider(_provider_binding(account="account_one"))
+    runner = _runner(
+        harness,
+        data_dir=tmp_path / "data",
+        provider_account_provider=account_provider,
+    )
+    session = runner.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+        default_model="GigaChat-2-Max",
+    )
+
+    first = runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "codex-cli",
+            "prompt": "first",
+            "model": "GigaChat-2-Max",
+        },
+    )
+
+    binding = first.session.metadata["provider_account_binding"]
+    assert binding["account_identity"] == "account_one"
+    assert binding["home_identity"] == "home_one"
+    assert binding["quota"]["ownership"] == "provider"
+    assert binding["monetary_cost"]["ownership"] == "api_route"
+    assert first.run.metadata["provider_account_binding"] == binding
+
+    account_provider.binding = _provider_binding(account="account_two")
+    with pytest.raises(ProviderAccountSessionError) as preflight_caught:
+        runner.preflight(
+            {
+                "harness_id": "codex-cli",
+                "prompt": "must not run",
+                "model": "GigaChat-2-Max",
+            },
+            session_id=session.id,
+        )
+    assert preflight_caught.value.code == "provider_account_identity_drift"
+
+    with pytest.raises(ProviderAccountSessionError) as caught:
+        runner.run_in_session(
+            session.id,
+            {
+                "harness_id": "codex-cli",
+                "prompt": "must not run",
+                "model": "GigaChat-2-Max",
+            },
+        )
+
+    assert caught.value.code == "provider_account_identity_drift"
+    assert caught.value.to_detail()["execution_authorized"] is False
+    assert caught.value.to_detail()["allowed_actions"] == [
+        "new_session",
+        "evidence_only_handoff",
+    ]
+    assert len(harness.requests) == 1
+    assert len(runner.store.list_runs(session.id)) == 1
+    assert len(runner.store.list_messages(session.id)) == 2
+
+
+def test_native_resume_requires_current_ready_account_identity(tmp_path):
+    harness = _StructuredThreadHarness()
+    account_provider = _AccountProvider(None, status=ProviderAccountStatus.LOGGED_OUT)
+    runner = _runner(
+        harness,
+        data_dir=tmp_path / "data",
+        provider_account_provider=account_provider,
+    )
+    session = runner.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+        default_model="GigaChat-2-Max",
+    )
+
+    with pytest.raises(ProviderAccountSessionError) as caught:
+        runner.run_in_session(
+            session.id,
+            {
+                "harness_id": "codex-cli",
+                "prompt": "resume",
+                "native_session_id": "provider-thread",
+                "extra": {"native_session_operation": "resume"},
+            },
+        )
+
+    assert caught.value.code == "provider_account_identity_unavailable"
+    assert caught.value.status == "logged_out"
+    assert harness.requests == []
+    assert runner.store.list_runs(session.id) == ()
+    assert runner.store.list_messages(session.id) == ()
 
 
 @pytest.mark.parametrize("operation", ("resume", "fork"))
@@ -941,6 +1042,7 @@ def _runner(
     store: InMemoryHarnessSessionStore | None = None,
     data_dir=None,
     memory_store: FilesystemProjectMemoryStore | None = None,
+    provider_account_provider=None,
 ) -> HarnessSessionRunner:
     registry = HarnessRegistry()
     registry.register(harness)
@@ -952,6 +1054,53 @@ def _runner(
         ),
         store=store or InMemoryHarnessSessionStore(),
         memory_store=memory_store,
+        provider_account_provider=provider_account_provider,
+    )
+
+
+class _AccountProvider:
+    def __init__(
+        self,
+        binding: ProviderSessionBinding | None,
+        *,
+        status: ProviderAccountStatus = ProviderAccountStatus.READY,
+    ) -> None:
+        self.binding = binding
+        self.account_status = status
+
+    def session_binding(self, provider_id: str) -> ProviderSessionBinding | None:
+        assert provider_id == "codex-cli"
+        return self.binding
+
+    def status(self, provider_id: str) -> ProviderAccountSnapshot:
+        assert provider_id == "codex-cli"
+        return ProviderAccountSnapshot(
+            provider_id=provider_id,
+            display_name="Codex CLI",
+            status=self.account_status,
+            source="test",
+            checked_at="2026-07-26T00:00:00Z",
+            pinned_cli_version="0.144.3",
+            detected_cli_version="0.144.3",
+            version_status="reviewed_pin",
+            identity_label=None,
+            authentication_method="chatgpt",
+            expires_at=None,
+            reason_code="test",
+            recovery=("test",),
+            actions={},
+        )
+
+
+def _provider_binding(*, account: str) -> ProviderSessionBinding:
+    return ProviderSessionBinding(
+        provider_id="codex-cli",
+        account_identity=account,
+        home_identity="home_one",
+        source_identity="source_one",
+        identity_evidence="isolated_home_scoped",
+        authentication_method="chatgpt",
+        observed_at="2026-07-26T00:00:00Z",
     )
 
 

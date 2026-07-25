@@ -178,6 +178,11 @@ from gpt2giga_harness.preflight import (
 )
 from gpt2giga_harness.provider_settings import ProviderSettingsService
 from gpt2giga_harness.provider_authentication_broker import NativeLoginBroker
+from gpt2giga_harness.provider_account_sessions import (
+    PROVIDER_ACCOUNT_BINDING_KEY,
+    ProviderAccountSessionError,
+    prepare_provider_account_binding,
+)
 from gpt2giga_harness.pr_artifacts import (
     build_pr_artifact,
     create_pr_branch,
@@ -462,6 +467,7 @@ def create_app(
         store=store,
         attachment_store=attachment_store,
         memory_store=memory_store,
+        provider_account_provider=native_login_broker,
     )
     durable_dispatcher = (
         DurableJobDispatcher(
@@ -1303,6 +1309,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"preflight": preflight_report_to_dict(report)}
@@ -1626,6 +1634,49 @@ def create_app(
             action = str(payload.get("action") or "start").strip().lower()
             if action not in {"start", "resume"}:
                 raise ValueError("action must be start or resume")
+            if action == "resume":
+                identity_native_ref_id = _optional_text(payload.get("native_ref_id"))
+                if identity_native_ref_id is not None:
+                    identity_ref = _native_ref_or_404(
+                        native_index_store,
+                        identity_native_ref_id,
+                    )
+                else:
+                    identity_harness_id = _required_text(
+                        payload.get("harness_id") or session.default_harness_id,
+                        "harness_id is required",
+                    )
+                    identity_ref = _native_ref_from_session_link(
+                        store,
+                        session,
+                        identity_harness_id,
+                    )
+                identity_provider_id = identity_ref.harness_id
+                identity_native_session_id = (
+                    identity_ref.native_session_id or identity_ref.id
+                )
+            else:
+                identity_provider_id = _required_text(
+                    payload.get("harness_id") or session.default_harness_id,
+                    "harness_id is required",
+                )
+                identity_native_session_id = None
+            provider_account_binding = prepare_provider_account_binding(
+                session,
+                provider_id=identity_provider_id,
+                native_session_id=identity_native_session_id,
+                provider=native_login_broker,
+            )
+            if provider_account_binding is not None and not session.metadata.get(
+                PROVIDER_ACCOUNT_BINDING_KEY
+            ):
+                session = store.update_session(
+                    session.id,
+                    metadata={
+                        **dict(session.metadata),
+                        PROVIDER_ACCOUNT_BINDING_KEY: provider_account_binding,
+                    },
+                )
             if action == "start":
                 _native_permission_mode(payload.get("mode") or session.default_mode)
             policy_result = _native_process_policy_gate(
@@ -1697,6 +1748,8 @@ def create_app(
             )
             options["workspace_execution"] = workspace_metadata
             options["policy"] = policy_metadata
+            if provider_account_binding is not None:
+                options[PROVIDER_ACCOUNT_BINDING_KEY] = provider_account_binding
             options["plan"] = replace(
                 options["plan"],
                 metadata={
@@ -1824,6 +1877,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except HTTPException:
             raise
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except (NativeProcessStartError, ValueError) as exc:
             if isinstance(options, Mapping):
                 route_preflight = options.get("proxy_route_preflight")
@@ -2533,6 +2588,8 @@ def create_app(
             run = await _start_headless_run(session.id, payload)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -2551,6 +2608,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -2906,6 +2965,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         response = result.to_dict()
@@ -3114,6 +3175,8 @@ def create_app(
             result = session_service.create_and_run(payload)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return result.to_dict()
@@ -3129,6 +3192,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return result.to_dict()
@@ -4710,6 +4775,9 @@ def _native_process_run_metadata(
     policy = options.get("policy")
     if isinstance(policy, Mapping):
         metadata["policy"] = dict(policy)
+    provider_account_binding = options.get(PROVIDER_ACCOUNT_BINDING_KEY)
+    if isinstance(provider_account_binding, Mapping):
+        metadata[PROVIDER_ACCOUNT_BINDING_KEY] = dict(provider_account_binding)
     return metadata
 
 
@@ -4745,6 +4813,9 @@ def _append_native_process_link(
     policy = options.get("policy")
     if isinstance(policy, Mapping):
         metadata["policy"] = dict(policy)
+    provider_account_binding = options.get(PROVIDER_ACCOUNT_BINDING_KEY)
+    if isinstance(provider_account_binding, Mapping):
+        metadata[PROVIDER_ACCOUNT_BINDING_KEY] = dict(provider_account_binding)
     if process_ref.native_home is not None:
         metadata["native_home"] = process_ref.native_home
     if isinstance(ref, NativeSessionRef):

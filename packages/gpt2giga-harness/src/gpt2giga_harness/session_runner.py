@@ -43,6 +43,11 @@ from gpt2giga_harness.permission_simulator import (
     extension_permission_contract,
 )
 from gpt2giga_harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
+from gpt2giga_harness.provider_account_sessions import (
+    PROVIDER_ACCOUNT_BINDING_KEY,
+    ProviderAccountBindingProvider,
+    prepare_provider_account_binding,
+)
 from gpt2giga_harness.provenance import (
     build_run_provenance,
     run_provenance_to_dict,
@@ -157,6 +162,7 @@ class HarnessSessionRunner:
         store: HarnessSessionStore,
         attachment_store: FilesystemAttachmentStore | None = None,
         memory_store: FilesystemProjectMemoryStore | None = None,
+        provider_account_provider: ProviderAccountBindingProvider | None = None,
     ) -> None:
         self.registry = registry
         self.config = config
@@ -165,6 +171,7 @@ class HarnessSessionRunner:
             config.data_dir
         )
         self.memory_store = memory_store or FilesystemProjectMemoryStore()
+        self.provider_account_provider = provider_account_provider
 
     def preflight(
         self,
@@ -176,6 +183,13 @@ class HarnessSessionRunner:
         """Build a pre-run safety report without invoking a harness."""
         session = self.store.get_session(session_id) if session_id is not None else None
         options = self._run_options(payload, session=session)
+        if session is not None:
+            prepare_provider_account_binding(
+                session,
+                provider_id=str(options["harness_id"]),
+                native_session_id=_optional_text(options.get("native_session_id")),
+                provider=self.provider_account_provider,
+            )
         previous_messages = ()
         if session is not None and not bool(
             _mapping(options["extra"]).get("isolated_history")
@@ -262,6 +276,10 @@ class HarnessSessionRunner:
         """Prepare one durable headless run without executing its harness."""
         session = self.store.get_session(session_id)
         options = self._run_options(payload, session=session)
+        session, provider_account_binding = self._prepare_provider_account_session(
+            session,
+            options,
+        )
         if (
             options["invocation_mode"].value != "headless"
             and options["execution_transport"]
@@ -314,6 +332,11 @@ class HarnessSessionRunner:
                 **edited_message_metadata(_edit_message_id(options)),
                 **_agent_metadata(options),
                 **_workbench_admission_metadata(options),
+                **(
+                    {PROVIDER_ACCOUNT_BINDING_KEY: provider_account_binding}
+                    if provider_account_binding is not None
+                    else {}
+                ),
             },
         )
         user_message = self.store.append_message(
@@ -366,6 +389,10 @@ class HarnessSessionRunner:
         """Run one prompt inside an existing session."""
         session = self.store.get_session(session_id)
         options = self._run_options(payload, session=session)
+        session, provider_account_binding = self._prepare_provider_account_session(
+            session,
+            options,
+        )
         harness = self.registry.get(options["harness_id"])
         logical_user_message_id = user_message_id or new_id("msg")
         previous_messages = ()
@@ -467,6 +494,11 @@ class HarnessSessionRunner:
             ),
             **_agent_metadata(options),
             **_workbench_admission_metadata(options),
+            **(
+                {PROVIDER_ACCOUNT_BINDING_KEY: provider_account_binding}
+                if provider_account_binding is not None
+                else {}
+            ),
         }
         edit_message_id = _edit_message_id(options)
         if edit_message_id is not None:
@@ -1075,6 +1107,28 @@ class HarnessSessionRunner:
                 else None
             ),
         }
+
+    def _prepare_provider_account_session(
+        self,
+        session: HarnessSession,
+        options: Mapping[str, Any],
+    ) -> tuple[HarnessSession, dict[str, Any] | None]:
+        binding = prepare_provider_account_binding(
+            session,
+            provider_id=str(options["harness_id"]),
+            native_session_id=_optional_text(options.get("native_session_id")),
+            provider=self.provider_account_provider,
+        )
+        if binding is None or session.metadata.get(PROVIDER_ACCOUNT_BINDING_KEY):
+            return session, binding
+        updated = self.store.update_session(
+            session.id,
+            metadata={
+                **dict(session.metadata),
+                PROVIDER_ACCOUNT_BINDING_KEY: binding,
+            },
+        )
+        return updated, binding
 
     def _build_request_messages(
         self,
