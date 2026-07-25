@@ -698,6 +698,15 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .settings-server-list strong { font-size: 11px; }
 .settings-server-list span:not(.status-label) { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .settings-action-result { color: var(--muted); font-size: 10px; }
+.provider-account-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.provider-account-card { min-width: 0; display: grid; gap: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 14px; }
+.provider-account-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.provider-account-card > header > div { min-width: 0; display: grid; gap: 2px; }
+.provider-account-card > header strong { font-size: 12px; }
+.provider-account-card > header small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.provider-account-card .settings-facts { grid-template-columns: 1fr; }
+.provider-account-recovery { min-height: 42px; display: grid; gap: 4px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.provider-account-recovery strong { color: var(--text); font-size: 9px; text-transform: uppercase; }
 .settings-subheading { margin: 18px 0 10px; color: var(--text); font-size: 12px; }
 .settings-subheading:first-child { margin-top: 0; }
 .provider-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
@@ -731,6 +740,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .settings-sections { gap: 10px; }
   .settings-section { padding: 14px; }
   .settings-field-grid, .settings-facts { grid-template-columns: 1fr; }
+  .provider-account-grid { grid-template-columns: 1fr; }
   .provider-toolbar { align-items: stretch; flex-direction: column; }
   .provider-list { grid-template-columns: 1fr; }
   .provider-route-list > div { grid-template-columns: 72px minmax(0, 1fr); }

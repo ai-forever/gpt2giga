@@ -12,6 +12,7 @@ describe("backend-owned Settings contract", () => {
     for (const category of [
       "appearance",
       "runtime",
+      "providerAccounts",
       "provider",
       "routesModels",
       "harnessDefaults",
@@ -34,6 +35,9 @@ describe("backend-owned Settings contract", () => {
     expect(source).toContain('/discover`');
     expect(source).toContain("fork_or_new_session_required");
     expect(source).toContain("providerFieldErrors(saveProvider.error)");
+    expect(source).toContain("/api/provider-accounts/");
+    expect(source).toContain("ProviderAccountCard");
+    expect(source).toContain("isolated_home_only");
   });
 
   it("never creates browser fields for credentials, tokens, or certificates", () => {

@@ -822,6 +822,51 @@ export interface ProviderCheckResponse {
   effects: Record<string, string>;
 }
 
+export type ProviderAccountStatus =
+  | "logged_out"
+  | "pending"
+  | "ready"
+  | "expired"
+  | "revoked"
+  | "unavailable"
+  | "unknown";
+
+export interface ProviderAccountProjection {
+  provider_id: string;
+  display_name: string;
+  status: ProviderAccountStatus;
+  source: string;
+  checked_at: string;
+  pinned_cli_version: string;
+  detected_cli_version: string | null;
+  version_status: string;
+  identity_label: string | null;
+  authentication_method: string | null;
+  expires_at: string | null;
+  reason_code: string;
+  recovery: string[];
+  actions: {
+    start: boolean;
+    status: boolean;
+    logout: boolean;
+    cancel: boolean;
+  };
+  attempt_id: string | null;
+  home_scope: "isolated_provider_owned";
+  credential_values_readable: false;
+}
+
+export interface ProviderAccountsResponse {
+  schema_version: 1;
+  credential_values_readable: false;
+  real_native_homes_accessed: false;
+  accounts: ProviderAccountProjection[];
+}
+
+export interface ProviderAccountMutationResponse {
+  account: ProviderAccountProjection;
+}
+
 export interface AttachmentSummary {
   id: string;
   filename: string;

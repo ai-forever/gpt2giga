@@ -135,6 +135,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/project/state"),
         ("GET", "/api/providers"),
         ("GET", "/api/providers/{provider_id}"),
+        ("GET", "/api/provider-accounts"),
         ("GET", "/api/provider-handoffs/{harness_id}/preview"),
         ("GET", "/api/runs"),
         ("GET", "/api/runs/updates/stream"),
@@ -226,6 +227,7 @@ _SQLITE_PREFIXES = (
 _SUBPROCESS_PREFIXES = (
     "/api/editor/",
     "/api/native/processes",
+    "/api/provider-accounts",
     "/api/tool-servers/",
 )
 _SUBPROCESS_EXACT = frozenset(

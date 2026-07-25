@@ -177,6 +177,7 @@ from gpt2giga_harness.preflight import (
     preflight_report_to_dict,
 )
 from gpt2giga_harness.provider_settings import ProviderSettingsService
+from gpt2giga_harness.provider_authentication_broker import NativeLoginBroker
 from gpt2giga_harness.pr_artifacts import (
     build_pr_artifact,
     create_pr_branch,
@@ -366,6 +367,7 @@ def create_app(
     native_process_manager: NativeProcessManager | None = None,
     runtime_store: RuntimeCoordinationStore | None = None,
     provider_settings_service: ProviderSettingsService | None = None,
+    native_login_broker: NativeLoginBroker | None = None,
     integration_flow_service: IntegrationFlowService | None = None,
     grouped_integration_service: GroupedIntegrationService | None = None,
     integration_lifecycle_service: IntegrationLifecycleService | None = None,
@@ -403,6 +405,15 @@ def create_app(
     settings_store = HarnessSettingsStore(config.data_dir, config)
     provider_settings_service = provider_settings_service or ProviderSettingsService(
         config.data_dir
+    )
+    native_login_broker = native_login_broker or NativeLoginBroker(
+        config.data_dir,
+        resolution_provider=lambda provider_id: registry.get(
+            provider_id
+        ).executable_resolution(),
+        capability_provider=lambda provider_id: registry.get(
+            provider_id
+        ).capability_probe(),
     )
     integration_flow_service = integration_flow_service or IntegrationFlowService(
         config.data_dir
@@ -546,6 +557,7 @@ def create_app(
     app.state.harness_workbench_resources = workbench_resources
     app.state.harness_settings_store = settings_store
     app.state.harness_provider_settings_service = provider_settings_service
+    app.state.harness_native_login_broker = native_login_broker
     app.state.harness_integration_flow_service = integration_flow_service
     app.state.harness_grouped_integration_service = grouped_integration_service
     app.state.harness_integration_lifecycle_service = integration_lifecycle_service

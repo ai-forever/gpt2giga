@@ -156,6 +156,22 @@ CONFORMANCE_EVIDENCE = {
             ),
         ),
         ConformanceEvidence(
+            id="provider.authentication",
+            behaviors=frozenset(
+                {
+                    ConformanceBehavior.AUTHENTICATION,
+                    ConformanceBehavior.ALLOW,
+                    ConformanceBehavior.DENY,
+                    ConformanceBehavior.STALE_OR_REBOUND,
+                    ConformanceBehavior.REDACTION,
+                }
+            ),
+            test_nodes=(
+                "tests/harness/test_provider_authentication_broker.py::test_provider_account_api_is_typed_bounded_and_content_free",
+                "tests/harness/test_provider_authentication_broker.py::test_broker_rejects_concurrent_login_and_cancels_exact_attempt",
+            ),
+        ),
+        ConformanceEvidence(
             id="external.editor",
             behaviors=frozenset(
                 {
@@ -333,6 +349,7 @@ _EDITOR = (*_AUTH, "external.editor")
 _NATIVE_CONTROL = (*_AUTH, "external.native_control")
 _POLICY = (*_AUTH, "policy.lifecycle")
 _PROVIDER_SETTINGS = (*_AUTH, "provider.settings")
+_PROVIDER_AUTHENTICATION = (*_AUTH, "provider.authentication")
 _INTEGRATION_FLOW = (*_AUTH, "integrations.flow")
 _TRACE_REPLAY = (*_AUTH, "trace_replay.manifest")
 
@@ -406,6 +423,14 @@ MUTATION_ROUTE_CONTRACTS = (
         EnforcementControl.AUTHENTICATED_PROJECTION,
         None,
         evidence=_READ,
+    ),
+    _route(
+        "POST",
+        "/api/provider-accounts/{provider_id}/refresh",
+        MutationClass.READ_ONLY,
+        EnforcementControl.AUTHENTICATED_PROJECTION,
+        None,
+        evidence=_PROVIDER_AUTHENTICATION,
     ),
     *_many(
         "PATCH",
@@ -682,6 +707,35 @@ MUTATION_ROUTE_CONTRACTS = (
         "provider_settings.probe",
         actions=(PermissionAction.NETWORK_CONNECT,),
         evidence=_PROVIDER_SETTINGS,
+    ),
+    _route(
+        "POST",
+        "/api/provider-accounts/{provider_id}/login",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.EXPLICIT_OPERATOR_ACTION,
+        "provider_authentication.login",
+        actions=(
+            PermissionAction.PROCESS_SPAWN,
+            PermissionAction.NETWORK_CONNECT,
+        ),
+        evidence=_PROVIDER_AUTHENTICATION,
+    ),
+    _route(
+        "POST",
+        "/api/provider-accounts/{provider_id}/cancel",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.EXPLICIT_OPERATOR_ACTION,
+        "provider_authentication.cancel",
+        evidence=_PROVIDER_AUTHENTICATION,
+    ),
+    _route(
+        "POST",
+        "/api/provider-accounts/{provider_id}/logout",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.EXPLICIT_OPERATOR_ACTION,
+        "provider_authentication.logout",
+        actions=(PermissionAction.PROCESS_SPAWN,),
+        evidence=_PROVIDER_AUTHENTICATION,
     ),
     _route(
         "DELETE",

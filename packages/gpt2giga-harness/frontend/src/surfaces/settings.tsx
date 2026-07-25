@@ -6,6 +6,8 @@ import {
   mutateCockpit,
   patchCockpit,
   type ModelsResponse,
+  type ProviderAccountMutationResponse,
+  type ProviderAccountProjection,
   type ProviderCheckResponse,
   type ProviderMutationResponse,
   type ProviderProjection,
@@ -18,7 +20,12 @@ import { LazyInspector, type InspectorKind } from "../inspectors/LazyInspector";
 import { message } from "../messages";
 import type { LocalePreference, ThemePreference } from "../preferences";
 import { usePreferences } from "../preferences-context";
-import { providersOptions, requestKeys, settingsOptions } from "../request-graph";
+import {
+  providerAccountsOptions,
+  providersOptions,
+  requestKeys,
+  settingsOptions,
+} from "../request-graph";
 
 type DefaultsDraft = {
   default_api_mode: string;
@@ -59,6 +66,7 @@ type ProviderDraft = {
 const categories = [
   "appearance",
   "runtime",
+  "providerAccounts",
   "provider",
   "routesModels",
   "harnessDefaults",
@@ -73,6 +81,7 @@ export function SettingsSurface() {
   const queryClient = useQueryClient();
   const settings = useQuery(settingsOptions());
   const providers = useQuery(providersOptions());
+  const providerAccounts = useQuery(providerAccountsOptions());
   const [draft, setDraft] = useState<DefaultsDraft | null>(null);
   const [providerDraft, setProviderDraft] = useState<ProviderDraft | null>(null);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
@@ -147,6 +156,23 @@ export function SettingsSurface() {
       void queryClient.invalidateQueries({ queryKey: requestKeys.providers() });
     },
   });
+  const providerAccountAction = useMutation({
+    mutationFn: ({
+      providerId,
+      action,
+    }: {
+      providerId: string;
+      action: "cancel" | "login" | "logout" | "refresh";
+    }) =>
+      mutateCockpit<ProviderAccountMutationResponse>(
+        `/api/provider-accounts/${encodeURIComponent(providerId)}/${action}`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: requestKeys.providerAccounts(),
+      });
+    },
+  });
   const modelDiscovery = useMutation({
     mutationFn: () =>
       fetchCockpit<ModelsResponse>(
@@ -165,10 +191,23 @@ export function SettingsSurface() {
     settings.data?.routes.models,
   ]);
 
-  if (settings.isPending || providers.isPending || draft === null || providerDraft === null) {
+  if (
+    settings.isPending ||
+    providers.isPending ||
+    providerAccounts.isPending ||
+    draft === null ||
+    providerDraft === null
+  ) {
     return <div className="settings-loading" aria-busy="true">{message(locale, "loading")}</div>;
   }
-  if (settings.isError || providers.isError || settings.data === undefined || providers.data === undefined) {
+  if (
+    settings.isError ||
+    providers.isError ||
+    providerAccounts.isError ||
+    settings.data === undefined ||
+    providers.data === undefined ||
+    providerAccounts.data === undefined
+  ) {
     return <div className="error-state">{message(locale, "settingsUnavailable")}</div>;
   }
   const data = settings.data;
@@ -237,6 +276,31 @@ export function SettingsSurface() {
               {message(locale, "checkRuntime")}
             </button>
             <Boundary source={data.runtime.proxy_source} effect={data.runtime.change_effect} />
+          </SettingsSection>
+
+          <SettingsSection id="providerAccounts" title={message(locale, "providerAccounts")} description={message(locale, "providerAccountsHint")}>
+            <div className="provider-account-grid">
+              {providerAccounts.data.accounts.map((account) => (
+                <ProviderAccountCard
+                  account={account}
+                  actionPending={
+                    providerAccountAction.isPending &&
+                    providerAccountAction.variables?.providerId === account.provider_id
+                  }
+                  key={account.provider_id}
+                  locale={locale}
+                  onAction={(action) =>
+                    providerAccountAction.mutate({
+                      providerId: account.provider_id,
+                      action,
+                    })}
+                />
+              ))}
+            </div>
+            {providerAccountAction.isError ? (
+              <p className="mutation-error" role="alert">{message(locale, "loginActionFailed")}</p>
+            ) : null}
+            <Boundary source="provider_owned_cli" effect="isolated_home_only" />
           </SettingsSection>
 
           <SettingsSection id="provider" title={message(locale, "provider")} description={message(locale, "providerHint")}>
@@ -540,6 +604,90 @@ function Boundary({ effect, source }: { effect: string; source: string }) {
 
 function ProviderField({ children, error, label }: { children: React.ReactNode; error?: string; label: string }) {
   return <label>{label}{children}{error ? <span className="settings-field-error">{error}</span> : null}</label>;
+}
+
+function ProviderAccountCard({
+  account,
+  actionPending,
+  locale,
+  onAction,
+}: {
+  account: ProviderAccountProjection;
+  actionPending: boolean;
+  locale: LocalePreference;
+  onAction: (action: "cancel" | "login" | "logout" | "refresh") => void;
+}) {
+  const pending = account.status === "pending";
+  return (
+    <article className="provider-account-card">
+      <header>
+        <div>
+          <strong>{account.display_name}</strong>
+          <small>{account.provider_id}</small>
+        </div>
+        <span className={`status-label ${account.status === "ready" ? "success" : ""}`}>
+          {account.status}
+        </span>
+      </header>
+      <dl className="settings-facts">
+        <Fact label={message(locale, "source")} value={account.source} mono />
+        <Fact
+          label={message(locale, "detectedVersion")}
+          value={account.detected_cli_version ?? message(locale, "cliNotDetected")}
+        />
+        <Fact
+          label={message(locale, "authentication")}
+          value={account.authentication_method ?? message(locale, "providerOwnedCredentials")}
+        />
+        <Fact
+          label={message(locale, "expiry")}
+          value={account.expires_at ?? message(locale, "noExpiry")}
+        />
+      </dl>
+      <p className="provider-account-recovery">
+        <strong>{message(locale, "accountRecovery")}</strong>
+        <span>{account.recovery[0] ?? account.reason_code}</span>
+      </p>
+      {pending ? (
+        <p className="settings-action-result" role="status">
+          {message(locale, "loginPendingHint")}
+        </p>
+      ) : null}
+      <div className="provider-actions">
+        <button
+          disabled={!account.actions.status || actionPending || pending}
+          onClick={() => onAction("refresh")}
+          type="button"
+        >
+          {message(locale, "refreshStatus")}
+        </button>
+        {pending ? (
+          <button
+            disabled={!account.actions.cancel || actionPending}
+            onClick={() => onAction("cancel")}
+            type="button"
+          >
+            {message(locale, "cancelLogin")}
+          </button>
+        ) : (
+          <button
+            disabled={!account.actions.start || actionPending}
+            onClick={() => onAction("login")}
+            type="button"
+          >
+            {message(locale, "startLogin")}
+          </button>
+        )}
+        <button
+          disabled={!account.actions.logout || actionPending || pending}
+          onClick={() => onAction("logout")}
+          type="button"
+        >
+          {message(locale, "logout")}
+        </button>
+      </div>
+    </article>
+  );
 }
 
 function emptyProviderDraft(template: ProviderSettingsResponse["templates"][number] | undefined): ProviderDraft {
