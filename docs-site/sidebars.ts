@@ -48,6 +48,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'architecture/harness',
         'architecture/product-capability-admission-adr',
+        'architecture/provider-authentication-capability-matrix',
         'architecture/normalized-messages',
         'architecture/logging-and-observability',
         'architecture/how-to-add-provider',

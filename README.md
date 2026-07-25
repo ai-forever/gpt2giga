@@ -152,6 +152,7 @@ make docs-dev-ru
 | Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [docs/deployment.md](./docs/deployment.md) |
 | Logs, metrics, traffic logs, admin API, debug translation | [docs/operations.md](./docs/operations.md) |
 | Live GigaChat integration tests | [docs/live-integration-tests.md](./docs/live-integration-tests.md) |
+| Provider-owned login, status, logout и headless-границы | [docs/architecture/provider-authentication-capability-matrix.md](./docs/architecture/provider-authentication-capability-matrix.md) |
 | Внутренняя архитектура normalized messages | [docs/architecture/normalized-messages.md](./docs/architecture/normalized-messages.md) |
 | Checklist для добавления provider/protocol | [docs/architecture/how-to-add-provider.md](./docs/architecture/how-to-add-provider.md) |
 | Редакторы, агенты, SDK examples, reverse proxies | [docs/integrations.md](./docs/integrations.md) |
