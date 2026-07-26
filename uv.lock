@@ -1074,7 +1074,7 @@ wheels = [
 
 [[package]]
 name = "gpt2giga"
-version = "0.2.4a1"
+version = "0.2.5a1"
 source = { editable = "packages/gpt2giga" }
 dependencies = [
     { name = "aiohttp" },
@@ -1140,7 +1140,7 @@ provides-extras = ["postgres", "opensearch", "phoenix"]
 
 [[package]]
 name = "gpt2giga-harness"
-version = "0.4.1a1"
+version = "0.5.0a1"
 source = { editable = "packages/gpt2giga-harness" }
 dependencies = [
     { name = "anyio" },

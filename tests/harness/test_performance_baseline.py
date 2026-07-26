@@ -38,6 +38,34 @@ def test_cli_import_does_not_load_testclient_backend():
     assert result.returncode == 0, result.stderr
 
 
+def test_performance_baseline_imports_without_posix_resource_module():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys\n"
+                "class BlockResource:\n"
+                "    def find_spec(self, fullname, path=None, target=None):\n"
+                "        if fullname == 'resource':\n"
+                "            raise ModuleNotFoundError(fullname)\n"
+                "        return None\n"
+                "sys.meta_path.insert(0, BlockResource()); "
+                "from gpt2giga_harness import performance_baseline as baseline; "
+                "sample = baseline._measure(lambda: {}); "
+                "assert sample.rss_bytes == 0; "
+                "assert sample.input_blocks == 0; "
+                "assert sample.output_blocks == 0"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_performance_baseline_is_bounded_content_free_and_machine_readable():
     report = run_performance_baseline(samples=2)
 

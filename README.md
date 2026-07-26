@@ -52,19 +52,19 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Текущая alpha-preview линия Unified Harness — `0.4.1a1`. Её всегда можно
+Текущая alpha-preview линия Unified Harness — `0.5.0a1`. Её всегда можно
 запустить [из source checkout](./docs/harness.md#quickstart). Опубликованный
 provider-neutral пакет добавляет команды `giga` и `gpt2giga-harness`:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 giga doctor
 giga --version
 giga ui
 ```
 
 Для Direct Chat и provider preset локального gateway установите явный extra
-`gpt2giga-harness[gpt2giga]==0.4.1a1`; он закрепляет `gpt2giga==0.2.4a1`.
+`gpt2giga-harness[gpt2giga]==0.5.0a1`; он закрепляет `gpt2giga==0.2.5a1`.
 
 Нативные команды Codex CLI, Claude Code и Gemini CLI получают ровно один
 префикс; общий глагол `exec` не вводится:

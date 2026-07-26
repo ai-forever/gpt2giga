@@ -120,8 +120,8 @@ Node.js runtime, credentials или provider config. `uv tool` и `pipx` соз�
 изолированное окружение Harness:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.4.1a1'
-pipx install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
+pipx install 'gpt2giga-harness==0.5.0a1'
 ```
 
 Существующий prerelease с optional TUI обновляйте на месте без extra `[tui]`.
@@ -131,10 +131,10 @@ pipx install 'gpt2giga-harness==0.4.1a1'
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool install --force 'gpt2giga-harness==0.4.1a1'
+uv tool install --force 'gpt2giga-harness==0.5.0a1'
 uv tool install --force 'gpt2giga-harness==<previous-version>'
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 ```
 
 Удаление пакета не удаляет `~/.gpt2giga/harness`, проектные `.giga/` или
@@ -193,19 +193,19 @@ giga harness list
 короткий вариант:
 
 ```bash
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 giga doctor
 ```
 
 Для Direct Chat и provider preset `gpt2giga` установите явный extra:
 
 ```bash
-uv tool install 'gpt2giga-harness[gpt2giga]==0.4.1a1'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.5.0a1'
 ```
 
-Текущий дистрибутив `gpt2giga-harness==0.4.1a1` добавляет команды `giga` и
+Текущий дистрибутив `gpt2giga-harness==0.5.0a1` добавляет команды `giga` и
 `gpt2giga-harness`; его явный extra `gpt2giga` закрепляет
-`gpt2giga==0.2.4a1`.
+`gpt2giga==0.2.5a1`.
 
 Для Direct Chat понадобятся credentials из [быстрого старта gpt2giga](quickstart.md).
 Codex, Claude Code и Gemini — опциональные интеграции: соответствующий CLI
@@ -269,7 +269,7 @@ bytes, exit code и разделение stdout/stderr CLI.
 пакет и удалите `[tui]` из команд установки:
 
 ```bash
-uv tool install --force 'gpt2giga-harness==0.4.1a1'
+uv tool install --force 'gpt2giga-harness==0.5.0a1'
 giga --version
 giga
 ```
@@ -1654,12 +1654,12 @@ project state:
 ```bash
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 giga doctor
 ```
 
-Текущая metadata `gpt2giga-harness==0.4.1a1` сохраняет
-`gpt2giga==0.2.4a1` в явном optional extra `gpt2giga`. Старый import
+Текущая metadata `gpt2giga-harness==0.5.0a1` сохраняет
+`gpt2giga==0.2.5a1` в явном optional extra `gpt2giga`. Старый import
 `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
 перезаписывает `~/.gpt2giga/harness`, `.giga/` или vendor-owned CLI homes.

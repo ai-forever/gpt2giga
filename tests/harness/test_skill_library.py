@@ -20,6 +20,11 @@ from gpt2giga_harness.federated_catalog import (
 from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.skill_library import GitCommandResult, SkillLibraryService
 from gpt2giga_harness.integration_flows import IntegrationFlowService
+from gpt2giga_harness.portable_skills import (
+    SkillActivationMode,
+    SkillCapabilitySnapshot,
+    SkillTargetStatus,
+)
 from gpt2giga_harness.ui.app import create_app
 
 
@@ -37,6 +42,19 @@ _GIT_SKILL = _SKILL.replace(
     "description: Review one pull request safely.\n",
     "description: Review one pull request safely.\nallowed-tools: Read, Grep\n",
 )
+
+
+def _supported_skill(target_id: str) -> SkillCapabilitySnapshot:
+    return SkillCapabilitySnapshot(
+        target_id=target_id,
+        status=SkillTargetStatus.SUPPORTED,
+        version="test",
+        command=(target_id.removesuffix("-skill"),),
+        supports_discovery=True,
+        supports_activation=True,
+        discovery_method="documented_filesystem",
+        activation_mode=SkillActivationMode.IMPLICIT_OR_EXPLICIT,
+    )
 
 
 class _CatalogSource:
@@ -293,7 +311,10 @@ async def test_remote_provenance_survives_git_import_preview_and_receipt(
         upstream_id="acme/skills/review",
     )
     entry = library.import_git_skill(inspection["candidates"][0]["id"])
-    service = IntegrationFlowService(data_dir)
+    service = IntegrationFlowService(
+        data_dir,
+        skill_capability_provider=_supported_skill,
+    )
     preview = service.preview(
         {
             "source": "catalog",

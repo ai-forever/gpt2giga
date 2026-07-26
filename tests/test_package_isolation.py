@@ -38,6 +38,7 @@ IMPORT_DISTRIBUTIONS = {
     "fastapi": "fastapi",
     "gigachat": "gigachat",
     "gpt2giga": "gpt2giga",
+    "jwt": "pyjwt",
     "pydantic": "pydantic",
     "starlette": "starlette",
     "textual": "textual",
@@ -322,7 +323,7 @@ client = TestClient(
 assert client.get("/healthz").status_code == 200
 shell = client.get("/")
 assert shell.status_code == 200
-assert "gpt2giga Harness" in shell.text
+assert "GigaLoom" in shell.text
 assert client.get("/assets/app.css").status_code == 200
 harnesses = client.get("/api/harnesses")
 assert harnesses.status_code == 200

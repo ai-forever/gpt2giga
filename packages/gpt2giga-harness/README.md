@@ -15,7 +15,7 @@ Project Cockpit web UI.
 Install the published prerelease from your package index:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 giga doctor
 giga --version
 giga
@@ -25,7 +25,7 @@ giga ui
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```sh
-uv tool install 'gpt2giga-harness[gpt2giga]==0.4.1a1'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.5.0a1'
 ```
 
 The standard install includes the terminal workbench. Start it from the project
@@ -99,7 +99,7 @@ If you installed the earlier optional-TUI prerelease, upgrade the existing tool;
 do not keep or add a `[tui]` extra:
 
 ```sh
-uv tool install --force 'gpt2giga-harness==0.4.1a1'
+uv tool install --force 'gpt2giga-harness==0.5.0a1'
 giga --version
 giga
 ```
@@ -124,8 +124,8 @@ giga ui
 Keep that environment active when you `cd` to the project you want to manage.
 On Windows PowerShell, activate `.venv\Scripts\Activate.ps1` instead.
 
-The current `gpt2giga-harness==0.4.1a1` metadata keeps
-`gpt2giga==0.2.4a1` in the `gpt2giga` optional extra. Installing only
+The current `gpt2giga-harness==0.5.0a1` metadata keeps
+`gpt2giga==0.2.5a1` in the `gpt2giga` optional extra. Installing only
 `gpt2giga` never adds Harness commands or the `gpt2giga_harness` namespace.
 
 The provider-neutral base Harness install is intentionally limited to nine
@@ -619,7 +619,7 @@ migration:
 ```sh
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 giga doctor
 ```
 

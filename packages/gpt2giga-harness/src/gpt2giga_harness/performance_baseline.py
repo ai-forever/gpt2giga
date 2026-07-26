@@ -10,13 +10,17 @@ import json
 import os
 from pathlib import Path
 import platform
-import resource
 import sqlite3
 import statistics
 import sys
 import tempfile
 import time
 from typing import Any, Final
+
+try:
+    import resource
+except ModuleNotFoundError:  # pragma: no cover - exercised on Windows
+    resource = None
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.registry import create_default_registry
@@ -268,19 +272,19 @@ def _summarize_probe(
 
 
 def _measure(probe: Callable[[], Mapping[str, float]]) -> _Sample:
-    before_usage = resource.getrusage(resource.RUSAGE_SELF)
+    before_rss, before_input, before_output = _resource_usage()
     before_wall = time.perf_counter_ns()
     before_cpu = time.process_time_ns()
     stages = probe()
     after_cpu = time.process_time_ns()
     after_wall = time.perf_counter_ns()
-    after_usage = resource.getrusage(resource.RUSAGE_SELF)
+    after_rss, after_input, after_output = _resource_usage()
     return _Sample(
         wall_ms=(after_wall - before_wall) / 1_000_000,
         cpu_ms=(after_cpu - before_cpu) / 1_000_000,
-        rss_bytes=_rss_bytes(after_usage.ru_maxrss),
-        input_blocks=max(after_usage.ru_inblock - before_usage.ru_inblock, 0),
-        output_blocks=max(after_usage.ru_oublock - before_usage.ru_oublock, 0),
+        rss_bytes=after_rss,
+        input_blocks=max(after_input - before_input, 0),
+        output_blocks=max(after_output - before_output, 0),
         stages_ms=dict(stages),
     )
 
@@ -467,6 +471,17 @@ def _percentile(values: list[float], percentile: int) -> float:
     upper = min(lower + 1, len(values) - 1)
     weight = rank - lower
     return round(values[lower] * (1 - weight) + values[upper] * weight, 3)
+
+
+def _resource_usage() -> tuple[int, int, int]:
+    if resource is None:
+        return (0, 0, 0)
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    return (
+        _rss_bytes(usage.ru_maxrss),
+        int(usage.ru_inblock),
+        int(usage.ru_oublock),
+    )
 
 
 def _rss_bytes(raw_maxrss: int | float) -> int:
