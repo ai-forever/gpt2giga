@@ -5,6 +5,16 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5a1] - 2026-07-26
+
+### Added
+- **OpenAI-compatible Files API**: mounted the reviewed file upload, list, retrieve, content, and delete routes independently from the still-disabled Batches API.
+- **Harness attachment handoff**: trusted local Harness requests can bind a bounded set of validated GigaChat file ids to the current OpenAI Responses user turn.
+
+### Fixed
+- **Document uploads**: file uploads now use GigaChat's universal `general` purpose and omit the incompatible multipart content-type tuple, allowing supported PDFs and other documents to reach the provider.
+- **Attachment preservation**: pre-existing attachment ids are retained and de-duplicated when compound text, image, and file content is transformed.
+
 ## [0.2.4a1] - 2026-07-16
 
 ### Fixed
@@ -495,6 +505,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.2.5a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.4a1...v0.2.5a1
 [0.2.4a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a2...v0.2.4a1
 [0.2.3a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a1...v0.2.3a2
 [0.2.3a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.2a1...v0.2.3a1

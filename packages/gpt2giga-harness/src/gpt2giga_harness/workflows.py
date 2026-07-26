@@ -74,6 +74,14 @@ TERMINAL_STEP_STATUSES = frozenset({"succeeded", "failed", "canceled", "skipped"
 WORKFLOW_COORDINATION_OUTPUT = "_coordination"
 
 
+class WorkflowSubmissionConflictError(ValueError):
+    """One idempotency key was rebound to different workflow intent."""
+
+
+class WorkflowWorkerUnavailableError(ValueError):
+    """A new workflow submission requires an online durable worker."""
+
+
 class WorkflowStepKind(str, Enum):
     """Supported nodes in the canonical workflow IR."""
 
@@ -596,6 +604,7 @@ class WorkflowCoordinator:
         inputs: Mapping[str, Any] | None = None,
         prompt: str | None = None,
         idempotency_key: str | None = None,
+        worker_online: bool | None = None,
     ) -> WorkflowRun:
         """Create and advance one immutable workflow definition snapshot."""
         for step in definition.steps:
@@ -628,12 +637,22 @@ class WorkflowCoordinator:
                         existing.definition_hash != (definition.source_hash or "")
                         or dict(existing.inputs) != effective_inputs
                     ):
-                        raise ValueError(
+                        raise WorkflowSubmissionConflictError(
                             "idempotency key is already bound to a different workflow submission"
                         )
-                    return self.advance(existing.id)
+                    return existing
+                self._require_worker(worker_online)
                 return self._start_new(definition, effective_inputs, run_id=run_id)
+        self._require_worker(worker_online)
         return self._start_new(definition, effective_inputs)
+
+    @staticmethod
+    def _require_worker(worker_online: bool | None) -> None:
+        if worker_online is False:
+            raise WorkflowWorkerUnavailableError(
+                "The durable worker is offline. Start it with "
+                "`giga worker start`, then retry."
+            )
 
     def _start_new(
         self,

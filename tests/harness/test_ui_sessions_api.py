@@ -349,13 +349,40 @@ def test_sessions_api_start_run_returns_stream_urls_and_sse_replay():
 
     started = client.post(
         "/api/sessions/run/start",
-        json={"harness_id": "echo", "prompt": "hello", "stream": True},
+        json={
+            "authority": "read_only",
+            "harness_id": "echo",
+            "prompt": "hello",
+            "stream": True,
+            "task_intent": "ask",
+            "workbench_kind": "direct_chat",
+        },
     )
 
     assert started.status_code == 200
     body = started.json()
     assert body["run"]["id"].startswith("run_")
     assert body["run"]["metadata"]["execution_transport"] == "one_shot"
+    assert body["run"]["metadata"]["workbench_admission"] == {
+        "schema_version": 1,
+        "kind": "direct_chat",
+        "intent": "ask",
+        "authority": "read_only",
+        "capability": "chat_completions",
+        "status": "available",
+        "why": ["admitted_provider_path:direct_chat"],
+        "recovery": [],
+        "input_source": "product",
+        "mode": "plan",
+        "diagnostics": {
+            "content_free": True,
+            "harness_id": "echo",
+            "provider_path": "direct_chat",
+            "execution_transport": "one_shot",
+            "provider_native_continuity": False,
+            "fallback": None,
+        },
+    }
     assert body["stream_url"] == f"/api/runs/{body['run']['id']}/events/stream"
     assert body["cancel_url"] == f"/api/runs/{body['run']['id']}/cancel"
 
@@ -365,6 +392,46 @@ def test_sessions_api_start_run_returns_stream_urls_and_sse_replay():
 
     assert "run_started" in text
     assert "run_finished" in text
+
+
+def test_session_selection_patch_persists_intent_and_authority_independently():
+    client = _client()
+    created = client.post(
+        "/api/sessions",
+        json={
+            "harness_id": "echo",
+            "workbench_kind": "direct_chat",
+            "task_intent": "change",
+            "authority": "read_only",
+        },
+    )
+    session_id = created.json()["session"]["id"]
+
+    updated = client.patch(
+        f"/api/sessions/{session_id}",
+        json={
+            "workbench_selection": {
+                "kind": "direct_chat",
+                "intent": "review",
+                "authority": "workspace_write",
+            }
+        },
+    )
+
+    assert updated.status_code == 200
+    session = updated.json()["session"]
+    assert session["default_mode"] == "read"
+    assert session["metadata"]["workbench_selection"] == {
+        "schema_version": 1,
+        "kind": "direct_chat",
+        "intent": "review",
+        "authority": "workspace_write",
+        "input_source": "product",
+        "compatibility_warning": None,
+    }
+    cockpit = client.get(f"/api/cockpit/sessions/{session_id}").json()["session"]
+    assert cockpit["workbench_selection"]["intent"] == "review"
+    assert cockpit["workbench_selection"]["authority"] == "workspace_write"
 
 
 def test_headless_run_uses_title_model_from_settings(tmp_path, monkeypatch):

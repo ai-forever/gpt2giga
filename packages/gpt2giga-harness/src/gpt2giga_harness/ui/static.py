@@ -7,7 +7,17 @@ from importlib import resources
 
 
 ASSET_PACKAGE = "gpt2giga_harness.ui.assets"
-ASSET_NAMES = frozenset({"app.css", "app.js", "favicon.ico", "index.html"})
+ASSET_NAMES = frozenset(
+    {
+        "app.css",
+        "app.js",
+        "brand/gigaloom-mark.svg",
+        "brand/gigaloom-mark-dark.svg",
+        "brand/gigaloom-mask.svg",
+        "brand/gigaloom.webmanifest",
+        "index.html",
+    }
+)
 
 
 class UIAssetNotFoundError(FileNotFoundError):

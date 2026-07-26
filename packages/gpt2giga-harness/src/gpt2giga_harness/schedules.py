@@ -32,6 +32,7 @@ from gpt2giga_harness.project import (
 )
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.runtime.worker import DurableJobDispatcher
+from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.models import run_to_dict
 from gpt2giga_harness.sessions.store import title_from_prompt
 from gpt2giga_harness.workflows import (
@@ -99,6 +100,10 @@ class ScheduleOccurrence:
 
 class ScheduleError(ValueError):
     """Raised for safe schedule validation or lifecycle failures."""
+
+
+class ScheduleConflictError(ScheduleError):
+    """Raised when a schedule changes after an optimistic preview."""
 
 
 def build_schedule_definition(
@@ -175,21 +180,34 @@ def build_schedule_definition(
     )
 
 
-def save_schedule(project: HarnessProject, definition: ScheduleDefinition) -> Path:
+def save_schedule(
+    project: HarnessProject,
+    definition: ScheduleDefinition,
+    *,
+    expected_hash: str | None = None,
+) -> Path:
     """Atomically persist one shareable schedule definition."""
     directory = Path(project.root) / SCHEDULE_DIRECTORY
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{definition.id}.yaml"
-    temp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    temp.write_text(
-        yaml.safe_dump(
-            schedule_definition_to_dict(definition, include_hash=False),
-            sort_keys=False,
-            allow_unicode=True,
-        ),
-        encoding="utf-8",
-    )
-    temp.replace(path)
+    with exclusive_file_lock(path):
+        if expected_hash is not None:
+            try:
+                actual_hash = load_schedule(project.root, definition.id).source_hash
+            except KeyError:
+                actual_hash = None
+            if actual_hash != expected_hash:
+                raise ScheduleConflictError("Schedule changed since it was loaded")
+        temp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        temp.write_text(
+            yaml.safe_dump(
+                schedule_definition_to_dict(definition, include_hash=False),
+                sort_keys=False,
+                allow_unicode=True,
+            ),
+            encoding="utf-8",
+        )
+        temp.replace(path)
     return path
 
 
@@ -299,10 +317,14 @@ class ScheduleService:
         self.eval_store = eval_store
 
     def upsert(
-        self, project: HarnessProject, payload: Mapping[str, Any]
+        self,
+        project: HarnessProject,
+        payload: Mapping[str, Any],
+        *,
+        expected_hash: str | None = None,
     ) -> dict[str, Any]:
         definition = build_schedule_definition(project, payload)
-        save_schedule(project, definition)
+        save_schedule(project, definition, expected_hash=expected_hash)
         next_run = _first_scheduled(definition)
         now = _utc_now()
         schedule_key = _schedule_key(project.id, definition.id)
@@ -469,14 +491,21 @@ class ScheduleService:
             )
         return self.detail(project, schedule_id)
 
-    def archive(self, project: HarnessProject, schedule_id: str) -> dict[str, Any]:
+    def archive(
+        self,
+        project: HarnessProject,
+        schedule_id: str,
+        *,
+        expected_hash: str | None = None,
+    ) -> dict[str, Any]:
         """Remove the shareable definition while retaining immutable audit rows."""
-        definition = load_schedule(project.root, schedule_id)
-        self.pause(project, schedule_id)
         path = Path(project.root) / SCHEDULE_DIRECTORY / f"{schedule_id}.yaml"
-        if not path.is_file():
-            raise KeyError(schedule_id)
-        path.unlink()
+        with exclusive_file_lock(path):
+            definition = load_schedule(project.root, schedule_id)
+            if expected_hash is not None and definition.source_hash != expected_hash:
+                raise ScheduleConflictError("Schedule changed since the delete preview")
+            self.pause(project, schedule_id)
+            path.unlink()
         with self.runtime_store._connect() as connection:  # noqa: SLF001
             connection.execute(
                 "UPDATE schedule_states SET status = 'archived', enabled = 0, definition_json = ?, updated_at = ? WHERE schedule_key = ?",

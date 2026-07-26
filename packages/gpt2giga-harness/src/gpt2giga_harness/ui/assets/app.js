@@ -195,7 +195,12 @@
     }
 
     async function getJson(url, options) {
-      const response = await fetch(url, options);
+      const request = { ...(options || {}) };
+      const method = String(request.method || "GET").toUpperCase();
+      if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+        request.headers = { ...(request.headers || {}), "X-GigaLoom-CSRF": "1" };
+      }
+      const response = await fetch(url, request);
       let data = {};
       try {
         data = await response.json();

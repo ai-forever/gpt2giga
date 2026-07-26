@@ -13,6 +13,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
+from urllib.parse import quote
 from urllib.parse import urlparse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -161,6 +162,63 @@ def request_json(
         raise ProxyRequestError("proxy returned non-JSON response") from exc
     if not isinstance(decoded, dict):
         raise ProxyRequestError("proxy returned JSON that is not an object")
+    return decoded
+
+
+def upload_file(
+    proxy_url: str,
+    api_mode: GigaChatApiMode,
+    *,
+    filename: str,
+    content: bytes,
+    api_key: str | None = None,
+    purpose: str = "assistants",
+    timeout: float = 60.0,
+) -> dict[str, Any]:
+    """Upload one file through the OpenAI-compatible GigaChat Files route."""
+    del api_mode
+    safe_filename = filename.replace("\r", "").replace("\n", "") or "attachment"
+    boundary = f"gpt2giga-{secrets.token_hex(16)}"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="purpose"\r\n\r\n'
+        f"{purpose}\r\n"
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="file"; '
+        f"filename*=UTF-8''{quote(safe_filename)}\r\n\r\n"
+    ).encode("utf-8")
+    body += content
+    body += f"\r\n--{boundary}--\r\n".encode("ascii")
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+        headers["x-api-key"] = api_key
+    url = f"{proxy_url.rstrip('/')}/v1/files"
+    request = Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            data = response.read()
+    except HTTPError as exc:
+        error_body = _read_error_body(exc)
+        message = f"proxy returned HTTP {exc.code} while uploading attachment"
+        if error_body:
+            message = f"{message}: {error_body}"
+        raise ProxyRequestError(message, status_code=exc.code) from exc
+    except URLError as exc:
+        raise ProxyRequestError(f"proxy is not reachable: {exc.reason}") from exc
+    try:
+        decoded = json.loads(data.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ProxyRequestError(
+            "proxy returned non-JSON attachment upload response"
+        ) from exc
+    if not isinstance(decoded, dict):
+        raise ProxyRequestError(
+            "proxy returned attachment upload response that is not an object"
+        )
     return decoded
 
 

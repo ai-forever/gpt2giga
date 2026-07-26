@@ -122,6 +122,7 @@ def test_codex_mcp_lifecycle_is_transactional_native_loaded_and_reversible(tmp_p
     assert tomllib.loads(text)["mcp_servers"]["fixture"] == {
         "command": "fixture-mcp",
         "args": ["--readonly"],
+        "cwd": "tools/server",
         "env_vars": ["FIXTURE_TOKEN"],
         "enabled": True,
         "required": False,
@@ -285,6 +286,13 @@ def test_codex_mcp_rejects_secrets_invalid_http_and_foreign_server_collision(tmp
             transport=CodexMCPTransport.STREAMABLE_HTTP,
             url="http://registry.example/mcp",
         )
+    remote = CodexMCPServerSpec(
+        name="fixture",
+        transport=CodexMCPTransport.STREAMABLE_HTTP,
+        url="https://MCP.EXAMPLE/mcp?tenant=fixture",
+        env_http_headers=(("Authorization", "MCP_AUTHORIZATION"),),
+    )
+    assert remote.url == "https://mcp.example/mcp?tenant=fixture"
 
     data_dir = tmp_path / "data"
     root = data_dir / "native" / "codex" / "home"
@@ -312,6 +320,7 @@ def _request(
             transport=CodexMCPTransport.STDIO,
             command="fixture-mcp",
             args=("--readonly",),
+            cwd="tools/server",
             env_vars=("FIXTURE_TOKEN",),
             enabled_tools=("ping",),
         ),

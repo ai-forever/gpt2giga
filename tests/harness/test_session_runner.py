@@ -13,8 +13,15 @@ from gpt2giga_harness.native import HarnessInvocationMode
 from gpt2giga_harness.preflight import PreflightBlockedError
 from gpt2giga_harness.project import project_id_for_root, resolve_project
 from gpt2giga_harness.project_memory import FilesystemProjectMemoryStore
+from gpt2giga_harness.provider_account_sessions import ProviderAccountSessionError
+from gpt2giga_harness.provider_authentication_broker import (
+    ProviderAccountSnapshot,
+    ProviderAccountStatus,
+    ProviderSessionBinding,
+)
 from gpt2giga_harness.registry import HarnessRegistry
 from gpt2giga_harness.session_runner import HarnessSessionRunner
+from gpt2giga_harness.session_titles import title_diagnostics
 from gpt2giga_harness.sessions import InMemoryHarnessSessionStore
 from gpt2giga_harness.sessions.conversation import active_conversation_messages
 from gpt2giga_harness.sessions.models import HarnessMessage
@@ -187,6 +194,101 @@ def test_session_runner_persists_structured_thread_and_rejects_identity_change(
     assert len(runner.store.list_messages(session.id)) == 4
 
 
+def test_session_runner_binds_account_and_rejects_drift_before_execution(tmp_path):
+    harness = _StructuredThreadHarness()
+    account_provider = _AccountProvider(_provider_binding(account="account_one"))
+    runner = _runner(
+        harness,
+        data_dir=tmp_path / "data",
+        provider_account_provider=account_provider,
+    )
+    session = runner.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+        default_model="GigaChat-2-Max",
+    )
+
+    first = runner.run_in_session(
+        session.id,
+        {
+            "harness_id": "codex-cli",
+            "prompt": "first",
+            "model": "GigaChat-2-Max",
+        },
+    )
+
+    binding = first.session.metadata["provider_account_binding"]
+    assert binding["account_identity"] == "account_one"
+    assert binding["home_identity"] == "home_one"
+    assert binding["quota"]["ownership"] == "provider"
+    assert binding["monetary_cost"]["ownership"] == "api_route"
+    assert first.run.metadata["provider_account_binding"] == binding
+
+    account_provider.binding = _provider_binding(account="account_two")
+    with pytest.raises(ProviderAccountSessionError) as preflight_caught:
+        runner.preflight(
+            {
+                "harness_id": "codex-cli",
+                "prompt": "must not run",
+                "model": "GigaChat-2-Max",
+            },
+            session_id=session.id,
+        )
+    assert preflight_caught.value.code == "provider_account_identity_drift"
+
+    with pytest.raises(ProviderAccountSessionError) as caught:
+        runner.run_in_session(
+            session.id,
+            {
+                "harness_id": "codex-cli",
+                "prompt": "must not run",
+                "model": "GigaChat-2-Max",
+            },
+        )
+
+    assert caught.value.code == "provider_account_identity_drift"
+    assert caught.value.to_detail()["execution_authorized"] is False
+    assert caught.value.to_detail()["allowed_actions"] == [
+        "new_session",
+        "evidence_only_handoff",
+    ]
+    assert len(harness.requests) == 1
+    assert len(runner.store.list_runs(session.id)) == 1
+    assert len(runner.store.list_messages(session.id)) == 2
+
+
+def test_native_resume_requires_current_ready_account_identity(tmp_path):
+    harness = _StructuredThreadHarness()
+    account_provider = _AccountProvider(None, status=ProviderAccountStatus.LOGGED_OUT)
+    runner = _runner(
+        harness,
+        data_dir=tmp_path / "data",
+        provider_account_provider=account_provider,
+    )
+    session = runner.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+        default_model="GigaChat-2-Max",
+    )
+
+    with pytest.raises(ProviderAccountSessionError) as caught:
+        runner.run_in_session(
+            session.id,
+            {
+                "harness_id": "codex-cli",
+                "prompt": "resume",
+                "native_session_id": "provider-thread",
+                "extra": {"native_session_operation": "resume"},
+            },
+        )
+
+    assert caught.value.code == "provider_account_identity_unavailable"
+    assert caught.value.status == "logged_out"
+    assert harness.requests == []
+    assert runner.store.list_runs(session.id) == ()
+    assert runner.store.list_messages(session.id) == ()
+
+
 @pytest.mark.parametrize("operation", ("resume", "fork"))
 def test_codex_native_deep_link_seeds_exact_app_server_identity(tmp_path, operation):
     harness = _StructuredThreadHarness()
@@ -298,6 +400,23 @@ def test_session_runner_rejects_builtin_tools_for_v1():
                 "builtin_tools": ["web_search"],
             }
         )
+
+
+def test_session_runner_rejects_unknown_builtin_tool_before_harness_call():
+    harness = _CaptureHarness()
+    runner = _runner(harness)
+
+    with pytest.raises(ValueError, match="Unsupported built-in tool: unknown"):
+        runner.create_and_run(
+            {
+                "harness_id": "capture",
+                "prompt": "search",
+                "api_mode": "v2",
+                "builtin_tools": ["unknown"],
+            }
+        )
+
+    assert harness.last_request is None
 
 
 def test_managed_mcp_snapshot_is_bound_to_provenance_and_reused_for_replay(tmp_path):
@@ -562,7 +681,14 @@ def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):
         )
         request_started.set()
         assert release_request.wait(timeout=2)
-        return {"choices": [{"message": {"content": "Починить стрим чата"}}]}
+        return {
+            "choices": [{"message": {"content": "Починить стрим чата"}}],
+            "usage": {
+                "prompt_tokens": 14,
+                "completion_tokens": 5,
+                "total_tokens": 19,
+            },
+        }
 
     monkeypatch.setattr(
         "gpt2giga_harness.session_runner.proxy.request_json", request_json
@@ -590,6 +716,18 @@ def test_first_ui_run_generates_title_with_lightning_model(monkeypatch):
         assert time.monotonic() < deadline
         time.sleep(0.01)
     assert runner.store.get_session(session.id).title == "Починить стрим чата"
+    assert title_diagnostics(runner.store.get_session(session.id)) == {
+        "schema_version": 1,
+        "provenance": "fallback",
+        "status": "succeeded",
+        "source": "bounded_fallback",
+        "bound_run_id": result.run.id,
+        "model": "GigaChat-3-Lightning",
+        "timeout_seconds": 15.0,
+        "duration_ms": pytest.approx(0, abs=2000),
+        "usage": {"input_tokens": 14, "output_tokens": 5, "total_tokens": 19},
+        "cost": {"knowledge": "unknown"},
+    }
     deadline = time.monotonic() + 2
     while not any(
         event.type == "session.updated"
@@ -638,6 +776,11 @@ def test_session_title_proxy_failure_publishes_deterministic_fallback(monkeypatc
         assert time.monotonic() < deadline
         time.sleep(0.01)
     assert runner.store.get_session(session.id).title == prompt
+    diagnostics = title_diagnostics(runner.store.get_session(session.id))
+    assert diagnostics["provenance"] == "fallback"
+    assert diagnostics["status"] == "failed"
+    assert diagnostics["failure_kind"] == "OSError"
+    assert diagnostics["cost"] == {"knowledge": "unknown"}
     while not any(
         event.type == "session.updated" and event.run_id == result.run.id
         for event in runner.store.list_events(session.id)
@@ -675,6 +818,10 @@ def test_delayed_session_title_never_overwrites_user_rename(monkeypatch):
     _wait_for_session_title_thread(session.id)
 
     assert runner.store.get_session(session.id).title == "User rename"
+    assert (
+        title_diagnostics(runner.store.get_session(session.id))["provenance"]
+        == "manual"
+    )
     assert not any(
         event.type == "session.updated"
         for event in runner.store.list_events(session.id)
@@ -725,6 +872,27 @@ def _wait_for_session_title_thread(session_id: str) -> None:
             return
         thread.join(timeout=0.05)
         assert time.monotonic() < deadline
+
+
+def test_provider_native_title_wins_over_local_fallback():
+    runner = _runner(_NativeTitleHarness())
+    session = runner.create_session(default_harness_id="capture")
+
+    result = runner.run_in_session(
+        session.id,
+        {"harness_id": "capture", "prompt": "Local fallback prompt"},
+    )
+
+    assert result.session.title == "Native provider title"
+    diagnostics = title_diagnostics(result.session)
+    assert diagnostics["provenance"] == "provider_native"
+    assert diagnostics["source"] == "capture"
+    assert diagnostics["source_id"] == "provider-session-1"
+    assert [
+        event.payload["title"]["provenance"]
+        for event in result.bundle.events
+        if event.type == "session.updated"
+    ] == ["fallback", "provider_native"]
 
 
 def test_session_runner_create_session_records_project_metadata(tmp_path):
@@ -874,6 +1042,7 @@ def _runner(
     store: InMemoryHarnessSessionStore | None = None,
     data_dir=None,
     memory_store: FilesystemProjectMemoryStore | None = None,
+    provider_account_provider=None,
 ) -> HarnessSessionRunner:
     registry = HarnessRegistry()
     registry.register(harness)
@@ -885,6 +1054,53 @@ def _runner(
         ),
         store=store or InMemoryHarnessSessionStore(),
         memory_store=memory_store,
+        provider_account_provider=provider_account_provider,
+    )
+
+
+class _AccountProvider:
+    def __init__(
+        self,
+        binding: ProviderSessionBinding | None,
+        *,
+        status: ProviderAccountStatus = ProviderAccountStatus.READY,
+    ) -> None:
+        self.binding = binding
+        self.account_status = status
+
+    def session_binding(self, provider_id: str) -> ProviderSessionBinding | None:
+        assert provider_id == "codex-cli"
+        return self.binding
+
+    def status(self, provider_id: str) -> ProviderAccountSnapshot:
+        assert provider_id == "codex-cli"
+        return ProviderAccountSnapshot(
+            provider_id=provider_id,
+            display_name="Codex CLI",
+            status=self.account_status,
+            source="test",
+            checked_at="2026-07-26T00:00:00Z",
+            pinned_cli_version="0.144.3",
+            detected_cli_version="0.144.3",
+            version_status="reviewed_pin",
+            identity_label=None,
+            authentication_method="chatgpt",
+            expires_at=None,
+            reason_code="test",
+            recovery=("test",),
+            actions={},
+        )
+
+
+def _provider_binding(*, account: str) -> ProviderSessionBinding:
+    return ProviderSessionBinding(
+        provider_id="codex-cli",
+        account_identity=account,
+        home_identity="home_one",
+        source_identity="source_one",
+        identity_evidence="isolated_home_scoped",
+        authentication_method="chatgpt",
+        observed_at="2026-07-26T00:00:00Z",
     )
 
 
@@ -916,6 +1132,25 @@ class _CaptureHarness(BaseHarness):
             ok=True,
             text=f"answer: {request.prompt}",
             raw={"request_id": "ok"},
+            command=("capture", request.prompt),
+        )
+
+
+class _NativeTitleHarness(_CaptureHarness):
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        del context
+        self.last_request = request
+        return HarnessResult(
+            ok=True,
+            text=f"answer: {request.prompt}",
+            raw={
+                "provider_session_title": "Native provider title",
+                "provider_session_id": "provider-session-1",
+            },
             command=("capture", request.prompt),
         )
 

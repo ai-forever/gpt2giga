@@ -5,10 +5,11 @@ import { primarySurfaces } from "../navigation";
 import { PrimaryRailBrand, PrimaryRailIcon } from "./PrimaryRailIcon";
 
 describe("PrimaryRailIcon", () => {
-  it("uses the existing multi-resolution favicon without a text fallback", () => {
+  it("uses the governed light and dark GigaLoom marks without a text fallback", () => {
     const markup = renderToStaticMarkup(<PrimaryRailBrand />);
 
-    expect(markup).toContain('src="/assets/favicon.ico"');
+    expect(markup).toContain('src="/cockpit-v2/assets/brand/gigaloom-mark.svg"');
+    expect(markup).toContain('srcSet="/cockpit-v2/assets/brand/gigaloom-mark-dark.svg"');
     expect(markup).toContain('width="30"');
     expect(markup).toContain('height="30"');
     expect(markup).not.toContain("g2");

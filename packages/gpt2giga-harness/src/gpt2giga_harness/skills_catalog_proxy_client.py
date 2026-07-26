@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from urllib import parse as urllib_parse
 
 from gpt2giga_harness.federated_catalog import (
@@ -36,7 +37,7 @@ class SkillsCatalogProxyFetcher:
             raise ValueError("skills proxy client path is invalid")
         proxy_url = urllib_parse.urlunsplit(
             (
-                "https",
+                urllib_parse.urlsplit(self.proxy_origin).scheme,
                 urllib_parse.urlsplit(self.proxy_origin).netloc,
                 upstream.path,
                 upstream.query,
@@ -49,6 +50,9 @@ class SkillsCatalogProxyFetcher:
             headers={"Accept": "application/json"},
             timeout_seconds=request.timeout_seconds,
             max_response_bytes=request.max_response_bytes,
+            allow_loopback_http=(
+                urllib_parse.urlsplit(self.proxy_origin).scheme == "http"
+            ),
         )
         response = await self._fetch(proxy_request)
         if response.redirected or response.final_url != proxy_url:
@@ -58,8 +62,18 @@ class SkillsCatalogProxyFetcher:
                 headers={},
                 body=b'{"error":"proxy.redirect_rejected"}',
             )
+        status_code = response.status_code
+        if status_code in {429, 503}:
+            try:
+                error = json.loads(response.body).get("error")
+            except (AttributeError, json.JSONDecodeError, UnicodeError):
+                error = None
+            if error in {"proxy.oidc_unavailable", "proxy.upstream_auth_failed"}:
+                status_code = 401
+            elif error == "proxy.upstream_rate_limited":
+                status_code = 429
         return FederatedHTTPResponse(
-            status_code=response.status_code,
+            status_code=status_code,
             final_url=request.url,
             headers=response.headers,
             body=response.body,
@@ -68,17 +82,21 @@ class SkillsCatalogProxyFetcher:
 
 def _canonical_https_origin(value: str) -> str:
     parsed = urllib_parse.urlsplit(value)
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
+    local_http = parsed.scheme == "http" and parsed.hostname in {
+        "127.0.0.1",
+        "::1",
+        "localhost",
+    }
+    if (parsed.scheme != "https" and not local_http) or (
+        not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
         or parsed.path
         or parsed.query
         or parsed.fragment
     ):
-        raise ValueError("skills proxy origin must be a canonical HTTPS origin")
-    return urllib_parse.urlunsplit(("https", parsed.netloc, "", "", ""))
+        raise ValueError("skills proxy origin must be HTTPS or loopback HTTP")
+    return urllib_parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
 
 
 __all__ = ["SkillsCatalogProxyFetcher"]

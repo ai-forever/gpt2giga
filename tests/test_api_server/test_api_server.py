@@ -15,6 +15,7 @@ from gpt2giga.openapi_tags import (
     OPENAPI_TAG_LITELLM_MODEL_INFO,
     OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS,
     OPENAPI_TAG_OPENAI_EMBEDDINGS,
+    OPENAPI_TAG_OPENAI_FILES,
     OPENAPI_TAG_OPENAI_MODELS,
     OPENAPI_TAG_OPENAI_RESPONSES,
     OPENAPI_TAG_SYSTEM_HEALTH,
@@ -219,6 +220,7 @@ def test_openapi_tags_group_routes_by_provider_and_endpoint_type():
         ("post", "/v2/responses"): [OPENAPI_TAG_OPENAI_RESPONSES],
         ("post", "/embeddings"): [OPENAPI_TAG_OPENAI_EMBEDDINGS],
         ("get", "/models"): [OPENAPI_TAG_OPENAI_MODELS],
+        ("post", "/v1/files"): [OPENAPI_TAG_OPENAI_FILES],
         ("post", "/models/{model}:generateContent"): [
             OPENAPI_TAG_GEMINI_GENERATE_CONTENT
         ],

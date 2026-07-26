@@ -176,9 +176,23 @@ class RequestTransformer:
 
             # Process compound content (text + images/files)
             if isinstance(message["content"], list):
-                texts, attachments = await self._process_content_parts(
+                texts, content_attachments = await self._process_content_parts(
                     message["content"], giga_client, size_totals
                 )
+                existing_attachments = message.get("attachments")
+                attachments = [
+                    attachment
+                    for attachment in (
+                        *(
+                            existing_attachments
+                            if isinstance(existing_attachments, list)
+                            else ()
+                        ),
+                        *content_attachments,
+                    )
+                    if isinstance(attachment, str) and attachment
+                ]
+                attachments = list(dict.fromkeys(attachments))
                 message["content"] = "\n".join(texts)
                 message["attachments"] = attachments
                 attachment_count += len(attachments)
@@ -785,7 +799,12 @@ class RequestTransformer:
 
         return transformed
 
-    def transform_response_format(self, data: Dict) -> List:
+    def transform_response_format(
+        self,
+        data: Dict,
+        *,
+        attachment_ids: tuple[str, ...] = (),
+    ) -> List:
         """Transforms response format for Responses API input."""
         message_payload = []
         if "instructions" in data:
@@ -874,7 +893,35 @@ class RequestTransformer:
                         message_payload.append({"role": role, "content": contents})
                     else:
                         message_payload.append({"role": role, "content": content})
+        self._attach_files_to_last_user_message(message_payload, attachment_ids)
         return message_payload
+
+    @staticmethod
+    def _attach_files_to_last_user_message(
+        messages: List[Dict],
+        attachment_ids: tuple[str, ...],
+    ) -> None:
+        """Attach already-uploaded GigaChat files to the current user turn."""
+        if not attachment_ids:
+            return
+        for message in reversed(messages):
+            if message.get("role") != "user":
+                continue
+            existing = message.get("attachments")
+            if not isinstance(existing, list):
+                existing = []
+                message["attachments"] = existing
+            for file_id in attachment_ids:
+                if file_id not in existing:
+                    existing.append(file_id)
+            return
+        messages.append(
+            {
+                "role": "user",
+                "content": "",
+                "attachments": list(attachment_ids),
+            }
+        )
 
     @staticmethod
     def mock_completion(message: dict) -> dict:
@@ -1364,24 +1411,38 @@ class RequestTransformer:
         )
 
     async def prepare_response_chat(
-        self, data: dict, giga_client: Optional[GigaChat] = None
+        self,
+        data: dict,
+        giga_client: Optional[GigaChat] = None,
+        *,
+        attachment_ids: tuple[str, ...] = (),
     ) -> Dict[str, Any]:
         """Prepare a Responses API request for the legacy GigaChat chat path."""
         transformed_data = self.transform_responses_parameters(
             data, allow_builtin_tools=False, allow_stateful=False
         )
-        transformed_data["messages"] = self.transform_response_format(transformed_data)
+        transformed_data["messages"] = self.transform_response_format(
+            transformed_data,
+            attachment_ids=attachment_ids,
+        )
         return await self._finalize_chat_transformation(transformed_data, giga_client)
 
     async def prepare_response_chat_completion(
-        self, data: dict, giga_client: Optional[GigaChat] = None
+        self,
+        data: dict,
+        giga_client: Optional[GigaChat] = None,
+        *,
+        attachment_ids: tuple[str, ...] = (),
     ) -> ChatCompletionRequest:
         """Prepare a Responses API request for the GigaChat chat completion path."""
         transformed_data = self.transform_responses_parameters(
             data, allow_builtin_tools=True, allow_stateful=True
         )
         transformed_data["_gpt2giga_responses_api"] = True
-        transformed_data["messages"] = self.transform_response_format(transformed_data)
+        transformed_data["messages"] = self.transform_response_format(
+            transformed_data,
+            attachment_ids=attachment_ids,
+        )
         return await self._finalize_chat_completion_transformation(
             transformed_data,
             giga_client,

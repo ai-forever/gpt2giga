@@ -94,6 +94,7 @@ class CodexMCPServerSpec:
     transport: CodexMCPTransport
     command: str | None = None
     args: tuple[str, ...] = ()
+    cwd: str | None = None
     env_vars: tuple[str, ...] = ()
     url: str | None = None
     bearer_token_env_var: str | None = None
@@ -158,8 +159,15 @@ class CodexMCPServerSpec:
                 raise ValueError("Codex stdio MCP server cannot use HTTP headers")
             for env_name in self.env_vars:
                 _validate_env_name(env_name)
+            if self.cwd is not None:
+                _validate_secret_free(self.cwd, "Codex MCP cwd")
             return
-        if self.command is not None or self.args or self.env_vars:
+        if (
+            self.command is not None
+            or self.args
+            or self.cwd is not None
+            or self.env_vars
+        ):
             raise ValueError("Codex HTTP MCP server cannot use stdio fields")
         if self.url is None:
             raise ValueError("Codex HTTP MCP server requires a URL")
@@ -878,6 +886,8 @@ def _render_owned_block(request: CodexMCPRequest) -> str:
         lines.append(f"command = {_toml_string(server.command or '')}")
         if server.args:
             lines.append(f"args = {_toml_array(server.args)}")
+        if server.cwd:
+            lines.append(f"cwd = {_toml_string(server.cwd)}")
         if server.env_vars:
             lines.append(f"env_vars = {_toml_array(server.env_vars)}")
     else:
@@ -996,6 +1006,7 @@ def _server_spec_hash(server: CodexMCPServerSpec) -> str:
         "transport": server.transport.value,
         "command": server.command,
         "args": list(server.args),
+        "cwd": server.cwd,
         "env_vars": list(server.env_vars),
         "url": server.url,
         "bearer_token_env_var": server.bearer_token_env_var,
@@ -1117,9 +1128,9 @@ def _canonical_https_url(value: str) -> str:
         raise ValueError("Codex HTTP MCP URL must be credential-free HTTPS")
     if parsed.fragment:
         raise ValueError("Codex HTTP MCP URL cannot contain a fragment")
-    if parsed.query:
-        raise ValueError("Codex HTTP MCP URL cannot contain a query")
-    return urlunsplit(("https", parsed.netloc.lower(), parsed.path or "/", "", ""))
+    return urlunsplit(
+        ("https", parsed.netloc.lower(), parsed.path or "/", parsed.query, "")
+    )
 
 
 def _normalize_texts(values: Sequence[str], label: str) -> tuple[str, ...]:

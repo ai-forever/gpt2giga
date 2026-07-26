@@ -1,0 +1,24 @@
+{
+  "name": "GigaLoom",
+  "short_name": "GigaLoom",
+  "description": "Local agent workbench for gpt2giga",
+  "start_url": "/cockpit-v2/work",
+  "scope": "/cockpit-v2/",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "gigaloom-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "gigaloom-mask.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "monochrome"
+    }
+  ]
+}

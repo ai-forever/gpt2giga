@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "journeys": [
+    {
+      "id": "ask-question",
+      "web_route": "/cockpit-v2/work",
+      "web_surface": "work",
+      "api_routes": ["POST /api/sessions/run"],
+      "other_surfaces": ["cli", "tui"],
+      "authority": {
+        "ceiling": "read_only",
+        "mutation": "none"
+      },
+      "outcomes": ["answer_visible", "run_retained"]
+    },
+    {
+      "id": "review-repository",
+      "web_route": "/cockpit-v2/work",
+      "web_surface": "work",
+      "api_routes": ["POST /api/sessions/run", "GET /api/runs/{run_id}/diff"],
+      "other_surfaces": ["cli", "tui"],
+      "authority": {
+        "ceiling": "read_only",
+        "mutation": "none"
+      },
+      "outcomes": ["review_visible", "source_workspace_unchanged"]
+    },
+    {
+      "id": "make-isolated-change",
+      "web_route": "/cockpit-v2/runs/{run_id}",
+      "web_surface": "runs",
+      "api_routes": [
+        "POST /api/sessions/run",
+        "GET /api/runs/{run_id}/diff",
+        "POST /api/runs/{run_id}/apply"
+      ],
+      "other_surfaces": ["cli"],
+      "authority": {
+        "ceiling": "workspace_write",
+        "mutation": "reviewed_allow_once"
+      },
+      "outcomes": [
+        "source_workspace_unchanged_before_apply",
+        "reviewed_diff_visible",
+        "approved_change_applied"
+      ]
+    },
+    {
+      "id": "connect-or-disable-mcp",
+      "web_route": "/cockpit-v2/plugins/mcp",
+      "web_surface": "integrations",
+      "api_routes": [
+        "POST /api/integrations/preview",
+        "POST /api/integrations/flows/{flow_id}/apply",
+        "POST /api/integrations/flows/{flow_id}/lifecycle/preview",
+        "POST /api/integrations/lifecycle/{operation_id}/apply"
+      ],
+      "other_surfaces": ["cli"],
+      "authority": {
+        "ceiling": "explicit_operation",
+        "mutation": "reviewed_native_consent"
+      },
+      "outcomes": ["mcp_connected", "mcp_disabled_for_new_sessions"]
+    },
+    {
+      "id": "run-or-author-automation",
+      "web_route": "/cockpit-v2/automation/workflows",
+      "web_surface": "automation",
+      "api_routes": [
+        "POST /api/workflows/{workflow_id}/draft",
+        "POST /api/workflows/{workflow_id}/apply",
+        "POST /api/workflows/{workflow_id}/run"
+      ],
+      "other_surfaces": ["cli"],
+      "authority": {
+        "ceiling": "explicit_operation",
+        "mutation": "revision_bound_authoring"
+      },
+      "outcomes": ["definition_previewed", "definition_retained", "run_retained"]
+    },
+    {
+      "id": "provider-login-guidance",
+      "web_route": "/cockpit-v2/settings",
+      "web_surface": "settings",
+      "api_routes": ["GET /api/harnesses"],
+      "other_surfaces": ["cli"],
+      "authority": {
+        "ceiling": "provider_owned",
+        "mutation": "none"
+      },
+      "outcomes": ["native_login_owner_visible", "no_login_authority_inferred"]
+    },
+    {
+      "id": "request-network-or-github-grant",
+      "web_route": "/cockpit-v2/work",
+      "web_surface": "work",
+      "api_routes": ["GET /api/approvals", "POST /api/approvals/{approval_id}/decision"],
+      "other_surfaces": ["tui"],
+      "authority": {
+        "ceiling": "explicit_operation",
+        "mutation": "pending_until_decided"
+      },
+      "outcomes": ["scoped_request_visible", "no_grant_before_decision"]
+    },
+    {
+      "id": "recover-disconnect",
+      "web_route": "/cockpit-v2/runs/{run_id}",
+      "web_surface": "runs",
+      "api_routes": [
+        "POST /api/workflows/{workflow_id}/run",
+        "GET /api/runs/{run_id}/events/stream"
+      ],
+      "other_surfaces": ["tui"],
+      "authority": {
+        "ceiling": "original_request",
+        "mutation": "idempotent_replay_only"
+      },
+      "outcomes": ["retained_identity_recovered", "conflicting_retry_rejected"]
+    }
+  ]
+}

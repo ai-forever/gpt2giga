@@ -1,8 +1,9 @@
 """Shared helpers for OpenAI-compatible API routes."""
 
+import re
 from typing import Optional
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from gpt2giga.app_state import get_batch_store, get_gigachat_client
 from gpt2giga.common.gigachat_options import (
@@ -11,6 +12,39 @@ from gpt2giga.common.gigachat_options import (
 )
 from gpt2giga.common.tools import convert_tool_to_giga_functions
 from gpt2giga.protocol.batches import infer_openai_file_purpose
+
+GPT2GIGA_ATTACHMENT_IDS_HEADER = "x-gpt2giga-attachment-ids"
+_FILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,200}$")
+_MAX_REQUEST_ATTACHMENT_IDS = 10
+
+
+def request_attachment_ids(request: Request) -> tuple[str, ...]:
+    """Parse GigaChat file ids supplied by a trusted local Harness request."""
+    raw_value = request.headers.get(GPT2GIGA_ATTACHMENT_IDS_HEADER)
+    if not raw_value:
+        return ()
+    file_ids = tuple(item.strip() for item in raw_value.split(",") if item.strip())
+    if (
+        not file_ids
+        or len(file_ids) > _MAX_REQUEST_ATTACHMENT_IDS
+        or len(set(file_ids)) != len(file_ids)
+        or any(_FILE_ID_PATTERN.fullmatch(file_id) is None for file_id in file_ids)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": (
+                        f"`{GPT2GIGA_ATTACHMENT_IDS_HEADER}` must contain up to "
+                        f"{_MAX_REQUEST_ATTACHMENT_IDS} unique GigaChat file ids."
+                    ),
+                    "type": "invalid_request_error",
+                    "param": GPT2GIGA_ATTACHMENT_IDS_HEADER,
+                    "code": "invalid_attachment_ids",
+                }
+            },
+        )
+    return file_ids
 
 
 def _paginate_items(

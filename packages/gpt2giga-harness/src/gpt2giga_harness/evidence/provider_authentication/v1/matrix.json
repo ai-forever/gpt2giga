@@ -1,0 +1,255 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-07-26",
+  "providers": [
+    {
+      "harness_id": "codex-cli",
+      "display_name": "Codex CLI",
+      "pinned_cli_version": "0.144.3",
+      "version_window": {
+        "minimum": "0.144.0",
+        "maximum_exclusive": "0.145.0"
+      },
+      "flows": [
+        "chatgpt_browser",
+        "chatgpt_device_code",
+        "api_key",
+        "enterprise_access_token"
+      ],
+      "credential_owner": "codex",
+      "storage_location_classes": [
+        "codex_home_secret_file",
+        "operating_system_credential_store"
+      ],
+      "surfaces": {
+        "start": [
+          "codex login",
+          "app-server account/login/start"
+        ],
+        "status": [
+          "app-server account/read",
+          "app-server account/updated"
+        ],
+        "logout": [
+          "codex logout",
+          "app-server account/logout"
+        ],
+        "revoke": [
+          "provider account or workspace control"
+        ]
+      },
+      "projection": {
+        "identity": "provider account label may be shown ephemerally; do not persist it in diagnostics",
+        "status": "auth mode, plan type, requires-auth, and credential-source class",
+        "expiry": "not documented as a stable account field",
+        "scopes": "not documented as a stable account field"
+      },
+      "headless_limitations": [
+        "browser login needs an interactive browser callback",
+        "device-code login still requires the user to complete provider authentication",
+        "API keys and enterprise access tokens are separate trusted-automation paths"
+      ],
+      "cancellation": "app-server account/login/cancel cancels a pending managed ChatGPT login",
+      "timeout": "the future broker must impose its own bounded timeout",
+      "recovery": [
+        "retry provider-owned login",
+        "use device-code flow when the browser callback is brittle",
+        "log out and sign in again after credential or workspace mismatch"
+      ],
+      "terms_reviewed_at": "2026-07-26",
+      "sources": [
+        {
+          "id": "authentication",
+          "url": "https://learn.chatgpt.com/docs/auth",
+          "claims": [
+            "browser_and_api_key_login",
+            "provider_owned_storage",
+            "logout_clears_cached_credentials"
+          ]
+        },
+        {
+          "id": "app_server",
+          "url": "https://learn.chatgpt.com/docs/app-server",
+          "claims": [
+            "account_read",
+            "login_start_and_cancel",
+            "logout",
+            "bounded_status_projection"
+          ]
+        },
+        {
+          "id": "terms",
+          "url": "https://openai.com/policies/terms-of-use/",
+          "claims": [
+            "terms_review_anchor"
+          ]
+        }
+      ]
+    },
+    {
+      "harness_id": "claude-code",
+      "display_name": "Claude Code",
+      "pinned_cli_version": "2.1.212",
+      "version_window": {
+        "minimum": "2.1.0",
+        "maximum_exclusive": "2.2.0"
+      },
+      "flows": [
+        "claude_ai_browser",
+        "claude_console_browser",
+        "cloud_provider_environment",
+        "api_key_or_helper"
+      ],
+      "credential_owner": "claude_code_or_selected_cloud_provider",
+      "storage_location_classes": [
+        "operating_system_credential_store",
+        "provider_config_home_secret_file",
+        "environment_or_external_credential_helper"
+      ],
+      "surfaces": {
+        "start": [
+          "claude auth login",
+          "interactive /login"
+        ],
+        "status": [
+          "claude auth status",
+          "interactive /status"
+        ],
+        "logout": [
+          "claude auth logout",
+          "interactive /logout"
+        ],
+        "revoke": [
+          "provider account, organization, or cloud-provider control"
+        ]
+      },
+      "projection": {
+        "identity": "provider-reported account and organization label may be shown ephemerally",
+        "status": "machine-readable auth status and active credential-source class",
+        "expiry": "expired state and provider warning may be shown when disclosed",
+        "scopes": "do not infer scopes beyond provider-reported status"
+      },
+      "headless_limitations": [
+        "browser login may require copying a URL and pasting a code in SSH, WSL, or containers",
+        "cloud-provider and API-key modes are owned outside the subscription browser flow",
+        "status precedence must be respected before claiming which credential is active"
+      ],
+      "cancellation": "no stable machine cancellation surface is documented for an in-progress auth login",
+      "timeout": "the future broker must impose its own bounded timeout",
+      "recovery": [
+        "claude auth logout followed by claude auth login",
+        "copy the provider URL and paste the returned code for remote terminals",
+        "use provider cloud-credential recovery for Bedrock, Vertex, or Foundry"
+      ],
+      "terms_reviewed_at": "2026-07-26",
+      "sources": [
+        {
+          "id": "authentication",
+          "url": "https://code.claude.com/docs/en/authentication",
+          "claims": [
+            "browser_console_and_cloud_flows",
+            "credential_storage_classes",
+            "expiry_and_recovery"
+          ]
+        },
+        {
+          "id": "cli_reference",
+          "url": "https://code.claude.com/docs/en/cli-usage",
+          "claims": [
+            "auth_login",
+            "auth_status_json",
+            "auth_logout"
+          ]
+        },
+        {
+          "id": "terms",
+          "url": "https://www.anthropic.com/legal/consumer-terms",
+          "claims": [
+            "terms_review_anchor"
+          ]
+        }
+      ]
+    },
+    {
+      "harness_id": "gemini-cli",
+      "display_name": "Gemini CLI",
+      "pinned_cli_version": "0.46.0",
+      "version_window": {
+        "minimum": "0.46.0",
+        "maximum_exclusive": "0.47.0"
+      },
+      "flows": [
+        "google_account_browser",
+        "gemini_api_key",
+        "vertex_ai",
+        "google_cloud_ambient_credentials"
+      ],
+      "credential_owner": "gemini_cli_or_selected_google_cloud_provider",
+      "storage_location_classes": [
+        "gemini_cli_user_state",
+        "environment_secret",
+        "google_cloud_application_default_credentials"
+      ],
+      "surfaces": {
+        "start": [
+          "gemini interactive authentication chooser",
+          "interactive /auth"
+        ],
+        "status": [
+          "no documented machine-readable account-status command"
+        ],
+        "logout": [
+          "provider-owned interactive authentication reset only"
+        ],
+        "revoke": [
+          "Google account, API key, or Google Cloud control"
+        ]
+      },
+      "projection": {
+        "identity": "unavailable without a documented provider-owned machine surface",
+        "status": "unknown unless the provider CLI reports it through a reviewed surface",
+        "expiry": "not documented as a stable machine field",
+        "scopes": "not documented as a stable machine field"
+      },
+      "headless_limitations": [
+        "Google-account browser login is not supported as a new headless login",
+        "headless mode requires an existing cached credential, API key, or Vertex AI credentials",
+        "third-party software must not harvest or piggyback on Gemini CLI OAuth"
+      ],
+      "cancellation": "no documented machine cancellation surface is frozen",
+      "timeout": "the future broker must impose its own bounded timeout",
+      "recovery": [
+        "return to the provider-owned interactive authentication chooser",
+        "configure an API key or Vertex AI credential for headless use",
+        "revoke or rotate credentials in the owning Google service"
+      ],
+      "terms_reviewed_at": "2026-07-26",
+      "sources": [
+        {
+          "id": "authentication",
+          "url": "https://geminicli.com/docs/get-started/authentication/",
+          "claims": [
+            "browser_api_key_and_vertex_flows",
+            "headless_limitations",
+            "credential_cache_class"
+          ]
+        },
+        {
+          "id": "commands",
+          "url": "https://geminicli.com/docs/reference/commands/",
+          "claims": [
+            "interactive_auth_surface"
+          ]
+        },
+        {
+          "id": "terms",
+          "url": "https://geminicli.com/docs/resources/tos-privacy/",
+          "claims": [
+            "terms_review_anchor",
+            "third_party_oauth_piggyback_prohibited"
+          ]
+        }
+      ]
+    }
+  ]
+}

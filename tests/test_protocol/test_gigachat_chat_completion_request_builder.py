@@ -971,6 +971,36 @@ async def test_prepare_chat_completion_reuses_attachment_uploads():
     assert content[1].files[0].id_ == "file_1"
 
 
+async def test_prepare_responses_chat_completion_attaches_uploaded_pdf_with_tools():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_response_chat_completion(
+        {
+            "model": "GigaChat-3.5-432B-A28B",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "What is in the PDF?"}],
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "plugin_tool",
+                    "description": "Plugin tool",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+        },
+        attachment_ids=("file-pdf-1",),
+    )
+
+    assert request.messages[0].content[0].text == "What is in the PDF?"
+    assert request.messages[0].content[1].files[0].id_ == "file-pdf-1"
+    assert request.tools
+
+
 async def test_prepare_chat_completion_maps_tool_call_result_history():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)

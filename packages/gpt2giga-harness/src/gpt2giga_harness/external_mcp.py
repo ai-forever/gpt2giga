@@ -272,6 +272,7 @@ class ExternalMCPDescriptor:
     transport: MCPTransport
     command: str | None
     args: tuple[str, ...]
+    cwd: str | None
     url: str | None
     environment: Mapping[str, SecretReference]
     headers: Mapping[str, SecretReference]
@@ -297,6 +298,7 @@ class ExternalMCPDescriptor:
             transport=self.transport,
             command=self.command,
             args=self.args,
+            cwd=self.cwd,
             url=self.url,
             environment=self.environment,
             headers=self.headers,
@@ -513,6 +515,7 @@ def normalize_external_mcp_candidate(
         transport=transport,
         command=command,
         args=args,
+        cwd=None,
         url=url,
         environment=environment,
         headers=headers,
@@ -545,6 +548,10 @@ def project_external_mcp_target(
         name != reference.name for name, reference in descriptor.environment.items()
     ):
         error_code = "target.environment_alias_unsupported"
+    elif descriptor.transport is MCPTransport.SSE and target_id != GEMINI_MCP_TARGET_ID:
+        error_code = "target.transport_unsupported"
+    elif descriptor.cwd is not None and target_id == CLAUDE_MCP_TARGET_ID:
+        error_code = "target.cwd_unsupported"
     elif target_id == CLAUDE_MCP_TARGET_ID and (
         descriptor.tool_policy.include_tools
         or descriptor.tool_policy.exclude_tools
@@ -682,6 +689,7 @@ def external_mcp_descriptor_to_dict(
         "transport": descriptor.transport.value,
         "command": descriptor.command,
         "args": list(descriptor.args),
+        "cwd": descriptor.cwd,
         "url": descriptor.url,
         "environment": {
             key: secret_reference_to_dict(value)
@@ -862,6 +870,7 @@ def _target_configuration(
             ),
             command=descriptor.command,
             args=descriptor.args,
+            cwd=descriptor.cwd,
             env_vars=env_names,
             url=descriptor.url,
             env_http_headers=header_names,
@@ -896,10 +905,13 @@ def _target_configuration(
         transport=(
             GeminiMCPTransport.STDIO
             if descriptor.transport is MCPTransport.STDIO
+            else GeminiMCPTransport.SSE
+            if descriptor.transport is MCPTransport.SSE
             else GeminiMCPTransport.HTTP
         ),
         command=descriptor.command,
         args=descriptor.args,
+        cwd=descriptor.cwd,
         env_vars=env_names,
         url=descriptor.url,
         env_http_headers=header_names,
@@ -922,6 +934,8 @@ def _native_spec_to_dict(server: Any) -> dict[str, Any]:
         "env_http_headers": [list(item) for item in server.env_http_headers],
         "enabled": server.enabled,
     }
+    if hasattr(server, "cwd"):
+        result["cwd"] = server.cwd
     for field_name in (
         "startup_timeout_sec",
         "tool_timeout_sec",

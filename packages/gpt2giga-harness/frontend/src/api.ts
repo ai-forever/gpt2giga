@@ -18,6 +18,14 @@ export interface SessionSummary {
   pinned: boolean;
   archived: boolean;
   tags?: string[];
+  workbench_selection?: {
+    schema_version: number;
+    kind: "coding_agent" | "direct_chat";
+    intent: "ask" | "review" | "change";
+    authority: "read_only" | "workspace_write";
+    input_source: string;
+    compatibility_warning: string | null;
+  };
 }
 
 export interface EnvironmentResponse {
@@ -229,6 +237,7 @@ export interface MessageProjection {
   content: TextProjection;
   reasoning?: TextProjection;
   usage?: TokenUsageProjection;
+  attachments?: AttachmentSummary[];
 }
 
 export interface FullMessageResponse {
@@ -562,6 +571,15 @@ export interface HarnessOption {
     durable: false;
     content_free: true;
   } | null;
+  workbench_admission?: {
+    schema_version: number;
+    modes: Array<{
+      id: "coding_agent" | "direct_chat";
+      status: "available" | "degraded" | "blocked";
+      why: string[];
+      recovery: string[];
+    }>;
+  };
   workbench_transport?: {
     default: "native_structured" | "native_terminal" | "one_shot";
     options: Array<{
@@ -650,6 +668,8 @@ export interface SettingsResponse {
     default_title_model: string | null;
     default_api_mode: string;
     mode: string;
+    task_intent: "ask" | "review" | "change";
+    authority: "read_only" | "workspace_write";
     execution_transport: string;
     invocation_mode: string;
     workspace_policy: string;
@@ -660,11 +680,18 @@ export interface SettingsResponse {
       title: string;
       native_supported: boolean;
       status: string;
+      workbench_admission?: NonNullable<HarnessOption["workbench_admission"]>;
       workbench_transport: NonNullable<HarnessOption["workbench_transport"]>;
     }>;
     sources: Record<string, string>;
     locked_fields: string[];
     change_effect: "new_runs";
+    compatibility: {
+      mode: {
+        warning: string;
+        value: string;
+      } | null;
+    };
   };
   workspace: {
     project_id: string;
@@ -693,6 +720,14 @@ export interface SettingsResponse {
     actions: Array<{ id: string; method: string; path: string }>;
     async_data_plane: Record<string, unknown>;
   };
+}
+
+export interface BrowserAccessStatusResponse {
+  local: boolean;
+  authenticated: boolean;
+  claimable: boolean;
+  expires_at: string | null;
+  recovery: string;
 }
 
 export interface SettingsSaveResponse {
@@ -795,6 +830,51 @@ export interface ProviderCheckResponse {
   effects: Record<string, string>;
 }
 
+export type ProviderAccountStatus =
+  | "logged_out"
+  | "pending"
+  | "ready"
+  | "expired"
+  | "revoked"
+  | "unavailable"
+  | "unknown";
+
+export interface ProviderAccountProjection {
+  provider_id: string;
+  display_name: string;
+  status: ProviderAccountStatus;
+  source: string;
+  checked_at: string;
+  pinned_cli_version: string;
+  detected_cli_version: string | null;
+  version_status: string;
+  identity_label: string | null;
+  authentication_method: string | null;
+  expires_at: string | null;
+  reason_code: string;
+  recovery: string[];
+  actions: {
+    start: boolean;
+    status: boolean;
+    logout: boolean;
+    cancel: boolean;
+  };
+  attempt_id: string | null;
+  home_scope: "isolated_provider_owned";
+  credential_values_readable: false;
+}
+
+export interface ProviderAccountsResponse {
+  schema_version: 1;
+  credential_values_readable: false;
+  real_native_homes_accessed: false;
+  accounts: ProviderAccountProjection[];
+}
+
+export interface ProviderAccountMutationResponse {
+  account: ProviderAccountProjection;
+}
+
 export interface AttachmentSummary {
   id: string;
   filename: string;
@@ -802,6 +882,7 @@ export interface AttachmentSummary {
   kind?: string;
   mime_type?: string | null;
   size_bytes: number;
+  url?: string;
   warnings?: string[];
 }
 
@@ -1046,6 +1127,14 @@ export async function patchCockpit<T>(
   return writeCockpit<T>(path, "PATCH", body, signal);
 }
 
+export async function putCockpit<T>(
+  path: string,
+  body: Readonly<Record<string, unknown>>,
+  signal?: AbortSignal,
+): Promise<T> {
+  return writeCockpit<T>(path, "PUT", body, signal);
+}
+
 export async function deleteCockpit<T>(
   path: string,
   signal?: AbortSignal,
@@ -1055,7 +1144,7 @@ export async function deleteCockpit<T>(
 
 async function writeCockpit<T>(
   path: string,
-  method: "DELETE" | "PATCH" | "POST",
+  method: "DELETE" | "PATCH" | "POST" | "PUT",
   body?: Readonly<Record<string, unknown>>,
   signal?: AbortSignal,
 ): Promise<T> {
@@ -1063,6 +1152,7 @@ async function writeCockpit<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
     headers: {
       Accept: "application/json",
+      "X-GigaLoom-CSRF": "1",
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     method,
@@ -1073,7 +1163,25 @@ async function writeCockpit<T>(
 
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    throw new CockpitApiError(response.status, await response.text());
+    const body = await response.text();
+    let detail = body;
+    try {
+      const parsed = JSON.parse(body) as unknown;
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "detail" in parsed &&
+        typeof parsed.detail === "string"
+      ) {
+        detail = parsed.detail;
+      }
+    } catch {
+      // Preserve non-JSON server errors as returned.
+    }
+    throw new CockpitApiError(
+      response.status,
+      detail || `Request failed with HTTP ${response.status}.`,
+    );
   }
   return (await response.json()) as T;
 }

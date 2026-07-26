@@ -130,6 +130,27 @@ def render_for_direct_chat(
                 )
             )
             continue
+        if kind == AttachmentKind.DOCUMENT.value and attachment.storage_path:
+            data = store.read_blob(attachment.id)
+            encoded = base64.b64encode(data).decode("ascii")
+            content_parts.append(
+                {
+                    "type": "file",
+                    "file": {
+                        "filename": attachment.filename,
+                        "file_data": (f"data:{attachment.mime_type};base64,{encoded}"),
+                    },
+                }
+            )
+            deliveries.append(
+                _delivery(
+                    attachment,
+                    transport="gigachat_file_upload",
+                    rich=True,
+                    surfaces=("headless",),
+                )
+            )
+            continue
         if attachment.kind == AttachmentKind.WORKSPACE_FILE.value:
             prompt_blocks.append(_workspace_reference(attachment))
             warnings.append(
@@ -177,11 +198,24 @@ def render_for_codex_cli(
     del store, prompt, inline_text_limit
     attachment_list = tuple(attachments)
     referenced_files: list[HarnessAttachment] = []
+    uploaded_documents: list[HarnessAttachment] = []
     image_paths: list[str] = []
     warnings: list[str] = []
     deliveries: list[dict[str, Any]] = []
     for attachment in attachment_list:
-        if _effective_kind(attachment) != AttachmentKind.IMAGE.value:
+        effective_kind = _effective_kind(attachment)
+        if effective_kind == AttachmentKind.DOCUMENT.value and attachment.storage_path:
+            uploaded_documents.append(attachment)
+            deliveries.append(
+                _delivery(
+                    attachment,
+                    transport="gigachat_file_upload",
+                    rich=True,
+                    surfaces=("headless_one_shot",),
+                )
+            )
+            continue
+        if effective_kind != AttachmentKind.IMAGE.value:
             referenced_files.append(attachment)
             deliveries.append(_path_delivery(attachment))
             continue
@@ -212,11 +246,27 @@ def render_for_codex_cli(
             "Codex CLI will receive this document as a path reference only."
         ),
     )
+    if uploaded_documents:
+        uploaded_prefix = "\n".join(
+            (
+                "Provider attachments:",
+                *(
+                    f"- {attachment.filename} ({attachment.mime_type}, "
+                    f"{attachment.size_bytes} bytes)"
+                    for attachment in uploaded_documents
+                ),
+            )
+        )
+        prefix = "\n".join(part for part in (uploaded_prefix, prefix) if part)
     warnings.extend(reference_warnings)
     cli_args = tuple(
         item for image_path in image_paths for item in ("--image", image_path)
     )
-    if image_paths and referenced_files:
+    if uploaded_documents and (image_paths or referenced_files):
+        transport = "mixed_gigachat_file_upload"
+    elif uploaded_documents:
+        transport = "gigachat_file_upload"
+    elif image_paths and referenced_files:
         transport = "cli_image_flag_and_prompt_path_reference"
     elif image_paths:
         transport = "cli_image_flag"

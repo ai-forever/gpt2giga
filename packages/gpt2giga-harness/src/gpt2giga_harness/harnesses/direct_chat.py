@@ -70,8 +70,17 @@ class DirectChatHarness(BaseHarness):
             supports_structured_events=True,
             supports_cancellation=True,
             supports_attachments=True,
-            accepted_attachment_kinds=("image", "text", "workspace_file"),
-            attachment_transport=("openai_content_parts", "inline_text"),
+            accepted_attachment_kinds=(
+                "image",
+                "text",
+                "workspace_file",
+                "document",
+            ),
+            attachment_transport=(
+                "openai_content_parts",
+                "inline_text",
+                "gigachat_file_upload",
+            ),
             attachment_capabilities={
                 "image": AttachmentTransportSupport(
                     headless=("openai_content_parts",),
@@ -85,6 +94,14 @@ class DirectChatHarness(BaseHarness):
                 "workspace_file": AttachmentTransportSupport(
                     headless=("prompt_path_reference",),
                     detail="Workspace files remain contained path references.",
+                ),
+                "document": AttachmentTransportSupport(
+                    headless=("gigachat_file_upload",),
+                    rich=True,
+                    detail=(
+                        "Stored documents are uploaded to GigaChat Files through "
+                        "gpt2giga and attached to the user message."
+                    ),
                 ),
             },
             supported_builtin_tools=GIGACHAT_BUILTIN_TOOLS,

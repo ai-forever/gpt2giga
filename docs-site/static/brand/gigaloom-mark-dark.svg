@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">GigaLoom</title>
+  <rect data-part="field" x="3" y="3" width="58" height="58" rx="17" fill="#F8FAFC"/>
+  <g data-part="threads" fill="none" stroke="#172033" stroke-linecap="round" stroke-width="3.5" opacity=".78">
+    <path d="M18 14v36"/>
+    <path d="M32 14v36"/>
+    <path d="M46 14v36"/>
+  </g>
+  <path data-part="weft-a" d="M12 22c7-6 13-6 20 0s13 6 20 0" fill="none" stroke="#0F766E" stroke-linecap="round" stroke-width="7"/>
+  <path data-part="weft-b" d="M12 42c7-6 13-6 20 0s13 6 20 0" fill="none" stroke="#6D28D9" stroke-linecap="round" stroke-width="7"/>
+  <g data-part="crossings" fill="none" stroke="#172033" stroke-linecap="round" stroke-width="3.5">
+    <path d="M18 18v8"/>
+    <path d="M32 38v8"/>
+    <path d="M46 18v8"/>
+  </g>
+</svg>

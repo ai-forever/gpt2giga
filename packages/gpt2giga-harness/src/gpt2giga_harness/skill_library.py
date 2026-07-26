@@ -33,6 +33,7 @@ from gpt2giga_harness.federated_catalog import (
 from gpt2giga_harness.integration_catalog import (
     CatalogEntry,
     CatalogSourceType,
+    FederatedCatalogMetadata,
     IntegrationCatalogStore,
 )
 from gpt2giga_harness.integration_packages import (
@@ -60,6 +61,7 @@ from gpt2giga_harness.skills_catalog_proxy_client import SkillsCatalogProxyFetch
 
 
 MAX_ROOT_SKILLS = 512
+MAX_ROOT_PLUGINS = 128
 MAX_GIT_CANDIDATES = 256
 MAX_PREVIEW_CHARS = 40_000
 GIT_TIMEOUT_SECONDS = 90.0
@@ -90,11 +92,27 @@ class _RootSkill:
 
 
 @dataclass(frozen=True)
+class _RootPlugin:
+    id: str
+    name: str
+    title: str
+    description: str
+    version: str
+    target_ids: tuple[str, ...]
+    origin: str
+    invocation: str
+    bundled_skills: tuple[str, ...]
+    default_prompts: tuple[str, ...]
+    repository_url: str | None
+
+
+@dataclass(frozen=True)
 class _GitSnapshot:
     repository_url: str
     requested_ref: str | None
     commit: str
     root: Path
+    source_provenance: Mapping[str, Any] | None = None
 
 
 class SkillLibraryService:
@@ -105,6 +123,7 @@ class SkillLibraryService:
         data_dir: Path,
         *,
         root_skill_roots: Sequence[tuple[Path, Sequence[str], str]] | None = None,
+        root_plugin_roots: Sequence[tuple[Path, str]] | None = None,
         federated_sources: Sequence[FederatedCatalogSource] | None = None,
         git_runner: GitCommandRunner | None = None,
     ) -> None:
@@ -118,6 +137,11 @@ class SkillLibraryService:
             root_skill_roots
             if root_skill_roots is not None
             else _default_root_skill_roots()
+        )
+        self._root_plugin_roots = tuple(
+            root_plugin_roots
+            if root_plugin_roots is not None
+            else _default_root_plugin_roots()
         )
         use_default_sources = federated_sources is None
         self._federated_sources = tuple(
@@ -133,6 +157,10 @@ class SkillLibraryService:
     def root_skills(self) -> list[dict[str, Any]]:
         """Return deduplicated global/native Skill metadata without instructions."""
         return [_root_projection(item) for item in self._scan_root_skills()]
+
+    def root_plugins(self) -> list[dict[str, Any]]:
+        """Return bounded OpenAI-bundled Codex plugin manifest metadata."""
+        return [_root_plugin_projection(item) for item in self._scan_root_plugins()]
 
     async def search(
         self,
@@ -153,24 +181,43 @@ class SkillLibraryService:
 
         async def search_source(source: FederatedCatalogSource):
             if not selected_components.intersection(source.descriptor.components):
-                return source.descriptor.source_id, (), None
+                return source.descriptor.source_id, (), None, source
             try:
                 candidates = await source.search(query, limit=limit)
-                return source.descriptor.source_id, candidates, None
+                return source.descriptor.source_id, candidates, None, source
             except Exception as exc:
-                return source.descriptor.source_id, (), type(exc).__name__
+                return (
+                    source.descriptor.source_id,
+                    (),
+                    getattr(exc, "code", type(exc).__name__),
+                    source,
+                )
 
         results = await asyncio.gather(
             *(search_source(source) for source in self._federated_sources)
         )
         items: list[dict[str, Any]] = []
         sources = []
-        for source_id, candidates, error_type in results:
+        for source_id, candidates, error_code, source in results:
+            cache_status = getattr(source, "last_cache_status", "live")
+            status = (
+                "unavailable"
+                if error_code is not None
+                else "stale"
+                if cache_status == "stale"
+                else "ready"
+            )
             sources.append(
                 {
                     "id": source_id,
-                    "status": "ready" if error_type is None else "unavailable",
-                    "error_type": error_type,
+                    "status": status,
+                    "reason_code": error_code
+                    or getattr(source, "last_source_error", None),
+                    "cache_status": cache_status,
+                    "cache_age_seconds": getattr(
+                        source, "last_cache_age_seconds", None
+                    ),
+                    "last_good": cache_status == "stale",
                 }
             )
             items.extend(
@@ -182,7 +229,10 @@ class SkillLibraryService:
             {
                 "id": source_id,
                 "status": "configuration_required",
-                "error_type": None,
+                "reason_code": "proxy_origin_missing",
+                "cache_status": "unavailable",
+                "cache_age_seconds": None,
+                "last_good": False,
             }
             for source_id in self._unconfigured_source_ids
         )
@@ -201,11 +251,85 @@ class SkillLibraryService:
             "install_authorized": False,
         }
 
+    async def source_detail(
+        self,
+        source_id: str,
+        upstream_id: str,
+        *,
+        include_audit: bool = False,
+    ) -> dict[str, Any]:
+        """Resolve one selected source item to bounded provenance and file metadata."""
+        source = next(
+            (
+                item
+                for item in self._federated_sources
+                if item.descriptor.source_id == source_id
+            ),
+            None,
+        )
+        if source is None:
+            raise KeyError(source_id)
+        candidate = await source.detail(upstream_id)
+        audits = await source.audits(upstream_id) if include_audit else ()
+        return {
+            **_federated_projection(candidate),
+            "provenance": _provenance_projection(candidate),
+            "audits": [
+                {
+                    "provider": item.provider,
+                    "status": item.status,
+                    "audited_at": item.audited_at,
+                    "risk_level": item.risk_level,
+                }
+                for item in audits
+            ],
+            "source_health": {
+                "status": (
+                    "stale"
+                    if getattr(source, "last_cache_status", "live") == "stale"
+                    else "ready"
+                ),
+                "cache_status": getattr(source, "last_cache_status", "live"),
+                "cache_age_seconds": getattr(source, "last_cache_age_seconds", None),
+                "reason_code": getattr(source, "last_source_error", None),
+                "last_good": getattr(source, "last_cache_status", "live") == "stale",
+            },
+        }
+
     async def inspect_git(
-        self, repository_url: str, *, ref: str | None = None
+        self,
+        repository_url: str,
+        *,
+        ref: str | None = None,
+        source_id: str | None = None,
+        upstream_id: str | None = None,
     ) -> dict[str, Any]:
         """Clone one admitted GitHub ref and inspect bounded install candidates."""
-        return await asyncio.to_thread(self._inspect_git, repository_url, ref)
+        if (source_id is None) != (upstream_id is None):
+            raise ValueError("source_id and upstream_id must be supplied together")
+        source_provenance = None
+        if source_id is not None and upstream_id is not None:
+            detail = await self.source_detail(
+                source_id,
+                upstream_id,
+                include_audit=False,
+            )
+            source_provenance = detail["provenance"]
+            source_repository = source_provenance.get("repository_url")
+            if not isinstance(source_repository, str):
+                raise ValueError("selected source has no reviewable repository")
+            requested_repository, _ = _canonical_github_repository(repository_url)
+            canonical_source, _ = _canonical_github_repository(source_repository)
+            if requested_repository != canonical_source:
+                raise ValueError(
+                    "repository does not match the selected source provenance"
+                )
+        return await asyncio.to_thread(
+            self._inspect_git,
+            repository_url,
+            ref,
+            source_provenance,
+        )
 
     def import_git_skill(self, candidate_id: str) -> CatalogEntry:
         """Import one previously inspected Skill into the offline catalog."""
@@ -216,6 +340,19 @@ class SkillLibraryService:
         relative_dir = _safe_relative_path(str(candidate["relative_dir"]))
         skill_root = snapshot_root / relative_dir
         files = _read_skill_files(skill_root)
+        reviewed_content_hash = candidate.get("reviewed_content_hash")
+        if (
+            not isinstance(reviewed_content_hash, str)
+            or _artifact_hash(files) != reviewed_content_hash
+        ):
+            raise ValueError("reviewed Git artifact hash drifted")
+        source_provenance = candidate.get("source_provenance")
+        if source_provenance is not None:
+            if not isinstance(source_provenance, Mapping):
+                raise ValueError("Git candidate provenance is invalid")
+            expected_hash = source_provenance.get("content_hash")
+            if not isinstance(expected_hash, str):
+                raise ValueError("selected source artifact hash is invalid")
         files["SKILL.md"] = _normalize_skill_markdown(
             files["SKILL.md"].decode("utf-8")
         ).encode("utf-8")
@@ -233,6 +370,11 @@ class SkillLibraryService:
             package,
             source_id=f"git-{str(candidate['snapshot_id'])[:24]}",
             source_type=CatalogSourceType.GIT,
+            federated=(
+                _federated_metadata_from_candidate(candidate)
+                if source_provenance is not None
+                else None
+            ),
         )
 
     def preview(self, preview_id: str) -> dict[str, Any]:
@@ -295,7 +437,12 @@ class SkillLibraryService:
             )
         raise KeyError(preview_id)
 
-    def _inspect_git(self, repository_url: str, ref: str | None) -> dict[str, Any]:
+    def _inspect_git(
+        self,
+        repository_url: str,
+        ref: str | None,
+        source_provenance: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         canonical_url, embedded_ref = _canonical_github_repository(repository_url)
         selected_ref = ref.strip() if ref is not None and ref.strip() else embedded_ref
         if selected_ref is not None and _GIT_REF_RE.fullmatch(selected_ref) is None:
@@ -344,6 +491,7 @@ class SkillLibraryService:
                 requested_ref=selected_ref,
                 commit=commit,
                 root=destination,
+                source_provenance=source_provenance,
             )
             candidates = self._git_candidates(snapshot, snapshot_id)
             return {
@@ -363,6 +511,22 @@ class SkillLibraryService:
     ) -> list[dict[str, Any]]:
         candidates = []
         license_evidence = _license_evidence(snapshot.root)
+        source_provenance = (
+            dict(snapshot.source_provenance)
+            if snapshot.source_provenance is not None
+            else None
+        )
+        source_provenance_sha256 = (
+            hashlib.sha256(
+                json.dumps(
+                    source_provenance,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            if source_provenance is not None
+            else None
+        )
         for skill_md in sorted(snapshot.root.rglob("SKILL.md")):
             if len(candidates) >= MAX_GIT_CANDIDATES:
                 break
@@ -376,8 +540,12 @@ class SkillLibraryService:
             except (OSError, UnicodeError, ValueError):
                 continue
             relative_dir = str(skill_md.parent.relative_to(snapshot.root)) or "."
+            reviewed_content_hash = _artifact_hash(_read_skill_files(skill_md.parent))
             candidate_id = hashlib.sha256(
-                f"{snapshot_id}\0skill\0{relative_dir}".encode()
+                (
+                    f"{snapshot_id}\0skill\0{relative_dir}\0"
+                    f"{source_provenance_sha256 or ''}"
+                ).encode()
             ).hexdigest()
             candidate = {
                 "id": candidate_id,
@@ -391,6 +559,9 @@ class SkillLibraryService:
                 "license": license_evidence,
                 "preview_id": f"git:{candidate_id}",
                 "manifest": None,
+                "source_provenance": source_provenance,
+                "source_provenance_sha256": source_provenance_sha256,
+                "reviewed_content_hash": reviewed_content_hash,
             }
             self._write_candidate(candidate)
             candidates.append(candidate)
@@ -420,7 +591,10 @@ class SkillLibraryService:
             )
             relative_dir = str(manifest_path.parent.relative_to(snapshot.root)) or "."
             candidate_id = hashlib.sha256(
-                f"{snapshot_id}\0manifest\0{relative_dir}".encode()
+                (
+                    f"{snapshot_id}\0manifest\0{relative_dir}\0"
+                    f"{source_provenance_sha256 or ''}"
+                ).encode()
             ).hexdigest()
             candidate = {
                 "id": candidate_id,
@@ -434,6 +608,8 @@ class SkillLibraryService:
                 "license": manifest["license"],
                 "preview_id": None,
                 "manifest": manifest,
+                "source_provenance": source_provenance,
+                "source_provenance_sha256": source_provenance_sha256,
             }
             self._write_candidate(candidate)
             candidates.append(candidate)
@@ -472,6 +648,31 @@ class SkillLibraryService:
                 )
         return tuple(sorted(by_key.values(), key=lambda item: item.name.casefold()))
 
+    def _scan_root_plugins(self) -> tuple[_RootPlugin, ...]:
+        by_name: dict[str, _RootPlugin] = {}
+        for root, origin in self._root_plugin_roots:
+            root = Path(root).expanduser()
+            if not root.is_dir() or root.is_symlink():
+                continue
+            count = 0
+            for manifest_path in sorted(root.rglob(".codex-plugin/plugin.json")):
+                if count >= MAX_ROOT_PLUGINS:
+                    break
+                if _unsafe_path(root, manifest_path):
+                    continue
+                try:
+                    plugin = _root_plugin_from_manifest(
+                        manifest_path,
+                        origin=origin,
+                    )
+                except (OSError, UnicodeError, ValueError):
+                    continue
+                count += 1
+                current = by_name.get(plugin.name)
+                if current is None or plugin.version > current.version:
+                    by_name[plugin.name] = plugin
+        return tuple(sorted(by_name.values(), key=lambda item: item.title.casefold()))
+
     def _candidate_path(self, candidate_id: str) -> Path:
         if not re.fullmatch(r"[0-9a-f]{64}", candidate_id):
             raise ValueError("Git candidate id is invalid")
@@ -493,6 +694,29 @@ class SkillLibraryService:
         value = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(value, dict) or value.get("id") != candidate_id:
             raise ValueError("Git candidate state is invalid")
+        provenance = value.get("source_provenance")
+        expected_provenance_hash = value.get("source_provenance_sha256")
+        if provenance is not None:
+            actual_provenance_hash = hashlib.sha256(
+                json.dumps(
+                    provenance,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            if expected_provenance_hash != actual_provenance_hash:
+                raise ValueError("Git candidate provenance binding is invalid")
+            candidate_kind = "skill" if value.get("type") == "skill" else "manifest"
+            expected_candidate_id = hashlib.sha256(
+                (
+                    f"{value.get('snapshot_id')}\0{candidate_kind}\0"
+                    f"{value.get('relative_dir')}\0{actual_provenance_hash}"
+                ).encode()
+            ).hexdigest()
+            if expected_candidate_id != candidate_id:
+                raise ValueError("Git candidate provenance binding is invalid")
+        elif expected_provenance_hash is not None:
+            raise ValueError("Git candidate provenance binding is invalid")
         return value
 
     def _snapshot_root(self, snapshot_id: str) -> Path:
@@ -533,6 +757,15 @@ def _default_root_skill_roots() -> tuple[tuple[Path, tuple[str, ...], str], ...]
     return tuple(roots)
 
 
+def _default_root_plugin_roots() -> tuple[tuple[Path, str], ...]:
+    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    cache = codex_home / "plugins" / "cache"
+    return (
+        (cache / "openai-primary-runtime", "openai-primary-runtime"),
+        (cache / "openai-bundled", "openai-bundled"),
+    )
+
+
 def _default_sources() -> tuple[FederatedCatalogSource, ...]:
     sources: list[FederatedCatalogSource] = [NeuralDeepFederatedCatalogSource()]
     proxy_origin = os.environ.get("GIGA_SKILLS_PROXY_ORIGIN")
@@ -559,6 +792,92 @@ def _root_projection(item: _RootSkill) -> dict[str, Any]:
     }
 
 
+def _root_plugin_projection(item: _RootPlugin) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "title": item.title,
+        "description": item.description,
+        "version": item.version,
+        "target_ids": list(item.target_ids),
+        "origin": item.origin,
+        "source_label": "OpenAI",
+        "scope": "system",
+        "connected": True,
+        "invocation": item.invocation,
+        "bundled_skills": list(item.bundled_skills),
+        "default_prompts": list(item.default_prompts),
+        "repository_url": item.repository_url,
+    }
+
+
+def _root_plugin_from_manifest(
+    manifest_path: Path,
+    *,
+    origin: str,
+) -> _RootPlugin:
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("plugin manifest must be an object")
+    name = str(payload.get("name") or "").strip()
+    version = str(payload.get("version") or "").strip()
+    if not name or not version:
+        raise ValueError("plugin manifest identity is incomplete")
+    raw_interface = payload.get("interface")
+    interface = raw_interface if isinstance(raw_interface, Mapping) else {}
+    title = str(interface.get("displayName") or name).strip()
+    description = str(
+        interface.get("shortDescription") or payload.get("description") or title
+    ).strip()
+    skills_path = payload.get("skills")
+    bundled_skills: list[str] = []
+    if isinstance(skills_path, str) and skills_path.strip():
+        plugin_root = manifest_path.parent.parent.resolve()
+        skills_root = (plugin_root / skills_path).resolve()
+        try:
+            skills_root.relative_to(plugin_root)
+        except ValueError as exc:
+            raise ValueError("plugin skills path escapes the plugin") from exc
+        if skills_root.is_dir() and not skills_root.is_symlink():
+            for skill_md in sorted(skills_root.rglob("SKILL.md"))[:MAX_ROOT_SKILLS]:
+                if _unsafe_path(skills_root, skill_md):
+                    continue
+                try:
+                    skill_name, _ = _skill_metadata(skill_md)
+                except (OSError, UnicodeError, ValueError):
+                    continue
+                bundled_skills.append(skill_name)
+    default_prompts = interface.get("defaultPrompt")
+    prompts = (
+        tuple(
+            str(item).strip()
+            for item in default_prompts[:3]
+            if isinstance(item, str) and item.strip()
+        )
+        if isinstance(default_prompts, list)
+        else ()
+    )
+    digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    repository_url = payload.get("repository")
+    return _RootPlugin(
+        id=f"plugin:{digest}",
+        name=name,
+        title=title,
+        description=description,
+        version=version,
+        target_ids=("codex-plugin",),
+        origin=origin,
+        invocation=f"@{name}",
+        bundled_skills=tuple(sorted(set(bundled_skills))),
+        default_prompts=prompts,
+        repository_url=(
+            repository_url
+            if isinstance(repository_url, str) and repository_url.startswith("https://")
+            else None
+        ),
+    )
+
+
 def _federated_projection(item: FederatedCatalogCandidate) -> dict[str, Any]:
     return {
         "id": f"remote:{item.source_id}:{item.upstream_id}",
@@ -571,8 +890,80 @@ def _federated_projection(item: FederatedCatalogCandidate) -> dict[str, Any]:
         "curated": item.trust.curated,
         "popularity": item.trust.popularity,
         "upstream_audit": item.trust.upstream_audit,
+        "canonical_origin": item.provenance.canonical_origin,
+        "observed_at": item.provenance.observed_at,
+        "discovery_location": f"{item.source_id}/{item.upstream_id}",
         "install_authorized": False,
     }
+
+
+def _provenance_projection(item: FederatedCatalogCandidate) -> dict[str, Any]:
+    return {
+        "canonical_source": item.source_id,
+        "upstream_id": item.upstream_id,
+        "canonical_origin": item.provenance.canonical_origin,
+        "repository_url": item.provenance.artifact_url,
+        "artifact_url": item.provenance.artifact_url,
+        "immutable_ref": item.immutable_ref,
+        "content_hash": (
+            item.immutable_ref.removeprefix("sha256:")
+            if item.immutable_ref is not None
+            else None
+        ),
+        "relative_path": item.provenance.relative_path,
+        "file_paths": list(item.provenance.file_paths),
+        "discovery_location": f"{item.source_id}/{item.upstream_id}",
+        "detail_url": item.provenance.detail_url,
+        "observed_at": item.provenance.observed_at,
+        "trust": {
+            "curated": item.trust.curated,
+            "upstream_audit": item.trust.upstream_audit,
+            "source_present": item.trust.source_present,
+            "install_authorized": False,
+        },
+    }
+
+
+def _federated_metadata_from_candidate(
+    candidate: Mapping[str, Any],
+) -> FederatedCatalogMetadata:
+    provenance = candidate.get("source_provenance")
+    if not isinstance(provenance, Mapping):
+        raise ValueError("Git candidate provenance is invalid")
+    trust = provenance.get("trust")
+    if trust is not None and not isinstance(trust, Mapping):
+        raise ValueError("Git candidate trust provenance is invalid")
+    immutable_ref = provenance.get("immutable_ref")
+    content_hash = provenance.get("content_hash")
+    if not isinstance(immutable_ref, str) or not isinstance(content_hash, str):
+        raise ValueError("Git candidate immutable provenance is incomplete")
+    return FederatedCatalogMetadata(
+        upstream_id=str(provenance["upstream_id"]),
+        canonical_package_id=None,
+        name=str(candidate["title"]),
+        component="skill",
+        canonical_origin=str(provenance["canonical_origin"]),
+        detail_url=str(provenance["detail_url"]),
+        artifact_url=str(provenance["artifact_url"]),
+        curated=bool(trust.get("curated", False)) if trust is not None else False,
+        popularity=None,
+        upstream_audit=(
+            str(trust["upstream_audit"])
+            if trust is not None and trust.get("upstream_audit") is not None
+            else None
+        ),
+        artifact_resolved=True,
+        source_present=True,
+        observed_at=str(provenance["observed_at"]),
+        discovery_location=str(provenance["discovery_location"]),
+        immutable_ref=immutable_ref,
+        content_hash=content_hash,
+        relative_path=(
+            str(provenance["relative_path"])
+            if provenance.get("relative_path") is not None
+            else None
+        ),
+    )
 
 
 def _preview_projection(

@@ -25,8 +25,6 @@ from gpt2giga_harness.claude_mcp_target import (
     CLAUDE_MCP_TARGET_DESCRIPTOR,
     CLAUDE_MCP_TARGET_ID,
     ClaudeMCPRequest,
-    ClaudeMCPServerSpec,
-    ClaudeMCPTransport,
     ClaudeMCPTargetDriver,
 )
 from gpt2giga_harness.claude_plugin_target import (
@@ -42,8 +40,6 @@ from gpt2giga_harness.codex_mcp_target import (
     CODEX_MCP_TARGET_DESCRIPTOR,
     CODEX_MCP_TARGET_ID,
     CodexMCPRequest,
-    CodexMCPServerSpec,
-    CodexMCPTransport,
     CodexMCPTargetDriver,
 )
 from gpt2giga_harness.external_mcp import (
@@ -79,12 +75,11 @@ from gpt2giga_harness.gemini_mcp_target import (
     GEMINI_MCP_TARGET_DESCRIPTOR,
     GEMINI_MCP_TARGET_ID,
     GeminiMCPRequest,
-    GeminiMCPServerSpec,
-    GeminiMCPTransport,
     GeminiMCPTargetDriver,
 )
 from gpt2giga_harness.integration_catalog import (
     CatalogEntry,
+    CatalogSourceType,
     IntegrationCatalogStore,
 )
 from gpt2giga_harness.integration_installer import (
@@ -116,6 +111,11 @@ from gpt2giga_harness.integration_packages import (
     integration_package_to_dict,
 )
 from gpt2giga_harness.managed_mcp_inventory import ManagedMCPInventoryStore
+from gpt2giga_harness.mcp_authoring import (
+    MCPAuthoringTransport,
+    mcp_authoring_configuration_from_dict,
+    resolve_mcp_authoring_cwd,
+)
 from gpt2giga_harness.mcp import MCPTransport
 from gpt2giga_harness.portable_skills import (
     CLAUDE_SKILL_TARGET_ID,
@@ -209,6 +209,7 @@ class IntegrationFlowRecord:
     created_at: str
     updated_at: str
     events: tuple[IntegrationFlowEvent, ...]
+    source_provenance: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -224,6 +225,8 @@ class _ResolvedPreview:
     configuration_diff: tuple[str, ...]
     restart_required: bool
     handoff_reason: str | None = None
+    configuration_preview: Mapping[str, Any] | None = None
+    source_provenance: Mapping[str, Any] | None = None
 
 
 _SKILL_TARGETS = {
@@ -381,7 +384,9 @@ class IntegrationFlowService:
     def inventory(self) -> dict[str, Any]:
         """Return bounded sources, targets, catalog entries, and recent flows."""
         self._ensure_catalog_seeded()
-        entries = tuple(self.catalog.list())
+        snapshot = self.catalog.snapshot()
+        entries = tuple(snapshot.entries)
+        now = self._now().astimezone(timezone.utc)
         return {
             "schema_version": INTEGRATION_FLOW_SCHEMA_VERSION,
             "sources": [
@@ -396,6 +401,9 @@ class IntegrationFlowService:
                     },
                 }
                 for item in IntegrationFlowSource
+            ],
+            "catalog_sources": [
+                _catalog_source_to_dict(item, now=now) for item in snapshot.sources
             ],
             "targets": [
                 {
@@ -439,6 +447,7 @@ class IntegrationFlowService:
             package_id=resolved.package.id,
             package_version=resolved.package.version,
             manifest_sha256=integration_package_semantic_hash(resolved.package),
+            source_provenance=resolved.source_provenance,
             target_id=resolved.target.id,
             scope=InstallationScope(request["scope"]),
             workspace=request.get("workspace"),
@@ -619,6 +628,106 @@ class IntegrationFlowService:
                 "integration rollback failed; details were omitted"
             ) from exc
 
+    def uninstall_owned(
+        self,
+        flow_id: str,
+        *,
+        receipt_id: str,
+        authority: str,
+        allow_user_home: bool = False,
+    ) -> dict[str, Any]:
+        """Remove only material owned by one exact verified installation."""
+        record = self.get(flow_id)
+        _validate_identity(authority, field_name="approval authority")
+        if (
+            record.status is not IntegrationFlowStatus.VERIFIED
+            or record.receipt_id is None
+            or record.receipt_id != receipt_id
+        ):
+            raise IntegrationFlowConflictError(
+                "uninstall requires the exact verified installation receipt"
+            )
+        target = _target(record.target_id)
+        root = self._target_root(record.request, target, create=False)
+        package = self._resolve_package(
+            record.request,
+            record.source,
+            target,
+            record.scope,
+        )
+        try:
+            if target.id in _SKILL_TARGETS:
+                result = self._skill_installer(record.request, root).rollback(
+                    receipt_id
+                )
+                outcome = result.status
+            elif target.id == HARNESS_MANAGED_MCP_TARGET_ID:
+                result = self._managed_mcp_inventory.rollback(receipt_id)
+                outcome = result.status
+            elif target.id in _MCP_TARGET_IDS:
+                driver = self._mcp_driver_provider(target.id)
+                plan = driver.preview_uninstall(receipt_id)
+                result = driver.uninstall(
+                    plan,
+                    InstallationApproval(
+                        plan_id=plan.plan_id,
+                        authority=authority,
+                        allow_user_home=allow_user_home,
+                    ),
+                )
+                outcome = result.status
+            elif target.id in _PLUGIN_TARGET_IDS:
+                driver = self._plugin_driver(target.id, root, record.scope)
+                native_request = self._plugin_request(
+                    record.request,
+                    package,
+                    target.id,
+                    root,
+                    record.scope,
+                )
+                plan = driver.preview_uninstall(native_request)
+                if target.id == CODEX_PLUGIN_TARGET_ID:
+                    approval = CodexPluginApproval(
+                        plan_id=plan.plan_id,
+                        authority=authority,
+                        native_consent_acknowledged=True,
+                        allow_user_home=allow_user_home,
+                    )
+                elif target.id == CLAUDE_PLUGIN_TARGET_ID:
+                    approval = ClaudePluginApproval(
+                        plan_id=plan.plan_id,
+                        authority=authority,
+                        native_consent_acknowledged=True,
+                        allow_user_home=allow_user_home,
+                    )
+                else:
+                    approval = GeminiExtensionApproval(
+                        plan_id=plan.plan_id,
+                        authority=authority,
+                        native_consent_acknowledged=True,
+                        source_trust_acknowledged=True,
+                        allow_user_home=allow_user_home,
+                    )
+                result = driver.uninstall(native_request, plan, approval)
+                outcome = result.status
+            else:
+                raise IntegrationFlowConflictError(
+                    "selected target has no application-owned uninstall surface"
+                )
+            return {
+                "flow_id": record.id,
+                "receipt_id": receipt_id,
+                "status": str(outcome),
+                "installer_owned_only": True,
+                "content_free": True,
+            }
+        except IntegrationFlowConflictError:
+            raise
+        except Exception as exc:
+            raise IntegrationFlowError(
+                "integration uninstall failed; details were omitted"
+            ) from exc
+
     def _resolve_preview(
         self,
         request: Mapping[str, Any],
@@ -632,6 +741,7 @@ class IntegrationFlowService:
             raise ValueError("selected target does not support the requested scope")
         root = self._target_root(request, target, create=not existing)
         package = self._resolve_package(request, source, target, scope)
+        source_provenance = self._source_provenance(request)
         _validate_target_compatibility(package, target, scope)
         if target.id in _SKILL_TARGETS:
             skill = self._portable_skill_for_package(package)
@@ -658,6 +768,7 @@ class IntegrationFlowService:
                     for item in native.mutations
                 ),
                 restart_required=generated.restart_required,
+                source_provenance=source_provenance,
             )
         if (
             target.id in _MCP_TARGET_IDS
@@ -701,15 +812,21 @@ class IntegrationFlowService:
                 native_plan_id=native_plan_id,
                 configuration_diff=configuration_diff,
                 restart_required=restart_required,
+                source_provenance=source_provenance,
             )
         if (
             target.id in _MCP_TARGET_IDS
             and source is IntegrationFlowSource.RAW_DESCRIPTOR
         ):
-            if target.id == HARNESS_MANAGED_MCP_TARGET_ID:
-                native = self._managed_mcp_inventory.preview(
-                    self._raw_harness_mcp_descriptor(request)
+            descriptor = self._raw_mcp_descriptor(request, root)
+            target_preview = project_external_mcp_target(descriptor, target.id)
+            if not target_preview.supported:
+                raise ValueError(
+                    "raw MCP target is incompatible: "
+                    f"{target_preview.error_code or 'unknown'}"
                 )
+            if target.id == HARNESS_MANAGED_MCP_TARGET_ID:
+                native = self._managed_mcp_inventory.preview(descriptor)
                 configuration_diff = (
                     ("create:managed-mcp-inventory",) if native.changed else ()
                 )
@@ -737,6 +854,12 @@ class IntegrationFlowService:
                 native_plan_id=native_plan_id,
                 configuration_diff=configuration_diff,
                 restart_required=restart_required,
+                configuration_preview={
+                    "transport": descriptor.transport.value,
+                    "target": dict(target_preview.configuration),
+                    "secret_references": list(target_preview.secret_references),
+                },
+                source_provenance=source_provenance,
             )
         if target.id in _PLUGIN_TARGET_IDS:
             driver = self._plugin_driver(target.id, root, scope)
@@ -756,6 +879,7 @@ class IntegrationFlowService:
                     for item in getattr(native, "command_ids", ())
                 ),
                 restart_required=bool(getattr(native, "restart_required", True)),
+                source_provenance=source_provenance,
             )
         return _ResolvedPreview(
             package=package,
@@ -767,7 +891,32 @@ class IntegrationFlowService:
             configuration_diff=_configuration_diff(request.get("configuration", {})),
             restart_required=True,
             handoff_reason=_handoff_reason(target.id),
+            source_provenance=source_provenance,
         )
+
+    def _source_provenance(
+        self, request: Mapping[str, Any]
+    ) -> Mapping[str, Any] | None:
+        if request.get("source") != IntegrationFlowSource.CATALOG.value:
+            return None
+        catalog_id = str(request.get("catalog_id") or "")
+        entry = self.catalog.get(catalog_id) if catalog_id else None
+        if entry is None or entry.federated is None:
+            return None
+        metadata = entry.federated
+        return {
+            "canonical_source": entry.source_id,
+            "upstream_id": metadata.upstream_id,
+            "canonical_origin": metadata.canonical_origin,
+            "repository_url": metadata.artifact_url,
+            "artifact_url": metadata.artifact_url,
+            "immutable_ref": metadata.immutable_ref or entry.immutable_ref,
+            "content_hash": metadata.content_hash or entry.content_hash,
+            "relative_path": metadata.relative_path,
+            "discovery_location": metadata.discovery_location
+            or f"{entry.source_id}/{metadata.upstream_id}",
+            "observed_at": metadata.observed_at or entry.last_seen_at,
+        }
 
     def _resolve_package(
         self,
@@ -887,7 +1036,7 @@ class IntegrationFlowService:
             is IntegrationFlowSource.RAW_DESCRIPTOR
         ):
             if resolved.target.id == HARNESS_MANAGED_MCP_TARGET_ID:
-                descriptor = self._raw_harness_mcp_descriptor(request)
+                descriptor = self._raw_mcp_descriptor(request, resolved.root)
                 plan = self._managed_mcp_inventory.preview(descriptor)
                 if plan.plan_id != resolved.native_plan_id:
                     raise InstallationConflictError(
@@ -1085,105 +1234,56 @@ class IntegrationFlowService:
         root: Path,
         scope: InstallationScope,
     ) -> CodexMCPRequest | ClaudeMCPRequest | GeminiMCPRequest:
-        configuration = request.get("configuration")
-        if not isinstance(configuration, Mapping):
-            raise ValueError("raw MCP configuration is invalid")
-        transport = str(configuration.get("transport") or "")
-        command = str(configuration.get("command") or "") or None
-        url = str(configuration.get("url") or "") or None
-        args = tuple(str(item) for item in configuration.get("args", ()))
-        env_vars = tuple(str(item) for item in configuration.get("env_vars", ()))
-        name = package.id
+        descriptor = self._raw_mcp_descriptor(request, root)
+        spec = external_mcp_server_spec(descriptor, target_id)
         if target_id == CODEX_MCP_TARGET_ID:
-            codex_transport = (
-                CodexMCPTransport.STDIO
-                if transport == "stdio"
-                else CodexMCPTransport.STREAMABLE_HTTP
-            )
-            return CodexMCPRequest(
-                package=package,
-                scope=scope,
-                root=root,
-                server=CodexMCPServerSpec(
-                    name=name,
-                    transport=codex_transport,
-                    command=command,
-                    args=args,
-                    env_vars=env_vars,
-                    url=url,
-                ),
-            )
+            return CodexMCPRequest(package=package, scope=scope, root=root, server=spec)
         if target_id == CLAUDE_MCP_TARGET_ID:
-            if transport == "sse":
-                raise ValueError("Claude target does not support legacy SSE MCP")
             return ClaudeMCPRequest(
-                package=package,
-                scope=scope,
-                root=root,
-                server=ClaudeMCPServerSpec(
-                    name=name,
-                    transport=(
-                        ClaudeMCPTransport.STDIO
-                        if transport == "stdio"
-                        else ClaudeMCPTransport.HTTP
-                    ),
-                    command=command,
-                    args=args,
-                    env_vars=env_vars,
-                    url=url,
-                ),
+                package=package, scope=scope, root=root, server=spec
             )
         if target_id == GEMINI_MCP_TARGET_ID:
             return GeminiMCPRequest(
-                package=package,
-                scope=scope,
-                root=root,
-                server=GeminiMCPServerSpec(
-                    name=name,
-                    transport=(
-                        GeminiMCPTransport.STDIO
-                        if transport == "stdio"
-                        else GeminiMCPTransport.SSE
-                        if transport == "sse"
-                        else GeminiMCPTransport.HTTP
-                    ),
-                    command=command,
-                    args=args,
-                    env_vars=env_vars,
-                    url=url,
-                ),
+                package=package, scope=scope, root=root, server=spec
             )
         raise ValueError("raw MCP native target is unsupported")
 
-    def _raw_harness_mcp_descriptor(
-        self, request: Mapping[str, Any]
+    def _raw_mcp_descriptor(
+        self,
+        request: Mapping[str, Any],
+        root: Path,
     ) -> ExternalMCPDescriptor:
         configuration = request.get("configuration")
         if not isinstance(configuration, Mapping):
             raise ValueError("raw MCP configuration is invalid")
-        transport = str(configuration.get("transport") or "")
-        if transport == "sse":
-            raise ValueError("Harness inventory does not support legacy SSE MCP")
+        target_id = str(request.get("target_id") or "")
+        authored = mcp_authoring_configuration_from_dict(
+            configuration,
+            target_id=target_id,
+        )
         package_id = str(request.get("package_id") or "")
-        command = str(configuration.get("command")) if transport == "stdio" else None
-        args = tuple(str(item) for item in configuration.get("args", ()))
-        url = str(configuration.get("url")) if transport != "stdio" else None
+        transport = (
+            MCPTransport.STDIO
+            if authored.transport is MCPAuthoringTransport.STDIO
+            else MCPTransport.SSE
+            if authored.transport is MCPAuthoringTransport.SSE
+            else MCPTransport.STREAMABLE_HTTP
+        )
+        cwd = resolve_mcp_authoring_cwd(root, authored.cwd)
         content_hash = hashlib.sha256(
             json.dumps(
                 {
                     "id": package_id,
-                    "transport": transport,
-                    "command": command,
-                    "args": args,
-                    "url": url,
+                    "configuration": authored.to_dict(),
+                    "cwd": cwd,
                 },
                 sort_keys=True,
                 separators=(",", ":"),
             ).encode()
         ).hexdigest()
         network_origins = ()
-        if url is not None:
-            parsed = urlsplit(url)
+        if authored.url is not None:
+            parsed = urlsplit(authored.url)
             network_origins = (urlunsplit((parsed.scheme, parsed.netloc, "", "", "")),)
         return ExternalMCPDescriptor(
             id=package_id,
@@ -1194,16 +1294,13 @@ class IntegrationFlowService:
             catalog_id=f"raw:{package_id}",
             immutable_ref=f"sha256:{content_hash}",
             content_hash=content_hash,
-            transport=(
-                MCPTransport.STDIO
-                if transport == "stdio"
-                else MCPTransport.STREAMABLE_HTTP
-            ),
-            command=command,
-            args=args,
-            url=url,
-            environment={},
-            headers={},
+            transport=transport,
+            command=authored.executable,
+            args=authored.argv,
+            cwd=cwd,
+            url=authored.url,
+            environment=authored.environment,
+            headers=authored.headers,
             artifact=None,
             network_origins=network_origins,
             timeout_seconds=10,
@@ -1478,6 +1575,11 @@ def integration_flow_record_to_dict(record: IntegrationFlowRecord) -> dict[str, 
         "package_id": record.package_id,
         "package_version": record.package_version,
         "manifest_sha256": record.manifest_sha256,
+        "source_provenance": (
+            dict(record.source_provenance)
+            if record.source_provenance is not None
+            else None
+        ),
         "target_id": record.target_id,
         "scope": record.scope.value,
         "verification_status": record.verification_status,
@@ -1520,6 +1622,7 @@ def _public_plan(
         "workspace": request.get("workspace"),
         "configuration_sha256": _json_hash(request.get("configuration", {})),
         "native_plan_id": resolved.native_plan_id,
+        "source_provenance": resolved.source_provenance,
     }
     plan_id = f"plan_{_json_hash(semantic)}"
     return {
@@ -1534,6 +1637,11 @@ def _public_plan(
             "immutable_ref": resolved.package.immutable_ref,
             "checksum": resolved.package.checksum,
             "manifest_sha256": integration_package_semantic_hash(resolved.package),
+            "source_provenance": (
+                dict(resolved.source_provenance)
+                if resolved.source_provenance is not None
+                else None
+            ),
         },
         "target": {
             "id": resolved.target.id,
@@ -1564,6 +1672,7 @@ def _public_plan(
             "diff": list(resolved.configuration_diff),
             "restart_required": resolved.restart_required,
             "fields": sorted(request.get("configuration", {})),
+            "preview": dict(resolved.configuration_preview or {}),
         },
         "verification_steps": list(resolved.package.verification_steps),
         "rollback_steps": list(resolved.package.rollback_steps),
@@ -1607,7 +1716,13 @@ def _normalize_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     configuration = payload.get("configuration", {})
     if not isinstance(configuration, Mapping):
         raise ValueError("configuration must be an object")
-    _validate_configuration(configuration)
+    if source is IntegrationFlowSource.RAW_DESCRIPTOR:
+        configuration = mcp_authoring_configuration_from_dict(
+            configuration,
+            target_id=target_id,
+        ).to_dict()
+    else:
+        _validate_configuration(configuration)
     manifest = payload.get("manifest")
     if manifest is not None:
         if not isinstance(manifest, Mapping):
@@ -1637,36 +1752,27 @@ def _raw_mcp_package(
     configuration = request.get("configuration")
     if not isinstance(configuration, Mapping):
         raise ValueError("raw descriptor configuration is required")
-    transport = str(configuration.get("transport") or "")
-    if transport not in {"stdio", "http", "sse", "streamable_http"}:
-        raise ValueError("raw MCP transport is unsupported")
-    if transport == "stdio":
-        command = configuration.get("command")
-        if not isinstance(command, str) or not command.strip():
-            raise ValueError("raw stdio MCP descriptor requires a command")
-    else:
-        url = configuration.get("url")
-        if not isinstance(url, str) or not url.startswith("https://"):
-            raise ValueError("raw network MCP descriptor requires an HTTPS URL")
-    canonical = _json_value(configuration)
+    authored = mcp_authoring_configuration_from_dict(
+        configuration,
+        target_id=target.id,
+    )
+    canonical = authored.to_dict()
     descriptor_hash = _json_hash(canonical)
     requirements: list[IntegrationRequirement] = []
-    if transport == "stdio":
+    if authored.transport is MCPAuthoringTransport.STDIO:
         requirements.append(
             IntegrationRequirement(
                 id="mcp-command",
                 type=IntegrationRequirementType.COMMAND,
                 classification=IntegrationPolicyClass.EXPLICIT_APPROVAL,
                 reason="Start the reviewed MCP server command.",
-                argv=(str(configuration["command"]),),
-                environment=tuple(
-                    str(item) for item in configuration.get("env_vars", ())
-                ),
+                argv=(str(authored.executable), *authored.argv),
+                environment=tuple(authored.environment),
             )
         )
     else:
-        url = str(configuration["url"])
-        origin = "/".join(url.split("/", 3)[:3])
+        parsed_url = urlsplit(str(authored.url))
+        origin = urlunsplit((parsed_url.scheme, parsed_url.netloc, "", "", ""))
         requirements.append(
             IntegrationRequirement(
                 id="mcp-network",
@@ -1676,7 +1782,8 @@ def _raw_mcp_package(
                 locator=origin,
             )
         )
-    for index, env_name in enumerate(configuration.get("env_vars", ())):
+    secret_names = sorted(set(authored.environment) | set(authored.headers))
+    for index, _name in enumerate(secret_names):
         requirements.append(
             IntegrationRequirement(
                 id=f"mcp-secret-{index + 1}",
@@ -1800,6 +1907,12 @@ def _catalog_entry_to_dict(entry: CatalogEntry) -> dict[str, Any]:
                 "canonical_origin": federated.canonical_origin,
                 "detail_url": federated.detail_url,
                 "artifact_url": federated.artifact_url,
+                "repository_url": federated.artifact_url,
+                "observed_at": federated.observed_at,
+                "discovery_location": federated.discovery_location,
+                "immutable_ref": federated.immutable_ref,
+                "content_hash": federated.content_hash,
+                "relative_path": federated.relative_path,
                 "curated": federated.curated,
                 "popularity": federated.popularity,
                 "upstream_audit": federated.upstream_audit,
@@ -1810,6 +1923,49 @@ def _catalog_entry_to_dict(entry: CatalogEntry) -> dict[str, Any]:
             if federated is not None
             else None
         ),
+    }
+
+
+def _catalog_source_to_dict(item: Any, *, now: datetime) -> dict[str, Any]:
+    last_success = (
+        datetime.fromisoformat(item.last_success_at.replace("Z", "+00:00"))
+        if item.last_success_at is not None
+        else None
+    )
+    freshness = (
+        datetime.fromisoformat(item.freshness_expires_at.replace("Z", "+00:00"))
+        if item.freshness_expires_at is not None
+        else None
+    )
+    stale = item.last_success_at is not None and (
+        not item.last_attempt_succeeded
+        or (
+            item.source_type is CatalogSourceType.FEDERATED_CATALOG
+            and (freshness is None or freshness <= now)
+        )
+    )
+    return {
+        "id": item.source_id,
+        "status": (
+            "unavailable"
+            if item.last_success_at is None and not item.last_attempt_succeeded
+            else "stale"
+            if stale
+            else "ready"
+        ),
+        "last_sync_at": item.last_success_at,
+        "last_attempt_at": item.last_attempt_at,
+        "cache_age_seconds": (
+            max(0, int((now - last_success).total_seconds()))
+            if last_success is not None
+            else None
+        ),
+        "last_good": item.last_success_at is not None,
+        "stale": stale,
+        "reason_code": item.errors[-1].code if item.errors else None,
+        "next_retry_at": item.next_retry_at,
+        "entry_count": item.entry_count,
+        "content_free": True,
     }
 
 
@@ -1908,6 +2064,9 @@ def _record_from_dict(payload: object) -> IntegrationFlowRecord:
     if not isinstance(payload, Mapping):
         raise IntegrationFlowError("integration flow record is invalid")
     try:
+        source_provenance = payload.get("source_provenance")
+        if source_provenance is not None and not isinstance(source_provenance, Mapping):
+            raise TypeError("source provenance must be an object")
         record = IntegrationFlowRecord(
             id=str(payload["id"]),
             plan_id=str(payload["plan_id"]),
@@ -1916,6 +2075,11 @@ def _record_from_dict(payload: object) -> IntegrationFlowRecord:
             package_id=str(payload["package_id"]),
             package_version=str(payload["package_version"]),
             manifest_sha256=str(payload["manifest_sha256"]),
+            source_provenance=(
+                _json_value(source_provenance)
+                if source_provenance is not None
+                else None
+            ),
             target_id=str(payload["target_id"]),
             scope=InstallationScope(str(payload["scope"])),
             workspace=(str(payload["workspace"]) if payload.get("workspace") else None),

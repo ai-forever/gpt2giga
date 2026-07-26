@@ -46,6 +46,7 @@ class EnforcementControl(str, Enum):
     POLICY_ENGINE = "policy_engine"
     REVIEW_BINDING = "review_binding"
     BOOTSTRAP_AUTH = "bootstrap_auth"
+    OIDC_AUTH = "oidc_auth"
 
 
 class ConformanceBehavior(str, Enum):
@@ -95,7 +96,7 @@ CONFORMANCE_EVIDENCE = {
                 {ConformanceBehavior.AUTHENTICATION, ConformanceBehavior.DENY}
             ),
             test_nodes=(
-                "tests/harness/test_ui_security.py::test_remote_mutations_fail_closed_without_auth_configuration",
+                "tests/harness/test_ui_security.py::test_remote_app_fails_closed_before_bootstrap_exchange",
             ),
         ),
         ConformanceEvidence(
@@ -153,6 +154,22 @@ CONFORMANCE_EVIDENCE = {
                 "tests/harness/test_settings_api.py::test_provider_settings_api_crud_is_reference_only_and_optimistic",
                 "tests/harness/test_settings_api.py::test_provider_settings_api_returns_field_errors_before_persistence",
                 "tests/harness/test_settings_api.py::test_provider_settings_api_probe_is_explicit_bounded_and_content_free",
+            ),
+        ),
+        ConformanceEvidence(
+            id="provider.authentication",
+            behaviors=frozenset(
+                {
+                    ConformanceBehavior.AUTHENTICATION,
+                    ConformanceBehavior.ALLOW,
+                    ConformanceBehavior.DENY,
+                    ConformanceBehavior.STALE_OR_REBOUND,
+                    ConformanceBehavior.REDACTION,
+                }
+            ),
+            test_nodes=(
+                "tests/harness/test_provider_authentication_broker.py::test_provider_account_api_is_typed_bounded_and_content_free",
+                "tests/harness/test_provider_authentication_broker.py::test_broker_rejects_concurrent_login_and_cancels_exact_attempt",
             ),
         ),
         ConformanceEvidence(
@@ -308,7 +325,7 @@ CONFORMANCE_EVIDENCE = {
             ),
         ),
         ConformanceEvidence(
-            id="auth.bootstrap",
+            id="auth.local_access",
             behaviors=frozenset(
                 {
                     ConformanceBehavior.AUTHENTICATION,
@@ -318,7 +335,16 @@ CONFORMANCE_EVIDENCE = {
                 }
             ),
             test_nodes=(
-                "tests/harness/test_ui_security.py::test_remote_shell_requires_bootstrap_exchange_for_api_and_sse_cookie",
+                "tests/harness/test_ui_security.py::test_local_access_logout_rotate_recovery_and_csrf",
+                "tests/harness/test_ui_security.py::test_local_access_persists_only_hashed_expiring_sessions",
+            ),
+        ),
+        ConformanceEvidence(
+            id="auth.remote_identity",
+            behaviors=frozenset(ConformanceBehavior),
+            test_nodes=(
+                "tests/harness/test_remote_identity.py::test_remote_oidc_login_enforces_pkce_nonce_roles_and_audit_identity",
+                "tests/harness/test_remote_identity.py::test_remote_viewer_revocation_and_backchannel_logout_fail_closed",
             ),
         ),
     )
@@ -333,6 +359,7 @@ _EDITOR = (*_AUTH, "external.editor")
 _NATIVE_CONTROL = (*_AUTH, "external.native_control")
 _POLICY = (*_AUTH, "policy.lifecycle")
 _PROVIDER_SETTINGS = (*_AUTH, "provider.settings")
+_PROVIDER_AUTHENTICATION = (*_AUTH, "provider.authentication")
 _INTEGRATION_FLOW = (*_AUTH, "integrations.flow")
 _TRACE_REPLAY = (*_AUTH, "trace_replay.manifest")
 
@@ -393,15 +420,27 @@ MUTATION_ROUTE_CONTRACTS = (
             "/api/agents/validate",
             "/api/agents/{agent_id}/draft",
             "/api/agents/{agent_id}/duplicate",
+            "/api/agents/{agent_id}/delete-preview",
             "/api/tool-config/preview",
             "/api/runs/{run_id}/promotions/preview",
             "/api/workflows/validate",
+            "/api/workflows/{workflow_id}/draft",
+            "/api/workflows/{workflow_id}/delete-preview",
             "/api/schedules/preview",
+            "/api/schedules/{schedule_id}/delete-preview",
         ),
         MutationClass.READ_ONLY,
         EnforcementControl.AUTHENTICATED_PROJECTION,
         None,
         evidence=_READ,
+    ),
+    _route(
+        "POST",
+        "/api/provider-accounts/{provider_id}/refresh",
+        MutationClass.READ_ONLY,
+        EnforcementControl.AUTHENTICATED_PROJECTION,
+        None,
+        evidence=_PROVIDER_AUTHENTICATION,
     ),
     *_many(
         "PATCH",
@@ -486,10 +525,13 @@ MUTATION_ROUTE_CONTRACTS = (
         "POST",
         (
             "/api/agents/{agent_id}/apply",
+            "/api/agents/{agent_id}/delete",
             "/api/tool-config/apply",
             "/api/tool-config/rollback",
             "/api/workflows/import",
             "/api/workflows/{workflow_id}/duplicate",
+            "/api/workflows/{workflow_id}/apply",
+            "/api/workflows/{workflow_id}/delete",
         ),
         MutationClass.LOCAL_STATE,
         EnforcementControl.OPTIMISTIC_LOCAL_STATE,
@@ -558,6 +600,25 @@ MUTATION_ROUTE_CONTRACTS = (
         MutationClass.LOCAL_STATE,
         EnforcementControl.OPTIMISTIC_LOCAL_STATE,
         "integration_group.preview",
+        evidence=_INTEGRATION_FLOW,
+    ),
+    *_many(
+        "POST",
+        (
+            "/api/integrations/flows/{flow_id}/lifecycle/preview",
+            "/api/integrations/groups/{group_id}/lifecycle/preview",
+        ),
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OPTIMISTIC_LOCAL_STATE,
+        "integration_lifecycle.preview",
+        evidence=_INTEGRATION_FLOW,
+    ),
+    _route(
+        "POST",
+        "/api/integrations/lifecycle/{operation_id}/apply",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.REVIEW_BINDING,
+        "integration_lifecycle.exact_plan",
         evidence=_INTEGRATION_FLOW,
     ),
     *_many(
@@ -656,6 +717,35 @@ MUTATION_ROUTE_CONTRACTS = (
         "provider_settings.probe",
         actions=(PermissionAction.NETWORK_CONNECT,),
         evidence=_PROVIDER_SETTINGS,
+    ),
+    _route(
+        "POST",
+        "/api/provider-accounts/{provider_id}/login",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.EXPLICIT_OPERATOR_ACTION,
+        "provider_authentication.login",
+        actions=(
+            PermissionAction.PROCESS_SPAWN,
+            PermissionAction.NETWORK_CONNECT,
+        ),
+        evidence=_PROVIDER_AUTHENTICATION,
+    ),
+    _route(
+        "POST",
+        "/api/provider-accounts/{provider_id}/cancel",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.EXPLICIT_OPERATOR_ACTION,
+        "provider_authentication.cancel",
+        evidence=_PROVIDER_AUTHENTICATION,
+    ),
+    _route(
+        "POST",
+        "/api/provider-accounts/{provider_id}/logout",
+        MutationClass.GOVERNED_EXTERNAL_EFFECT,
+        EnforcementControl.EXPLICIT_OPERATOR_ACTION,
+        "provider_authentication.logout",
+        actions=(PermissionAction.PROCESS_SPAWN,),
+        evidence=_PROVIDER_AUTHENTICATION,
     ),
     _route(
         "DELETE",
@@ -810,11 +900,51 @@ MUTATION_ROUTE_CONTRACTS = (
     ),
     _route(
         "POST",
-        "/auth/session",
+        "/auth/logout",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.AUTHENTICATED_LOCAL_STATE,
+        "ui_security.local_logout",
+        evidence=("auth.local_access",),
+    ),
+    _route(
+        "POST",
+        "/auth/local/rotate",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.AUTHENTICATED_LOCAL_STATE,
+        "ui_security.local_rotate",
+        evidence=("auth.local_access",),
+    ),
+    _route(
+        "POST",
+        "/auth/local/recover",
         MutationClass.LOCAL_STATE,
         EnforcementControl.BOOTSTRAP_AUTH,
-        "ui_security.browser_session",
-        evidence=("auth.bootstrap",),
+        "ui_security.local_recovery",
+        evidence=("auth.local_access",),
+    ),
+    _route(
+        "POST",
+        "/auth/oidc/backchannel-logout",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OIDC_AUTH,
+        "ui_security.remote_backchannel_logout",
+        evidence=("auth.remote_identity",),
+    ),
+    _route(
+        "POST",
+        "/auth/remote/revoke-actor",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.AUTHENTICATED_LOCAL_STATE,
+        "ui_security.remote_actor_revocation",
+        evidence=("auth.remote_identity",),
+    ),
+    _route(
+        "POST",
+        "/auth/remote/revoke-all",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.AUTHENTICATED_LOCAL_STATE,
+        "ui_security.remote_global_revocation",
+        evidence=("auth.remote_identity",),
     ),
 )
 

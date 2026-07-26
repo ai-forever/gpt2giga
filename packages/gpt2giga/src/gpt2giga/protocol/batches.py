@@ -86,9 +86,9 @@ def get_batch_target(endpoint: str) -> BatchTarget:
 
 
 def map_openai_file_purpose(purpose: str) -> str:
-    """Map an OpenAI file purpose to the closest GigaChat purpose."""
-    if purpose == "assistants":
-        return "assistant"
+    """Map an OpenAI file purpose to the universal GigaChat purpose."""
+    # Keep the OpenAI purpose in the gateway file store. GigaChat's `assistant`
+    # purpose rejects otherwise valid document uploads, including PDFs.
     return "general"
 
 

@@ -15,11 +15,21 @@ from gpt2giga_harness.project import (
     load_project_state,
     resolve_project,
 )
+from gpt2giga_harness.product_capabilities import (
+    AuthorityLevel,
+    TaskIntent,
+    legacy_mode_compatibility_receipt,
+)
 from gpt2giga_harness.provider_settings import (
     ProviderRegistryConflict,
     ProviderSettingsNotFoundError,
     ProviderSettingsService,
     ProviderSettingsValidationError,
+)
+from gpt2giga_harness.provider_authentication_broker import (
+    ProviderAuthenticationConflictError,
+    ProviderAuthenticationOperationError,
+    provider_account_snapshot_to_dict,
 )
 from gpt2giga_harness.runtime.policy import permission_profile
 from gpt2giga_harness.settings import (
@@ -29,7 +39,10 @@ from gpt2giga_harness.settings import (
 )
 from gpt2giga_harness.types import parse_api_mode
 from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
-from gpt2giga_harness.workbench_execution import workbench_transport_projection
+from gpt2giga_harness.workbench_execution import (
+    workbench_admission_projection,
+    workbench_transport_projection,
+)
 
 
 router = APIRouter(route_class=ConformantAPIRoute)
@@ -64,6 +77,7 @@ def settings_read_model(
                 "title": spec.title,
                 "native_supported": spec.supports_native_sessions,
                 "status": availability.status.value,
+                "workbench_admission": workbench_admission_projection(harness),
                 "workbench_transport": workbench_transport_projection(harness),
             }
         )
@@ -114,6 +128,15 @@ def settings_read_model(
             "sources": dict(snapshot.sources),
             "locked_fields": list(snapshot.locked_fields),
             "change_effect": "new_runs",
+            "compatibility": {
+                "mode": (
+                    legacy_mode_compatibility_receipt(defaults.mode)
+                    if snapshot.sources.get("task_intent") == "legacy_mode_alias"
+                    or snapshot.sources.get("authority") == "legacy_mode_alias"
+                    or defaults.mode not in {"plan", "read", "edit"}
+                    else None
+                )
+            },
         },
         "workspace": {
             "project_id": project.id,
@@ -163,6 +186,36 @@ def settings_read_model(
 def list_provider_settings(request: Request) -> dict[str, Any]:
     """Return the reference-only provider registry and template catalog."""
     return request.app.state.harness_provider_settings_service.list()
+
+
+@router.get("/api/provider-accounts")
+def list_provider_accounts(request: Request) -> dict[str, Any]:
+    """Return typed provider-owned account cards from isolated homes."""
+    return request.app.state.harness_native_login_broker.list_accounts()
+
+
+@router.post("/api/provider-accounts/{provider_id}/refresh")
+def refresh_provider_account(request: Request, provider_id: str) -> dict[str, Any]:
+    """Explicitly refresh one provider-owned status projection."""
+    return _provider_account_action(request, provider_id, "refresh")
+
+
+@router.post("/api/provider-accounts/{provider_id}/login")
+def start_provider_login(request: Request, provider_id: str) -> dict[str, Any]:
+    """Start one bounded provider-owned login attempt."""
+    return _provider_account_action(request, provider_id, "start")
+
+
+@router.post("/api/provider-accounts/{provider_id}/cancel")
+def cancel_provider_login(request: Request, provider_id: str) -> dict[str, Any]:
+    """Cancel the exact pending provider-owned login attempt."""
+    return _provider_account_action(request, provider_id, "cancel")
+
+
+@router.post("/api/provider-accounts/{provider_id}/logout")
+def logout_provider_account(request: Request, provider_id: str) -> dict[str, Any]:
+    """Run the reviewed provider-owned logout operation."""
+    return _provider_account_action(request, provider_id, "logout")
 
 
 @router.get("/api/providers/{provider_id}")
@@ -255,18 +308,32 @@ def update_settings_defaults(
     unknown = sorted(set(patch) - SETTINGS_FIELDS - {"expected_revision"})
     if unknown:
         raise _field_error({field: "unknown setting" for field in unknown})
+    normalized_patch = dict(patch)
+    candidate = {**asdict(current.defaults), **normalized_patch}
+    if {"task_intent", "authority"} & set(normalized_patch):
+        mode = _mode_for_product_defaults(
+            candidate.get("task_intent"),
+            candidate.get("authority"),
+        )
+        if mode is not None:
+            normalized_patch["mode"] = mode
+    elif "mode" in normalized_patch:
+        legacy = legacy_mode_compatibility_receipt(normalized_patch["mode"])
+        normalized_patch["task_intent"] = legacy["intent"]
+        normalized_patch["authority"] = legacy["authority"]
     locked = set(current.locked_fields)
     locked_changes = {
         field: "owned by the environment; restart with a new environment value"
-        for field in patch
-        if field in locked and getattr(current.defaults, field) != patch[field]
+        for field in normalized_patch
+        if field in locked
+        and getattr(current.defaults, field) != normalized_patch[field]
     }
     if locked_changes:
         raise HTTPException(
             status_code=409,
             detail={"code": "environment_owned", "field_errors": locked_changes},
         )
-    values = {**asdict(current.defaults), **dict(patch)}
+    values = {**asdict(current.defaults), **normalized_patch}
     field_errors = _validate_defaults(request, values)
     if field_errors:
         raise _field_error(field_errors)
@@ -331,8 +398,12 @@ def _validate_defaults(request: Request, values: Mapping[str, Any]) -> dict[str,
         errors.setdefault(
             "invocation_mode", f"{transport} requires headless invocation"
         )
-    if values.get("mode") not in {"plan", "act"}:
-        errors["mode"] = "expected plan or act"
+    if values.get("task_intent") not in {item.value for item in TaskIntent}:
+        errors["task_intent"] = "expected ask, review, or change"
+    if values.get("authority") not in {item.value for item in AuthorityLevel}:
+        errors["authority"] = "expected read_only or workspace_write"
+    if values.get("mode") not in {"plan", "read", "edit", "act"}:
+        errors["mode"] = "expected plan, read, or edit"
     if values.get("workspace_policy") not in {"auto", "current", "worktree"}:
         errors["workspace_policy"] = "expected auto, current, or worktree"
     try:
@@ -357,6 +428,17 @@ def _saved_defaults(snapshot: HarnessDefaultsSnapshot) -> dict[str, Any]:
         "locked_fields": list(snapshot.locked_fields),
         "change_effect": "new_runs",
     }
+
+
+def _mode_for_product_defaults(intent: Any, authority: Any) -> str | None:
+    """Project explicit product defaults onto the retained machine alias."""
+    if intent == TaskIntent.ASK.value:
+        return "plan"
+    if intent == TaskIntent.REVIEW.value:
+        return "read"
+    if intent == TaskIntent.CHANGE.value:
+        return "edit" if authority == AuthorityLevel.WORKSPACE_WRITE.value else "read"
+    return None
 
 
 def _field_error(errors: Mapping[str, str]) -> HTTPException:
@@ -418,6 +500,29 @@ def _run_provider_check(
 def _mcp_health(history: MCPProbeHistoryStore, server_id: str) -> str:
     latest = history.list(server_id, limit=1)
     return str(latest[0].get("status") or "not_checked") if latest else "not_checked"
+
+
+def _provider_account_action(
+    request: Request,
+    provider_id: str,
+    operation: str,
+) -> dict[str, Any]:
+    broker = request.app.state.harness_native_login_broker
+    try:
+        snapshot = getattr(broker, operation)(provider_id)
+    except ProviderAuthenticationConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "provider_login_conflict", "message": str(exc)},
+        ) from exc
+    except ProviderAuthenticationOperationError as exc:
+        reason_code = str(exc)
+        status_code = 404 if reason_code == "provider_authentication_unknown" else 409
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": reason_code},
+        ) from exc
+    return {"account": provider_account_snapshot_to_dict(snapshot)}
 
 
 def _optional_text(value: Any) -> str | None:

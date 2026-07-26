@@ -32,7 +32,10 @@ from gpt2giga.protocol.response import (
     extract_chat_completion_thread_id,
     hydrate_chat_completion_image_files,
 )
-from gpt2giga.routers.openai.helpers import populate_giga_functions
+from gpt2giga.routers.openai.helpers import (
+    populate_giga_functions,
+    request_attachment_ids,
+)
 from gpt2giga.sinks.observability.responses import (
     emit_openai_response_observability,
     observe_openai_response_stream,
@@ -56,11 +59,15 @@ async def responses(request: Request):
     conversation_turn = await stitch_responses_payload(request, data, mode=mode)
 
     populate_giga_functions(data, getattr(state, "logger", None))
+    attachment_ids = request_attachment_ids(request)
+    attachment_kwargs = {"attachment_ids": attachment_ids} if attachment_ids else {}
     if mode == "v2":
         async with gigachat_request_options(giga_client, request_options):
             chat_request = (
                 await state.request_transformer.prepare_response_chat_completion(
-                    data, giga_client
+                    data,
+                    giga_client,
+                    **attachment_kwargs,
                 )
             )
         effective_model = resolve_gigachat_model(chat_request, state.config)
@@ -121,7 +128,9 @@ async def responses(request: Request):
 
     async with gigachat_request_options(giga_client, request_options):
         chat_messages = await state.request_transformer.prepare_response_chat(
-            data, giga_client
+            data,
+            giga_client,
+            **attachment_kwargs,
         )
     effective_model = resolve_gigachat_model(chat_messages, state.config)
     update_request_context(model_effective=effective_model)

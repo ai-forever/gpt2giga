@@ -5,7 +5,7 @@ All notable changes to gpt2giga-harness are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.1a1] - 2026-07-23
+## [0.5.0a1] - 2026-07-26
 
 ### Added
 - **Trace-to-Replay comparisons**: Runs Center can replay a retained task in a new session while changing exactly one model, provider, Harness, or extensions axis, then show a content-addressed source/destination comparison without applying changes automatically.
@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Permission simulation**: CLI and Workbench preflight now project effective filesystem, command, network, secret, integration, provider, and Git/GitHub permissions for the exact route snapshot; denials block startup, while runtime-dependent and provider-owned actions are not presented as guaranteed grants.
 - **Compatibility guardian**: `giga compatibility check --json` and a read-only API validate pinned Codex, Claude, and Gemini CLI windows, native protocols, Adapter/Integration SDK schemas, and marketplace contracts before model-backed execution.
 - **Truthful handoff capsules**: `giga handoff capsule` and Runs Center build a verifiable content-free snapshot of the task, evidence, environment, pending approvals, and continuity limits for cross-Harness transfer without starting the target or claiming a false resume.
+- **Native Automation authoring**: Cockpit can create and revise agents, workflows, schedules, and typed MCP definitions through revision-bound backend contracts, while workflow execution is restored behind explicit operator actions.
+- **Provider account sessions**: versioned capability evidence, a native login broker, and session-bound account references separate provider authentication from Harness execution authority without persisting provider credentials.
+- **Remote GigaLoom identity**: local access remains loopback-owned, while explicitly configured remote deployments gain signed short-lived sessions, OIDC subject-to-role mapping, CSRF protection, and fail-closed websocket and mutation admission.
+- **Product capability admission**: Workbench now separates task intent from authority, projects tool and integration availability before execution, and keeps unsupported provider-native behavior visible instead of silently broadening permissions.
+- **Performance baselines**: content-free bounded probes cover filesystem, SQLite, session projection, worker, TUI, and web defaults with machine-readable percentiles and explicit future optimization gates.
+
+### Changed
+- **GigaLoom product surfaces**: onboarding, Plugin Library, tool selection, attachments, session titles, row actions, and Automation authoring now share backend-owned capability and lifecycle state across Cockpit and the terminal Workbench.
+- **Gateway preset**: the optional integration now pins `gpt2giga==0.2.5a1`.
+- **Base install policy**: the reviewed direct dependency surface includes `PyJWT[crypto]` for signed remote UI sessions while provider SDKs remain optional.
+
+### Fixed
+- **Cross-platform terminal package**: performance metrics no longer import the POSIX-only `resource` module unconditionally, so Windows wheel commands can start normally.
+- **Release and documentation gates**: package-isolation expectations include the reviewed identity dependency and product branding, Skill provenance tests use deterministic capability evidence, and the agent capability matrix has a complete Russian locale.
 
 ## [0.4.0a1] - 2026-07-23
 
@@ -165,7 +179,7 @@ considered stable.
 
 ---
 
-[0.4.1a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.4.0a1...gpt2giga-harness-v0.4.1a1
+[0.5.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.4.0a1...gpt2giga-harness-v0.5.0a1
 [0.4.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.3.0a1...gpt2giga-harness-v0.4.0a1
 [0.3.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.2.0a1...gpt2giga-harness-v0.3.0a1
 [0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.1.0b1...gpt2giga-harness-v0.2.0a1

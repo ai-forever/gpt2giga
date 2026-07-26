@@ -207,6 +207,101 @@ def test_raw_mcp_flow_installs_into_managed_harness_inventory(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("target_id", "transport"),
+    [
+        ("codex-mcp", "streamable_http"),
+        ("claude-mcp", "streamable_http"),
+        ("gemini-mcp", "sse"),
+        ("harness-managed-mcp", "streamable_http"),
+    ],
+)
+def test_typed_remote_mcp_preview_is_normalized_and_content_free(
+    tmp_path,
+    target_id,
+    transport,
+):
+    service = _service(tmp_path)
+    preview = service.preview(
+        {
+            "source": "raw_descriptor",
+            "package_id": f"typed-{target_id}",
+            "target_id": target_id,
+            "scope": "managed_home",
+            "configuration": {
+                "schema_version": 1,
+                "transport": transport,
+                "remote": {
+                    "url": "https://MCP.EXAMPLE/v1?tenant=fixture",
+                    "headers": {
+                        "X-Tenant": {
+                            "kind": "environment",
+                            "name": "TENANT_ID",
+                        }
+                    },
+                },
+            },
+        }
+    )
+
+    configuration = preview["plan"]["configuration"]["preview"]
+    assert configuration["transport"] == transport
+    assert configuration["target"]["url"] == ("https://mcp.example/v1?tenant=fixture")
+    assert configuration["secret_references"] == [
+        {
+            "field": "header",
+            "name": "X-Tenant",
+            "reference": {
+                "schema_version": 1,
+                "kind": "environment",
+                "name": "TENANT_ID",
+                "service": None,
+                "account": None,
+                "expires_at": None,
+                "cache_ttl_seconds": 0,
+            },
+        }
+    ]
+    assert "fixture-secret-value" not in json.dumps(preview)
+
+
+def test_typed_project_stdio_preview_resolves_cwd_inside_workspace(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    service = _service(tmp_path / "data")
+
+    preview = service.preview(
+        {
+            "source": "raw_descriptor",
+            "package_id": "project-mcp",
+            "target_id": "codex-mcp",
+            "scope": "project",
+            "workspace": str(workspace),
+            "configuration": {
+                "schema_version": 1,
+                "transport": "stdio",
+                "stdio": {
+                    "executable": "fixture-mcp",
+                    "argv": ["--stdio"],
+                    "cwd": "tools/server",
+                    "environment": {
+                        "MCP_TOKEN": {
+                            "kind": "environment",
+                            "name": "MCP_TOKEN",
+                        }
+                    },
+                },
+            },
+        }
+    )
+
+    target = preview["plan"]["configuration"]["preview"]["target"]
+    assert target["command"] == "fixture-mcp"
+    assert target["args"] == ["--stdio"]
+    assert target["cwd"] == str(workspace / "tools" / "server")
+    assert target["env_vars"] == ["MCP_TOKEN"]
+
+
 def test_flow_rejects_secret_values_stale_approval_and_records_failure(tmp_path):
     service = _service(tmp_path)
     entry = service.inventory()["catalog"][0]

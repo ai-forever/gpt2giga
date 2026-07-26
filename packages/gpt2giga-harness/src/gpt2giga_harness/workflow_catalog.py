@@ -118,13 +118,25 @@ def duplicate_workflow(
     return save_workflow(project_root, content)
 
 
-def delete_workflow(project_root: str | Path, workflow_id: str) -> None:
+def delete_workflow(
+    project_root: str | Path,
+    workflow_id: str,
+    *,
+    expected_hash: str | None = None,
+) -> None:
     """Delete the current editable definition while retaining history."""
-    content = workflow_source(project_root, workflow_id)
     root = Path(project_root).resolve()
     path = _workflow_path(root, workflow_id)
     lock = root / WORKFLOW_DIRECTORY / ".catalog"
     with exclusive_file_lock(lock):
+        if not path.is_file():
+            raise KeyError(workflow_id)
+        content = path.read_text(encoding="utf-8")
+        if (
+            expected_hash is not None
+            and hashlib.sha256(content.encode("utf-8")).hexdigest() != expected_hash
+        ):
+            raise ValueError("Workflow changed since the delete preview")
         _archive_revision(root, workflow_id, content)
         path.unlink()
 

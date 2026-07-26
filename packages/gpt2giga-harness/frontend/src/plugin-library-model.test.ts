@@ -62,6 +62,9 @@ const inventory: IntegrationFlowInventory = {
     },
   ],
   groups: [],
+  installations: [],
+  capability_matrix: [],
+  operations: [],
   content_free: true,
 };
 
@@ -102,6 +105,37 @@ describe("plugin library model", () => {
       "gpt2giga.builtin.find-skills",
     ]);
     expect(filterPluginLibrary(items, "all", "", false, "external")).toEqual([]);
+  });
+
+  it("uses effective lifecycle state instead of treating retained disabled files as connected", () => {
+    const withLifecycle: IntegrationFlowInventory = {
+      ...inventory,
+      installations: [{
+        flow_id: "plugin-installed",
+        package_id: "acme.review-tools",
+        package_version: "2.0.0",
+        target_id: "codex-plugin",
+        scope: "managed_home",
+        state: "disabled",
+        enabled: false,
+        installed: true,
+        revision: 2,
+        catalog_id: null,
+        last_operation_id: "iop-1",
+        updated_at: "2026-07-19T13:00:00Z",
+        content_free: true,
+      }],
+    };
+
+    expect(
+      buildPluginLibrary(withLifecycle, []).find(
+        (item) => item.packageId === "acme.review-tools",
+      ),
+    ).toMatchObject({
+      connected: false,
+      status: "disabled",
+      lifecycle: { state: "disabled", installed: true },
+    });
   });
 
   it("projects verified and repair-required all-target groups without inventing plugin sources", () => {
@@ -162,6 +196,9 @@ describe("plugin library model", () => {
         curated: false,
         popularity: 42,
         upstream_audit: null,
+        canonical_origin: "https://skills.sh",
+        observed_at: "2026-07-24T08:00:00Z",
+        discovery_location: "skills-sh/acme/review",
         install_authorized: false,
       }],
       sources: [{ id: "skills-sh", status: "ready", error_type: null }],
@@ -181,6 +218,44 @@ describe("plugin library model", () => {
       artifactUrl: "https://github.com/acme/review",
       sourceId: "skills-sh",
       popularity: 42,
+      provenance: {
+        canonical_source: "skills-sh",
+        upstream_id: "acme/review",
+        canonical_origin: "https://skills.sh",
+        discovery_location: "skills-sh/acme/review",
+      },
     });
+  });
+
+  it("shows OpenAI bundled plugins as built-in Codex capabilities", () => {
+    const items = buildPluginLibrary({
+      ...inventory,
+      root_plugins: [{
+        id: "plugin:pdf",
+        name: "pdf",
+        title: "PDF",
+        description: "Read, create, and verify PDF files",
+        version: "1.0.0",
+        target_ids: ["codex-plugin"],
+        origin: "openai-primary-runtime",
+        source_label: "OpenAI",
+        scope: "system",
+        connected: true,
+        invocation: "@pdf",
+        bundled_skills: ["pdf"],
+        default_prompts: ["Review this PDF"],
+        repository_url: "https://github.com/openai/openai",
+      }],
+    }, []);
+
+    expect(items.find((item) => item.id === "plugin:pdf")).toMatchObject({
+      category: "plugins",
+      connected: true,
+      sourceId: "OpenAI",
+      invocation: "@pdf",
+      bundledSkills: ["pdf"],
+    });
+    expect(filterPluginLibrary(items, "plugins", "", false, "built_in", "codex")
+      .some((item) => item.id === "plugin:pdf")).toBe(true);
   });
 });

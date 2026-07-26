@@ -15,7 +15,7 @@ Project Cockpit web UI.
 Install the published prerelease from your package index:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 giga doctor
 giga --version
 giga
@@ -25,7 +25,7 @@ giga ui
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```sh
-uv tool install 'gpt2giga-harness[gpt2giga]==0.4.1a1'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.5.0a1'
 ```
 
 The standard install includes the terminal workbench. Start it from the project
@@ -99,7 +99,7 @@ If you installed the earlier optional-TUI prerelease, upgrade the existing tool;
 do not keep or add a `[tui]` extra:
 
 ```sh
-uv tool install --force 'gpt2giga-harness==0.4.1a1'
+uv tool install --force 'gpt2giga-harness==0.5.0a1'
 giga --version
 giga
 ```
@@ -124,8 +124,8 @@ giga ui
 Keep that environment active when you `cd` to the project you want to manage.
 On Windows PowerShell, activate `.venv\Scripts\Activate.ps1` instead.
 
-The current `gpt2giga-harness==0.4.1a1` metadata keeps
-`gpt2giga==0.2.4a1` in the `gpt2giga` optional extra. Installing only
+The current `gpt2giga-harness==0.5.0a1` metadata keeps
+`gpt2giga==0.2.5a1` in the `gpt2giga` optional extra. Installing only
 `gpt2giga` never adds Harness commands or the `gpt2giga_harness` namespace.
 
 The provider-neutral base Harness install is intentionally limited to nine
@@ -252,7 +252,18 @@ without introducing a shared writable workspace.
 Open `http://127.0.0.1:8091/`. `giga ui` starts a durable local worker when
 needed; pass `--no-start-worker` when another supervisor owns that lifecycle.
 The default loopback binding is intentional. Remote binding requires explicit
-authentication and remote-access opt-in.
+single-issuer OIDC configuration plus `--allow-remote`; incomplete identity
+configuration, plain HTTP public origins, unmapped subjects, and untrusted
+proxy headers fail closed. Configure and deploy that boundary only behind the
+reviewed HTTPS/proxy controls described in the remote UI identity ADR.
+
+Validate deployment-owned identity configuration without contacting the
+issuer, or revoke every remote session from the OS-local CLI:
+
+```bash
+giga ui-identity validate --json
+giga ui-identity revoke-all --confirm --json
+```
 
 The root URL opens Cockpit V2. During its release-level rollback window, the
 previous no-build cockpit remains available at `http://127.0.0.1:8091/legacy`
@@ -474,6 +485,14 @@ from `~/.agents/skills` and provider-specific Skill homes appear in inventory
 and can be filtered by Codex, Claude, Gemini, or Harness. Override shared roots
 with the OS-path-separated `GIGA_ROOT_SKILLS_DIRS` variable.
 
+System bundles already shipped by OpenAI are projected as read-only Plugins
+with an OpenAI source badge, bundled Skill names, default prompts, and their
+`@name` invocation hint. Type `@` in Work to choose one; for Codex CLI runs the
+composer translates that selection to the native `$name` Skill invocation.
+Every federated result also retains its source badge. The canonical NeuralDeep
+GigaChat Image MCP page is
+[NeuralDeep GigaChat Image MCP](https://neuraldeep.ru/mcp/gigachat-image).
+
 An external Skill must match its reviewed immutable reference and content hash
 before bounded `SKILL.md` validation and target projection. A normalized MCP
 candidate likewise keeps exact package integrity, argv, origins, secret
@@ -600,7 +619,7 @@ migration:
 ```sh
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 giga doctor
 ```
 

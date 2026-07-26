@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from gpt2giga_harness import proxy
 from gpt2giga_harness.codex_app_server import CodexAppServerSupervisor
 from gpt2giga_harness.cli_capabilities import (
     CliCapabilitySnapshot,
@@ -33,6 +34,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
     attachment_warning_events,
     cli_args_from_attachments,
     prompt_with_attachments,
+    request_render_plan,
 )
 from gpt2giga_harness.harnesses.adapter_parity import codex_adapter_capabilities
 from gpt2giga_harness.harnesses.base import BaseHarness
@@ -61,6 +63,7 @@ MODE_TO_SANDBOX = {
     "read": "read-only",
     "edit": "workspace-write",
 }
+GPT2GIGA_ATTACHMENT_IDS_HEADER = "x-gpt2giga-attachment-ids"
 
 
 class CodexCliHarness(BaseHarness):
@@ -91,8 +94,17 @@ class CodexCliHarness(BaseHarness):
             supports_cancellation=True,
             supports_workspace=True,
             supports_attachments=True,
-            accepted_attachment_kinds=("image", "text", "workspace_file"),
-            attachment_transport=("cli_image_flag", "prompt_path_reference"),
+            accepted_attachment_kinds=(
+                "image",
+                "text",
+                "workspace_file",
+                "document",
+            ),
+            attachment_transport=(
+                "cli_image_flag",
+                "prompt_path_reference",
+                "gigachat_file_upload",
+            ),
             attachment_capabilities={
                 "image": AttachmentTransportSupport(
                     headless=("cli_image_flag",),
@@ -116,6 +128,14 @@ class CodexCliHarness(BaseHarness):
                     detail=(
                         "Workspace files are referenced by path unless their detected "
                         "kind is an image eligible for --image."
+                    ),
+                ),
+                "document": AttachmentTransportSupport(
+                    headless=("gigachat_file_upload",),
+                    rich=True,
+                    detail=(
+                        "Headless one-shot runs upload stored documents through "
+                        "gpt2giga to GigaChat Files before Codex starts."
                     ),
                 ),
             },
@@ -245,9 +265,13 @@ class CodexCliHarness(BaseHarness):
         context: HarnessContext,
     ) -> HarnessResult:
         continuation = request.extra.get("continuation")
+        headless_only_attachment_transports = _headless_only_attachment_transports(
+            request
+        )
         uses_app_server = (
             isinstance(continuation, Mapping)
             and continuation.get("strategy") == "structured_thread"
+            and not headless_only_attachment_transports
         )
         resolution = self.executable_resolution()
         command = (
@@ -311,6 +335,36 @@ class CodexCliHarness(BaseHarness):
         )
         if proxy_error is not None:
             return proxy_error
+        (
+            attachment_file_ids,
+            attachment_upload_events,
+            attachment_upload_error,
+        ) = _upload_gigachat_attachments(request, prepared_context)
+        if attachment_upload_error is not None:
+            return HarnessResult(
+                ok=False,
+                text="",
+                raw=attachment_raw_metadata(request),
+                command=command,
+                events=(*proxy_events, *attachment_upload_events),
+                error=attachment_upload_error,
+            )
+        if headless_only_attachment_transports:
+            attachment_upload_events = (
+                HarnessEvent(
+                    type="attachment_transport",
+                    message=(
+                        "Using an ephemeral Codex turn for attachment transports "
+                        "that are unavailable through app-server."
+                    ),
+                    payload={
+                        "transports": list(headless_only_attachment_transports),
+                        "continuation": "degraded_replay",
+                    },
+                ),
+                *attachment_upload_events,
+            )
+        proxy_events = (*proxy_events, *attachment_upload_events)
         if uses_app_server:
             if not self.capability_probe().capabilities.get("app-server"):
                 return HarnessResult(
@@ -349,7 +403,12 @@ class CodexCliHarness(BaseHarness):
         with tempfile.TemporaryDirectory(prefix="gpt2giga-codex-") as temp_dir:
             codex_home = str(Path(temp_dir) / ".codex")
             Path(codex_home).mkdir(parents=True, exist_ok=True)
-            _write_codex_config(Path(codex_home), request, prepared_context)
+            _write_codex_config(
+                Path(codex_home),
+                request,
+                prepared_context,
+                attachment_file_ids=attachment_file_ids,
+            )
             managed_mcp = materialize_headless_mcp_snapshot(
                 "codex-cli",
                 codex_home,
@@ -380,7 +439,14 @@ class CodexCliHarness(BaseHarness):
                     result,
                     (*attachment_warning_events(request), *proxy_events),
                 ),
-                {"managed_mcp_snapshot": managed_mcp} if managed_mcp else None,
+                {
+                    **({"managed_mcp_snapshot": managed_mcp} if managed_mcp else {}),
+                    **(
+                        {"gigachat_attachment_file_ids": list(attachment_file_ids)}
+                        if attachment_file_ids
+                        else {}
+                    ),
+                },
             )
 
 
@@ -388,6 +454,8 @@ def _write_codex_config(
     codex_home: Path,
     request: HarnessRequest,
     context: HarnessContext,
+    *,
+    attachment_file_ids: tuple[str, ...] = (),
 ) -> None:
     model = request.model or context.default_model or "GigaChat"
     options = request.extra.get("agent_adapter_options")
@@ -398,6 +466,14 @@ def _write_codex_config(
         else "none"
     )
     base_url = context.api_base_url(request.api_mode)
+    attachment_headers = ""
+    if attachment_file_ids:
+        header_value = ",".join(attachment_file_ids)
+        attachment_headers = (
+            'http_headers = { "'
+            f'{GPT2GIGA_ATTACHMENT_IDS_HEADER}" = "{_toml_escape(header_value)}"'
+            " }\n"
+        )
     config = (
         f'model = "{_toml_escape(model)}"\n'
         'model_provider = "gpt2giga_harness"\n'
@@ -407,9 +483,140 @@ def _write_codex_config(
         f'base_url = "{_toml_escape(base_url)}"\n'
         'env_key = "GPT2GIGA_API_KEY"\n'
         'wire_api = "responses"\n'
+        f"{attachment_headers}"
         "supports_websockets = false\n"
     )
     write_startup_config("codex-cli", codex_home, config)
+
+
+def _upload_gigachat_attachments(
+    request: HarnessRequest,
+    context: HarnessContext,
+) -> tuple[tuple[str, ...], tuple[HarnessEvent, ...], str | None]:
+    """Upload planned document attachments and return provider file ids."""
+    planned_ids = _planned_gigachat_upload_ids(request)
+    if not planned_ids:
+        return (), (), None
+    attachments = {
+        str(attachment.get("id") or ""): attachment
+        for attachment in request.attachments
+        if isinstance(attachment, Mapping)
+    }
+    file_ids: list[str] = []
+    events: list[HarnessEvent] = []
+    for attachment_id in planned_ids:
+        attachment = attachments.get(attachment_id)
+        if attachment is None:
+            return (
+                tuple(file_ids),
+                tuple(events),
+                "Planned GigaChat attachment is missing from the Harness request.",
+            )
+        source = str(attachment.get("storage_path") or "").strip()
+        filename = str(attachment.get("filename") or "attachment")
+        if not source:
+            return (
+                tuple(file_ids),
+                tuple(events),
+                f"{filename} has no stored payload for GigaChat Files upload.",
+            )
+        try:
+            content = Path(source).expanduser().resolve().read_bytes()
+            response = proxy.upload_file(
+                context.proxy_url,
+                request.api_mode,
+                filename=filename,
+                content=content,
+                api_key=context.api_key
+                or proxy.cached_sidecar_api_key(context.proxy_url),
+                timeout=context.timeout_seconds,
+            )
+        except (OSError, proxy.ProxyRequestError) as exc:
+            return (
+                tuple(file_ids),
+                tuple(events),
+                str(redact_secrets(f"Failed to upload {filename}: {exc}")),
+            )
+        file_id = str(response.get("id") or "").strip()
+        if not _valid_attachment_file_id(file_id):
+            return (
+                tuple(file_ids),
+                tuple(events),
+                f"GigaChat Files returned an invalid file id for {filename}.",
+            )
+        file_ids.append(file_id)
+        events.append(
+            HarnessEvent(
+                type="attachment_uploaded",
+                message=f"Uploaded {filename} to GigaChat Files.",
+                payload={
+                    "attachment_id": attachment_id,
+                    "filename": filename,
+                    "file_id": file_id,
+                    "transport": "gigachat_file_upload",
+                },
+            )
+        )
+    return tuple(file_ids), tuple(events), None
+
+
+def _planned_gigachat_upload_ids(request: HarnessRequest) -> tuple[str, ...]:
+    plan = request_render_plan(request)
+    metadata_value = plan.get("metadata")
+    if not isinstance(metadata_value, Mapping):
+        return ()
+    deliveries = metadata_value.get("deliveries")
+    if not isinstance(deliveries, list | tuple):
+        return ()
+    result: list[str] = []
+    for delivery in deliveries:
+        if (
+            isinstance(delivery, Mapping)
+            and delivery.get("transport") == "gigachat_file_upload"
+        ):
+            attachment_id = str(delivery.get("attachment_id") or "").strip()
+            if attachment_id and attachment_id not in result:
+                result.append(attachment_id)
+    return tuple(result)
+
+
+def _headless_only_attachment_transports(
+    request: HarnessRequest,
+) -> tuple[str, ...]:
+    """Return transports requiring one-shot Codex instead of app-server."""
+    plan = request_render_plan(request)
+    metadata_value = plan.get("metadata")
+    if not isinstance(metadata_value, Mapping):
+        return ()
+    deliveries = metadata_value.get("deliveries")
+    if not isinstance(deliveries, list | tuple):
+        return ()
+    result: list[str] = []
+    for delivery in deliveries:
+        if not isinstance(delivery, Mapping):
+            continue
+        surfaces_value = delivery.get("surfaces")
+        if not isinstance(surfaces_value, list | tuple):
+            continue
+        surfaces = {
+            str(surface)
+            for surface in surfaces_value
+            if isinstance(surface, str) and surface
+        }
+        if "headless_one_shot" not in surfaces or "structured_thread" in surfaces:
+            continue
+        transport = str(delivery.get("transport") or "").strip()
+        if transport and transport not in result:
+            result.append(transport)
+    return tuple(result)
+
+
+def _valid_attachment_file_id(value: str) -> bool:
+    return (
+        bool(value)
+        and len(value) <= 200
+        and all(character.isalnum() or character in "._:-" for character in value)
+    )
 
 
 def _managed_mcp_reference(request: HarnessRequest) -> Mapping[str, Any] | None:

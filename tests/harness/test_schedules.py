@@ -145,6 +145,53 @@ def test_schedule_api_requires_exact_test_hash_and_online_worker(tmp_path):
         assert updated.json()["state"]["tested_hash"] is None
         assert updated.json()["state"]["enabled"] == 0
 
+        stale = client.put(
+            "/api/schedules/daily-echo",
+            json={**payload, "expected_hash": original_hash},
+        )
+        assert stale.status_code == 409
+        assert stale.json()["detail"] == "Schedule changed since it was loaded"
+
+
+def test_schedule_native_delete_preview_binds_exact_revision(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_echo_project(workspace)
+    config = HarnessConfig(data_dir=str(tmp_path / "data"), auto_start_proxy=False)
+    app = create_app(config)
+    project = resolve_project(workspace, data_dir=config.data_dir)
+    created = app.state.harness_schedule_service.upsert(project, _payload(workspace))
+
+    with TestClient(app) as client:
+        preview = client.post(
+            "/api/schedules/daily-echo/delete-preview",
+            json={"workspace": str(workspace)},
+        )
+        assert preview.status_code == 200
+        assert preview.json()["source_hash"] == created["definition"]["source_hash"]
+        assert preview.json()["confirmation_required"] is True
+
+        stale = client.delete(
+            "/api/schedules/daily-echo",
+            params={
+                "workspace": str(workspace),
+                "expected_hash": "stale",
+                "confirm_id": "daily-echo",
+            },
+        )
+        assert stale.status_code == 409
+
+        deleted = client.delete(
+            "/api/schedules/daily-echo",
+            params={
+                "workspace": str(workspace),
+                "expected_hash": preview.json()["source_hash"],
+                "confirm_id": "daily-echo",
+            },
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["archived"] is True
+
 
 def test_schedule_cli_crud_and_preview(tmp_path, monkeypatch, capsys):
     workspace = tmp_path / "workspace"

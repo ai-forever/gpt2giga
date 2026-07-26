@@ -209,6 +209,19 @@ def _catalog_entry(
         upstream_audit=candidate.trust.upstream_audit,
         artifact_resolved=resolution is not None,
         source_present=candidate.source_present,
+        observed_at=candidate.provenance.observed_at,
+        discovery_location=f"{candidate.source_id}/{candidate.upstream_id}",
+        immutable_ref=(resolution.immutable_ref if resolution is not None else None),
+        content_hash=(
+            resolution.immutable_ref.removeprefix("sha256:")
+            if resolution is not None and resolution.immutable_ref is not None
+            else None
+        ),
+        relative_path=(
+            resolution.relative_path
+            if resolution is not None
+            else candidate.provenance.relative_path
+        ),
     )
     package_id = canonical_package_id or (
         f"federated:{candidate.source_id}:{candidate.upstream_id}"

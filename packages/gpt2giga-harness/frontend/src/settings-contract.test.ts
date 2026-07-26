@@ -11,7 +11,9 @@ describe("backend-owned Settings contract", () => {
   it("renders all accepted categories with Appearance as the local boundary", () => {
     for (const category of [
       "appearance",
+      "localAccess",
       "runtime",
+      "providerAccounts",
       "provider",
       "routesModels",
       "harnessDefaults",
@@ -25,6 +27,8 @@ describe("backend-owned Settings contract", () => {
     expect(source).toContain('patchCockpit<SettingsSaveResponse>("/api/settings/defaults"');
     expect(source).toContain("default_title_model");
     expect(source).toContain("execution_transport");
+    expect(source).not.toContain('checked={draft.stream}');
+    expect(source).toContain('message(locale, "streamRuntimeOwned")');
     expect(source).toContain('message(locale, "chatModel")');
     expect(source).toContain('message(locale, "titleModel")');
     expect(source).toContain('mutateCockpit<ProviderMutationResponse>("/api/providers"');
@@ -32,6 +36,13 @@ describe("backend-owned Settings contract", () => {
     expect(source).toContain('/discover`');
     expect(source).toContain("fork_or_new_session_required");
     expect(source).toContain("providerFieldErrors(saveProvider.error)");
+    expect(source).toContain("/api/provider-accounts/");
+    expect(source).toContain("ProviderAccountCard");
+    expect(source).toContain("isolated_home_only");
+    expect(source).toContain("/auth/status");
+    expect(source).toContain("/auth/local/rotate");
+    expect(source).toContain("/auth/logout");
+    expect(source).toContain("os_local_private_store");
   });
 
   it("never creates browser fields for credentials, tokens, or certificates", () => {

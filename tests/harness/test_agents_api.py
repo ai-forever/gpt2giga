@@ -142,3 +142,63 @@ def test_agent_api_rejects_unsupported_options_before_creating_a_run(tmp_path):
     assert detail.json()["profile"]["execution_plan"]["queueable"] is False
     assert run.status_code == 400
     assert "max_tokens cannot be enforced" in run.json()["detail"]
+
+
+def test_agent_api_previews_and_confirms_exact_delete_revision(tmp_path):
+    client, workspace = _client(tmp_path)
+    content = render_starter_agent("planner").replace(
+        "id: planner\ntitle: Planner",
+        "id: unused-agent\ntitle: Unused Agent",
+        1,
+    )
+    draft = client.post(
+        "/api/agents/unused-agent/draft",
+        json={"workspace": str(workspace), "content": content},
+    ).json()
+    assert (
+        client.post(
+            "/api/agents/unused-agent/apply",
+            json={
+                "workspace": str(workspace),
+                "content": content,
+                "expected_hash": draft["source_hash"],
+            },
+        ).status_code
+        == 200
+    )
+    preview = client.post(
+        "/api/agents/unused-agent/delete-preview",
+        json={"workspace": str(workspace)},
+    )
+
+    assert preview.status_code == 200
+    assert preview.json()["confirmation_required"] is True
+    assert preview.json()["relative_path"] == ".giga/agents/unused-agent.yaml"
+    assert preview.json()["active_dependents"] == []
+
+    stale = client.post(
+        "/api/agents/unused-agent/delete",
+        json={
+            "workspace": str(workspace),
+            "expected_hash": "stale",
+            "confirm_id": "unused-agent",
+        },
+    )
+    assert stale.status_code == 409
+
+    deleted = client.post(
+        "/api/agents/unused-agent/delete",
+        json={
+            "workspace": str(workspace),
+            "expected_hash": preview.json()["source_hash"],
+            "confirm_id": "unused-agent",
+        },
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+    assert (
+        client.get(
+            "/api/agents/unused-agent", params={"workspace": str(workspace)}
+        ).status_code
+        == 404
+    )

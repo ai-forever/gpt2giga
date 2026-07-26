@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 
 const styles = readFileSync(fileURLToPath(new URL("./styles.css", import.meta.url)), "utf8");
 const shell = readFileSync(fileURLToPath(new URL("./AppShell.tsx", import.meta.url)), "utf8");
+const workbench = readFileSync(
+  fileURLToPath(new URL("./surfaces/workbench.tsx", import.meta.url)),
+  "utf8",
+);
 
 describe("workbench viewport containment", () => {
   it("keeps a resized composer inside the workbench viewport", () => {
@@ -21,5 +25,13 @@ describe("workbench viewport containment", () => {
     expect(styles).toContain("html.workbench-scroll-lock body");
     expect(styles).toContain("html.workbench-scroll-lock #root");
     expect(styles).toMatch(/html\.workbench-scroll-lock #root \{[^}]*overflow: hidden;/);
+  });
+
+  it("keeps streaming runtime-owned and tool selection in the compact composer flow", () => {
+    expect(workbench).not.toContain("advancedConfig.stream");
+    expect(workbench).not.toContain('message(locale, "streamResponse")');
+    expect(workbench).toContain('className="composer-tool-picker"');
+    expect(workbench).toContain("admittedBuiltinToolSelection(");
+    expect(workbench).toContain('message(locale, "toolsAndIntegrations")');
   });
 });

@@ -102,13 +102,18 @@ describe("Cockpit V2 route contract", () => {
     expect(shellSource).not.toContain('message(preferences.locale, "connected")');
   });
 
-  it("labels intentional full-document authoring transitions as legacy", () => {
-    for (const surface of ["automation", "evaluation"]) {
-      const source = readFileSync(
-        fileURLToPath(new URL(`./surfaces/${surface}.tsx`, import.meta.url)),
-        "utf8",
-      );
-      expect(source).toContain('data-legacy-transition="true"');
-    }
+  it("keeps only working full-document authoring transitions", () => {
+    const automationSource = readFileSync(
+      fileURLToPath(new URL("./surfaces/automation.tsx", import.meta.url)),
+      "utf8",
+    );
+    const evaluationSource = readFileSync(
+      fileURLToPath(new URL("./surfaces/evaluation.tsx", import.meta.url)),
+      "utf8",
+    );
+
+    expect(automationSource).not.toContain('data-legacy-transition="true"');
+    expect(automationSource).toContain("<AutomationAuthoringDrawer");
+    expect(evaluationSource).toContain('data-legacy-transition="true"');
   });
 });

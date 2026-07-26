@@ -81,6 +81,36 @@ def test_session_runner_persists_uploaded_image_attachment_with_echo(tmp_path):
     )
 
 
+def test_session_runner_persists_attachment_on_durable_queued_message(tmp_path):
+    data_dir = tmp_path / "data"
+    runner, _, attachment_store = _runner(EchoHarness(), data_dir=data_dir)
+    session = runner.create_session(default_harness_id="echo")
+    attachment = attachment_store.create_upload(
+        session_id=session.id,
+        project_id=None,
+        filename="screenshot.png",
+        data=PNG_BYTES,
+        mime_type="image/png",
+        source="paste",
+    )
+
+    queued = runner.enqueue_in_session(
+        session.id,
+        {
+            "harness_id": "echo",
+            "prompt": "look at this",
+            "attachment_ids": [attachment.id],
+        },
+        run_id="run_queued_attachment",
+    )
+
+    assert queued.run.metadata["attachment_ids"] == [attachment.id]
+    assert queued.run.metadata["attachments"][0]["filename"] == "screenshot.png"
+    assert queued.user_message.metadata["attachment_ids"] == [attachment.id]
+    assert queued.user_message.metadata["attachments"][0]["mime_type"] == "image/png"
+    assert "storage_path" not in queued.user_message.metadata["attachments"][0]
+
+
 def test_session_runner_persists_workspace_attachment_with_echo(tmp_path):
     data_dir = tmp_path / "data"
     workspace = tmp_path / "repo"

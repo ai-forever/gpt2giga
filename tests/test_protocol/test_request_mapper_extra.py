@@ -166,6 +166,37 @@ def test_transform_response_format_complex(request_transformer):
     assert res[3]["content"] == '{"res": 1}'
 
 
+def test_transform_response_format_attaches_uploaded_files_to_current_user(
+    request_transformer,
+):
+    data = {
+        "input": [
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Read the PDF"}],
+            },
+            {
+                "type": "function_call",
+                "name": "plugin_tool",
+                "arguments": "{}",
+            },
+            {
+                "type": "function_call_output",
+                "name": "plugin_tool",
+                "output": {"ok": True},
+            },
+        ]
+    }
+
+    result = request_transformer.transform_response_format(
+        data,
+        attachment_ids=("file-pdf-1",),
+    )
+
+    assert result[0]["role"] == "user"
+    assert result[0]["attachments"] == ["file-pdf-1"]
+
+
 def test_limit_attachments(request_transformer):
     # Setup messages with many attachments
     messages = [

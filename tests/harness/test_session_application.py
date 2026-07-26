@@ -47,6 +47,32 @@ def test_session_application_service_completes_approval_and_event_vertical(tmp_p
             runner=runner,
         ),
     )
+    legacy_payload = service.prepare_turn_payload(
+        {
+            "harness_id": "codex-cli",
+            "capability": "third_party_machine_capability",
+            "mode": "custom-machine-mode",
+            "invocation_mode": "provider-owned",
+            "execution_transport": "one_shot",
+            "stream": False,
+        }
+    )
+    assert legacy_payload["capability"] == "third_party_machine_capability"
+    assert legacy_payload["mode"] == "custom-machine-mode"
+    assert legacy_payload["invocation_mode"] == "provider-owned"
+    assert legacy_payload["execution_transport"] == "one_shot"
+    assert legacy_payload["stream"] is False
+
+    product_payload = service.prepare_turn_payload(
+        {
+            "authority": "workspace_write",
+            "harness_id": "codex-cli",
+            "stream": False,
+            "task_intent": "change",
+            "workbench_kind": "coding_agent",
+        }
+    )
+    assert product_payload["stream"] is True
 
     session = service.create_session(
         {
