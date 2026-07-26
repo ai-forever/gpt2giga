@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
@@ -647,10 +648,8 @@ class NativeLoginBroker:
     def _home(self, provider_id: str) -> Path:
         home = self.root / "homes" / provider_id
         home.mkdir(parents=True, exist_ok=True, mode=0o700)
-        try:
+        with suppress(OSError):
             home.chmod(0o700)
-        except OSError:
-            pass
         return home
 
     def _isolated_environment(self, provider_id: str) -> dict[str, str]:
@@ -691,10 +690,8 @@ class NativeLoginBroker:
             with exclusive_file_lock(path):
                 file_status = None
                 if not rotate:
-                    try:
+                    with suppress(FileNotFoundError):
                         file_status = path.lstat()
-                    except FileNotFoundError:
-                        pass
                 if file_status is None:
                     key = secrets.token_bytes(32)
                     temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
@@ -963,23 +960,19 @@ def _drain_output(stream: Any, output: bytearray) -> None:
 
 
 def _stop_process(process: subprocess.Popen[Any]) -> None:
-    try:
+    with suppress(OSError, ProcessLookupError):
         if os.name != "nt":
             os.killpg(process.pid, signal.SIGTERM)
         else:
             process.terminate()
-    except (OSError, ProcessLookupError):
-        pass
 
 
 def _kill_process(process: subprocess.Popen[Any]) -> None:
-    try:
+    with suppress(OSError, ProcessLookupError):
         if os.name != "nt":
             os.killpg(process.pid, signal.SIGKILL)
         else:
             process.kill()
-    except (OSError, ProcessLookupError):
-        pass
 
 
 def _utc_now() -> str:

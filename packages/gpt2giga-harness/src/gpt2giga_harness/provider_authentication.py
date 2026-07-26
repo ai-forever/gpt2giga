@@ -176,18 +176,28 @@ def render_provider_authentication_capability_matrix_markdown(
             "",
             "## Safety contract",
             "",
-            "- The provider CLI or selected cloud provider owns credentials, refresh, "
-            "logout, and revocation.",
-            "- An installed executable or compatible `--help` surface never proves "
-            "that an account is ready.",
-            "- GigaLoom may retain capability evidence, status class, source, and "
-            "recovery guidance; it must not retain tokens, raw credential files, "
-            "browser callbacks, or unredacted command output.",
-            "- Version drift is fail-closed. G3-01 must re-review the exact CLI "
-            "version before enabling a broker path.",
-            "- Gemini CLI OAuth may not be harvested or piggybacked by third-party "
-            "software. Only provider-owned interactive guidance or separately "
-            "supported API-key/Vertex paths are admissible.",
+            _join_markdown_fragments(
+                "- The provider CLI or selected cloud provider owns credentials, refresh,",
+                "logout, and revocation.",
+            ),
+            _join_markdown_fragments(
+                "- An installed executable or compatible `--help` surface never proves",
+                "that an account is ready.",
+            ),
+            _join_markdown_fragments(
+                "- GigaLoom may retain capability evidence, status class, source, and",
+                "recovery guidance; it must not retain tokens, raw credential files,",
+                "browser callbacks, or unredacted command output.",
+            ),
+            _join_markdown_fragments(
+                "- Version drift is fail-closed. G3-01 must re-review the exact CLI",
+                "version before enabling a broker path.",
+            ),
+            _join_markdown_fragments(
+                "- Gemini CLI OAuth may not be harvested or piggybacked by third-party",
+                "software. Only provider-owned interactive guidance or separately",
+                "supported API-key/Vertex paths are admissible.",
+            ),
             "",
             "## Provider detail",
             "",
@@ -231,11 +241,13 @@ def render_provider_authentication_capability_matrix_markdown(
         [
             "## Consequences",
             "",
-            "G3-01 may consume this matrix to design a bounded native login broker. "
-            "That later slice still requires isolated homes, bounded subprocesses, "
-            "typed status, cancellation and recovery tests. This slice does not "
-            "launch provider commands, authenticate, inspect native homes, or bind "
-            "accounts to sessions.",
+            _join_markdown_fragments(
+                "G3-01 may consume this matrix to design a bounded native login broker.",
+                "That later slice still requires isolated homes, bounded subprocesses,",
+                "typed status, cancellation and recovery tests. This slice does not",
+                "launch provider commands, authenticate, inspect native homes, or bind",
+                "accounts to sessions.",
+            ),
             "",
         ]
     )
@@ -364,3 +376,7 @@ def _string_list_mapping(
 
 def _markdown(value: Any) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def _join_markdown_fragments(*fragments: str) -> str:
+    return " ".join(fragments)

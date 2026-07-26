@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import suppress
 from datetime import datetime, timezone
 from enum import Enum
 import hashlib
@@ -812,14 +813,10 @@ class IntegrationLifecycleService:
             os.replace(temporary, self.path)
             os.chmod(self.path, 0o600)
         except Exception:
-            try:
+            with suppress(OSError):
                 os.close(handle)
-            except OSError:
-                pass
-            try:
+            with suppress(OSError):
                 os.unlink(temporary)
-            except OSError:
-                pass
             raise
 
     def _ensure_root(self) -> None:
