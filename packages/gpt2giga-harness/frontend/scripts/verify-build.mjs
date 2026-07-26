@@ -40,6 +40,16 @@ if (initialJavaScriptBytes > 112 * 1024) {
 }
 
 const names = Object.keys(manifest.assets);
+for (const requiredBrandAsset of [
+  "brand/gigaloom-mark.svg",
+  "brand/gigaloom-mark-dark.svg",
+  "brand/gigaloom-mask.svg",
+  "brand/gigaloom.webmanifest",
+]) {
+  if (!names.includes(requiredBrandAsset)) {
+    throw new Error(`Expected governed brand asset is missing: ${requiredBrandAsset}`);
+  }
+}
 for (const requiredPrefix of [
   "assets/workbench-",
   "assets/runs-",
@@ -61,6 +71,12 @@ for (const requiredPrefix of [
 const index = await readFile(join(outputRoot, "index.html"), "utf8");
 if (/https?:\/\//u.test(index) || /<script(?![^>]*\bsrc=)/u.test(index)) {
   throw new Error("Cockpit V2 index must load only CSP-safe local script assets");
+}
+if (
+  !index.includes("<title>GigaLoom</title>")
+  || !index.includes("/cockpit-v2/assets/brand/gigaloom.webmanifest")
+) {
+  throw new Error("Cockpit V2 brand title or manifest is missing");
 }
 
 const initialStyles = (

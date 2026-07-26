@@ -9,6 +9,10 @@ import { useMemo, useRef, useState } from "react";
 
 import { mutateCockpit } from "../api";
 import {
+  automationStarter,
+  type AutomationAuthoringRequest,
+} from "../automation-authoring";
+import {
   createAutomationSubmissionKey,
   planAutomationAction,
   projectAutomationActionResult,
@@ -21,6 +25,7 @@ import {
   StatusBadge,
   type OperationalTab,
 } from "../components/OperationalSurface";
+import { AutomationAuthoringDrawer } from "../components/AutomationAuthoringDrawer";
 import { message } from "../messages";
 import { usePreferences } from "../preferences-context";
 import { requestKeys } from "../request-graph";
@@ -50,22 +55,43 @@ export function AutomationSurface() {
       : "workflows";
   const { selected: selectedId } = useSearch({ strict: false });
   const query = useQuery(automationSurfaceOptions());
+  const [authoring, setAuthoring] = useState<AutomationAuthoringRequest | null>(null);
 
   return (
-    <OperationalSurface
-      activeTab={section}
-      aside={<AutomationDetail section={section} selectedId={selectedId} />}
-      detailKey="automationDetailMigrated"
-      eyebrowKey="automationEyebrow"
-      tabs={tabs}
-      titleKey="automation"
-    >
-      <AutomationList section={section} query={query} selectedId={selectedId} />
-    </OperationalSurface>
+    <>
+      <OperationalSurface
+        activeTab={section}
+        aside={
+          <AutomationDetail
+            onAuthoring={setAuthoring}
+            section={section}
+            selectedId={selectedId}
+          />
+        }
+        detailKey="automationDetailMigrated"
+        eyebrowKey="automationEyebrow"
+        tabs={tabs}
+        titleKey="automation"
+      >
+        <AutomationList
+          onCreate={() => setAuthoring({ mode: "create", section })}
+          section={section}
+          query={query}
+          selectedId={selectedId}
+        />
+      </OperationalSurface>
+      {authoring ? (
+        <AutomationAuthoringDrawer
+          onClose={() => setAuthoring(null)}
+          request={authoring}
+        />
+      ) : null}
+    </>
   );
 }
 
-function AutomationList({ section, query, selectedId }: {
+function AutomationList({ onCreate, section, query, selectedId }: {
+  onCreate: () => void;
   section: AutomationSection;
   query: UseQueryResult<AutomationProjection, Error>;
   selectedId: string | undefined;
@@ -74,7 +100,15 @@ function AutomationList({ section, query, selectedId }: {
   const locale = preferences.locale;
   if (query.isPending) return <LoadingRows />;
   if (query.isError || query.data === undefined) {
-    return <div className="error-state">{message(locale, "boundedDataUnavailable")}</div>;
+    return (
+      <div className="error-state" role="alert">
+        <strong>{message(locale, "boundedDataUnavailable")}</strong>
+        <span>{query.error?.message}</span>
+        <button onClick={() => void query.refetch()} type="button">
+          {message(locale, "retry")}
+        </button>
+      </div>
+    );
   }
   const rows = query.data[section];
   return (
@@ -83,13 +117,23 @@ function AutomationList({ section, query, selectedId }: {
         <div>
           <span className="section-kicker">{message(locale, section)}</span>
           <strong>{rows.length} {message(locale, "retainedItems")}</strong>
+          <span className="worker-readiness" data-status={query.data.workerOnline ? "ready" : "offline"}>
+            {message(locale, query.data.workerOnline ? "workerReady" : "workerOffline")}
+          </span>
         </div>
-        <a className="primary-link" data-legacy-transition="true" href={section === "agents" ? "/agents" : section === "schedules" ? "/scheduled" : "/workflows"}>
-          {message(locale, "openLegacyAuthoring")}
-        </a>
+        <div className="automation-authoring-entry">
+          <button className="primary-button" onClick={onCreate} type="button">
+            + {message(locale, "authoringCreate")}
+          </button>
+          <span>{message(locale, "authoringValidationHint")}</span>
+        </div>
       </div>
       {rows.length === 0 ? (
-        <div className="empty-state">{message(locale, "noItems")}</div>
+        <AutomationStarterCard
+          locale={locale}
+          onCreate={onCreate}
+          section={section}
+        />
       ) : (
         <div className="operations-table" role="table">
           {rows.map((item) => (
@@ -98,6 +142,60 @@ function AutomationList({ section, query, selectedId }: {
         </div>
       )}
     </>
+  );
+}
+
+function AutomationStarterCard({
+  locale,
+  onCreate,
+  section,
+}: {
+  locale: "en" | "ru";
+  onCreate: () => void;
+  section: AutomationSection;
+}) {
+  const starter = automationStarter(section);
+  const command = section === "agents"
+    ? "giga run --agent code-reviewer --workspace . \"Review this change\""
+    : section === "workflows"
+      ? "giga workflow run review-change --workspace . --prompt \"Review this change\""
+      : "giga schedule test-now weekday-review --workspace .";
+  return (
+    <section className="automation-starter-card">
+      <div className="automation-starter-number">{starter.sequence}</div>
+      <div>
+        <span className="section-kicker">
+          {locale === "ru" ? "Готовый пример" : "First-class example"}
+        </span>
+        <h3>{starter.title}</h3>
+        <p>
+          {locale === "ru"
+            ? section === "agents"
+              ? "Read-only Codex-агент, который возвращает конкретные замечания по коду."
+              : section === "workflows"
+                ? "Запускает Code Reviewer с повторно используемой задачей."
+                : "Запускает Review Change по будням в отдельном worktree."
+            : starter.description}
+        </p>
+      </div>
+      <ol>
+        <li>{locale === "ru" ? "Откройте пример и проверьте поля." : "Open the example and review its fields."}</li>
+        <li>{locale === "ru" ? "Нажмите Preview change, затем Apply." : "Choose Preview change, then Apply."}</li>
+        <li>
+          {section === "schedules"
+            ? locale === "ru"
+              ? "Запустите Test schedule и только затем Enable."
+              : "Run Test schedule before choosing Enable."
+            : locale === "ru"
+              ? "Запустите из карточки или той же CLI-командой."
+              : "Run it from the detail card or with the same CLI contract."}
+        </li>
+      </ol>
+      <code>{command}</code>
+      <button className="primary-button" onClick={onCreate} type="button">
+        {locale === "ru" ? `Создать ${starter.title}` : `Create ${starter.title}`}
+      </button>
+    </section>
   );
 }
 
@@ -122,15 +220,18 @@ function AutomationRow({ item, section, selected }: {
 }
 
 function AutomationDetail({
+  onAuthoring,
   section,
   selectedId,
 }: {
+  onAuthoring: (request: AutomationAuthoringRequest) => void;
   section: AutomationSection;
   selectedId: string | undefined;
 }) {
   return (
     <AutomationDetailSelection
       key={`${section}:${selectedId ?? "none"}`}
+      onAuthoring={onAuthoring}
       section={section}
       selectedId={selectedId}
     />
@@ -138,9 +239,11 @@ function AutomationDetail({
 }
 
 function AutomationDetailSelection({
+  onAuthoring,
   section,
   selectedId,
 }: {
+  onAuthoring: (request: AutomationAuthoringRequest) => void;
   section: AutomationSection;
   selectedId: string | undefined;
 }) {
@@ -196,11 +299,36 @@ function AutomationDetailSelection({
       await Promise.all(invalidations);
     },
   });
+  const lifecycle = useMutation({
+    mutationFn: async (action: "enable" | "pause" | "resume") => {
+      if (section !== "schedules" || selected === undefined) {
+        throw new Error("Schedule lifecycle is unavailable.");
+      }
+      return mutateCockpit(`/api/schedules/${encodeURIComponent(selected.id)}/${action}`, {});
+    },
+    onSuccess: async (response) => {
+      await queryClient.invalidateQueries({
+        queryKey: remainingRequestKeys.automation(),
+      });
+      if (
+        typeof response === "object" &&
+        response !== null &&
+        "approval_required" in response &&
+        response.approval_required === true
+      ) {
+        openInbox("approvals");
+      }
+    },
+  });
 
   if (selected === undefined) return <div className="detail-empty"><span className="section-kicker">{message(locale, "selectedDefinition")}</span><h2>{message(locale, "selectReusableDefinition")}</h2><p>{message(locale, "automationSelectionHint")}</p></div>;
   if (plan === null) return null;
   const promptMissing = plan.prompt === "required" && !prompt.trim();
   const disabledReason = plan.disabledReason;
+  const disabledReasonText =
+    disabledReason === "worker_offline"
+      ? message(locale, "workerOfflineRecovery")
+      : disabledReason;
   const submit = () => {
     if (run.isPending || disabledReason !== null || promptMissing) return;
     submissionKey.current ??= createAutomationSubmissionKey(section, selected.id);
@@ -222,9 +350,22 @@ function AutomationDetailSelection({
         {Object.entries(selected).filter(([key]) => !["id", "title", "queueable", "tested", "unavailableReason"].includes(key)).slice(0, 5).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value === null ? "—" : String(value)}</dd></div>)}
       </dl>
       {plan.prompt !== "none" ? <label className="field-control">{message(locale, plan.prompt === "required" ? "runPrompt" : "optionalRunPrompt")}<textarea value={prompt} onChange={(event) => updatePrompt(event.target.value)} placeholder={message(locale, "composerPlaceholder")} /></label> : null}
-      {disabledReason ? <p className="action-unavailable" role="note">{message(locale, "actionUnavailable")} {disabledReason}</p> : null}
+      {disabledReasonText ? <p className="action-unavailable" role="note">{message(locale, "actionUnavailable")} {disabledReasonText}</p> : null}
       <button className="primary-button" disabled={run.isPending || disabledReason !== null || promptMissing} onClick={submit} type="button">{message(locale, run.isPending ? "loading" : plan.labelKey)}</button>
+      <div className="definition-authoring-actions">
+        <button onClick={() => onAuthoring({ mode: "edit", section, id: selected.id })} type="button">{message(locale, "authoringEdit")}</button>
+        <button onClick={() => onAuthoring({ mode: "duplicate", section, id: selected.id })} type="button">{message(locale, "authoringDuplicate")}</button>
+        <button className="danger-button" onClick={() => onAuthoring({ mode: "delete", section, id: selected.id })} type="button">{message(locale, "authoringDelete")}</button>
+      </div>
+      {section === "schedules" ? (
+        <div className="definition-lifecycle-actions">
+          <button disabled={lifecycle.isPending} onClick={() => lifecycle.mutate("enable")} type="button">{message(locale, "enableDefinition")}</button>
+          <button disabled={lifecycle.isPending} onClick={() => lifecycle.mutate("pause")} type="button">{message(locale, "pauseDefinition")}</button>
+          <button disabled={lifecycle.isPending} onClick={() => lifecycle.mutate("resume")} type="button">{message(locale, "resumeDefinition")}</button>
+        </div>
+      ) : null}
       {run.isError ? <p className="mutation-error" role="alert">{run.error.message}</p> : null}
+      {lifecycle.isError ? <p className="mutation-error" role="alert">{lifecycle.error.message}</p> : null}
       {run.isSuccess ? <AutomationActionReceipt identity={run.data} /> : null}
     </div>
   );

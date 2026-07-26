@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 
@@ -10,6 +11,8 @@ from gpt2giga_harness.types import GigaChatApiMode, HarnessContext, parse_api_mo
 DEFAULT_PROXY_URL = "http://127.0.0.1:8090"
 DEFAULT_UI_HOST = "127.0.0.1"
 DEFAULT_UI_PORT = 8091
+DEFAULT_UI_REMOTE_ABSOLUTE_TTL_SECONDS = 8 * 60 * 60
+DEFAULT_UI_REMOTE_IDLE_TTL_SECONDS = 30 * 60
 DEFAULT_PROXY_START_TIMEOUT_SECONDS = 15.0
 DEFAULT_HARNESS_TIMEOUT_SECONDS = 3600.0
 DEFAULT_HARNESS_DATA_DIR = "~/.gpt2giga/harness"
@@ -36,6 +39,14 @@ class HarnessConfig:
     ui_port: int = DEFAULT_UI_PORT
     ui_bootstrap_token: str | None = field(default=None, repr=False)
     ui_allowed_hosts: tuple[str, ...] = ()
+    ui_oidc_issuer: str | None = None
+    ui_oidc_client_id: str | None = None
+    ui_oidc_client_secret: str | None = field(default=None, repr=False)
+    ui_oidc_public_origin: str | None = None
+    ui_oidc_role_map: tuple[tuple[str, str], ...] = ()
+    ui_trusted_proxies: tuple[str, ...] = ()
+    ui_remote_absolute_ttl_seconds: int = DEFAULT_UI_REMOTE_ABSOLUTE_TTL_SECONDS
+    ui_remote_idle_ttl_seconds: int = DEFAULT_UI_REMOTE_IDLE_TTL_SECONDS
     timeout_seconds: float = DEFAULT_HARNESS_TIMEOUT_SECONDS
     auto_start_proxy: bool = True
     proxy_start_timeout_seconds: float = DEFAULT_PROXY_START_TIMEOUT_SECONDS
@@ -60,6 +71,24 @@ class HarnessConfig:
         )
         ui_bootstrap_token = _env_first("GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN")
         ui_allowed_hosts = _parse_csv(_env_first("GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS"))
+        ui_oidc_issuer = _env_first("GPT2GIGA_HARNESS_UI_OIDC_ISSUER")
+        ui_oidc_client_id = _env_first("GPT2GIGA_HARNESS_UI_OIDC_CLIENT_ID")
+        ui_oidc_client_secret = _env_first("GPT2GIGA_HARNESS_UI_OIDC_CLIENT_SECRET")
+        ui_oidc_public_origin = _env_first("GPT2GIGA_HARNESS_UI_OIDC_PUBLIC_ORIGIN")
+        ui_oidc_role_map = _parse_oidc_role_map(
+            _env_first("GPT2GIGA_HARNESS_UI_OIDC_ROLE_MAP")
+        )
+        ui_trusted_proxies = _parse_csv(
+            _env_first("GPT2GIGA_HARNESS_UI_TRUSTED_PROXIES")
+        )
+        ui_remote_absolute_ttl_seconds = _parse_int(
+            _env_first("GPT2GIGA_HARNESS_UI_REMOTE_ABSOLUTE_TTL_SECONDS"),
+            DEFAULT_UI_REMOTE_ABSOLUTE_TTL_SECONDS,
+        )
+        ui_remote_idle_ttl_seconds = _parse_int(
+            _env_first("GPT2GIGA_HARNESS_UI_REMOTE_IDLE_TTL_SECONDS"),
+            DEFAULT_UI_REMOTE_IDLE_TTL_SECONDS,
+        )
         timeout = _parse_float(
             _env_first("GPT2GIGA_HARNESS_TIMEOUT_SECONDS"),
             DEFAULT_HARNESS_TIMEOUT_SECONDS,
@@ -82,6 +111,14 @@ class HarnessConfig:
             ui_port=ui_port,
             ui_bootstrap_token=ui_bootstrap_token,
             ui_allowed_hosts=ui_allowed_hosts,
+            ui_oidc_issuer=ui_oidc_issuer,
+            ui_oidc_client_id=ui_oidc_client_id,
+            ui_oidc_client_secret=ui_oidc_client_secret,
+            ui_oidc_public_origin=ui_oidc_public_origin,
+            ui_oidc_role_map=ui_oidc_role_map,
+            ui_trusted_proxies=ui_trusted_proxies,
+            ui_remote_absolute_ttl_seconds=ui_remote_absolute_ttl_seconds,
+            ui_remote_idle_ttl_seconds=ui_remote_idle_ttl_seconds,
             timeout_seconds=timeout,
             auto_start_proxy=auto_start_proxy,
             proxy_start_timeout_seconds=proxy_start_timeout,
@@ -106,6 +143,14 @@ class HarnessConfig:
             ui_port=ui_port if ui_port is not None else self.ui_port,
             ui_bootstrap_token=self.ui_bootstrap_token,
             ui_allowed_hosts=self.ui_allowed_hosts,
+            ui_oidc_issuer=self.ui_oidc_issuer,
+            ui_oidc_client_id=self.ui_oidc_client_id,
+            ui_oidc_client_secret=self.ui_oidc_client_secret,
+            ui_oidc_public_origin=self.ui_oidc_public_origin,
+            ui_oidc_role_map=self.ui_oidc_role_map,
+            ui_trusted_proxies=self.ui_trusted_proxies,
+            ui_remote_absolute_ttl_seconds=self.ui_remote_absolute_ttl_seconds,
+            ui_remote_idle_ttl_seconds=self.ui_remote_idle_ttl_seconds,
             timeout_seconds=self.timeout_seconds,
             auto_start_proxy=(
                 auto_start_proxy
@@ -188,3 +233,32 @@ def _parse_csv(value: str | None) -> tuple[str, ...]:
     if value is None:
         return ()
     return tuple(item.strip().lower() for item in value.split(",") if item.strip())
+
+
+def _parse_oidc_role_map(value: str | None) -> tuple[tuple[str, str], ...]:
+    """Parse a default-deny JSON object mapping exact subjects to roles."""
+    if value is None:
+        return ()
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "GPT2GIGA_HARNESS_UI_OIDC_ROLE_MAP must be a JSON object"
+        ) from exc
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(
+            "GPT2GIGA_HARNESS_UI_OIDC_ROLE_MAP must be a non-empty JSON object"
+        )
+    normalized: list[tuple[str, str]] = []
+    for subject, role in payload.items():
+        if (
+            not isinstance(subject, str)
+            or not subject
+            or len(subject) > 512
+            or role not in {"viewer", "operator"}
+        ):
+            raise ValueError(
+                "OIDC role map entries require an exact subject and viewer/operator role"
+            )
+        normalized.append((subject, role))
+    return tuple(sorted(normalized))

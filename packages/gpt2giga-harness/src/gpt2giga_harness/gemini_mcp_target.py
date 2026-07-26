@@ -76,6 +76,7 @@ class GeminiMCPServerSpec:
     transport: GeminiMCPTransport
     command: str | None = None
     args: tuple[str, ...] = ()
+    cwd: str | None = None
     env_vars: tuple[str, ...] = ()
     url: str | None = None
     env_http_headers: tuple[tuple[str, str], ...] = ()
@@ -136,8 +137,15 @@ class GeminiMCPServerSpec:
             _validate_secret_free(self.command, "Gemini MCP command")
             if self.url is not None or self.env_http_headers:
                 raise ValueError("Gemini stdio MCP server cannot use HTTP fields")
+            if self.cwd is not None:
+                _validate_secret_free(self.cwd, "Gemini MCP cwd")
             return
-        if self.command is not None or self.args or self.env_vars:
+        if (
+            self.command is not None
+            or self.args
+            or self.cwd is not None
+            or self.env_vars
+        ):
             raise ValueError("Gemini remote MCP server cannot use stdio fields")
         if self.url is None:
             raise ValueError("Gemini remote MCP server requires a URL")
@@ -907,6 +915,8 @@ def _server_payload(server: GeminiMCPServerSpec) -> dict[str, Any]:
         }
         if server.env_vars:
             payload["env"] = {name: f"${{{name}}}" for name in server.env_vars}
+        if server.cwd:
+            payload["cwd"] = server.cwd
     else:
         payload = {"type": server.transport.value, "url": server.url}
         if server.env_http_headers:

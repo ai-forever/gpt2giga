@@ -117,6 +117,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/health"),
         ("GET", "/api/integrations"),
         ("GET", "/api/integrations/search"),
+        ("GET", "/api/integrations/source-detail"),
         ("GET", "/api/integrations/skills/preview"),
         ("GET", "/api/integrations/flows/{flow_id}"),
         ("GET", "/api/integrations/groups/{group_id}"),
@@ -134,6 +135,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/project/state"),
         ("GET", "/api/providers"),
         ("GET", "/api/providers/{provider_id}"),
+        ("GET", "/api/provider-accounts"),
         ("GET", "/api/provider-handoffs/{harness_id}/preview"),
         ("GET", "/api/runs"),
         ("GET", "/api/runs/updates/stream"),
@@ -175,9 +177,13 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/cockpit-v2"),
         ("GET", "/cockpit-v2/assets/{asset_name:path}"),
         ("GET", "/cockpit-v2/{spa_path:path}"),
+        ("GET", "/auth/status"),
+        ("GET", "/auth/oidc/callback"),
+        ("GET", "/auth/oidc/login"),
         ("GET", "/healthz"),
         ("GET", "/legacy"),
         ("GET", "/legacy/{spa_path:path}"),
+        ("GET", "/local-access"),
         ("GET", "/openapi.json"),
         ("GET", "/{spa_path:path}"),
         ("HEAD", "/openapi.json"),
@@ -197,9 +203,13 @@ _EVENT_LOOP_SAFE = frozenset(
     {
         ("GET", "/api/policy/profiles"),
         ("GET", "/api/workbench/state"),
+        ("GET", "/auth/status"),
         ("GET", "/healthz"),
+        ("GET", "/local-access"),
         ("GET", "/openapi.json"),
-        ("POST", "/auth/session"),
+        ("POST", "/auth/local/recover"),
+        ("POST", "/auth/local/rotate"),
+        ("POST", "/auth/logout"),
         ("HEAD", "/openapi.json"),
     }
 )
@@ -207,9 +217,13 @@ _NETWORK = frozenset(
     {
         ("GET", "/api/health"),
         ("GET", "/api/integrations/search"),
+        ("GET", "/api/integrations/source-detail"),
         ("GET", "/api/models"),
         ("POST", "/api/providers/{provider_id}/discover"),
         ("POST", "/api/providers/{provider_id}/test"),
+        ("GET", "/auth/oidc/callback"),
+        ("GET", "/auth/oidc/login"),
+        ("POST", "/auth/oidc/backchannel-logout"),
     }
 )
 _SQLITE_PREFIXES = (
@@ -224,6 +238,7 @@ _SQLITE_PREFIXES = (
 _SUBPROCESS_PREFIXES = (
     "/api/editor/",
     "/api/native/processes",
+    "/api/provider-accounts",
     "/api/tool-servers/",
 )
 _SUBPROCESS_EXACT = frozenset(
@@ -277,6 +292,11 @@ _SYNC_DURABLE_SUBMISSIONS = frozenset(
 )
 _NATIVE_ASYNC = frozenset(
     {
+        ("GET", "/auth/oidc/callback"),
+        ("GET", "/auth/oidc/login"),
+        ("POST", "/auth/oidc/backchannel-logout"),
+        ("POST", "/auth/remote/revoke-actor"),
+        ("POST", "/auth/remote/revoke-all"),
         ("GET", "/api/environment"),
         ("POST", "/api/environment/commit/apply"),
         ("POST", "/api/environment/commit/preview"),
@@ -285,6 +305,7 @@ _NATIVE_ASYNC = frozenset(
         ("POST", "/api/environment/pull-request/apply"),
         ("POST", "/api/environment/pull-request/preview"),
         ("GET", "/api/integrations/search"),
+        ("GET", "/api/integrations/source-detail"),
         ("POST", "/api/integrations/git/inspect"),
         ("POST", "/api/native/processes/{process_id}/input"),
     }

@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the standalone TUI argument parser without importing Textual."""
     parser = argparse.ArgumentParser(
         prog="giga",
-        description="Open the built-in provider-neutral terminal workbench.",
+        description="Open GigaLoom, the built-in provider-neutral terminal workbench.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Prefix a native command with only 'giga': 'giga codex exec ...', "
@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"gpt2giga-harness {__version__}",
+        version=f"GigaLoom {__version__} (gpt2giga-harness)",
     )
     parser.add_argument("--workspace", default=None)
     parser.add_argument("--session", dest="session_id", default=None)
@@ -67,7 +67,7 @@ def main(
     """Run the built-in TUI or report an incomplete installation."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments == ["--version"]:
-        print(f"gpt2giga-harness {__version__}")
+        print(f"GigaLoom {__version__} (gpt2giga-harness)")
         return 0
     args = build_parser().parse_args(arguments)
     with _presentation_environment(

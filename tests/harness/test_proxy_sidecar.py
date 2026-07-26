@@ -1,10 +1,58 @@
 import threading
 import time
+from email.parser import BytesParser
+from email.policy import default
 
 import pytest
 
 from gpt2giga_harness import proxy
 from gpt2giga_harness.types import GigaChatApiMode, HarnessContext
+
+
+def test_upload_file_sends_multipart_to_stable_v1_files_route(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"id":"file-pdf-1"}'
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(proxy, "urlopen", fake_urlopen)
+
+    result = proxy.upload_file(
+        "http://127.0.0.1:8090",
+        GigaChatApiMode.V2,
+        filename="Отчёт.pdf",
+        content=b"%PDF-1.7\nfixture",
+        api_key="proxy-key",
+        timeout=12,
+    )
+
+    request = captured["request"]
+    content_type = request.get_header("Content-type")
+    message = BytesParser(policy=default).parsebytes(
+        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode()
+        + request.data
+    )
+    parts = list(message.iter_parts())
+
+    assert result == {"id": "file-pdf-1"}
+    assert request.full_url == "http://127.0.0.1:8090/v1/files"
+    assert request.get_header("Authorization") == "Bearer proxy-key"
+    assert parts[0].get_payload(decode=True) == b"assistants"
+    assert parts[1].get_filename() == "Отчёт.pdf"
+    assert parts[1].get("content-type") is None
+    assert parts[1].get_payload(decode=True) == b"%PDF-1.7\nfixture"
 
 
 def test_stream_sse_json_decodes_events_and_stops_at_done(monkeypatch):

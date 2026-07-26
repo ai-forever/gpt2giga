@@ -19,6 +19,7 @@ BASE_DIRECT_DISTRIBUTIONS = frozenset(
         "anyio",
         "fastapi",
         "pydantic",
+        "pyjwt",
         "python-dateutil",
         "pyyaml",
         "starlette",

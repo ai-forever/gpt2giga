@@ -53,6 +53,7 @@ from gpt2giga_harness.sessions.read_index import (
     SessionReadIndex,
     StaleReadSnapshotError,
 )
+from gpt2giga_harness.session_titles import new_session_metadata
 from gpt2giga_harness.sessions.store import (
     RunNotFoundError,
     SessionNotFoundError,
@@ -126,7 +127,12 @@ class FilesystemHarnessSessionStore:
             default_api_mode=default_api_mode,
             default_mode=default_mode,
             native=_redacted_mapping(native),
-            metadata=_redacted_mapping(metadata),
+            metadata=_redacted_mapping(
+                new_session_metadata(
+                    metadata,
+                    explicit_title=bool(title and str(title).strip()),
+                )
+            ),
         )
         session_dir = self._session_dir_for_new(session)
         session_dir.mkdir(parents=True, exist_ok=True)

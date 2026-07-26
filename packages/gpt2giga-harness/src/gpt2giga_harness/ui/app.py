@@ -113,6 +113,7 @@ from gpt2giga_harness.editor import (
 from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.integration_flows import IntegrationFlowService
 from gpt2giga_harness.integration_groups import GroupedIntegrationService
+from gpt2giga_harness.integration_lifecycle import IntegrationLifecycleService
 from gpt2giga_harness.skill_library import SkillLibraryService
 from gpt2giga_harness.native.base import (
     NativeCommandPlan,
@@ -176,6 +177,12 @@ from gpt2giga_harness.preflight import (
     preflight_report_to_dict,
 )
 from gpt2giga_harness.provider_settings import ProviderSettingsService
+from gpt2giga_harness.provider_authentication_broker import NativeLoginBroker
+from gpt2giga_harness.provider_account_sessions import (
+    PROVIDER_ACCOUNT_BINDING_KEY,
+    ProviderAccountSessionError,
+    prepare_provider_account_binding,
+)
 from gpt2giga_harness.pr_artifacts import (
     build_pr_artifact,
     create_pr_branch,
@@ -246,6 +253,12 @@ from gpt2giga_harness.sessions.models import (
     session_to_dict,
 )
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
+from gpt2giga_harness.session_titles import (
+    apply_provider_native_title,
+    manual_title_metadata,
+    provider_native_title_metadata,
+    title_diagnostics,
+)
 from gpt2giga_harness.cli_capabilities import (
     CliCapabilitySnapshot,
     cli_capability_snapshot_to_dict,
@@ -307,6 +320,11 @@ from gpt2giga_harness.ui.security import (
     HarnessUISecurityMiddleware,
     is_loopback_host,
 )
+from gpt2giga_harness.ui.remote_identity import (
+    RemoteIdentityError,
+    RemoteOIDCClient,
+    RemoteOIDCSettings,
+)
 from gpt2giga_harness.worktrees import (
     WorktreeConflictError,
     WorktreeError,
@@ -322,7 +340,10 @@ from gpt2giga_harness.workspace import (
     workspace_file_metadata,
     workspace_tree,
 )
-from gpt2giga_harness.workbench_execution import workbench_transport_projection
+from gpt2giga_harness.workbench_execution import (
+    workbench_admission_projection,
+    workbench_transport_projection,
+)
 from gpt2giga_harness.workbench_resources import (
     WorkbenchPreferenceStore,
     WorkbenchResourceService,
@@ -356,16 +377,20 @@ def create_app(
     native_process_manager: NativeProcessManager | None = None,
     runtime_store: RuntimeCoordinationStore | None = None,
     provider_settings_service: ProviderSettingsService | None = None,
+    native_login_broker: NativeLoginBroker | None = None,
     integration_flow_service: IntegrationFlowService | None = None,
     grouped_integration_service: GroupedIntegrationService | None = None,
+    integration_lifecycle_service: IntegrationLifecycleService | None = None,
     skill_library_service: SkillLibraryService | None = None,
     github_environment_service: GitHubEnvironmentService | None = None,
     environment_commit_service: EnvironmentCommitService | None = None,
     environment_push_service: EnvironmentPushService | None = None,
     environment_pull_request_service: EnvironmentPullRequestService | None = None,
+    remote_oidc_client: RemoteOIDCClient | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
+    validate_ui_bind(config, allow_remote=None)
     registry = registry or create_default_registry()
     store = store or FilesystemHarnessSessionStore(config.data_dir)
     if runtime_store is None and isinstance(store, FilesystemHarnessSessionStore):
@@ -392,6 +417,15 @@ def create_app(
     settings_store = HarnessSettingsStore(config.data_dir, config)
     provider_settings_service = provider_settings_service or ProviderSettingsService(
         config.data_dir
+    )
+    native_login_broker = native_login_broker or NativeLoginBroker(
+        config.data_dir,
+        resolution_provider=lambda provider_id: registry.get(
+            provider_id
+        ).executable_resolution(),
+        capability_provider=lambda provider_id: registry.get(
+            provider_id
+        ).capability_probe(),
     )
     integration_flow_service = integration_flow_service or IntegrationFlowService(
         config.data_dir
@@ -426,12 +460,21 @@ def create_app(
             flow_service=integration_flow_service,
         )
     )
+    integration_lifecycle_service = (
+        integration_lifecycle_service
+        or IntegrationLifecycleService(
+            config.data_dir,
+            flow_service=integration_flow_service,
+            group_service=grouped_integration_service,
+        )
+    )
     runner = HarnessSessionRunner(
         registry=registry,
         config=config,
         store=store,
         attachment_store=attachment_store,
         memory_store=memory_store,
+        provider_account_provider=native_login_broker,
     )
     durable_dispatcher = (
         DurableJobDispatcher(
@@ -480,13 +523,14 @@ def create_app(
         lifespan=lifespan,
     )
     app.router.route_class = ConformantAPIRoute
-    ui_security = HarnessUISecurity(config)
+    ui_security = HarnessUISecurity(config, oidc_client=remote_oidc_client)
     app.add_middleware(HarnessUISecurityMiddleware, security=ui_security)
     app.add_middleware(
         AsyncDiagnosticsMiddleware,
         diagnostics=async_diagnostics,
     )
     app.state.harness_config = config
+    app.state.harness_ui_security = ui_security
     app.state.harness_registry = registry
     app.state.harness_session_store = store
     app.state.harness_runtime_store = runtime_store
@@ -527,8 +571,10 @@ def create_app(
     app.state.harness_workbench_resources = workbench_resources
     app.state.harness_settings_store = settings_store
     app.state.harness_provider_settings_service = provider_settings_service
+    app.state.harness_native_login_broker = native_login_broker
     app.state.harness_integration_flow_service = integration_flow_service
     app.state.harness_grouped_integration_service = grouped_integration_service
+    app.state.harness_integration_lifecycle_service = integration_lifecycle_service
     app.state.harness_skill_library_service = skill_library_service
     app.state.harness_github_environment_service = github_environment_service
     app.state.harness_environment_commit_service = environment_commit_service
@@ -681,6 +727,7 @@ def create_app(
                     ),
                     "provider_handoff": provider_handoff,
                     "execution_surfaces": execution_surfaces,
+                    "workbench_admission": workbench_admission_projection(harness),
                     "workbench_transport": workbench_transport_projection(harness),
                     "validation": harness_validation_report_to_dict(validation),
                 }
@@ -699,6 +746,8 @@ def create_app(
             "default_model": harness_defaults.default_model,
             "default_api_mode": harness_defaults.default_api_mode,
             "default_mode": harness_defaults.mode,
+            "task_intent": harness_defaults.task_intent,
+            "authority": harness_defaults.authority,
             "execution_transport": harness_defaults.execution_transport,
             "invocation_mode": harness_defaults.invocation_mode,
             "workspace_policy": harness_defaults.workspace_policy,
@@ -1268,6 +1317,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"preflight": preflight_report_to_dict(report)}
@@ -1460,7 +1511,11 @@ def create_app(
                 "native_session_id": ref.native_session_id,
                 "status": ref.status.value,
             },
-            metadata=_native_import_session_metadata(ref),
+            metadata=provider_native_title_metadata(
+                _native_import_session_metadata(ref),
+                provider=ref.harness_id,
+                source_id=ref.native_session_id or ref.id,
+            ),
         )
         messages = []
         skipped_count = 0
@@ -1587,6 +1642,49 @@ def create_app(
             action = str(payload.get("action") or "start").strip().lower()
             if action not in {"start", "resume"}:
                 raise ValueError("action must be start or resume")
+            if action == "resume":
+                identity_native_ref_id = _optional_text(payload.get("native_ref_id"))
+                if identity_native_ref_id is not None:
+                    identity_ref = _native_ref_or_404(
+                        native_index_store,
+                        identity_native_ref_id,
+                    )
+                else:
+                    identity_harness_id = _required_text(
+                        payload.get("harness_id") or session.default_harness_id,
+                        "harness_id is required",
+                    )
+                    identity_ref = _native_ref_from_session_link(
+                        store,
+                        session,
+                        identity_harness_id,
+                    )
+                identity_provider_id = identity_ref.harness_id
+                identity_native_session_id = (
+                    identity_ref.native_session_id or identity_ref.id
+                )
+            else:
+                identity_provider_id = _required_text(
+                    payload.get("harness_id") or session.default_harness_id,
+                    "harness_id is required",
+                )
+                identity_native_session_id = None
+            provider_account_binding = prepare_provider_account_binding(
+                session,
+                provider_id=identity_provider_id,
+                native_session_id=identity_native_session_id,
+                provider=native_login_broker,
+            )
+            if provider_account_binding is not None and not session.metadata.get(
+                PROVIDER_ACCOUNT_BINDING_KEY
+            ):
+                session = store.update_session(
+                    session.id,
+                    metadata={
+                        **dict(session.metadata),
+                        PROVIDER_ACCOUNT_BINDING_KEY: provider_account_binding,
+                    },
+                )
             if action == "start":
                 _native_permission_mode(payload.get("mode") or session.default_mode)
             policy_result = _native_process_policy_gate(
@@ -1658,6 +1756,8 @@ def create_app(
             )
             options["workspace_execution"] = workspace_metadata
             options["policy"] = policy_metadata
+            if provider_account_binding is not None:
+                options[PROVIDER_ACCOUNT_BINDING_KEY] = provider_account_binding
             options["plan"] = replace(
                 options["plan"],
                 metadata={
@@ -1702,13 +1802,28 @@ def create_app(
                 "default_mode": options["mode"],
                 "workspace": options["source_workspace"],
             }
-            if (
-                session.title == "Untitled session"
-                and options["action"] == "start"
-                and options["prompt"]
+            updated_session = store.update_session(session.id, **session_patch)
+            if options["action"] == "resume" and isinstance(
+                options.get("native_ref"), NativeSessionRef
             ):
-                session_patch["title"] = title_from_prompt(options["prompt"])
-            store.update_session(session.id, **session_patch)
+                native_ref = options["native_ref"]
+                runner.apply_native_session_title(
+                    session_id=session.id,
+                    run_id=run.id,
+                    title=native_ref.title,
+                    provider=native_ref.harness_id,
+                    source_id=native_ref.native_session_id or native_ref.id,
+                )
+            elif options["action"] == "start" and options["prompt"]:
+                runner.schedule_session_title(
+                    updated_session,
+                    run.id,
+                    {
+                        "prompt": options["prompt"],
+                        "model": options["model"],
+                        "extra": _metadata_mapping(effective_payload.get("extra")),
+                    },
+                )
             store.append_event(
                 HarnessStoredEvent(
                     id=new_id("evt"),
@@ -1770,6 +1885,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except HTTPException:
             raise
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except (NativeProcessStartError, ValueError) as exc:
             if isinstance(options, Mapping):
                 route_preflight = options.get("proxy_route_preflight")
@@ -2036,7 +2153,8 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
         try:
-            patch = _session_patch(payload)
+            current = store.get_session(session_id)
+            patch = _session_patch(payload, session=current)
             session = store.update_session(session_id, **patch)
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
@@ -2075,8 +2193,9 @@ def create_app(
         if cached is not None:
             return cached
         _validate_navigation_binding(store, session_id, payload)
-        patch = _session_patch(payload)
         try:
+            current = store.get_session(session_id)
+            patch = _session_patch(payload, session=current)
             updated = store.update_session_if_revision(
                 session_id,
                 _required_text(payload.get("session_revision"), "session_revision"),
@@ -2310,10 +2429,31 @@ def create_app(
     def attachment_blob(attachment_id: str) -> Response:
         try:
             attachment = attachment_store.get_attachment(attachment_id)
-            data = attachment_store.read_blob(attachment_id)
+            if attachment.storage_path:
+                data = attachment_store.read_blob(attachment_id)
+            elif attachment.workspace_path and attachment.mime_type.startswith(
+                "image/"
+            ):
+                session = store.get_session(attachment.session_id)
+                workspace_root = _attachment_workspace(session, {})
+                resolved, _relative = normalize_workspace_file(
+                    workspace_root,
+                    attachment.workspace_path,
+                    _attachment_limits(session, workspace_root=workspace_root),
+                )
+                data = resolved.read_bytes()
+            else:
+                raise AttachmentValidationError("Attachment has no stored blob")
         except AttachmentNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Attachment not found") from exc
-        except AttachmentValidationError as exc:
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except OSError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Attachment content is unavailable",
+            ) from exc
+        except (AttachmentValidationError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return Response(
             content=data,
@@ -2450,12 +2590,14 @@ def create_app(
             session = await run_in_threadpool(
                 session_service.create_session,
                 payload,
-                title_from_turn=True,
+                title_from_turn=False,
                 validate_harness=True,
             )
             run = await _start_headless_run(session.id, payload)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -2474,6 +2616,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -2829,6 +2973,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         response = result.to_dict()
@@ -3037,6 +3183,8 @@ def create_app(
             result = session_service.create_and_run(payload)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return result.to_dict()
@@ -3052,6 +3200,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ProviderAccountSessionError as exc:
+            raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return result.to_dict()
@@ -3518,13 +3668,25 @@ def create_app(
     return app
 
 
-def validate_ui_bind(host: str, *, allow_remote: bool) -> None:
-    """Reject unsafe remote UI binding unless explicitly allowed."""
-    if not is_loopback_host(host) and not allow_remote:
+def validate_ui_bind(
+    config: HarnessConfig,
+    *,
+    allow_remote: bool | None,
+) -> None:
+    """Admit remote binding only for the complete accepted OIDC profile."""
+    if is_loopback_host(config.ui_host):
+        return
+    if allow_remote is False:
         raise ValueError(
-            f"Refusing to bind UI to {host} without --allow-remote. "
-            "The UI may expose local harness execution."
+            f"Refusing to bind GigaLoom UI to non-loopback host {config.ui_host}. "
+            "Pass --allow-remote only with the complete single-issuer OIDC profile."
         )
+    try:
+        RemoteOIDCSettings.from_config(config)
+    except RemoteIdentityError as exc:
+        raise ValueError(
+            f"Refusing to bind GigaLoom UI to non-loopback host {config.ui_host}. {exc}"
+        ) from exc
 
 
 def _build_current_run_provenance(
@@ -4633,6 +4795,9 @@ def _native_process_run_metadata(
     policy = options.get("policy")
     if isinstance(policy, Mapping):
         metadata["policy"] = dict(policy)
+    provider_account_binding = options.get(PROVIDER_ACCOUNT_BINDING_KEY)
+    if isinstance(provider_account_binding, Mapping):
+        metadata[PROVIDER_ACCOUNT_BINDING_KEY] = dict(provider_account_binding)
     return metadata
 
 
@@ -4668,6 +4833,9 @@ def _append_native_process_link(
     policy = options.get("policy")
     if isinstance(policy, Mapping):
         metadata["policy"] = dict(policy)
+    provider_account_binding = options.get(PROVIDER_ACCOUNT_BINDING_KEY)
+    if isinstance(provider_account_binding, Mapping):
+        metadata[PROVIDER_ACCOUNT_BINDING_KEY] = dict(provider_account_binding)
     if process_ref.native_home is not None:
         metadata["native_home"] = process_ref.native_home
     if isinstance(ref, NativeSessionRef):
@@ -5049,6 +5217,31 @@ def _sync_native_process_transcript(
     if len(candidates) != 1:
         return run
     ref = candidates[0]
+    title_updated = apply_provider_native_title(
+        store,
+        run.session_id,
+        title=ref.title,
+        run_id=run.id,
+        provider=ref.harness_id,
+        source_id=ref.native_session_id or ref.id,
+    )
+    if title_updated is not None:
+        store.append_event(
+            HarnessStoredEvent(
+                id=new_id("evt"),
+                session_id=run.session_id,
+                run_id=run.id,
+                type=HarnessEventType.SESSION_UPDATED.value,
+                message="Session title revision stored.",
+                payload={
+                    "session_id": run.session_id,
+                    "revision": title_updated.updated_at,
+                    "changed_fields": ["title"],
+                    "title": title_diagnostics(title_updated),
+                },
+                created_at=utc_now(),
+            )
+        )
     if native_index_store is not None:
         ref = native_index_store.upsert_ref(
             ref,
@@ -5750,6 +5943,7 @@ def _session_summary(
             "session_revision": session.updated_at,
             "session_generation": _navigation_generation(native_reference),
             "session_lease": active_runs[-1] if active_runs else None,
+            "title_diagnostics": title_diagnostics(session),
         }
     )
     return payload
@@ -5925,7 +6119,11 @@ def _fork_session_from_session(
     return fork
 
 
-def _session_patch(payload: dict[str, Any]) -> dict[str, Any]:
+def _session_patch(
+    payload: dict[str, Any],
+    *,
+    session: HarnessSession | None = None,
+) -> dict[str, Any]:
     allowed = {
         "title",
         "workspace",
@@ -5939,10 +6137,45 @@ def _session_patch(payload: dict[str, Any]) -> dict[str, Any]:
         "metadata",
     }
     patch = {key: payload[key] for key in allowed if key in payload}
+    if "title" in patch and isinstance(patch.get("metadata"), Mapping):
+        patch["metadata"] = manual_title_metadata(patch["metadata"])
     if "workspace" in patch:
         patch["workspace"] = resolve_workspace(_optional_text(patch["workspace"]))
     if "default_api_mode" in patch:
         patch["default_api_mode"] = parse_api_mode(patch["default_api_mode"])
+    if "workbench_selection" in payload:
+        if session is None:
+            raise ValueError("session is required for workbench selection")
+        selection = payload["workbench_selection"]
+        if not isinstance(selection, Mapping):
+            raise ValueError("workbench selection must be an object")
+        kind = str(selection.get("kind") or "")
+        intent = str(selection.get("intent") or "")
+        authority = str(selection.get("authority") or "")
+        if kind not in {"coding_agent", "direct_chat"}:
+            raise ValueError("workbench kind is invalid")
+        if intent not in {"ask", "review", "change"}:
+            raise ValueError("task intent is invalid")
+        if authority not in {"read_only", "workspace_write"}:
+            raise ValueError("authority is invalid")
+        patch["default_mode"] = (
+            "plan"
+            if intent == "ask"
+            else "read"
+            if intent == "review" or authority == "read_only"
+            else "edit"
+        )
+        patch["metadata"] = {
+            **dict(session.metadata),
+            "workbench_selection": {
+                "schema_version": 1,
+                "kind": kind,
+                "intent": intent,
+                "authority": authority,
+                "input_source": "product",
+                "compatibility_warning": None,
+            },
+        }
     return patch
 
 

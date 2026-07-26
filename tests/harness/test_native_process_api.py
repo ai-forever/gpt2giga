@@ -27,12 +27,18 @@ from gpt2giga_harness.native.process import NativeProcessManager
 from gpt2giga_harness.native.registry import NativeHistoryConnectorRegistry
 from gpt2giga_harness.native.store import FilesystemNativeSessionIndexStore
 from gpt2giga_harness.project import project_id_for_root
+from gpt2giga_harness.provider_authentication_broker import (
+    ProviderAccountSnapshot,
+    ProviderAccountStatus,
+    ProviderSessionBinding,
+)
 from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.runtime.policy import NATIVE_PROCESS_SPAWN_OWNER
 from gpt2giga_harness.sessions import (
     FilesystemHarnessSessionStore,
     InMemoryHarnessSessionStore,
 )
+from gpt2giga_harness.session_titles import title_diagnostics
 from gpt2giga_harness.types import (
     GigaChatApiMode,
     HarnessContext,
@@ -140,6 +146,56 @@ def test_native_process_api_rejects_unproven_builtin_cli_contract(tmp_path):
     assert response.status_code == 400
     assert response.json()["detail"] == "Codex CLI fixture is missing --json."
     assert store.list_runs(session.id) == ()
+
+
+def test_native_process_resume_rejects_provider_account_drift_before_spawn(tmp_path):
+    script = _write_once_cli(tmp_path)
+    provider = _ReadyAccountProvider("codex-cli")
+    native_index = FilesystemNativeSessionIndexStore(tmp_path / "data")
+    ref = replace(_native_ref(workspace=str(tmp_path)), harness_id="codex-cli")
+    native_index.upsert_ref(ref, project_id="proj_native")
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(start_script=script, harness_id="codex-cli"),
+        native_index_store=native_index,
+        native_login_broker=provider,
+    )
+    session = store.create_session(
+        title="Bound native account",
+        workspace=str(tmp_path),
+        default_harness_id="codex-cli",
+    )
+
+    first = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "codex-cli",
+            "action": "start",
+            "prompt": "bind",
+            "workspace": str(tmp_path),
+        },
+    )
+    assert first.status_code == 200, first.text
+    assert (
+        first.json()["run"]["metadata"]["provider_account_binding"]["account_identity"]
+        == "account_one"
+    )
+
+    provider.account_identity = "account_two"
+    blocked = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "action": "resume",
+            "native_ref_id": ref.id,
+        },
+    )
+
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["code"] == "provider_account_identity_drift"
+    assert blocked.json()["detail"]["execution_authorized"] is False
+    assert len(store.list_runs(session.id)) == 1
 
 
 def test_native_process_output_stream_resumes_from_persisted_cursor(tmp_path):
@@ -379,7 +435,6 @@ def test_native_process_syncs_assistant_message_while_running(
     connector = TranscriptConnector()
     client, store = _client(tmp_path, connector)
     session = store.create_session(
-        title="Native transcript",
         workspace=str(tmp_path),
         default_harness_id=harness_id,
     )
@@ -425,6 +480,9 @@ def test_native_process_syncs_assistant_message_while_running(
     assert links[-1].native_ref_id == native_ref_id
     assert links[-1].native_session_id == native_session_id
     assert links[-1].metadata["auto_reconciled"] is True
+    titled = store.get_session(session.id)
+    assert titled.title == "Live native session"
+    assert title_diagnostics(titled)["provenance"] == "provider_native"
 
 
 def test_native_process_auto_reconciles_codex_history_ref(tmp_path):
@@ -1728,6 +1786,7 @@ def _client(
     native_index_store=None,
     registry=None,
     store=None,
+    native_login_broker=None,
 ):
     store = store or InMemoryHarnessSessionStore()
     native_registry = NativeHistoryConnectorRegistry()
@@ -1761,8 +1820,53 @@ def _client(
         native_registry=native_registry,
         native_index_store=native_index_store,
         native_process_manager=manager,
+        native_login_broker=(
+            native_login_broker
+            or (
+                _ReadyAccountProvider(connector.harness_id)
+                if connector.harness_id in {"codex-cli", "claude-code", "gemini-cli"}
+                else None
+            )
+        ),
     )
     return TestClient(app), store
+
+
+class _ReadyAccountProvider:
+    def __init__(self, provider_id: str) -> None:
+        self.provider_id = provider_id
+        self.account_identity = "account_one"
+
+    def session_binding(self, provider_id: str) -> ProviderSessionBinding | None:
+        assert provider_id == self.provider_id
+        return ProviderSessionBinding(
+            provider_id=provider_id,
+            account_identity=self.account_identity,
+            home_identity=f"home_{provider_id}",
+            source_identity=f"source_{provider_id}",
+            identity_evidence="provider_reported",
+            authentication_method="fixture",
+            observed_at="2026-07-26T00:00:00Z",
+        )
+
+    def status(self, provider_id: str) -> ProviderAccountSnapshot:
+        assert provider_id == self.provider_id
+        return ProviderAccountSnapshot(
+            provider_id=provider_id,
+            display_name=provider_id,
+            status=ProviderAccountStatus.READY,
+            source="fixture",
+            checked_at="2026-07-26T00:00:00Z",
+            pinned_cli_version="fixture",
+            detected_cli_version="fixture",
+            version_status="reviewed_pin",
+            identity_label=None,
+            authentication_method="fixture",
+            expires_at=None,
+            reason_code="provider_ready",
+            recovery=("fixture",),
+            actions={},
+        )
 
 
 def _write_echo_cli(tmp_path):

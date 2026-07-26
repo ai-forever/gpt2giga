@@ -14,6 +14,24 @@ one place to run a task through direct GigaChat, Codex CLI, Claude Code, Gemini
 CLI, or a plugin harness; compare the results; inspect what happened; and decide
 which changes are allowed back into your project.
 
+The product name shown by the Web UI, TUI, and human-facing CLI output is
+**GigaLoom**. The `giga` command and `gpt2giga-harness` distribution names stay
+unchanged for compatibility.
+
+### Visual identity and icon policy
+
+The GigaLoom loom mark is original project artwork and is not copied from or
+derived from GigaChat branding. Its canonical source is
+`packages/gpt2giga-harness/branding/gigaloom-mark.svg`; the repository license
+governs that source. Run
+`node packages/gpt2giga-harness/branding/generate-assets.mjs` to reproduce its
+light, dark, mask, favicon, manifest, packaged-UI, and documentation variants.
+
+Skills, Plugins, and MCP use curated local pictograms. Unknown integrations use
+a deterministic text monogram. GigaLoom does not fetch remote icons, so catalog
+rendering does not grant an external origin network, tracking, SVG, or content
+authority.
+
 The Harness is not another model and it does not replace the compatibility
 gateway or the agent CLIs. It coordinates them and keeps a normalized local
 record of runs, approvals, artifacts, and reusable project automation.
@@ -102,8 +120,8 @@ binary, Node.js runtime, credentials, or provider configuration. Both `uv tool`
 and `pipx` create an isolated Harness environment:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.4.1a1'
-pipx install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
+pipx install 'gpt2giga-harness==0.5.0a1'
 ```
 
 Upgrade an existing optional-TUI prerelease in place; do not retain or add a
@@ -113,10 +131,10 @@ archive when a state migration occurred:
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool install --force 'gpt2giga-harness==0.4.1a1'
+uv tool install --force 'gpt2giga-harness==0.5.0a1'
 uv tool install --force 'gpt2giga-harness==<previous-version>'
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 ```
 
 Uninstalling the package does not delete `~/.gpt2giga/harness`, project
@@ -172,19 +190,19 @@ If the standalone preview is available in your package index, the shorter
 install path is:
 
 ```bash
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 giga doctor
 ```
 
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```bash
-uv tool install 'gpt2giga-harness[gpt2giga]==0.4.1a1'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.5.0a1'
 ```
 
-The current `gpt2giga-harness==0.4.1a1` distribution provides the `giga` and
+The current `gpt2giga-harness==0.5.0a1` distribution provides the `giga` and
 `gpt2giga-harness` commands; its explicit `gpt2giga` extra pins
-`gpt2giga==0.2.4a1`.
+`gpt2giga==0.2.5a1`.
 
 Requirements are Python 3.10–3.14 and `uv`. Direct GigaChat runs also need the
 gateway credentials described in the [gpt2giga quickstart](quickstart.md).
@@ -247,7 +265,7 @@ To migrate from the optional-TUI prerelease, upgrade the standard package and
 remove `[tui]` from install commands:
 
 ```bash
-uv tool install --force 'gpt2giga-harness==0.4.1a1'
+uv tool install --force 'gpt2giga-harness==0.5.0a1'
 giga --version
 giga
 ```
@@ -517,6 +535,13 @@ views plus a typed wizard for target, cadence, destination, worktree isolation,
 concurrency, retry/misfire policy, and notifications. It explains the exact-hash
 `Test now` gate and worker-online requirement before enable.
 
+The schedule wizard follows the Codex Scheduled mental model for common cases:
+choose **Once**, **Daily**, **Weekdays**, or **Weekly**, then set the first run,
+IANA timezone, target, prompt, and notification preference. Harness compiles
+those choices into the governed one-shot, fixed-interval, or RRULE contract.
+Use **Custom** and the collapsed **Advanced · JSON** editor only when an
+explicit RRULE or a lower-level policy field is required.
+
 The same area contains the project Attention Inbox. Pending approvals, failed
 durable jobs, and schedules in `needs_attention` are derived from their source
 audit records rather than copied into a second queue. Marking an item read only
@@ -546,27 +571,25 @@ giga project init
 giga init
 ```
 
-By default the UI binds to `127.0.0.1:8091`. Local requests receive an opaque
-HttpOnly, `SameSite=Strict` browser-session cookie. To bind remotely, configure
-a strong bootstrap token in the environment and opt in explicitly:
+By default the UI binds to `127.0.0.1:8091`. The first OS-local browser claim
+creates an opaque, expiring HttpOnly, `SameSite=Strict` session backed only by
+hashed private state under the Harness data directory. Cockpit Settings can
+rotate or log out that browser session; the loopback-only recovery page revokes
+older sessions before claiming a new one. Browser mutations also require the
+same-origin CSRF marker. No local access token is placed in a URL,
+`localStorage`, `sessionStorage`, diagnostics, screenshots, or project files.
 
-```bash
-export GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN="$(openssl rand -hex 32)"
-export GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS=harness.example.internal
-giga ui --host 0.0.0.0 --allow-remote
-```
+Remote binding implements the bounded G3-04 single-issuer OIDC/BFF identity
+contract. A non-loopback listener requires the complete static issuer, client,
+public HTTPS origin, exact subject-to-role map, and explicit `--allow-remote`.
+Authorization Code + PKCE `S256`, nonce/signature/audience validation, opaque
+server-side sessions, exact-origin CSRF, `viewer`/`operator` enforcement,
+JWKS rotation, and session/actor/global/back-channel revocation fail closed.
+The old bootstrap token and Host allowlist never authenticate remote users.
 
-Terminate TLS in front of a remote listener: remote cookies are `Secure`, the
-bootstrap token is exchanged through `Authorization: Bearer ...`, and it is
-never accepted in a URL. Without remote authentication, data APIs return `401`
-and mutating APIs fail closed with `403`. Host and same-origin checks apply to
-the shell, API, assets, and SSE connections.
-
-Treat the bootstrap token as same-principal operator access, not as a tenant or
-read-only credential. An authenticated operator can select any workspace the
-Harness OS account can access, preview supported files, and start approved
-processes there. Share the token only with operators who may act with that OS
-account's filesystem and process privileges.
+See the [remote UI identity ADR](architecture/remote-ui-identity-adr.md) for the
+accepted role, session, CSRF, revocation, trusted-proxy, and recovery contract.
+Do not expose or tunnel the loopback listener as a multi-user workaround.
 
 ## Configuration
 
@@ -579,8 +602,13 @@ GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max
 GPT2GIGA_HARNESS_DEFAULT_API_MODE=v2
 GPT2GIGA_HARNESS_UI_HOST=127.0.0.1
 GPT2GIGA_HARNESS_UI_PORT=8091
-GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN=<strong-random-secret-for-remote-ui>
-GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS=harness.example.internal
+# Remote deployment only; keep the secret in deployment-owned secret storage:
+GPT2GIGA_HARNESS_UI_OIDC_ISSUER=https://issuer.example
+GPT2GIGA_HARNESS_UI_OIDC_CLIENT_ID=gigaloom
+GPT2GIGA_HARNESS_UI_OIDC_CLIENT_SECRET=<deployment-secret>
+GPT2GIGA_HARNESS_UI_OIDC_PUBLIC_ORIGIN=https://harness.example
+GPT2GIGA_HARNESS_UI_OIDC_ROLE_MAP='{"subject-1":"viewer","subject-2":"operator"}'
+GPT2GIGA_HARNESS_UI_TRUSTED_PROXIES=10.0.0.2
 GPT2GIGA_HARNESS_AUTO_START_PROXY=True
 GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS=15
 GPT2GIGA_HARNESS_TIMEOUT_SECONDS=3600
@@ -863,6 +891,19 @@ templates: Plan-Implement-Test-Review, Diagnose-Fix-Regression, and
 Issue-Patch-PR Draft. Free-form drag-and-drop graph editing remains deferred;
 step ordering and dependencies stay explicit and validated.
 
+Automation also provides one connected, zero-setup example in every empty
+section:
+
+1. **Code Reviewer** — a read-only Codex agent profile.
+2. **Review Change** — a workflow that invokes `code-reviewer`.
+3. **Weekday Review** — a weekday schedule that targets `review-change`.
+
+Open **Automation → Agents**, create and apply Code Reviewer, then repeat in
+**Workflows**. Run either definition from its detail view. Finally create the
+schedule, use **Test** to bind the exact content hash, and choose **Enable** only
+when a worker is online. The cards also show the equivalent
+`giga run --agent`, `giga workflow`, and `giga schedule` commands for CLI users.
+
 Additional catalog APIs:
 
 - `POST /api/workflows/import`;
@@ -1134,9 +1175,37 @@ The **Skills**, **Plugins**, and **MCP** pages each expose their matching
 `skills.sh`, run the metadata proxy and pass its fixed origin to the Harness UI:
 
 ```bash
+export VERCEL_OIDC_TOKEN=<request-scoped-token>
+giga-skills-catalog-proxy
+
+# in the Harness process
 export GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092
 giga ui
 ```
+
+The Skills page contains the same setup guide next to the source filter. A
+healthy proxy changes the source from `configuration_required` or `unavailable`
+to `ready`; a retained last-good result remains visibly marked `stale`.
+
+For production, deploy the proxy on Vercel with OIDC Federation enabled and use
+the request-scoped `VERCEL_OIDC_TOKEN`; do not bake a token into an image,
+configuration file, or static environment export. The
+[skills.sh API contract](https://www.skills.sh/docs/api) rotates the token,
+returns `401` for missing or expired authentication, and returns `429` with
+`Retry-After` when rate-limited. `/healthz` reports `configuration_required`
+until OIDC is available. Configure the bounded in-memory last-good cache with
+`GIGA_SKILLS_PROXY_CACHE_ENTRIES` and
+`GIGA_SKILLS_PROXY_STALE_IF_ERROR_SECONDS`. Retained responses are explicitly
+marked `X-Giga-Cache-Status: stale`, expose their `Age`, and never conceal the
+source error.
+
+The fixed-origin proxy supports leaderboard/search, curated results, bounded
+detail file paths, and optional audit metadata. It strips file contents and
+audit summaries before returning data to Harness. Cockpit shows the canonical
+source, upstream ID, repository URL, immutable hash, relative path, discovery
+breadcrumb, last sync, cache age, last-good state, and bounded audit verdicts.
+The same URL/origin/ref/hash projection is included in exact install previews
+and retained flow receipts.
 
 **Add Skill** accepts a public GitHub repository or `/tree/<ref>` URL, pins the
 resolved commit, lists bounded `SKILL.md` candidates, previews the selected
@@ -1153,6 +1222,19 @@ OS-path-separated list when the shared roots live elsewhere. Inventory reads
 metadata only; full `SKILL.md` content is loaded for the bounded preview after
 an item is selected.
 
+Harness also scans the system bundles already shipped by OpenAI under the
+`openai-primary-runtime` and `openai-bundled` plugin caches. Capabilities such
+as PDF, Documents, Presentations, and Spreadsheets therefore appear under
+**Plugins** with an **OpenAI** source badge, their bundled Skill names, default
+prompts, and an `@name` invocation hint. This inventory is read-only: Harness
+does not install, enable, or rewrite an OpenAI bundle.
+
+In **Work**, type `@` to select one of these capabilities. For a Codex CLI run,
+Harness stores the explicit choice in the prompt and translates `@pdf` to the
+native `$pdf` Skill invocation. ChatGPT itself uses `@` for Plugins and Skills,
+while native Codex CLI/IDE Skill invocation uses `$`; the Cockpit picker keeps
+the user-facing `@` convention and makes that translation visible.
+
 Harness preserves the last good catalog snapshot when a source is unavailable,
 rate-limited, requires renewed authentication, or returns invalid data. An
 external Skill becomes installable only after its bytes match a reviewed
@@ -1161,6 +1243,10 @@ validation. A NeuralDeep MCP card is localized discovery metadata. It can link
 to an official MCP Registry package only by exact official package name or
 canonical repository identity; the official version, immutable reference, and
 integrity remain authoritative.
+
+Every result row and detail view shows its source bubble, including
+**NeuralDeep**. The canonical GigaChat Image MCP detail page is
+[NeuralDeep GigaChat Image MCP](https://neuraldeep.ru/mcp/gigachat-image).
 
 Inspect the offline inventory, then create a single-target preview:
 
@@ -1931,11 +2017,19 @@ giga session show <session_id> --json
 
 `giga ui` serves the local Harness Control Panel from packaged HTML, CSS, and
 JavaScript assets without a frontend build step, runtime CDN, or network fetch.
-It binds to `127.0.0.1:8091` by default. Remote binding is rejected unless you
-pass `--allow-remote`; usable remote APIs additionally require
-`GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN` and TLS termination. The token is exchanged
-for an in-memory browser session and is never stored in project state, history,
-traces, or URLs.
+It binds to `127.0.0.1:8091` by default. Local first-run, expiry, rotation,
+logout, and recovery remain server-side OS-local session operations; environment
+variables are not the primary local human access flow. Remote binding requires
+the complete static single-issuer OIDC profile and explicit `--allow-remote`;
+partial configuration and the retired shared bearer exchange fail closed. The
+implemented single-issuer OIDC/BFF boundary is documented in the
+[remote UI identity ADR](architecture/remote-ui-identity-adr.md).
+
+`giga ui-identity validate --json` validates the deployment profile without an
+issuer request. `giga ui-identity revoke-all --confirm --json` is the OS-local
+recovery path that revokes all remote sessions and rotates their generation.
+Live client registration, secrets, callbacks, users, proxy deployment, and
+listener activation remain deployment actions outside the local roadmap gate.
 
 The shell exposes stable Work and Runs routes. `/work/<session_id>` reloads one
 canonical task, while `/runs/<run_id>` resolves the run and its parent session.
@@ -2696,7 +2790,7 @@ Remove the old combined wheel before installing the split packages so stale
 
 ```bash
 python -m pip uninstall -y gpt2giga gpt2giga-harness
-python -m pip install 'gpt2giga-harness==0.4.1a1'
+python -m pip install 'gpt2giga-harness==0.5.0a1'
 ```
 
 For `uv` tool installations, recreate both tool environments:
@@ -2705,11 +2799,11 @@ For `uv` tool installations, recreate both tool environments:
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
 uv tool install --prerelease allow gpt2giga
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 ```
 
-The current `gpt2giga-harness==0.4.1a1` metadata keeps
-`gpt2giga==0.2.4a1` in the explicit `gpt2giga` optional extra.
+The current `gpt2giga-harness==0.5.0a1` metadata keeps
+`gpt2giga==0.2.5a1` in the explicit `gpt2giga` optional extra.
 
 This package migration does not move or rewrite Harness state. Existing
 `~/.gpt2giga/harness` data and project-local `.giga/` directories remain in

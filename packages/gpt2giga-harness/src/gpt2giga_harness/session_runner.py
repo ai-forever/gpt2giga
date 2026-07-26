@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import threading
+import time
 from typing import Any, Mapping
 
 from gpt2giga_harness import proxy
@@ -42,6 +43,11 @@ from gpt2giga_harness.permission_simulator import (
     extension_permission_contract,
 )
 from gpt2giga_harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
+from gpt2giga_harness.provider_account_sessions import (
+    PROVIDER_ACCOUNT_BINDING_KEY,
+    ProviderAccountBindingProvider,
+    prepare_provider_account_binding,
+)
 from gpt2giga_harness.provenance import (
     build_run_provenance,
     run_provenance_to_dict,
@@ -73,6 +79,13 @@ from gpt2giga_harness.sessions.store import (
     new_id,
     title_from_prompt,
     utc_now,
+)
+from gpt2giga_harness.session_titles import (
+    SessionTitleGeneration,
+    apply_provider_native_title,
+    claim_fallback_title,
+    complete_fallback_title,
+    title_diagnostics,
 )
 from gpt2giga_harness.types import (
     GigaChatApiMode,
@@ -149,6 +162,7 @@ class HarnessSessionRunner:
         store: HarnessSessionStore,
         attachment_store: FilesystemAttachmentStore | None = None,
         memory_store: FilesystemProjectMemoryStore | None = None,
+        provider_account_provider: ProviderAccountBindingProvider | None = None,
     ) -> None:
         self.registry = registry
         self.config = config
@@ -157,6 +171,7 @@ class HarnessSessionRunner:
             config.data_dir
         )
         self.memory_store = memory_store or FilesystemProjectMemoryStore()
+        self.provider_account_provider = provider_account_provider
 
     def preflight(
         self,
@@ -168,6 +183,13 @@ class HarnessSessionRunner:
         """Build a pre-run safety report without invoking a harness."""
         session = self.store.get_session(session_id) if session_id is not None else None
         options = self._run_options(payload, session=session)
+        if session is not None:
+            prepare_provider_account_binding(
+                session,
+                provider_id=str(options["harness_id"]),
+                native_session_id=_optional_text(options.get("native_session_id")),
+                provider=self.provider_account_provider,
+            )
         previous_messages = ()
         if session is not None and not bool(
             _mapping(options["extra"]).get("isolated_history")
@@ -206,6 +228,7 @@ class HarnessSessionRunner:
         default_model: str | None = None,
         default_api_mode: GigaChatApiMode | str | None = None,
         default_mode: str = "plan",
+        metadata: Mapping[str, Any] | None = None,
     ) -> HarnessSession:
         """Create a new empty session."""
         resolved_workspace = resolve_workspace(workspace)
@@ -216,10 +239,13 @@ class HarnessSessionRunner:
             default_model=default_model,
             default_api_mode=parse_api_mode(default_api_mode),
             default_mode=default_mode,
-            metadata=_project_metadata(
-                resolved_workspace,
-                data_dir=self.config.data_dir,
-            ),
+            metadata={
+                **dict(metadata or {}),
+                **_project_metadata(
+                    resolved_workspace,
+                    data_dir=self.config.data_dir,
+                ),
+            },
         )
 
     def create_and_run(
@@ -230,11 +256,8 @@ class HarnessSessionRunner:
     ) -> HarnessSessionRunResult:
         """Create a session from a prompt and immediately run it."""
         options = self._run_options(payload, session=None)
-        title = _optional_text(payload.get("title")) or title_from_prompt(
-            options["prompt"]
-        )
         session = self.create_session(
-            title=title,
+            title=_optional_text(payload.get("title")),
             workspace=options["workspace"],
             default_harness_id=options["harness_id"],
             default_model=options["model"],
@@ -253,6 +276,10 @@ class HarnessSessionRunner:
         """Prepare one durable headless run without executing its harness."""
         session = self.store.get_session(session_id)
         options = self._run_options(payload, session=session)
+        session, provider_account_binding = self._prepare_provider_account_session(
+            session,
+            options,
+        )
         if (
             options["invocation_mode"].value != "headless"
             and options["execution_transport"]
@@ -265,6 +292,13 @@ class HarnessSessionRunner:
         report = self.preflight(payload, session_id=session_id, durable=True)
         if report.hard_block:
             raise PreflightBlockedError(report)
+        attachments = self._load_attachments(
+            session.id,
+            options["attachment_ids"],
+        )
+        attachment_payloads = tuple(
+            _run_attachment_metadata(attachment) for attachment in attachments
+        )
         managed_mcp_snapshot = self._prepare_managed_mcp_snapshot(options)
         _validate_continuation_identity(session, options)
         message_id = new_id("msg")
@@ -289,6 +323,7 @@ class HarnessSessionRunner:
                 ),
                 "preflight": preflight_report_to_dict(report),
                 "durable": True,
+                **_message_attachment_metadata(attachment_payloads),
                 **(
                     {"managed_mcp_snapshot": managed_mcp_snapshot}
                     if managed_mcp_snapshot is not None
@@ -296,6 +331,12 @@ class HarnessSessionRunner:
                 ),
                 **edited_message_metadata(_edit_message_id(options)),
                 **_agent_metadata(options),
+                **_workbench_admission_metadata(options),
+                **(
+                    {PROVIDER_ACCOUNT_BINDING_KEY: provider_account_binding}
+                    if provider_account_binding is not None
+                    else {}
+                ),
             },
         )
         user_message = self.store.append_message(
@@ -309,7 +350,10 @@ class HarnessSessionRunner:
                 harness_id=options["harness_id"],
                 model=options["model"],
                 api_mode=options["api_mode"],
-                metadata=edited_message_metadata(_edit_message_id(options)),
+                metadata={
+                    **_message_attachment_metadata(attachment_payloads),
+                    **edited_message_metadata(_edit_message_id(options)),
+                },
             )
         )
         updated_session = self.store.update_session(
@@ -319,12 +363,10 @@ class HarnessSessionRunner:
             default_api_mode=options["api_mode"],
             default_mode=options["mode"],
             workspace=options["workspace"],
-            title=(
-                title_from_prompt(options["prompt"])
-                if session.title == "Untitled session"
-                and not _generate_session_title_requested(options["extra"])
-                else session.title
-            ),
+            metadata={
+                **dict(session.metadata),
+                **_workbench_session_selection_metadata(options),
+            },
         )
         self._schedule_session_title(session, run.id, options)
         return QueuedHarnessRun(
@@ -347,6 +389,10 @@ class HarnessSessionRunner:
         """Run one prompt inside an existing session."""
         session = self.store.get_session(session_id)
         options = self._run_options(payload, session=session)
+        session, provider_account_binding = self._prepare_provider_account_session(
+            session,
+            options,
+        )
         harness = self.registry.get(options["harness_id"])
         logical_user_message_id = user_message_id or new_id("msg")
         previous_messages = ()
@@ -447,6 +493,12 @@ class HarnessSessionRunner:
                 else {}
             ),
             **_agent_metadata(options),
+            **_workbench_admission_metadata(options),
+            **(
+                {PROVIDER_ACCOUNT_BINDING_KEY: provider_account_binding}
+                if provider_account_binding is not None
+                else {}
+            ),
         }
         edit_message_id = _edit_message_id(options)
         if edit_message_id is not None:
@@ -615,7 +667,9 @@ class HarnessSessionRunner:
             stream=options["stream"],
             workspace=workspace_execution.request_workspace,
             messages=request_messages,
-            attachments=attachment_payloads,
+            attachments=tuple(
+                attachment_to_dict(attachment) for attachment in attachments
+            ),
             attachment_render_plan=attachment_render_plan_payload,
             builtin_tools=options["builtin_tools"],
             session_id=session.id,
@@ -906,7 +960,9 @@ class HarnessSessionRunner:
             options["workspace"],
             data_dir=self.config.data_dir,
         )
-        session_metadata = {**session.metadata, **project_metadata}
+        latest_session = self.store.get_session(session.id)
+        session_metadata = {**latest_session.metadata, **project_metadata}
+        session_metadata.update(_workbench_session_selection_metadata(options))
         if isinstance(app_server_thread, Mapping) and app_server_thread:
             session_metadata["app_server_thread"] = dict(app_server_thread)
             session_metadata.pop("app_server_fork", None)
@@ -914,12 +970,20 @@ class HarnessSessionRunner:
             session_metadata["structured_session_link"] = dict(structured_session_link)
         if session_metadata:
             session_patch["metadata"] = session_metadata
-        if (
-            session.title == "Untitled session"
-            and not _generate_session_title_requested(options["extra"])
-        ):
-            session_patch["title"] = title_from_prompt(options["prompt"])
         updated_session = self.store.update_session(session.id, **session_patch)
+        native_title = _provider_native_title(result)
+        if native_title is not None:
+            native_updated = apply_provider_native_title(
+                self.store,
+                session.id,
+                title=native_title[0],
+                run_id=run.id,
+                provider=options["harness_id"],
+                source_id=native_title[1],
+            )
+            if native_updated is not None:
+                self._append_title_event(native_updated, run.id)
+                updated_session = native_updated
         self._append_event(
             session.id,
             run.id,
@@ -1043,6 +1107,28 @@ class HarnessSessionRunner:
                 else None
             ),
         }
+
+    def _prepare_provider_account_session(
+        self,
+        session: HarnessSession,
+        options: Mapping[str, Any],
+    ) -> tuple[HarnessSession, dict[str, Any] | None]:
+        binding = prepare_provider_account_binding(
+            session,
+            provider_id=str(options["harness_id"]),
+            native_session_id=_optional_text(options.get("native_session_id")),
+            provider=self.provider_account_provider,
+        )
+        if binding is None or session.metadata.get(PROVIDER_ACCOUNT_BINDING_KEY):
+            return session, binding
+        updated = self.store.update_session(
+            session.id,
+            metadata={
+                **dict(session.metadata),
+                PROVIDER_ACCOUNT_BINDING_KEY: binding,
+            },
+        )
+        return updated, binding
 
     def _build_request_messages(
         self,
@@ -1180,47 +1266,100 @@ class HarnessSessionRunner:
         run_id: str,
         options: Mapping[str, Any],
     ) -> None:
-        """Generate the first UI title off the run's critical path."""
-        if session.title != "Untitled session" or not _generate_session_title_requested(
-            options["extra"]
-        ):
+        """Settle one first-turn title without delaying provider execution."""
+        if session.title != "Untitled session":
             return
         prompt = str(options["prompt"])
+        generation_requested = _generate_session_title_requested(options["extra"])
         model = (
-            _optional_text(options["extra"].get("session_title_model"))
-            or _optional_text(options.get("model"))
-            or self.config.default_model
+            (
+                _optional_text(options["extra"].get("session_title_model"))
+                or _optional_text(options.get("model"))
+                or self.config.default_model
+            )
+            if generation_requested
+            else None
         )
+        timeout_seconds = min(self.config.timeout_seconds, 15.0)
+        claim = claim_fallback_title(
+            self.store,
+            session.id,
+            run_id=run_id,
+            model=model,
+            timeout_seconds=timeout_seconds,
+        )
+        if claim is None:
+            return
 
         def generate() -> None:
             try:
-                title = _generate_session_title(self.config, prompt, model=model)
-                updated = self.store.update_session_if_title(
-                    session.id,
-                    "Untitled session",
-                    title=title,
+                generation = _generate_session_title(
+                    self.config,
+                    prompt,
+                    model=model,
+                    generation_requested=generation_requested,
+                    timeout_seconds=timeout_seconds,
                 )
+                updated = complete_fallback_title(self.store, claim, generation)
                 if updated is None:
                     return
-                self._append_event(
-                    session.id,
-                    run_id,
-                    HarnessEventType.SESSION_UPDATED.value,
-                    "Session title revision stored.",
-                    {
-                        "session_id": session.id,
-                        "revision": updated.updated_at,
-                        "changed_fields": ["title"],
-                    },
-                )
+                self._append_title_event(updated, run_id)
             except (OSError, SessionNotFoundError, ValueError):
                 return
 
+        if not generation_requested:
+            generate()
+            return
         threading.Thread(
             target=generate,
             name=f"harness-session-title-{session.id}",
             daemon=True,
         ).start()
+
+    def schedule_session_title(
+        self,
+        session: HarnessSession,
+        run_id: str,
+        options: Mapping[str, Any],
+    ) -> None:
+        """Schedule the shared title contract for non-runner native paths."""
+        self._schedule_session_title(session, run_id, options)
+
+    def apply_native_session_title(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        title: str,
+        provider: str,
+        source_id: str | None,
+    ) -> HarnessSession | None:
+        """Apply one discovered provider-native title and publish its revision."""
+        updated = apply_provider_native_title(
+            self.store,
+            session_id,
+            title=title,
+            run_id=run_id,
+            provider=provider,
+            source_id=source_id,
+        )
+        if updated is not None:
+            self._append_title_event(updated, run_id)
+        return updated
+
+    def _append_title_event(self, session: HarnessSession, run_id: str) -> None:
+        self._append_event(
+            session.id,
+            run_id,
+            HarnessEventType.SESSION_UPDATED.value,
+            "Session title revision stored.",
+            {
+                "session_id": session.id,
+                "revision": session.updated_at,
+                "changed_fields": ["title"],
+                "title": title_diagnostics(session),
+            },
+        )
 
     def _load_attachments(
         self,
@@ -1701,11 +1840,27 @@ def _generate_session_title(
     prompt: str,
     *,
     model: str | None,
-) -> str:
+    generation_requested: bool,
+    timeout_seconds: float,
+) -> SessionTitleGeneration:
     """Generate a compact title through the local proxy with a safe fallback."""
+    started_at = time.monotonic()
     fallback = title_from_prompt(prompt)
+    if not generation_requested:
+        return SessionTitleGeneration(
+            title=fallback,
+            status="disabled",
+            duration_ms=(time.monotonic() - started_at) * 1000,
+            usage={},
+        )
     if model is None:
-        return fallback
+        return SessionTitleGeneration(
+            title=fallback,
+            status="offline",
+            duration_ms=(time.monotonic() - started_at) * 1000,
+            usage={},
+            failure_kind="model_unavailable",
+        )
     payload = {
         "model": model,
         "messages": [
@@ -1728,12 +1883,73 @@ def _generate_session_title(
             proxy.build_chat_completions_url(config.proxy_url, GigaChatApiMode.V2),
             payload=payload,
             api_key=api_key,
-            timeout=min(config.timeout_seconds, 15.0),
+            timeout=timeout_seconds,
         )
-    except (OSError, proxy.ProxyRequestError, ValueError):
-        return fallback
+    except (OSError, proxy.ProxyRequestError, ValueError) as exc:
+        return SessionTitleGeneration(
+            title=fallback,
+            status="failed",
+            duration_ms=(time.monotonic() - started_at) * 1000,
+            usage={},
+            failure_kind=type(exc).__name__,
+        )
     generated = proxy.extract_text(response).strip().strip("\"'`").strip()
-    return title_from_prompt(generated) if generated else fallback
+    return SessionTitleGeneration(
+        title=title_from_prompt(generated) if generated else fallback,
+        status="succeeded" if generated else "failed",
+        duration_ms=(time.monotonic() - started_at) * 1000,
+        usage=_title_usage(response),
+        failure_kind=None if generated else "empty_response",
+    )
+
+
+def _title_usage(response: Mapping[str, Any]) -> dict[str, int]:
+    usage = _mapping(response.get("usage"))
+    aliases = {
+        "prompt_tokens": "input_tokens",
+        "input_tokens": "input_tokens",
+        "completion_tokens": "output_tokens",
+        "output_tokens": "output_tokens",
+        "total_tokens": "total_tokens",
+    }
+    result: dict[str, int] = {}
+    for source, target in aliases.items():
+        value = usage.get(source)
+        if (
+            target not in result
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and value >= 0
+        ):
+            result[target] = value
+    return result
+
+
+def _provider_native_title(result: Any) -> tuple[str, str | None] | None:
+    raw = _mapping(result.raw)
+    title = _optional_text(raw.get("provider_session_title"))
+    source_id = _optional_text(raw.get("provider_session_id"))
+    if title is not None:
+        return title, source_id
+    for event in reversed(tuple(result.events)):
+        if event.type not in {
+            "session.title.updated",
+            "thread.title.updated",
+            "thread.name.updated",
+        }:
+            continue
+        payload = _mapping(event.payload)
+        title = _optional_text(payload.get("title") or payload.get("name"))
+        if title is not None:
+            return (
+                title,
+                _optional_text(
+                    payload.get("session_id")
+                    or payload.get("thread_id")
+                    or payload.get("native_session_id")
+                ),
+            )
+    return None
 
 
 def _optional_text(value: Any) -> str | None:
@@ -1823,6 +2039,35 @@ def _agent_metadata(options: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(execution_plan, Mapping):
         metadata["agent_execution_plan"] = dict(execution_plan)
     return metadata
+
+
+def _workbench_admission_metadata(options: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain the content-free product admission receipt on each run."""
+    admission = _mapping(_mapping(options.get("extra")).get("workbench_admission"))
+    if admission.get("schema_version") != 1:
+        return {}
+    return {"workbench_admission": dict(admission)}
+
+
+def _workbench_session_selection_metadata(
+    options: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Retain explicit intent and authority independently from the mode alias."""
+    admission = _mapping(_mapping(options.get("extra")).get("workbench_admission"))
+    if admission.get("schema_version") != 1:
+        return {}
+    diagnostics = _mapping(admission.get("diagnostics"))
+    compatibility = _mapping(diagnostics.get("compatibility"))
+    return {
+        "workbench_selection": {
+            "schema_version": 1,
+            "kind": admission.get("kind"),
+            "intent": admission.get("intent"),
+            "authority": admission.get("authority"),
+            "input_source": admission.get("input_source"),
+            "compatibility_warning": compatibility.get("warning"),
+        }
+    }
 
 
 def _request_extra(

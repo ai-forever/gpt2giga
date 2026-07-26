@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from gpt2giga_harness.runtime.capabilities import negotiate_execution_capabilities
 from gpt2giga_harness.runtime.models import RuntimeJob
 from gpt2giga_harness.runtime.policy import ApprovalDecision, ApprovalRequest
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
@@ -21,8 +22,7 @@ from gpt2giga_harness.sessions.models import (
 )
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt, utc_now
 from gpt2giga_harness.settings import HarnessSettingsStore
-from gpt2giga_harness.execution import ExecutionTransport
-from gpt2giga_harness.workbench_execution import effective_workbench_transport
+from gpt2giga_harness.workbench_execution import admit_workbench_execution
 
 
 class DurableRuntimeUnavailableError(RuntimeError):
@@ -65,11 +65,50 @@ class SessionApplicationService:
         """Create one session from backend-owned defaults and client overrides."""
         defaults = self.settings_store.load().defaults
         harness_id = str(payload.get("harness_id") or defaults.default_harness_id)
-        if validate_harness:
-            self.runner.registry.get(harness_id)
+        try:
+            harness = self.runner.registry.get(harness_id)
+        except KeyError:
+            if validate_harness:
+                raise
+            harness = None
+        admission = None
+        if harness is not None:
+            admission_payload = dict(payload)
+            product_fields = {"workbench_kind", "task_intent", "authority"}
+            if not (product_fields & set(admission_payload)) and "mode" not in payload:
+                capabilities = {
+                    item.value for item in tuple(harness.spec().capabilities or ())
+                }
+                admission_payload.update(
+                    {
+                        "workbench_kind": (
+                            "coding_agent"
+                            if "agent_cli" in capabilities
+                            else "direct_chat"
+                        ),
+                        "task_intent": defaults.task_intent,
+                        "authority": defaults.authority,
+                    }
+                )
+            admission = admit_workbench_execution(
+                harness,
+                admission_payload,
+                configured_default=defaults.execution_transport,
+            )
         title = _optional_text(payload.get("title"))
         if title is None and title_from_turn:
             title = title_from_prompt(str(payload.get("prompt") or ""))
+        selection_metadata: dict[str, Any] = {}
+        if admission is not None:
+            compatibility = _mapping(admission.diagnostics.get("compatibility"))
+            selection_metadata["workbench_selection"] = {
+                "schema_version": 1,
+                "kind": admission.kind.value,
+                "intent": admission.intent.value,
+                "authority": admission.authority.value,
+                "input_source": admission.input_source,
+                "compatibility_warning": compatibility.get("warning"),
+            }
         return self.runner.create_session(
             title=title,
             workspace=_optional_text(payload.get("workspace")),
@@ -80,7 +119,12 @@ class SessionApplicationService:
                 else defaults.default_model
             ),
             default_api_mode=payload.get("api_mode") or defaults.default_api_mode,
-            default_mode=str(payload.get("mode") or defaults.mode),
+            default_mode=(
+                admission.mode
+                if admission is not None
+                else str(payload.get("mode") or defaults.mode)
+            ),
+            metadata=selection_metadata,
         )
 
     def prepare_turn_payload(
@@ -99,19 +143,23 @@ class SessionApplicationService:
             or defaults.default_harness_id
         )
         harness = self.runner.registry.get(harness_id)
-        transport = effective_workbench_transport(
+        admission = admit_workbench_execution(
             harness,
             payload,
             configured_default=defaults.execution_transport,
         )
-        effective_payload["execution_transport"] = transport.value
-        if "invocation_mode" not in effective_payload:
-            effective_payload["invocation_mode"] = (
-                "native"
-                if transport is ExecutionTransport.NATIVE_TERMINAL
-                else "headless"
-            )
+        if admission.input_source != "legacy_machine":
+            effective_payload["capability"] = admission.capability.value
+            effective_payload["mode"] = admission.mode
+            effective_payload["invocation_mode"] = admission.invocation_mode
+            effective_payload["stream"] = negotiate_execution_capabilities(
+                harness
+            ).streaming
+        else:
+            effective_payload.setdefault("invocation_mode", admission.invocation_mode)
+        effective_payload["execution_transport"] = admission.transport.value
         extra = _mapping(payload.get("extra"))
+        extra["workbench_admission"] = admission.to_dict()
         if (
             bool(extra.get("generate_session_title"))
             and _optional_text(extra.get("session_title_model")) is None

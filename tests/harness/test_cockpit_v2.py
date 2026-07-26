@@ -36,6 +36,11 @@ def test_cockpit_v2_manifest_binds_hashed_split_identity_assets():
     assert any(name.startswith("assets/runs-") for name in manifest.assets)
     assert any(name.startswith("assets/markdown-") for name in manifest.assets)
     assert any(name.startswith("assets/raw-evidence-") for name in manifest.assets)
+    assert manifest.assets["brand/gigaloom-mark.svg"].media_type == "image/svg+xml"
+    assert (
+        manifest.assets["brand/gigaloom.webmanifest"].media_type
+        == "application/manifest+json"
+    )
     assert all(
         asset.gzip_name is None and asset.brotli_name is None
         for asset in manifest.assets.values()
@@ -70,15 +75,18 @@ def test_cockpit_v2_is_default_and_legacy_remains_explicit_fallback(tmp_path):
     assert default_redirect.headers["location"] == "/cockpit-v2/work"
     assert default_redirect.headers["cache-control"] == "no-cache"
     assert cockpit_default.status_code == 200
-    assert "gpt2giga Harness — Cockpit V2" in cockpit_default.text
+    assert "<title>GigaLoom</title>" in cockpit_default.text
     assert legacy_recovery.status_code == 200
-    assert "gpt2giga Harness — Cockpit V2" not in legacy_recovery.text
+    assert (
+        '<link rel="stylesheet" href="/assets/app.css?v=38.44">' in legacy_recovery.text
+    )
     assert cockpit.status_code == 200
-    assert "gpt2giga Harness — Cockpit V2" in cockpit.text
+    assert "<title>GigaLoom</title>" in cockpit.text
     assert cockpit.headers["content-security-policy"].startswith(
         "default-src 'none'; script-src 'self'; style-src 'self'"
     )
     assert "frame-src 'self'" in cockpit.headers["content-security-policy"]
+    assert "manifest-src 'self'" in cockpit.headers["content-security-policy"]
     assert cockpit.headers["x-content-type-options"] == "nosniff"
     assert unknown.status_code == 404
 
@@ -153,7 +161,7 @@ def test_cockpit_v2_remaining_surface_deep_links_are_preserved(path, tmp_path):
     response = _client(tmp_path).get(path)
 
     assert response.status_code == 200
-    assert "gpt2giga Harness — Cockpit V2" in response.text
+    assert "<title>GigaLoom</title>" in response.text
 
 
 def test_cockpit_v2_serves_negotiated_immutable_assets(tmp_path):

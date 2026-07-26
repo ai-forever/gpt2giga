@@ -14,6 +14,7 @@ BASE_REQUIREMENTS = (
     "anyio>=4.10,<5",
     "fastapi>=0.133.0,<1",
     "pydantic>=2.12.0,<3",
+    "pyjwt[crypto]>=2.12.0,<3",
     "pyyaml>=6.0,<7",
     "python-dateutil>=2.9.0,<3",
     "starlette>=1.1,<2",

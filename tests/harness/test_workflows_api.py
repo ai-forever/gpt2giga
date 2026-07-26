@@ -52,7 +52,13 @@ def test_workflow_api_lists_validates_runs_status_and_cancels(
     )
     cli_run = json.loads(capsys.readouterr().out)["run"]
 
-    with TestClient(create_app(config)) as client:
+    app = create_app(config)
+    worker = {"online": True}
+    app.state.harness_schedule_service.worker_health = lambda: {
+        "online": worker["online"],
+        "count": 1,
+    }
+    with TestClient(app) as client:
         listed = client.get("/api/workflows", params={"workspace": str(workspace)})
         assert listed.status_code == 200
         assert listed.json()["workflows"][0]["id"] == "review-team"
@@ -91,6 +97,7 @@ def test_workflow_api_lists_validates_runs_status_and_cancels(
             for step in cli_run["steps"]
         ]
 
+        worker["online"] = False
         retried = client.post(
             "/api/workflows/review-team/run",
             json={
@@ -110,8 +117,9 @@ def test_workflow_api_lists_validates_runs_status_and_cancels(
         assert retried.status_code == 200
         assert retried.json()["run"]["id"] == run["id"]
         assert retried.json()["run"]["session_id"] == run["session_id"]
-        assert rebound.status_code == 400
+        assert rebound.status_code == 409
         assert "different workflow submission" in rebound.json()["detail"]
+        worker["online"] = True
 
         child_summary = client.get(
             f"/api/runs/{run['steps'][0]['outputs']['run_id']}/summary"
@@ -142,6 +150,48 @@ def test_workflow_api_lists_validates_runs_status_and_cancels(
         canceled = client.post(f"/api/workflow-runs/{run['id']}/cancel")
         assert canceled.status_code == 200
         assert canceled.json()["run"]["status"] == "canceled"
+
+
+def test_workflow_run_reports_missing_and_offline_worker_before_advancement(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    init_project_config(workspace)
+    config = HarnessConfig(
+        data_dir=str(tmp_path / "data"),
+        proxy_url="http://127.0.0.1:9",
+        auto_start_proxy=False,
+    )
+    app = create_app(config)
+
+    def fail_if_created(*_args, **_kwargs):
+        raise AssertionError("offline workflow must not create retained state")
+
+    monkeypatch.setattr(
+        "gpt2giga_harness.workflows.WorkflowCoordinator._start_new",
+        fail_if_created,
+    )
+
+    with TestClient(app) as client:
+        missing = client.post(
+            "/api/workflows/missing/run",
+            json={"workspace": str(workspace)},
+        )
+        offline = client.post(
+            "/api/workflows/review-team/run",
+            json={
+                "workspace": str(workspace),
+                "idempotency_key": "cockpit-offline-workflow-1",
+            },
+        )
+
+    assert missing.status_code == 404
+    assert offline.status_code == 409
+    assert offline.json()["detail"] == (
+        "The durable worker is offline. Start it with `giga worker start`, then retry."
+    )
 
 
 def test_workflow_catalog_api_edits_histories_duplicates_imports_and_exports(
@@ -230,3 +280,78 @@ def test_workflow_catalog_api_edits_histories_duplicates_imports_and_exports(
         assert exported.status_code == 200
         assert "attachment;" in exported.headers["content-disposition"]
         assert exported.text.startswith("id: review-copy")
+
+
+def test_workflow_native_authoring_previews_applies_and_retains_delete_history(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    init_project_config(workspace)
+    config = HarnessConfig(
+        data_dir=str(tmp_path / "data"),
+        proxy_url="http://127.0.0.1:9",
+        auto_start_proxy=False,
+    )
+    content = "\n".join(
+        [
+            "id: native-flow",
+            "title: Native flow",
+            "version: '1.0.0'",
+            "steps:",
+            "  - id: keep",
+            "    kind: transform",
+            "    transform: identity",
+            "",
+        ]
+    )
+
+    with TestClient(create_app(config)) as client:
+        preview = client.post(
+            "/api/workflows/native-flow/draft",
+            json={"workspace": str(workspace), "content": content},
+        )
+        assert preview.status_code == 200
+        assert preview.json()["plan"]["step_count"] == 1
+        assert preview.json()["redacted_diff"].startswith("--- ")
+
+        applied = client.post(
+            "/api/workflows/native-flow/apply",
+            json={
+                "workspace": str(workspace),
+                "content": content,
+                "expected_hash": preview.json()["source_hash"],
+            },
+        )
+        assert applied.status_code == 200
+        source_hash = applied.json()["workflow"]["source_hash"]
+
+        delete_preview = client.post(
+            "/api/workflows/native-flow/delete-preview",
+            json={"workspace": str(workspace)},
+        )
+        assert delete_preview.status_code == 200
+        assert delete_preview.json()["source_hash"] == source_hash
+        assert delete_preview.json()["dependents"] == []
+
+        stale = client.post(
+            "/api/workflows/native-flow/delete",
+            json={
+                "workspace": str(workspace),
+                "expected_hash": "stale",
+                "confirm_id": "native-flow",
+            },
+        )
+        assert stale.status_code == 409
+
+        deleted = client.post(
+            "/api/workflows/native-flow/delete",
+            json={
+                "workspace": str(workspace),
+                "expected_hash": source_hash,
+                "confirm_id": "native-flow",
+            },
+        )
+        assert deleted.status_code == 200
+        history = workspace / ".giga" / "workflows" / ".history" / "native-flow"
+        assert len(list(history.glob("*.yaml"))) == 1

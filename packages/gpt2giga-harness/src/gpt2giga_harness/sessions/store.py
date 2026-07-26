@@ -32,6 +32,11 @@ from gpt2giga_harness.sessions.redaction import (
     redact_event_payload,
     redact_for_storage,
 )
+from gpt2giga_harness.session_titles import (
+    manual_title_metadata,
+    merge_title_metadata,
+    new_session_metadata,
+)
 from gpt2giga_harness.types import GigaChatApiMode, HarnessCapability
 
 
@@ -268,7 +273,12 @@ class InMemoryHarnessSessionStore:
             default_api_mode=default_api_mode,
             default_mode=default_mode,
             native=_redacted_mapping(native),
-            metadata=_redacted_mapping(metadata),
+            metadata=_redacted_mapping(
+                new_session_metadata(
+                    metadata,
+                    explicit_title=bool(title and str(title).strip()),
+                )
+            ),
         )
         self._sessions[session.id] = session
         self._session_generation += 1
@@ -727,7 +737,20 @@ def _patch_session(session: HarnessSession, patch: Mapping[str, Any]) -> Harness
         "metadata",
     }
     changes: dict[str, Any] = {"updated_at": utc_now()}
-    for key, value in patch.items():
+    normalized_patch = dict(patch)
+    if "title" in normalized_patch:
+        metadata_was_explicit = "metadata" in normalized_patch
+        patched_metadata = normalized_patch.get("metadata", session.metadata)
+        if not isinstance(patched_metadata, Mapping):
+            patched_metadata = session.metadata
+        if not metadata_was_explicit or "title_state" not in patched_metadata:
+            normalized_patch["metadata"] = manual_title_metadata(patched_metadata)
+    elif isinstance(normalized_patch.get("metadata"), Mapping):
+        normalized_patch["metadata"] = merge_title_metadata(
+            session.metadata,
+            normalized_patch["metadata"],
+        )
+    for key, value in normalized_patch.items():
         if key not in allowed:
             continue
         if key == "default_api_mode" and not isinstance(value, GigaChatApiMode):

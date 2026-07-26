@@ -22,17 +22,19 @@ describe("remaining Cockpit surface projections", () => {
       },
       {
         workflows: [{ id: "review", title: "Review", steps: [{ id: "one" }], prompt: "secret" }],
-        runs: [{ workflow_id: "review", status: "passed", updated_at: "2026-07-16T10:00:00Z", inputs: { token: "secret" } }],
+        runs: [{ workflow_id: "review", status: "running", updated_at: "2026-07-16T10:00:00Z", inputs: { token: "secret" } }],
       },
       {
         schedules: [{ definition: { id: "nightly", title: "Nightly", source_hash: "hash-1", target: { kind: "eval", id: "compat" }, prompt: "secret" }, state: { status: "enabled", tested_hash: "hash-1" }, preview: ["2026-07-17T00:00:00Z"], worker: { online: true } }],
+        worker: { online: true, count: 1 },
       },
     );
 
     expect(projected.agents).toHaveLength(100);
-    expect(projected.workflows[0]).toMatchObject({ id: "review", stepCount: 1, lastRunStatus: "passed" });
+    expect(projected.workflows[0]).toMatchObject({ id: "review", stepCount: 1, lastRunStatus: "running", workerOnline: true });
     expect(projected.agents[0]).toMatchObject({ queueable: true, unavailableReason: null });
     expect(projected.schedules[0]).toMatchObject({ target: "eval:compat", workerOnline: true, tested: true });
+    expect(projected.workerOnline).toBe(true);
     expect(JSON.stringify(projected)).not.toContain("secret");
     expect(JSON.stringify(projected)).not.toContain("/private/repo");
   });

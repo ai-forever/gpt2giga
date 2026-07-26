@@ -15,6 +15,7 @@ export interface WorkflowProjection {
   stepCount: number;
   lastRunStatus: string | null;
   lastRunAt: string | null;
+  workerOnline: boolean;
 }
 
 export interface ScheduleProjection {
@@ -31,6 +32,7 @@ export interface AutomationProjection {
   agents: AgentProjection[];
   workflows: WorkflowProjection[];
   schedules: ScheduleProjection[];
+  workerOnline: boolean;
   contentFree: true;
 }
 
@@ -137,6 +139,9 @@ export function projectAutomation(
   workflowsResponse: unknown,
   schedulesResponse: unknown,
 ): AutomationProjection {
+  const automation = record(schedulesResponse);
+  const sharedWorker = record(automation.worker);
+  const sharedWorkerOnline = sharedWorker.online === true;
   const workflowRuns = array(record(workflowsResponse).runs);
   const latestRunByWorkflow = new Map<string, UnknownRecord>();
   for (const value of workflowRuns) {
@@ -181,10 +186,11 @@ export function projectAutomation(
           stepCount: array(item.steps).length,
           lastRunStatus: latest === undefined ? null : nullableText(latest.status),
           lastRunAt: latest === undefined ? null : nullableText(latest.updated_at),
+          workerOnline: sharedWorkerOnline,
         };
       })
       .filter((item) => item.id),
-    schedules: array(record(schedulesResponse).schedules)
+    schedules: array(automation.schedules)
       .slice(0, MAX_ROWS)
       .map((value) => {
         const item = record(value);
@@ -200,12 +206,15 @@ export function projectAutomation(
           target: [text(target.kind), text(target.id)].filter(Boolean).join(":"),
           status: text(state.status) || "disabled",
           nextRunAt: nullableText(state.next_run_at) ?? nullableText(preview[0]),
-          workerOnline: worker.online === true,
+          workerOnline:
+            worker.online === true ||
+            (Object.keys(worker).length === 0 && sharedWorkerOnline),
           tested:
             Boolean(definitionHash) && text(state.tested_hash) === definitionHash,
         };
       })
       .filter((item) => item.id),
+    workerOnline: sharedWorkerOnline,
     contentFree: true,
   };
 }

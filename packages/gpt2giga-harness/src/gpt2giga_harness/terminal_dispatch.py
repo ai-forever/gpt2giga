@@ -146,6 +146,7 @@ EXTERNAL_HANDOFF_ROOT_COMMANDS = frozenset({"open"})
 AUTOMATION_ROOT_COMMANDS = frozenset(
     {
         "agent",
+        "benchmark",
         "bootstrap",
         "compatibility",
         "config",
@@ -165,6 +166,7 @@ AUTOMATION_ROOT_COMMANDS = frozenset(
         "schedule",
         "state",
         "ui",
+        "ui-identity",
         "worker",
         "workflow",
     }

@@ -379,6 +379,29 @@ class IntegrationRuntimeStore:
             self._assert_binding_current(binding, snapshot)
             return binding
 
+    def bindings_for_integration(
+        self,
+        *,
+        package_id: str,
+        target_id: str,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return content-free active bindings retaining one integration revision."""
+        _validate_identity(package_id, field_name="runtime package id")
+        _validate_identity(target_id, field_name="runtime target id")
+        self._ensure_root()
+        with exclusive_file_lock(self.lock_path):
+            bindings = self._read_bindings_unlocked()
+            matched: list[dict[str, Any]] = []
+            for binding in bindings.values():
+                snapshot = self._load_id_unlocked(binding.snapshot_id)
+                if (
+                    snapshot.package_id == package_id
+                    and snapshot.target_id == target_id
+                ):
+                    self._assert_binding_current(binding, snapshot)
+                    matched.append(binding.public_projection())
+        return tuple(sorted(matched, key=lambda item: str(item["session_id"])))
+
     def rollback(
         self,
         installer: TransactionalIntegrationInstaller,

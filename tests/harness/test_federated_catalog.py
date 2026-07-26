@@ -89,7 +89,8 @@ async def test_skills_sh_hosted_boundary_refresh_search_detail_and_resolution():
         "acme/skills/react",
         "example.com/tooling",
     ]
-    assert found == (selected,)
+    assert found[0].upstream_id == selected.upstream_id
+    assert selected.immutable_ref == f"sha256:{_HASH}"
     assert selected.component is FederatedCatalogComponent.SKILL
     assert selected.provenance.canonical_origin == SKILLS_SH_ORIGIN
     assert selected.trust.popularity == 12
@@ -105,6 +106,77 @@ async def test_skills_sh_hosted_boundary_refresh_search_detail_and_resolution():
         for request in fetcher.requests
     )
     assert "files" not in repr(source.last_good)
+
+
+async def test_skills_sh_curated_detail_paths_and_audits_are_bounded():
+    curated_url = f"{SKILLS_SH_ORIGIN}/api/v1/skills/curated"
+    page_url = f"{SKILLS_SH_ORIGIN}/api/v1/skills?page=0&per_page=1"
+    detail_url = f"{SKILLS_SH_ORIGIN}/api/v1/skills/acme/skills/react"
+    audit_url = f"{SKILLS_SH_ORIGIN}/api/v1/skills/audit/acme/skills/react"
+    fetcher = _FixtureFetcher(
+        {
+            curated_url: {
+                "data": [
+                    {
+                        "owner": "acme",
+                        "totalInstalls": 12,
+                        "featuredRepo": "skills",
+                        "featuredSkill": "react",
+                        "skills": [_skills_item()],
+                    }
+                ],
+                "totalOwners": 1,
+                "totalSkills": 1,
+                "generatedAt": "2026-07-24T08:00:00Z",
+            },
+            page_url: _skills_page(_skills_item(), page=0, has_more=False),
+            detail_url: {
+                "id": "acme/skills/react",
+                "source": "acme/skills",
+                "slug": "react",
+                "installs": 12,
+                "hash": _HASH,
+                "files": [
+                    {"path": "SKILL.md"},
+                    {"path": "references/guide.md"},
+                ],
+            },
+            audit_url: {
+                "id": "acme/skills/react",
+                "source": "acme/skills",
+                "slug": "react",
+                "audits": [
+                    {
+                        "provider": "Socket",
+                        "slug": "socket",
+                        "status": "pass",
+                        "auditedAt": "2026-07-24T08:05:00Z",
+                        "riskLevel": "LOW",
+                    }
+                ],
+            },
+        }
+    )
+    source = SkillsShFederatedCatalogSource(
+        hosted_fetch=fetcher,
+        now=lambda: _NOW,
+    )
+
+    refresh = await source.refresh(page_size=1)
+    detail = await source.detail("acme/skills/react")
+    audits = await source.audits("acme/skills/react")
+
+    assert refresh.success is True
+    assert refresh.snapshot.items[0].trust.curated is True
+    assert detail.immutable_ref == f"sha256:{_HASH}"
+    assert detail.provenance.relative_path == "SKILL.md"
+    assert detail.provenance.file_paths == (
+        "SKILL.md",
+        "references/guide.md",
+    )
+    assert [(item.provider, item.status, item.risk_level) for item in audits] == [
+        ("Socket", "pass", "LOW")
+    ]
 
 
 def test_skills_sh_requires_an_explicit_hosted_metadata_boundary():
@@ -150,6 +222,32 @@ async def test_neuraldeep_direct_get_keeps_skills_and_mcp_separate():
     assert all(
         request.headers == {"Accept": "application/json"}
         for request in fetcher.requests
+    )
+
+
+async def test_neuraldeep_mcp_detail_uses_the_public_slug():
+    mcp_url = f"{NEURALDEEP_ORIGIN}/skapi/skills?type=mcp"
+    source = NeuralDeepFederatedCatalogSource(
+        fetch=_FixtureFetcher(
+            {
+                mcp_url: [
+                    _neural_item(
+                        upstream_id="curated:gigachat-image",
+                        kind="mcp",
+                    )
+                    | {"name": "GigaChat Image MCP"}
+                ]
+            }
+        ),
+        now=lambda: _NOW,
+    )
+
+    result = await source.refresh(components=(FederatedCatalogComponent.MCP,))
+
+    assert result.success is True
+    assert (
+        result.snapshot.items[0].provenance.detail_url
+        == "https://neuraldeep.ru/mcp/gigachat-image"
     )
 
 

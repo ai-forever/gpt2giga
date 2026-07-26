@@ -16,6 +16,18 @@ const rootKey = ["cockpit", "remaining-surfaces"] as const;
 
 export interface IntegrationFlowInventory {
   sources: Array<{ id: string; network_required: boolean }>;
+  catalog_sources?: Array<{
+    id: string;
+    status: "ready" | "stale" | "unavailable";
+    last_sync_at: string | null;
+    last_attempt_at: string;
+    cache_age_seconds: number | null;
+    last_good: boolean;
+    stale: boolean;
+    reason_code: string | null;
+    next_retry_at: string | null;
+    entry_count: number;
+  }>;
   targets: Array<{
     id: string;
     component_types: string[];
@@ -24,6 +36,7 @@ export interface IntegrationFlowInventory {
   }>;
   catalog: Array<{
     catalog_id: string;
+    source_id?: string;
     package_id: string;
     version: string;
     component_types: string[];
@@ -32,10 +45,18 @@ export interface IntegrationFlowInventory {
     trust_decision: string;
     source_type: string;
     discovery?: {
+      upstream_id?: string;
       name: string;
       component: string;
+      canonical_origin?: string;
       detail_url: string | null;
       artifact_url: string | null;
+      repository_url: string | null;
+      observed_at: string | null;
+      discovery_location: string | null;
+      immutable_ref: string | null;
+      content_hash: string | null;
+      relative_path: string | null;
       popularity: number | null;
       curated: boolean;
     } | null;
@@ -50,8 +71,27 @@ export interface IntegrationFlowInventory {
     connected: true;
     preview_id: string;
   }>;
+  root_plugins?: Array<{
+    id: string;
+    name: string;
+    title: string;
+    description: string;
+    version: string;
+    target_ids: string[];
+    origin: string;
+    source_label: string;
+    scope: "system";
+    connected: true;
+    invocation: string;
+    bundled_skills: string[];
+    default_prompts: string[];
+    repository_url: string | null;
+  }>;
   flows: IntegrationFlowSummary[];
   groups: IntegrationGroupSummary[];
+  installations: IntegrationLifecycleInstallation[];
+  capability_matrix: IntegrationLifecycleTargetCapability[];
+  operations: IntegrationLifecycleOperation[];
   content_free: true;
 }
 
@@ -68,10 +108,64 @@ export interface IntegrationSearchResponse {
     curated: boolean;
     popularity: number | null;
     upstream_audit: string | null;
+    canonical_origin?: string;
+    observed_at?: string;
+    discovery_location?: string;
     install_authorized: false;
   }>;
-  sources: Array<{ id: string; status: string; error_type: string | null }>;
+  sources: Array<{
+    id: string;
+    status: string;
+    reason_code?: string | null;
+    error_type?: string | null;
+    cache_status?: string;
+    cache_age_seconds?: number | null;
+    last_good?: boolean;
+  }>;
   install_authorized: false;
+}
+
+export interface IntegrationSourceProvenance {
+  canonical_source: string;
+  upstream_id: string;
+  canonical_origin: string;
+  repository_url: string | null;
+  artifact_url: string | null;
+  immutable_ref: string | null;
+  content_hash: string | null;
+  relative_path: string | null;
+  file_paths?: string[];
+  discovery_location: string;
+  detail_url?: string;
+  observed_at: string;
+  trust?: {
+    curated: boolean;
+    upstream_audit: string | null;
+    source_present: boolean;
+    install_authorized: false;
+  };
+}
+
+export interface IntegrationSourceDetailResponse {
+  id: string;
+  source_id: string;
+  upstream_id: string;
+  title: string;
+  component: "skill" | "mcp";
+  provenance: IntegrationSourceProvenance;
+  audits: Array<{
+    provider: string;
+    status: "pass" | "warn" | "fail";
+    audited_at: string;
+    risk_level: string | null;
+  }>;
+  source_health: {
+    status: "ready" | "stale";
+    cache_status: string;
+    cache_age_seconds: number | null;
+    reason_code: string | null;
+    last_good: boolean;
+  };
 }
 
 export interface SkillPreviewResponse {
@@ -100,6 +194,8 @@ export interface GitInspectionResponse {
     license: string;
     preview_id: string | null;
     manifest: Record<string, unknown> | null;
+    source_provenance?: IntegrationSourceProvenance | null;
+    source_provenance_sha256?: string | null;
   }>;
 }
 
@@ -136,11 +232,102 @@ export interface IntegrationFlowSummary {
   status: string;
   package_id: string;
   package_version: string;
+  source_provenance?: IntegrationSourceProvenance | null;
   target_id: string;
   scope: string;
   verification_status: string;
   rollback_available: boolean;
   events: Array<{ stage: string; status: string; occurred_at: string; code: string | null }>;
+}
+
+export type IntegrationLifecycleAction = "enable" | "disable" | "uninstall" | "delete_definition";
+
+export interface IntegrationLifecycleInstallation {
+  flow_id: string;
+  package_id: string;
+  package_version: string;
+  target_id: string;
+  scope: string;
+  state: "definition_only" | "enabled" | "disabled" | "uninstalled" | "definition_deleted";
+  enabled: boolean;
+  installed: boolean;
+  revision: number;
+  catalog_id: string | null;
+  last_operation_id: string | null;
+  updated_at: string;
+  content_free: true;
+}
+
+export interface IntegrationLifecycleTargetCapability {
+  target_id: string;
+  component_types: string[];
+  actions: Array<{
+    action: IntegrationLifecycleAction | "rollback";
+    supported: boolean;
+    reason: string | null;
+  }>;
+  content_free: true;
+}
+
+export interface IntegrationLifecycleOperation {
+  id: string;
+  plan_id: string;
+  kind: "flow" | "group";
+  target_id: string;
+  action: IntegrationLifecycleAction;
+  flow_ids: string[];
+  expected_revisions: Record<string, number>;
+  status: string;
+  confirmation_required: boolean;
+  confirmation_id: string;
+  active_session_count: number;
+  completed_flow_ids: string[];
+  receipt_id: string | null;
+  recovery_actions: string[];
+  error_code: string | null;
+  created_at: string;
+  updated_at: string;
+  content_free: true;
+}
+
+export interface IntegrationLifecyclePlan {
+  plan_id: string;
+  kind: "flow" | "group";
+  target_id: string;
+  action: IntegrationLifecycleAction;
+  expected_revisions: Record<string, number>;
+  confirmation_required: boolean;
+  confirmation_id: string;
+  active_session_count: number;
+  active_sessions_retain_revision: boolean;
+  effects: Array<{
+    flow_id: string;
+    package_id: string;
+    target_id: string;
+    scope: string;
+    mutation: "admission_state_only" | "installer_owned_material_only" | "user_owned_definition_only";
+    active_session_count: number;
+    content_free: true;
+  }>;
+  approval_required: true;
+  content_free: true;
+}
+
+export interface IntegrationLifecyclePreviewResponse {
+  operation: IntegrationLifecycleOperation;
+  plan: IntegrationLifecyclePlan;
+}
+
+export interface IntegrationLifecycleMutationResponse {
+  operation: IntegrationLifecycleOperation;
+  receipt: {
+    id: string;
+    action: IntegrationLifecycleAction;
+    outcome: string;
+    completed_flow_ids: string[];
+    recovery_actions: string[];
+    content_free: true;
+  };
 }
 
 export interface IntegrationFlowPlan {
@@ -152,6 +339,7 @@ export interface IntegrationFlowPlan {
     license: string;
     checksum: string;
     immutable_ref: string;
+    source_provenance?: IntegrationSourceProvenance | null;
   };
   target: { id: string; scope: string; execution_owner: string; executable: boolean };
   risk: { decision: string; install_authorized: false };
@@ -161,7 +349,12 @@ export interface IntegrationFlowPlan {
     user_home: boolean;
     requirements: Array<{ id: string; type: string; reason: string }>;
   };
-  configuration: { diff: string[]; restart_required: boolean; fields: string[] };
+  configuration: {
+    diff: string[];
+    restart_required: boolean;
+    fields: string[];
+    preview: Record<string, unknown>;
+  };
   verification_steps: string[];
   rollback_steps: string[];
   handoff_reason: string | null;
@@ -263,12 +456,30 @@ export function automationSurfaceOptions() {
   return queryOptions({
     queryKey: remainingRequestKeys.automation(),
     queryFn: async ({ signal }) => {
-      const [agents, workflows, schedules] = await Promise.all([
+      const [agents, workflows, automation] = await Promise.all([
         fetchCockpit<unknown>("/api/agents", signal),
         fetchCockpit<unknown>("/api/workflows", signal),
-        fetchCockpit<unknown>("/api/schedules", signal),
+        fetchCockpit<unknown>("/api/automation", signal),
       ]);
-      return projectAutomation(agents, workflows, schedules);
+      return projectAutomation(agents, workflows, automation);
+    },
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (
+        data === undefined ||
+        !data.workerOnline ||
+        data.workflows.some((item) =>
+          ["queued", "running", "waiting_approval"].includes(
+            item.lastRunStatus ?? "",
+          ),
+        ) ||
+        data.schedules.some((item) =>
+          ["queued", "running"].includes(item.status),
+        )
+      ) {
+        return 2_000;
+      }
+      return false;
     },
     staleTime: 10_000,
   });

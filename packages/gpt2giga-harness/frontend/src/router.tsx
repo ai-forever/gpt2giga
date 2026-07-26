@@ -8,6 +8,7 @@ import {
 
 import { AppShell } from "./AppShell";
 import { validateOperationalSearch } from "./operational-navigation";
+import { validateWorkbenchEntrySearch } from "./session-creation";
 
 const rootRoute = createRootRoute({ component: AppShell });
 
@@ -30,8 +31,18 @@ const integrationsComponent = lazyRouteComponent(() => import("./surfaces/integr
 
 const routes = [
   cockpitRoute,
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/work", component: workbenchComponent }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/work/$sessionId", component: workbenchComponent }),
+  createRoute({
+    component: workbenchComponent,
+    getParentRoute: () => rootRoute,
+    path: "/cockpit-v2/work",
+    validateSearch: validateWorkbenchEntrySearch,
+  }),
+  createRoute({
+    component: workbenchComponent,
+    getParentRoute: () => rootRoute,
+    path: "/cockpit-v2/work/$sessionId",
+    validateSearch: validateWorkbenchEntrySearch,
+  }),
   createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/runs", component: runsComponent }),
   createRoute({ getParentRoute: () => rootRoute, path: "/cockpit-v2/runs/$runId", component: runsComponent }),
   createRoute({ beforeLoad: () => { throw redirect({ to: "/cockpit-v2/automation/workflows" }); }, getParentRoute: () => rootRoute, path: "/cockpit-v2/automation" }),

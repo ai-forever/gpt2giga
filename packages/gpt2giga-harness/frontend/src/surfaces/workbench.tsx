@@ -5,10 +5,12 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import {
+  type AttachmentSummary,
   type AttachmentUploadResponse,
   deleteCockpit,
   type EnvironmentCommitApplyResponse,
@@ -25,7 +27,6 @@ import {
   fetchCockpit,
   type FullMessageResponse,
   mutateCockpit,
-  type NativeStartResponse,
   patchCockpit,
   type RunPreflightResponse,
   type RunStartResponse,
@@ -33,6 +34,7 @@ import {
   type TokenUsageProjection,
   withQuery,
 } from "../api";
+import { composerAttachments, isPreviewableImage } from "../attachment-model";
 import { MessageMarkdown } from "../message-markdown";
 import { generatedFileProjection } from "../generated-image";
 import { projectEnvironment, type EnvironmentView } from "../environment-model";
@@ -44,9 +46,10 @@ import {
   type MessageActionKind,
   type ResolvedMessageAction,
 } from "../message-actions";
-import { message } from "../messages";
+import { message, type MessageKey } from "../messages";
 import { usePreferences } from "../preferences-context";
 import type { LocalePreference } from "../preferences";
+import { integrationFlowOptions } from "../remaining-request-graph";
 import {
   environmentOptions,
   requestKeys,
@@ -66,7 +69,22 @@ import {
 } from "../request-graph";
 import { observeNativeProcess } from "../native-process-stream";
 import { observeSessionUpdates } from "../session-update-stream";
-import { sessionCreationPayload, type SessionCreationIntent } from "../session-creation";
+import {
+  sessionCreationPayload,
+  shouldAutomaticallyCreateSession,
+  type SessionCreationIntent,
+} from "../session-creation";
+import {
+  promptWithSkillMentions,
+  skillMentionOptions,
+  type SkillMention,
+} from "../skill-mentions";
+import {
+  admittedBuiltinToolSelection,
+  composerToolCatalog,
+  type ComposerToolCategory,
+  type ComposerToolOption,
+} from "../tool-selection";
 import {
   formatTimestamp,
   latestRun,
@@ -86,12 +104,15 @@ import {
 } from "../workbench-model";
 import {
   activeAtQuery,
-  availableExecutionTransports,
+  admittedExecutionTransport,
   consumeAtQuery,
-  type ExecutionTransport,
-  invocationModeForTransport,
-  normalizeExecutionSelection,
+  harnessesForWorkbenchKind,
+  legacyModeForProductSelection,
+  normalizeProductSelection,
   permissionSimulationHighlights,
+  resolveLegacyProductSelection,
+  type ProductExecutionSelection,
+  type WorkbenchKind,
 } from "../workbench-execution";
 
 const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
@@ -106,17 +127,31 @@ type MessageAction = {
 type RunConfig = { apiMode: string; harnessId: string; mode: string; model: string };
 type ReasoningEffort = "high" | "low" | "medium";
 type AdvancedRunConfig = {
-  capability: string;
   dryRun: boolean;
-  executionTransport: ExecutionTransport;
   permissionProfile: string;
-  stream: boolean;
   workspacePolicy: string;
 };
 
+function ArchiveSessionIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M4 7h16M6 7v12h12V7M9 11h6" />
+      <path d="M5 4h14v3H5z" />
+    </svg>
+  );
+}
+
+function DeleteSessionIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+    </svg>
+  );
+}
+
 type StartResult =
   | { kind: "preview"; report: RunPreflightResponse["preflight"] }
-  | { kind: "run"; processId?: string; run: RunStartResponse["run"] };
+  | { kind: "run"; run: RunStartResponse["run"] };
 
 const builtinToolLabels: Record<string, string> = {
   code_interpreter: "Code interpreter",
@@ -124,6 +159,13 @@ const builtinToolLabels: Record<string, string> = {
   model_3d_generate: "3D generation",
   url_content_extraction: "URL content",
   web_search: "Web search",
+};
+const toolCategoryMessageKeys: Record<ComposerToolCategory, MessageKey> = {
+  agent: "toolCategoryAgent",
+  gigachat: "toolCategoryGigachat",
+  mcp: "toolCategoryMcp",
+  plugin: "toolCategoryPlugin",
+  skill: "toolCategorySkill",
 };
 const emptyStringList: readonly string[] = [];
 const activeRunStatusGroups = new Set(["approval-needed", "blocked", "queued", "running"]);
@@ -398,6 +440,7 @@ function EnvironmentCard({
 
 export function WorkbenchSurface() {
   const params = useParams({ strict: false });
+  const routeSearch = useSearch({ strict: false });
   const sessionId =
     "sessionId" in params && typeof params.sessionId === "string"
       ? params.sessionId
@@ -412,6 +455,7 @@ export function WorkbenchSurface() {
   const [leftWidth, setLeftWidth] = useState(() => loadWidth("left", 264));
   const [rightWidth, setRightWidth] = useState(() => loadWidth("right", 320));
   const [prompt, setPrompt] = useState("");
+  const [selectedSkills, setSelectedSkills] = useState<SkillMention[]>([]);
   const [environmentCommitDraft, setEnvironmentCommitDraft] = useState<EnvironmentCommitDraft>({
     authorEmail: "",
     authorName: "",
@@ -432,22 +476,36 @@ export function WorkbenchSurface() {
   const [environmentPullRequestNotice, setEnvironmentPullRequestNotice] = useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const rememberedRunPreferences = useMemo(loadRunPreferences, []);
+  const rememberedProductSelection = useMemo(
+    () => resolveLegacyProductSelection(
+      rememberedRunPreferences.config.mode,
+      rememberedRunPreferences.config.harnessId === "direct-chat"
+        ? "direct_chat"
+        : "coding_agent",
+    ),
+    [rememberedRunPreferences],
+  );
   const [runConfig, setRunConfig] = useState<RunConfig>(rememberedRunPreferences.config);
+  const [productSelection, setProductSelection] = useState<ProductExecutionSelection>(
+    rememberedProductSelection.selection,
+  );
+  const [legacyModeWarning, setLegacyModeWarning] = useState<string | null>(
+    rememberedProductSelection.warning,
+  );
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
     rememberedRunPreferences.reasoningEffort,
   );
   const [advancedConfig, setAdvancedConfig] = useState<AdvancedRunConfig>({
-    capability: "chat_completions",
     dryRun: false,
-    executionTransport: "native_structured",
     permissionProfile: "interactive",
-    stream: true,
     workspacePolicy: "auto",
   });
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [builtinTools, setBuiltinTools] = useState<string[]>([]);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const [toolPickerOpen, setToolPickerOpen] = useState(false);
+  const [toolSearch, setToolSearch] = useState("");
   const [draggingFiles, setDraggingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -458,7 +516,6 @@ export function WorkbenchSurface() {
     previewReport?.permission_simulation,
   );
   const [startedRuns, setStartedRuns] = useState<Record<string, string>>({});
-  const [startedNativeProcesses, setStartedNativeProcesses] = useState<Record<string, string>>({});
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => new Set());
   const [completionNotices, setCompletionNotices] = useState<CompletionNotice[]>([]);
   const previousRunStatuses = useRef(new Map<string, string>());
@@ -475,6 +532,7 @@ export function WorkbenchSurface() {
   const harnesses = useQuery(harnessesOptions());
   const models = useQuery(modelsOptions(runConfig.apiMode));
   const settings = useQuery(settingsOptions());
+  const integrations = useQuery(integrationFlowOptions());
   const overview = useQuery({
     ...sessionOverviewOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
@@ -501,6 +559,11 @@ export function WorkbenchSurface() {
     ...workspaceFilesOptions(sessionId ?? "pending", deferredAtQuery),
     enabled: sessionId !== undefined && atQuery !== null,
   });
+  const availableSkillMentions = skillMentionOptions(
+    integrations.data,
+    runConfig.harnessId,
+    deferredAtQuery,
+  ).filter((skill) => !selectedSkills.some((selected) => selected.id === skill.id));
   const events = useQuery({
     ...sessionEventsOptions(sessionId ?? "pending"),
     enabled: sessionId !== undefined,
@@ -509,9 +572,14 @@ export function WorkbenchSurface() {
     () => projectActiveMessageTimeline(messages.data?.messages ?? []),
     [messages.data?.messages],
   );
-  const latestUserMessageId = advancedConfig.executionTransport === "native_terminal"
-    ? undefined
-    : latestEditableUserMessageId(activeMessages);
+  const draftAttachments = useMemo(
+    () => composerAttachments(
+      attachments.data?.attachments ?? [],
+      messages.data?.messages ?? [],
+    ),
+    [attachments.data?.attachments, messages.data?.messages],
+  );
+  const latestUserMessageId = latestEditableUserMessageId(activeMessages);
   const visibleMessages = useMemo(
     () => timelineWhileEditing(activeMessages, editingMessageId),
     [activeMessages, editingMessageId],
@@ -519,6 +587,7 @@ export function WorkbenchSurface() {
 
   useEffect(() => {
     setEditingMessageId(undefined);
+    setSelectedSkills([]);
   }, [sessionId]);
 
   useEffect(() => {
@@ -532,12 +601,20 @@ export function WorkbenchSurface() {
         mode: defaults.mode,
         model: defaults.default_model ?? "",
       });
+      setProductSelection({
+        authority: defaults.authority,
+        intent: defaults.task_intent,
+        kind: defaults.default_harness_id === "direct-chat"
+          ? "direct_chat"
+          : "coding_agent",
+      });
+      setLegacyModeWarning(
+        settings.data.harness_defaults.compatibility.mode?.warning ?? null,
+      );
     }
     setAdvancedConfig((current) => ({
       ...current,
-      executionTransport: defaults.execution_transport as ExecutionTransport,
       permissionProfile: defaults.permission_profile,
-      stream: defaults.stream,
       workspacePolicy: defaults.workspace_policy,
     }));
   }, [sessionId, settings.data]);
@@ -580,12 +657,32 @@ export function WorkbenchSurface() {
       mode: session.default_mode ?? current.mode,
       model: session.default_model ?? current.model,
     }));
+    setProductSelection((current) => {
+      const retained = session.workbench_selection;
+      if (retained !== undefined) {
+        setLegacyModeWarning(retained.compatibility_warning);
+        return {
+          authority: retained.authority,
+          intent: retained.intent,
+          kind: retained.kind,
+        };
+      }
+      const legacy = resolveLegacyProductSelection(
+        session.default_mode,
+        session.default_harness_id === "direct-chat"
+          ? "direct_chat"
+          : current.kind,
+      );
+      setLegacyModeWarning(legacy.warning);
+      return legacy.selection;
+    });
   }, [
     overview.data?.session.default_api_mode,
     overview.data?.session.default_harness_id,
     overview.data?.session.default_mode,
     overview.data?.session.default_model,
     overview.data?.session.id,
+    overview.data?.session.workbench_selection,
   ]);
 
   useEffect(() => {
@@ -619,6 +716,7 @@ export function WorkbenchSurface() {
       ),
     onSuccess: ({ session }) => {
       setPrompt("");
+      setSelectedSkills([]);
       setBuiltinTools([]);
       void navigate({
         params: { sessionId: session.id },
@@ -740,12 +838,12 @@ export function WorkbenchSurface() {
 
   useEffect(() => {
     if (
-      sessionId !== undefined
+      !shouldAutomaticallyCreateSession(sessionId, routeSearch)
       || automaticSessionRequested.current
     ) return;
     automaticSessionRequested.current = true;
     createSessionMutate({ kind: "backend-defaults" });
-  }, [createSessionMutate, sessionId]);
+  }, [createSessionMutate, routeSearch, sessionId]);
 
   useEffect(() => {
     if (sessionId === undefined || !overview.isSuccess) return;
@@ -761,9 +859,9 @@ export function WorkbenchSurface() {
       }
       const payload = {
         api_mode: runConfig.apiMode,
-        attachment_ids: attachments.data?.attachments.map((attachment) => attachment.id) ?? [],
-        builtin_tools: runConfig.apiMode === "v2" ? builtinTools : [],
-        capability: advancedConfig.capability,
+        attachment_ids: draftAttachments.map((attachment) => attachment.id),
+        authority: productSelection.authority,
+        builtin_tools: admittedBuiltinTools,
         extra: {
           ...(editingMessageId === undefined ? {} : { edit_message_id: editingMessageId }),
           generate_session_title: session.title === "Untitled session",
@@ -775,14 +873,16 @@ export function WorkbenchSurface() {
             : {}),
         },
         harness_id: runConfig.harnessId,
-        execution_transport: advancedConfig.executionTransport,
-        invocation_mode: invocationModeForTransport(advancedConfig.executionTransport),
-        mode: runConfig.mode,
         model: runConfig.model.trim() || null,
         permission_profile: advancedConfig.permissionProfile,
-        prompt: prompt.trim(),
+        prompt: promptWithSkillMentions(
+          prompt,
+          selectedSkills,
+          runConfig.harnessId,
+        ),
         session_id: sessionId,
-        stream: advancedConfig.stream,
+        task_intent: productSelection.intent,
+        workbench_kind: productSelection.kind,
         workspace: session.workspace_bound ? undefined : ".",
         workspace_policy: advancedConfig.workspacePolicy,
       };
@@ -792,19 +892,6 @@ export function WorkbenchSurface() {
           dry_run: true,
         });
         return { kind: "preview", report: response.preflight };
-      }
-      if (advancedConfig.executionTransport === "native_terminal") {
-        if (editingMessageId !== undefined) {
-          throw new Error("Editing retained messages is unavailable for native terminal sessions.");
-        }
-        const response = await mutateCockpit<NativeStartResponse>(
-          "/api/native/processes/start",
-          { ...payload, action: "start" },
-        );
-        if (response.run === undefined || response.process === undefined) {
-          throw new Error("Native execution requires approval before it can start.");
-        }
-        return { kind: "run", processId: response.process.id, run: response.run };
       }
       const response = await mutateCockpit<RunStartResponse>(
         `/api/sessions/${encodeURIComponent(sessionId)}/run/start`,
@@ -820,16 +907,11 @@ export function WorkbenchSurface() {
       const { run } = result;
       setPreviewReport(null);
       setStartedRuns((current) => ({ ...current, [run.session_id]: run.id }));
-      if (result.processId !== undefined) {
-        setStartedNativeProcesses((current) => ({
-          ...current,
-          [run.id]: result.processId!,
-        }));
-      }
       previousRunStatuses.current.set(run.id, run.status);
       await refreshSessionAfterRunStart(queryClient, run.session_id);
       setEditingMessageId(undefined);
       setPrompt("");
+      setSelectedSkills([]);
     },
   });
   const messageAction = useMutation({
@@ -964,7 +1046,13 @@ export function WorkbenchSurface() {
         delete next[id];
         return next;
       });
-      await navigate({ to: "/cockpit-v2/work" });
+      if (id === sessionId) {
+        await navigate({
+          replace: true,
+          search: { fromSessionAction: true },
+          to: "/cockpit-v2/work",
+        });
+      }
       queryClient.removeQueries({ queryKey: requestKeys.sessionScope(id) });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: requestKeys.sessionIndex() }),
@@ -1046,22 +1134,87 @@ export function WorkbenchSurface() {
   const selectedHarness = harnesses.data?.harnesses.find(
     (harness) => harness.spec.id === runConfig.harnessId,
   );
-  const executionTransports = availableExecutionTransports(selectedHarness);
-  const selectedTransport = selectedHarness?.workbench_transport?.options.find(
-    (option) => option.id === advancedConfig.executionTransport,
+  const selectableHarnesses = harnessesForWorkbenchKind(
+    harnesses.data?.harnesses ?? [],
+    productSelection.kind,
   );
+  const admittedTransport = admittedExecutionTransport(
+    selectedHarness,
+    productSelection.kind,
+  );
+  const selectedTransport = selectedHarness?.workbench_transport?.options.find(
+    (option) => option.id === admittedTransport,
+  );
+  const selectedAdmission = selectedHarness?.workbench_admission?.modes.find(
+    (mode) => mode.id === productSelection.kind,
+  );
+  const authorityLimitsChange =
+    productSelection.intent === "change"
+    && productSelection.authority === "read_only";
+  const admissionStatus = selectedAdmission?.status === "blocked"
+    ? "blocked"
+    : selectedAdmission?.status === "degraded" || authorityLimitsChange
+      ? "degraded"
+      : "available";
+  const admissionReasons = [
+    ...(selectedAdmission?.why ?? []),
+    ...(authorityLimitsChange
+      ? ["change_intent_limited_by_read_only_authority"]
+      : []),
+  ];
   const providerHandoffActions = [
     ...(selectedHarness?.provider_handoff?.available_actions ?? []),
     ...(selectedHarness?.provider_handoff?.degraded_actions ?? []),
   ];
-  const capabilityCopy = advancedConfig.capability === "agent_cli"
+  const capabilityCopy = productSelection.kind === "coding_agent"
     ? { label: message(locale, "codingAgent"), detail: message(locale, "codingAgentHint") }
     : { label: message(locale, "directChat"), detail: message(locale, "directChatHint") };
   const supportedBuiltinTools = selectedHarness?.spec.supported_builtin_tools ?? emptyStringList;
   const builtinToolsAvailable =
     runConfig.apiMode === "v2" &&
-    advancedConfig.executionTransport === "one_shot" &&
+    productSelection.kind === "direct_chat" &&
     supportedBuiltinTools.length > 0;
+  const admittedBuiltinTools = useMemo(
+    () => admittedBuiltinToolSelection(
+      builtinTools,
+      supportedBuiltinTools,
+      runConfig.apiMode,
+      productSelection.kind,
+    ),
+    [builtinTools, productSelection.kind, runConfig.apiMode, supportedBuiltinTools],
+  );
+  const toolSkillMentions = useMemo(
+    () => skillMentionOptions(
+      integrations.data,
+      runConfig.harnessId,
+      toolSearch,
+    ),
+    [integrations.data, runConfig.harnessId, toolSearch],
+  );
+  const toolGroups = useMemo(
+    () => composerToolCatalog({
+      apiMode: runConfig.apiMode,
+      builtinTools: admittedBuiltinTools,
+      harnessId: runConfig.harnessId,
+      inventory: integrations.data,
+      kind: productSelection.kind,
+      query: toolSearch,
+      selectedSkillIds: new Set(selectedSkills.map((skill) => skill.id)),
+      skillMentions: toolSkillMentions,
+      supportedBuiltinTools,
+    }),
+    [
+      admittedBuiltinTools,
+      integrations.data,
+      productSelection.kind,
+      runConfig.apiMode,
+      runConfig.harnessId,
+      selectedSkills,
+      supportedBuiltinTools,
+      toolSearch,
+      toolSkillMentions,
+    ],
+  );
   const modelSuggestions = models.data?.models ?? [];
   const streamPresentation = useMemo(
     () => projectWorkbenchStream(
@@ -1102,18 +1255,22 @@ export function WorkbenchSurface() {
   );
   const selectedRun = (runs.data?.runs ?? []).find((run) => run.id === selectedRunId);
   const selectedNativeProcessId =
-    (selectedRunId === undefined ? undefined : startedNativeProcesses[selectedRunId]) ??
-    selectedRun?.native_process_id ??
-    undefined;
+    selectedRun?.native_process_id ?? undefined;
 
   useEffect(() => {
     const supported = new Set(supportedBuiltinTools);
-    setBuiltinTools((current) => current.filter((tool) => supported.has(tool)));
-    setAdvancedConfig((current) => ({
-      ...current,
-      ...normalizeExecutionSelection(selectedHarness, current),
-    }));
-  }, [runConfig.harnessId, selectedHarness, supportedBuiltinTools]);
+    setBuiltinTools((current) => (
+      builtinToolsAvailable
+        ? current.filter((tool) => supported.has(tool))
+        : []
+    ));
+    setProductSelection((current) => normalizeProductSelection(selectedHarness, current));
+  }, [
+    builtinToolsAvailable,
+    runConfig.harnessId,
+    selectedHarness,
+    supportedBuiltinTools,
+  ]);
 
   useEffect(() => {
     setAtSelection(0);
@@ -1209,10 +1366,88 @@ export function WorkbenchSurface() {
     setRunConfig((current) => ({ ...current, [key]: value }));
     if (persistKey !== undefined) saveRunConfig.mutate({ [persistKey]: value || null });
   };
+  const updateProductSelection = (
+    patch: Partial<ProductExecutionSelection>,
+  ) => {
+    const next = { ...productSelection, ...patch };
+    setProductSelection(next);
+    setLegacyModeWarning(null);
+    setRunConfig((current) => ({
+      ...current,
+      mode: legacyModeForProductSelection(next),
+    }));
+    saveRunConfig.mutate({ workbench_selection: next });
+  };
+  const selectWorkbenchKind = (kind: WorkbenchKind) => {
+    const compatibleHarnesses = harnessesForWorkbenchKind(
+      harnesses.data?.harnesses ?? [],
+      kind,
+    ).filter(
+      (harness) => harness.availability?.status !== "unavailable",
+    );
+    const preferredHarnessId =
+      kind === "coding_agent" ? "codex-cli" : "direct-chat";
+    const compatibleHarness =
+      compatibleHarnesses?.find(
+        (harness) => harness.spec.id === runConfig.harnessId,
+      )
+      ?? compatibleHarnesses?.find(
+        (harness) => harness.spec.id === preferredHarnessId,
+      )
+      ?? compatibleHarnesses?.[0];
+    setProductSelection((current) => ({ ...current, kind }));
+    if (
+      compatibleHarness !== undefined
+      && compatibleHarness.spec.id !== runConfig.harnessId
+    ) {
+      setConfig(
+        "harnessId",
+        compatibleHarness.spec.id,
+        "default_harness_id",
+      );
+    }
+  };
   const workspaceFileCandidates = workspaceFiles.data?.files ?? [];
+  const atCandidates = [
+    ...availableSkillMentions.map((skill) => ({ kind: "skill" as const, skill })),
+    ...workspaceFileCandidates.map((file) => ({ kind: "file" as const, file })),
+  ];
   const chooseWorkspaceFile = (path: string) => {
     if (atQuery === null || attachWorkspaceFile.isPending) return;
     attachWorkspaceFile.mutate({ path, token: atQuery });
+  };
+  const chooseSkill = (skill: SkillMention) => {
+    if (atQuery === null) return;
+    const nextPrompt = consumeAtQuery(prompt, atQuery);
+    setSelectedSkills((current) => [...current, skill]);
+    setPrompt(nextPrompt);
+    setComposerCaret(nextPrompt.length);
+    setAtSelection(0);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  };
+  const chooseAtCandidate = (index: number) => {
+    const candidate = atCandidates[index];
+    if (candidate?.kind === "skill") chooseSkill(candidate.skill);
+    if (candidate?.kind === "file") chooseWorkspaceFile(candidate.file.path);
+  };
+  const toggleComposerTool = (option: ComposerToolOption) => {
+    if (!option.selectable || option.value === null) return;
+    const value = option.value;
+    if (option.category === "gigachat") {
+      setBuiltinTools((current) => (
+        current.includes(value)
+          ? current.filter((tool) => tool !== value)
+          : [...current, value]
+      ));
+      return;
+    }
+    const skill = toolSkillMentions.find((candidate) => candidate.id === value);
+    if (skill === undefined) return;
+    setSelectedSkills((current) => (
+      current.some((candidate) => candidate.id === skill.id)
+        ? current.filter((candidate) => candidate.id !== skill.id)
+        : [...current, skill]
+    ));
   };
 
   return (
@@ -1235,7 +1470,10 @@ export function WorkbenchSurface() {
           <button
             className="new-session-button"
             disabled={createSession.isPending || !runConfig.model}
-            onClick={() => createSession.mutate({ config: runConfig, kind: "configured" })}
+            onClick={() => createSession.mutate({
+              config: { ...runConfig, productSelection },
+              kind: "configured",
+            })}
             type="button"
           >
             <span aria-hidden="true">＋</span>
@@ -1269,7 +1507,7 @@ export function WorkbenchSurface() {
                   const running = runState !== undefined && activeRunStatusGroups.has(runState.status);
                   const unread = unreadSessionIds.has(session.id);
                   return (
-                    <Link
+                    <div
                       className={[
                         "session-row",
                         session.id === sessionId ? "selected" : "",
@@ -1277,29 +1515,68 @@ export function WorkbenchSurface() {
                         unread ? "unread" : "",
                       ].filter(Boolean).join(" ")}
                       key={session.id}
-                      onClick={() => {
-                        setUnreadSessionIds((current) => {
-                          if (!current.has(session.id)) return current;
-                          const next = new Set(current);
-                          next.delete(session.id);
-                          return next;
-                        });
-                      }}
-                      params={{ sessionId: session.id }}
-                      to="/cockpit-v2/work/$sessionId"
                     >
-                      <strong>{session.title}</strong>
-                      <span>
-                        {session.default_harness_id ?? "echo"} · {session.default_api_mode ?? "v2"}
-                      </span>
-                      {running ? (
-                        <span aria-label={message(locale, "running")} className="session-status-icon running-spinner" />
-                      ) : unread ? (
-                        <span aria-label={message(locale, "unreadSession")} className="session-status-icon unread-dot" />
-                      ) : (
-                        <time>{formatTimestamp(session.updated_at, locale)}</time>
-                      )}
-                    </Link>
+                      <Link
+                        className="session-row-link"
+                        onClick={() => {
+                          setUnreadSessionIds((current) => {
+                            if (!current.has(session.id)) return current;
+                            const next = new Set(current);
+                            next.delete(session.id);
+                            return next;
+                          });
+                        }}
+                        params={{ sessionId: session.id }}
+                        to="/cockpit-v2/work/$sessionId"
+                      >
+                        <strong>{session.title}</strong>
+                        <span>
+                          {session.default_harness_id ?? "echo"} · {session.default_api_mode ?? "v2"}
+                        </span>
+                        {running ? (
+                          <span aria-label={message(locale, "running")} className="session-status-icon running-spinner" />
+                        ) : unread ? (
+                          <span aria-label={message(locale, "unreadSession")} className="session-status-icon unread-dot" />
+                        ) : (
+                          <time>{formatTimestamp(session.updated_at, locale)}</time>
+                        )}
+                      </Link>
+                      <div className="session-row-actions">
+                        <button
+                          aria-label={`${message(locale, "archiveSession")}: ${session.title}`}
+                          disabled={changeSession.isPending}
+                          onClick={() => {
+                            changeSession.reset();
+                            setSessionConfirmation({
+                              action: "archive",
+                              id: session.id,
+                              title: session.title,
+                            });
+                          }}
+                          title={message(locale, "archiveSession")}
+                          type="button"
+                        >
+                          <ArchiveSessionIcon />
+                        </button>
+                        <button
+                          aria-label={`${message(locale, "deleteSession")}: ${session.title}`}
+                          className="danger"
+                          disabled={changeSession.isPending}
+                          onClick={() => {
+                            changeSession.reset();
+                            setSessionConfirmation({
+                              action: "delete",
+                              id: session.id,
+                              title: session.title,
+                            });
+                          }}
+                          title={message(locale, "deleteSession")}
+                          type="button"
+                        >
+                          <DeleteSessionIcon />
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </section>
@@ -1322,9 +1599,18 @@ export function WorkbenchSurface() {
       <main className="work-canvas">
         {sessionId === undefined ? (
           <div className="empty-work-canvas">
-            <span className="opening-session-spinner" aria-hidden="true" />
-            <h1>{message(locale, "openingSession")}</h1>
-            {createSession.isError ? (
+            {routeSearch.fromSessionAction === true ? (
+              <>
+                <h1>{message(locale, "noSessionSelected")}</h1>
+                <p>{message(locale, "noSessionSelectedDescription")}</p>
+              </>
+            ) : (
+              <>
+                <span className="opening-session-spinner" aria-hidden="true" />
+                <h1>{message(locale, "openingSession")}</h1>
+              </>
+            )}
+            {routeSearch.fromSessionAction !== true && createSession.isError ? (
               <button
                 onClick={() => createSession.mutate({ kind: "backend-defaults" })}
                 type="button"
@@ -1443,6 +1729,9 @@ export function WorkbenchSurface() {
                     {item.reasoning?.text ? (
                       <ReasoningDisclosure text={item.reasoning.text} locale={locale} />
                     ) : null}
+                    {item.attachments && item.attachments.length > 0 ? (
+                      <AttachmentGallery attachments={item.attachments} locale={locale} />
+                    ) : null}
                     <MessageMarkdown source={item.content.text} />
                     {item.content.truncated ? <span>{message(locale, "boundedPreview")}</span> : null}
                   </article>
@@ -1501,7 +1790,7 @@ export function WorkbenchSurface() {
               className={[
                 "composer",
                 draggingFiles ? "dragging-files" : "",
-                modelMenuOpen || plusMenuOpen ? "popover-open" : "",
+                modelMenuOpen || plusMenuOpen || toolPickerOpen ? "popover-open" : "",
               ].filter(Boolean).join(" ")}
               onDragEnter={(event) => {
                 event.preventDefault();
@@ -1524,6 +1813,12 @@ export function WorkbenchSurface() {
                 if (prompt.trim() && !startRun.isPending) startRun.mutate();
               }}
             >
+              {legacyModeWarning === null ? null : (
+                <div className="preview-execution blocked" role="status">
+                  <strong>{message(locale, "legacyModeWarningTitle")}</strong>
+                  <span>{message(locale, "legacyModeWarning")}</span>
+                </div>
+              )}
               {previewReport === null ? null : (
                 <div
                   className={previewReport.hard_block ? "preview-execution blocked" : "preview-execution"}
@@ -1545,24 +1840,108 @@ export function WorkbenchSurface() {
                   )}
                 </div>
               )}
-              {attachments.data?.attachments.length ? (
-                <div className="attachment-chips" aria-label={message(locale, "attachedFiles")}>
-                  {attachments.data.attachments.map((attachment) => (
-                    <span className="attachment-chip" key={attachment.id}>
-                      <span aria-hidden="true">{attachment.mime_type?.startsWith("image/") ? "▧" : "◇"}</span>
-                      <span title={attachment.workspace_path ?? attachment.filename}>
-                        {attachment.workspace_path ? `@${attachment.workspace_path}` : attachment.filename}
-                      </span>
-                      <small>{formatBytes(attachment.size_bytes)}</small>
+              {selectedSkills.length > 0 || admittedBuiltinTools.length > 0 ? (
+                <div className="attachment-chips" aria-label={message(locale, "selectedTools")}>
+                  {admittedBuiltinTools.map((tool) => (
+                    <span className="attachment-chip tool-selection-chip" key={tool}>
+                      <span aria-hidden="true">⌁</span>
+                      <span>{builtinToolLabels[tool] ?? tool}</span>
+                      <small>GigaChat</small>
                       <button
-                        aria-label={`${message(locale, "removeAttachment")} ${attachment.filename}`}
-                        disabled={removeAttachment.isPending}
-                        onClick={() => removeAttachment.mutate(attachment.id)}
+                        aria-label={`${message(locale, "removeTool")} ${builtinToolLabels[tool] ?? tool}`}
+                        onClick={() => setBuiltinTools((current) => current.filter((item) => item !== tool))}
+                        type="button"
+                      >×</button>
+                    </span>
+                  ))}
+                  {selectedSkills.map((skill) => (
+                    <span className="attachment-chip skill-mention-chip" key={skill.id}>
+                      <span aria-hidden="true">✦</span>
+                      <span title={`${skill.source} · ${skill.nativeName}`}>{skill.mention}</span>
+                      <small>{skill.source}</small>
+                      <button
+                        aria-label={`${message(locale, "removeTool")} ${skill.mention}`}
+                        onClick={() => setSelectedSkills((current) => current.filter((item) => item.id !== skill.id))}
                         type="button"
                       >×</button>
                     </span>
                   ))}
                 </div>
+              ) : null}
+              {draftAttachments.length > 0 ? (
+                <AttachmentGallery
+                  attachments={draftAttachments}
+                  locale={locale}
+                  onRemove={(attachmentId) => removeAttachment.mutate(attachmentId)}
+                  removePending={removeAttachment.isPending}
+                />
+              ) : null}
+              {toolPickerOpen ? (
+                <section
+                  aria-label={message(locale, "toolPickerTitle")}
+                  className="composer-tool-picker"
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setToolPickerOpen(false);
+                    }
+                  }}
+                  role="dialog"
+                >
+                  <header>
+                    <div>
+                      <strong>{message(locale, "toolPickerTitle")}</strong>
+                      <span>{message(locale, "toolPickerHint")}</span>
+                    </div>
+                    <button
+                      aria-label={message(locale, "close")}
+                      onClick={() => setToolPickerOpen(false)}
+                      type="button"
+                    >×</button>
+                  </header>
+                  <label className="tool-picker-search">
+                    <span className="sr-only">{message(locale, "searchTools")}</span>
+                    <input
+                      autoFocus
+                      onChange={(event) => setToolSearch(event.target.value)}
+                      placeholder={message(locale, "searchTools")}
+                      type="search"
+                      value={toolSearch}
+                    />
+                  </label>
+                  <div className="tool-picker-results">
+                    {toolGroups.length === 0 ? (
+                      <p className="empty-state">{message(locale, "noToolsFound")}</p>
+                    ) : toolGroups.map((group) => (
+                      <section className="tool-picker-group" key={group.category}>
+                        <h3>{message(locale, toolCategoryMessageKeys[group.category])}</h3>
+                        <div>
+                          {group.options.map((option) => (
+                            <button
+                              aria-disabled={!option.selectable}
+                              aria-pressed={option.selectable ? option.selected : undefined}
+                              className={[
+                                "tool-picker-option",
+                                option.selected ? "selected" : "",
+                                option.selectable ? "" : "unavailable",
+                              ].filter(Boolean).join(" ")}
+                              key={option.id}
+                              onClick={() => toggleComposerTool(option)}
+                              type="button"
+                            >
+                              <span aria-hidden="true">{option.selected ? "✓" : option.selectable ? "+" : "·"}</span>
+                              <span>
+                                <strong>{option.label}</strong>
+                                <small>{option.detail}</small>
+                                {option.reason === null ? null : <em>{option.reason}</em>}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                </section>
               ) : null}
               <textarea
                 aria-label={message(locale, "composerPlaceholder")}
@@ -1575,21 +1954,20 @@ export function WorkbenchSurface() {
                   setPreviewReport(null);
                 }}
                 onKeyDown={(event) => {
-                  if (atQuery !== null && workspaceFileCandidates.length > 0) {
+                  if (atQuery !== null && atCandidates.length > 0) {
                     if (event.key === "ArrowDown") {
                       event.preventDefault();
-                      setAtSelection((current) => (current + 1) % workspaceFileCandidates.length);
+                      setAtSelection((current) => (current + 1) % atCandidates.length);
                       return;
                     }
                     if (event.key === "ArrowUp") {
                       event.preventDefault();
-                      setAtSelection((current) => (current - 1 + workspaceFileCandidates.length) % workspaceFileCandidates.length);
+                      setAtSelection((current) => (current - 1 + atCandidates.length) % atCandidates.length);
                       return;
                     }
                     if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) {
                       event.preventDefault();
-                      const selected = workspaceFileCandidates[atSelection];
-                      if (selected !== undefined) chooseWorkspaceFile(selected.path);
+                      chooseAtCandidate(atSelection);
                       return;
                     }
                   }
@@ -1616,19 +1994,37 @@ export function WorkbenchSurface() {
               {atQuery === null ? null : (
                 <div className="workspace-file-picker" id="workspace-file-picker" role="listbox">
                   <div>
-                    <strong>{message(locale, "workspaceFiles")}</strong>
-                    <small>{message(locale, "workspaceFilesHint")}</small>
+                    <strong>{locale === "ru" ? "Skills, плагины и файлы" : "Skills, plugins, and files"}</strong>
+                    <small>
+                      {locale === "ru"
+                        ? "OpenAI bundled capabilities доступны здесь через @; для Codex Harness передаст нативный $-вызов."
+                        : "OpenAI bundled capabilities are selectable with @; Harness sends Codex the native $ invocation."}
+                    </small>
                   </div>
-                  {workspaceFiles.isPending ? (
-                    <span className="muted-copy">{message(locale, "loading")}</span>
-                  ) : workspaceFiles.isError ? (
-                    <span className="error-state" role="alert">{String(workspaceFiles.error)}</span>
-                  ) : workspaceFileCandidates.length === 0 ? (
-                    <span className="muted-copy">{message(locale, "noWorkspaceFiles")}</span>
-                  ) : workspaceFileCandidates.map((file, index) => (
+                  {availableSkillMentions.map((skill, index) => (
                     <button
                       aria-selected={index === atSelection}
                       className={index === atSelection ? "selected" : ""}
+                      key={skill.id}
+                      onClick={() => chooseSkill(skill)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      role="option"
+                      type="button"
+                    >
+                      <span>{skill.mention}</span>
+                      <small>{skill.source} · Skill</small>
+                    </button>
+                  ))}
+                  {workspaceFiles.isPending && workspaceFileCandidates.length === 0 ? (
+                    <span className="muted-copy">{message(locale, "loading")}</span>
+                  ) : workspaceFiles.isError ? (
+                    <span className="error-state" role="alert">{String(workspaceFiles.error)}</span>
+                  ) : workspaceFileCandidates.length === 0 && availableSkillMentions.length === 0 ? (
+                    <span className="muted-copy">{message(locale, "noWorkspaceFiles")}</span>
+                  ) : workspaceFileCandidates.map((file, index) => (
+                    <button
+                      aria-selected={index + availableSkillMentions.length === atSelection}
+                      className={index + availableSkillMentions.length === atSelection ? "selected" : ""}
                       key={file.path}
                       onClick={() => chooseWorkspaceFile(file.path)}
                       onMouseDown={(event) => event.preventDefault()}
@@ -1672,39 +2068,31 @@ export function WorkbenchSurface() {
                     <button aria-label={message(locale, "close")} onClick={() => setAdvancedOpen(false)} type="button">×</button>
                   </div>
                   <div className="advanced-config-grid">
-                    <label>
-                      <span>{message(locale, "executionTransport")}</span>
-                      <select
-                        onChange={(event) => {
-                          const executionTransport = event.target.value as ExecutionTransport;
-                          setAdvancedConfig((current) => ({
-                            ...current,
-                            executionTransport,
-                          }));
-                          if (executionTransport === "native_terminal") {
-                            setEditingMessageId(undefined);
-                          }
-                        }}
-                        value={advancedConfig.executionTransport}
-                      >
-                        {executionTransports.map((transport) => (
-                          <option key={transport} value={transport}>
-                            {message(locale, transport === "native_structured" ? "nativeStructured" : transport === "native_terminal" ? "nativeTerminal" : "oneShot")}
-                          </option>
-                        ))}
-                      </select>
-                      {selectedTransport?.blocker ? (
-                        <small className="transport-remediation">
-                          <span>{selectedTransport.detail}</span>
-                          {selectedTransport.remediation ? <code>{selectedTransport.remediation}</code> : null}
-                        </small>
-                      ) : null}
-                    </label>
+                    <div className="capability-summary">
+                      <span>{message(locale, "advancedDiagnostics")}</span>
+                      <strong>{message(locale, "whyThisMode")}</strong>
+                      <small>{selectedTransport?.detail ?? message(locale, "fastApiAuthority")}</small>
+                      <code>{admittedTransport}</code>
+                      {admissionReasons.map((reason) => (
+                        <small key={reason}>{reason.replaceAll("_", " ")}</small>
+                      ))}
+                    </div>
                     <div className="capability-summary">
                       <span>{message(locale, "capability")}</span>
                       <strong>{capabilityCopy.label}</strong>
                       <small>{capabilityCopy.detail}</small>
                     </div>
+                    <label>
+                      <span>{message(locale, "apiMode")}</span>
+                      <select
+                        disabled={selectedHarness?.spec.supports_api_mode_selection === false}
+                        onChange={(event) => setConfig("apiMode", event.target.value, "default_api_mode")}
+                        value={runConfig.apiMode}
+                      >
+                        <option value="v2">/v2</option>
+                        <option value="v1">/v1</option>
+                      </select>
+                    </label>
                     <label>
                       <span>{message(locale, "workspacePolicy")}</span>
                       <select
@@ -1734,34 +2122,8 @@ export function WorkbenchSurface() {
                       <input checked={advancedConfig.dryRun} onChange={(event) => setAdvancedConfig((current) => ({ ...current, dryRun: event.target.checked }))} type="checkbox" />
                       <span><strong>{message(locale, "previewExecution")}</strong><small>{message(locale, "previewExecutionHint")}</small></span>
                     </label>
-                    <label>
-                      <input checked={advancedConfig.stream} onChange={(event) => setAdvancedConfig((current) => ({ ...current, stream: event.target.checked }))} type="checkbox" />
-                      <span><strong>{message(locale, "streamResponse")}</strong></span>
-                    </label>
                   </fieldset>
-                  <fieldset className="builtin-tools-panel">
-                    <legend>{message(locale, "builtinTools")}</legend>
-                    <div>
-                      {Object.entries(builtinToolLabels).map(([tool, label]) => (
-                        <label className="builtin-tool-choice" key={tool}>
-                          <input
-                            checked={builtinTools.includes(tool)}
-                            disabled={!builtinToolsAvailable || !supportedBuiltinTools.includes(tool)}
-                            onChange={(event) => setBuiltinTools((current) => event.target.checked
-                              ? [...current, tool]
-                              : current.filter((item) => item !== tool))}
-                            type="checkbox"
-                          />
-                          <span>{label}</span>
-                        </label>
-                      ))}
-                    </div>
-                    <p>
-                      {builtinToolsAvailable
-                        ? message(locale, "builtinToolsHint")
-                        : message(locale, "builtinToolsUnavailable")}
-                    </p>
-                  </fieldset>
+                  <p className="runtime-owned-copy">{message(locale, "streamRuntimeOwned")}</p>
                 </section>
               ) : null}
               <div className="composer-footer">
@@ -1796,13 +2158,30 @@ export function WorkbenchSurface() {
                             <span aria-hidden="true">◇</span>
                             <span><strong>{message(locale, "attachFiles")}</strong><small>{message(locale, "attachFilesHint")}</small></span>
                           </button>
-                          <button onClick={() => { setPlusMenuOpen(false); setAdvancedOpen(true); }} role="menuitem" type="button">
+                          <button onClick={() => {
+                            setPlusMenuOpen(false);
+                            setToolPickerOpen(true);
+                            setToolSearch("");
+                          }} role="menuitem" type="button">
                             <span aria-hidden="true">✦</span>
-                            <span><strong>{message(locale, "builtinTools")}</strong><small>{message(locale, "builtinToolsMenuHint")}</small></span>
+                            <span><strong>{message(locale, "toolsAndIntegrations")}</strong><small>{message(locale, "toolPickerMenuHint")}</small></span>
                           </button>
                         </div>
                       ) : null}
                     </div>
+                    <label className="compact-control">
+                      <span>{message(locale, "taskType")}</span>
+                      <select
+                        aria-label={message(locale, "taskType")}
+                        onChange={(event) => selectWorkbenchKind(
+                          event.target.value as WorkbenchKind,
+                        )}
+                        value={productSelection.kind}
+                      >
+                        <option value="coding_agent">{message(locale, "codingAgent")}</option>
+                        <option value="direct_chat">{message(locale, "directChat")}</option>
+                      </select>
+                    </label>
                     <label className="compact-control">
                       <span>{message(locale, "harness")}</span>
                       <select
@@ -1810,7 +2189,7 @@ export function WorkbenchSurface() {
                         onChange={(event) => setConfig("harnessId", event.target.value, "default_harness_id")}
                         value={runConfig.harnessId}
                       >
-                        {harnesses.data?.harnesses.map((harness) => (
+                        {selectableHarnesses.map((harness) => (
                           <option
                             disabled={harness.availability?.status === "unavailable"}
                             key={harness.spec.id}
@@ -1818,19 +2197,7 @@ export function WorkbenchSurface() {
                           >
                             {harness.spec.title || harness.spec.id}
                           </option>
-                        )) ?? <option value={runConfig.harnessId}>{runConfig.harnessId}</option>}
-                      </select>
-                    </label>
-                    <label className="compact-control api-control">
-                      <span>{message(locale, "apiMode")}</span>
-                      <select
-                        aria-label={message(locale, "apiMode")}
-                        disabled={selectedHarness?.spec.supports_api_mode_selection === false}
-                        onChange={(event) => setConfig("apiMode", event.target.value, "default_api_mode")}
-                        value={runConfig.apiMode}
-                      >
-                        <option value="v2">/v2</option>
-                        <option value="v1">/v1</option>
+                        ))}
                       </select>
                     </label>
                     <div className="compact-control model-control">
@@ -1873,24 +2240,39 @@ export function WorkbenchSurface() {
                       </label>
                     ) : null}
                     <label className="compact-control mode-control">
-                      <span>{message(locale, "mode")}</span>
+                      <span>{message(locale, "intent")}</span>
                       <select
-                        aria-label={message(locale, "mode")}
-                        onChange={(event) => setConfig("mode", event.target.value, "default_mode")}
-                        value={runConfig.mode}
+                        aria-label={message(locale, "intent")}
+                        onChange={(event) => updateProductSelection({
+                          intent: event.target.value as ProductExecutionSelection["intent"],
+                        })}
+                        value={productSelection.intent}
                       >
-                        <option value="plan">plan</option>
-                        <option value="read">read</option>
-                        <option value="edit">edit</option>
+                        <option value="ask">{message(locale, "ask")}</option>
+                        <option value="review">{message(locale, "review")}</option>
+                        <option value="change">{message(locale, "change")}</option>
+                      </select>
+                    </label>
+                    <label className="compact-control mode-control">
+                      <span>{message(locale, "authority")}</span>
+                      <select
+                        aria-label={message(locale, "authority")}
+                        onChange={(event) => updateProductSelection({
+                          authority: event.target.value as ProductExecutionSelection["authority"],
+                        })}
+                        value={productSelection.authority}
+                      >
+                        <option value="read_only">{message(locale, "readOnly")}</option>
+                        <option value="workspace_write">{message(locale, "workspaceWrite")}</option>
                       </select>
                     </label>
                     <button
                       aria-expanded={advancedOpen}
-                      className={builtinTools.length > 0 ? "advanced-button active" : "advanced-button"}
+                      className={advancedConfig.dryRun ? "advanced-button active" : "advanced-button"}
                       onClick={() => setAdvancedOpen((open) => !open)}
                       type="button"
                     >
-                      {message(locale, "advanced")}{builtinTools.length > 0 ? ` · ${builtinTools.length}` : ""}
+                      {message(locale, "advanced")}
                     </button>
                   </div>
                   <span className={`stream-indicator ${stream.status}`}>
@@ -1940,8 +2322,8 @@ export function WorkbenchSurface() {
               </div>
               <button aria-label={message(locale, "collapse")} onClick={() => setRightOpen(false)} type="button">×</button>
             </div>
-            <div className={selectedTransport?.status === "blocked" || previewReport?.hard_block ? "readiness-callout blocked" : "readiness-callout success"}>
-              <strong>{message(locale, selectedTransport?.status === "blocked" || previewReport?.hard_block ? "blocked" : "ready")}</strong>
+            <div className={selectedTransport?.status === "blocked" || admissionStatus === "blocked" || previewReport?.hard_block ? "readiness-callout blocked" : admissionStatus === "degraded" ? "readiness-callout degraded" : "readiness-callout success"}>
+              <strong>{message(locale, selectedTransport?.status === "blocked" || admissionStatus === "blocked" || previewReport?.hard_block ? "blocked" : admissionStatus === "degraded" ? "degraded" : "ready")}</strong>
               <span>{selectedTransport?.detail ?? message(locale, "fastApiAuthority")}</span>
               {selectedTransport?.status === "blocked" && selectedTransport.remediation ? (
                 <code>{selectedTransport.remediation}</code>
@@ -1959,11 +2341,12 @@ export function WorkbenchSurface() {
             <section className="inspector-section">
               <h3>{message(locale, "executionPlan")}</h3>
               <dl className="plan-fields">
-                <div><dt>{message(locale, "mode")}</dt><dd>{runConfig.mode}</dd></div>
+                <div><dt>{message(locale, "taskType")}</dt><dd>{capabilityCopy.label}</dd></div>
+                <div><dt>{message(locale, "intent")}</dt><dd>{message(locale, productSelection.intent)}</dd></div>
+                <div><dt>{message(locale, "authority")}</dt><dd>{message(locale, productSelection.authority === "read_only" ? "readOnly" : "workspaceWrite")}</dd></div>
                 <div><dt>{message(locale, "workspacePolicy")}</dt><dd>{message(locale, "workspacePolicyValue")}</dd></div>
                 <div><dt>{message(locale, "route")}</dt><dd>{runConfig.model || "GigaChat"} · /{runConfig.apiMode}</dd></div>
                 <div><dt>{message(locale, "harness")}</dt><dd>{runConfig.harnessId}</dd></div>
-                <div><dt>{message(locale, "executionTransport")}</dt><dd>{advancedConfig.executionTransport}</dd></div>
               </dl>
             </section>
             {selectedRun?.provider_session ? (
@@ -2231,6 +2614,110 @@ function ReasoningDisclosure({
       <summary>{message(locale, "reasoningTrace")}</summary>
       <p>{text}</p>
     </details>
+  );
+}
+
+function AttachmentGallery({
+  attachments,
+  locale,
+  onRemove,
+  removePending = false,
+}: {
+  attachments: readonly AttachmentSummary[];
+  locale: "en" | "ru";
+  onRemove?: (attachmentId: string) => void;
+  removePending?: boolean;
+}) {
+  const [activeAttachment, setActiveAttachment] = useState<AttachmentSummary | null>(null);
+
+  useEffect(() => {
+    if (activeAttachment === null) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActiveAttachment(null);
+    };
+    globalThis.addEventListener("keydown", closeOnEscape);
+    return () => globalThis.removeEventListener("keydown", closeOnEscape);
+  }, [activeAttachment]);
+
+  return (
+    <>
+      <div className="attachment-gallery" aria-label={message(locale, "attachedFiles")}>
+        {attachments.map((attachment) => (
+          <div
+            className={isPreviewableImage(attachment) ? "attachment-preview-card" : "attachment-file-card"}
+            key={attachment.id}
+          >
+            {isPreviewableImage(attachment) ? (
+              <button
+                aria-label={`${message(locale, "openAttachment")} ${attachment.filename}`}
+                className="attachment-preview-button"
+                onClick={() => setActiveAttachment(attachment)}
+                type="button"
+              >
+                <img alt="" src={attachment.url} />
+                <span>
+                  <strong>{attachment.filename}</strong>
+                  <small>{formatBytes(attachment.size_bytes)}</small>
+                </span>
+              </button>
+            ) : (
+              <span className="attachment-file-copy">
+                <span aria-hidden="true">◇</span>
+                <span title={attachment.workspace_path ?? attachment.filename}>
+                  <strong>
+                    {attachment.workspace_path ? `@${attachment.workspace_path}` : attachment.filename}
+                  </strong>
+                  <small>{formatBytes(attachment.size_bytes)}</small>
+                </span>
+              </span>
+            )}
+            {onRemove === undefined ? null : (
+              <button
+                aria-label={`${message(locale, "removeAttachment")} ${attachment.filename}`}
+                className="attachment-remove"
+                disabled={removePending}
+                onClick={() => onRemove(attachment.id)}
+                type="button"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {activeAttachment !== null && isPreviewableImage(activeAttachment)
+        ? createPortal(
+            <div
+              aria-label={`${message(locale, "attachmentPreview")}: ${activeAttachment.filename}`}
+              aria-modal="true"
+              className="attachment-lightbox"
+              onClick={() => setActiveAttachment(null)}
+              role="dialog"
+            >
+              <div className="attachment-lightbox-content" onClick={(event) => event.stopPropagation()}>
+                <header>
+                  <span>
+                    <strong>{activeAttachment.filename}</strong>
+                    <small>{formatBytes(activeAttachment.size_bytes)}</small>
+                  </span>
+                  <button
+                    aria-label={message(locale, "closeAttachmentPreview")}
+                    onClick={() => setActiveAttachment(null)}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </header>
+                <img alt={activeAttachment.filename} src={activeAttachment.url} />
+                <a href={activeAttachment.url} rel="noreferrer" target="_blank">
+                  {message(locale, "openOriginal")} ↗
+                </a>
+              </div>
+            </div>,
+            globalThis.document.body,
+          )
+        : null}
+    </>
   );
 }
 

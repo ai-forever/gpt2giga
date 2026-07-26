@@ -85,7 +85,8 @@ def test_cli_version_reports_distribution_version(capsys):
 
     assert raised.value.code == 0
     assert (
-        capsys.readouterr().out == f"gpt2giga-harness {version('gpt2giga-harness')}\n"
+        capsys.readouterr().out
+        == f"GigaLoom {version('gpt2giga-harness')} (gpt2giga-harness)\n"
     )
 
 
@@ -110,7 +111,8 @@ def test_console_entrypoint_reports_version_without_importing_full_cli(
 
     assert "gpt2giga_harness.cli" not in sys.modules
     assert (
-        capsys.readouterr().out == f"gpt2giga-harness {version('gpt2giga-harness')}\n"
+        capsys.readouterr().out
+        == f"GigaLoom {version('gpt2giga-harness')} (gpt2giga-harness)\n"
     )
 
 
@@ -244,6 +246,41 @@ def test_cli_ui_rejects_invalid_worker_count(capsys, worker_count):
     assert "UI worker count must be between 1 and 32." in capsys.readouterr().err
 
 
+def test_cli_remote_ui_identity_validate_and_revoke_all(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "GPT2GIGA_HARNESS_UI_OIDC_ISSUER",
+        "https://issuer.example",
+    )
+    monkeypatch.setenv("GPT2GIGA_HARNESS_UI_OIDC_CLIENT_ID", "gigaloom")
+    monkeypatch.setenv(
+        "GPT2GIGA_HARNESS_UI_OIDC_CLIENT_SECRET",
+        "client-secret",
+    )
+    monkeypatch.setenv(
+        "GPT2GIGA_HARNESS_UI_OIDC_PUBLIC_ORIGIN",
+        "https://harness.example",
+    )
+    monkeypatch.setenv(
+        "GPT2GIGA_HARNESS_UI_OIDC_ROLE_MAP",
+        '{"operator-sub":"operator","viewer-sub":"viewer"}',
+    )
+
+    assert cli.main(["ui-identity", "validate", "--json"]) == 0
+    validated = json.loads(capsys.readouterr().out)
+    assert validated["valid"] is True
+    assert validated["roles"] == {"operator": 1, "viewer": 1}
+    assert "client-secret" not in json.dumps(validated)
+
+    assert cli.main(["ui-identity", "revoke-all", "--confirm", "--json"]) == 0
+    revoked = json.loads(capsys.readouterr().out)
+    assert revoked == {"revoked": 0, "session_generation_rotated": True}
+
+
 def test_cli_harness_list_outputs_direct_chat(capsys):
     exit_code = cli.main(["harness", "list"])
 
@@ -320,8 +357,12 @@ def test_cli_session_application_flow_create_turn_events_and_approve(
 
     assert cli.main(["session", "events", submitted["run"]["id"], "--json"]) == 0
     events = json.loads(capsys.readouterr().out)["events"]
-    assert [event["type"] for event in events] == ["approval_requested"]
-    approval_id = events[0]["payload"]["approval_id"]
+    assert [event["type"] for event in events] == [
+        "session.updated",
+        "approval_requested",
+    ]
+    assert events[0]["payload"]["title"]["provenance"] == "fallback"
+    approval_id = events[1]["payload"]["approval_id"]
 
     assert (
         cli.main(
@@ -573,6 +614,20 @@ def test_cli_harness_capabilities_outputs_generated_matrix(capsys):
     }
     assert cli.main(["harness", "capabilities"]) == 0
     assert "# Harness adapter capability matrix" in capsys.readouterr().out
+
+
+def test_cli_harness_capabilities_outputs_agent_surface_matrix(capsys):
+    assert cli.main(["harness", "capabilities", "--agents", "--json"]) == 0
+
+    matrix = json.loads(capsys.readouterr().out)
+    assert [item["id"] for item in matrix["surfaces"]] == [
+        "direct-chat",
+        "codex-cli",
+        "claude-code",
+        "gemini-cli",
+    ]
+    assert cli.main(["harness", "capabilities", "--agents"]) == 0
+    assert "# GigaLoom agent surface capability matrix" in capsys.readouterr().out
 
 
 def test_cli_harness_inspect_json_shows_native_support(capsys):
@@ -1389,6 +1444,11 @@ def test_cli_native_sync_list_and_import_json(monkeypatch, capsys, tmp_path):
 
     assert import_code == 0
     assert import_payload["session"]["default_harness_id"] == "fake-cli"
+    assert import_payload["session"]["title"] == "Fake native session"
+    assert (
+        import_payload["session"]["metadata"]["title_state"]["provenance"]
+        == "provider_native"
+    )
     assert import_payload["imported_message_count"] == 2
     assert import_payload["skipped_item_count"] == 1
     assert [message["role"] for message in import_payload["messages"]] == [

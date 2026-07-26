@@ -5,7 +5,20 @@ interface PrimaryRailIconProps {
 }
 
 export function PrimaryRailBrand() {
-  return <img src="/assets/favicon.ico" alt="" width="30" height="30" />;
+  return (
+    <picture>
+      <source
+        media="(prefers-color-scheme: dark)"
+        srcSet="/cockpit-v2/assets/brand/gigaloom-mark-dark.svg"
+      />
+      <img
+        src="/cockpit-v2/assets/brand/gigaloom-mark.svg"
+        alt=""
+        width="30"
+        height="30"
+      />
+    </picture>
+  );
 }
 
 export function PrimaryRailIcon({ surface }: PrimaryRailIconProps) {

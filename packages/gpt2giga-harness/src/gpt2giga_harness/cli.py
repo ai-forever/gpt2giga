@@ -37,7 +37,9 @@ from gpt2giga_harness.agents import (
 )
 from gpt2giga_harness.capability_matrix import (
     build_adapter_capability_matrix,
+    build_agent_surface_capability_matrix,
     render_adapter_capability_matrix_markdown,
+    render_agent_surface_capability_matrix_markdown,
 )
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.completion import SHELLS, render_completion
@@ -143,6 +145,10 @@ from gpt2giga_harness.preflight import (
     preflight_report_to_dict,
 )
 from gpt2giga_harness.permission_simulator import build_permission_simulation
+from gpt2giga_harness.performance_baseline import (
+    run_performance_baseline,
+    write_performance_report,
+)
 from gpt2giga_harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
 from gpt2giga_harness.plugins import (
     harness_validation_report_to_dict,
@@ -195,6 +201,7 @@ from gpt2giga_harness.sessions.models import (
 )
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import new_id, utc_now
+from gpt2giga_harness.session_titles import provider_native_title_metadata
 from gpt2giga_harness.state_backup import (
     create_state_backup,
     restore_state_backup,
@@ -214,6 +221,11 @@ from gpt2giga_harness.types import (
 )
 from gpt2giga_harness.worktrees import parse_workspace_policy
 from gpt2giga_harness.ui.app import create_app, validate_ui_bind
+from gpt2giga_harness.ui.remote_identity import (
+    RemoteIdentityError,
+    RemoteIdentityStore,
+    RemoteOIDCSettings,
+)
 from gpt2giga_harness.ui.security import is_loopback_host
 from gpt2giga_harness.workspace import resolve_workspace
 from gpt2giga_harness.workbench_execution import workbench_transport_projection
@@ -286,6 +298,9 @@ def main(argv: list[str] | None = None) -> int:
     except (IntegrationGroupConflictError, IntegrationGroupError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    except RemoteIdentityError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -317,7 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"gpt2giga-harness {__version__}",
+        version=f"GigaLoom {__version__} (gpt2giga-harness)",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -588,7 +603,14 @@ def build_parser() -> argparse.ArgumentParser:
     ui = subparsers.add_parser("ui", parents=[common])
     ui.add_argument("--host", default=None)
     ui.add_argument("--port", type=int, default=None)
-    ui.add_argument("--allow-remote", action="store_true")
+    ui.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help=(
+            "Allow a non-loopback listener only with the complete single-issuer "
+            "OIDC profile and deployment TLS/proxy controls"
+        ),
+    )
     ui.add_argument(
         "--start-worker",
         action=argparse.BooleanOptionalAction,
@@ -603,6 +625,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Target durable worker pool size when worker auto-start is enabled",
     )
     ui.set_defaults(handler=_handle_ui)
+    ui_identity = subparsers.add_parser(
+        "ui-identity",
+        help="Validate or recover the deployment-owned remote UI identity boundary",
+    )
+    ui_identity_subparsers = ui_identity.add_subparsers(dest="ui_identity_command")
+    ui_identity_validate = ui_identity_subparsers.add_parser("validate")
+    ui_identity_validate.add_argument("--json", action="store_true")
+    ui_identity_validate.set_defaults(handler=_handle_ui_identity_validate)
+    ui_identity_revoke = ui_identity_subparsers.add_parser("revoke-all")
+    ui_identity_revoke.add_argument("--confirm", action="store_true", required=True)
+    ui_identity_revoke.add_argument("--json", action="store_true")
+    ui_identity_revoke.set_defaults(handler=_handle_ui_identity_revoke_all)
 
     run = subparsers.add_parser("run", parents=[common])
     run.add_argument("--agent", choices=tuple(AGENT_ALIASES), default=None)
@@ -740,6 +774,22 @@ def build_parser() -> argparse.ArgumentParser:
     worker_idle.add_argument("--lease-seconds", type=float, default=15.0)
     worker_idle.add_argument("--heartbeat-seconds", type=float, default=2.0)
     worker_idle.set_defaults(handler=_handle_worker_stop_on_idle)
+
+    benchmark = subparsers.add_parser("benchmark")
+    benchmark_subparsers = benchmark.add_subparsers(dest="benchmark_command")
+    benchmark_performance = benchmark_subparsers.add_parser("performance")
+    benchmark_performance.add_argument(
+        "--profile",
+        choices=("ci-smoke", "local-detail"),
+        default="ci-smoke",
+    )
+    benchmark_performance.add_argument("--samples", type=int, default=5)
+    benchmark_performance.add_argument(
+        "--output",
+        default=None,
+        help="Atomically write a private canonical JSON report",
+    )
+    benchmark_performance.set_defaults(handler=_handle_benchmark_performance)
 
     schedule = subparsers.add_parser("schedule")
     schedule_subparsers = schedule.add_subparsers(dest="schedule_command")
@@ -999,6 +1049,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     harness_capabilities = harness_subparsers.add_parser("capabilities")
     harness_capabilities.add_argument("--json", action="store_true")
+    harness_capabilities.add_argument(
+        "--agents",
+        action="store_true",
+        help="Show Direct Chat and coding-agent behavior contracts",
+    )
     harness_capabilities.set_defaults(handler=_handle_harness_capabilities)
 
     harness_inspect = harness_subparsers.add_parser("inspect", parents=[common])
@@ -1253,11 +1308,16 @@ def _handle_harness_capabilities(
     config: HarnessConfig,
 ) -> int:
     registry = create_default_registry(include_entry_points=False)
-    matrix = build_adapter_capability_matrix(registry)
+    if args.agents:
+        matrix = build_agent_surface_capability_matrix(registry)
+        renderer = render_agent_surface_capability_matrix_markdown
+    else:
+        matrix = build_adapter_capability_matrix(registry)
+        renderer = render_adapter_capability_matrix_markdown
     if args.json:
         _print_json(matrix)
     else:
-        print(render_adapter_capability_matrix_markdown(matrix), end="")
+        print(renderer(matrix), end="")
     return 0
 
 
@@ -2227,6 +2287,23 @@ def _handle_worker_stop_on_idle(args: argparse.Namespace, config: HarnessConfig)
     return 0
 
 
+def _handle_benchmark_performance(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    del config
+    report = run_performance_baseline(
+        samples=args.samples,
+        profile=args.profile,
+    )
+    if args.output:
+        write_performance_report(args.output, report)
+        print(f"Wrote private performance report to {Path(args.output).expanduser()}")
+    else:
+        _print_json(report)
+    return 0 if report["status"] == "passed" else 1
+
+
 def _handle_schedule_list(args: argparse.Namespace, config: HarnessConfig) -> int:
     project = _schedule_project(args.workspace, config)
     rows = list(_schedule_service(config).list(project))
@@ -2389,7 +2466,7 @@ def _handle_native_import(args: argparse.Namespace, config: HarnessConfig) -> in
     session_store = FilesystemHarnessSessionStore(config.data_dir)
     snapshot = ref.execution_snapshot
     session = session_store.create_session(
-        title=f"Imported: {ref.title}",
+        title=ref.title,
         workspace=ref.workspace,
         default_harness_id=ref.harness_id,
         default_model=(
@@ -2405,7 +2482,11 @@ def _handle_native_import(args: argparse.Namespace, config: HarnessConfig) -> in
             "native_ref_id": ref.id,
             "native_session_id": ref.native_session_id,
         },
-        metadata=_native_import_session_metadata(ref),
+        metadata=provider_native_title_metadata(
+            _native_import_session_metadata(ref),
+            provider=ref.harness_id,
+            source_id=ref.native_session_id or ref.id,
+        ),
     )
     messages = []
     skipped_count = 0
@@ -2953,23 +3034,17 @@ def _handle_open_file(args: argparse.Namespace, config: HarnessConfig) -> int:
 
 def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     config = config.with_overrides(ui_host=args.host, ui_port=args.port)
-    validate_ui_bind(config.ui_host, allow_remote=args.allow_remote)
+    validate_ui_bind(config, allow_remote=args.allow_remote)
     if not 1 <= args.worker_count <= MAX_UI_WORKER_COUNT:
         raise ValueError(
             f"UI worker count must be between 1 and {MAX_UI_WORKER_COUNT}."
         )
-    if args.allow_remote and not is_loopback_host(config.ui_host):
-        if config.ui_bootstrap_token:
-            warning = "Remote UI browser authentication is enabled."
-        else:
-            warning = (
-                "Remote UI APIs require GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN; "
-                "mutating APIs are disabled."
-            )
-        print(f"Warning: {warning}", file=sys.stderr)
-    print(
-        f"Starting gpt2giga Unified Harness UI at http://{config.ui_host}:{config.ui_port}/"
+    ui_url = (
+        config.ui_oidc_public_origin
+        if not is_loopback_host(config.ui_host)
+        else f"http://{config.ui_host}:{config.ui_port}"
     )
+    print(f"Starting GigaLoom UI at {ui_url}/")
     worker_processes = (
         _start_ui_workers(config, worker_count=args.worker_count)
         if args.start_worker
@@ -2986,6 +3061,52 @@ def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
         )
     finally:
         _stop_ui_workers(worker_processes)
+    return 0
+
+
+def _handle_ui_identity_validate(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    settings = RemoteOIDCSettings.from_config(config)
+    payload = {
+        "valid": True,
+        "issuer": settings.issuer,
+        "public_origin": settings.public_origin,
+        "callback_uri": settings.callback_uri,
+        "roles": {
+            "viewer": sum(role == "viewer" for role in settings.roles.values()),
+            "operator": sum(role == "operator" for role in settings.roles.values()),
+        },
+        "trusted_proxy_count": len(settings.trusted_proxies),
+        "client_secret_configured": True,
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(
+            "Remote UI identity configuration is valid for "
+            f"{settings.public_origin} ({len(settings.roles)} mapped subjects)."
+        )
+    return 0
+
+
+def _handle_ui_identity_revoke_all(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    if not args.confirm:
+        raise ValueError("Remote session revocation requires --confirm.")
+    settings = RemoteOIDCSettings.from_config(config)
+    revoked = RemoteIdentityStore(config.data_dir, settings).revoke_all()
+    payload = {
+        "revoked": revoked,
+        "session_generation_rotated": True,
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Revoked {revoked} remote UI session(s) and rotated the generation.")
     return 0
 
 

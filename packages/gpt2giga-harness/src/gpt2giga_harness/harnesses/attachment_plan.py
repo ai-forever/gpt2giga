@@ -52,9 +52,11 @@ def attachment_raw_metadata(request: HarnessRequest) -> dict[str, Any]:
     """Return redacted attachment metadata suitable for harness raw output."""
     payload: dict[str, Any] = {}
     if request.attachments:
-        payload["attachments"] = [
-            dict(attachment) for attachment in request.attachments
-        ]
+        payload["attachments"] = []
+        for attachment in request.attachments:
+            public_attachment = dict(attachment)
+            public_attachment.pop("storage_path", None)
+            payload["attachments"].append(public_attachment)
     plan = request_render_plan(request)
     if plan:
         payload["attachment_render_plan"] = dict(redact_secrets(dict(plan)))

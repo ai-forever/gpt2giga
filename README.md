@@ -52,19 +52,19 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Текущая alpha-preview линия Unified Harness — `0.4.1a1`. Её всегда можно
+Текущая alpha-preview линия Unified Harness — `0.5.0a1`. Её всегда можно
 запустить [из source checkout](./docs/harness.md#quickstart). Опубликованный
 provider-neutral пакет добавляет команды `giga` и `gpt2giga-harness`:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.4.1a1'
+uv tool install 'gpt2giga-harness==0.5.0a1'
 giga doctor
 giga --version
 giga ui
 ```
 
 Для Direct Chat и provider preset локального gateway установите явный extra
-`gpt2giga-harness[gpt2giga]==0.4.1a1`; он закрепляет `gpt2giga==0.2.4a1`.
+`gpt2giga-harness[gpt2giga]==0.5.0a1`; он закрепляет `gpt2giga==0.2.5a1`.
 
 Нативные команды Codex CLI, Claude Code и Gemini CLI получают ровно один
 префикс; общий глагол `exec` не вводится:
@@ -147,10 +147,12 @@ make docs-dev-ru
 | Совместимость SDK `extra_*` и параметров клиентов | [docs/client-parameter-compatibility.md](./docs/client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [docs/builtin-tools.md](./docs/builtin-tools.md) |
 | Local harness CLI/UI для smoke tests и agent CLI adapters | [docs/harness.md](./docs/harness.md) |
+| Direct Chat, Coding Agents, native Codex subagents, Arena и Workflows | [docs/agents-and-multi-agent.md](./docs/agents-and-multi-agent.md) |
 | Переменные окружения, CLI flags, backend modes | [docs/configuration.md](./docs/configuration.md) |
 | Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [docs/deployment.md](./docs/deployment.md) |
 | Logs, metrics, traffic logs, admin API, debug translation | [docs/operations.md](./docs/operations.md) |
 | Live GigaChat integration tests | [docs/live-integration-tests.md](./docs/live-integration-tests.md) |
+| Provider-owned login, status, logout и headless-границы | [docs/architecture/provider-authentication-capability-matrix.md](./docs/architecture/provider-authentication-capability-matrix.md) |
 | Внутренняя архитектура normalized messages | [docs/architecture/normalized-messages.md](./docs/architecture/normalized-messages.md) |
 | Checklist для добавления provider/protocol | [docs/architecture/how-to-add-provider.md](./docs/architecture/how-to-add-provider.md) |
 | Редакторы, агенты, SDK examples, reverse proxies | [docs/integrations.md](./docs/integrations.md) |

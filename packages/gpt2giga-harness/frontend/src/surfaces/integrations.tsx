@@ -3,6 +3,7 @@ import { Link, useRouterState, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchCockpit, mutateCockpit } from "../api";
+import { IntegrationVisual } from "../components/IntegrationVisual";
 import { LoadingRows, StatusBadge } from "../components/OperationalSurface";
 import {
   extensionPackCatalogOptions,
@@ -10,6 +11,12 @@ import {
   parseExtensionPackConfiguration,
 } from "../extension-pack-model";
 import { message } from "../messages";
+import {
+  buildMCPAuthoringConfiguration,
+  supportedMCPTransports,
+  supportsMCPAuthoringCwd,
+  type MCPAuthoringTransport,
+} from "../mcp-authoring-model";
 import {
   buildPluginLibrary,
   buildRemotePluginLibrary,
@@ -25,10 +32,14 @@ import {
   remainingRequestKeys,
   type IntegrationGroupMutationResponse,
   type IntegrationGroupPreviewResponse,
+  type IntegrationLifecycleAction,
+  type IntegrationLifecycleMutationResponse,
+  type IntegrationLifecyclePreviewResponse,
   type IntegrationFlowInventory,
   type IntegrationFlowMutationResponse,
   type IntegrationFlowPreviewResponse,
   type IntegrationSearchResponse,
+  type IntegrationSourceDetailResponse,
   type SkillPreviewResponse,
   type GitInspectionResponse,
 } from "../remaining-request-graph";
@@ -174,6 +185,7 @@ export function IntegrationsSurface() {
               <span>{connectedCount} {message(locale, "connectedCount")}</span>
             </div>
           </div>
+          {category === "skills" ? <SkillsShSetupGuide locale={locale} /> : null}
           {externalQuery.data ? (
             <div className="plugin-search-sources" aria-label={message(locale, "searchSources")}>
               <span>{message(locale, "searchSources")}</span>
@@ -184,11 +196,23 @@ export function IntegrationsSurface() {
               ))}
             </div>
           ) : null}
+          {integrationQuery.data?.catalog_sources?.length ? (
+            <div className="plugin-search-sources" aria-label={locale === "ru" ? "Состояние каталога" : "Catalog health"}>
+              <span>{locale === "ru" ? "Каталог" : "Catalog"}</span>
+              {integrationQuery.data.catalog_sources.map((source) => (
+                <span className={`source-status ${source.status}`} key={source.id} title={source.reason_code ?? undefined}>
+                  {source.id}: {sourceStatusLabel(locale, source.status)}
+                  {source.cache_age_seconds !== null ? ` · ${source.cache_age_seconds}s` : ""}
+                  {source.last_good && source.stale ? ` · ${locale === "ru" ? "last-good" : "last-good"}` : ""}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {pending ? <LoadingRows /> : failed ? (
             <div className="error-state">{message(locale, "boundedDataUnavailable")}</div>
           ) : visibleItems.length === 0 ? (
             <div className="plugin-empty-state">
-              <PluginItemIcon category={category === "all" ? "plugins" : category} />
+              <IntegrationVisual category={category === "all" ? "plugins" : category} />
               <strong>{message(locale, "noPluginsFound")}</strong>
               <span>{message(locale, "noPluginsFoundHint")}</span>
             </div>
@@ -216,7 +240,7 @@ export function IntegrationsSurface() {
             />
           ) : (
             <div className="plugin-detail-empty">
-              <PluginItemIcon category="plugins" />
+              <IntegrationVisual category="plugins" />
               <h2>{message(locale, "selectPlugin")}</h2>
               <p>{message(locale, "selectPluginHint")}</p>
             </div>
@@ -241,6 +265,33 @@ export function IntegrationsSurface() {
   );
 }
 
+function SkillsShSetupGuide({ locale }: { locale: "en" | "ru" }) {
+  return (
+    <details className="source-setup-guide">
+      <summary>
+        <span>skills.sh</span>
+        <strong>{locale === "ru" ? "Как подключить источник" : "Connect this source"}</strong>
+      </summary>
+      <div>
+        <p>
+          {locale === "ru"
+            ? "Harness читает только metadata через отдельный read-only proxy. Токен остаётся в proxy и никогда не попадает в browser."
+            : "Harness reads metadata through a separate read-only proxy. The token stays in the proxy and never reaches the browser."}
+        </p>
+        <ol>
+          <li>{locale === "ru" ? "Получите request-scoped Vercel OIDC token." : "Obtain a request-scoped Vercel OIDC token."}</li>
+          <li><code>VERCEL_OIDC_TOKEN=&lt;token&gt; giga-skills-catalog-proxy</code></li>
+          <li><code>GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092 giga ui</code></li>
+          <li>{locale === "ru" ? "Ищите Skill на этой странице; статус skills-sh должен стать ready." : "Search for a Skill here; the skills-sh status should become ready."}</li>
+        </ol>
+        <a href="https://skills.sh/docs/api" rel="noreferrer" target="_blank">
+          {locale === "ru" ? "Открыть API guide skills.sh" : "Open the skills.sh API guide"}
+        </a>
+      </div>
+    </details>
+  );
+}
+
 function PluginRow({
   category,
   item,
@@ -259,11 +310,19 @@ function PluginRow({
       search={{ selected: item.id }}
       to={categoryPaths[category]}
     >
-      <PluginItemIcon category={item.category} />
+      <IntegrationVisual
+        category={item.category}
+        label={`${item.title} ${typeLabel(locale, item.category)}`}
+        packageId={item.packageId}
+        title={item.title}
+      />
       <div className="plugin-row-copy">
         <div>
           <strong>{item.title}</strong>
           <span className="plugin-type-label">{typeLabel(locale, item.category)}</span>
+          <span className="plugin-source-badge">
+            {message(locale, "source")} · {sourceBadgeLabel(locale, item)}
+          </span>
         </div>
         <p>{descriptionFor(locale, item)}</p>
       </div>
@@ -299,6 +358,23 @@ function PluginDetails({
     ),
     enabled: item.category === "skills" && item.previewId !== null,
   });
+  const sourceDetail = useQuery({
+    queryKey: ["cockpit", "integration-source-detail", item.sourceId, item.packageId],
+    queryFn: ({ signal }) => {
+      const params = new URLSearchParams({
+        source_id: item.sourceId ?? "",
+        upstream_id: item.packageId,
+        include_audit: "true",
+      });
+      return fetchCockpit<IntegrationSourceDetailResponse>(
+        `/api/integrations/source-detail?${params}`,
+        signal,
+      );
+    },
+    enabled: item.source === "remote" && item.sourceId !== null,
+    staleTime: 300_000,
+  });
+  const provenance = sourceDetail.data?.provenance ?? item.provenance;
   return (
     <div className="plugin-detail">
       <Link
@@ -310,7 +386,12 @@ function PluginDetails({
         <CloseIcon />
       </Link>
       <div className="plugin-detail-heading">
-        <PluginItemIcon category={item.category} />
+        <IntegrationVisual
+          category={item.category}
+          label={`${item.title} ${typeLabel(locale, item.category)}`}
+          packageId={item.packageId}
+          title={item.title}
+        />
         <div>
           <h2>{item.title}</h2>
           <span className="plugin-type-label">{typeLabel(locale, item.category)}</span>
@@ -329,7 +410,7 @@ function PluginDetails({
       <dl className="plugin-facts">
         <div>
           <dt>{message(locale, "source")}</dt>
-          <dd>{item.sourceId ?? sourceLabel(locale, item.source)}</dd>
+          <dd>{sourceBadgeLabel(locale, item)}</dd>
         </div>
         <div>
           <dt>{message(locale, "version")}</dt>
@@ -340,12 +421,81 @@ function PluginDetails({
           <dd>{item.connected ? message(locale, "connected") : statusLabel(locale, item.status)}</dd>
         </div>
       </dl>
+      {provenance ? (
+        <section className="plugin-detail-section integration-provenance">
+          <h3>{locale === "ru" ? "Происхождение" : "Provenance"}</h3>
+          <p className="integration-breadcrumb">{provenance.discovery_location}</p>
+          <dl className="plugin-facts">
+            <div><dt>{locale === "ru" ? "Источник" : "Canonical source"}</dt><dd>{provenance.canonical_source}</dd></div>
+            <div><dt>Upstream ID</dt><dd>{provenance.upstream_id}</dd></div>
+            <div><dt>{locale === "ru" ? "Путь" : "Relative path"}</dt><dd>{provenance.relative_path ?? "—"}</dd></div>
+            <div><dt>{locale === "ru" ? "Неизменяемая ссылка" : "Immutable ref"}</dt><dd>{provenance.immutable_ref ?? "—"}</dd></div>
+            <div><dt>SHA-256</dt><dd>{provenance.content_hash ?? "—"}</dd></div>
+            <div><dt>{locale === "ru" ? "Последняя синхронизация" : "Last sync"}</dt><dd>{provenance.observed_at || "—"}</dd></div>
+          </dl>
+          {sourceDetail.data ? (
+            <p className={`source-status ${sourceDetail.data.source_health.status}`}>
+              {sourceStatusLabel(locale, sourceDetail.data.source_health.status)}
+              {sourceDetail.data.source_health.last_good
+                ? ` · ${locale === "ru" ? "последние успешные данные" : "last-good data"}`
+                : ""}
+            </p>
+          ) : null}
+          {sourceDetail.data?.audits.length ? (
+            <ul className="integration-audits">
+              {sourceDetail.data.audits.map((audit) => (
+                <li key={`${audit.provider}:${audit.audited_at}`}>
+                  <strong>{audit.provider}</strong>
+                  <span>{audit.status}{audit.risk_level ? ` · ${audit.risk_level}` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {provenance.file_paths?.length ? (
+            <details className="integration-file-tree">
+              <summary>
+                {locale === "ru" ? "Файлы" : "Files"} · {provenance.file_paths.length}
+              </summary>
+              <ul>
+                {provenance.file_paths.map((path) => <li key={path}>{path}</li>)}
+              </ul>
+            </details>
+          ) : null}
+          {provenance.repository_url ? (
+            <a href={provenance.repository_url} rel="noreferrer" target="_blank">
+              {locale === "ru" ? "Открыть репозиторий" : "Open repository"}
+            </a>
+          ) : null}
+          {sourceDetail.isError ? <p className="mutation-error">{sourceDetail.error.message}</p> : null}
+        </section>
+      ) : null}
       {item.category === "skills" && item.previewId ? (
         <section className="plugin-skill-preview">
           <h3>{message(locale, "skillPreview")}</h3>
           {skillPreview.isPending ? <LoadingRows /> : null}
           {skillPreview.data ? <pre>{skillPreview.data.markdown}</pre> : null}
           {skillPreview.isError ? <p className="mutation-error">{skillPreview.error.message}</p> : null}
+        </section>
+      ) : null}
+      {item.invocation ? (
+        <section className="plugin-detail-section plugin-invocation">
+          <h3>{locale === "ru" ? "Использование в Work" : "Use in Work"}</h3>
+          <p>
+            {locale === "ru"
+              ? "Введите @ в composer и выберите capability. Harness передаст нативному агенту правильный Skill-вызов."
+              : "Type @ in the composer and choose the capability. Harness sends the native agent the correct Skill invocation."}
+          </p>
+          <code>{item.invocation}</code>
+          {item.bundledSkills.length ? (
+            <span>
+              {locale === "ru" ? "Bundled Skills" : "Bundled Skills"} · {item.bundledSkills.join(", ")}
+            </span>
+          ) : null}
+          {item.defaultPrompts.length ? (
+            <ul>
+              {item.defaultPrompts.map((prompt) => <li key={prompt}>{prompt}</li>)}
+            </ul>
+          ) : null}
         </section>
       ) : null}
       {item.source === "remote" ? (
@@ -519,6 +669,7 @@ function PluginConnectionPanel({
             {message(locale, "rollback")}
           </button>
         ) : null}
+        {item.lifecycle ? <LifecycleControls item={item} /> : null}
         {rollback.isError ? <p className="mutation-error" role="alert">{rollback.error.message}</p> : null}
         {groupRollback.isError ? <p className="mutation-error" role="alert">{groupRollback.error.message}</p> : null}
       </div>
@@ -535,6 +686,22 @@ function PluginConnectionPanel({
         <button disabled={groupRecover.isPending} onClick={() => groupRecover.mutate()} type="button">
           {message(locale, "retrySafeRecovery")}
         </button>
+      </div>
+    );
+  }
+
+  if (item.lifecycle && ["disabled", "uninstalled"].includes(item.lifecycle.state)) {
+    return (
+      <div className="plugin-detail-actions">
+        <StatusBadge status={item.lifecycle.state} />
+        {item.lifecycle.state === "disabled" ? (
+          <p className="plugin-unavailable-note">
+            {locale === "ru"
+              ? "Интеграция сохранена, но исключена из новых сессий."
+              : "The integration is retained but excluded from new sessions."}
+          </p>
+        ) : null}
+        <LifecycleControls item={item} />
       </div>
     );
   }
@@ -630,6 +797,113 @@ function PluginConnectionPanel({
       {groupPreview.isError ? <p className="mutation-error" role="alert">{groupPreview.error.message}</p> : null}
       {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
     </div>
+  );
+}
+
+function LifecycleControls({ item }: { item: PluginLibraryItem }) {
+  const { preferences } = usePreferences();
+  const locale = preferences.locale;
+  const queryClient = useQueryClient();
+  const [action, setAction] = useState<IntegrationLifecycleAction | null>(null);
+  const [confirmId, setConfirmId] = useState("");
+  const preview = useMutation({
+    mutationFn: (selected: IntegrationLifecycleAction) => {
+      if (!item.flow) throw new Error("No installed integration revision is available");
+      const useGroup = Boolean(item.group) && selected !== "delete_definition";
+      const path = useGroup
+        ? `/api/integrations/groups/${encodeURIComponent(item.group!.id)}/lifecycle/preview`
+        : `/api/integrations/flows/${encodeURIComponent(item.flow.id)}/lifecycle/preview`;
+      return mutateCockpit<IntegrationLifecyclePreviewResponse>(path, { action: selected });
+    },
+    onSuccess: (_data, selected) => {
+      setAction(selected);
+      setConfirmId("");
+    },
+  });
+  const apply = useMutation({
+    mutationFn: () => {
+      if (!preview.data) throw new Error("Preview the lifecycle action first");
+      return mutateCockpit<IntegrationLifecycleMutationResponse>(
+        `/api/integrations/lifecycle/${encodeURIComponent(preview.data.operation.id)}/apply`,
+        {
+          plan_id: preview.data.plan.plan_id,
+          authority: "cockpit-operator",
+          expected_revisions: preview.data.plan.expected_revisions,
+          confirm_id: preview.data.plan.confirmation_required ? confirmId : undefined,
+        },
+      );
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: remainingRequestKeys.integrationFlows() });
+    },
+  });
+  if (!item.lifecycle) return null;
+  const actions: IntegrationLifecycleAction[] = item.lifecycle.state === "enabled"
+    ? ["disable", "uninstall"]
+    : item.lifecycle.state === "disabled"
+      ? ["enable", "uninstall"]
+      : item.lifecycle.state === "uninstalled"
+        && ["git", "local"].includes(item.catalogSourceType ?? "")
+        ? ["delete_definition"]
+        : [];
+  return (
+    <section className="plugin-lifecycle-actions">
+      <h3>{locale === "ru" ? "Жизненный цикл" : "Lifecycle"}</h3>
+      <div className="plugin-connect-choices">
+        {actions.map((candidate) => (
+          <button
+            className={["uninstall", "delete_definition"].includes(candidate) ? "danger-button" : ""}
+            disabled={preview.isPending || apply.isPending}
+            key={candidate}
+            onClick={() => preview.mutate(candidate)}
+            type="button"
+          >
+            {lifecycleActionLabel(locale, candidate)}
+          </button>
+        ))}
+      </div>
+      {preview.data && action ? (
+        <div className="plugin-approval-panel">
+          <strong>{lifecycleActionLabel(locale, action)}</strong>
+          <span>
+            {preview.data.plan.effects.length} {locale === "ru" ? "целей" : "targets"}
+            {preview.data.plan.active_session_count > 0
+              ? ` · ${preview.data.plan.active_session_count} ${locale === "ru" ? "активных сессий сохранят ревизию" : "active sessions retain the revision"}`
+              : ""}
+          </span>
+          {preview.data.plan.confirmation_required ? (
+            <label className="field-control">
+              {locale === "ru"
+                ? `Введите ${preview.data.plan.confirmation_id} для подтверждения`
+                : `Type ${preview.data.plan.confirmation_id} to confirm`}
+              <input onChange={(event) => setConfirmId(event.target.value)} value={confirmId} />
+            </label>
+          ) : null}
+          <button
+            className={preview.data.plan.confirmation_required ? "danger-button" : "primary-button"}
+            disabled={
+              apply.isPending
+              || (preview.data.plan.confirmation_required
+                && confirmId !== preview.data.plan.confirmation_id)
+            }
+            onClick={() => apply.mutate()}
+            type="button"
+          >
+            {locale === "ru" ? "Подтвердить действие" : "Approve action"}
+          </button>
+        </div>
+      ) : null}
+      {apply.data ? (
+        <p className={apply.data.operation.status === "succeeded" ? "mutation-success" : "mutation-error"} role="status">
+          {apply.data.operation.status}
+          {apply.data.receipt.recovery_actions.length
+            ? ` · ${apply.data.receipt.recovery_actions.join(", ")}`
+            : ""}
+        </p>
+      ) : null}
+      {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
+      {apply.isError ? <p className="mutation-error" role="alert">{apply.error.message}</p> : null}
+    </section>
   );
 }
 
@@ -809,15 +1083,24 @@ function AddIntegrationDrawer({
   const [catalogId, setCatalogId] = useState("");
   const [targetId, setTargetId] = useState("");
   const [scope, setScope] = useState("managed_home");
+  const [workspace, setWorkspace] = useState("");
   const [packageId, setPackageId] = useState("custom-mcp");
-  const [transport, setTransport] = useState("stdio");
-  const [command, setCommand] = useState("custom-mcp");
+  const [transport, setTransport] = useState<MCPAuthoringTransport>("stdio");
+  const [executable, setExecutable] = useState("custom-mcp");
+  const [argvText, setArgvText] = useState("");
+  const [cwd, setCwd] = useState("");
+  const [environmentText, setEnvironmentText] = useState("");
+  const [url, setUrl] = useState("https://");
+  const [headersText, setHeadersText] = useState("");
+  const [authorizationEnvironment, setAuthorizationEnvironment] = useState("");
   const [allowNetwork, setAllowNetwork] = useState(false);
   const [nativeConsent, setNativeConsent] = useState(false);
   const inspect = useMutation({
     mutationFn: () => mutateCockpit<GitInspectionResponse>("/api/integrations/git/inspect", {
       repository_url: repositoryUrl,
       ref: ref.trim() || undefined,
+      source_id: seed?.source === "remote" ? seed.sourceId : undefined,
+      upstream_id: seed?.source === "remote" ? seed.packageId : undefined,
     }),
     onSuccess: (data) => setSelectedCandidateId(
       data.candidates.find((item) => item.type === mode.slice(0, -1))?.id
@@ -858,6 +1141,10 @@ function AddIntegrationDrawer({
   const selectedScope = selectedTarget?.scopes.includes(scope)
     ? scope
     : selectedTarget?.scopes[0] ?? "managed_home";
+  const availableTransports = supportedMCPTransports(selectedTarget?.id ?? "");
+  const selectedTransport = availableTransports.includes(transport)
+    ? transport
+    : availableTransports[0];
   const preview = useMutation({
     mutationFn: () => {
       if (!selectedTarget) throw new Error("No compatible target is available");
@@ -868,18 +1155,27 @@ function AddIntegrationDrawer({
         : mode === "mcp"
           ? "raw_descriptor"
           : sourceForManifest(selectedCandidate?.manifest);
+      const mcpConfiguration = mode === "mcp"
+        ? buildMCPAuthoringConfiguration({
+          transport: selectedTransport,
+          executable,
+          argvText,
+          cwd: supportsMCPAuthoringCwd(selectedTarget.id) ? cwd : "",
+          environmentText,
+          url,
+          headersText,
+          authorizationEnvironment,
+        })
+        : undefined;
       return mutateCockpit<IntegrationFlowPreviewResponse>("/api/integrations/preview", {
         source,
         catalog_id: mode === "skills" ? catalogId : undefined,
         manifest: mode === "plugins" ? selectedCandidate?.manifest : undefined,
         target_id: selectedTarget.id,
         scope: selectedScope,
+        workspace: selectedScope === "project" ? workspace : undefined,
         package_id: mode === "mcp" ? packageId : undefined,
-        configuration: mode === "mcp" ? {
-          transport,
-          command: transport === "stdio" ? command : undefined,
-          url: transport === "stdio" ? undefined : command,
-        } : {
+        configuration: mcpConfiguration ?? {
           plugin_name: selectedCandidate?.title,
           sparse: selectedCandidate?.relative_dir && selectedCandidate.relative_dir !== "."
             ? [selectedCandidate.relative_dir]
@@ -888,6 +1184,11 @@ function AddIntegrationDrawer({
       });
     },
   });
+  const resetPreviewState = () => {
+    preview.reset();
+    setAllowNetwork(false);
+    setNativeConsent(false);
+  };
   const apply = useMutation({
     mutationFn: () => {
       if (!preview.data) throw new Error("Preview the installation first");
@@ -916,7 +1217,7 @@ function AddIntegrationDrawer({
         {category === "all" ? (
           <div className="plugin-add-kind">
             {(["skills", "plugins", "mcp"] as const).map((item) => (
-              <button className={mode === item ? "selected" : ""} key={item} onClick={() => { setMode(item); preview.reset(); }} type="button">
+              <button className={mode === item ? "selected" : ""} key={item} onClick={() => { setMode(item); resetPreviewState(); }} type="button">
                 {typeLabel(locale, item)}
               </button>
             ))}
@@ -935,7 +1236,7 @@ function AddIntegrationDrawer({
             {inspect.data ? <p className="git-commit"><strong>{message(locale, "resolvedCommit")}</strong><code>{inspect.data.commit}</code></p> : null}
             {candidates.length > 0 ? (
               <label className="field-control">{message(locale, "selectCandidate")}
-                <select onChange={(event) => { setSelectedCandidateId(event.target.value); setCatalogId(""); preview.reset(); }} value={selectedCandidate?.id ?? ""}>
+                <select onChange={(event) => { setSelectedCandidateId(event.target.value); setCatalogId(""); resetPreviewState(); }} value={selectedCandidate?.id ?? ""}>
                   {candidates.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.relative_dir}</option>)}
                 </select>
               </label>
@@ -950,21 +1251,73 @@ function AddIntegrationDrawer({
           </>
         ) : (
           <>
-            <label className="field-control">{message(locale, "packageId")}<input onChange={(event) => setPackageId(event.target.value)} value={packageId} /></label>
-            <label className="field-control">{message(locale, "transport")}<select onChange={(event) => setTransport(event.target.value)} value={transport}><option value="stdio">stdio</option><option value="streamable_http">streamable HTTP</option><option value="sse">SSE</option></select></label>
-            <label className="field-control">{transport === "stdio" ? message(locale, "command") : "HTTPS URL"}<input onChange={(event) => setCommand(event.target.value)} value={command} /></label>
+            <label className="field-control">{message(locale, "packageId")}<input onChange={(event) => { setPackageId(event.target.value); resetPreviewState(); }} value={packageId} /></label>
+            <label className="field-control">{message(locale, "transport")}
+              <select onChange={(event) => { setTransport(event.target.value as MCPAuthoringTransport); resetPreviewState(); }} value={selectedTransport}>
+                {availableTransports.map((item) => <option key={item} value={item}>{item === "streamable_http" ? "streamable HTTP" : item.toUpperCase()}</option>)}
+              </select>
+            </label>
+            {selectedTransport === "stdio" ? (
+              <>
+                <label className="field-control">
+                  {locale === "ru" ? "Исполняемый файл" : "Executable"}
+                  <input onChange={(event) => { setExecutable(event.target.value); resetPreviewState(); }} placeholder="custom-mcp" value={executable} />
+                </label>
+                <label className="field-control">
+                  {locale === "ru" ? "Аргументы (по одному на строку)" : "Arguments (one per line)"}
+                  <textarea onChange={(event) => { setArgvText(event.target.value); resetPreviewState(); }} rows={3} spellCheck={false} value={argvText} />
+                </label>
+                {supportsMCPAuthoringCwd(selectedTarget?.id ?? "") ? (
+                  <label className="field-control">
+                    {locale === "ru" ? "Рабочий каталог (относительный, необязательно)" : "Working directory (relative, optional)"}
+                    <input onChange={(event) => { setCwd(event.target.value); resetPreviewState(); }} placeholder="tools/server" value={cwd} />
+                  </label>
+                ) : null}
+                <label className="field-control">
+                  {locale === "ru" ? "SecretRef окружения (имена, по одному на строку)" : "Environment SecretRefs (names, one per line)"}
+                  <textarea onChange={(event) => { setEnvironmentText(event.target.value); resetPreviewState(); }} placeholder="MCP_TOKEN" rows={3} spellCheck={false} value={environmentText} />
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="field-control">
+                  HTTPS URL
+                  <input onChange={(event) => { setUrl(event.target.value); resetPreviewState(); }} placeholder="https://mcp.example/v1" type="url" value={url} />
+                </label>
+                <label className="field-control">
+                  {locale === "ru" ? "Header SecretRefs (Header=ENV, по одному на строку)" : "Header SecretRefs (Header=ENV, one per line)"}
+                  <textarea onChange={(event) => { setHeadersText(event.target.value); resetPreviewState(); }} placeholder="X-Tenant=TENANT_ID" rows={3} spellCheck={false} value={headersText} />
+                </label>
+                <label className="field-control">
+                  {locale === "ru" ? "Authorization SecretRef (имя ENV, необязательно)" : "Authorization SecretRef (ENV name, optional)"}
+                  <input onChange={(event) => { setAuthorizationEnvironment(event.target.value); resetPreviewState(); }} placeholder="MCP_AUTHORIZATION" value={authorizationEnvironment} />
+                </label>
+              </>
+            )}
           </>
         )}
         <div className="wizard-fields">
-          <label className="field-control">{message(locale, "target")}<select onChange={(event) => { setTargetId(event.target.value); preview.reset(); }} value={selectedTarget?.id ?? ""}>{targets.map((target) => <option key={target.id} value={target.id}>{targetLabel(target.id)}</option>)}</select></label>
-          <label className="field-control">{message(locale, "scope")}<select onChange={(event) => { setScope(event.target.value); preview.reset(); }} value={selectedScope}>{selectedTarget?.scopes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label className="field-control">{message(locale, "target")}<select onChange={(event) => { setTargetId(event.target.value); resetPreviewState(); }} value={selectedTarget?.id ?? ""}>{targets.map((target) => <option key={target.id} value={target.id}>{targetLabel(target.id)}</option>)}</select></label>
+          <label className="field-control">{message(locale, "scope")}<select onChange={(event) => { setScope(event.target.value); resetPreviewState(); }} value={selectedScope}>{selectedTarget?.scopes.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          {mode === "mcp" && selectedScope === "project" ? (
+            <label className="field-control span-two">
+              Workspace
+              <input onChange={(event) => { setWorkspace(event.target.value); resetPreviewState(); }} placeholder="/path/to/project" value={workspace} />
+            </label>
+          ) : null}
         </div>
-        <button disabled={preview.isPending || (mode === "skills" && !catalogId) || (mode === "plugins" && !selectedCandidate?.manifest)} onClick={() => preview.mutate()} type="button">{message(locale, "previewInstall")}</button>
+        <button disabled={preview.isPending || (mode === "skills" && !catalogId) || (mode === "plugins" && !selectedCandidate?.manifest) || (mode === "mcp" && selectedScope === "project" && !workspace.trim())} onClick={() => preview.mutate()} type="button">{message(locale, "previewInstall")}</button>
         {preview.isError ? <p className="mutation-error" role="alert">{preview.error.message}</p> : null}
         {preview.data ? (
           <section className="integration-preview">
             <div className="integration-preview-heading"><h2>{preview.data.plan.package.id}</h2><StatusBadge status={preview.data.plan.risk.decision} /></div>
             <dl className="plugin-facts"><div><dt>{message(locale, "target")}</dt><dd>{targetLabel(preview.data.plan.target.id)}</dd></div><div><dt>{message(locale, "configurationDiff")}</dt><dd>{preview.data.plan.configuration.diff.length}</dd></div><div><dt>{message(locale, "permissions")}</dt><dd>{preview.data.plan.permissions.requirements.map((item) => item.type).join(", ") || message(locale, "noExtraPermissions")}</dd></div></dl>
+            {mode === "mcp" ? (
+              <details className="mcp-configuration-preview">
+                <summary>{locale === "ru" ? "Точная нормализованная конфигурация" : "Exact normalized configuration"}</summary>
+                <pre>{JSON.stringify(preview.data.plan.configuration.preview, null, 2)}</pre>
+              </details>
+            ) : null}
             {preview.data.plan.permissions.network ? <label className="check-control"><input checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} type="checkbox" />{message(locale, "allowNetwork")}</label> : null}
             {preview.data.plan.permissions.native_consent ? <label className="check-control"><input checked={nativeConsent} onChange={(event) => setNativeConsent(event.target.checked)} type="checkbox" />{message(locale, "nativeConsent")}</label> : null}
             <button className="primary-button" disabled={apply.isPending} onClick={() => apply.mutate()} type="button">{message(locale, "approveAndApply")}</button>
@@ -985,34 +1338,12 @@ function sourceForManifest(manifest: Record<string, unknown> | null | undefined)
   return "git";
 }
 
-function PluginItemIcon({ category }: { category: PluginItemCategory }) {
-  if (category === "skills") {
-    return <span className="plugin-item-icon skills" aria-hidden="true"><SparklesIcon /></span>;
-  }
-  if (category === "mcp") {
-    return <span className="plugin-item-icon mcp" aria-hidden="true"><CubeIcon /></span>;
-  }
-  return <span className="plugin-item-icon plugins" aria-hidden="true"><PluginIcon /></span>;
-}
-
 function SearchIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>;
 }
 
 function CloseIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>;
-}
-
-function SparklesIcon() {
-  return <svg viewBox="0 0 24 24"><path d="m12 3 1.3 4.2L17.5 9l-4.2 1.8L12 15l-1.3-4.2L6.5 9l4.2-1.8L12 3Z" /><path d="m18 14 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z" /></svg>;
-}
-
-function CubeIcon() {
-  return <svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" /><path d="m4 7.5 8 4.5 8-4.5M12 12v9" /></svg>;
-}
-
-function PluginIcon() {
-  return <svg viewBox="0 0 24 24"><path d="M8.5 4v4.5H4v7h4.5V20h7v-4.5H20v-7h-4.5V4h-7Z" /><path d="M11 4v3M13 17v3M4 12h3M17 12h3" /></svg>;
 }
 
 function categoryLabel(locale: "en" | "ru", category: PluginCategory) {
@@ -1085,12 +1416,41 @@ function sourceLabel(locale: "en" | "ru", source: PluginLibraryItem["source"]) {
   return message(locale, "installedPackage");
 }
 
+function sourceBadgeLabel(locale: "en" | "ru", item: PluginLibraryItem) {
+  if (item.sourceId === "neuraldeep") return "NeuralDeep";
+  if (item.sourceId === "skills-sh") return "skills.sh";
+  if (item.sourceId === "codex-root") return "Codex";
+  if (item.sourceId === "claude-root") return "Claude";
+  if (item.sourceId === "gemini-root") return "Gemini";
+  if (item.sourceId === "root") return locale === "ru" ? "Общий" : "Shared";
+  if (item.sourceId) return item.sourceId;
+  if (item.catalogSourceType?.startsWith("openai-")) return "OpenAI";
+  if (item.catalogSourceType === "local_private") return "gpt2giga";
+  return sourceLabel(locale, item.source);
+}
+
 function sourceStatusLabel(locale: "en" | "ru", status: string) {
   if (status === "ready") return message(locale, "sourceReady");
+  if (status === "stale") {
+    return locale === "ru" ? "Устаревшие данные" : "Stale data";
+  }
   if (status === "configuration_required") {
     return message(locale, "sourceConfigurationRequired");
   }
   return message(locale, "sourceUnavailable");
+}
+
+function lifecycleActionLabel(
+  locale: "en" | "ru",
+  action: IntegrationLifecycleAction,
+) {
+  const labels: Record<IntegrationLifecycleAction, { en: string; ru: string }> = {
+    enable: { en: "Enable", ru: "Включить" },
+    disable: { en: "Disable", ru: "Отключить" },
+    uninstall: { en: "Uninstall", ru: "Удалить установку" },
+    delete_definition: { en: "Delete definition", ru: "Удалить определение" },
+  };
+  return labels[action][locale];
 }
 
 function statusLabel(locale: "en" | "ru", status: string) {
@@ -1100,6 +1460,9 @@ function statusLabel(locale: "en" | "ru", status: string) {
     failed: { en: "Failed", ru: "Ошибка" },
     handoff_required: { en: "Continue in provider", ru: "Продолжить у провайдера" },
     compensated: { en: "Safely compensated", ru: "Безопасно компенсировано" },
+    disabled: { en: "Disabled", ru: "Отключено" },
+    uninstalled: { en: "Uninstalled", ru: "Установка удалена" },
+    definition_deleted: { en: "Definition deleted", ru: "Определение удалено" },
     repair_required: { en: "Repair required", ru: "Требуется восстановление" },
     rolled_back: { en: "Not connected", ru: "Не подключено" },
     verified: { en: "Connected", ru: "Подключено" },

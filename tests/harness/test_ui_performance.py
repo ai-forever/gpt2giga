@@ -34,7 +34,13 @@ def test_ui_performance_budgets_are_machine_readable_and_copy_safe():
 
 
 def test_packaged_ui_critical_assets_stay_within_initial_load_budget():
-    critical_assets = ("index.html", "app.css", "app.js", "favicon.ico")
+    critical_assets = (
+        "index.html",
+        "app.css",
+        "app.js",
+        "brand/gigaloom-mark.svg",
+        "brand/gigaloom.webmanifest",
+    )
     total_bytes = sum(len(load_asset(name)) for name in critical_assets)
 
     assert total_bytes <= UI_PERFORMANCE_BUDGETS["critical_asset_bytes"]

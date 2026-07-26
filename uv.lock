@@ -1074,7 +1074,7 @@ wheels = [
 
 [[package]]
 name = "gpt2giga"
-version = "0.2.4a1"
+version = "0.2.5a1"
 source = { editable = "packages/gpt2giga" }
 dependencies = [
     { name = "aiohttp" },
@@ -1140,12 +1140,13 @@ provides-extras = ["postgres", "opensearch", "phoenix"]
 
 [[package]]
 name = "gpt2giga-harness"
-version = "0.4.1a1"
+version = "0.5.0a1"
 source = { editable = "packages/gpt2giga-harness" }
 dependencies = [
     { name = "anyio" },
     { name = "fastapi" },
     { name = "pydantic" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "python-dateutil" },
     { name = "pyyaml" },
     { name = "starlette" },
@@ -1171,6 +1172,7 @@ requires-dist = [
     { name = "gigachat", marker = "extra == 'gpt2giga'", specifier = ">=0.2.2a1,<0.3.0" },
     { name = "gpt2giga", marker = "extra == 'gpt2giga'", editable = "packages/gpt2giga" },
     { name = "pydantic", specifier = ">=2.12.0,<3" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.12.0,<3" },
     { name = "python-dateutil", specifier = ">=2.9.0,<3" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "starlette", specifier = ">=1.1,<2" },

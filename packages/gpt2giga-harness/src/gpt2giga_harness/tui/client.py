@@ -2662,6 +2662,8 @@ class AttachedWorkbenchClient:
         def send() -> Mapping[str, Any]:
             body = None
             headers = {"Accept": "application/json"}
+            if method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+                headers["X-GigaLoom-CSRF"] = "1"
             if payload is not None:
                 body = json.dumps(dict(payload), separators=(",", ":")).encode()
                 headers["Content-Type"] = "application/json"

@@ -158,12 +158,18 @@ structured-session link. Отклонённый embedded Claude SDK path ост�
 | Agents, workflows, evals, schedules, prompts, project defaults | `<project>/.giga/` | Проверяемая конфигурация проекта без секретов. |
 | Durable coordination | `~/.gpt2giga/harness/runtime.sqlite3` | Версионируемая SQLite-схема с WAL, миграциями, leases, approvals и audit history. |
 | Sessions, events, raw records, attachments, arenas, eval results | `~/.gpt2giga/harness/...` | Маскирование до записи и ограниченная сериализация в API. |
+| Локальный UI-доступ | `~/.gpt2giga/harness/ui_access/state.json` | Только приватные server-side хэши и сроки с режимом `0600`; browser cookies и значения доступа здесь не сохраняются. |
+| Удалённый UI-доступ | `~/.gpt2giga/harness/ui_access/remote_state.json` | Приватные `0600` digests transactions/sessions, стабильные actor IDs, роли, сроки и revocation evidence; OAuth material не сохраняется. |
 | Native reference index и managed CLI homes | `~/.gpt2giga/harness/native/...` | Harness пишет только в свои managed homes, но не в пользовательский native vendor home. |
 | Изолированные edit worktrees | `~/.gpt2giga/harness/worktrees/...` | Применение только после policy, approval, base-commit и dirty-tree checks. |
 
-UI по умолчанию слушает только loopback. `/healthz` намеренно минимален и не
-требует аутентификации. Remote bind требует явного opt-in, обмена bootstrap token
-на сессию через `/auth/session`, разрешённого Host и внешнего TLS termination.
+UI по умолчанию слушает только loopback. Первый OS-local claim, expiry, logout,
+rotation, recovery, same-origin checks и CSRF marker сохраняют opaque
+server-side browser-session boundary без локального `.env` token. `/healthz`
+намеренно минимален и не требует аутентификации. Remote bind допускает только
+реализованный [single-issuer OIDC/BFF контракт](remote-ui-identity-adr.md) с
+полной статической конфигурацией и явным CLI opt-in. Legacy bootstrap token,
+Host allowlist и retired bearer exchange не аутентифицируют remote users.
 Секреты и скрытые reasoning-данные удаляются до сохранения и повторно перед
 выбранными API-ответами.
 
@@ -179,7 +185,8 @@ JSON-схема FastAPI доступна по `/openapi.json`; Swagger и ReDoc 
 | Маршруты | Зачем нужны |
 | --- | --- |
 | `GET /healthz` | Минимальная liveness-проверка без данных проекта или runtime. |
-| `POST /auth/session` | Меняет настроенный remote bootstrap bearer token на cookie браузерной сессии в памяти. |
+| `GET /auth/status`<br />`POST /auth/logout`<br />`POST /auth/local/rotate` | Возвращает content-free состояние browser session и выполняет аутентифицированный logout или loopback rotation. |
+| `POST /auth/local/recover` | Завершает явное same-origin loopback recovery и отзывает старые локальные сессии; token не принимается в URL или форме. |
 | `GET /api/health` | Возвращает аутентифицированному UI расширенную готовность cockpit, proxy, runtime и reconciliation. |
 | `GET /api/defaults` | Передаёт UI безопасные начальные значения model, API mode, timeout и других настроек. |
 | `GET /api/settings`<br />`PATCH /api/settings/defaults` | Читают backend-owned Workbench defaults или валидируемо обновляют default harness, route/model, canonical execution transport, compatibility invocation field, mode и workspace policy. |

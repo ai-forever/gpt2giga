@@ -174,6 +174,82 @@ def test_extension_pack_api_rejects_unreviewed_fields_without_echoing_content(
     assert "secret-value-canary" not in response.text
 
 
+def test_integration_api_exposes_distinct_revisioned_lifecycle_operations(tmp_path):
+    service = IntegrationFlowService(
+        tmp_path / "data",
+        skill_capability_provider=_supported_skill,
+    )
+    client = TestClient(
+        create_app(
+            HarnessConfig(data_dir=str(tmp_path / "data")),
+            registry=create_default_registry(include_entry_points=False),
+            integration_flow_service=service,
+        )
+    )
+    entry = client.get("/api/integrations").json()["catalog"][0]
+    preview = client.post(
+        "/api/integrations/preview",
+        json={
+            "source": "catalog",
+            "catalog_id": entry["catalog_id"],
+            "target_id": "codex-skill",
+            "scope": "managed_home",
+        },
+    ).json()
+    installed = client.post(
+        f"/api/integrations/flows/{preview['flow']['id']}/apply",
+        json={
+            "plan_id": preview["plan"]["plan_id"],
+            "authority": "api-operator",
+        },
+    )
+    assert installed.status_code == 200
+
+    inventory = client.get("/api/integrations").json()
+    assert inventory["installations"][0]["state"] == "enabled"
+    assert next(
+        item
+        for item in inventory["capability_matrix"]
+        if item["target_id"] == "codex-skill"
+    )["actions"][0] == {
+        "action": "enable",
+        "supported": True,
+        "reason": None,
+    }
+
+    lifecycle_preview = client.post(
+        f"/api/integrations/flows/{preview['flow']['id']}/lifecycle/preview",
+        json={"action": "disable"},
+    )
+    assert lifecycle_preview.status_code == 200
+    lifecycle_plan = lifecycle_preview.json()["plan"]
+    operation = lifecycle_preview.json()["operation"]
+    stale = client.post(
+        f"/api/integrations/lifecycle/{operation['id']}/apply",
+        json={
+            "plan_id": lifecycle_plan["plan_id"],
+            "authority": "api-operator",
+            "expected_revisions": {preview["flow"]["id"]: 99},
+        },
+    )
+    assert stale.status_code == 409
+
+    disabled = client.post(
+        f"/api/integrations/lifecycle/{operation['id']}/apply",
+        json={
+            "plan_id": lifecycle_plan["plan_id"],
+            "authority": "api-operator",
+            "expected_revisions": lifecycle_plan["expected_revisions"],
+        },
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["receipt"]["action"] == "disable"
+    assert disabled.json()["receipt"]["outcome"] == "succeeded"
+    assert client.get("/api/integrations").json()["installations"][0]["state"] == (
+        "disabled"
+    )
+
+
 def _supported_skill(target_id: str) -> SkillCapabilitySnapshot:
     return SkillCapabilitySnapshot(
         target_id=target_id,

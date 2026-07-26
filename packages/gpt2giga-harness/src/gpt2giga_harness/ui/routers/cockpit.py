@@ -8,10 +8,14 @@ import json
 import secrets
 from time import monotonic
 from typing import Any, Callable, Mapping
+from urllib.parse import quote
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from gpt2giga_harness.product_capabilities import (
+    legacy_mode_compatibility_receipt,
+)
 from gpt2giga_harness.sessions.filesystem import FilesystemHarnessSessionStore
 from gpt2giga_harness.sessions.models import (
     HarnessMessage,
@@ -35,6 +39,7 @@ from gpt2giga_harness.sessions.store import (
     RunNotFoundError,
     SessionNotFoundError,
 )
+from gpt2giga_harness.session_titles import title_diagnostics
 from gpt2giga_harness.ui.async_execution import (
     ConformantAPIRoute,
     run_stream_offload,
@@ -584,6 +589,34 @@ def _session_summary(session: HarnessSession) -> dict[str, Any]:
         "tags": [_bounded_text(item, 128) for item in session.tags[:20]],
         "project_id": str(session.metadata.get("project_id") or "") or None,
         "workspace_bound": session.workspace is not None,
+        "title_diagnostics": title_diagnostics(session),
+        "workbench_selection": _workbench_selection(session),
+    }
+
+
+def _workbench_selection(session: HarnessSession) -> dict[str, Any]:
+    retained = session.metadata.get("workbench_selection")
+    if isinstance(retained, Mapping) and retained.get("schema_version") == 1:
+        return {
+            "schema_version": 1,
+            "kind": retained.get("kind"),
+            "intent": retained.get("intent"),
+            "authority": retained.get("authority"),
+            "input_source": retained.get("input_source"),
+            "compatibility_warning": retained.get("compatibility_warning"),
+        }
+    legacy = legacy_mode_compatibility_receipt(session.default_mode)
+    return {
+        "schema_version": 1,
+        "kind": (
+            "direct_chat"
+            if session.default_harness_id == "direct-chat"
+            else "coding_agent"
+        ),
+        "intent": legacy["intent"],
+        "authority": legacy["authority"],
+        "input_source": "legacy_saved_state",
+        "compatibility_warning": legacy["warning"],
     }
 
 
@@ -619,6 +652,46 @@ def _message_projection(message: HarnessMessage) -> dict[str, Any]:
         reasoning = metadata.get("reasoning")
         if isinstance(reasoning, str) and reasoning:
             payload["reasoning"] = _text_projection(reasoning, _ITEM_TEXT_BYTES)
+        attachments = metadata.get("attachments")
+        if isinstance(attachments, list | tuple):
+            projected_attachments = [
+                projected
+                for attachment in attachments[:20]
+                if isinstance(attachment, Mapping)
+                and (projected := _message_attachment_projection(attachment))
+                is not None
+            ]
+            if projected_attachments:
+                payload["attachments"] = projected_attachments
+    return payload
+
+
+def _message_attachment_projection(
+    attachment: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    attachment_id = attachment.get("id")
+    filename = attachment.get("filename")
+    if not isinstance(attachment_id, str) or not attachment_id:
+        return None
+    if not isinstance(filename, str) or not filename:
+        return None
+    payload: dict[str, Any] = {
+        "id": _bounded_text(attachment_id, 256),
+        "filename": _bounded_text(filename, 512),
+        "size_bytes": (
+            attachment["size_bytes"]
+            if isinstance(attachment.get("size_bytes"), int)
+            and not isinstance(attachment.get("size_bytes"), bool)
+            and attachment["size_bytes"] >= 0
+            else 0
+        ),
+    }
+    for key, limit in (("kind", 64), ("mime_type", 256), ("workspace_path", 4096)):
+        value = attachment.get(key)
+        if isinstance(value, str) and value:
+            payload[key] = _bounded_text(value, limit)
+    if "workspace_path" not in payload:
+        payload["url"] = f"/api/attachments/{quote(attachment_id, safe='')}"
     return payload
 
 

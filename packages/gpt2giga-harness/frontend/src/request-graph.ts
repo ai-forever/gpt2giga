@@ -12,6 +12,7 @@ import {
   fetchCockpit,
   type HarnessesResponse,
   type ModelsResponse,
+  type ProviderAccountsResponse,
   type ProviderSettingsResponse,
   type RunCenterSummaryResponse,
   type RunOverviewResponse,
@@ -49,6 +50,7 @@ export const requestKeys = {
   models: (apiMode: string) => [...rootKey, "models", apiMode] as const,
   settings: () => [...rootKey, "settings"] as const,
   providers: () => [...rootKey, "providers"] as const,
+  providerAccounts: () => [...rootKey, "provider-accounts"] as const,
   runsCenter: () => [...rootKey, "runs-center"] as const,
   approvals: () => [...rootKey, "approvals"] as const,
   attention: () => [...rootKey, "attention"] as const,
@@ -95,6 +97,19 @@ export function providersOptions() {
     queryKey: requestKeys.providers(),
     queryFn: ({ signal }) =>
       fetchCockpit<ProviderSettingsResponse>("/api/providers", signal),
+    staleTime: 10_000,
+  });
+}
+
+export function providerAccountsOptions() {
+  return queryOptions({
+    queryKey: requestKeys.providerAccounts(),
+    queryFn: ({ signal }) =>
+      fetchCockpit<ProviderAccountsResponse>("/api/provider-accounts", signal),
+    refetchInterval: (query) =>
+      query.state.data?.accounts.some((account) => account.status === "pending")
+        ? 1_000
+        : false,
     staleTime: 10_000,
   });
 }

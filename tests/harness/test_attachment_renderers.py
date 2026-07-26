@@ -150,6 +150,40 @@ def test_claude_and_gemini_documents_remain_explicit_path_references(tmp_path):
     )
 
 
+def test_direct_chat_and_codex_upload_documents_to_gigachat_files(tmp_path):
+    session, store = _session_and_store(tmp_path)
+    document = store.create_upload(
+        session_id=session.id,
+        project_id=None,
+        filename="report.pdf",
+        data=b"%PDF-1.7\nfixture",
+        mime_type="application/pdf",
+    )
+
+    direct_plan = render_for_direct_chat((document,), store, prompt="Read it")
+    codex_plan = render_for_codex_cli((document,), store)
+
+    assert direct_plan.content_parts[0] == {"type": "text", "text": "Read it"}
+    assert direct_plan.content_parts[1]["type"] == "file"
+    assert direct_plan.content_parts[1]["file"]["filename"] == "report.pdf"
+    assert direct_plan.content_parts[1]["file"]["file_data"].startswith(
+        "data:application/pdf;base64,"
+    )
+    assert direct_plan.metadata["deliveries"][0] == {
+        "attachment_id": document.id,
+        "kind": "document",
+        "transport": "gigachat_file_upload",
+        "rich": True,
+        "required_cli_capabilities": [],
+        "surfaces": ["headless"],
+    }
+    assert "Provider attachments:" in codex_plan.prompt_prefix
+    assert document.storage_path not in codex_plan.prompt_prefix
+    assert codex_plan.warnings == ()
+    assert codex_plan.metadata["transport"] == "gigachat_file_upload"
+    assert codex_plan.metadata["deliveries"][0]["surfaces"] == ["headless_one_shot"]
+
+
 def test_render_dispatcher_reports_unknown_harness(tmp_path):
     session, store = _session_and_store(tmp_path)
     attachment = store.create_upload(

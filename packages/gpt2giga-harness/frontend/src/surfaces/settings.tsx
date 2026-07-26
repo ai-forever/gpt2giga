@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  type BrowserAccessStatusResponse,
   fetchCockpit,
   mutateCockpit,
   patchCockpit,
   type ModelsResponse,
+  type ProviderAccountMutationResponse,
+  type ProviderAccountProjection,
   type ProviderCheckResponse,
   type ProviderMutationResponse,
   type ProviderProjection,
@@ -18,7 +21,12 @@ import { LazyInspector, type InspectorKind } from "../inspectors/LazyInspector";
 import { message } from "../messages";
 import type { LocalePreference, ThemePreference } from "../preferences";
 import { usePreferences } from "../preferences-context";
-import { providersOptions, requestKeys, settingsOptions } from "../request-graph";
+import {
+  providerAccountsOptions,
+  providersOptions,
+  requestKeys,
+  settingsOptions,
+} from "../request-graph";
 
 type DefaultsDraft = {
   default_api_mode: string;
@@ -28,6 +36,8 @@ type DefaultsDraft = {
   execution_transport: string;
   invocation_mode: string;
   mode: string;
+  task_intent: "ask" | "review" | "change";
+  authority: "read_only" | "workspace_write";
   permission_profile: string;
   stream: boolean;
   workspace_policy: string;
@@ -56,7 +66,9 @@ type ProviderDraft = {
 
 const categories = [
   "appearance",
+  "localAccess",
   "runtime",
+  "providerAccounts",
   "provider",
   "routesModels",
   "harnessDefaults",
@@ -70,7 +82,13 @@ export function SettingsSurface() {
   const locale = preferences.locale;
   const queryClient = useQueryClient();
   const settings = useQuery(settingsOptions());
+  const browserAccess = useQuery({
+    queryKey: ["cockpit", "browser-access"],
+    queryFn: ({ signal }) =>
+      fetchCockpit<BrowserAccessStatusResponse>("/auth/status", signal),
+  });
   const providers = useQuery(providersOptions());
+  const providerAccounts = useQuery(providerAccountsOptions());
   const [draft, setDraft] = useState<DefaultsDraft | null>(null);
   const [providerDraft, setProviderDraft] = useState<ProviderDraft | null>(null);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
@@ -110,6 +128,22 @@ export function SettingsSurface() {
   const runtimeCheck = useMutation({
     mutationFn: () => fetchCockpit<Record<string, unknown>>("/api/health"),
   });
+  const rotateBrowserAccess = useMutation({
+    mutationFn: () =>
+      mutateCockpit<{ authenticated: boolean }>("/auth/local/rotate"),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["cockpit", "browser-access"],
+      });
+    },
+  });
+  const logoutBrowser = useMutation({
+    mutationFn: () =>
+      mutateCockpit<{ authenticated: boolean }>("/auth/logout"),
+    onSuccess: () => {
+      window.location.assign("/local-access");
+    },
+  });
   const saveProvider = useMutation({
     mutationFn: (next: ProviderDraft) => {
       const body = providerDraftPayload(next);
@@ -145,6 +179,23 @@ export function SettingsSurface() {
       void queryClient.invalidateQueries({ queryKey: requestKeys.providers() });
     },
   });
+  const providerAccountAction = useMutation({
+    mutationFn: ({
+      providerId,
+      action,
+    }: {
+      providerId: string;
+      action: "cancel" | "login" | "logout" | "refresh";
+    }) =>
+      mutateCockpit<ProviderAccountMutationResponse>(
+        `/api/provider-accounts/${encodeURIComponent(providerId)}/${action}`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: requestKeys.providerAccounts(),
+      });
+    },
+  });
   const modelDiscovery = useMutation({
     mutationFn: () =>
       fetchCockpit<ModelsResponse>(
@@ -163,10 +214,26 @@ export function SettingsSurface() {
     settings.data?.routes.models,
   ]);
 
-  if (settings.isPending || providers.isPending || draft === null || providerDraft === null) {
+  if (
+    settings.isPending ||
+    browserAccess.isPending ||
+    providers.isPending ||
+    providerAccounts.isPending ||
+    draft === null ||
+    providerDraft === null
+  ) {
     return <div className="settings-loading" aria-busy="true">{message(locale, "loading")}</div>;
   }
-  if (settings.isError || providers.isError || settings.data === undefined || providers.data === undefined) {
+  if (
+    settings.isError ||
+    browserAccess.isError ||
+    providers.isError ||
+    providerAccounts.isError ||
+    settings.data === undefined ||
+    browserAccess.data === undefined ||
+    providers.data === undefined ||
+    providerAccounts.data === undefined
+  ) {
     return <div className="error-state">{message(locale, "settingsUnavailable")}</div>;
   }
   const data = settings.data;
@@ -224,6 +291,57 @@ export function SettingsSurface() {
             <Boundary source="browser" effect="live" />
           </SettingsSection>
 
+          <SettingsSection
+            id="localAccess"
+            title={message(locale, "localAccess")}
+            description={message(locale, "localAccessHint")}
+          >
+            <dl className="settings-facts">
+              <Fact
+                label={message(locale, "accessMode")}
+                value={browserAccess.data.local ? message(locale, "loopbackLocal") : message(locale, "remoteDeployment")}
+              />
+              <Fact
+                label={message(locale, "browserSession")}
+                value={browserAccess.data.authenticated ? message(locale, "active") : message(locale, "expired")}
+              />
+              <Fact
+                label={message(locale, "expiry")}
+                value={browserAccess.data.expires_at ?? message(locale, "noExpiry")}
+                mono
+              />
+            </dl>
+            <p className="muted-copy">{browserAccess.data.recovery}</p>
+            <div className="provider-actions">
+              <button
+                disabled={!browserAccess.data.local || rotateBrowserAccess.isPending}
+                onClick={() => rotateBrowserAccess.mutate()}
+                type="button"
+              >
+                {message(locale, "rotateBrowserSession")}
+              </button>
+              <button
+                className="danger-button"
+                disabled={logoutBrowser.isPending}
+                onClick={() => logoutBrowser.mutate()}
+                type="button"
+              >
+                {message(locale, "logoutBrowser")}
+              </button>
+            </div>
+            {rotateBrowserAccess.isSuccess ? (
+              <p className="mutation-success" role="status">
+                {message(locale, "browserSessionRotated")}
+              </p>
+            ) : null}
+            {rotateBrowserAccess.isError || logoutBrowser.isError ? (
+              <p className="mutation-error" role="alert">
+                {message(locale, "browserAccessActionFailed")}
+              </p>
+            ) : null}
+            <Boundary source="os_local_private_store" effect="current_browser" />
+          </SettingsSection>
+
           <SettingsSection id="runtime" title={message(locale, "runtime")} description={message(locale, "runtimeHint")}>
             <dl className="settings-facts">
               <Fact label={message(locale, "proxyUrl")} value={data.runtime.proxy_url} mono />
@@ -235,6 +353,31 @@ export function SettingsSurface() {
               {message(locale, "checkRuntime")}
             </button>
             <Boundary source={data.runtime.proxy_source} effect={data.runtime.change_effect} />
+          </SettingsSection>
+
+          <SettingsSection id="providerAccounts" title={message(locale, "providerAccounts")} description={message(locale, "providerAccountsHint")}>
+            <div className="provider-account-grid">
+              {providerAccounts.data.accounts.map((account) => (
+                <ProviderAccountCard
+                  account={account}
+                  actionPending={
+                    providerAccountAction.isPending &&
+                    providerAccountAction.variables?.providerId === account.provider_id
+                  }
+                  key={account.provider_id}
+                  locale={locale}
+                  onAction={(action) =>
+                    providerAccountAction.mutate({
+                      providerId: account.provider_id,
+                      action,
+                    })}
+                />
+              ))}
+            </div>
+            {providerAccountAction.isError ? (
+              <p className="mutation-error" role="alert">{message(locale, "loginActionFailed")}</p>
+            ) : null}
+            <Boundary source="provider_owned_cli" effect="isolated_home_only" />
           </SettingsSection>
 
           <SettingsSection id="provider" title={message(locale, "provider")} description={message(locale, "providerHint")}>
@@ -454,12 +597,35 @@ export function SettingsSurface() {
                   ))}
                 </select>
               </label>
-              <label>{message(locale, "mode")}
-                <select value={draft.mode} onChange={(event) => setDraft({ ...draft, mode: event.target.value })}>
-                  <option value="plan">plan</option><option value="act">act</option>
+              <label>{message(locale, "intent")}
+                <select value={draft.task_intent} onChange={(event) => setDraft({
+                  ...draft,
+                  task_intent: event.target.value as DefaultsDraft["task_intent"],
+                })}>
+                  <option value="ask">{message(locale, "ask")}</option>
+                  <option value="review">{message(locale, "review")}</option>
+                  <option value="change">{message(locale, "change")}</option>
                 </select>
               </label>
-              <label className="settings-checkbox"><input checked={draft.stream} onChange={(event) => setDraft({ ...draft, stream: event.target.checked })} type="checkbox" />{message(locale, "streamResponse")}</label>
+              <label>{message(locale, "authority")}
+                <select value={draft.authority} onChange={(event) => setDraft({
+                  ...draft,
+                  authority: event.target.value as DefaultsDraft["authority"],
+                })}>
+                  <option value="read_only">{message(locale, "readOnly")}</option>
+                  <option value="workspace_write">{message(locale, "workspaceWrite")}</option>
+                </select>
+              </label>
+              {data.harness_defaults.compatibility.mode === null ? null : (
+                <div className="runtime-owned-setting" role="status">
+                  <strong>{message(locale, "legacyModeWarningTitle")}</strong>
+                  <span>{message(locale, "legacyModeWarning")}</span>
+                </div>
+              )}
+              <div className="runtime-owned-setting">
+                <strong>{message(locale, "streamRuntimeOwnedTitle")}</strong>
+                <span>{message(locale, "streamRuntimeOwned")}</span>
+              </div>
             </div>
             <Boundary source="harness_settings" effect="new_runs" />
           </SettingsSection>
@@ -515,6 +681,90 @@ function Boundary({ effect, source }: { effect: string; source: string }) {
 
 function ProviderField({ children, error, label }: { children: React.ReactNode; error?: string; label: string }) {
   return <label>{label}{children}{error ? <span className="settings-field-error">{error}</span> : null}</label>;
+}
+
+function ProviderAccountCard({
+  account,
+  actionPending,
+  locale,
+  onAction,
+}: {
+  account: ProviderAccountProjection;
+  actionPending: boolean;
+  locale: LocalePreference;
+  onAction: (action: "cancel" | "login" | "logout" | "refresh") => void;
+}) {
+  const pending = account.status === "pending";
+  return (
+    <article className="provider-account-card">
+      <header>
+        <div>
+          <strong>{account.display_name}</strong>
+          <small>{account.provider_id}</small>
+        </div>
+        <span className={`status-label ${account.status === "ready" ? "success" : ""}`}>
+          {account.status}
+        </span>
+      </header>
+      <dl className="settings-facts">
+        <Fact label={message(locale, "source")} value={account.source} mono />
+        <Fact
+          label={message(locale, "detectedVersion")}
+          value={account.detected_cli_version ?? message(locale, "cliNotDetected")}
+        />
+        <Fact
+          label={message(locale, "authentication")}
+          value={account.authentication_method ?? message(locale, "providerOwnedCredentials")}
+        />
+        <Fact
+          label={message(locale, "expiry")}
+          value={account.expires_at ?? message(locale, "noExpiry")}
+        />
+      </dl>
+      <p className="provider-account-recovery">
+        <strong>{message(locale, "accountRecovery")}</strong>
+        <span>{account.recovery[0] ?? account.reason_code}</span>
+      </p>
+      {pending ? (
+        <p className="settings-action-result" role="status">
+          {message(locale, "loginPendingHint")}
+        </p>
+      ) : null}
+      <div className="provider-actions">
+        <button
+          disabled={!account.actions.status || actionPending || pending}
+          onClick={() => onAction("refresh")}
+          type="button"
+        >
+          {message(locale, "refreshStatus")}
+        </button>
+        {pending ? (
+          <button
+            disabled={!account.actions.cancel || actionPending}
+            onClick={() => onAction("cancel")}
+            type="button"
+          >
+            {message(locale, "cancelLogin")}
+          </button>
+        ) : (
+          <button
+            disabled={!account.actions.start || actionPending}
+            onClick={() => onAction("login")}
+            type="button"
+          >
+            {message(locale, "startLogin")}
+          </button>
+        )}
+        <button
+          disabled={!account.actions.logout || actionPending || pending}
+          onClick={() => onAction("logout")}
+          type="button"
+        >
+          {message(locale, "logout")}
+        </button>
+      </div>
+    </article>
+  );
 }
 
 function emptyProviderDraft(template: ProviderSettingsResponse["templates"][number] | undefined): ProviderDraft {
@@ -631,6 +881,8 @@ function toDraft(data: SettingsResponse): DefaultsDraft {
     execution_transport: current.execution_transport,
     invocation_mode: current.invocation_mode,
     mode: current.mode,
+    task_intent: current.task_intent,
+    authority: current.authority,
     permission_profile: current.permission_profile,
     stream: current.stream,
     workspace_policy: current.workspace_policy,

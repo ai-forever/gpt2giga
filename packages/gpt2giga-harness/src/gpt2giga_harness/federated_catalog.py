@@ -127,6 +127,8 @@ class FederatedProvenance:
     detail_url: str
     artifact_url: str | None
     artifact_origin: str | None
+    relative_path: str | None = None
+    file_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_id(self.source_id, "federated source id")
@@ -141,6 +143,18 @@ class FederatedProvenance:
             origin = _origin_for_url(self.artifact_url)
             if self.artifact_origin != origin:
                 raise ValueError("artifact origin does not match artifact URL")
+        if self.relative_path is not None:
+            _validate_relative_path(self.relative_path)
+        file_paths = tuple(self.file_paths)
+        if len(file_paths) > 512:
+            raise ValueError("federated file tree is too large")
+        for path in file_paths:
+            _validate_relative_path(path)
+        if len(set(file_paths)) != len(file_paths):
+            raise ValueError("federated file tree contains duplicate paths")
+        if self.relative_path is not None and self.relative_path not in file_paths:
+            raise ValueError("federated relative path is absent from the file tree")
+        object.__setattr__(self, "file_paths", file_paths)
 
 
 @dataclass(frozen=True)
@@ -215,6 +229,7 @@ class FederatedArtifactResolution:
     immutable_ref: str | None
     artifact_url: str | None
     reason_code: str | None
+    relative_path: str | None = None
     install_authorized: bool = False
 
     def __post_init__(self) -> None:
@@ -233,10 +248,13 @@ class FederatedArtifactResolution:
                 )
             _validate_sha256_ref(self.immutable_ref)
             _validate_https_url(self.artifact_url)
+            if self.relative_path is not None:
+                _validate_relative_path(self.relative_path)
         elif (
             self.immutable_ref is not None
             or self.artifact_url is not None
             or self.reason_code != "immutable_reference_unavailable"
+            or self.relative_path is not None
         ):
             raise ValueError("unavailable artifact resolution is invalid")
         if self.install_authorized is not False:
@@ -309,11 +327,15 @@ class FederatedRequest:
     headers: Mapping[str, str]
     timeout_seconds: float
     max_response_bytes: int
+    allow_loopback_http: bool = False
 
     def __post_init__(self) -> None:
         if self.method != "GET":
             raise ValueError("federated sources are read-only")
-        _validate_https_url(self.url)
+        if self.allow_loopback_http:
+            _validate_loopback_http_url(self.url)
+        else:
+            _validate_https_url(self.url)
         if dict(self.headers) != {"Accept": "application/json"}:
             raise ValueError("federated request headers are invalid")
         if self.timeout_seconds != FEDERATED_TIMEOUT_SECONDS:
@@ -334,6 +356,31 @@ class FederatedHTTPResponse:
 
 
 FederatedFetcher = Callable[[FederatedRequest], Awaitable[FederatedHTTPResponse]]
+
+
+@dataclass(frozen=True)
+class FederatedAuditProjection:
+    """Bounded content-free security-audit metadata for one candidate."""
+
+    provider: str
+    status: str
+    audited_at: str
+    risk_level: str | None = None
+
+    def __post_init__(self) -> None:
+        _validate_text(self.provider, "federated audit provider", maximum=128)
+        if self.status not in {"pass", "warn", "fail"}:
+            raise ValueError("federated audit status is invalid")
+        _parse_timestamp(self.audited_at)
+        if self.risk_level not in {
+            None,
+            "NONE",
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL",
+        }:
+            raise ValueError("federated audit risk level is invalid")
 
 
 class FederatedCatalogSource(Protocol):
@@ -358,6 +405,10 @@ class FederatedCatalogSource(Protocol):
     ) -> tuple[FederatedCatalogCandidate, ...]: ...
 
     async def detail(self, upstream_id: str) -> FederatedCatalogCandidate: ...
+
+    async def audits(
+        self, upstream_id: str
+    ) -> tuple[FederatedAuditProjection, ...]: ...
 
     async def resolve_artifact(
         self, upstream_id: str
@@ -388,6 +439,10 @@ class _BaseFederatedSource:
             revision=0, observed_at=None, items=()
         )
         self.health: FederatedSourceHealth | None = None
+        self.last_cache_status = "live"
+        self.last_cache_age_seconds: int | None = None
+        self.last_source_error: str | None = None
+        self._ephemeral_candidates: dict[str, FederatedCatalogCandidate] = {}
 
     async def refresh(
         self,
@@ -467,7 +522,7 @@ class _BaseFederatedSource:
             health=self.health,
         )
 
-    async def _request_json(self, url: str) -> Any:
+    async def _request_json(self, url: str, *, allow_not_found: bool = False) -> Any:
         expected_origin = self.descriptor.canonical_origin
         if _origin_for_url(url) != expected_origin:
             raise _FederatedFailure("source.origin_rejected", "OriginRejected")
@@ -490,8 +545,19 @@ class _BaseFederatedSource:
             raise _FederatedFailure("source.auth_failed", "AuthenticationFailure")
         if response.status_code == 429:
             raise _FederatedFailure("source.rate_limited", "RateLimitFailure")
+        if response.status_code == 404 and allow_not_found:
+            return None
         if response.status_code < 200 or response.status_code >= 300:
             raise _FederatedFailure("source.http_failed", "HTTPFailure")
+        cache_status = _header(response.headers, "x-giga-cache-status")
+        age = _header(response.headers, "age")
+        self.last_cache_status = (
+            cache_status if cache_status in {"fresh", "stale"} else "live"
+        )
+        self.last_cache_age_seconds = (
+            int(age) if age is not None and age.isdigit() else None
+        )
+        self.last_source_error = _header(response.headers, "x-giga-source-error")
         if not isinstance(response.body, bytes):
             raise _FederatedFailure("source.invalid_payload", "ResponseBodyType")
         if len(response.body) > MAX_FEDERATED_RESPONSE_BYTES:
@@ -522,11 +588,20 @@ class _BaseFederatedSource:
         _validate_id(upstream_id, "federated upstream id")
         candidate = next(
             (item for item in self.last_good.items if item.upstream_id == upstream_id),
-            None,
+            self._ephemeral_candidates.get(upstream_id),
         )
         if candidate is None or not candidate.source_present:
             raise KeyError(upstream_id)
         return candidate
+
+    def _remember_candidates(
+        self, items: Sequence[FederatedCatalogCandidate]
+    ) -> tuple[FederatedCatalogCandidate, ...]:
+        remembered = tuple(items)
+        self._ephemeral_candidates = {
+            item.upstream_id: item for item in remembered[:200]
+        }
+        return remembered
 
     async def _fetch_inventory(
         self,
@@ -552,6 +627,7 @@ class SkillsShFederatedCatalogSource(_BaseFederatedSource):
         if hosted_fetch is None:
             raise ValueError("skills.sh requires an explicit hosted metadata fetcher")
         super().__init__(fetch=hosted_fetch, now=now)
+        self._curated_ids: frozenset[str] | None = None
 
     async def _fetch_inventory(
         self,
@@ -564,6 +640,7 @@ class SkillsShFederatedCatalogSource(_BaseFederatedSource):
             raise _FederatedFailure(
                 "source.unsupported_component", "UnsupportedComponent"
             )
+        curated_ids = await self._fetch_curated_ids()
         candidates: list[FederatedCatalogCandidate] = []
         for page in range(MAX_FEDERATED_PAGES):
             url = f"{SKILLS_SH_ORIGIN}/api/v1/skills?page={page}&per_page={page_size}"
@@ -573,6 +650,7 @@ class SkillsShFederatedCatalogSource(_BaseFederatedSource):
                 expected_page=page,
                 page_size=page_size,
                 observed_at=observed_at,
+                curated_ids=curated_ids,
             )
             candidates.extend(items)
             if len(candidates) > MAX_FEDERATED_ENTRIES:
@@ -589,6 +667,11 @@ class SkillsShFederatedCatalogSource(_BaseFederatedSource):
     ) -> tuple[FederatedCatalogCandidate, ...]:
         query = _validate_query(query)
         _validate_limit(limit, field="federated search limit", maximum=200)
+        curated_ids = (
+            self._curated_ids
+            if self._curated_ids is not None
+            else await self._fetch_curated_ids()
+        )
         url = (
             f"{SKILLS_SH_ORIGIN}/api/v1/skills/search?"
             f"q={urllib_parse.quote(query, safe='')}&limit={limit}"
@@ -598,32 +681,70 @@ class SkillsShFederatedCatalogSource(_BaseFederatedSource):
             payload,
             observed_at=_format_timestamp(self._now()),
             limit=limit,
+            curated_ids=curated_ids,
         )
         _reject_duplicate_candidates(items)
-        return items
+        return self._remember_candidates(items)
 
     async def detail(self, upstream_id: str) -> FederatedCatalogCandidate:
         cached = self._cached_detail(upstream_id)
         url = f"{SKILLS_SH_ORIGIN}/api/v1/skills/{urllib_parse.quote(upstream_id, safe='/')}"
         payload = await self._request_json(url)
-        _parse_skills_sh_detail(payload, expected_id=upstream_id)
-        return cached
+        digest, file_paths = _parse_skills_sh_detail(payload, expected_id=upstream_id)
+        relative_path = next(
+            (
+                path
+                for path in file_paths
+                if path == "SKILL.md" or path.endswith("/SKILL.md")
+            ),
+            None,
+        )
+        return replace(
+            cached,
+            immutable_ref=f"sha256:{digest}",
+            provenance=replace(
+                cached.provenance,
+                relative_path=relative_path,
+                file_paths=file_paths,
+            ),
+        )
+
+    async def audits(self, upstream_id: str) -> tuple[FederatedAuditProjection, ...]:
+        self._cached_detail(upstream_id)
+        url = (
+            f"{SKILLS_SH_ORIGIN}/api/v1/skills/audit/"
+            f"{urllib_parse.quote(upstream_id, safe='/')}"
+        )
+        payload = await self._request_json(url, allow_not_found=True)
+        if payload is None:
+            return ()
+        return _parse_skills_sh_audits(payload, expected_id=upstream_id)
 
     async def resolve_artifact(self, upstream_id: str) -> FederatedArtifactResolution:
-        cached = self._cached_detail(upstream_id)
-        url = f"{SKILLS_SH_ORIGIN}/api/v1/skills/{urllib_parse.quote(upstream_id, safe='/')}"
-        payload = await self._request_json(url)
-        digest = _parse_skills_sh_detail(payload, expected_id=upstream_id)
-        if cached.provenance.artifact_url is None:
+        detailed = await self.detail(upstream_id)
+        if detailed.immutable_ref is None or detailed.provenance.artifact_url is None:
             return _unavailable_artifact(self.descriptor.source_id, upstream_id)
         return FederatedArtifactResolution(
             source_id=self.descriptor.source_id,
             upstream_id=upstream_id,
             available=True,
-            immutable_ref=f"sha256:{digest}",
-            artifact_url=cached.provenance.artifact_url,
+            immutable_ref=detailed.immutable_ref,
+            artifact_url=detailed.provenance.artifact_url,
             reason_code=None,
+            relative_path=detailed.provenance.relative_path,
         )
+
+    async def _fetch_curated_ids(self) -> frozenset[str]:
+        try:
+            payload = await self._request_json(
+                f"{SKILLS_SH_ORIGIN}/api/v1/skills/curated"
+            )
+            curated_ids = _parse_skills_sh_curated(payload)
+        except _FederatedFailure as exc:
+            self.last_source_error = exc.code
+            curated_ids = frozenset()
+        self._curated_ids = curated_ids
+        return curated_ids
 
 
 class NeuralDeepFederatedCatalogSource(_BaseFederatedSource):
@@ -684,10 +805,16 @@ class NeuralDeepFederatedCatalogSource(_BaseFederatedSource):
                 )
             )
         _reject_duplicate_candidates(candidates)
-        return tuple(sorted(candidates, key=_candidate_sort_key)[:limit])
+        return self._remember_candidates(
+            tuple(sorted(candidates, key=_candidate_sort_key)[:limit])
+        )
 
     async def detail(self, upstream_id: str) -> FederatedCatalogCandidate:
         return self._cached_detail(upstream_id)
+
+    async def audits(self, upstream_id: str) -> tuple[FederatedAuditProjection, ...]:
+        self._cached_detail(upstream_id)
+        return ()
 
     async def resolve_artifact(self, upstream_id: str) -> FederatedArtifactResolution:
         self._cached_detail(upstream_id)
@@ -737,6 +864,7 @@ def _parse_skills_sh_page(
     expected_page: int,
     page_size: int,
     observed_at: str,
+    curated_ids: frozenset[str],
 ) -> tuple[tuple[FederatedCatalogCandidate, ...], bool]:
     mapping = _strict_mapping(payload, {"data", "pagination"})
     pagination = _strict_mapping(
@@ -752,7 +880,11 @@ def _parse_skills_sh_page(
     if not isinstance(has_more, bool):
         raise _FederatedFailure("source.invalid_payload", "PaginationState")
     return (
-        _parse_skills_sh_items(mapping.get("data"), observed_at=observed_at),
+        _parse_skills_sh_items(
+            mapping.get("data"),
+            observed_at=observed_at,
+            curated_ids=curated_ids,
+        ),
         has_more,
     )
 
@@ -762,6 +894,7 @@ def _parse_skills_sh_search(
     *,
     observed_at: str,
     limit: int,
+    curated_ids: frozenset[str],
 ) -> tuple[FederatedCatalogCandidate, ...]:
     mapping = _strict_mapping(
         payload,
@@ -773,7 +906,11 @@ def _parse_skills_sh_search(
     _validate_text(mapping.get("searchType"), "skills.sh search type", maximum=32)
     count = _integer(mapping.get("count"), "skills.sh count")
     _integer(mapping.get("durationMs"), "skills.sh duration")
-    items = _parse_skills_sh_items(mapping.get("data"), observed_at=observed_at)
+    items = _parse_skills_sh_items(
+        mapping.get("data"),
+        observed_at=observed_at,
+        curated_ids=curated_ids,
+    )
     if count != len(items) or len(items) > limit:
         raise _FederatedFailure("source.invalid_payload", "SearchCount")
     return items
@@ -783,20 +920,26 @@ def _parse_skills_sh_items(
     payload: Any,
     *,
     observed_at: str,
+    curated_ids: frozenset[str],
 ) -> tuple[FederatedCatalogCandidate, ...]:
     if not isinstance(payload, list):
         raise _FederatedFailure("source.invalid_payload", "ItemList")
     if len(payload) > MAX_FEDERATED_ENTRIES:
         raise _FederatedFailure("source.too_many_entries", "EntryLimit")
     items = tuple(
-        _parse_skills_sh_item(item, observed_at=observed_at) for item in payload
+        _parse_skills_sh_item(
+            item,
+            observed_at=observed_at,
+            curated_ids=curated_ids,
+        )
+        for item in payload
     )
     _reject_duplicate_candidates(items)
     return items
 
 
 def _parse_skills_sh_item(
-    payload: Any, *, observed_at: str
+    payload: Any, *, observed_at: str, curated_ids: frozenset[str]
 ) -> FederatedCatalogCandidate:
     mapping = _strict_mapping(payload, _SKILLS_SH_ITEM_FIELDS)
     upstream_id = _id(mapping.get("id"), "skills.sh id")
@@ -829,16 +972,54 @@ def _parse_skills_sh_item(
         observed_at=observed_at,
         detail_url=detail_url,
         artifact_url=install_url,
-        curated=False,
+        curated=upstream_id in curated_ids,
         popularity=installs,
         upstream_audit="reported_reviewed" if not duplicate else None,
     )
 
 
-def _parse_skills_sh_detail(payload: Any, *, expected_id: str) -> str:
+def _parse_skills_sh_curated(payload: Any) -> frozenset[str]:
     mapping = _strict_mapping(
         payload,
-        {"id", "source", "slug", "installs", "hash"},
+        {"data", "totalOwners", "totalSkills", "generatedAt"},
+    )
+    owners = mapping.get("data")
+    if not isinstance(owners, list) or len(owners) > 1_000:
+        raise _FederatedFailure("source.invalid_payload", "CuratedOwners")
+    curated_ids: set[str] = set()
+    for owner in owners:
+        owner_mapping = _strict_mapping(
+            owner,
+            {
+                "owner",
+                "totalInstalls",
+                "featuredRepo",
+                "featuredSkill",
+                "skills",
+            },
+        )
+        _text(owner_mapping.get("owner"), "skills.sh curated owner")
+        _integer(owner_mapping.get("totalInstalls"), "skills.sh curated installs")
+        _text(owner_mapping.get("featuredRepo"), "skills.sh featured repo")
+        _text(owner_mapping.get("featuredSkill"), "skills.sh featured skill")
+        skills = owner_mapping.get("skills")
+        if not isinstance(skills, list):
+            raise _FederatedFailure("source.invalid_payload", "CuratedSkills")
+        for item in skills:
+            item_mapping = _strict_mapping(item, _SKILLS_SH_ITEM_FIELDS)
+            curated_ids.add(_id(item_mapping.get("id"), "skills.sh curated id"))
+    _integer(mapping.get("totalOwners"), "skills.sh total owners")
+    _integer(mapping.get("totalSkills"), "skills.sh total skills")
+    _parse_timestamp(mapping.get("generatedAt"))
+    return frozenset(curated_ids)
+
+
+def _parse_skills_sh_detail(
+    payload: Any, *, expected_id: str
+) -> tuple[str, tuple[str, ...]]:
+    mapping = _strict_mapping(
+        payload,
+        {"id", "source", "slug", "installs", "hash", "files"},
     )
     upstream_id = _id(mapping.get("id"), "skills.sh detail id")
     source = _id(mapping.get("source"), "skills.sh detail source")
@@ -849,7 +1030,56 @@ def _parse_skills_sh_detail(payload: Any, *, expected_id: str) -> str:
         raise _FederatedFailure("source.invalid_payload", "IdentityMismatch")
     if not isinstance(digest, str) or _HEX_HASH_RE.fullmatch(digest) is None:
         raise _FederatedFailure("source.invalid_payload", "ImmutableHash")
-    return digest
+    raw_files = mapping.get("files")
+    if raw_files is None:
+        return digest, ()
+    if not isinstance(raw_files, list) or len(raw_files) > 512:
+        raise _FederatedFailure("source.invalid_payload", "FileTree")
+    file_paths = []
+    for item in raw_files:
+        file_mapping = _strict_mapping(item, {"path"})
+        path = file_mapping.get("path")
+        try:
+            _validate_relative_path(path)
+        except ValueError as exc:
+            raise _FederatedFailure("source.invalid_payload", "FilePath") from exc
+        file_paths.append(path)
+    if len(set(file_paths)) != len(file_paths):
+        raise _FederatedFailure("source.invalid_payload", "DuplicateFilePath")
+    return digest, tuple(file_paths)
+
+
+def _parse_skills_sh_audits(
+    payload: Any, *, expected_id: str
+) -> tuple[FederatedAuditProjection, ...]:
+    mapping = _strict_mapping(payload, {"id", "source", "slug", "audits"})
+    upstream_id = _id(mapping.get("id"), "skills.sh audit id")
+    source = _id(mapping.get("source"), "skills.sh audit source")
+    slug = _id(mapping.get("slug"), "skills.sh audit slug")
+    if upstream_id != expected_id or upstream_id != f"{source}/{slug}":
+        raise _FederatedFailure("source.invalid_payload", "IdentityMismatch")
+    audits = mapping.get("audits")
+    if not isinstance(audits, list) or len(audits) > 32:
+        raise _FederatedFailure("source.invalid_payload", "AuditList")
+    result = []
+    for item in audits:
+        audit = _strict_mapping(
+            item,
+            {"provider", "slug", "status", "auditedAt", "riskLevel"},
+        )
+        result.append(
+            FederatedAuditProjection(
+                provider=_text(audit.get("provider"), "skills.sh audit provider"),
+                status=_text(audit.get("status"), "skills.sh audit status"),
+                audited_at=_text(audit.get("auditedAt"), "skills.sh audit timestamp"),
+                risk_level=(
+                    _text(audit.get("riskLevel"), "skills.sh audit risk")
+                    if audit.get("riskLevel") is not None
+                    else None
+                ),
+            )
+        )
+    return tuple(result)
 
 
 def _parse_neuraldeep_items(
@@ -912,6 +1142,14 @@ def _parse_neuraldeep_item(
     explicit_url = mapping.get("url")
     if artifact_url is None and explicit_url is not None:
         artifact_url = _https_url(explicit_url, "NeuralDeep artifact URL")
+    relative_path = mapping.get("contentPath")
+    if relative_path not in {None, ""}:
+        try:
+            _validate_relative_path(relative_path)
+        except ValueError as exc:
+            raise _FederatedFailure("source.invalid_payload", "ContentPath") from exc
+    else:
+        relative_path = None
     return _candidate(
         source_id=NEURALDEEP_SOURCE_ID,
         upstream_id=upstream_id,
@@ -919,12 +1157,32 @@ def _parse_neuraldeep_item(
         component=component,
         source_present=source_present,
         observed_at=observed_at,
-        detail_url=f"{NEURALDEEP_ORIGIN}/{component.value}/{urllib_parse.quote(name, safe='')}",
+        detail_url=(
+            f"{NEURALDEEP_ORIGIN}/{component.value}/"
+            f"{urllib_parse.quote(_neuraldeep_detail_slug(upstream_id, name, component), safe='')}"
+        ),
         artifact_url=artifact_url,
         curated=featured or mapping.get("source") == "curated",
         popularity=installs,
         upstream_audit="reported_approved" if status == "approved" else None,
+        relative_path=relative_path,
     )
+
+
+def _neuraldeep_detail_slug(
+    upstream_id: str,
+    name: str,
+    component: FederatedCatalogComponent,
+) -> str:
+    identity_slug = upstream_id.rsplit(":", 1)[-1].lower()
+    if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", identity_slug):
+        return identity_slug
+    name_slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    if component is FederatedCatalogComponent.MCP:
+        name_slug = name_slug.removesuffix("-mcp")
+    if not name_slug:
+        raise _FederatedFailure("source.invalid_payload", "DetailSlug")
+    return name_slug
 
 
 def _candidate(
@@ -940,6 +1198,7 @@ def _candidate(
     curated: bool,
     popularity: int,
     upstream_audit: str | None,
+    relative_path: str | None = None,
 ) -> FederatedCatalogCandidate:
     return FederatedCatalogCandidate(
         source_id=source_id,
@@ -960,6 +1219,8 @@ def _candidate(
             detail_url=detail_url,
             artifact_url=artifact_url,
             artifact_origin=_origin_for_url(artifact_url) if artifact_url else None,
+            relative_path=relative_path,
+            file_paths=(relative_path,) if relative_path is not None else (),
         ),
         trust=FederatedTrustProjection(
             source_present=source_present,
@@ -1121,6 +1382,37 @@ def _validate_https_url(value: str) -> None:
         raise ValueError("URL must be canonical HTTPS")
 
 
+def _validate_loopback_http_url(value: str) -> None:
+    parsed = urllib_parse.urlsplit(value)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"127.0.0.1", "::1", "localhost"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        raise ValueError("URL must be loopback HTTP")
+
+
+def _validate_relative_path(value: Any) -> None:
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 512
+        or value.startswith(("/", "\\"))
+        or "\\" in value
+        or any(part in {"", ".", ".."} for part in value.split("/"))
+        or any(ord(char) < 32 for char in value)
+    ):
+        raise ValueError("federated relative path is invalid")
+
+
+def _header(headers: Mapping[str, str], name: str) -> str | None:
+    return next(
+        (value for key, value in headers.items() if key.casefold() == name.casefold()),
+        None,
+    )
+
+
 def _origin_for_url(value: str) -> str:
     _validate_https_url(value)
     parsed = urllib_parse.urlsplit(value)
@@ -1204,6 +1496,7 @@ __all__ = [
     "SKILLS_SH_ORIGIN",
     "SKILLS_SH_SOURCE_ID",
     "FederatedArtifactResolution",
+    "FederatedAuditProjection",
     "FederatedCatalogCandidate",
     "FederatedCatalogComponent",
     "FederatedCatalogSnapshot",

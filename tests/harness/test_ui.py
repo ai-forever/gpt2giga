@@ -28,7 +28,10 @@ UI_SOURCE = "\n".join((INDEX_HTML, APP_CSS, APP_JS))
 
 def test_ui_assets_load_from_package_resources():
     assert load_asset("index.html").startswith(b"<!doctype html>")
-    assert load_asset("favicon.ico").startswith(b"\x00\x00\x01\x00")
+    assert b'<title id="title">GigaLoom</title>' in load_asset(
+        "brand/gigaloom-mark.svg"
+    )
+    assert b'"name": "GigaLoom"' in load_asset("brand/gigaloom.webmanifest")
     assert "function boot()" in APP_JS
     assert "function agentPlanSummary(agent)" in APP_JS
     assert "executable with current adapter options" in APP_JS
@@ -49,7 +52,8 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     index_response = client.get("/legacy")
     css_response = client.get("/assets/app.css")
     js_response = client.get("/assets/app.js")
-    favicon_response = client.get("/assets/favicon.ico")
+    favicon_response = client.get("/assets/brand/gigaloom-mark.svg")
+    manifest_response = client.get("/assets/brand/gigaloom.webmanifest")
     missing_response = client.get("/assets/missing.js")
     traversal_response = client.get("/assets/nested/app.js")
 
@@ -60,10 +64,10 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
         '<link rel="stylesheet" href="/assets/app.css?v=38.44">' in index_response.text
     )
     assert (
-        '<link rel="icon" href="/assets/favicon.ico" sizes="any">'
+        '<link rel="icon" href="/assets/brand/gigaloom-mark.svg" type="image/svg+xml">'
         in index_response.text
     )
-    assert '<script src="/assets/app.js?v=38.53"></script>' in index_response.text
+    assert '<script src="/assets/app.js?v=38.54"></script>' in index_response.text
     assert "<style>" not in index_response.text
     assert "<script>" not in index_response.text
     assert css_response.status_code == 200
@@ -75,9 +79,14 @@ def test_ui_serves_packaged_assets_with_mime_and_cache_headers():
     assert js_response.headers["cache-control"] == "public, max-age=3600"
     assert js_response.text == APP_JS
     assert favicon_response.status_code == 200
-    assert favicon_response.headers["content-type"] == "image/vnd.microsoft.icon"
+    assert favicon_response.headers["content-type"] == "image/svg+xml"
     assert favicon_response.headers["cache-control"] == "public, max-age=3600"
-    assert favicon_response.content == load_asset("favicon.ico")
+    assert favicon_response.content == load_asset("brand/gigaloom-mark.svg")
+    assert manifest_response.status_code == 200
+    assert manifest_response.headers["content-type"].startswith(
+        "application/manifest+json"
+    )
+    assert manifest_response.content == load_asset("brand/gigaloom.webmanifest")
     assert missing_response.status_code == 404
     assert traversal_response.status_code == 404
 
@@ -1628,17 +1637,27 @@ def test_ui_mobile_advanced_panel_uses_viewport_containing_block():
 
 
 def test_ui_rejects_remote_bind_without_allow_remote():
-    with pytest.raises(ValueError):
-        validate_ui_bind("0.0.0.0", allow_remote=False)
+    with pytest.raises(ValueError, match="Pass --allow-remote"):
+        validate_ui_bind(
+            HarnessConfig(ui_host="0.0.0.0"),
+            allow_remote=False,
+        )
 
 
-def test_ui_allows_remote_bind_with_explicit_flag():
-    validate_ui_bind("0.0.0.0", allow_remote=True)
+def test_ui_remote_flag_does_not_bypass_identity_boundary():
+    with pytest.raises(ValueError, match="issuer, client ID, client secret"):
+        validate_ui_bind(
+            HarnessConfig(ui_host="0.0.0.0"),
+            allow_remote=True,
+        )
 
 
 def test_ui_rejects_non_loopback_hostname_without_explicit_flag():
-    with pytest.raises(ValueError, match="harness.example"):
-        validate_ui_bind("harness.example", allow_remote=False)
+    with pytest.raises(ValueError, match="harness.example.*Pass --allow-remote"):
+        validate_ui_bind(
+            HarnessConfig(ui_host="harness.example"),
+            allow_remote=False,
+        )
 
 
 class _WorkspaceCaptureHarness(BaseHarness):

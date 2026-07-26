@@ -40,11 +40,12 @@ export function planAutomationAction(
     };
   }
   if (section === "workflows") {
+    const workflow = item as WorkflowProjection;
     return {
       kind: "workflow_run",
       labelKey: "runWorkflow",
       prompt: "optional",
-      disabledReason: null,
+      disabledReason: workflow.workerOnline ? null : "worker_offline",
     };
   }
   const schedule = item as ScheduleProjection;

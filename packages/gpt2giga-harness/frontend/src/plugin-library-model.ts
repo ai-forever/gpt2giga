@@ -2,7 +2,9 @@ import type {
   IntegrationGroupSummary,
   IntegrationFlowInventory,
   IntegrationFlowSummary,
+  IntegrationLifecycleInstallation,
   IntegrationSearchResponse,
+  IntegrationSourceProvenance,
 } from "./remaining-request-graph";
 import type { McpProjection } from "./surface-projections";
 
@@ -24,6 +26,7 @@ export interface PluginLibraryItem {
   status: string;
   flow: IntegrationFlowSummary | null;
   group: IntegrationGroupSummary | null;
+  lifecycle: IntegrationLifecycleInstallation | null;
   mcp: McpProjection | null;
   description: string | null;
   previewId: string | null;
@@ -31,6 +34,10 @@ export interface PluginLibraryItem {
   detailUrl: string | null;
   sourceId: string | null;
   popularity: number | null;
+  provenance: IntegrationSourceProvenance | null;
+  invocation: string | null;
+  bundledSkills: string[];
+  defaultPrompts: string[];
 }
 
 export function buildPluginLibrary(
@@ -39,15 +46,24 @@ export function buildPluginLibrary(
 ): PluginLibraryItem[] {
   const latestFlows = latestFlowsByPackageTarget(inventory.flows);
   const latestGroups = latestGroupsByPackage(inventory.groups);
+  const lifecycleByFlow = new Map(
+    (inventory.installations ?? []).map((item) => [item.flow_id, item]),
+  );
   const catalogPackages = new Set(inventory.catalog.map((item) => item.package_id));
   const items: PluginLibraryItem[] = inventory.catalog.map((entry) => {
     const flows = entry.target_ids
       .map((targetId) => latestFlows.get(flowKey(entry.package_id, targetId)))
       .filter((flow): flow is IntegrationFlowSummary => flow !== undefined);
-    const connectedFlows = flows.filter((flow) => flow.status === "verified");
+    const connectedFlows = flows.filter(
+      (flow) => lifecycleByFlow.get(flow.id)?.enabled ?? flow.status === "verified",
+    );
     const latestFlow = newestFlow(flows);
+    const latestLifecycle = latestFlow ? lifecycleByFlow.get(latestFlow.id) ?? null : null;
     const latestGroup = latestGroups.get(entry.package_id) ?? null;
-    const groupedConnected = latestGroup?.status === "verified";
+    const groupedConnected = latestGroup?.status === "verified"
+      && latestGroup.children.every(
+        (child) => lifecycleByFlow.get(child.flow_id)?.enabled ?? child.status === "verified",
+      );
     return {
       id: `catalog:${entry.catalog_id}`,
       category: categoryFor(entry.component_types, entry.target_ids),
@@ -60,9 +76,10 @@ export function buildPluginLibrary(
       targetIds: [...entry.target_ids].sort(),
       connectedTargetIds: connectedFlows.map((flow) => flow.target_id).sort(),
       connected: connectedFlows.length > 0 || groupedConnected,
-      status: latestGroup?.status ?? latestFlow?.status ?? "available",
+      status: latestLifecycle?.state ?? latestGroup?.status ?? latestFlow?.status ?? "available",
       flow: latestFlow ?? null,
       group: latestGroup,
+      lifecycle: latestLifecycle,
       mcp: null,
       description: entry.discovery?.name ?? null,
       previewId: entry.component_types.includes("skill") && entry.version !== "discovery"
@@ -70,8 +87,23 @@ export function buildPluginLibrary(
         : null,
       artifactUrl: entry.discovery?.artifact_url ?? null,
       detailUrl: entry.discovery?.detail_url ?? null,
-      sourceId: entry.discovery ? entry.source_type : null,
+      sourceId: entry.discovery ? entry.source_id ?? entry.source_type : null,
       popularity: entry.discovery?.popularity ?? null,
+      provenance: entry.discovery ? {
+        canonical_source: entry.source_id ?? entry.source_type,
+        upstream_id: entry.discovery.upstream_id ?? entry.package_id,
+        canonical_origin: entry.discovery.canonical_origin ?? "",
+        repository_url: entry.discovery.repository_url,
+        artifact_url: entry.discovery.artifact_url,
+        immutable_ref: entry.discovery.immutable_ref,
+        content_hash: entry.discovery.content_hash,
+        relative_path: entry.discovery.relative_path,
+        discovery_location: entry.discovery.discovery_location ?? entry.package_id,
+        observed_at: entry.discovery.observed_at ?? "",
+      } : null,
+      invocation: null,
+      bundledSkills: [],
+      defaultPrompts: [],
     };
   });
 
@@ -84,8 +116,11 @@ export function buildPluginLibrary(
   }
   for (const [packageId, flows] of uncataloguedFlows) {
     const latestFlow = newestFlow(flows);
-    const connectedFlows = flows.filter((flow) => flow.status === "verified");
+    const connectedFlows = flows.filter(
+      (flow) => lifecycleByFlow.get(flow.id)?.enabled ?? flow.status === "verified",
+    );
     const targetIds = flows.map((flow) => flow.target_id).sort();
+    const latestLifecycle = latestFlow ? lifecycleByFlow.get(latestFlow.id) ?? null : null;
     items.push({
       id: `package:${packageId}`,
       category: categoryFor([], targetIds),
@@ -98,9 +133,10 @@ export function buildPluginLibrary(
       targetIds,
       connectedTargetIds: connectedFlows.map((flow) => flow.target_id).sort(),
       connected: connectedFlows.length > 0,
-      status: latestFlow?.status ?? "available",
+      status: latestLifecycle?.state ?? latestFlow?.status ?? "available",
       flow: latestFlow ?? null,
       group: latestGroups.get(packageId) ?? null,
+      lifecycle: latestLifecycle,
       mcp: null,
       description: null,
       previewId: null,
@@ -108,6 +144,10 @@ export function buildPluginLibrary(
       detailUrl: null,
       sourceId: null,
       popularity: null,
+      provenance: null,
+      invocation: null,
+      bundledSkills: [],
+      defaultPrompts: [],
     });
   }
 
@@ -127,6 +167,7 @@ export function buildPluginLibrary(
       status: mcp.status,
       flow: null,
       group: null,
+      lifecycle: null,
       mcp,
       description: null,
       previewId: null,
@@ -134,6 +175,10 @@ export function buildPluginLibrary(
       detailUrl: null,
       sourceId: null,
       popularity: null,
+      provenance: null,
+      invocation: null,
+      bundledSkills: [],
+      defaultPrompts: [],
     });
   }
 
@@ -153,6 +198,7 @@ export function buildPluginLibrary(
       status: "verified",
       flow: null,
       group: null,
+      lifecycle: null,
       mcp: null,
       description: skill.description,
       previewId: skill.preview_id,
@@ -160,6 +206,41 @@ export function buildPluginLibrary(
       detailUrl: null,
       sourceId: skill.origin,
       popularity: null,
+      provenance: null,
+      invocation: `@${skill.name}`,
+      bundledSkills: [skill.name],
+      defaultPrompts: [],
+    });
+  }
+
+  for (const plugin of inventory.root_plugins ?? []) {
+    items.push({
+      id: plugin.id,
+      category: "plugins",
+      packageId: plugin.name,
+      title: plugin.title,
+      version: plugin.version,
+      source: "root",
+      catalogId: null,
+      catalogSourceType: plugin.origin,
+      targetIds: [...plugin.target_ids].sort(),
+      connectedTargetIds: [...plugin.target_ids].sort(),
+      connected: plugin.connected,
+      status: "available",
+      flow: null,
+      group: null,
+      lifecycle: null,
+      mcp: null,
+      description: plugin.description,
+      previewId: null,
+      artifactUrl: null,
+      detailUrl: plugin.repository_url,
+      sourceId: plugin.source_label,
+      popularity: null,
+      provenance: null,
+      invocation: plugin.invocation,
+      bundledSkills: [...plugin.bundled_skills],
+      defaultPrompts: [...plugin.default_prompts],
     });
   }
 
@@ -188,6 +269,7 @@ export function buildRemotePluginLibrary(search: IntegrationSearchResponse | und
     status: "available",
     flow: null,
     group: null,
+    lifecycle: null,
     mcp: null,
     description: item.upstream_audit,
     previewId: null,
@@ -195,6 +277,21 @@ export function buildRemotePluginLibrary(search: IntegrationSearchResponse | und
     detailUrl: item.detail_url,
     sourceId: item.source_id,
     popularity: item.popularity,
+    provenance: {
+      canonical_source: item.source_id,
+      upstream_id: item.upstream_id,
+      canonical_origin: item.canonical_origin ?? "",
+      repository_url: item.artifact_url,
+      artifact_url: item.artifact_url,
+      immutable_ref: null,
+      content_hash: null,
+      relative_path: null,
+      discovery_location: item.discovery_location ?? `${item.source_id}/${item.upstream_id}`,
+      observed_at: item.observed_at ?? "",
+    },
+    invocation: null,
+    bundledSkills: [],
+    defaultPrompts: [],
   }));
 }
 
@@ -213,7 +310,10 @@ export function filterPluginLibrary(
     if (harnessFilter !== "all" && !item.targetIds.some((target) => (
       harnessFilter === "harness" ? target.startsWith("harness-") : target.startsWith(`${harnessFilter}-`)
     ))) return false;
-    if (sourceFilter === "built_in" && item.catalogSourceType !== "local_private") return false;
+    if (sourceFilter === "built_in" && (
+      item.catalogSourceType !== "local_private"
+      && !(item.catalogSourceType?.startsWith("openai-") ?? false)
+    )) return false;
     if (sourceFilter === "external" && (
       item.category === "plugins"
       || item.catalogSourceType === null

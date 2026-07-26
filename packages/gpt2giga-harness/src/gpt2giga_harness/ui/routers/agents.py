@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request
 import yaml
 
 from gpt2giga_harness.agents import (
+    AGENT_DIRECTORY,
     agent_execution_plan_to_dict,
     agent_profile_to_dict,
     agent_run_payload,
@@ -20,11 +21,17 @@ from gpt2giga_harness.agents import (
     parse_agent_profile,
 )
 from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
-from gpt2giga_harness.authoring import AuthoringConflictError, ProjectAuthoringService
+from gpt2giga_harness.authoring import (
+    AuthoringConflictError,
+    ProjectAuthoringService,
+    content_hash,
+)
 from gpt2giga_harness.project import project_to_dict, resolve_project
+from gpt2giga_harness.sessions.locking import exclusive_file_lock
 from gpt2giga_harness.sessions.models import run_to_dict
 from gpt2giga_harness.sessions.redaction import redact_for_storage
 from gpt2giga_harness.sessions.store import new_id, title_from_prompt
+from gpt2giga_harness.workflows import discover_workflows
 
 
 router = APIRouter(route_class=ConformantAPIRoute)
@@ -169,6 +176,113 @@ def agent_duplicate(
         "source_hash": draft.source_hash,
         "redacted_diff": draft.redacted_diff,
         "profile": _profile_payload(request, draft.value),
+    }
+
+
+@router.post("/api/agents/{agent_id}/delete-preview")
+def agent_delete_preview(
+    agent_id: str,
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Preview the exact project file and retained runs affected by deletion."""
+    project = _project(request, payload.get("workspace"))
+    try:
+        profile = load_agent_profile(project.root, agent_id)
+        path = Path(project.root).resolve() / (profile.source_path or "")
+        source = path.read_text(encoding="utf-8")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Agent profile not found") from exc
+    run_dependents = [
+        {
+            "kind": "run",
+            "id": job.id,
+            "status": job.status.value,
+        }
+        for job in request.app.state.harness_runtime_store.list_jobs()
+        if job.project_id == project.id and job.agent_id == agent_id
+    ]
+    workflows, _errors = discover_workflows(project.root)
+    workflow_dependents = [
+        {"kind": "workflow", "id": workflow.id, "status": "defined"}
+        for workflow in workflows
+        if any(getattr(step, "agent_id", None) == agent_id for step in workflow.steps)
+    ]
+    schedule_service = request.app.state.harness_schedule_service
+    schedule_dependents = [
+        {
+            "kind": "schedule",
+            "id": item["definition"]["id"],
+            "status": str((item.get("state") or {}).get("status") or "unknown"),
+        }
+        for item in schedule_service.list(project)
+        if item["definition"]["target"]["kind"] == "agent"
+        and item["definition"]["target"]["id"] == agent_id
+        and str((item.get("state") or {}).get("status")) != "archived"
+    ]
+    dependents = [*workflow_dependents, *schedule_dependents, *run_dependents]
+    return {
+        "kind": "agent",
+        "id": agent_id,
+        "source_hash": content_hash(source),
+        "relative_path": path.relative_to(Path(project.root).resolve()).as_posix(),
+        "dependents": dependents,
+        "active_dependents": [
+            item
+            for item in dependents
+            if item["status"] not in {"succeeded", "failed", "canceled"}
+        ],
+        "confirmation_required": True,
+    }
+
+
+@router.post("/api/agents/{agent_id}/delete")
+def agent_delete(
+    agent_id: str,
+    request: Request,
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Delete one exact profile revision after explicit preview confirmation."""
+    preview = agent_delete_preview(agent_id, request, payload)
+    blocking_dependents = [
+        item
+        for item in preview["active_dependents"]
+        if item["kind"] in {"workflow", "schedule", "run"}
+    ]
+    if blocking_dependents:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Agent has dependent workflows, schedules, or active runs; "
+                "remove or finish them before deletion"
+            ),
+        )
+    expected_hash = _optional_text(payload.get("expected_hash"))
+    if expected_hash != preview["source_hash"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Agent changed since the delete preview; reload before deleting",
+        )
+    if payload.get("confirm_id") != agent_id:
+        raise HTTPException(
+            status_code=400,
+            detail="confirm_id must exactly match the agent id",
+        )
+    root = Path(_project(request, payload.get("workspace")).root).resolve()
+    path = root / AGENT_DIRECTORY / f"{agent_id}.yaml"
+    with exclusive_file_lock(path):
+        if content_hash(path.read_text(encoding="utf-8")) != expected_hash:
+            raise HTTPException(
+                status_code=409,
+                detail="Agent changed since the delete preview; reload before deleting",
+            )
+        path.unlink()
+    return {
+        "deleted": True,
+        "kind": "agent",
+        "id": agent_id,
+        "source_hash": expected_hash,
+        "retained_dependents": preview["dependents"],
     }
 
 
