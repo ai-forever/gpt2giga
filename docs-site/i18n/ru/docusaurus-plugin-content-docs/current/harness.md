@@ -491,8 +491,6 @@ GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max
 GPT2GIGA_HARNESS_DEFAULT_API_MODE=v2
 GPT2GIGA_HARNESS_UI_HOST=127.0.0.1
 GPT2GIGA_HARNESS_UI_PORT=8091
-GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN=<strong-random-secret-for-remote-ui>
-GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS=harness.example.internal
 GPT2GIGA_HARNESS_AUTO_START_PROXY=True
 GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS=15
 GPT2GIGA_HARNESS_TIMEOUT_SECONDS=3600
@@ -1195,23 +1193,16 @@ issue или диагностический архив.
 Локальный access token не попадает в URL, `localStorage`, `sessionStorage`,
 diagnostics, screenshots или project files.
 
-Для non-loopback bind нужны
-явный `--allow-remote`, сильный bootstrap token, список разрешённых hosts и TLS:
+Remote binding сейчас недоступен. G3-04 принял ограниченный single-issuer
+OIDC/BFF identity contract, но его реализация G3-05 является отдельным gate. До
+неё любой non-loopback host завершается ошибкой до запуска application или
+worker pool. Legacy `--allow-remote`, bootstrap-token environment input и Host
+allowlist не обходят эту границу; local bootstrap не используется как remote
+identity.
 
-```bash
-export GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN="$(openssl rand -hex 32)"
-export GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS=harness.example.internal
-giga ui --host 0.0.0.0 --allow-remote
-```
-
-Не передавайте token через URL. Размещайте TLS reverse proxy перед UI. Alpha не
-позиционируется как публичный Internet-facing или multi-tenant сервис.
-
-Bootstrap token даёт доступ доверенного оператора с правами того же OS account,
-а не изолированного tenant или read-only пользователя. Аутентифицированный
-оператор может выбрать любой доступный этому account workspace, открыть
-поддерживаемые файлы и запускать там разрешённые policy процессы. Передавайте
-token только операторам, которым допустимы эти filesystem и process privileges.
+Принятые контракты ролей, sessions, CSRF, revocation, trusted proxy и recovery
+описаны в [ADR удалённого UI](architecture/remote-ui-identity-adr.md). Не
+публикуйте и не туннелируйте loopback listener как multi-user workaround.
 
 ## Ограничения preview
 

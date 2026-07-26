@@ -20,6 +20,7 @@ http://localhost:8090
 | Direct Chat, Coding Agents, native Codex subagents, Arena, and Workflows | [Agents and multi-agent behavior](agents-and-multi-agent.md) |
 | Unified Harness components, execution flow, storage, and control-plane API | [Harness architecture](architecture/harness.md) |
 | Provider-owned login, status, logout, revoke, and headless boundaries | [Provider authentication matrix](architecture/provider-authentication-capability-matrix.md) |
+| Accepted remote UI identity boundary and current fail-closed gate | [Remote UI identity ADR](architecture/remote-ui-identity-adr.md) |
 | Environment variables, authentication, limits, metrics, observability | [Configuration](configuration.md) |
 | Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Deployment](deployment.md) |
 | Runtime logs, traffic logs, admin API, debug translate | [Operations](operations.md) |
@@ -58,6 +59,7 @@ OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are pr
 
 - [Harness architecture](architecture/harness.md) explains the local control plane, durable runtime, storage boundaries, and why each API family exists.
 - [Provider authentication matrix](architecture/provider-authentication-capability-matrix.md) freezes source-backed, versioned login capabilities without copying provider credentials.
+- [Remote UI identity ADR](architecture/remote-ui-identity-adr.md) accepts one single-issuer OIDC/BFF profile while keeping non-loopback startup closed until its implementation gate.
 - [Normalized messages](architecture/normalized-messages.md) describes the experimental layer of protocol-independent models.
 - [Logging and observability](architecture/logging-and-observability.md) sets the boundaries between runtime logs, traffic logs, metrics, and traces.
 - [Adding a provider or protocol](architecture/how-to-add-provider.md) gives a checklist for extending the public protocol surface and upstream providers.

@@ -165,10 +165,13 @@ structured-session link. Отклонённый embedded Claude SDK path ост�
 UI по умолчанию слушает только loopback. Первый OS-local claim, expiry, logout,
 rotation, recovery, same-origin checks и CSRF marker сохраняют opaque
 server-side browser-session boundary без локального `.env` token. `/healthz`
-намеренно минимален и не требует аутентификации. Remote bind требует явного opt-in, обмена bootstrap token
-на сессию через `/auth/session`, разрешённого Host и внешнего TLS termination.
-Секреты и скрытые reasoning-данные удаляются до сохранения и повторно перед
-выбранными API-ответами.
+намеренно минимален и не требует аутентификации. Remote bind остаётся
+fail-closed, пока принятый
+[single-issuer OIDC/BFF контракт](remote-ui-identity-adr.md) не будет реализован
+в G3-05. Legacy remote flag, bootstrap-token input, Host allowlist и
+retired bearer-exchange config не разрешают non-loopback listener. Секреты и
+скрытые reasoning-данные удаляются до сохранения и повторно перед выбранными
+API-ответами.
 
 ## API управляющего слоя
 
@@ -182,7 +185,6 @@ JSON-схема FastAPI доступна по `/openapi.json`; Swagger и ReDoc 
 | Маршруты | Зачем нужны |
 | --- | --- |
 | `GET /healthz` | Минимальная liveness-проверка без данных проекта или runtime. |
-| `POST /auth/session` | Меняет настроенный remote bootstrap bearer token на cookie браузерной сессии в памяти. |
 | `GET /auth/status`<br />`POST /auth/logout`<br />`POST /auth/local/rotate` | Возвращает content-free состояние browser session и выполняет аутентифицированный logout или loopback rotation. |
 | `POST /auth/local/recover` | Завершает явное same-origin loopback recovery и отзывает старые локальные сессии; token не принимается в URL или форме. |
 | `GET /api/health` | Возвращает аутентифицированному UI расширенную готовность cockpit, proxy, runtime и reconciliation. |

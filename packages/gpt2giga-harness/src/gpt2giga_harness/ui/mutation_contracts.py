@@ -95,7 +95,7 @@ CONFORMANCE_EVIDENCE = {
                 {ConformanceBehavior.AUTHENTICATION, ConformanceBehavior.DENY}
             ),
             test_nodes=(
-                "tests/harness/test_ui_security.py::test_remote_mutations_fail_closed_without_auth_configuration",
+                "tests/harness/test_ui_security.py::test_remote_app_fails_closed_before_bootstrap_exchange",
             ),
         ),
         ConformanceEvidence(
@@ -321,20 +321,6 @@ CONFORMANCE_EVIDENCE = {
                 "tests/harness/test_integrations_api.py::test_integration_api_keeps_preview_apply_progress_and_rollback_equivalent",
                 "tests/harness/test_integrations_api.py::test_integration_api_validates_fields_and_never_returns_secret_payloads",
                 "tests/harness/test_integration_flows.py::test_flow_rejects_secret_values_stale_approval_and_records_failure",
-            ),
-        ),
-        ConformanceEvidence(
-            id="auth.bootstrap",
-            behaviors=frozenset(
-                {
-                    ConformanceBehavior.AUTHENTICATION,
-                    ConformanceBehavior.ALLOW,
-                    ConformanceBehavior.DENY,
-                    ConformanceBehavior.REDACTION,
-                }
-            ),
-            test_nodes=(
-                "tests/harness/test_ui_security.py::test_remote_shell_requires_bootstrap_exchange_for_api_and_sse_cookie",
             ),
         ),
         ConformanceEvidence(
@@ -902,14 +888,6 @@ MUTATION_ROUTE_CONTRACTS = (
         EnforcementControl.REVIEW_BINDING,
         "reviewed_promotion.project_artifact_apply",
         evidence=(*_AUTH, "reviewed.project_artifact"),
-    ),
-    _route(
-        "POST",
-        "/auth/session",
-        MutationClass.LOCAL_STATE,
-        EnforcementControl.BOOTSTRAP_AUTH,
-        "ui_security.browser_session",
-        evidence=("auth.bootstrap",),
     ),
     _route(
         "POST",

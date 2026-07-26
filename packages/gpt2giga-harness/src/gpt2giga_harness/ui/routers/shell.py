@@ -1,4 +1,4 @@
-"""Public shell, packaged assets, health, and browser-session exchange."""
+"""Public shell, packaged assets, health, and local browser-session controls."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import re
 from urllib.parse import quote, urlparse
 
-from fastapi import APIRouter, Header, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
@@ -161,21 +161,6 @@ def create_shell_router(security: HarnessUISecurity) -> APIRouter:
     @router.get("/healthz", response_model=UIHealthResponse)
     async def health() -> UIHealthResponse:
         return UIHealthResponse()
-
-    @router.post("/auth/session", response_model=BrowserSessionResponse)
-    async def browser_session(
-        response: Response,
-        authorization: str | None = Header(default=None),
-    ) -> BrowserSessionResponse:
-        if not security.bootstrap_configured:
-            raise HTTPException(
-                status_code=403,
-                detail="Remote browser authentication is not configured",
-            )
-        if not security.bootstrap_matches(authorization):
-            raise HTTPException(status_code=401, detail="Invalid bootstrap token")
-        security.set_session_cookie(response, security.issue_remote_session())
-        return BrowserSessionResponse()
 
     @router.get("/auth/status", response_model=BrowserAccessStatusResponse)
     async def browser_access_status(request: Request) -> BrowserAccessStatusResponse:

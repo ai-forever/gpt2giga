@@ -159,7 +159,7 @@ class HarnessUISecurity:
         """Require an explicit same-origin browser marker on mutations."""
         if request.method.upper() not in _MUTATING_METHODS:
             return True
-        if request.url.path in {"/auth/session", "/auth/local/recover"}:
+        if request.url.path == "/auth/local/recover":
             return True
         if request_is_test_client(request):
             return True

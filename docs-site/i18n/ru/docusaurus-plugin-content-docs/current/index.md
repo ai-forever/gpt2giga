@@ -20,6 +20,7 @@ http://localhost:8090
 | Direct Chat, Coding Agents, нативные subagents Codex, Arena и Workflows | [Agents и multi-agent поведение](agents-and-multi-agent.md) |
 | Компоненты Unified Harness, поток выполнения, хранение и API управляющего слоя | [Архитектура Harness](architecture/harness.md) |
 | Provider-owned login, status, logout, revoke и headless-границы | [Матрица аутентификации провайдеров](architecture/provider-authentication-capability-matrix.md) |
+| Принятая граница remote UI identity и текущий fail-closed gate | [ADR удалённого UI](architecture/remote-ui-identity-adr.md) |
 | Переменные окружения, аутентификация, лимиты, метрики, наблюдаемость | [Конфигурация](configuration.md) |
 | Профили Compose, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развёртывание](deployment.md) |
 | Журналы выполнения, журналы трафика, admin API, отладочная трансляция | [Операции](operations.md) |
@@ -58,6 +59,7 @@ OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подг
 
 - [Архитектура Harness](architecture/harness.md) описывает локальный управляющий слой, durable runtime, границы хранения и назначение каждого семейства API.
 - [Матрица аутентификации провайдеров](architecture/provider-authentication-capability-matrix.md) фиксирует версионированные provider-owned возможности без копирования credentials.
+- [ADR удалённого UI](architecture/remote-ui-identity-adr.md) принимает один single-issuer OIDC/BFF profile, сохраняя non-loopback startup закрытым до отдельной реализации.
 - [Нормализованные сообщения](architecture/normalized-messages.md) описывают экспериментальный слой моделей, не зависящих от протокола.
 - [Логирование и наблюдаемость](architecture/logging-and-observability.md) фиксирует границы между журналами выполнения, журналами трафика, метриками и трейсами.
 - [Добавление провайдера или протокола](architecture/how-to-add-provider.md) даёт чек-лист для расширения набора публичных протоколов и вышестоящих провайдеров.

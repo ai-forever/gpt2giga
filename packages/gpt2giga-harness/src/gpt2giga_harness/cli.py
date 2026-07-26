@@ -221,7 +221,6 @@ from gpt2giga_harness.types import (
 )
 from gpt2giga_harness.worktrees import parse_workspace_policy
 from gpt2giga_harness.ui.app import create_app, validate_ui_bind
-from gpt2giga_harness.ui.security import is_loopback_host
 from gpt2giga_harness.workspace import resolve_workspace
 from gpt2giga_harness.workbench_execution import workbench_transport_projection
 from gpt2giga_harness.workflows import (
@@ -595,7 +594,14 @@ def build_parser() -> argparse.ArgumentParser:
     ui = subparsers.add_parser("ui", parents=[common])
     ui.add_argument("--host", default=None)
     ui.add_argument("--port", type=int, default=None)
-    ui.add_argument("--allow-remote", action="store_true")
+    ui.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help=(
+            "Reserved compatibility flag; remote startup remains blocked "
+            "until the G3-05 OIDC identity boundary is implemented"
+        ),
+    )
     ui.add_argument(
         "--start-worker",
         action=argparse.BooleanOptionalAction,
@@ -3012,15 +3018,6 @@ def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
         raise ValueError(
             f"UI worker count must be between 1 and {MAX_UI_WORKER_COUNT}."
         )
-    if args.allow_remote and not is_loopback_host(config.ui_host):
-        if config.ui_bootstrap_token:
-            warning = "Remote UI browser authentication is enabled."
-        else:
-            warning = (
-                "Remote UI APIs require GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN; "
-                "mutating APIs are disabled."
-            )
-        print(f"Warning: {warning}", file=sys.stderr)
     print(f"Starting GigaLoom UI at http://{config.ui_host}:{config.ui_port}/")
     worker_processes = (
         _start_ui_workers(config, worker_count=args.worker_count)

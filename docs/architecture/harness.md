@@ -166,11 +166,13 @@ the ownership split is stable:
 The UI binds to loopback by default. Its first OS-local claim, expiry, logout,
 rotation, recovery, same-origin checks, and CSRF marker preserve an opaque
 server-side browser-session boundary without a local `.env` token.
-`/healthz` is intentionally minimal and unauthenticated. Remote binding
-requires an explicit opt-in, a bootstrap-token
-exchange through `/auth/session`, an allowed Host, and external TLS termination.
-Secrets and hidden reasoning are removed before persistence and again before
-selected API responses.
+`/healthz` is intentionally minimal and unauthenticated. Remote binding is
+fail-closed until the accepted
+[single-issuer OIDC/BFF contract](remote-ui-identity-adr.md) is implemented in
+G3-05. The legacy remote flag, bootstrap-token input, Host allowlist, and
+retired bearer-exchange configuration do not authorize a non-loopback
+listener. Secrets and hidden reasoning are removed before persistence and
+again before selected API responses.
 
 ## Control-plane API
 
@@ -184,7 +186,6 @@ are intentionally disabled.
 | Routes | Why they exist |
 | --- | --- |
 | `GET /healthz` | Minimal liveness probe that does not expose project or runtime data. |
-| `POST /auth/session` | Exchanges a configured remote bootstrap bearer token for an in-memory browser-session cookie. |
 | `GET /auth/status`<br />`POST /auth/logout`<br />`POST /auth/local/rotate` | Projects content-free browser-session state and provides authenticated logout or loopback rotation. |
 | `POST /auth/local/recover` | Completes an explicit same-origin loopback recovery and revokes older local sessions; no token is accepted in the URL or form. |
 | `GET /api/health` | Returns richer cockpit readiness, proxy, runtime, and reconciliation state for the authenticated UI. |

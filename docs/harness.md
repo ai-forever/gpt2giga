@@ -579,26 +579,16 @@ older sessions before claiming a new one. Browser mutations also require the
 same-origin CSRF marker. No local access token is placed in a URL,
 `localStorage`, `sessionStorage`, diagnostics, screenshots, or project files.
 
-To bind remotely, configure a strong bootstrap token in the environment and opt
-in explicitly:
+Remote binding is currently unavailable. G3-04 accepted a bounded,
+single-issuer OIDC/BFF identity contract, but its G3-05 implementation is a
+separate gate. Until then, any non-loopback host fails before the application
+or worker pool starts. `--allow-remote`, a bootstrap-token environment value,
+or a Host allowlist does not bypass that boundary; the local bootstrap is never
+reused as remote identity.
 
-```bash
-export GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN="$(openssl rand -hex 32)"
-export GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS=harness.example.internal
-giga ui --host 0.0.0.0 --allow-remote
-```
-
-Terminate TLS in front of a remote listener: remote cookies are `Secure`, the
-bootstrap token is exchanged through `Authorization: Bearer ...`, and it is
-never accepted in a URL. Without remote authentication, data APIs return `401`
-and mutating APIs fail closed with `403`. Host and same-origin checks apply to
-the shell, API, assets, and SSE connections.
-
-Treat the bootstrap token as same-principal operator access, not as a tenant or
-read-only credential. An authenticated operator can select any workspace the
-Harness OS account can access, preview supported files, and start approved
-processes there. Share the token only with operators who may act with that OS
-account's filesystem and process privileges.
+See the [remote UI identity ADR](architecture/remote-ui-identity-adr.md) for the
+accepted role, session, CSRF, revocation, trusted-proxy, and recovery contract.
+Do not expose or tunnel the loopback listener as a multi-user workaround.
 
 ## Configuration
 
@@ -611,8 +601,6 @@ GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max
 GPT2GIGA_HARNESS_DEFAULT_API_MODE=v2
 GPT2GIGA_HARNESS_UI_HOST=127.0.0.1
 GPT2GIGA_HARNESS_UI_PORT=8091
-GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN=<strong-random-secret-for-remote-ui>
-GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS=harness.example.internal
 GPT2GIGA_HARNESS_AUTO_START_PROXY=True
 GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS=15
 GPT2GIGA_HARNESS_TIMEOUT_SECONDS=3600
@@ -2024,10 +2012,10 @@ JavaScript assets without a frontend build step, runtime CDN, or network fetch.
 It binds to `127.0.0.1:8091` by default. Local first-run, expiry, rotation,
 logout, and recovery remain server-side OS-local session operations; environment
 variables are not the primary local human access flow. Remote binding is
-rejected unless you pass `--allow-remote`; usable remote APIs additionally require
-`GPT2GIGA_HARNESS_UI_BOOTSTRAP_TOKEN` and TLS termination. The token is exchanged
-for an in-memory browser session and is never stored in project state, history,
-traces, or URLs.
+fail-closed pending G3-05: `--allow-remote` is retained only as a compatibility
+input and does not authorize a non-loopback listener. The accepted future
+single-issuer OIDC/BFF boundary is documented in the
+[remote UI identity ADR](architecture/remote-ui-identity-adr.md).
 
 The shell exposes stable Work and Runs routes. `/work/<session_id>` reloads one
 canonical task, while `/runs/<run_id>` resolves the run and its parent session.

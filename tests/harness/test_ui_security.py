@@ -274,46 +274,34 @@ def test_ui_security_config_loads_token_and_host_allowlist_without_api_exposure(
     assert "secret-token" not in client.get("/api/defaults").text
 
 
-def test_remote_shell_requires_bootstrap_exchange_for_api_and_sse_cookie():
+@pytest.mark.parametrize("bootstrap_token", [None, "bootstrap-secret"])
+def test_remote_app_fails_closed_before_bootstrap_exchange(bootstrap_token):
     config = HarnessConfig(
         ui_host="0.0.0.0",
-        ui_bootstrap_token="bootstrap-secret",
+        ui_bootstrap_token=bootstrap_token,
+        ui_allowed_hosts=("harness.example",),
     )
-    client = _client(config, base_url="https://192.168.1.50")
 
-    shell = client.get("/work")
-    denied = client.get("/api/defaults")
-    invalid = client.post(
+    with pytest.raises(ValueError, match="G3-05 single-issuer OIDC"):
+        create_app(
+            config,
+            registry=create_default_registry(include_entry_points=False),
+        )
+
+
+def test_shared_remote_bearer_exchange_is_unmounted():
+    client = _client(HarnessConfig(ui_bootstrap_token="bootstrap-secret"))
+
+    response = client.post(
         "/auth/session",
-        headers={"Authorization": "Bearer wrong"},
+        headers={
+            "Authorization": "Bearer bootstrap-secret",
+            "X-GigaLoom-CSRF": "1",
+        },
     )
-    accepted = client.post(
-        "/auth/session",
-        headers={"Authorization": "Bearer bootstrap-secret"},
-    )
 
-    assert shell.status_code == 200
-    assert "set-cookie" not in shell.headers
-    assert denied.status_code == 401
-    assert invalid.status_code == 401
-    assert accepted.status_code == 200
-    assert accepted.json() == {"authenticated": True}
-    cookie = accepted.headers["set-cookie"]
-    assert "HttpOnly" in cookie
-    assert "SameSite=strict" in cookie
-    assert "Secure" in cookie
-    assert client.get("/api/defaults").status_code == 200
-    assert client.get("/api/runs/missing/events/stream").status_code == 404
-
-
-def test_remote_mutations_fail_closed_without_auth_configuration():
-    config = HarnessConfig(ui_host="0.0.0.0")
-    client = _client(config, base_url="http://192.168.1.50")
-
-    response = client.post("/api/sessions", json={})
-
-    assert response.status_code == 403
-    assert "disabled" in response.json()["detail"]
+    assert response.status_code == 405
+    assert "set-cookie" not in response.headers
 
 
 def test_host_and_origin_validation_reject_untrusted_requests():

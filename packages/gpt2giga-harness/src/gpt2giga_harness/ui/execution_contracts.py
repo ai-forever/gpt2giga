@@ -208,7 +208,6 @@ _EVENT_LOOP_SAFE = frozenset(
         ("POST", "/auth/local/recover"),
         ("POST", "/auth/local/rotate"),
         ("POST", "/auth/logout"),
-        ("POST", "/auth/session"),
         ("HEAD", "/openapi.json"),
     }
 )

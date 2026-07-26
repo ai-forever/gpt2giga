@@ -384,6 +384,7 @@ def create_app(
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
+    validate_ui_bind(config.ui_host, allow_remote=False)
     registry = registry or create_default_registry()
     store = store or FilesystemHarnessSessionStore(config.data_dir)
     if runtime_store is None and isinstance(store, FilesystemHarnessSessionStore):
@@ -3661,12 +3662,20 @@ def create_app(
 
 
 def validate_ui_bind(host: str, *, allow_remote: bool) -> None:
-    """Reject unsafe remote UI binding unless explicitly allowed."""
-    if not is_loopback_host(host) and not allow_remote:
-        raise ValueError(
-            f"Refusing to bind UI to {host} without --allow-remote. "
-            "The UI may expose local harness execution."
-        )
+    """Keep remote UI fail-closed until the accepted OIDC contract exists."""
+    if is_loopback_host(host):
+        return
+    compatibility = (
+        " --allow-remote is reserved and does not bypass this boundary."
+        if allow_remote
+        else ""
+    )
+    raise ValueError(
+        f"Refusing to bind GigaLoom UI to non-loopback host {host}. "
+        "Remote UI identity requires the G3-05 single-issuer OIDC "
+        "implementation; the local bootstrap cannot authenticate remote users."
+        f"{compatibility}"
+    )
 
 
 def _build_current_run_provenance(
