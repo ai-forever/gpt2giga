@@ -246,6 +246,41 @@ def test_cli_ui_rejects_invalid_worker_count(capsys, worker_count):
     assert "UI worker count must be between 1 and 32." in capsys.readouterr().err
 
 
+def test_cli_remote_ui_identity_validate_and_revoke_all(
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "GPT2GIGA_HARNESS_UI_OIDC_ISSUER",
+        "https://issuer.example",
+    )
+    monkeypatch.setenv("GPT2GIGA_HARNESS_UI_OIDC_CLIENT_ID", "gigaloom")
+    monkeypatch.setenv(
+        "GPT2GIGA_HARNESS_UI_OIDC_CLIENT_SECRET",
+        "client-secret",
+    )
+    monkeypatch.setenv(
+        "GPT2GIGA_HARNESS_UI_OIDC_PUBLIC_ORIGIN",
+        "https://harness.example",
+    )
+    monkeypatch.setenv(
+        "GPT2GIGA_HARNESS_UI_OIDC_ROLE_MAP",
+        '{"operator-sub":"operator","viewer-sub":"viewer"}',
+    )
+
+    assert cli.main(["ui-identity", "validate", "--json"]) == 0
+    validated = json.loads(capsys.readouterr().out)
+    assert validated["valid"] is True
+    assert validated["roles"] == {"operator": 1, "viewer": 1}
+    assert "client-secret" not in json.dumps(validated)
+
+    assert cli.main(["ui-identity", "revoke-all", "--confirm", "--json"]) == 0
+    revoked = json.loads(capsys.readouterr().out)
+    assert revoked == {"revoked": 0, "session_generation_rotated": True}
+
+
 def test_cli_harness_list_outputs_direct_chat(capsys):
     exit_code = cli.main(["harness", "list"])
 

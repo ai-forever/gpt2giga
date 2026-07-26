@@ -166,6 +166,7 @@ AUTOMATION_ROOT_COMMANDS = frozenset(
         "schedule",
         "state",
         "ui",
+        "ui-identity",
         "worker",
         "workflow",
     }

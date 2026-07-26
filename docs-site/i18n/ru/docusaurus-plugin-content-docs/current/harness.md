@@ -491,6 +491,13 @@ GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max
 GPT2GIGA_HARNESS_DEFAULT_API_MODE=v2
 GPT2GIGA_HARNESS_UI_HOST=127.0.0.1
 GPT2GIGA_HARNESS_UI_PORT=8091
+# Только remote deployment; secret хранится в deployment-owned secret storage:
+GPT2GIGA_HARNESS_UI_OIDC_ISSUER=https://issuer.example
+GPT2GIGA_HARNESS_UI_OIDC_CLIENT_ID=gigaloom
+GPT2GIGA_HARNESS_UI_OIDC_CLIENT_SECRET=<deployment-secret>
+GPT2GIGA_HARNESS_UI_OIDC_PUBLIC_ORIGIN=https://harness.example
+GPT2GIGA_HARNESS_UI_OIDC_ROLE_MAP='{"subject-1":"viewer","subject-2":"operator"}'
+GPT2GIGA_HARNESS_UI_TRUSTED_PROXIES=10.0.0.2
 GPT2GIGA_HARNESS_AUTO_START_PROXY=True
 GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS=15
 GPT2GIGA_HARNESS_TIMEOUT_SECONDS=3600
@@ -1193,12 +1200,18 @@ issue или диагностический архив.
 Локальный access token не попадает в URL, `localStorage`, `sessionStorage`,
 diagnostics, screenshots или project files.
 
-Remote binding сейчас недоступен. G3-04 принял ограниченный single-issuer
-OIDC/BFF identity contract, но его реализация G3-05 является отдельным gate. До
-неё любой non-loopback host завершается ошибкой до запуска application или
-worker pool. Legacy `--allow-remote`, bootstrap-token environment input и Host
-allowlist не обходят эту границу; local bootstrap не используется как remote
-identity.
+Remote binding реализует ограниченный single-issuer OIDC/BFF identity contract
+из G3-04. Non-loopback listener требует полной статической конфигурации issuer,
+client, публичного HTTPS origin, точного subject-to-role mapping и явного
+`--allow-remote`. Authorization Code + PKCE `S256`, nonce/signature/audience
+validation, opaque server-side sessions, exact-origin CSRF, роли
+`viewer`/`operator`, JWKS rotation и session/actor/global/back-channel
+revocation работают fail-closed. Старые bootstrap token и Host allowlist не
+аутентифицируют remote users.
+
+`giga ui-identity validate --json` проверяет deployment profile без запроса к
+issuer. `giga ui-identity revoke-all --confirm --json` — OS-local recovery,
+который отзывает все remote sessions и ротирует их generation.
 
 Принятые контракты ролей, sessions, CSRF, revocation, trusted proxy и recovery
 описаны в [ADR удалённого UI](architecture/remote-ui-identity-adr.md). Не

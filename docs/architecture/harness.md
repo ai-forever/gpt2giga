@@ -160,19 +160,20 @@ the ownership split is stable:
 | Durable coordination | `~/.gpt2giga/harness/runtime.sqlite3` | Versioned SQLite schema with WAL, migrations, leases, approvals, and audit history. |
 | Sessions, events, raw records, attachments, arenas, eval results | `~/.gpt2giga/harness/...` | Redacted before persistence and bounded on API serialization. |
 | Local UI access | `~/.gpt2giga/harness/ui_access/state.json` | Private `0600` server-side hashes and expiries only; browser cookies and access values are never persisted here. |
+| Remote UI access | `~/.gpt2giga/harness/ui_access/remote_state.json` | Private `0600` transaction/session digests, stable actor IDs, roles, expiries, and revocation evidence; OAuth material is never persisted. |
 | Native reference index and Harness-managed CLI homes | `~/.gpt2giga/harness/native/...` | Harness may write only its managed homes, never the user's native vendor home. |
 | Isolated edit worktrees | `~/.gpt2giga/harness/worktrees/...` | Applied only after policy, approval, base-commit, and dirty-tree checks. |
 
 The UI binds to loopback by default. Its first OS-local claim, expiry, logout,
 rotation, recovery, same-origin checks, and CSRF marker preserve an opaque
 server-side browser-session boundary without a local `.env` token.
-`/healthz` is intentionally minimal and unauthenticated. Remote binding is
-fail-closed until the accepted
-[single-issuer OIDC/BFF contract](remote-ui-identity-adr.md) is implemented in
-G3-05. The legacy remote flag, bootstrap-token input, Host allowlist, and
-retired bearer-exchange configuration do not authorize a non-loopback
-listener. Secrets and hidden reasoning are removed before persistence and
-again before selected API responses.
+`/healthz` is intentionally minimal and unauthenticated. Remote binding admits
+only the implemented
+[single-issuer OIDC/BFF contract](remote-ui-identity-adr.md) with complete
+static configuration and explicit CLI opt-in. The legacy bootstrap token, Host
+allowlist, and retired bearer exchange do not authenticate remote users.
+Secrets and hidden reasoning are removed before persistence and again before
+selected API responses.
 
 ## Control-plane API
 

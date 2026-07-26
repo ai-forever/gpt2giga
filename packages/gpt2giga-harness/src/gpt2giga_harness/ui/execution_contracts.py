@@ -178,6 +178,8 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/cockpit-v2/assets/{asset_name:path}"),
         ("GET", "/cockpit-v2/{spa_path:path}"),
         ("GET", "/auth/status"),
+        ("GET", "/auth/oidc/callback"),
+        ("GET", "/auth/oidc/login"),
         ("GET", "/healthz"),
         ("GET", "/legacy"),
         ("GET", "/legacy/{spa_path:path}"),
@@ -219,6 +221,9 @@ _NETWORK = frozenset(
         ("GET", "/api/models"),
         ("POST", "/api/providers/{provider_id}/discover"),
         ("POST", "/api/providers/{provider_id}/test"),
+        ("GET", "/auth/oidc/callback"),
+        ("GET", "/auth/oidc/login"),
+        ("POST", "/auth/oidc/backchannel-logout"),
     }
 )
 _SQLITE_PREFIXES = (
@@ -287,6 +292,11 @@ _SYNC_DURABLE_SUBMISSIONS = frozenset(
 )
 _NATIVE_ASYNC = frozenset(
     {
+        ("GET", "/auth/oidc/callback"),
+        ("GET", "/auth/oidc/login"),
+        ("POST", "/auth/oidc/backchannel-logout"),
+        ("POST", "/auth/remote/revoke-actor"),
+        ("POST", "/auth/remote/revoke-all"),
         ("GET", "/api/environment"),
         ("POST", "/api/environment/commit/apply"),
         ("POST", "/api/environment/commit/preview"),

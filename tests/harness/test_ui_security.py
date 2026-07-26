@@ -265,12 +265,25 @@ def test_ui_security_config_loads_token_and_host_allowlist_without_api_exposure(
         "GPT2GIGA_HARNESS_UI_ALLOWED_HOSTS",
         " harness.example, 10.0.0.7 ",
     )
+    monkeypatch.setenv(
+        "GPT2GIGA_HARNESS_UI_OIDC_CLIENT_SECRET",
+        "oidc-client-secret",
+    )
+    monkeypatch.setenv(
+        "GPT2GIGA_HARNESS_UI_OIDC_ROLE_MAP",
+        '{"subject-1":"viewer","subject-2":"operator"}',
+    )
     config = HarnessConfig.from_env()
     client = _client(config)
 
     assert config.ui_bootstrap_token == "secret-token"
     assert config.ui_allowed_hosts == ("harness.example", "10.0.0.7")
+    assert config.ui_oidc_role_map == (
+        ("subject-1", "viewer"),
+        ("subject-2", "operator"),
+    )
     assert "secret-token" not in repr(config)
+    assert "oidc-client-secret" not in repr(config)
     assert "secret-token" not in client.get("/api/defaults").text
 
 
@@ -282,7 +295,7 @@ def test_remote_app_fails_closed_before_bootstrap_exchange(bootstrap_token):
         ui_allowed_hosts=("harness.example",),
     )
 
-    with pytest.raises(ValueError, match="G3-05 single-issuer OIDC"):
+    with pytest.raises(ValueError, match="issuer, client ID, client secret"):
         create_app(
             config,
             registry=create_default_registry(include_entry_points=False),

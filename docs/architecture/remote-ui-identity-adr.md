@@ -2,8 +2,8 @@
 
 Status: accepted for GigaLoom roadmap slice G3-04 on 2026-07-26.
 
-Implementation status: not implemented. Remote UI binding remains fail-closed
-until G3-05 satisfies this contract.
+Implementation status: implemented by G3-05 on 2026-07-26. Deployment and live
+identity-provider configuration remain external gates.
 
 ## Context
 
@@ -81,6 +81,10 @@ issued-at time, nonce, and the exact redirect URI before creating a session.
 Unknown algorithms, metadata drift, key-fetch failure, replay, and clock values
 outside a bounded skew fail closed.
 
+The browser binding uses a host-only `Secure`, `HttpOnly`, `SameSite=Lax`
+cookie scoped only to the callback path so the top-level redirect from the
+issuer can complete. The resulting session cookie remains `SameSite=Strict`.
+
 Remote sessions have an absolute lifetime and a shorter idle lifetime. They
 rotate at login, privilege change, and recovery. OAuth material is never
 returned by UI APIs, stored in project state, or emitted to logs, diagnostics,
@@ -153,17 +157,16 @@ password recovery, or live provider onboarding. Those remain out of scope.
 
 ## Transition and gates
 
-Until G3-05 is implemented, GigaLoom accepts loopback UI binding only.
-`--allow-remote`, the legacy bootstrap-token environment input, and remote Host
-allowlists do not authorize a listener. A non-loopback host fails before the
-FastAPI application or worker pool starts and reports that the OIDC contract is
-not implemented.
+G3-05 implements this profile with hermetic issuer fixtures. Non-loopback
+startup now requires complete static OIDC configuration plus explicit
+`--allow-remote`; partial configuration, legacy bootstrap-token input, and Host
+allowlists fail closed. The OS-local `giga ui-identity` command validates the
+profile without contacting the issuer and can revoke all sessions while
+rotating the server-side session generation.
 
-G3-05 is authorized to implement this one profile using hermetic issuer
-fixtures. It is not authorized to register a live client, configure secrets,
-create users or groups, expose a callback publicly, deploy a reverse proxy, or
-start a remote listener against a real identity provider. Each remains an
-explicit external gate.
+Live client registration, secret provisioning, users or groups, public
+callbacks, reverse-proxy deployment, and starting a listener against a real
+identity provider remain explicit external gates.
 
 ## Primary standards
 
@@ -177,10 +180,7 @@ explicit external gate.
 ## Consequences
 
 The shared remote bearer exchange is no longer an available product mode.
-Existing remote experiments must return to loopback until G3-05 and a separate
-deployment authorization are complete. Local first-run, logout, rotation, and
-recovery are unchanged.
-
-This ADR authorizes only G3-05. It does not grant a remote identity, role,
-action authority, network access, GitHub access, deployment, or live OIDC
-configuration.
+G3-05 supplies the accepted identity/session boundary but does not itself
+register or configure an issuer, deploy a proxy, expose a listener, grant
+action authority, enable network/GitHub access, or authorize live OIDC traffic.
+Local first-run, logout, rotation, and recovery are unchanged.

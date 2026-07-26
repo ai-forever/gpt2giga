@@ -86,6 +86,7 @@ def test_cockpit_v2_is_default_and_legacy_remains_explicit_fallback(tmp_path):
         "default-src 'none'; script-src 'self'; style-src 'self'"
     )
     assert "frame-src 'self'" in cockpit.headers["content-security-policy"]
+    assert "manifest-src 'self'" in cockpit.headers["content-security-policy"]
     assert cockpit.headers["x-content-type-options"] == "nosniff"
     assert unknown.status_code == 404
 

@@ -252,9 +252,18 @@ without introducing a shared writable workspace.
 Open `http://127.0.0.1:8091/`. `giga ui` starts a durable local worker when
 needed; pass `--no-start-worker` when another supervisor owns that lifecycle.
 The default loopback binding is intentional. Remote binding requires explicit
-single-issuer OIDC identity that is not implemented yet, so every non-loopback
-host currently fails closed even when the legacy `--allow-remote` flag is
-present.
+single-issuer OIDC configuration plus `--allow-remote`; incomplete identity
+configuration, plain HTTP public origins, unmapped subjects, and untrusted
+proxy headers fail closed. Configure and deploy that boundary only behind the
+reviewed HTTPS/proxy controls described in the remote UI identity ADR.
+
+Validate deployment-owned identity configuration without contacting the
+issuer, or revoke every remote session from the OS-local CLI:
+
+```bash
+giga ui-identity validate --json
+giga ui-identity revoke-all --confirm --json
+```
 
 The root URL opens Cockpit V2. During its release-level rollback window, the
 previous no-build cockpit remains available at `http://127.0.0.1:8091/legacy`

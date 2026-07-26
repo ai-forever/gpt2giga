@@ -46,6 +46,7 @@ class EnforcementControl(str, Enum):
     POLICY_ENGINE = "policy_engine"
     REVIEW_BINDING = "review_binding"
     BOOTSTRAP_AUTH = "bootstrap_auth"
+    OIDC_AUTH = "oidc_auth"
 
 
 class ConformanceBehavior(str, Enum):
@@ -336,6 +337,14 @@ CONFORMANCE_EVIDENCE = {
             test_nodes=(
                 "tests/harness/test_ui_security.py::test_local_access_logout_rotate_recovery_and_csrf",
                 "tests/harness/test_ui_security.py::test_local_access_persists_only_hashed_expiring_sessions",
+            ),
+        ),
+        ConformanceEvidence(
+            id="auth.remote_identity",
+            behaviors=frozenset(ConformanceBehavior),
+            test_nodes=(
+                "tests/harness/test_remote_identity.py::test_remote_oidc_login_enforces_pkce_nonce_roles_and_audit_identity",
+                "tests/harness/test_remote_identity.py::test_remote_viewer_revocation_and_backchannel_logout_fail_closed",
             ),
         ),
     )
@@ -912,6 +921,30 @@ MUTATION_ROUTE_CONTRACTS = (
         EnforcementControl.BOOTSTRAP_AUTH,
         "ui_security.local_recovery",
         evidence=("auth.local_access",),
+    ),
+    _route(
+        "POST",
+        "/auth/oidc/backchannel-logout",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.OIDC_AUTH,
+        "ui_security.remote_backchannel_logout",
+        evidence=("auth.remote_identity",),
+    ),
+    _route(
+        "POST",
+        "/auth/remote/revoke-actor",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.AUTHENTICATED_LOCAL_STATE,
+        "ui_security.remote_actor_revocation",
+        evidence=("auth.remote_identity",),
+    ),
+    _route(
+        "POST",
+        "/auth/remote/revoke-all",
+        MutationClass.LOCAL_STATE,
+        EnforcementControl.AUTHENTICATED_LOCAL_STATE,
+        "ui_security.remote_global_revocation",
+        evidence=("auth.remote_identity",),
     ),
 )
 

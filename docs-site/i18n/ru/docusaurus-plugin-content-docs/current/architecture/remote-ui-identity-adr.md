@@ -2,8 +2,8 @@
 
 Статус: принято для slice G3-04 roadmap GigaLoom 2026-07-26.
 
-Статус реализации: не реализовано. Удалённый UI остаётся fail-closed, пока
-G3-05 не выполнит этот контракт.
+Статус реализации: реализовано в G3-05 2026-07-26. Deployment и live
+identity-provider configuration остаются внешними gates.
 
 ## Контекст
 
@@ -75,6 +75,10 @@ issued-at, nonce и точный redirect URI до создания сессии
 алгоритм, metadata drift, ошибка получения ключа, replay и недопустимый clock
 skew закрываются fail-closed.
 
+Browser binding использует host-only cookie `Secure`, `HttpOnly`,
+`SameSite=Lax`, ограниченную callback path, чтобы top-level redirect от issuer
+мог завершиться. Полученная session cookie остаётся `SameSite=Strict`.
+
 Remote session имеет абсолютный и более короткий idle lifetime и вращается при
 login, изменении привилегий и recovery. OAuth material не возвращается UI API
 и не попадает в project state, logs, diagnostics, screenshots, traces или
@@ -141,17 +145,16 @@ process, собственного IdP, SCIM, dynamic registration, local passwor
 
 ## Переход и gates
 
-До реализации G3-05 GigaLoom принимает только loopback UI binding.
-`--allow-remote`, legacy environment bootstrap token и remote Host allowlists
-не авторизуют listener. Non-loopback host завершается ошибкой до запуска
-FastAPI application или worker pool и сообщает, что OIDC contract ещё не
-реализован.
+G3-05 реализует этот profile с hermetic issuer fixtures. Non-loopback startup
+теперь требует полной статической OIDC configuration и явного
+`--allow-remote`; partial config, legacy bootstrap-token input и Host allowlist
+работают fail-closed. OS-local команда `giga ui-identity` проверяет profile без
+запроса к issuer и может отозвать все sessions с ротацией server-side session
+generation.
 
-G3-05 разрешено реализовать один этот profile с hermetic issuer fixtures. Оно
-не разрешает регистрировать live client, настраивать secrets, создавать users
-или groups, публиковать callback, развёртывать reverse proxy или запускать
-remote listener с реальным identity provider. Для каждого действия нужен
-отдельный внешний gate.
+Live client registration, provision secrets, users/groups, public callback,
+reverse-proxy deployment и запуск listener с реальным identity provider
+остаются явными внешними gates.
 
 ## Основные стандарты
 
@@ -164,10 +167,8 @@ remote listener с реальным identity provider. Для каждого д�
 
 ## Последствия
 
-Обмен общего remote bearer больше не является продуктным режимом. Существующие
-remote experiments должны вернуться на loopback до завершения G3-05 и
-отдельного разрешения deployment. Локальные first-run, logout, rotation и
-recovery не меняются.
-
-Этот ADR разрешает только G3-05. Он не предоставляет remote identity, role,
-action authority, network/GitHub access, deployment или live OIDC config.
+Обмен общего remote bearer больше не является продуктным режимом. G3-05
+предоставляет принятую identity/session boundary, но не регистрирует и не
+настраивает issuer, не развёртывает proxy, не публикует listener, не выдаёт
+action authority, network/GitHub access и не разрешает live OIDC traffic.
+Локальные first-run, logout, rotation и recovery не меняются.

@@ -1637,18 +1637,27 @@ def test_ui_mobile_advanced_panel_uses_viewport_containing_block():
 
 
 def test_ui_rejects_remote_bind_without_allow_remote():
-    with pytest.raises(ValueError, match="G3-05"):
-        validate_ui_bind("0.0.0.0", allow_remote=False)
+    with pytest.raises(ValueError, match="Pass --allow-remote"):
+        validate_ui_bind(
+            HarnessConfig(ui_host="0.0.0.0"),
+            allow_remote=False,
+        )
 
 
 def test_ui_remote_flag_does_not_bypass_identity_boundary():
-    with pytest.raises(ValueError, match="--allow-remote is reserved"):
-        validate_ui_bind("0.0.0.0", allow_remote=True)
+    with pytest.raises(ValueError, match="issuer, client ID, client secret"):
+        validate_ui_bind(
+            HarnessConfig(ui_host="0.0.0.0"),
+            allow_remote=True,
+        )
 
 
 def test_ui_rejects_non_loopback_hostname_without_explicit_flag():
-    with pytest.raises(ValueError, match="harness.example.*single-issuer OIDC"):
-        validate_ui_bind("harness.example", allow_remote=False)
+    with pytest.raises(ValueError, match="harness.example.*Pass --allow-remote"):
+        validate_ui_bind(
+            HarnessConfig(ui_host="harness.example"),
+            allow_remote=False,
+        )
 
 
 class _WorkspaceCaptureHarness(BaseHarness):

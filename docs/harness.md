@@ -579,12 +579,13 @@ older sessions before claiming a new one. Browser mutations also require the
 same-origin CSRF marker. No local access token is placed in a URL,
 `localStorage`, `sessionStorage`, diagnostics, screenshots, or project files.
 
-Remote binding is currently unavailable. G3-04 accepted a bounded,
-single-issuer OIDC/BFF identity contract, but its G3-05 implementation is a
-separate gate. Until then, any non-loopback host fails before the application
-or worker pool starts. `--allow-remote`, a bootstrap-token environment value,
-or a Host allowlist does not bypass that boundary; the local bootstrap is never
-reused as remote identity.
+Remote binding implements the bounded G3-04 single-issuer OIDC/BFF identity
+contract. A non-loopback listener requires the complete static issuer, client,
+public HTTPS origin, exact subject-to-role map, and explicit `--allow-remote`.
+Authorization Code + PKCE `S256`, nonce/signature/audience validation, opaque
+server-side sessions, exact-origin CSRF, `viewer`/`operator` enforcement,
+JWKS rotation, and session/actor/global/back-channel revocation fail closed.
+The old bootstrap token and Host allowlist never authenticate remote users.
 
 See the [remote UI identity ADR](architecture/remote-ui-identity-adr.md) for the
 accepted role, session, CSRF, revocation, trusted-proxy, and recovery contract.
@@ -601,6 +602,13 @@ GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max
 GPT2GIGA_HARNESS_DEFAULT_API_MODE=v2
 GPT2GIGA_HARNESS_UI_HOST=127.0.0.1
 GPT2GIGA_HARNESS_UI_PORT=8091
+# Remote deployment only; keep the secret in deployment-owned secret storage:
+GPT2GIGA_HARNESS_UI_OIDC_ISSUER=https://issuer.example
+GPT2GIGA_HARNESS_UI_OIDC_CLIENT_ID=gigaloom
+GPT2GIGA_HARNESS_UI_OIDC_CLIENT_SECRET=<deployment-secret>
+GPT2GIGA_HARNESS_UI_OIDC_PUBLIC_ORIGIN=https://harness.example
+GPT2GIGA_HARNESS_UI_OIDC_ROLE_MAP='{"subject-1":"viewer","subject-2":"operator"}'
+GPT2GIGA_HARNESS_UI_TRUSTED_PROXIES=10.0.0.2
 GPT2GIGA_HARNESS_AUTO_START_PROXY=True
 GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS=15
 GPT2GIGA_HARNESS_TIMEOUT_SECONDS=3600
@@ -2011,11 +2019,17 @@ giga session show <session_id> --json
 JavaScript assets without a frontend build step, runtime CDN, or network fetch.
 It binds to `127.0.0.1:8091` by default. Local first-run, expiry, rotation,
 logout, and recovery remain server-side OS-local session operations; environment
-variables are not the primary local human access flow. Remote binding is
-fail-closed pending G3-05: `--allow-remote` is retained only as a compatibility
-input and does not authorize a non-loopback listener. The accepted future
-single-issuer OIDC/BFF boundary is documented in the
+variables are not the primary local human access flow. Remote binding requires
+the complete static single-issuer OIDC profile and explicit `--allow-remote`;
+partial configuration and the retired shared bearer exchange fail closed. The
+implemented single-issuer OIDC/BFF boundary is documented in the
 [remote UI identity ADR](architecture/remote-ui-identity-adr.md).
+
+`giga ui-identity validate --json` validates the deployment profile without an
+issuer request. `giga ui-identity revoke-all --confirm --json` is the OS-local
+recovery path that revokes all remote sessions and rotates their generation.
+Live client registration, secrets, callbacks, users, proxy deployment, and
+listener activation remain deployment actions outside the local roadmap gate.
 
 The shell exposes stable Work and Runs routes. `/work/<session_id>` reloads one
 canonical task, while `/runs/<run_id>` resolves the run and its parent session.

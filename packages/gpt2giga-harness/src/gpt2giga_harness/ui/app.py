@@ -320,6 +320,11 @@ from gpt2giga_harness.ui.security import (
     HarnessUISecurityMiddleware,
     is_loopback_host,
 )
+from gpt2giga_harness.ui.remote_identity import (
+    RemoteIdentityError,
+    RemoteOIDCClient,
+    RemoteOIDCSettings,
+)
 from gpt2giga_harness.worktrees import (
     WorktreeConflictError,
     WorktreeError,
@@ -381,10 +386,11 @@ def create_app(
     environment_commit_service: EnvironmentCommitService | None = None,
     environment_push_service: EnvironmentPushService | None = None,
     environment_pull_request_service: EnvironmentPullRequestService | None = None,
+    remote_oidc_client: RemoteOIDCClient | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
-    validate_ui_bind(config.ui_host, allow_remote=False)
+    validate_ui_bind(config, allow_remote=None)
     registry = registry or create_default_registry()
     store = store or FilesystemHarnessSessionStore(config.data_dir)
     if runtime_store is None and isinstance(store, FilesystemHarnessSessionStore):
@@ -517,13 +523,14 @@ def create_app(
         lifespan=lifespan,
     )
     app.router.route_class = ConformantAPIRoute
-    ui_security = HarnessUISecurity(config)
+    ui_security = HarnessUISecurity(config, oidc_client=remote_oidc_client)
     app.add_middleware(HarnessUISecurityMiddleware, security=ui_security)
     app.add_middleware(
         AsyncDiagnosticsMiddleware,
         diagnostics=async_diagnostics,
     )
     app.state.harness_config = config
+    app.state.harness_ui_security = ui_security
     app.state.harness_registry = registry
     app.state.harness_session_store = store
     app.state.harness_runtime_store = runtime_store
@@ -3661,21 +3668,25 @@ def create_app(
     return app
 
 
-def validate_ui_bind(host: str, *, allow_remote: bool) -> None:
-    """Keep remote UI fail-closed until the accepted OIDC contract exists."""
-    if is_loopback_host(host):
+def validate_ui_bind(
+    config: HarnessConfig,
+    *,
+    allow_remote: bool | None,
+) -> None:
+    """Admit remote binding only for the complete accepted OIDC profile."""
+    if is_loopback_host(config.ui_host):
         return
-    compatibility = (
-        " --allow-remote is reserved and does not bypass this boundary."
-        if allow_remote
-        else ""
-    )
-    raise ValueError(
-        f"Refusing to bind GigaLoom UI to non-loopback host {host}. "
-        "Remote UI identity requires the G3-05 single-issuer OIDC "
-        "implementation; the local bootstrap cannot authenticate remote users."
-        f"{compatibility}"
-    )
+    if allow_remote is False:
+        raise ValueError(
+            f"Refusing to bind GigaLoom UI to non-loopback host {config.ui_host}. "
+            "Pass --allow-remote only with the complete single-issuer OIDC profile."
+        )
+    try:
+        RemoteOIDCSettings.from_config(config)
+    except RemoteIdentityError as exc:
+        raise ValueError(
+            f"Refusing to bind GigaLoom UI to non-loopback host {config.ui_host}. {exc}"
+        ) from exc
 
 
 def _build_current_run_provenance(

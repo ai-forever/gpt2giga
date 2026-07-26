@@ -26,6 +26,11 @@ class BrowserAccessStatusResponse(BaseModel):
     authenticated: bool
     claimable: bool = False
     expires_at: str | None = None
+    idle_expires_at: str | None = None
+    actor_id: str | None = None
+    role: str | None = None
+    session_id: str | None = None
+    authentication_time: str | None = None
     recovery: str
 
 

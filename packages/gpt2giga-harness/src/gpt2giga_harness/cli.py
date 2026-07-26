@@ -221,6 +221,12 @@ from gpt2giga_harness.types import (
 )
 from gpt2giga_harness.worktrees import parse_workspace_policy
 from gpt2giga_harness.ui.app import create_app, validate_ui_bind
+from gpt2giga_harness.ui.remote_identity import (
+    RemoteIdentityError,
+    RemoteIdentityStore,
+    RemoteOIDCSettings,
+)
+from gpt2giga_harness.ui.security import is_loopback_host
 from gpt2giga_harness.workspace import resolve_workspace
 from gpt2giga_harness.workbench_execution import workbench_transport_projection
 from gpt2giga_harness.workflows import (
@@ -290,6 +296,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Unknown integration group: {exc.args[0]}", file=sys.stderr)
         return 2
     except (IntegrationGroupConflictError, IntegrationGroupError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except RemoteIdentityError as exc:
         print(str(exc), file=sys.stderr)
         return 2
     except ValueError as exc:
@@ -598,8 +607,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-remote",
         action="store_true",
         help=(
-            "Reserved compatibility flag; remote startup remains blocked "
-            "until the G3-05 OIDC identity boundary is implemented"
+            "Allow a non-loopback listener only with the complete single-issuer "
+            "OIDC profile and deployment TLS/proxy controls"
         ),
     )
     ui.add_argument(
@@ -616,6 +625,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Target durable worker pool size when worker auto-start is enabled",
     )
     ui.set_defaults(handler=_handle_ui)
+    ui_identity = subparsers.add_parser(
+        "ui-identity",
+        help="Validate or recover the deployment-owned remote UI identity boundary",
+    )
+    ui_identity_subparsers = ui_identity.add_subparsers(dest="ui_identity_command")
+    ui_identity_validate = ui_identity_subparsers.add_parser("validate")
+    ui_identity_validate.add_argument("--json", action="store_true")
+    ui_identity_validate.set_defaults(handler=_handle_ui_identity_validate)
+    ui_identity_revoke = ui_identity_subparsers.add_parser("revoke-all")
+    ui_identity_revoke.add_argument("--confirm", action="store_true", required=True)
+    ui_identity_revoke.add_argument("--json", action="store_true")
+    ui_identity_revoke.set_defaults(handler=_handle_ui_identity_revoke_all)
 
     run = subparsers.add_parser("run", parents=[common])
     run.add_argument("--agent", choices=tuple(AGENT_ALIASES), default=None)
@@ -3013,12 +3034,17 @@ def _handle_open_file(args: argparse.Namespace, config: HarnessConfig) -> int:
 
 def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     config = config.with_overrides(ui_host=args.host, ui_port=args.port)
-    validate_ui_bind(config.ui_host, allow_remote=args.allow_remote)
+    validate_ui_bind(config, allow_remote=args.allow_remote)
     if not 1 <= args.worker_count <= MAX_UI_WORKER_COUNT:
         raise ValueError(
             f"UI worker count must be between 1 and {MAX_UI_WORKER_COUNT}."
         )
-    print(f"Starting GigaLoom UI at http://{config.ui_host}:{config.ui_port}/")
+    ui_url = (
+        config.ui_oidc_public_origin
+        if not is_loopback_host(config.ui_host)
+        else f"http://{config.ui_host}:{config.ui_port}"
+    )
+    print(f"Starting GigaLoom UI at {ui_url}/")
     worker_processes = (
         _start_ui_workers(config, worker_count=args.worker_count)
         if args.start_worker
@@ -3035,6 +3061,52 @@ def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
         )
     finally:
         _stop_ui_workers(worker_processes)
+    return 0
+
+
+def _handle_ui_identity_validate(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    settings = RemoteOIDCSettings.from_config(config)
+    payload = {
+        "valid": True,
+        "issuer": settings.issuer,
+        "public_origin": settings.public_origin,
+        "callback_uri": settings.callback_uri,
+        "roles": {
+            "viewer": sum(role == "viewer" for role in settings.roles.values()),
+            "operator": sum(role == "operator" for role in settings.roles.values()),
+        },
+        "trusted_proxy_count": len(settings.trusted_proxies),
+        "client_secret_configured": True,
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(
+            "Remote UI identity configuration is valid for "
+            f"{settings.public_origin} ({len(settings.roles)} mapped subjects)."
+        )
+    return 0
+
+
+def _handle_ui_identity_revoke_all(
+    args: argparse.Namespace,
+    config: HarnessConfig,
+) -> int:
+    if not args.confirm:
+        raise ValueError("Remote session revocation requires --confirm.")
+    settings = RemoteOIDCSettings.from_config(config)
+    revoked = RemoteIdentityStore(config.data_dir, settings).revoke_all()
+    payload = {
+        "revoked": revoked,
+        "session_generation_rotated": True,
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        print(f"Revoked {revoked} remote UI session(s) and rotated the generation.")
     return 0
 
 
