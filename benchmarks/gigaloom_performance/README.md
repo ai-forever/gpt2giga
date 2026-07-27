@@ -21,9 +21,11 @@ The TUI detail profile measures cold import, startup and first input, full and
 incremental timeline projection, unchanged run polling, bounded native-output
 normalization, temporary filesystem/SQLite comparators, and retained timeline
 memory. It also records the current polling/rendering contract, cProfile
-timing evidence, ranked target gaps, and the reviewed G5 repair budgets. A
-completed profile exits successfully even when an optimization target is not
-yet met; `target_status` and `ranked_bottlenecks` carry that distinction.
+timing evidence, ranked target gaps, and the reviewed G5 repair budgets.
+Schema v3 names the cold-start, warm-start, and long-session closure workloads;
+its `status` is `passed` only when every accepted G5 repair metric is within
+budget. The command still exits successfully when it writes a complete report;
+`status`, `target_status`, and `ranked_bottlenecks` carry the closure decision.
 
 The JSON report is schema-versioned. It records wall and CPU percentiles,
 process RSS, observable block I/O, stage timings, conservative CI smoke

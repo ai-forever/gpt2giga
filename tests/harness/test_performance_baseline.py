@@ -108,9 +108,8 @@ def test_local_detail_profile_keeps_bounded_content_free_samples():
 def test_tui_detail_profile_is_ranked_bounded_and_content_free():
     report = run_performance_baseline(samples=1, profile="tui-detail")
 
-    assert report["schema_version"] == "gigaloom.tui-performance-profile.v2"
-    assert report["fixture_set_version"] == "g5-02.v1"
-    assert report["status"] == "passed"
+    assert report["schema_version"] == "gigaloom.tui-performance-profile.v3"
+    assert report["fixture_set_version"] == "g5-03.v1"
     assert report["privacy"] == {
         "content_captured": False,
         "secrets_captured": False,
@@ -131,6 +130,26 @@ def test_tui_detail_profile_is_ranked_bounded_and_content_free():
         "persistent_event_stream"
     )
     assert report["retention"]["max_retained_events_observed"] == 100
+    assert report["closure_workloads"] == {
+        "cold_start": {
+            "samples": 1,
+            "evidence": ["cold_tui_import"],
+        },
+        "warm_start": {
+            "samples": 1,
+            "evidence": ["startup_to_paint", "first_input_to_paint"],
+        },
+        "long_session": {
+            "retained_event_limit": 100,
+            "retained_character_limit": 65_536,
+            "evidence": [
+                "timeline_full_100_projection",
+                "timeline_incremental_1_projection",
+                "timeline_batch_10_projection",
+                "timeline_retained_memory",
+            ],
+        },
+    }
     assert {item["id"] for item in report["accepted_repairs"]} == {
         "event_driven_run_delivery",
         "event_driven_native_output",
@@ -165,6 +184,27 @@ def test_tui_detail_profile_is_ranked_bounded_and_content_free():
         "timeline_full_100_projection",
         "timeline_incremental_1_projection",
         "unchanged_run_poll_projection",
+        "run_timer_wakeup_rate",
+        "run_active_request_rate",
+        "native_active_request_rate",
+    ):
+        assert by_metric[metric]["target_status"] in {
+            "within_target",
+            "over_target",
+        }
+    accepted_metrics = {
+        metric for repair in report["accepted_repairs"] for metric in repair["evidence"]
+    }
+    expected_status = (
+        "passed"
+        if all(
+            by_metric[metric]["target_status"] == "within_target"
+            for metric in accepted_metrics
+        )
+        else "failed"
+    )
+    assert report["status"] == expected_status
+    for metric in (
         "run_timer_wakeup_rate",
         "run_active_request_rate",
         "native_active_request_rate",
@@ -226,6 +266,6 @@ def test_performance_cli_writes_private_tui_profile(tmp_path, capsys):
     )
 
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "gigaloom.tui-performance-profile.v2"
+    assert payload["schema_version"] == "gigaloom.tui-performance-profile.v3"
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert "Wrote private performance report" in capsys.readouterr().out

@@ -41,8 +41,8 @@ from gpt2giga_harness.tui.client import (
 )
 
 
-SCHEMA_VERSION: Final[str] = "gigaloom.tui-performance-profile.v2"
-FIXTURE_SET_VERSION: Final[str] = "g5-02.v1"
+SCHEMA_VERSION: Final[str] = "gigaloom.tui-performance-profile.v3"
+FIXTURE_SET_VERSION: Final[str] = "g5-03.v1"
 
 # Reviewed G5 repair budgets, not CI pass/fail thresholds.
 TARGET_BUDGETS: Final[dict[str, tuple[str, float]]] = {
@@ -146,7 +146,7 @@ def run_tui_performance_profile(*, samples: int) -> dict[str, Any]:
     for index, item in enumerate(ranked, start=1):
         item["rank"] = index
 
-    return {
+    report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "fixture_set_version": FIXTURE_SET_VERSION,
         "captured_at": datetime.now(timezone.utc).isoformat(),
@@ -197,6 +197,26 @@ def run_tui_performance_profile(*, samples: int) -> dict[str, Any]:
             "max_retained_characters_observed": max(
                 item.retained_characters for item in tui_samples
             ),
+        },
+        "closure_workloads": {
+            "cold_start": {
+                "samples": samples,
+                "evidence": ["cold_tui_import"],
+            },
+            "warm_start": {
+                "samples": samples,
+                "evidence": ["startup_to_paint", "first_input_to_paint"],
+            },
+            "long_session": {
+                "retained_event_limit": MAX_TIMELINE_EVENTS,
+                "retained_character_limit": MAX_TIMELINE_CHARS,
+                "evidence": [
+                    "timeline_full_100_projection",
+                    "timeline_incremental_1_projection",
+                    "timeline_batch_10_projection",
+                    "timeline_retained_memory",
+                ],
+            },
         },
         "results": results,
         "ranked_bottlenecks": ranked,
@@ -261,8 +281,20 @@ def run_tui_performance_profile(*, samples: int) -> dict[str, Any]:
             "lazy_tui_startup",
         ],
         "profile_top": _profile_timeline_render(),
-        "status": "passed",
     }
+    accepted_metric_ids = {
+        metric for repair in report["accepted_repairs"] for metric in repair["evidence"]
+    }
+    report["status"] = (
+        "passed"
+        if all(
+            result["target_status"] == "within_target"
+            for result in results
+            if result["id"] in accepted_metric_ids
+        )
+        else "failed"
+    )
+    return report
 
 
 async def _profile_tui_once() -> _TuiSample:

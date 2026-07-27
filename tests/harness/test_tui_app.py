@@ -10,6 +10,7 @@ import pytest
 
 pytest.importorskip("textual")
 
+from textual import events
 from textual.widgets import Input, ListView
 
 from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
@@ -66,6 +67,7 @@ class FakeClient:
         self.submitted: list[str] = []
         self.submitted_attachments: list[tuple[str, ...]] = []
         self.decisions: list[str] = []
+        self.answers: list[tuple[str, str]] = []
         self.environment_commit_approved = False
         self.environment_commit_preview = EnvironmentCommitPreviewSummary(
             "commit_" + "c" * 64,
@@ -529,6 +531,18 @@ class FakeClient:
         return self.current_run
 
     async def answer_input(self, binding, input_id, answer):
+        self.answers.append((input_id, answer))
+        self.current_run = replace(
+            self.current_run,
+            events=(
+                TimelineEvent(
+                    "evt_answered",
+                    "input_answered",
+                    "Answer accepted",
+                ),
+            ),
+            resnapshot_reason="cursor_gap",
+        )
         return self.current_run
 
     async def search_files(self, session_id, query):
@@ -980,6 +994,25 @@ async def test_tui_composer_renders_incremental_content_and_tool_lifecycle():
 
 
 @pytest.mark.anyio
+async def test_tui_composer_accepts_bounded_bracketed_paste():
+    client = FakeClient()
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        composer = app.query_one("#composer", Input)
+        composer.focus()
+        composer.post_message(events.Paste("Review pasted change\nignored second line"))
+        await pilot.pause()
+
+        assert composer.value == "Review pasted change"
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert client.submitted == ["Review pasted change"]
+
+
+@pytest.mark.anyio
 async def test_tui_applies_event_driven_run_delivery_without_poll_timer():
     class StreamingClient(FakeClient):
         def __init__(self):
@@ -1326,7 +1359,7 @@ async def test_tui_quality_states_have_headless_artifacts_and_primary_actions(
             )
 
         screenshot = app.export_screenshot(
-            title=f"N5-05 {state} {size[0]}x{size[1]}", simplify=True
+            title=f"G5-03 {state} {size[0]}x{size[1]}", simplify=True
         )
         assert screenshot.startswith("<svg")
         if artifact_root := os.getenv("GIGALOOM_TUI_ARTIFACT_DIR"):
@@ -1357,6 +1390,29 @@ async def test_tui_quality_states_have_headless_artifacts_and_primary_actions(
             assert widget.region.right <= size[0]
             assert widget.region.y >= 0
             assert widget.region.bottom <= size[1]
+
+
+@pytest.mark.anyio
+async def test_tui_answers_question_and_clears_resnapshotted_prompt():
+    client = FakeClient()
+    client.current_run = _quality_state_snapshot("question")
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await pilot.click("#answer")
+        await pilot.pause()
+        prompt = app.screen.query_one("#prompt-input", Input)
+        prompt.post_message(events.Paste("workspace"))
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        answer = app.query_one("#answer")
+        assert client.answers == [("input_1", "workspace")]
+        assert answer.disabled is True
+        assert answer.styles.display == "none"
+        assert "Answer accepted" in str(app.query_one("#timeline").render())
 
 
 @pytest.mark.anyio
@@ -1420,7 +1476,7 @@ async def test_tui_context_drawer_keeps_non_chat_surfaces_out_of_default_shell(s
             root.mkdir(parents=True, exist_ok=True)
             (root / f"context-drawer-{size[0]}x{size[1]}.svg").write_text(
                 app.export_screenshot(
-                    title=f"G5-01 context drawer {size[0]}x{size[1]}",
+                    title=f"G5-03 context drawer {size[0]}x{size[1]}",
                     simplify=True,
                 ),
                 encoding="utf-8",
