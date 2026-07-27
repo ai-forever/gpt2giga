@@ -62,6 +62,9 @@ from gpt2giga_harness.tui.commands import (
     visible_commands,
 )
 
+NATIVE_OUTPUT_POLL_SECONDS = 0.1
+RUN_POLL_SECONDS = 0.15
+
 
 class NavigationItem(ListItem):
     """List item that retains one opaque navigation identity."""
@@ -923,7 +926,7 @@ class NativeTerminalScreen(ModalScreen[str | None]):
 
     async def on_mount(self) -> None:
         self._apply_snapshot(self.snapshot)
-        self.set_interval(0.1, self._poll)
+        self.set_interval(NATIVE_OUTPUT_POLL_SECONDS, self._poll)
         await self._resize()
         await self._enforce_fullscreen_boundary()
         self.query_one("#native-input", Input).focus()
@@ -1395,7 +1398,7 @@ class WorkbenchTui(App[None]):
         self._set_narrow(self.size.width)
         await self._reload()
         await self._apply_launch_intent()
-        self.set_interval(0.15, self._poll_run)
+        self.set_interval(RUN_POLL_SECONDS, self._poll_run)
         self.query_one("#session-list", ListView).focus()
 
     def on_resize(self, event: events.Resize) -> None:

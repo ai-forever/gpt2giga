@@ -105,6 +105,49 @@ def test_local_detail_profile_keeps_bounded_content_free_samples():
         }
 
 
+def test_tui_detail_profile_is_ranked_bounded_and_content_free():
+    report = run_performance_baseline(samples=1, profile="tui-detail")
+
+    assert report["schema_version"] == "gigaloom.tui-performance-profile.v1"
+    assert report["fixture_set_version"] == "g5-00.v1"
+    assert report["status"] == "passed"
+    assert report["privacy"] == {
+        "content_captured": False,
+        "secrets_captured": False,
+        "native_homes_accessed": False,
+        "provider_traffic": False,
+        "network_accessed": False,
+        "temporary_state_only": True,
+    }
+    assert report["current_contract"]["timeline_render_strategy"] == "full_rebuild"
+    assert report["current_contract"]["run_poll_rerenders_unchanged_snapshot"] is True
+    assert report["retention"]["max_retained_events_observed"] == 100
+    assert {item["id"] for item in report["accepted_repairs"]} == {
+        "event_driven_run_delivery",
+        "event_driven_native_output",
+        "differential_timeline_rendering",
+        "lazy_tui_startup",
+    }
+    metrics = {item["id"] for item in report["results"]}
+    assert {
+        "cold_tui_import",
+        "startup_to_paint",
+        "first_input_to_paint",
+        "timeline_full_100_projection",
+        "timeline_incremental_1_projection",
+        "unchanged_run_poll_projection",
+        "timeline_retained_memory",
+        "run_timer_wakeup_rate",
+        "run_active_request_rate",
+        "native_active_request_rate",
+    } <= metrics
+    assert report["startup_imports"]["module_count_p95"] > 0
+    assert [item["rank"] for item in report["ranked_bottlenecks"]] == list(
+        range(1, len(report["ranked_bottlenecks"]) + 1)
+    )
+    assert report["profile_top"]
+
+
 @pytest.mark.parametrize("samples", (0, 101))
 def test_performance_baseline_rejects_unbounded_sample_counts(samples):
     with pytest.raises(ValueError, match="samples must be between 1 and 100"):
@@ -130,5 +173,30 @@ def test_performance_cli_writes_private_report(tmp_path, capsys):
 
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["schema_version"] == SCHEMA_VERSION
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert "Wrote private performance report" in capsys.readouterr().out
+
+
+def test_performance_cli_writes_private_tui_profile(tmp_path, capsys):
+    output = tmp_path / "tui-report.json"
+
+    assert (
+        cli.main(
+            [
+                "benchmark",
+                "performance",
+                "--profile",
+                "tui-detail",
+                "--samples",
+                "1",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "gigaloom.tui-performance-profile.v1"
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert "Wrote private performance report" in capsys.readouterr().out
