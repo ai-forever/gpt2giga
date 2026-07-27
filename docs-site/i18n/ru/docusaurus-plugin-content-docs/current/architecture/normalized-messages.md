@@ -24,32 +24,42 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
   независимо от флагов нормализации OpenAI Chat.
 - Debug-эндпоинты умеют переводить между форматами `openai`, `anthropic`, `normalized` и
   `gigachat` для защищённых admin-сценариев.
+- G7-00 фиксирует `gigaloom.normalized-chat.v1` и контракт
+  `gigaloom.protocol-loss-matrix.v1` для будущего upstream-моста,
+  совместимого с OpenAI. Контракт реализован, но upstream-адаптер
+  OpenAI-compatible/vLLM пока не активен.
 
 ## Основные модели
 
 Конверт нормализованного запроса:
 
-- `NormalizedChatRequest`: `protocol`, `operation`, `model`, `stream`,
-  `messages`, `tools`, `tool_choice`, `response_format`,
-  `generation_config`, `user`, `metadata`.
+- `NormalizedChatRequest`: версионированный класс запроса, `protocol`,
+  `operation`, `model`, `stream`, `messages`, `tools`, `tool_choice`,
+  `parallel_tool_calls`, `response_format`, `generation_config`,
+  `cancellation`, `user`, `metadata`.
 - `NormalizedMessage`: `role`, `content`, `name`, `tool_call_id`,
   `tool_calls`.
-- `NormalizedContentPart`: универсальная часть контента с `type`, `text`, `data`,
-  `mime_type`, `detail`.
+- `NormalizedContentPart`: универсальная часть контента и типизированный
+  `NormalizedImageReference` для разрешённых изображений `url` и `data_url`.
 - `NormalizedTool`: уплощённый контракт инструмента/функции с `name`,
   `description`, `parameters`.
 - `NormalizedGenerationConfig`: общие параметры генерации:
   `temperature`, `top_p`, `max_tokens`, penalties, `stop`, `seed`.
+- `NormalizedTokenCountRequest`, `NormalizedTokenCountResponse` и
+  `NormalizedTokenLimits`: явные контракты подсчёта токенов и контекстных
+  лимитов.
 
 Нормализованный вывод:
 
 - `NormalizedResponse`: ответ без потоковой передачи, не зависящий от провайдера:
   `choices`, `usage`, `error`, `metadata`, `provider_metadata`.
-- `NormalizedChoice`: `message` или `delta`, `finish_reason`, `index`.
+- `NormalizedChoice`: `message` или `delta`, прежний `finish_reason`,
+  нормализованный v1 `stop_reason` и `index`.
 - `NormalizedUsage`: `input_tokens`, `output_tokens`, `total_tokens`.
 - `NormalizedStreamEvent`: канонические события потока:
   `message_start`, `content_delta`, `reasoning_delta`, `tool_call_start`,
-  `tool_call_delta`, `usage`, `message_end`, `error`, `heartbeat`.
+  `tool_call_delta`, `usage`, `message_end`, `cancelled`, `error`,
+  `heartbeat`.
 
 Все нормализованные модели наследуют два набора расширений:
 
@@ -57,6 +67,61 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
   сохранить, но не поднимать в каноническую модель.
 - `provider_metadata`: данные, специфичные для провайдера, например GigaChat
   `additional_fields` или безопасные метаданные из ответа вышестоящего сервиса.
+
+## OpenAI-compatible protocol bridge v1
+
+G7-00 фиксирует возможность трансляции, а не доступность runtime. Машиночитаемый
+источник — `PROTOCOL_LOSS_MATRIX_V1` в
+`gpt2giga.protocols.normalized`. Его сериализованный статус остаётся
+`implementation_status="frozen_contract"`, пока G7-01 не добавит
+upstream-адаптер.
+
+Принятое подмножество запроса содержит ровно четыре роли (`system`, `user`,
+`assistant`, `tool`), упорядоченные текстовые части и типизированные ссылки на
+изображения, function tools/calls/results, допустимый tool choice, необязательное
+управление параллельными вызовами, JSON Schema output, streaming с терминальными
+событиями, нормализованные stop/usage/model и классы request/error,
+кооперативную отмену, объявленные контекстные/токенные лимиты и явный подсчёт
+токенов. Файлы, аудио, произвольные части контента, provider metadata и
+несмоделированная семантика расширений находятся вне v1.
+
+`E` означает точное downstream-представление. `C` требует явного допуска
+проверенным профилем адаптера/модели. `U` означает, что смысл нельзя сохранить
+в v1 и admission завершается отказом.
+
+| Возможность normalized v1 | OpenAI downstream | Anthropic downstream | Gemini downstream |
+| --- | --- | --- | --- |
+| Роли | E | E | E |
+| Порядок частей контента | E | E | E |
+| Текст | E | E | E |
+| Ссылки на изображения | C | C | C |
+| Параметры генерации | C | C | C |
+| Function tools/calls | E | E | E |
+| Tool choice | E | E | C |
+| Явный переключатель parallel tools | E | E | U |
+| Результаты tools | E | E | E |
+| JSON Schema output | C | C | C |
+| Streaming deltas | E | E | E |
+| Терминальные события streaming | E | E | E |
+| Stop reason | E | E | E |
+| Usage | E | E | E |
+| Идентичность модели | E | E | E |
+| Классы request/error | E | E | E |
+| Отмена | E | E | E |
+| Контекстные/токенные лимиты | C | C | C |
+| Подсчёт токенов | U | E | E |
+
+`admit_protocol_bridge_request()` — обязательный guard до I/O. Он выводит
+семантические требования запроса, требует каждое из них в проверенном
+OpenAI-compatible upstream-профиле, требует явный opt-in для каждой ячейки
+`C`, проверяет объявленные токенные лимиты и отклоняет каждую ячейку `U` или
+несмоделированное расширение. `UnsupportedSemanticLossError` возникает до того,
+как адаптер может открыть сетевое соединение.
+
+Матрица повторно сверена с актуальными
+[справочником OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create),
+[контрактом Anthropic Messages SDK](https://github.com/anthropics/anthropic-sdk-python/tree/main/src/anthropic/types)
+и [документацией Gemini GenerateContent](https://ai.google.dev/gemini-api/docs/text-generation).
 
 ## Поток OpenAI Chat
 

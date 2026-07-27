@@ -233,6 +233,7 @@ def test_openai_adapter_reuses_chat_compatibility_policy():
     payload = normalized.to_json_dict()
     assert "n" not in payload["raw_extensions"]
     assert "parallel_tool_calls" not in payload["raw_extensions"]
+    assert payload["parallel_tool_calls"] is True
 
 
 def test_openai_adapter_reuses_chat_compatibility_policy_errors():

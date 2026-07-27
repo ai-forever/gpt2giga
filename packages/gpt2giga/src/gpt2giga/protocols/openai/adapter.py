@@ -101,6 +101,7 @@ class OpenAIProtocolAdapter:
             messages=_normalize_messages(sanitized.get("messages", [])),
             tools=_normalize_tools(sanitized),
             tool_choice=_normalize_tool_choice(original, sanitized),
+            parallel_tool_calls=_optional_bool(original.get("parallel_tool_calls")),
             response_format=_normalize_response_format(
                 sanitized.get("response_format")
             ),
@@ -375,3 +376,7 @@ def _string_or_none(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _optional_bool(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else None

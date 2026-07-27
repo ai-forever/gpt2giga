@@ -201,6 +201,11 @@ GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests
 
 Внутренний нормализованный слой, который отделяет публичные форматы протоколов от
 выполнения у провайдера, описан в [Нормализованных сообщениях](./architecture/normalized-messages.md).
+G7-00 также публикует версионированную матрицу семантических потерь для
+OpenAI-compatible upstream × OpenAI/Anthropic/Gemini и обязательный fail-closed
+guard допуска до I/O. Это зафиксированный контракт, а не активный vLLM или иной
+OpenAI-compatible upstream-адаптер; runtime-поддержка начинается не раньше
+G7-01.
 
 ## Режимы бэкенда
 

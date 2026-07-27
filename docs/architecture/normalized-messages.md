@@ -24,32 +24,41 @@ dedicated Gemini-to-normalized adapter in the main execution path.
   independently of the OpenAI Chat normalization flags.
 - Debug endpoints can translate between the `openai`, `anthropic`, `normalized`, and
   `gigachat` formats for protected admin workflows.
+- G7-00 freezes `gigaloom.normalized-chat.v1` and the
+  `gigaloom.protocol-loss-matrix.v1` contract for a future OpenAI-compatible
+  upstream bridge. The contract is implemented, but no OpenAI-compatible/vLLM
+  upstream adapter is active yet.
 
 ## Core models
 
 The normalized request envelope:
 
-- `NormalizedChatRequest`: `protocol`, `operation`, `model`, `stream`,
-  `messages`, `tools`, `tool_choice`, `response_format`,
-  `generation_config`, `user`, `metadata`.
+- `NormalizedChatRequest`: versioned request class, `protocol`, `operation`,
+  `model`, `stream`, `messages`, `tools`, `tool_choice`,
+  `parallel_tool_calls`, `response_format`, `generation_config`,
+  `cancellation`, `user`, `metadata`.
 - `NormalizedMessage`: `role`, `content`, `name`, `tool_call_id`,
   `tool_calls`.
-- `NormalizedContentPart`: a generic content part with `type`, `text`, `data`,
-  `mime_type`, `detail`.
+- `NormalizedContentPart`: a generic content part plus a typed
+  `NormalizedImageReference` for admitted `url` and `data_url` images.
 - `NormalizedTool`: a flattened tool/function contract with `name`,
   `description`, `parameters`.
 - `NormalizedGenerationConfig`: common generation knobs:
   `temperature`, `top_p`, `max_tokens`, penalties, `stop`, `seed`.
+- `NormalizedTokenCountRequest`, `NormalizedTokenCountResponse`, and
+  `NormalizedTokenLimits`: explicit token-count and context-limit contracts.
 
 Normalized output:
 
 - `NormalizedResponse`: a provider-independent non-streaming response:
   `choices`, `usage`, `error`, `metadata`, `provider_metadata`.
-- `NormalizedChoice`: `message` or `delta`, `finish_reason`, `index`.
+- `NormalizedChoice`: `message` or `delta`, legacy `finish_reason`, normalized
+  v1 `stop_reason`, and `index`.
 - `NormalizedUsage`: `input_tokens`, `output_tokens`, `total_tokens`.
 - `NormalizedStreamEvent`: canonical stream events:
   `message_start`, `content_delta`, `reasoning_delta`, `tool_call_start`,
-  `tool_call_delta`, `usage`, `message_end`, `error`, `heartbeat`.
+  `tool_call_delta`, `usage`, `message_end`, `cancelled`, `error`,
+  `heartbeat`.
 
 All normalized models inherit two extension buckets:
 
@@ -57,6 +66,60 @@ All normalized models inherit two extension buckets:
   keep but not promote into the canonical model.
 - `provider_metadata`: provider-specific data, for example GigaChat
   `additional_fields` or safe metadata from the upstream response.
+
+## OpenAI-compatible protocol bridge v1
+
+G7-00 freezes translation feasibility, not runtime availability. The
+machine-readable source is `PROTOCOL_LOSS_MATRIX_V1` in
+`gpt2giga.protocols.normalized`. Its serialized status is
+`implementation_status="frozen_contract"` until G7-01 adds an upstream
+adapter.
+
+The accepted request subset has exactly four roles (`system`, `user`,
+`assistant`, `tool`), ordered text and typed image-reference parts, function
+tools/calls/results, admitted tool choice, optional parallel-call control,
+JSON Schema output, streaming with terminal events, normalized stop/usage/model
+and request/error classes, cooperative cancellation, declared context/token
+limits, and explicit token counting. Files, audio, arbitrary content parts,
+provider metadata, and unmodeled extension semantics are outside v1.
+
+`E` means the normalized meaning has an exact downstream representation. `C`
+means a reviewed adapter/model profile must opt into the feature. `U` means the
+meaning cannot be preserved in v1 and admission fails.
+
+| Normalized v1 feature | OpenAI downstream | Anthropic downstream | Gemini downstream |
+| --- | --- | --- | --- |
+| Roles | E | E | E |
+| Ordered content parts | E | E | E |
+| Text | E | E | E |
+| Image references | C | C | C |
+| Generation controls | C | C | C |
+| Function tools/calls | E | E | E |
+| Tool choice | E | E | C |
+| Explicit parallel-tool toggle | E | E | U |
+| Tool results | E | E | E |
+| JSON Schema output | C | C | C |
+| Streaming deltas | E | E | E |
+| Streaming terminal events | E | E | E |
+| Stop reason | E | E | E |
+| Usage | E | E | E |
+| Model identity | E | E | E |
+| Request/error classes | E | E | E |
+| Cancellation | E | E | E |
+| Context/token limits | C | C | C |
+| Count tokens | U | E | E |
+
+`admit_protocol_bridge_request()` is the mandatory pre-I/O guard. It derives
+the request's semantic requirements, requires each one in the reviewed
+OpenAI-compatible upstream profile, requires explicit opt-in for every `C`
+cell, enforces declared token limits, and rejects every `U` cell or unmodeled
+extension. `UnsupportedSemanticLossError` is raised before an adapter may open
+a network connection.
+
+The matrix was revalidated against the current
+[OpenAI Chat Completions reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create),
+[Anthropic Messages SDK contract](https://github.com/anthropics/anthropic-sdk-python/tree/main/src/anthropic/types),
+and [Gemini GenerateContent documentation](https://ai.google.dev/gemini-api/docs/text-generation).
 
 ## OpenAI Chat flow
 
