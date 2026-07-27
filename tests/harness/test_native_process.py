@@ -61,6 +61,49 @@ def test_native_process_manager_starts_reads_writes_and_stops_fake_cli(tmp_path)
     }
 
 
+def test_native_process_manager_wakes_output_waiters_without_polling(tmp_path):
+    script = _write_echo_cli(tmp_path)
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Native output delivery")
+    manager = NativeProcessManager(session_store=store, use_pty=False)
+    ref = manager.start(
+        NativeCommandPlan(
+            command=(sys.executable, str(script)),
+            env=_python_env(),
+            cwd=str(tmp_path),
+            metadata={"harness_id": "fake-cli"},
+        ),
+        session_id=session.id,
+        run_id="run_delivery",
+    )
+    cursor, _ = _wait_for_text(manager, ref.id, 0, "ready")
+    waiting = threading.Event()
+    result = {}
+
+    def wait_for_output():
+        waiting.set()
+        result["chunk"], result["ref"] = manager.wait_for_output(
+            ref.id,
+            cursor,
+            timeout_seconds=1,
+        )
+
+    waiter = threading.Thread(target=wait_for_output)
+    started = time.monotonic()
+    waiter.start()
+    assert waiting.wait(timeout=1)
+    manager.write(ref.id, "delivered\n")
+    waiter.join(timeout=1)
+    manager.stop(ref.id)
+
+    assert not waiter.is_alive()
+    assert time.monotonic() - started < 1
+    assert "echo:delivered" in "".join(
+        output.text for output in result["chunk"].outputs
+    )
+    assert result["ref"].id == ref.id
+
+
 def test_native_process_manager_redacts_output_and_session_events(tmp_path):
     secret = "native-process-secret-value"
     script = tmp_path / "print_secret.py"

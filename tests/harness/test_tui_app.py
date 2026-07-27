@@ -13,7 +13,7 @@ pytest.importorskip("textual")
 from textual.widgets import Input, ListView
 
 from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
-from gpt2giga_harness.tui.app import SessionBrowserScreen, WorkbenchTui
+from gpt2giga_harness.tui.app import SessionBrowserScreen, TimelinePanel, WorkbenchTui
 from gpt2giga_harness.tui.commands import (
     COMMAND_REGISTRY,
     command_bindings,
@@ -637,6 +637,48 @@ def _run_snapshot(
     )
 
 
+def test_timeline_panel_suppresses_unchanged_updates_and_reuses_stable_cards(
+    monkeypatch,
+):
+    panel = TimelinePanel("empty", {"message": "MESSAGE"}, id="timeline")
+    events = tuple(
+        TimelineEvent(
+            f"evt_{index}",
+            "message_delta",
+            f"event {index}",
+            category="message",
+        )
+        for index in range(100)
+    )
+    rendered = 0
+    render_card = panel._render_card
+
+    def counted(*args, **kwargs):
+        nonlocal rendered
+        rendered += 1
+        return render_card(*args, **kwargs)
+
+    monkeypatch.setattr(panel, "_render_card", counted)
+
+    assert panel.set_events(events) is True
+    assert rendered == 100
+    rendered = 0
+    assert panel.set_events(events) is False
+    assert rendered == 0
+
+    shifted = (
+        *events[1:],
+        TimelineEvent(
+            "evt_100",
+            "message_delta",
+            "event 100",
+            category="message",
+        ),
+    )
+    assert panel.set_events(shifted) is True
+    assert rendered <= 3
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("size", ((120, 40), (80, 24), (60, 20)))
 async def test_tui_renders_keyboard_navigation_without_horizontal_overflow(size):
@@ -935,6 +977,38 @@ async def test_tui_composer_renders_incremental_content_and_tool_lifecycle():
         assert "hello" in timeline
         assert "search" in timeline
         assert app.run_snapshot.binding.run_id == "run_1"
+
+
+@pytest.mark.anyio
+async def test_tui_applies_event_driven_run_delivery_without_poll_timer():
+    class StreamingClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.updates: asyncio.Queue[RunSnapshot] = asyncio.Queue()
+            self.stream_started = asyncio.Event()
+
+        async def stream_run(self, run_id, *, cursor=None):
+            assert run_id == "run_1"
+            self.stream_started.set()
+            while True:
+                yield await self.updates.get()
+
+    client = StreamingClient()
+    client.current_run = _run_snapshot(
+        events=(TimelineEvent("evt_1", "run_started", "started"),)
+    )
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await asyncio.wait_for(client.stream_started.wait(), timeout=1)
+        await client.updates.put(
+            _run_snapshot(
+                events=(TimelineEvent("evt_2", "message_delta", "delivered"),)
+            )
+        )
+        await pilot.pause()
+
+        assert "delivered" in str(app.query_one("#timeline").render())
 
 
 @pytest.mark.anyio

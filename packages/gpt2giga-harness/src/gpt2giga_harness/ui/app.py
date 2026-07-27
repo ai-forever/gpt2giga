@@ -351,8 +351,9 @@ from gpt2giga_harness.workbench_resources import (
 
 
 NATIVE_SUBMIT_KEY_DELAY_SECONDS = 0.05
-RUN_EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
+RUN_EVENT_STREAM_HEARTBEAT_SECONDS = 15.0
 RUN_EVENT_STREAM_POLL_SECONDS = 0.1
+NATIVE_OUTPUT_STREAM_HEARTBEAT_SECONDS = 15.0
 TUI_FILE_PREVIEW_BYTES = 8 * 1024
 TUI_FILE_PREVIEW_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 TUI_NAVIGATION_TERMINAL_RE = re.compile(
@@ -2025,9 +2026,12 @@ def create_app(
             current_cursor = stream_cursor
             last_keepalive = asyncio.get_running_loop().time()
 
-            def poll_stream(cursor_value: int):
-                chunk = native_process_manager.read_since(process_id, cursor_value)
-                process_ref = native_process_manager.status(process_id)
+            def wait_stream(cursor_value: int):
+                chunk, process_ref = native_process_manager.wait_for_output(
+                    process_id,
+                    cursor_value,
+                    timeout_seconds=NATIVE_OUTPUT_STREAM_HEARTBEAT_SECONDS,
+                )
                 run = _sync_native_process_run(
                     store,
                     process_ref,
@@ -2054,7 +2058,7 @@ def create_app(
             while True:
                 try:
                     chunk, process_ref, event_payload = await run_stream_offload(
-                        poll_stream, current_cursor
+                        wait_stream, current_cursor
                     )
                 except NativeProcessNotFoundError:
                     break
@@ -2070,10 +2074,9 @@ def create_app(
                 if process_ref.status is not NativeProcessStatus.RUNNING:
                     break
                 now = asyncio.get_running_loop().time()
-                if now - last_keepalive >= 10:
+                if now - last_keepalive >= NATIVE_OUTPUT_STREAM_HEARTBEAT_SECONDS:
                     yield ": keepalive\n\n"
                     last_keepalive = now
-                await asyncio.sleep(0.1)
 
         return StreamingResponse(
             stream_output(),

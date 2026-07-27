@@ -177,6 +177,7 @@ class NativeProcessManager:
         self.max_output_chunks = max(int(max_output_chunks), 1)
         self._records: dict[str, _OwnedNativeProcess] = {}
         self._lock = threading.RLock()
+        self._output_condition = threading.Condition(self._lock)
         self._shutdown = threading.Event()
         self._reconcile_expired_records()
 
@@ -416,6 +417,37 @@ class NativeProcessManager:
         self._reconcile_expired_records()
         return self._durable_ref(process_id)
 
+    def wait_for_output(
+        self,
+        process_id: str,
+        cursor: int | None = None,
+        *,
+        timeout_seconds: float = 15.0,
+    ) -> tuple[NativeOutputChunk, NativeProcessRef]:
+        """Wait for owned output, with bounded durable fallback resnapshots."""
+        last_seen = cursor or 0
+        timeout = max(float(timeout_seconds), 0.01)
+        with self._output_condition:
+            owned = process_id in self._records
+        if not owned:
+            time.sleep(timeout)
+            return self.read_since(process_id, last_seen), self.status(process_id)
+        deadline = time.monotonic() + timeout
+        with self._output_condition:
+            while True:
+                chunk = self.read_since(process_id, last_seen)
+                process_ref = self.status(process_id)
+                if (
+                    chunk.outputs
+                    or chunk.truncated
+                    or process_ref.status is not NativeProcessStatus.RUNNING
+                ):
+                    return chunk, process_ref
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return chunk, process_ref
+                self._output_condition.wait(remaining)
+
     def stop(self, process_id: str) -> NativeProcessRef:
         """Terminate a running native process, killing it if needed."""
         with self._lock:
@@ -648,6 +680,7 @@ class NativeProcessManager:
                     "text": redacted_text,
                 },
             )
+            self._output_condition.notify_all()
 
     def _owned_record(self, process_id: str) -> _OwnedNativeProcess:
         record = self._records.get(process_id)
@@ -724,6 +757,7 @@ class NativeProcessManager:
                 },
             )
         self._close_finished_resources_locked(record)
+        self._output_condition.notify_all()
 
     def _close_finished_resources_locked(self, record: _OwnedNativeProcess) -> None:
         if record.ref.status is NativeProcessStatus.RUNNING or record.resources_closed:

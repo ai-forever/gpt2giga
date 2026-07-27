@@ -41,8 +41,8 @@ from gpt2giga_harness.tui.client import (
 )
 
 
-SCHEMA_VERSION: Final[str] = "gigaloom.tui-performance-profile.v1"
-FIXTURE_SET_VERSION: Final[str] = "g5-00.v1"
+SCHEMA_VERSION: Final[str] = "gigaloom.tui-performance-profile.v2"
+FIXTURE_SET_VERSION: Final[str] = "g5-02.v1"
 
 # Reviewed G5 repair budgets, not CI pass/fail thresholds.
 TARGET_BUDGETS: Final[dict[str, tuple[str, float]]] = {
@@ -166,14 +166,16 @@ def run_tui_performance_profile(*, samples: int) -> dict[str, Any]:
             "temporary_state_only": True,
         },
         "current_contract": {
-            "run_poll_interval_seconds": RUN_POLL_SECONDS,
-            "native_output_poll_interval_seconds": NATIVE_OUTPUT_POLL_SECONDS,
+            "run_resnapshot_interval_seconds": RUN_POLL_SECONDS,
+            "native_reconnect_interval_seconds": NATIVE_OUTPUT_POLL_SECONDS,
             "run_request_requires_active_run": True,
             "native_request_requires_active_process": True,
-            "run_poll_rerenders_unchanged_snapshot": True,
-            "native_poll_updates_widgets_on_empty_output": True,
-            "timeline_render_strategy": "full_rebuild",
-            "event_batching": "one_snapshot_batch",
+            "run_poll_rerenders_unchanged_snapshot": False,
+            "native_poll_updates_widgets_on_empty_output": False,
+            "run_delivery": "persistent_event_stream_with_bounded_resnapshot",
+            "native_delivery": "persistent_event_stream_with_bounded_reconnect",
+            "timeline_render_strategy": "stable_event_card_cache",
+            "event_batching": "bounded_snapshot_then_local_event_projection",
             "timeline_event_limit": MAX_TIMELINE_EVENTS,
             "timeline_character_limit": MAX_TIMELINE_CHARS,
             "native_scrollback_character_limit": MAX_NATIVE_SCROLLBACK_CHARS,
@@ -251,12 +253,20 @@ def run_tui_performance_profile(*, samples: int) -> dict[str, Any]:
                 },
             },
         ],
+        "implemented_repairs": [
+            "event_driven_run_delivery",
+            "event_driven_native_output",
+            "unchanged_snapshot_suppression",
+            "differential_timeline_rendering",
+            "lazy_tui_startup",
+        ],
         "profile_top": _profile_timeline_render(),
         "status": "passed",
     }
 
 
 async def _profile_tui_once() -> _TuiSample:
+    from textual import events
     from textual.widgets import Input
 
     project = ProjectSummary("fixture", "Fixture", "/tmp/fixture", "main", 0)
@@ -283,14 +293,20 @@ async def _profile_tui_once() -> _TuiSample:
     timings: dict[str, float] = {}
     started = time.perf_counter_ns()
     async with app.run_test(size=(80, 24)) as pilot:
-        await pilot.pause()
+        await pilot.pause(0)
         timings["startup_to_paint"] = _elapsed_ms(started)
 
         composer = app.query_one("#composer", Input)
         composer.focus()
+        painted = asyncio.Event()
+        key_event = events.Key("x", "x")
+        key_event.set_sender(app)
         started = time.perf_counter_ns()
-        await pilot.press("x")
-        await pilot.pause()
+        app._driver.send_message(key_event)
+        app.call_after_refresh(painted.set)
+        await asyncio.wait_for(painted.wait(), timeout=1)
+        if composer.value != "x":
+            raise RuntimeError("TUI input-to-paint probe did not apply its key event")
         timings["first_input_to_paint"] = _elapsed_ms(started)
 
         timings.update(_profile_timeline_projections())
@@ -367,18 +383,21 @@ def _profile_timeline_projections() -> dict[str, float]:
     incremental_1 = (*full_100[1:], *_events(100, 1))
     batch_10 = (*full_100[10:], *_events(100, 10))
 
-    def measure(events: tuple[TimelineEvent, ...]) -> float:
+    def measure(
+        initial: tuple[TimelineEvent, ...],
+        events: tuple[TimelineEvent, ...],
+    ) -> float:
         panel = TimelinePanel("empty", labels, id="timeline")
-        panel.set_events(events)
+        panel.set_events(initial)
         started = time.perf_counter_ns()
         panel.set_events(events)
         return _elapsed_ms(started)
 
     return {
-        "timeline_full_10_projection": measure(full_10),
-        "timeline_full_100_projection": measure(full_100),
-        "timeline_incremental_1_projection": measure(incremental_1),
-        "timeline_batch_10_projection": measure(batch_10),
+        "timeline_full_10_projection": measure((), full_10),
+        "timeline_full_100_projection": measure((), full_100),
+        "timeline_incremental_1_projection": measure(full_100, incremental_1),
+        "timeline_batch_10_projection": measure(full_100, batch_10),
     }
 
 

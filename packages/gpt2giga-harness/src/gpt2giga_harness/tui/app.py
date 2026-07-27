@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, replace
-from typing import ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
 
 from textual import events, on
@@ -24,34 +25,6 @@ from textual.widgets import (
 from textual.suggester import SuggestFromList
 
 from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
-from gpt2giga_harness.tui.client import (
-    AttachmentSummary,
-    ApprovalSummary,
-    EnvironmentCommitApplySummary,
-    EnvironmentCommitPreviewSummary,
-    EnvironmentPushApplySummary,
-    EnvironmentPushPreviewSummary,
-    EnvironmentPullRequestApplySummary,
-    EnvironmentPullRequestPreviewSummary,
-    FileCandidate,
-    HandoffPreview,
-    MAX_NATIVE_SCROLLBACK_CHARS,
-    NativeTerminalSnapshot,
-    NavigationSnapshot,
-    ProjectSummary,
-    RunActionBinding,
-    RunInspection,
-    RunSnapshot,
-    SessionActionBinding,
-    SessionSummary,
-    TimelineEvent,
-    WorkbenchClient,
-    neutralize_native_terminal_output,
-    session_action_binding,
-)
-from gpt2giga_harness.workbench_resources import (
-    WorkbenchResourceSnapshot,
-)
 from gpt2giga_harness.tui.i18n import translator
 from gpt2giga_harness.tui.commands import (
     COMMAND_REGISTRY,
@@ -62,8 +35,37 @@ from gpt2giga_harness.tui.commands import (
     visible_commands,
 )
 
-NATIVE_OUTPUT_POLL_SECONDS = 0.1
-RUN_POLL_SECONDS = 0.15
+if TYPE_CHECKING:
+    from gpt2giga_harness.tui.client import (
+        ApprovalSummary,
+        AttachmentSummary,
+        EnvironmentCommitApplySummary,
+        EnvironmentCommitPreviewSummary,
+        EnvironmentPullRequestApplySummary,
+        EnvironmentPullRequestPreviewSummary,
+        EnvironmentPushApplySummary,
+        EnvironmentPushPreviewSummary,
+        FileCandidate,
+        HandoffPreview,
+        NativeTerminalSnapshot,
+        NavigationSnapshot,
+        ProjectSummary,
+        RunActionBinding,
+        RunInspection,
+        RunSnapshot,
+        SessionActionBinding,
+        SessionSummary,
+        TimelineEvent,
+        WorkbenchClient,
+    )
+    from gpt2giga_harness.workbench_resources import WorkbenchResourceSnapshot
+
+MAX_NATIVE_SCROLLBACK_CHARS = 64 * 1024
+RUN_RESNAPSHOT_SECONDS = 15.0
+NATIVE_RECONNECT_SECONDS = 15.0
+# Kept as compatibility aliases for the versioned G5 performance report.
+RUN_POLL_SECONDS = RUN_RESNAPSHOT_SECONDS
+NATIVE_OUTPUT_POLL_SECONDS = NATIVE_RECONNECT_SECONDS
 
 
 class NavigationItem(ListItem):
@@ -82,6 +84,25 @@ class QueuedTurn:
     content: str
     idempotency_key: str
     attachment_ids: tuple[str, ...]
+
+
+def _new_run_action_binding(
+    *,
+    session_id: str,
+    run_id: str,
+    revision: str,
+    generation: int,
+    idempotency_key: str,
+) -> Any:
+    from gpt2giga_harness.tui.client import RunActionBinding
+
+    return RunActionBinding(
+        session_id=session_id,
+        run_id=run_id,
+        revision=revision,
+        generation=generation,
+        idempotency_key=idempotency_key,
+    )
 
 
 class TimelinePanel(Static):
@@ -103,13 +124,24 @@ class TimelinePanel(Static):
         self.active_index = 0
         self.expanded: set[str] = set()
         self._card_rows: list[tuple[int, int]] = []
+        self._card_cache: dict[
+            str, tuple[TimelineEvent, bool, bool, tuple[str, ...]]
+        ] = {}
 
-    def set_events(self, events: tuple[TimelineEvent, ...]) -> None:
+    def set_events(self, events: tuple[TimelineEvent, ...]) -> bool:
+        if events == self.events:
+            return False
         self.events = events
         self.active_index = min(self.active_index, max(len(events) - 1, 0))
         retained = {event.id for event in events}
         self.expanded.intersection_update(retained)
+        self._card_cache = {
+            event_id: cached
+            for event_id, cached in self._card_cache.items()
+            if event_id in retained
+        }
         self._render_cards()
+        return True
 
     def action_previous_card(self) -> None:
         if self.events:
@@ -148,31 +180,54 @@ class TimelinePanel(Static):
         self._card_rows = []
         for index, event in enumerate(self.events):
             start_row = len(lines)
-            active = ">" if index == self.active_index else " "
-            expanded = "−" if event.id in self.expanded else "+"
-            title = event.tool_name or event.message or event.type
-            title = title.replace("\n", " ")[:160]
-            category = _timeline_card_category(event)
-            label = self.labels.get(category, category.upper())
-            preview = ""
-            if event.delta and event.delta.replace("\n", " ") != title:
-                preview = f" · {event.delta.replace(chr(10), ' ')[:120]}"
-            lines.append(f"{active}[{expanded}] [{label}] {title}{preview}")
-            if event.id in self.expanded:
-                detail = event.delta or event.message or "—"
-                lines.extend(f"    {line}" for line in detail.splitlines() or ("—",))
-                if event.stream:
-                    lines.append(f"    stream: {event.stream}")
-                if event.artifact_kind or event.artifact_id:
-                    lines.append(
-                        "    artifact: "
-                        f"{event.artifact_kind or 'artifact'} · "
-                        f"{event.artifact_id or 'authoritative run inspection'}"
-                    )
-                if event.truncated:
-                    lines.append("    preview truncated; open authoritative evidence")
+            active = index == self.active_index
+            expanded = event.id in self.expanded
+            cached = self._card_cache.get(event.id)
+            if (
+                cached is None
+                or cached[0] != event
+                or cached[1] is not active
+                or cached[2] is not expanded
+            ):
+                card = self._render_card(event, active=active, expanded=expanded)
+                self._card_cache[event.id] = (event, active, expanded, card)
+            else:
+                card = cached[3]
+            lines.extend(card)
             self._card_rows.append((start_row, len(lines)))
         self.update("\n".join(lines)[-64_000:] or self.empty)
+
+    def _render_card(
+        self,
+        event: TimelineEvent,
+        *,
+        active: bool,
+        expanded: bool,
+    ) -> tuple[str, ...]:
+        active_marker = ">" if active else " "
+        expanded_marker = "−" if expanded else "+"
+        title = event.tool_name or event.message or event.type
+        title = title.replace("\n", " ")[:160]
+        category = _timeline_card_category(event)
+        label = self.labels.get(category, category.upper())
+        preview = ""
+        if event.delta and event.delta.replace("\n", " ") != title:
+            preview = f" · {event.delta.replace(chr(10), ' ')[:120]}"
+        lines = [f"{active_marker}[{expanded_marker}] [{label}] {title}{preview}"]
+        if expanded:
+            detail = event.delta or event.message or "—"
+            lines.extend(f"    {line}" for line in detail.splitlines() or ("—",))
+            if event.stream:
+                lines.append(f"    stream: {event.stream}")
+            if event.artifact_kind or event.artifact_id:
+                lines.append(
+                    "    artifact: "
+                    f"{event.artifact_kind or 'artifact'} · "
+                    f"{event.artifact_id or 'authoritative run inspection'}"
+                )
+            if event.truncated:
+                lines.append("    preview truncated; open authoritative evidence")
+        return tuple(lines)
 
 
 def _timeline_card_category(event: TimelineEvent) -> str:
@@ -297,7 +352,7 @@ class HelpScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
-class FilePickerScreen(ModalScreen[FileCandidate | None]):
+class FilePickerScreen(ModalScreen[Any]):
     """Bounded keyboard-first project file picker with safe preview."""
 
     CSS = """
@@ -418,7 +473,7 @@ class FilePickerScreen(ModalScreen[FileCandidate | None]):
         self.query_one("#file-preview", Static).update(header + candidate.preview)
 
 
-class SessionBrowserScreen(ModalScreen[SessionSummary | None]):
+class SessionBrowserScreen(ModalScreen[Any]):
     """Search and preview bounded session projections across projects."""
 
     CSS = """
@@ -1014,6 +1069,7 @@ class NativeTerminalScreen(ModalScreen[str | None]):
         self._pending_dimensions: tuple[int, int] | None = None
         self._disconnected = False
         self._stopping_for_handoff = False
+        self._delivery_worker: Any | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="native-dialog"):
@@ -1030,7 +1086,13 @@ class NativeTerminalScreen(ModalScreen[str | None]):
 
     async def on_mount(self) -> None:
         self._apply_snapshot(self.snapshot)
-        self.set_interval(NATIVE_OUTPUT_POLL_SECONDS, self._poll)
+        self._delivery_worker = self.run_worker(
+            self._consume_output(),
+            name=f"native-output-{self.snapshot.process_id}",
+            group="native-output",
+            exit_on_error=False,
+            exclusive=True,
+        )
         await self._resize()
         await self._enforce_fullscreen_boundary()
         self.query_one("#native-input", Input).focus()
@@ -1113,6 +1175,42 @@ class NativeTerminalScreen(ModalScreen[str | None]):
         finally:
             self._polling = False
 
+    async def _consume_output(self) -> None:
+        process_id = self.snapshot.process_id
+        while self.is_mounted and not self.snapshot.terminal:
+            stream = getattr(self.client, "stream_native_terminal", None)
+            try:
+                if callable(stream):
+                    async for updated in stream(
+                        process_id,
+                        cursor=self.snapshot.cursor,
+                    ):
+                        if (
+                            not self.is_mounted
+                            or process_id != self.snapshot.process_id
+                        ):
+                            return
+                        self._apply_snapshot(updated)
+                        if self._disconnected:
+                            self._disconnected = False
+                            self.query_one("#native-status", Static).update(
+                                f"{updated.harness_id} · {updated.transport} · "
+                                f"{self.reconnected_label}"
+                            )
+                        await self._enforce_fullscreen_boundary()
+                        if updated.terminal:
+                            return
+                else:
+                    await asyncio.sleep(NATIVE_RECONNECT_SECONDS)
+                    await self._poll()
+            except Exception as exc:
+                if not self.is_mounted:
+                    return
+                self._disconnected = True
+                self._show_error(exc, prefix=self.disconnected_label)
+            if self.is_mounted and not self.snapshot.terminal:
+                await asyncio.sleep(NATIVE_RECONNECT_SECONDS)
+
     async def _resize(self) -> None:
         if not self.is_mounted or self.snapshot.terminal:
             return
@@ -1157,6 +1255,8 @@ class NativeTerminalScreen(ModalScreen[str | None]):
             self._stopping_for_handoff = False
 
     def _apply_snapshot(self, snapshot: NativeTerminalSnapshot) -> None:
+        from gpt2giga_harness.tui.client import neutralize_native_terminal_output
+
         safe = neutralize_native_terminal_output(snapshot.output)
         if safe:
             self.scrollback = (self.scrollback + safe)[-MAX_NATIVE_SCROLLBACK_CHARS:]
@@ -1388,6 +1488,8 @@ class WorkbenchTui(App[None]):
         self._queue_flushing = False
         self._polling = False
         self._disconnected = False
+        self._run_delivery_worker: Any | None = None
+        self._run_delivery_id: str | None = None
         self.t = translator(locale)
         localized_bindings = BindingsMap(command_bindings(self.t))
         self._bindings.key_to_bindings.update(localized_bindings.key_to_bindings)
@@ -1491,7 +1593,7 @@ class WorkbenchTui(App[None]):
         self._set_narrow(self.size.width)
         await self._reload()
         await self._apply_launch_intent()
-        self.set_interval(RUN_POLL_SECONDS, self._poll_run)
+        self._start_run_delivery()
         self.query_one("#timeline", TimelinePanel).focus()
 
     def on_resize(self, event: events.Resize) -> None:
@@ -1721,7 +1823,7 @@ class WorkbenchTui(App[None]):
             return
         self._commit_approval = outcome.approval
         preview = outcome.preview
-        binding = RunActionBinding(
+        binding = _new_run_action_binding(
             session_id=self.selected_session_id or "environment",
             run_id="environment-commit",
             revision=preview.diff_sha256,
@@ -1808,7 +1910,7 @@ class WorkbenchTui(App[None]):
             return
         self._push_approval = outcome.approval
         preview = outcome.preview
-        binding = RunActionBinding(
+        binding = _new_run_action_binding(
             session_id=self.selected_session_id or "environment",
             run_id="environment-push",
             revision=preview.diff_sha256,
@@ -1921,7 +2023,7 @@ class WorkbenchTui(App[None]):
             return
         self._pull_request_approval = outcome.approval
         preview = outcome.preview
-        binding = RunActionBinding(
+        binding = _new_run_action_binding(
             session_id=self.selected_session_id or "environment",
             run_id="environment-pull-request",
             revision=preview.diff_sha256,
@@ -2177,6 +2279,8 @@ class WorkbenchTui(App[None]):
 
     @staticmethod
     def _session_binding(session: SessionSummary) -> SessionActionBinding:
+        from gpt2giga_harness.tui.client import session_action_binding
+
         return session_action_binding(
             session, idempotency_key=f"tui-session-{uuid4().hex}"
         )
@@ -2874,6 +2978,76 @@ class WorkbenchTui(App[None]):
         finally:
             self._polling = False
 
+    def _start_run_delivery(self) -> None:
+        snapshot = self.run_snapshot
+        if not self.is_mounted or snapshot is None or snapshot.terminal:
+            self._stop_run_delivery()
+            return
+        run_id = snapshot.binding.run_id
+        if self._run_delivery_id == run_id and self._run_delivery_worker is not None:
+            return
+        self._stop_run_delivery()
+        self._run_delivery_id = run_id
+        self._run_delivery_worker = self.run_worker(
+            self._consume_run_updates(run_id),
+            name=f"run-delivery-{run_id}",
+            group="run-delivery",
+            exit_on_error=False,
+            exclusive=True,
+        )
+
+    def _stop_run_delivery(self) -> None:
+        worker = self._run_delivery_worker
+        self._run_delivery_worker = None
+        self._run_delivery_id = None
+        if worker is not None:
+            worker.cancel()
+
+    async def _consume_run_updates(self, run_id: str) -> None:
+        while (
+            self.is_mounted
+            and self.run_snapshot is not None
+            and self.run_snapshot.binding.run_id == run_id
+            and not self.run_snapshot.terminal
+        ):
+            stream = getattr(self.client, "stream_run", None)
+            try:
+                if callable(stream):
+                    async for snapshot in stream(
+                        run_id,
+                        cursor=self.run_cursor,
+                    ):
+                        if (
+                            not self.is_mounted
+                            or self.run_snapshot is None
+                            or self.run_snapshot.binding.run_id != run_id
+                        ):
+                            return
+                        self._apply_run_snapshot(snapshot)
+                        if self._disconnected:
+                            self._disconnected = False
+                            self._set_status(self.t("status.reconnected"))
+                        if snapshot.terminal:
+                            return
+                else:
+                    await asyncio.sleep(RUN_RESNAPSHOT_SECONDS)
+                    await self._poll_run()
+            except Exception as exc:
+                if not self.is_mounted or self._run_delivery_id != run_id:
+                    return
+                self._disconnected = True
+                self._set_status(
+                    f"{self.t('status.disconnected')}: "
+                    f"{(str(exc).strip() or type(exc).__name__)[:180]}"
+                )
+            if (
+                self.is_mounted
+                and self.run_snapshot is not None
+                and self.run_snapshot.binding.run_id == run_id
+                and not self.run_snapshot.terminal
+            ):
+                await asyncio.sleep(RUN_RESNAPSHOT_SECONDS)
+
     async def _reconnect_selected_run(self, *, force: bool = False) -> None:
         if self.selected_session_id is None:
             self._reset_run()
@@ -2894,21 +3068,24 @@ class WorkbenchTui(App[None]):
             self._apply_run_snapshot(snapshot)
 
     def _apply_run_snapshot(self, snapshot: RunSnapshot) -> None:
-        if (
+        previous = self.run_snapshot
+        reset = (
             self.run_snapshot is None
             or self.run_snapshot.binding.run_id != snapshot.binding.run_id
             or snapshot.resnapshot_reason in {"cursor_gap", "generation_changed"}
-        ):
+        )
+        if reset:
             self.timeline.clear()
         known = {event.id for event in self.timeline}
-        self.timeline.extend(
-            event for event in snapshot.events if event.id not in known
-        )
+        appended = [event for event in snapshot.events if event.id not in known]
+        self.timeline.extend(appended)
         self.timeline = self.timeline[-100:]
         self.run_snapshot = snapshot
         self.run_cursor = snapshot.cursor
-        self._render_timeline()
-        self._update_interaction_actions()
+        if reset or appended:
+            self._render_timeline()
+        if previous != snapshot:
+            self._update_interaction_actions()
         if snapshot.terminal:
             self._set_status(f"{self.t('status.finished')}: {snapshot.status}")
             if self.queued_turn is not None:
@@ -2917,6 +3094,8 @@ class WorkbenchTui(App[None]):
             self._set_status(
                 f"{self.t('status.resnapshot')}: {snapshot.resnapshot_reason}"
             )
+        else:
+            self._start_run_delivery()
 
     def _render_timeline(self) -> None:
         self.query_one("#timeline", TimelinePanel).set_events(tuple(self.timeline))
@@ -3043,6 +3222,7 @@ class WorkbenchTui(App[None]):
         )
 
     def _reset_run(self) -> None:
+        self._stop_run_delivery()
         self.run_snapshot = None
         self.run_cursor = None
         self.timeline.clear()
