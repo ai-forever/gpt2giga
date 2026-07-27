@@ -239,6 +239,21 @@ def _fake_app():
     return app
 
 
+def _streaming_app(chunks):
+    app = FastAPI()
+
+    @app.post("/v1/chat/completions")
+    async def stream():
+        async def events():
+            for chunk in chunks:
+                yield f"data: {json.dumps(chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(events(), media_type="text/event-stream")
+
+    return app
+
+
 async def test_adapter_executes_chat_tools_and_model_discovery_through_fake_server():
     app = _fake_app()
     network = _NetworkAuthorizer()
@@ -333,6 +348,210 @@ async def test_adapter_streams_tool_events_usage_and_terminal_event():
     assert app.state.requests[0]["payload"]["stream_options"] == {"include_usage": True}
 
 
+@pytest.mark.parametrize(
+    ("chunks", "error_code"),
+    [
+        (
+            [
+                {
+                    "model": "fixture-model",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+                {
+                    "model": "fixture-model",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": "late"},
+                            "finish_reason": None,
+                        }
+                    ],
+                },
+            ],
+            "stream_data_after_terminal",
+        ),
+        (
+            [
+                {
+                    "model": "fixture-model",
+                    "choices": [],
+                    "usage": {"prompt_tokens": 2},
+                },
+                {
+                    "model": "fixture-model",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            ],
+            "usage_before_stream_terminal",
+        ),
+    ],
+)
+async def test_reordered_streams_fail_with_normalized_protocol_errors(
+    chunks,
+    error_code,
+):
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_streaming_app(chunks))
+    )
+    adapter = OpenAICompatibleProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            _request(stream=True),
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    ]
+    await client.aclose()
+
+    assert events[-1].type == "error"
+    assert events[-1].error is not None
+    assert events[-1].error.code == error_code
+    assert events[-1].error.retryable is False
+
+
+async def test_stream_accepts_partial_usage_after_terminal_without_inventing_counts():
+    chunks = [
+        {
+            "model": "fixture-model",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": "ok"},
+                    "finish_reason": "stop",
+                }
+            ],
+        },
+        {
+            "model": "fixture-model",
+            "choices": [],
+            "usage": {"prompt_tokens": 2},
+        },
+    ]
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_streaming_app(chunks))
+    )
+    adapter = OpenAICompatibleProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            _request(stream=True),
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    ]
+    await client.aclose()
+
+    assert [event.type for event in events] == [
+        "message_start",
+        "content_delta",
+        "message_end",
+        "usage",
+    ]
+    assert events[-1].usage is not None
+    assert events[-1].usage.input_tokens == 2
+    assert events[-1].usage.output_tokens is None
+    assert events[-1].usage.total_tokens is None
+
+
+async def test_malformed_stream_fails_with_a_non_retryable_protocol_error():
+    async def handler(_request):
+        return httpx.Response(
+            200,
+            text="data: {not-json}\n\ndata: [DONE]\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = OpenAICompatibleProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            _request(stream=True),
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    ]
+    await client.aclose()
+
+    assert events[-1].type == "error"
+    assert events[-1].error is not None
+    assert events[-1].error.code == "invalid_stream_json"
+    assert events[-1].error.retryable is False
+
+
+async def test_stream_disconnect_projects_cooperative_cancellation():
+    app = _streaming_app(
+        [
+            {
+                "model": "fixture-model",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": "unobserved"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        ]
+    )
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app))
+    adapter = OpenAICompatibleProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            _request(stream=True),
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+            is_disconnected=lambda: True,
+        )
+    ]
+    await client.aclose()
+
+    assert [event.type for event in events] == ["message_start", "cancelled"]
+    assert events[-1].stop_reason == "cancelled"
+
+
 async def test_semantic_admission_rejects_before_network_or_fake_server():
     app = _fake_app()
     network = _NetworkAuthorizer()
@@ -398,6 +617,46 @@ async def test_http_errors_preserve_provider_facts_and_normalize_retryability():
     assert error.code == "busy"
     assert error.error_class == "upstream"
     assert error.retryable is True
+
+
+async def test_invalid_request_http_error_is_non_retryable():
+    async def handler(_request):
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "message": "fixture request is invalid",
+                    "type": "invalid_request_error",
+                    "code": "invalid_fixture",
+                    "param": "tool_choice",
+                }
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = OpenAICompatibleProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    with pytest.raises(OpenAICompatibleUpstreamError) as exc_info:
+        await adapter.complete(
+            _request(),
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    await client.aclose()
+
+    error = exc_info.value.error
+    assert exc_info.value.status_code == 400
+    assert error.type == "invalid_request_error"
+    assert error.code == "invalid_fixture"
+    assert error.param == "tool_choice"
+    assert error.error_class == "invalid_request"
+    assert error.retryable is False
 
 
 async def test_route_model_and_peer_evidence_fail_closed_before_response_use():

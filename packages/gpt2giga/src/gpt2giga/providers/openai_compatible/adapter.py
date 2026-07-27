@@ -271,6 +271,7 @@ class OpenAICompatibleProviderAdapter:
         terminal_choices: set[int] = set()
         started_tool_calls: set[tuple[int, int]] = set()
         saw_done = False
+        saw_usage = False
 
         yield NormalizedStreamEvent(
             type="message_start",
@@ -299,12 +300,25 @@ class OpenAICompatibleProviderAdapter:
                         stop_reason="cancelled",
                     )
                     return
-                for event in _chunk_to_events(
+                if saw_usage:
+                    raise _protocol_error(
+                        "stream_data_after_usage",
+                        "Upstream stream continued after its usage summary.",
+                    )
+                events = _chunk_to_events(
                     chunk,
                     sequence=sequence,
                     started_tool_calls=started_tool_calls,
                     terminal_choices=terminal_choices,
-                ):
+                )
+                usage_events = [event for event in events if event.type == "usage"]
+                if usage_events and not terminal_choices:
+                    raise _protocol_error(
+                        "usage_before_stream_terminal",
+                        "Upstream stream reported usage before a terminal choice.",
+                    )
+                saw_usage = bool(usage_events)
+                for event in events:
                     sequence = (event.sequence or sequence) + 1
                     yield event
         except asyncio.CancelledError:
@@ -751,6 +765,11 @@ def _chunk_to_events(
                 "Upstream stream choice must be an object.",
             )
         choice_index = _integer(raw_choice.get("index"), default=0)
+        if choice_index in terminal_choices:
+            raise _protocol_error(
+                "stream_data_after_terminal",
+                "Upstream stream continued a choice after its terminal event.",
+            )
         delta = raw_choice.get("delta")
         if not isinstance(delta, Mapping):
             raise _protocol_error(

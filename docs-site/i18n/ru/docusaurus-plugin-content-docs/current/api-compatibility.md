@@ -212,8 +212,13 @@ stop-reason, errors и count-token через нормализованное я�
 режиме нормализации. G7-03 фиксирует принятые Gemini-контракты request/response/
 SSE/function/safety-error/usage/model-list/count-token, переводит inline-
 изображения в типизированные ссылки и доказывает отказ bridge admission для
-несмоделированной Gemini-семантики до provider I/O. Это ещё не публичный
-переключатель OpenAI-compatible upstream; закрытие остаётся за G7-04.
+несмоделированной Gemini-семантики до provider I/O. G7-04 закрывает внутренний
+bridge v1 герметичными контрактами OpenAI/Anthropic/Gemini для text, streaming,
+partial usage, function tools, semantic loss, cancellation, malformed streams,
+timeouts и provider errors. Он также переводит входные OpenAI-изображения в
+типизированные ссылки. Публичный environment switch для произвольного upstream
+не добавляется: проверенные profiles, secrets и network authority остаются во
+владении Harness.
 
 ## Режимы бэкенда
 

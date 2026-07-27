@@ -200,8 +200,9 @@ def test_debug_translate_openai_to_normalized_fixtures(
         assert normalized["response_format"]["json_schema"]["name"] == "answer"
     elif assertion_key == "multimodal":
         content = normalized["messages"][0]["content"]
-        assert content[1]["type"] == "image_url"
-        assert content[1]["detail"] == "low"
+        assert content[1]["type"] == "image_reference"
+        assert content[1]["image_reference"]["source"] == "data_url"
+        assert content[1]["image_reference"]["detail"] == "low"
     else:
         assert normalized["messages"][0]["content"] == "hello"
 

@@ -164,6 +164,30 @@ uv run pytest -n 0 tests/live/test_vllm_openai_compatible_smoke.py
 Задавайте `GPT2GIGA_VLLM_API_KEY` только если он нужен проверенному серверу.
 Live smoke требует удалённый HTTPS endpoint и scoped network grant Harness.
 
+### Закрытие protocol bridge
+
+Герметичный closure-suite G7-04 компонует один и тот же проверенный
+`OpenAICompatibleProviderAdapter` с downstream-адаптерами OpenAI, Anthropic и
+Gemini. Text, streaming, partial usage и function-tool нагрузки превращаются в
+одинаковый upstream payload OpenAI Chat Completions, а затем проецируются в
+запрошенную wire-форму. Входные OpenAI-изображения переводятся в тот же
+типизированный контракт `NormalizedImageReference`, который уже используют
+Anthropic и Gemini.
+
+Streaming parser отклоняет данные после terminal choice, usage до terminal
+choice, данные после usage summary, некорректный JSON и незавершённые потоки
+стабильными non-retryable protocol errors. Кооперативное отключение клиента,
+timeouts и provider HTTP failures сохраняют разные нормализованные признаки
+cancellation, retryability, error class, code и parameter. Partial usage
+остаётся частичным: отсутствующие token counts не выдумываются.
+
+Это закрывает внутренний normalized v1 composition contract. Оно не добавляет
+gateway environment switch для произвольного upstream URL или secret.
+OpenAI-compatible profiles, credentials, TLS/proxy policy и network grants
+по-прежнему принадлежат проверенной Harness execution boundary. Batches, files,
+embeddings, prompt caching, computer use, audio и неподдерживаемые multimodal
+формы остаются вне bridge v1.
+
 ## Поток OpenAI Chat
 
 OpenAI Chat Completions в нормализованном режиме проходит так:

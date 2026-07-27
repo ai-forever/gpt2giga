@@ -211,8 +211,12 @@ count-token projection through the normalized core when normalization mode is
 on. G7-03 freezes the admitted Gemini request/response/SSE/function/safety-error/
 usage/model-list/count-token contracts, promotes inline images to typed
 references, and proves that unmodeled Gemini semantics fail bridge admission
-before provider I/O. It is not yet a public OpenAI-compatible upstream-selection
-switch; that closure remains gated by G7-04.
+before provider I/O. G7-04 closes the internal v1 bridge with hermetic
+OpenAI/Anthropic/Gemini text, streaming, partial-usage, function-tool, semantic
+loss, cancellation, malformed-stream, timeout, and provider-error contracts.
+It also promotes OpenAI image inputs to typed references. This does not add a
+public arbitrary-upstream environment switch; reviewed profiles, secrets, and
+network authority remain Harness-owned.
 
 ## Backend modes
 
