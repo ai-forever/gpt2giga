@@ -217,6 +217,62 @@ def test_tui_detail_profile_is_ranked_bounded_and_content_free():
     assert report["profile_top"]
 
 
+def test_runtime_detail_profile_is_ranked_bounded_and_content_free():
+    report = run_performance_baseline(samples=1, profile="runtime-detail")
+
+    assert report["schema_version"] == "gigaloom.runtime-performance-profile.v1"
+    assert report["fixture_set_version"] == "g6-00.v1"
+    assert report["privacy"] == {
+        "content_captured": False,
+        "secrets_captured": False,
+        "native_homes_accessed": False,
+        "provider_traffic": False,
+        "network_accessed": False,
+        "temporary_state_only": True,
+    }
+    assert report["measurement_contract"]["optimization_performed"] is False
+    assert report["measurement_contract"]["g6_01_authorized"] is False
+    assert report["missing_coverage"] == {}
+    assert report["status"] == "passed"
+    metrics = {item["id"] for item in report["results"]}
+    assert {
+        "worker_idle_cycle",
+        "worker_idle_loop",
+        "worker_active_echo",
+        "queue_claim_one",
+        "queue_claim_many",
+        "sqlite_lock_contention",
+        "retry_requeue",
+        "expired_lease_recovery",
+        "api_defaults",
+        "api_session_events",
+        "sse_terminal_attach",
+        "tui_navigation_load",
+    } <= metrics
+    by_metric = {item["id"]: item for item in report["results"]}
+    assert by_metric["worker_active_echo"]["sqlite"]["observed"] is True
+    assert by_metric["worker_active_echo"]["sqlite"]["writes"]["p95"] > 0
+    assert by_metric["tui_navigation_load"]["sqlite"]["observed"] is False
+    assert by_metric["queue_claim_many"]["details"]["claimed_jobs"]["p95"] == 16
+    assert by_metric["queue_claim_many"]["details"]["duplicate_claims"]["p95"] == 0
+    assert by_metric["worker_idle_loop"]["details"]["cycles"]["p95"] >= 2
+    assert by_metric["sse_terminal_attach"]["details"]["frames"]["p95"] >= 1
+    assert by_metric["runtime_reconcile"]["details"]["outbox_failed"]["p95"] == 0
+    assert [item["rank"] for item in report["ranked_bottlenecks"]] == list(
+        range(1, len(report["ranked_bottlenecks"]) + 1)
+    )
+    assert all(
+        item["target_status"] == "requires_G6_01_or_G6_02_review"
+        for item in report["results"]
+    )
+    decisions = {item["id"]: item["status"] for item in report["candidate_repairs"]}
+    assert decisions == {
+        "demand_driven_worker_wakeup": "supported_for_G6-01_review",
+        "conflict_aware_worker_concurrency": "not_selected_by_G6-00",
+        "ranked_request_hot_path_repairs": "not_selected_by_G6-00",
+    }
+
+
 @pytest.mark.parametrize("samples", (0, 101))
 def test_performance_baseline_rejects_unbounded_sample_counts(samples):
     with pytest.raises(ValueError, match="samples must be between 1 and 100"):
@@ -267,5 +323,30 @@ def test_performance_cli_writes_private_tui_profile(tmp_path, capsys):
 
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "gigaloom.tui-performance-profile.v3"
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert "Wrote private performance report" in capsys.readouterr().out
+
+
+def test_performance_cli_writes_private_runtime_profile(tmp_path, capsys):
+    output = tmp_path / "runtime-report.json"
+
+    assert (
+        cli.main(
+            [
+                "benchmark",
+                "performance",
+                "--profile",
+                "runtime-detail",
+                "--samples",
+                "1",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "gigaloom.runtime-performance-profile.v1"
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert "Wrote private performance report" in capsys.readouterr().out

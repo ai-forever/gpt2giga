@@ -123,8 +123,15 @@ def run_performance_baseline(
     profile: str = "ci-smoke",
 ) -> dict[str, Any]:
     """Run bounded, hermetic probes and return a content-free JSON report."""
-    if profile not in {"ci-smoke", "local-detail", "tui-detail"}:
-        raise ValueError("profile must be ci-smoke, local-detail, or tui-detail")
+    if profile not in {
+        "ci-smoke",
+        "local-detail",
+        "tui-detail",
+        "runtime-detail",
+    }:
+        raise ValueError(
+            "profile must be ci-smoke, local-detail, tui-detail, or runtime-detail"
+        )
     if not 1 <= samples <= MAX_SAMPLES:
         raise ValueError(f"samples must be between 1 and {MAX_SAMPLES}")
     if profile == "tui-detail":
@@ -133,6 +140,12 @@ def run_performance_baseline(
         )
 
         return run_tui_performance_profile(samples=samples)
+    if profile == "runtime-detail":
+        from gpt2giga_harness.runtime_performance_profile import (
+            run_runtime_performance_profile,
+        )
+
+        return run_runtime_performance_profile(samples=samples)
 
     with tempfile.TemporaryDirectory(prefix="gigaloom-perf-") as raw_root:
         root = Path(raw_root)

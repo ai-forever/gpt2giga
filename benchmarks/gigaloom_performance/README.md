@@ -27,6 +27,19 @@ its `status` is `passed` only when every accepted G5 repair metric is within
 budget. The command still exits successfully when it writes a complete report;
 `status`, `target_status`, and `ranked_bottlenecks` carry the closure decision.
 
+Measure the G6 durable worker and request path locally:
+
+```bash
+uv run giga benchmark performance --profile runtime-detail --samples 20 \
+  --output docs/internal/evidence/GIGALOOM_G6_00_RUNTIME_PROFILE_2026-07-27.json
+```
+
+The runtime profile uses temporary content-free sessions and the local `echo`
+harness. It records wall/CPU/process-peak-RSS, context-switch wakeups, bounded
+SQLite statement counts, queue throughput/fairness, lock contention, worker
+lifecycle/recovery, and API/SSE/TUI/Web attribution. It does not authorize a
+G6-01 optimization or access provider/network/native-home state.
+
 The JSON report is schema-versioned. It records wall and CPU percentiles,
 process RSS, observable block I/O, stage timings, conservative CI smoke
 budgets, and the full workload contract for later TUI and durable-runtime
