@@ -220,8 +220,8 @@ def test_tui_detail_profile_is_ranked_bounded_and_content_free():
 def test_runtime_detail_profile_is_ranked_bounded_and_content_free():
     report = run_performance_baseline(samples=1, profile="runtime-detail")
 
-    assert report["schema_version"] == "gigaloom.runtime-performance-profile.v2"
-    assert report["fixture_set_version"] == "g6-01.v1"
+    assert report["schema_version"] == "gigaloom.runtime-performance-profile.v3"
+    assert report["fixture_set_version"] == "g6-02.v1"
     assert report["privacy"] == {
         "content_captured": False,
         "secrets_captured": False,
@@ -232,6 +232,7 @@ def test_runtime_detail_profile_is_ranked_bounded_and_content_free():
     }
     assert report["measurement_contract"]["optimization_performed"] is True
     assert report["measurement_contract"]["g6_01_authorized"] is True
+    assert report["measurement_contract"]["g6_02_authorized"] is True
     assert report["missing_coverage"] == {}
     assert report["status"] == "passed"
     metrics = {item["id"] for item in report["results"]}
@@ -249,6 +250,7 @@ def test_runtime_detail_profile_is_ranked_bounded_and_content_free():
         "api_session_events",
         "sse_terminal_attach",
         "tui_navigation_load",
+        "session_run_update",
     } <= metrics
     by_metric = {item["id"]: item for item in report["results"]}
     assert by_metric["worker_active_echo"]["sqlite"]["observed"] is True
@@ -268,6 +270,8 @@ def test_runtime_detail_profile_is_ranked_bounded_and_content_free():
     assert by_metric["worker_wakeup_signal"]["details"]["delivered"]["p95"] == 1
     assert by_metric["sse_terminal_attach"]["details"]["frames"]["p95"] >= 1
     assert by_metric["runtime_reconcile"]["details"]["outbox_failed"]["p95"] == 0
+    assert by_metric["session_run_update"]["details"]["retained_runs"]["p95"] == 16
+    assert by_metric["session_run_update"]["details"]["updated_runs"]["p95"] == 1
     assert [item["rank"] for item in report["ranked_bottlenecks"]] == list(
         range(1, len(report["ranked_bottlenecks"]) + 1)
     )
@@ -279,7 +283,9 @@ def test_runtime_detail_profile_is_ranked_bounded_and_content_free():
     assert decisions == {
         "demand_driven_worker_wakeup": "implemented_within_budget",
         "conflict_aware_worker_concurrency": "not_selected_by_G6-01",
-        "ranked_request_hot_path_repairs": "not_selected_by_G6-01",
+        "ranked_request_hot_path_repairs": (
+            "bounded_filesystem_scan_repair_implemented"
+        ),
     }
 
 
@@ -357,6 +363,6 @@ def test_performance_cli_writes_private_runtime_profile(tmp_path, capsys):
     )
 
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "gigaloom.runtime-performance-profile.v2"
+    assert payload["schema_version"] == "gigaloom.runtime-performance-profile.v3"
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert "Wrote private performance report" in capsys.readouterr().out

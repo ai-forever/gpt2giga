@@ -42,13 +42,18 @@ from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.sessions.models import HarnessStoredEvent
 from gpt2giga_harness.sessions.store import utc_now
-from gpt2giga_harness.types import HarnessCapability, HarnessEventType
+from gpt2giga_harness.types import (
+    GigaChatApiMode,
+    HarnessCapability,
+    HarnessEventType,
+)
 
 
-SCHEMA_VERSION: Final[str] = "gigaloom.runtime-performance-profile.v2"
-FIXTURE_SET_VERSION: Final[str] = "g6-01.v1"
+SCHEMA_VERSION: Final[str] = "gigaloom.runtime-performance-profile.v3"
+FIXTURE_SET_VERSION: Final[str] = "g6-02.v1"
 MAX_SAMPLES: Final[int] = 100
 QUEUE_SCALE: Final[int] = 16
+RUN_UPDATE_SCALE: Final[int] = 16
 IDLE_WINDOW_SECONDS: Final[float] = 0.56
 IDLE_POLL_SECONDS: Final[float] = DEFAULT_POLL_SECONDS
 IDLE_MAX_SECONDS: Final[float] = DEFAULT_MAX_IDLE_SECONDS
@@ -86,6 +91,7 @@ REQUIRED_COVERAGE: Final[dict[str, tuple[str, ...]]] = {
         "web_payload_projection",
         "tui_navigation_load",
     ),
+    "filesystem": ("session_run_update",),
 }
 
 
@@ -285,6 +291,8 @@ def run_runtime_performance_profile(*, samples: int) -> dict[str, Any]:
             "wakeup_semantics": "voluntary_plus_involuntary_context_switch_delta",
             "optimization_performed": True,
             "g6_01_authorized": True,
+            "g6_02_authorized": True,
+            "session_run_update_scale": RUN_UPDATE_SCALE,
             "accepted_budgets": {
                 "worker_idle_loop": {
                     "projected_steady_cycles_per_minute_max": (
@@ -321,12 +329,14 @@ def run_runtime_performance_profile(*, samples: int) -> dict[str, Any]:
             {
                 "id": "ranked_request_hot_path_repairs",
                 "evidence": [
+                    "worker_active_echo",
+                    "session_run_update",
                     "api_defaults",
                     "api_session_events",
                     "sse_terminal_attach",
                     "tui_navigation_load",
                 ],
-                "status": "not_selected_by_G6-01",
+                "status": "bounded_filesystem_scan_repair_implemented",
             },
         ],
         "missing_coverage": missing,
@@ -348,7 +358,47 @@ def _profile_once(root: Path) -> list[_OperationSample]:
     observations.extend(_profile_worker_resources(root / "workers"))
     observations.extend(_profile_queue_and_lifecycle(root / "runtime"))
     observations.extend(_profile_request_path(root / "requests"))
+    observations.extend(_profile_session_storage(root / "sessions"))
     return observations
+
+
+def _profile_session_storage(root: Path) -> list[_OperationSample]:
+    store = FilesystemHarnessSessionStore(root)
+    session = store.create_session(title="Content-free run update fixture")
+    target = None
+    for index in range(RUN_UPDATE_SCALE):
+        target = store.create_run(
+            session_id=session.id,
+            harness_id="echo",
+            prompt="fixture",
+            model=None,
+            api_mode=GigaChatApiMode.V2,
+            capability=HarnessCapability.CHAT_COMPLETIONS,
+            mode="read",
+            workspace=None,
+            metadata={"fixture_index": index},
+        )
+    if target is None:  # pragma: no cover - constant scale is positive
+        raise RuntimeError("session run update fixture is empty")
+    store.get_run(target.id)
+    update = _measure(
+        "session_run_update",
+        lambda: _update_profile_run(store, target.id),
+    )
+    return [update]
+
+
+def _update_profile_run(
+    store: FilesystemHarnessSessionStore,
+    run_id: str,
+) -> Mapping[str, float]:
+    updated = store.update_run(run_id, metadata={"profiled": True})
+    if updated.id != run_id:
+        raise RuntimeError("session run update fixture changed identity")
+    return {
+        "retained_runs": float(RUN_UPDATE_SCALE),
+        "updated_runs": 1.0,
+    }
 
 
 def _profile_worker_resources(root: Path) -> list[_OperationSample]:
