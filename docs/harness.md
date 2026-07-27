@@ -1027,6 +1027,16 @@ approval-required, denied, or unknown and as pre-start, runtime-dependent, or
 provider-owned. A denied required action blocks startup; runtime-dependent and
 provider-owned actions are never presented as guaranteed grants.
 
+Harness-owned outbound HTTPS is default-deny and uses the
+[scoped network access contract](architecture/scoped-network-access-adr.md).
+An exact, unexpired grant and an enabled sandbox boundary are both required;
+host, port, method class, redirect policy, purpose, request digest, and transfer
+ceilings are revalidated before connection. Public DNS answers are pinned and
+the connected peer must match. The optional reviewed proxy policy is
+loopback-only and allowlist-first, with purpose-bound expiring rules and no
+global wildcard. This policy does not activate provider or integration traffic
+by itself.
+
 Runs Center can create a Trace-to-Replay comparison that changes exactly one
 model, provider, Harness, or extensions axis. Preview hashes the retained source
 evidence and every unchanged dimension. Starting the reviewed manifest creates

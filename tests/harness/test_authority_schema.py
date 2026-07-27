@@ -84,6 +84,12 @@ def test_schema_models_each_authority_resource_separately():
     assert all(scope.to_dict()["schema_version"] == 1 for scope in scopes)
 
 
+def test_network_target_canonicalizes_ipv6_without_confusing_port_separator():
+    target = NetworkTarget("2606:4700:4700::1111", 443, "https")
+
+    assert target.to_dict()["host"] == "2606:4700:4700::1111"
+
+
 def test_presets_compile_to_explicit_rules_without_changing_enforcement():
     read = _scope(FilesystemTarget("workspace_1", "src"), "read")
     write = _scope(FilesystemTarget("workspace_1", "src"), "write")

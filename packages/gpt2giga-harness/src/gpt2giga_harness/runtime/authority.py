@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 import hashlib
+import ipaddress
 import json
 import re
 from typing import Any, Mapping
@@ -582,8 +583,13 @@ def _relative_path(value: str) -> str:
 
 def _host(value: str) -> str:
     text = str(value).strip().lower().rstrip(".")
-    if not text or any(character in text for character in ("/", ":", " ", "@")):
+    if not text or any(character in text for character in ("/", " ", "@")):
         raise ValueError("network host is invalid")
+    if ":" in text:
+        try:
+            return ipaddress.ip_address(text).compressed
+        except ValueError as exc:
+            raise ValueError("network host is invalid") from exc
     return text
 
 

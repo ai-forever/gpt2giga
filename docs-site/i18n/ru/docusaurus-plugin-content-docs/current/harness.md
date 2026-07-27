@@ -740,6 +740,15 @@ runtime-dependent или provider-owned. Обязательный deny блок�
 runtime-dependent и provider-owned действия не выдаются за гарантированное
 разрешение.
 
+Harness-owned исходящий HTTPS по умолчанию запрещён и использует
+[контракт ограниченного сетевого доступа](architecture/scoped-network-access-adr.md).
+Одновременно нужны точный непросроченный grant и включённая sandbox boundary;
+host, port, method class, redirect policy, purpose, digest request и transfer
+ceilings повторно проверяются до соединения. Публичные DNS answers pin-ятся, а
+connected peer обязан совпасть. Опциональная reviewed proxy policy работает
+только на loopback и по allowlist-first модели с purpose-bound expiring rules и
+без global wildcard. Сама policy не активирует provider или integration traffic.
+
 Runs Center может создать Trace-to-Replay comparison, изменив ровно одну ось:
 model, provider, Harness или extensions. Preview связывает сохранённое source
 evidence и все неизменённые измерения с hash. Запуск проверенного manifest

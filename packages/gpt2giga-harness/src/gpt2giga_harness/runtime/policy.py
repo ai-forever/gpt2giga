@@ -253,7 +253,7 @@ INTERACTIVE_PROFILE = PermissionProfile(
         PermissionAction.WORKSPACE_READ: PolicyDecision.ALLOW,
         PermissionAction.WORKSPACE_WRITE: PolicyDecision.ALLOW,
         PermissionAction.PROCESS_SPAWN: PolicyDecision.ALLOW,
-        PermissionAction.NETWORK_CONNECT: PolicyDecision.ALLOW,
+        PermissionAction.NETWORK_CONNECT: PolicyDecision.ASK,
         PermissionAction.MCP_SERVER_START: PolicyDecision.ASK,
         PermissionAction.MCP_TOOL_CALL: PolicyDecision.ASK,
         PermissionAction.GIT_COMMIT: PolicyDecision.ASK,

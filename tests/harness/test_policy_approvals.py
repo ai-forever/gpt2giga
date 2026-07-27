@@ -43,6 +43,17 @@ def test_policy_profiles_are_named_and_record_enforcement_boundary():
     assert resolution.enforcement is EnforcementLevel.DELEGATED_TO_CLI_SANDBOX
 
 
+def test_interactive_profile_does_not_implicitly_enable_network_access():
+    resolution = PolicyEngine().resolve(
+        PermissionAction.NETWORK_CONNECT,
+        profile=permission_profile("interactive"),
+        context=PolicyContext(reason="test"),
+    )
+
+    assert resolution.decision is PolicyDecision.ASK
+    assert resolution.policy_source == "profile:interactive"
+
+
 def test_approval_allow_once_requeues_pre_spawn_job_and_is_consumed(tmp_path):
     store = RuntimeCoordinationStore(tmp_path)
     job = store.submit_job(

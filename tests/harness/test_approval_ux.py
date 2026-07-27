@@ -94,3 +94,37 @@ def test_network_projection_retains_the_exact_redacted_target():
             "operation": "POST metadata only",
         },
     }
+
+
+def test_network_projection_exposes_scoped_grant_fields_without_body_content():
+    payload = approval_ux_projection(
+        _request(
+            action=PermissionAction.NETWORK_CONNECT,
+            preview={
+                "host": "api.example.test",
+                "port": 443,
+                "protocol": "https",
+                "method": "POST",
+                "method_class": "write",
+                "redirect_policy": "deny",
+                "purpose": "provider.metadata",
+                "max_request_body_bytes": 65536,
+                "max_response_body_bytes": 1048576,
+                "request_body_sha256": "a" * 64,
+            },
+        )
+    )
+
+    assert payload["target"]["kind"] == "network"
+    assert payload["target"]["fields"] == {
+        "host": "api.example.test",
+        "port": 443,
+        "protocol": "https",
+        "method": "POST",
+        "method_class": "write",
+        "redirect_policy": "deny",
+        "purpose": "provider.metadata",
+        "max_request_body_bytes": 65536,
+        "max_response_body_bytes": 1048576,
+    }
+    assert "request_body_sha256" not in payload["target"]["fields"]
