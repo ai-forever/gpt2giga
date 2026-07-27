@@ -31,14 +31,17 @@ Measure the G6 durable worker and request path locally:
 
 ```bash
 uv run giga benchmark performance --profile runtime-detail --samples 20 \
-  --output docs/internal/evidence/GIGALOOM_G6_00_RUNTIME_PROFILE_2026-07-27.json
+  --output docs/internal/evidence/GIGALOOM_G6_01_RUNTIME_PROFILE_2026-07-27.json
 ```
 
 The runtime profile uses temporary content-free sessions and the local `echo`
 harness. It records wall/CPU/process-peak-RSS, context-switch wakeups, bounded
 SQLite statement counts, queue throughput/fairness, lock contention, worker
-lifecycle/recovery, and API/SSE/TUI/Web attribution. It does not authorize a
-G6-01 optimization or access provider/network/native-home state.
+lifecycle/recovery, explicit loopback wake delivery, and API/SSE/TUI/Web
+attribution. Schema v2 accepts a maximum 65 projected steady empty cycles per
+minute and 250 ms p95 explicit wake latency. The report keeps higher
+concurrency, stop-on-idle ownership, and request/database repairs unselected;
+it does not access provider, external-network, or native-home state.
 
 The JSON report is schema-versioned. It records wall and CPU percentiles,
 process RSS, observable block I/O, stage timings, conservative CI smoke

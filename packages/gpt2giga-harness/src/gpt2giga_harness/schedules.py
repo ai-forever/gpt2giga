@@ -361,6 +361,7 @@ class ScheduleService:
                 ),
             )
             connection.commit()
+        self.runtime_store.wake_workers()
         return self.detail(project, definition.id)
 
     def detail(self, project: HarnessProject, schedule_id: str) -> dict[str, Any]:
@@ -481,6 +482,7 @@ class ScheduleService:
                     _schedule_key(project.id, schedule_id),
                 ),
             )
+        self.runtime_store.wake_workers()
         return self.detail(project, schedule_id)
 
     def pause(self, project: HarnessProject, schedule_id: str) -> dict[str, Any]:
@@ -489,6 +491,7 @@ class ScheduleService:
                 "UPDATE schedule_states SET enabled = 0, status = 'paused', updated_at = ? WHERE schedule_key = ?",
                 (_utc_now(), _schedule_key(project.id, schedule_id)),
             )
+        self.runtime_store.wake_workers()
         return self.detail(project, schedule_id)
 
     def archive(

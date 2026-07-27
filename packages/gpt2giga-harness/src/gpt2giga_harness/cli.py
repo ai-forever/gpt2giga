@@ -760,6 +760,7 @@ def build_parser() -> argparse.ArgumentParser:
     worker_start = worker_subparsers.add_parser("start", parents=[common])
     worker_start.add_argument("--once", action="store_true")
     worker_start.add_argument("--poll-seconds", type=float, default=0.25)
+    worker_start.add_argument("--max-idle-seconds", type=float, default=1.0)
     worker_start.add_argument("--lease-seconds", type=float, default=15.0)
     worker_start.add_argument("--heartbeat-seconds", type=float, default=2.0)
     worker_start.set_defaults(handler=_handle_worker_start)
@@ -771,6 +772,7 @@ def build_parser() -> argparse.ArgumentParser:
     worker_idle = worker_subparsers.add_parser("stop-on-idle", parents=[common])
     worker_idle.add_argument("--idle-seconds", type=float, default=5.0)
     worker_idle.add_argument("--poll-seconds", type=float, default=0.25)
+    worker_idle.add_argument("--max-idle-seconds", type=float, default=1.0)
     worker_idle.add_argument("--lease-seconds", type=float, default=15.0)
     worker_idle.add_argument("--heartbeat-seconds", type=float, default=2.0)
     worker_idle.set_defaults(handler=_handle_worker_stop_on_idle)
@@ -2251,7 +2253,10 @@ def _handle_worker_start(args: argparse.Namespace, config: HarnessConfig) -> int
     print(f"Starting durable Harness worker {worker.worker_id}")
     print("Proxy auto-start is disabled; configure a running proxy/API key if needed.")
     try:
-        worker.run_forever(poll_seconds=args.poll_seconds)
+        worker.run_forever(
+            poll_seconds=args.poll_seconds,
+            max_idle_seconds=args.max_idle_seconds,
+        )
     except KeyboardInterrupt:
         return 130
     return 0
@@ -2281,6 +2286,7 @@ def _handle_worker_stop_on_idle(args: argparse.Namespace, config: HarnessConfig)
     )
     worker.run_forever(
         poll_seconds=args.poll_seconds,
+        max_idle_seconds=args.max_idle_seconds,
         stop_on_idle_seconds=max(args.idle_seconds, 0.0),
     )
     print(f"Worker {worker.worker_id} stopped after idle timeout.")

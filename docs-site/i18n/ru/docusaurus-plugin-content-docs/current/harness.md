@@ -1174,6 +1174,13 @@ content hash. Изменение material field ставит schedule на pause
 history не удаляется при archive, а unattended edit fail-closed без worktree и
 нужных approvals.
 
+Пустой worker теперь увеличивает idle wait от 250 мс до ограниченной 1 секунды.
+Изменения queue, approval и конфигурации schedule посылают content-free
+loopback wake signal, а ближайшие schedule, retry и lease deadlines ограничивают
+ожидание даже при недоступной доставке wake. `--poll-seconds` задаёт минимум,
+`--max-idle-seconds` — верхнюю границу. Это не увеличивает concurrency workers
+и не меняет семантику lease, cancellation, recovery или durable ownership.
+
 Форма Schedule следует модели Codex Scheduled для частых сценариев: выберите
 **Once**, **Daily**, **Weekdays** или **Weekly**, затем задайте первый запуск,
 IANA timezone, target, prompt и уведомление. Harness преобразует эти поля в

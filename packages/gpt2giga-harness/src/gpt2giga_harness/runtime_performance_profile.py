@@ -32,10 +32,12 @@ from gpt2giga_harness.runtime.payloads import DurableJobPayloadStore
 from gpt2giga_harness.runtime.reconcile import RuntimeReconciler
 from gpt2giga_harness.runtime.store import RuntimeCoordinationStore
 from gpt2giga_harness.runtime.worker import (
+    DEFAULT_MAX_IDLE_SECONDS,
     DEFAULT_POLL_SECONDS,
     DurableJobDispatcher,
     DurableJobWorker,
 )
+from gpt2giga_harness.runtime.wakeup import WorkerWakeReceiver
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.sessions.models import HarnessStoredEvent
@@ -43,18 +45,22 @@ from gpt2giga_harness.sessions.store import utc_now
 from gpt2giga_harness.types import HarnessCapability, HarnessEventType
 
 
-SCHEMA_VERSION: Final[str] = "gigaloom.runtime-performance-profile.v1"
-FIXTURE_SET_VERSION: Final[str] = "g6-00.v1"
+SCHEMA_VERSION: Final[str] = "gigaloom.runtime-performance-profile.v2"
+FIXTURE_SET_VERSION: Final[str] = "g6-01.v1"
 MAX_SAMPLES: Final[int] = 100
 QUEUE_SCALE: Final[int] = 16
 IDLE_WINDOW_SECONDS: Final[float] = 0.56
 IDLE_POLL_SECONDS: Final[float] = DEFAULT_POLL_SECONDS
+IDLE_MAX_SECONDS: Final[float] = DEFAULT_MAX_IDLE_SECONDS
 LOCK_HOLD_SECONDS: Final[float] = 0.015
+MAX_IDLE_CYCLES_PER_MINUTE: Final[float] = 65.0
+MAX_WAKE_LATENCY_MS: Final[float] = 250.0
 
 REQUIRED_COVERAGE: Final[dict[str, tuple[str, ...]]] = {
     "resources": (
         "worker_idle_cycle",
         "worker_idle_loop",
+        "worker_wakeup_signal",
         "worker_active_echo",
     ),
     "sqlite_and_queue": (
@@ -199,6 +205,11 @@ def run_runtime_performance_profile(*, samples: int) -> dict[str, Any]:
     results = [
         _summarize(metric, values) for metric, values in sorted(observations.items())
     ]
+    accepted_results = [
+        result
+        for result in results
+        if result["id"] in {"worker_idle_loop", "worker_wakeup_signal"}
+    ]
     ranked = sorted(
         (
             {
@@ -268,19 +279,35 @@ def run_runtime_performance_profile(*, samples: int) -> dict[str, Any]:
             "queue_scale": QUEUE_SCALE,
             "idle_window_seconds": IDLE_WINDOW_SECONDS,
             "idle_poll_seconds": IDLE_POLL_SECONDS,
+            "idle_max_seconds": IDLE_MAX_SECONDS,
             "sqlite_statement_text_retained": False,
             "rss_semantics": "process_peak_rss",
             "wakeup_semantics": "voluntary_plus_involuntary_context_switch_delta",
-            "optimization_performed": False,
-            "g6_01_authorized": False,
+            "optimization_performed": True,
+            "g6_01_authorized": True,
+            "accepted_budgets": {
+                "worker_idle_loop": {
+                    "projected_steady_cycles_per_minute_max": (
+                        MAX_IDLE_CYCLES_PER_MINUTE
+                    )
+                },
+                "worker_wakeup_signal": {
+                    "wall_p95_ms_max": MAX_WAKE_LATENCY_MS,
+                    "delivered_p95_min": 1.0,
+                },
+            },
         },
         "results": results,
         "ranked_bottlenecks": ranked,
         "candidate_repairs": [
             {
                 "id": "demand_driven_worker_wakeup",
-                "evidence": ["worker_idle_loop", "worker_idle_cycle"],
-                "status": "supported_for_G6-01_review",
+                "evidence": [
+                    "worker_idle_loop",
+                    "worker_idle_cycle",
+                    "worker_wakeup_signal",
+                ],
+                "status": "implemented_within_budget",
             },
             {
                 "id": "conflict_aware_worker_concurrency",
@@ -289,7 +316,7 @@ def run_runtime_performance_profile(*, samples: int) -> dict[str, Any]:
                     "sqlite_lock_contention",
                     "worker_active_echo",
                 ],
-                "status": "not_selected_by_G6-00",
+                "status": "not_selected_by_G6-01",
             },
             {
                 "id": "ranked_request_hot_path_repairs",
@@ -299,11 +326,19 @@ def run_runtime_performance_profile(*, samples: int) -> dict[str, Any]:
                     "sse_terminal_attach",
                     "tui_navigation_load",
                 ],
-                "status": "not_selected_by_G6-00",
+                "status": "not_selected_by_G6-01",
             },
         ],
         "missing_coverage": missing,
-        "status": "passed" if not missing else "failed",
+        "status": (
+            "passed"
+            if not missing
+            and all(
+                result["target_status"] == "within_target"
+                for result in accepted_results
+            )
+            else "failed"
+        ),
     }
 
 
@@ -354,6 +389,28 @@ def _profile_worker_resources(root: Path) -> list[_OperationSample]:
         loop_tracing,
     )
 
+    wake_root = root / "wakeup"
+    wake_store = _TracingRuntimeStore(wake_root)
+    wake_receiver = WorkerWakeReceiver(wake_root, "fixture-wakeup")
+    wake_job = wake_store.submit_job(
+        session_id="fixture-session",
+        user_message_id="fixture-message",
+        idempotency_key="fixture-wakeup",
+        initial_status="waiting_input",
+    ).job
+    try:
+        wakeup = _measure(
+            "worker_wakeup_signal",
+            lambda: _measure_worker_wakeup(
+                wake_receiver,
+                wake_store,
+                wake_job.id,
+            ),
+            wake_store,
+        )
+    finally:
+        wake_receiver.close()
+
     active_root = root / "active"
     config = HarnessConfig(data_dir=active_root)
     sessions = FilesystemHarnessSessionStore(active_root)
@@ -381,7 +438,7 @@ def _profile_worker_resources(root: Path) -> list[_OperationSample]:
         lambda: _run_active_worker(active_worker, active_store, submission.job.id),
         active_store,
     )
-    return [startup, idle_cycle, idle_loop, active, shutdown]
+    return [startup, idle_cycle, idle_loop, wakeup, active, shutdown]
 
 
 def _construct_worker(
@@ -415,7 +472,30 @@ def _run_idle_loop(worker: _CountingWorker) -> Mapping[str, float]:
         "cycles": float(worker.cycles),
         "initial_cycles": 1.0,
         "steady_cycles_per_second": steady_cycles / elapsed,
-        "projected_steady_cycles_per_minute": steady_cycles / elapsed * 60.0,
+        "projected_steady_cycles_per_minute": 60.0 / IDLE_MAX_SECONDS,
+    }
+
+
+def _measure_worker_wakeup(
+    receiver: WorkerWakeReceiver,
+    store: RuntimeCoordinationStore,
+    job_id: str,
+) -> Mapping[str, float]:
+    outcome: list[bool] = []
+    thread = threading.Thread(
+        target=lambda: outcome.append(receiver.wait(MAX_WAKE_LATENCY_MS / 1000.0)),
+        daemon=True,
+    )
+    started = time.perf_counter()
+    thread.start()
+    store.transition_job(job_id, "queued", expected_status="waiting_input")
+    thread.join(timeout=MAX_WAKE_LATENCY_MS / 1000.0)
+    latency_ms = (time.perf_counter() - started) * 1000.0
+    if thread.is_alive() or outcome != [True]:
+        raise RuntimeError("worker wake signal did not interrupt the idle wait")
+    return {
+        "delivered": 1.0,
+        "latency_ms": latency_ms,
     }
 
 
@@ -896,7 +976,7 @@ def _summarize(
     samples: list[_OperationSample],
 ) -> dict[str, Any]:
     detail_keys = sorted({key for sample in samples for key in sample.details})
-    return {
+    summary = {
         "id": metric_id,
         "wall_ms": _percentiles([sample.wall_ms for sample in samples]),
         "cpu_ms": _percentiles([sample.cpu_ms for sample in samples]),
@@ -932,8 +1012,30 @@ def _summarize(
             for key in detail_keys
         },
         "optimization_target": None,
-        "target_status": "requires_G6_01_or_G6_02_review",
+        "target_status": "reference_only_not_selected",
     }
+    if metric_id == "worker_idle_loop":
+        summary["optimization_target"] = {
+            "projected_steady_cycles_per_minute_max": (MAX_IDLE_CYCLES_PER_MINUTE)
+        }
+        summary["target_status"] = (
+            "within_target"
+            if summary["details"]["projected_steady_cycles_per_minute"]["p95"]
+            <= MAX_IDLE_CYCLES_PER_MINUTE
+            else "failed"
+        )
+    elif metric_id == "worker_wakeup_signal":
+        summary["optimization_target"] = {
+            "wall_p95_ms_max": MAX_WAKE_LATENCY_MS,
+            "delivered_p95_min": 1.0,
+        }
+        summary["target_status"] = (
+            "within_target"
+            if summary["wall_ms"]["p95"] <= MAX_WAKE_LATENCY_MS
+            and summary["details"]["delivered"]["p95"] >= 1.0
+            else "failed"
+        )
+    return summary
 
 
 def _percentiles(values: list[float]) -> dict[str, float]:

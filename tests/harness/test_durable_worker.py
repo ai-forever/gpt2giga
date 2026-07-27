@@ -1,4 +1,5 @@
 import concurrent.futures
+from datetime import datetime, timedelta, timezone
 import json
 import threading
 import time
@@ -22,7 +23,9 @@ from gpt2giga_harness.runtime.worker import (
     RECOVERY_MARKER_IDENTITY_FIELD,
     DurableJobDispatcher,
     DurableJobWorker,
+    _adaptive_idle_delay,
 )
+from gpt2giga_harness.runtime.wakeup import WorkerWakeReceiver
 from gpt2giga_harness.session_runner import HarnessSessionRunner
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.types import (
@@ -71,6 +74,69 @@ def test_durable_dispatcher_worker_executes_once_and_preserves_logical_message(
     assert [message.content for message in bundle.messages] == ["hello", "hello"]
     assert bundle.runs[0].status.value == "succeeded"
     assert bundle.runs[0].metadata["runtime"]["worker_id"] == "worker_test"
+
+
+def test_worker_queue_signal_interrupts_long_idle_backoff(tmp_path):
+    receiver = WorkerWakeReceiver(tmp_path, "worker_wake")
+    assert receiver.available is True
+    runtime = RuntimeCoordinationStore(tmp_path)
+    submitted = runtime.submit_job(
+        session_id="sess_wake",
+        user_message_id="msg_wake",
+        idempotency_key="wake-submit",
+        initial_status=JobStatus.WAITING_INPUT,
+    )
+    outcome: list[bool] = []
+    thread = threading.Thread(
+        target=lambda: outcome.append(receiver.wait(5.0)),
+        daemon=True,
+    )
+    thread.start()
+    started = time.monotonic()
+    runtime.transition_job(
+        submitted.job.id,
+        JobStatus.QUEUED,
+        expected_status=JobStatus.WAITING_INPUT,
+    )
+    thread.join(timeout=0.75)
+
+    assert outcome == [True]
+    assert time.monotonic() - started < 0.75
+    assert not thread.is_alive()
+    receiver.close()
+
+
+def test_worker_idle_backoff_and_deadlines_are_bounded(tmp_path):
+    assert [_adaptive_idle_delay(0.25, 1.0, cycle) for cycle in range(1, 7)] == [
+        0.25,
+        0.5,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    ]
+    assert 60.0 / _adaptive_idle_delay(0.25, 1.0, 20) <= 65.0
+
+    store = RuntimeCoordinationStore(tmp_path)
+    assert store.next_worker_maintenance_delay(1.0) == 1.0
+    available_at = (datetime.now(timezone.utc) + timedelta(seconds=0.2)).isoformat()
+    store.submit_job(
+        session_id="sess_deadline",
+        user_message_id="msg_deadline",
+        idempotency_key="future-queue",
+        available_at=available_at,
+    )
+
+    delay = store.next_worker_maintenance_delay(1.0)
+    assert 0.0 < delay <= 0.2
+
+    due_store = RuntimeCoordinationStore(tmp_path / "unsupported")
+    due_store.submit_job(
+        session_id="sess_due",
+        user_message_id="msg_due",
+        idempotency_key="already-due",
+    )
+    assert due_store.next_worker_maintenance_delay(1.0) == 1.0
 
 
 def test_worker_fails_orphaned_job_without_stopping(tmp_path):

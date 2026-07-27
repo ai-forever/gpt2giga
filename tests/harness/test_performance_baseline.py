@@ -220,8 +220,8 @@ def test_tui_detail_profile_is_ranked_bounded_and_content_free():
 def test_runtime_detail_profile_is_ranked_bounded_and_content_free():
     report = run_performance_baseline(samples=1, profile="runtime-detail")
 
-    assert report["schema_version"] == "gigaloom.runtime-performance-profile.v1"
-    assert report["fixture_set_version"] == "g6-00.v1"
+    assert report["schema_version"] == "gigaloom.runtime-performance-profile.v2"
+    assert report["fixture_set_version"] == "g6-01.v1"
     assert report["privacy"] == {
         "content_captured": False,
         "secrets_captured": False,
@@ -230,14 +230,15 @@ def test_runtime_detail_profile_is_ranked_bounded_and_content_free():
         "network_accessed": False,
         "temporary_state_only": True,
     }
-    assert report["measurement_contract"]["optimization_performed"] is False
-    assert report["measurement_contract"]["g6_01_authorized"] is False
+    assert report["measurement_contract"]["optimization_performed"] is True
+    assert report["measurement_contract"]["g6_01_authorized"] is True
     assert report["missing_coverage"] == {}
     assert report["status"] == "passed"
     metrics = {item["id"] for item in report["results"]}
     assert {
         "worker_idle_cycle",
         "worker_idle_loop",
+        "worker_wakeup_signal",
         "worker_active_echo",
         "queue_claim_one",
         "queue_claim_many",
@@ -256,20 +257,29 @@ def test_runtime_detail_profile_is_ranked_bounded_and_content_free():
     assert by_metric["queue_claim_many"]["details"]["claimed_jobs"]["p95"] == 16
     assert by_metric["queue_claim_many"]["details"]["duplicate_claims"]["p95"] == 0
     assert by_metric["worker_idle_loop"]["details"]["cycles"]["p95"] >= 2
+    assert (
+        by_metric["worker_idle_loop"]["details"]["projected_steady_cycles_per_minute"][
+            "p95"
+        ]
+        <= 65
+    )
+    assert by_metric["worker_idle_loop"]["target_status"] == "within_target"
+    assert by_metric["worker_wakeup_signal"]["target_status"] == "within_target"
+    assert by_metric["worker_wakeup_signal"]["details"]["delivered"]["p95"] == 1
     assert by_metric["sse_terminal_attach"]["details"]["frames"]["p95"] >= 1
     assert by_metric["runtime_reconcile"]["details"]["outbox_failed"]["p95"] == 0
     assert [item["rank"] for item in report["ranked_bottlenecks"]] == list(
         range(1, len(report["ranked_bottlenecks"]) + 1)
     )
-    assert all(
-        item["target_status"] == "requires_G6_01_or_G6_02_review"
-        for item in report["results"]
-    )
+    assert {item["target_status"] for item in report["results"]} == {
+        "within_target",
+        "reference_only_not_selected",
+    }
     decisions = {item["id"]: item["status"] for item in report["candidate_repairs"]}
     assert decisions == {
-        "demand_driven_worker_wakeup": "supported_for_G6-01_review",
-        "conflict_aware_worker_concurrency": "not_selected_by_G6-00",
-        "ranked_request_hot_path_repairs": "not_selected_by_G6-00",
+        "demand_driven_worker_wakeup": "implemented_within_budget",
+        "conflict_aware_worker_concurrency": "not_selected_by_G6-01",
+        "ranked_request_hot_path_repairs": "not_selected_by_G6-01",
     }
 
 
@@ -347,6 +357,6 @@ def test_performance_cli_writes_private_runtime_profile(tmp_path, capsys):
     )
 
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "gigaloom.runtime-performance-profile.v1"
+    assert payload["schema_version"] == "gigaloom.runtime-performance-profile.v2"
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert "Wrote private performance report" in capsys.readouterr().out

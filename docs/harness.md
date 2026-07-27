@@ -462,6 +462,13 @@ do not auto-start a proxy: start `gpt2giga` yourself and configure
 `GPT2GIGA_HARNESS_API_KEY` when a harness needs the proxy. This avoids treating
 the UI process's temporary sidecar key cache as durable worker state.
 
+An empty worker now backs off from 250 ms to a bounded 1 second idle wait.
+Queue, approval, and schedule-configuration changes send a content-free
+loopback wake signal, while schedule, retry, and lease deadlines cap the wait
+even if wake delivery is unavailable. `--poll-seconds` changes the minimum and
+`--max-idle-seconds` changes the cap. This does not increase worker concurrency
+or change lease, cancellation, recovery, or durable ownership semantics.
+
 The `Runs` area is the durable queue and history view. It filters queued,
 running, blocked, approval-needed, failed, canceled, and completed jobs; shows
 attempt count, retries, duration, selected metrics, and worker ownership; and

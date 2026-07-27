@@ -595,6 +595,7 @@ class RuntimeCoordinationStore:
             "created_at": now,
             "updated_at": now,
         }
+        result: JobSubmission
         with self._connect() as connection, _transaction(connection):
             try:
                 connection.execute(
@@ -619,7 +620,7 @@ class RuntimeCoordinationStore:
                 row = connection.execute(
                     "SELECT * FROM jobs WHERE id = ?", (job_id,)
                 ).fetchone()
-                return JobSubmission(job=_job_from_row(row), created=True)
+                result = JobSubmission(job=_job_from_row(row), created=True)
             except sqlite3.IntegrityError:
                 row = connection.execute(
                     """
@@ -653,7 +654,10 @@ class RuntimeCoordinationStore:
                     raise IdempotencyConflictError(
                         "idempotency key is already bound to a different job"
                     )
-                return JobSubmission(job=existing, created=False)
+                result = JobSubmission(job=existing, created=False)
+        if result.created and result.job.status is JobStatus.QUEUED:
+            self.wake_workers()
+        return result
 
     def find_job_by_idempotency(
         self, *, origin: str, idempotency_key: str
@@ -826,7 +830,9 @@ class RuntimeCoordinationStore:
             updated = connection.execute(
                 "SELECT * FROM jobs WHERE id = ?", (job_id,)
             ).fetchone()
-        return _job_from_row(updated)
+        result = _job_from_row(updated)
+        self.wake_workers()
+        return result
 
     def create_attempt(
         self,
@@ -1520,7 +1526,9 @@ class RuntimeCoordinationStore:
             updated = connection.execute(
                 "SELECT * FROM jobs WHERE id = ?", (job_id,)
             ).fetchone()
-        return _job_from_row(updated)
+        result = _job_from_row(updated)
+        self.wake_workers()
+        return result
 
     def requeue_due_jobs(self) -> int:
         """Move due retry-wait jobs back to the claimable queue."""
@@ -1534,6 +1542,63 @@ class RuntimeCoordinationStore:
                 (JobStatus.QUEUED.value, now, JobStatus.RETRY_WAIT.value, now),
             )
             return int(connection.execute("SELECT changes()").fetchone()[0])
+
+    def next_worker_maintenance_delay(self, maximum_seconds: float) -> float:
+        """Bound an idle wait by the next queued, retry, lease, or schedule deadline."""
+        maximum = max(float(maximum_seconds), 0.0)
+        now = datetime.now(timezone.utc)
+        with self._connect() as connection:
+            rows = (
+                connection.execute(
+                    """
+                    SELECT MIN(available_at) FROM jobs
+                    WHERE status IN (?, ?) AND cancel_requested_at IS NULL
+                      AND available_at > ?
+                    """,
+                    (
+                        JobStatus.QUEUED.value,
+                        JobStatus.RETRY_WAIT.value,
+                        now.isoformat(),
+                    ),
+                ).fetchone(),
+                connection.execute(
+                    """
+                    SELECT MIN(leased_until) FROM job_attempts
+                    WHERE status IN (?, ?, ?) AND leased_until > ?
+                    """,
+                    (
+                        JobAttemptStatus.CLAIMED.value,
+                        JobAttemptStatus.STARTING.value,
+                        JobAttemptStatus.RUNNING.value,
+                        now.isoformat(),
+                    ),
+                ).fetchone(),
+                connection.execute(
+                    """
+                    SELECT MIN(next_run_at) FROM schedule_states
+                    WHERE enabled = 1 AND status = 'active' AND next_run_at > ?
+                    """,
+                    (now.isoformat(),),
+                ).fetchone(),
+            )
+        deadlines: list[float] = []
+        for row in rows:
+            if row is None or row[0] is None:
+                continue
+            try:
+                deadline = datetime.fromisoformat(str(row[0]))
+            except ValueError:
+                continue
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+            deadlines.append(max((deadline - now).total_seconds(), 0.0))
+        return min((maximum, *deadlines))
+
+    def wake_workers(self) -> int:
+        """Best-effort signal all local workers after coordination state changes."""
+        from gpt2giga_harness.runtime.wakeup import signal_workers
+
+        return signal_workers(self.data_dir)
 
     def register_worker(
         self,
@@ -2105,6 +2170,7 @@ class RuntimeCoordinationStore:
         """Persist a decision, optional scoped grant, and pre-spawn job outcome."""
         parsed_decision = ApprovalDecision(decision)
         now = _utc_now()
+        wake_worker = False
         with self._connect() as connection, _transaction(connection):
             _expire_approvals(connection, now)
             row = connection.execute(
@@ -2228,6 +2294,7 @@ class RuntimeCoordinationStore:
                             if parsed_decision is ApprovalDecision.DENY
                             else JobStatus.QUEUED
                         )
+                        wake_worker = target is JobStatus.QUEUED
                         next_version = job.version + 1
                         connection.execute(
                             """
@@ -2261,7 +2328,10 @@ class RuntimeCoordinationStore:
             updated = connection.execute(
                 "SELECT * FROM approval_requests WHERE id = ?", (request_id,)
             ).fetchone()
-        return _approval_request_from_row(updated)
+        result = _approval_request_from_row(updated)
+        if wake_worker:
+            self.wake_workers()
+        return result
 
     def consume_matching_approval_grant(
         self,
