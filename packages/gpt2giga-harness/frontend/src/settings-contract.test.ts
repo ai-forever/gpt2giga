@@ -43,6 +43,10 @@ describe("backend-owned Settings contract", () => {
     expect(source).toContain("/auth/local/rotate");
     expect(source).toContain("/auth/logout");
     expect(source).toContain("os_local_private_store");
+    expect(source).toContain('fetchCockpit<DoctorReport>(withQuery("/api/doctor"');
+    expect(source).toContain("DoctorResult");
+    expect(source).toContain("downloadDoctorReport");
+    expect(source).toContain("gigaloom-doctor.json");
   });
 
   it("never creates browser fields for credentials, tokens, or certificates", () => {

@@ -106,6 +106,7 @@ READ_ROUTE_IDENTITIES = frozenset(
         ("GET", "/api/cockpit/sessions/{session_id}/updates/stream"),
         ("GET", "/api/compatibility/guardian"),
         ("GET", "/api/defaults"),
+        ("GET", "/api/doctor"),
         ("GET", "/api/evals"),
         ("GET", "/api/evals/runs/{eval_run_id}"),
         ("GET", "/api/evaluate"),

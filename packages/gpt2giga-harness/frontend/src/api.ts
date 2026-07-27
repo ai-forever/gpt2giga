@@ -764,6 +764,49 @@ export interface BrowserAccessStatusResponse {
   recovery: string;
 }
 
+export interface DoctorReport {
+  schema_version: number;
+  kind: "gpt2giga_harness_doctor_report";
+  ok: boolean;
+  summary: { ready: number; degraded: number; blocked: number };
+  guided: {
+    first_run: true;
+    online_checks: boolean;
+    domains: string[];
+    disabled_actions: Array<{
+      check_id: string;
+      status: string;
+      reason: string;
+      recovery: string | null;
+      command: string | null;
+    }>;
+  };
+  privacy: {
+    content_free: true;
+    prompts_collected: false;
+    sensitive_values_collected: false;
+    oauth_material_collected: false;
+    raw_traffic_collected: false;
+    private_file_content_collected: false;
+    raw_paths_collected: false;
+  };
+  checks: Array<{
+    id: string;
+    category: string;
+    status: "ready" | "degraded" | "blocked";
+    summary: string;
+    evidence: Record<string, unknown>;
+    remediation: Array<{ message: string; command: string }>;
+  }>;
+  export: {
+    format: "canonical_json";
+    private_mode: "0600";
+    check_count: number;
+    max_check_count: number;
+    content_sha256: string;
+  };
+}
+
 export interface SettingsSaveResponse {
   saved: true;
   revision: string;

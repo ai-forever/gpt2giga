@@ -298,6 +298,16 @@ state without rewriting it. It also carries a stable report kind plus exact
 Harness/gateway, Python, and platform metadata; external CLI compatibility is
 embedded from the same bounded capability probes used for execution.
 
+Schema v2 adds the UI identity boundary, scoped network contract, GitHub CLI,
+and separate MCP, Skills, and Plugins source-health checks. The report declares
+its privacy contract, bounds the check count, carries a canonical SHA-256, and
+lists every disabled action with one exact recovery step. **Settings →
+Diagnostics → Run first-run doctor** uses the same contract in offline mode:
+it does not contact provider/model routes, GitHub, skills.sh, or an IdP. The
+downloaded JSON contains counts, hashes, statuses, and recovery commands, but no
+prompts, secrets, OAuth material, raw traffic, raw paths, or private file
+content. Use the CLI doctor only when live proxy and route probes are intended.
+
 For CI, choose the failure threshold explicitly. `blocked` returns exit code 1
 only for blocked checks; `degraded` returns 1 for either degraded or blocked
 checks. Without `--fail-on`, doctor keeps its interactive exit-code-0 behavior.

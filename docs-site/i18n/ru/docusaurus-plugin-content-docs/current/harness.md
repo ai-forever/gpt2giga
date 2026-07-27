@@ -302,6 +302,17 @@ workspace не публикуется, а существующий runtime worke
 Python и platform metadata; совместимость внешних CLI берётся из тех же
 ограниченных capability probes, которые используются перед execution.
 
+Schema v2 добавляет UI identity boundary, scoped network contract, GitHub CLI и
+раздельные проверки источников MCP, Skills и Plugins. Отчёт явно фиксирует
+privacy contract, ограничивает число checks, содержит канонический SHA-256 и
+показывает для каждого отключённого действия точный шаг восстановления.
+**Настройки → Диагностика → Запустить first-run doctor** использует тот же
+контракт в offline-режиме: Web-проверка не обращается к provider/model routes,
+GitHub, skills.sh или IdP. Экспортируемый JSON содержит только счётчики, хэши,
+статусы и recovery-команды — без prompts, secrets, OAuth material, raw traffic,
+raw paths и содержимого приватных файлов. CLI doctor следует запускать только
+когда нужны live-проверки proxy и routes.
+
 Для CI порог задаётся явно. `--fail-on blocked` возвращает exit code 1 только
 при blocked checks, а `--fail-on degraded` — при degraded или blocked. Без
 `--fail-on` сохраняется интерактивный exit code 0. Для issue report флаг
