@@ -58,8 +58,8 @@ GigaChat v2, а корневые маршруты без версиониров�
 |---|---|---|
 | `GET /models` | Поддерживается | Возвращается в форме Anthropic, когда запрос содержит заголовки Anthropic SDK. |
 | `GET /models/{model_id}` | Поддерживается | Возвращается в форме Anthropic, когда запрос содержит заголовки Anthropic SDK. |
-| `POST /messages` | Поддерживается | Messages API, потоковая передача, локальные инструменты, сопоставление с GigaChat v2 для совместимых провайдерских инструментов Anthropic, запасной путь для структурированного вывода. |
-| `POST /messages/count_tokens` | Поддерживается | Считает текст сообщений, system, инструментов и структурированного вывода через подсчёт токенов GigaChat. |
+| `POST /messages` | Поддерживается | Messages API, потоковая передача, локальные инструменты, сопоставление с GigaChat v2 для совместимых провайдерских инструментов Anthropic и запасной путь для структурированного вывода. При `GPT2GIGA_NORMALIZATION_MODE=on` принятое подмножество v1 использует нормализованное ядро запросов, ответов и SSE. |
+| `POST /messages/count_tokens` | Поддерживается | Считает текст сообщений, system, инструментов и структурированного вывода через подсчёт токенов GigaChat; нормализованный режим использует `NormalizedTokenCountRequest`/`Response`. |
 | `POST /messages/batches`, `GET /messages/batches*` | Отключено | Код роутера есть, но он не подключён до появления пакетных методов в SDK/бэкенде GigaChat. |
 | Files API beta | Не реализовано | Сейчас вне области поддержки. |
 | Skills API beta | Не реализовано | Сейчас вне области поддержки. |
@@ -206,9 +206,12 @@ OpenAI-compatible upstream × OpenAI/Anthropic/Gemini и обязательны�
 guard допуска до I/O. G7-01 добавляет внутренний upstream-адаптер Chat
 Completions для OpenAI-compatible/vLLM с точной привязкой профиля/модели,
 сетевым разрешением на каждый запрос, владением `SecretRef`, строгим model
-discovery, ограниченным streaming и нормализованными errors/usage. Это ещё не
-публичный переключатель upstream: маршрутизация фасадов Anthropic и Gemini
-через это ядро остаётся за воротами G7-02 и G7-03.
+discovery, ограниченным streaming и нормализованными errors/usage. G7-02
+добавляет прямую проекцию Anthropic request, response, SSE, tools, usage,
+stop-reason, errors и count-token через нормализованное ядро при включённом
+режиме нормализации. Это ещё не публичный переключатель OpenAI-compatible
+upstream; Gemini-shaped bridge и закрытие фазы остаются за воротами G7-03 и
+G7-04.
 
 ## Режимы бэкенда
 

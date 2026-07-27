@@ -9,16 +9,16 @@ dedicated Gemini-to-normalized adapter in the main execution path.
 
 ## Current status
 
-- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions goes through legacy
-  transforms.
+- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions and Anthropic
+  Messages go through legacy transforms.
 - `GPT2GIGA_NORMALIZATION_MODE=shadow`: OpenAI Chat builds a normalized request
   alongside the legacy path and stores a safe diagnostic shape hash without prompt content.
-- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions is executed through the
-  normalized path and `GigaChatProviderAdapter`; a legacy fallback is available
-  before the response starts via `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
-- OpenAI Responses and Anthropic Messages are still executed through legacy route
-  transforms, but observability and debug translation already use a normalized
-  representation where possible.
+- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions and the accepted
+  Anthropic Messages v1 subset are executed through their protocol adapters,
+  normalized models, and `GigaChatProviderAdapter`; a legacy fallback is
+  available before the response starts via
+  `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
+- OpenAI Responses is still executed through legacy route transforms.
 - Gemini GenerateContent and streamGenerateContent are executed through
   `GeminiProtocolAdapter`, normalized models, and `GigaChatProviderAdapter`
   independently of the OpenAI Chat normalization flags.
@@ -26,8 +26,9 @@ dedicated Gemini-to-normalized adapter in the main execution path.
   `gigachat` formats for protected admin workflows.
 - G7-01 provides a normalized OpenAI Chat Completions upstream adapter for
   explicitly admitted OpenAI-compatible/vLLM profiles. It is an internal
-  execution component, not a new public route switch; Anthropic- and
-  Gemini-shaped facades still await G7-02 and G7-03.
+  execution component, not a new public route switch. G7-02 adds the direct
+  Anthropic request/response/SSE and count-token projection; the Gemini-shaped
+  bridge still awaits G7-03.
 
 ## Core models
 
@@ -288,10 +289,14 @@ The normalized layer differs as follows:
 - Anthropic `usage.input_tokens` and `usage.output_tokens` already match the
   normalized naming, and `total_tokens` is computed when both values are present.
 
-Currently the Anthropic execution path stays legacy:
-the Anthropic payload is first brought to an OpenAI-like payload, then the
-common GigaChat route transform is used. Debug translation and observability can build
-a normalized representation on top of this path.
+With `GPT2GIGA_NORMALIZATION_MODE=on`, `AnthropicProtocolAdapter` builds the
+normalized request directly, `GigaChatProviderAdapter` executes it, and the
+Anthropic response/SSE projector restores the client wire contract. The same
+path represents `count_tokens` with `NormalizedTokenCountRequest` and
+`NormalizedTokenCountResponse`. Legacy execution remains the default and the
+pre-response fallback for semantics outside the accepted v1 subset. Prompt
+caching, computer use, files, and other unmodeled Anthropic features are not
+claimed by the normalized path.
 
 ## Observability
 

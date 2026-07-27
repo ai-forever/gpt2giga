@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Mapping
+import json
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -33,6 +34,8 @@ from gpt2giga.protocols.normalized import (
     NormalizedMessage,
     NormalizedResponse,
     NormalizedStreamEvent,
+    NormalizedTokenCountRequest,
+    NormalizedTokenCountResponse,
     NormalizedTool,
     NormalizedToolCall,
     NormalizedUsage,
@@ -76,6 +79,33 @@ class GigaChatProviderAdapter:
     ) -> NormalizedResponse:
         """Execute a non-streaming normalized chat request."""
         return await self.chat(request, context=context)
+
+    async def count_tokens(
+        self,
+        request: NormalizedTokenCountRequest,
+        *,
+        context: RequestContext | None = None,
+    ) -> NormalizedTokenCountResponse:
+        """Count the normalized input through the current GigaChat token API."""
+        texts = _normalized_token_count_texts(request)
+        if not texts:
+            return NormalizedTokenCountResponse(
+                model=request.model or request.input.model,
+                input_tokens=0,
+            )
+
+        model = self.forced_model or request.model or request.input.model or "unknown"
+        update_request_context(model_effective=model)
+        async with self.model_limiter.limit(model, provider=self.provider_label):
+            async with gigachat_request_options(
+                self.giga_client,
+                self.request_options,
+            ):
+                counts = await self.giga_client.atokens_count(texts, model=model)
+        return NormalizedTokenCountResponse(
+            model=request.model or request.input.model,
+            input_tokens=sum(int(getattr(item, "tokens", 0)) for item in counts),
+        )
 
     async def chat(
         self,
@@ -409,6 +439,9 @@ def normalized_chat_to_openai_payload(
         value = getattr(generation, source)
         if value is not None:
             payload[target] = value
+    reasoning_effort = generation.raw_extensions.get("reasoning_effort")
+    if request.protocol == "anthropic" and isinstance(reasoning_effort, str):
+        payload["reasoning_effort"] = reasoning_effort
 
     if request.protocol == "openai":
         payload.update(request.raw_extensions)
@@ -480,6 +513,11 @@ def _content_part_to_openai(part: NormalizedContentPart) -> dict[str, Any]:
     payload = {"type": part.type}
     if part.type == "text":
         payload["text"] = part.text or ""
+    elif part.type == "image_reference" and part.image_reference is not None:
+        payload = {
+            "type": "image_url",
+            "image_url": {"url": part.image_reference.uri},
+        }
     elif part.type == "image_url":
         payload["image_url"] = part.data
     elif part.type == "file":
@@ -576,6 +614,42 @@ def _gigachat_additional_fields(provider_metadata: Mapping[str, Any]) -> dict[st
     if not isinstance(additional_fields, Mapping):
         return {}
     return dict(additional_fields)
+
+
+def _normalized_token_count_texts(
+    request: NormalizedTokenCountRequest,
+) -> list[str]:
+    texts: list[str] = []
+    chat = request.input
+    for message in chat.messages:
+        if isinstance(message.content, str):
+            if message.content:
+                texts.append(message.content)
+        elif isinstance(message.content, list):
+            texts.extend(
+                part.text
+                for part in message.content
+                if part.type == "text" and part.text
+            )
+        for call in message.tool_calls:
+            if call.name:
+                texts.append(call.name)
+            if call.arguments:
+                texts.append(
+                    call.arguments
+                    if isinstance(call.arguments, str)
+                    else json.dumps(call.arguments, ensure_ascii=False)
+                )
+    for tool in chat.tools:
+        if tool.name:
+            texts.append(tool.name)
+        if tool.description:
+            texts.append(tool.description)
+        if tool.parameters:
+            texts.append(json.dumps(tool.parameters, ensure_ascii=False))
+    if chat.response_format and chat.response_format.json_schema:
+        texts.append(json.dumps(chat.response_format.json_schema, ensure_ascii=False))
+    return texts
 
 
 def _choice_to_normalized(index: int, choice: Mapping[str, Any]) -> NormalizedChoice:

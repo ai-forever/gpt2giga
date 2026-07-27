@@ -225,6 +225,15 @@ class FakeAChatResource:
 class FakeGigachat:
     def __init__(self):
         self.achat = FakeAChatResource()
+        self.token_inputs = []
+        self.token_model = None
+
+    async def atokens_count(self, values, model=None):
+        self.token_inputs = list(values)
+        self.token_model = model
+        return [
+            type("TokenCount", (), {"tokens": len(value.split())})() for value in values
+        ]
 
 
 class FakeRequestTransformer:
@@ -304,6 +313,93 @@ def test_anthropic_messages_v2_mode_uses_chat_completion_create():
     assert not app.state.request_transformer.chat_calls
     assert app.state.request_transformer.chat_completion_calls
     assert app.state.gigachat_client.achat.chat_calls == []
+    assert app.state.gigachat_client.achat.chat_completion_calls == [
+        {"contract": "anthropic-v2"}
+    ]
+
+
+def test_anthropic_messages_normalization_on_uses_normalized_core():
+    app = make_app(
+        "v2",
+        normalization_mode="on",
+        legacy_chat_fallback=False,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages",
+        json={
+            "model": "claude-x",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+                {
+                    "name": "lookup",
+                    "description": "Lookup data",
+                    "input_schema": {"type": "object"},
+                }
+            ],
+        },
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["content"] == [{"type": "text", "text": "ok-v2"}]
+    assert body["stop_reason"] == "end_turn"
+    transformed = app.state.request_transformer.chat_completion_calls[0][0]
+    assert transformed["model"] == "claude-x"
+    assert transformed["messages"] == [{"role": "user", "content": "hi"}]
+    assert transformed["tools"][0]["function"]["name"] == "lookup"
+    assert transformed["max_tokens"] == 16
+
+
+def test_anthropic_count_tokens_normalization_on_uses_normalized_core():
+    app = make_app(
+        "v2",
+        normalization_mode="on",
+        legacy_chat_fallback=False,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages/count_tokens",
+        json={
+            "model": "claude-x",
+            "messages": [{"role": "user", "content": "count these words"}],
+            "tools": [
+                {
+                    "name": "lookup",
+                    "description": "Lookup data",
+                    "input_schema": {"type": "object"},
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["input_tokens"] > 0
+    assert app.state.gigachat_client.token_model == "claude-x"
+    assert app.state.gigachat_client.token_inputs[0] == "count these words"
+
+
+def test_anthropic_normalized_failure_falls_back_before_response():
+    app = make_app(
+        "v2",
+        normalization_mode="on",
+        legacy_chat_fallback=True,
+    )
+
+    class BrokenAnthropicAdapter:
+        def messages_to_normalized(self, *args, **kwargs):
+            raise RuntimeError("normalized path unavailable")
+
+    app.state.anthropic_protocol_adapter = BrokenAnthropicAdapter()
+    client = TestClient(app)
+
+    response = client.post("/messages", json=_anthropic_payload())
+
+    assert response.status_code == 200
+    assert response.json()["content"][0]["text"] == "ok-v2"
     assert app.state.gigachat_client.achat.chat_completion_calls == [
         {"contract": "anthropic-v2"}
     ]
@@ -478,6 +574,32 @@ def test_anthropic_messages_v2_stream_uses_chat_completion_stream():
     assert app.state.gigachat_client.achat.stream_calls == [
         {"contract": "anthropic-v2"}
     ]
+
+
+def test_anthropic_messages_normalization_on_streams_anthropic_sse():
+    app = make_app(
+        "v2",
+        normalization_mode="on",
+        legacy_chat_fallback=False,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages",
+        json={
+            "model": "claude-x",
+            "max_tokens": 16,
+            "stream": True,
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert "event: message_start" in response.text
+    assert "event: content_block_delta" in response.text
+    assert '"text": "ok-stream"' in response.text
+    assert "event: message_delta" in response.text
+    assert "event: message_stop" in response.text
 
 
 def test_anthropic_messages_v2_stream_renders_sources_section():

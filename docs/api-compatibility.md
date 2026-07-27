@@ -58,8 +58,8 @@ Examples:
 |---|---|---|
 | `GET /models` | Supported | Returned in the Anthropic shape when the request contains Anthropic SDK headers. |
 | `GET /models/{model_id}` | Supported | Returned in the Anthropic shape when the request contains Anthropic SDK headers. |
-| `POST /messages` | Supported | Messages API, streaming, local tools, GigaChat v2 mapping for compatible Anthropic provider tools, structured-output fallback. |
-| `POST /messages/count_tokens` | Supported | Counts message, system, tool, and structured-output text through GigaChat token counting. |
+| `POST /messages` | Supported | Messages API, streaming, local tools, GigaChat v2 mapping for compatible Anthropic provider tools, and structured-output fallback. With `GPT2GIGA_NORMALIZATION_MODE=on`, the accepted v1 subset uses the normalized request/response/SSE core. |
+| `POST /messages/count_tokens` | Supported | Counts message, system, tool, and structured-output text through GigaChat token counting; normalized mode uses `NormalizedTokenCountRequest`/`Response`. |
 | `POST /messages/batches`, `GET /messages/batches*` | Disabled | Router code exists but is not mounted until batch methods appear in the GigaChat SDK/backend. |
 | Files API beta | Not implemented | Out of scope for now. |
 | Skills API beta | Not implemented | Out of scope for now. |
@@ -205,9 +205,11 @@ OpenAI/Anthropic/Gemini semantic-loss matrix and its mandatory fail-closed
 pre-I/O admission guard. G7-01 adds the internal OpenAI-compatible/vLLM
 upstream Chat Completions adapter with exact profile/model binding,
 request-specific network authorization, `SecretRef` ownership, strict model
-discovery, bounded streaming, and normalized errors/usage. It is not yet a
-public upstream-selection switch: Anthropic- and Gemini-shaped routing through
-this core remains gated by G7-02 and G7-03.
+discovery, bounded streaming, and normalized errors/usage. G7-02 adds direct
+Anthropic request, response, SSE, tool, usage, stop-reason, error, and
+count-token projection through the normalized core when normalization mode is
+on. It is not yet a public OpenAI-compatible upstream-selection switch; the
+Gemini-shaped bridge and bridge closure remain gated by G7-03 and G7-04.
 
 ## Backend modes
 

@@ -249,8 +249,8 @@ enabled.
 
 ## Normalized layer flags
 
-Experimental flags control the OpenAI Chat Completions normalized path and by
-default keep the legacy behavior for this route:
+Experimental flags control the OpenAI Chat Completions and Anthropic Messages
+normalized paths and by default keep the legacy behavior for these routes:
 
 ```dotenv
 GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER=False
@@ -258,14 +258,17 @@ GPT2GIGA_NORMALIZATION_MODE=off
 GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 ```
 
-- `off`: OpenAI Chat Completions goes through the legacy path;
+- `off`: OpenAI Chat Completions and Anthropic Messages go through the legacy paths;
 - `shadow`: builds normalized diagnostics alongside the legacy OpenAI Chat handling without changing client responses;
-- `on`: switches OpenAI Chat to the normalized path, with a legacy fallback before the response starts, if the fallback is enabled.
+- `on`: switches OpenAI Chat and the accepted Anthropic Messages v1 subset,
+  including streaming and `count_tokens`, to the normalized path, with a legacy
+  fallback before the response starts if the fallback is enabled.
 
 Gemini GenerateContent uses its own dedicated Gemini-to-normalized adapter and
-GigaChat provider path independently of these OpenAI Chat flags. OpenAI Responses
-and Anthropic Messages stay on the legacy execution paths, but use a normalized
-representation for observability/debug helpers where possible.
+GigaChat provider path independently of these flags. OpenAI Responses stays on
+the legacy execution path. Anthropic semantics outside normalized v1, including
+prompt caching, computer use, files, and unsupported content blocks, are not
+claimed by the normalized path and remain eligible for the legacy fallback.
 
 A detailed description of the models and current execution paths: [Normalized messages architecture](./architecture/normalized-messages.md).
 

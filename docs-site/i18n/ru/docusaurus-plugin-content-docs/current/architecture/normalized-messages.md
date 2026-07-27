@@ -9,16 +9,15 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
 
 ## Текущий статус
 
-- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions идёт через прежние
-  преобразования.
+- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions и Anthropic
+  Messages идут через прежние преобразования.
 - `GPT2GIGA_NORMALIZATION_MODE=shadow`: OpenAI Chat строит нормализованный запрос
   рядом с прежним путём и сохраняет безопасный диагностический хеш формы без содержимого промпта.
-- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions исполняется через
-  нормализованный путь и `GigaChatProviderAdapter`; до старта ответа доступен откат
-  к прежнему через `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
-- OpenAI Responses и Anthropic Messages пока исполняются через прежние
-  преобразования маршрута, но наблюдаемость и отладочная трансляция уже используют нормализованное
-  представление там, где это возможно.
+- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions и принятое
+  подмножество Anthropic Messages v1 исполняются через свои protocol adapters,
+  нормализованные модели и `GigaChatProviderAdapter`; до старта ответа доступен
+  откат к прежнему через `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
+- OpenAI Responses пока исполняется через прежние преобразования маршрута.
 - Gemini GenerateContent и streamGenerateContent исполняются через
   `GeminiProtocolAdapter`, нормализованные модели и `GigaChatProviderAdapter`
   независимо от флагов нормализации OpenAI Chat.
@@ -26,8 +25,9 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
   `gigachat` для защищённых admin-сценариев.
 - G7-01 предоставляет нормализованный upstream-адаптер OpenAI Chat Completions
   для явно допущенных профилей OpenAI-compatible/vLLM. Это внутренний компонент
-  исполнения, а не новый публичный переключатель маршрутов; фасады Anthropic и
-  Gemini остаются за воротами G7-02 и G7-03.
+  исполнения, а не новый публичный переключатель маршрутов. G7-02 добавляет
+  прямую проекцию Anthropic request/response/SSE и count-token; Gemini-shaped
+  bridge остаётся за воротами G7-03.
 
 ## Основные модели
 
@@ -290,10 +290,14 @@ Anthropic Messages — отдельный публичный протокол с
 - `usage.input_tokens` и `usage.output_tokens` в Anthropic уже совпадают с
   нормализованными именами, а `total_tokens` вычисляется при наличии обоих значений.
 
-Сейчас путь выполнения Anthropic остаётся прежним:
-полезная нагрузка Anthropic сначала приводится к OpenAI-подобной, затем используется
-общее преобразование маршрута GigaChat. Отладочная трансляция и наблюдаемость могут строить
-нормализованное представление поверх этого пути.
+При `GPT2GIGA_NORMALIZATION_MODE=on` `AnthropicProtocolAdapter` напрямую строит
+нормализованный запрос, `GigaChatProviderAdapter` исполняет его, а проектор
+Anthropic response/SSE восстанавливает сетевой контракт клиента. Тот же путь
+представляет `count_tokens` через `NormalizedTokenCountRequest` и
+`NormalizedTokenCountResponse`. Прежнее исполнение остаётся default и
+pre-response fallback для семантики вне принятого подмножества v1. Prompt
+caching, computer use, files и другие несмоделированные возможности Anthropic
+не объявляются поддержанными нормализованным путём.
 
 ## Наблюдаемость
 
