@@ -9,6 +9,7 @@ license = "MIT"
 dependencies = [
     "python-dotenv>=1.2.2,<2",
     "aiohttp>=3.14.0,<4",
+    "httpx>=0.28.1,<1",
     "tiktoken>=0.12.0,<1",
     "pillow>=12.2.0,<13",
     "uvicorn>=0.41.0,<1",

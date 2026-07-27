@@ -211,7 +211,7 @@ def protocol_loss_matrix_json() -> dict[str, object]:
     return {
         "schema_version": PROTOCOL_LOSS_MATRIX_SCHEMA_VERSION,
         "upstream": "openai_compatible",
-        "implementation_status": "frozen_contract",
+        "implementation_status": "openai_compatible_upstream_adapter",
         "downstreams": {
             downstream.value: {
                 feature.value: rule.model_dump(

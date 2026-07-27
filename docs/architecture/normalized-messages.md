@@ -24,10 +24,10 @@ dedicated Gemini-to-normalized adapter in the main execution path.
   independently of the OpenAI Chat normalization flags.
 - Debug endpoints can translate between the `openai`, `anthropic`, `normalized`, and
   `gigachat` formats for protected admin workflows.
-- G7-00 freezes `gigaloom.normalized-chat.v1` and the
-  `gigaloom.protocol-loss-matrix.v1` contract for a future OpenAI-compatible
-  upstream bridge. The contract is implemented, but no OpenAI-compatible/vLLM
-  upstream adapter is active yet.
+- G7-01 provides a normalized OpenAI Chat Completions upstream adapter for
+  explicitly admitted OpenAI-compatible/vLLM profiles. It is an internal
+  execution component, not a new public route switch; Anthropic- and
+  Gemini-shaped facades still await G7-02 and G7-03.
 
 ## Core models
 
@@ -69,11 +69,10 @@ All normalized models inherit two extension buckets:
 
 ## OpenAI-compatible protocol bridge v1
 
-G7-00 freezes translation feasibility, not runtime availability. The
-machine-readable source is `PROTOCOL_LOSS_MATRIX_V1` in
-`gpt2giga.protocols.normalized`. Its serialized status is
-`implementation_status="frozen_contract"` until G7-01 adds an upstream
-adapter.
+G7-00 froze translation feasibility. G7-01 adds the first upstream runtime
+without changing the matrix. The machine-readable source is
+`PROTOCOL_LOSS_MATRIX_V1` in `gpt2giga.protocols.normalized`; its serialized
+status is now `implementation_status="openai_compatible_upstream_adapter"`.
 
 The accepted request subset has exactly four roles (`system`, `user`,
 `assistant`, `tool`), ordered text and typed image-reference parts, function
@@ -120,6 +119,41 @@ The matrix was revalidated against the current
 [OpenAI Chat Completions reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create),
 [Anthropic Messages SDK contract](https://github.com/anthropics/anthropic-sdk-python/tree/main/src/anthropic/types),
 and [Gemini GenerateContent documentation](https://ai.google.dev/gemini-api/docs/text-generation).
+
+### OpenAI-compatible upstream execution
+
+`OpenAICompatibleProviderAdapter` executes only the frozen normalized v1 Chat
+Completions subset. Before any request it binds the exact profile revision and
+route model, runs `admit_protocol_bridge_request()`, serializes the reviewed
+body, and obtains a request-specific network authorization. The transport
+revalidates the serialized body, connected peer, and bounded response size.
+Redirects and automatic retries are disabled.
+
+Harness owns the provider profile, model route, `SecretRef`, TLS/proxy policy
+references, and scoped network ticket. A credential is resolved and revealed
+only to the exact `provider-execution:openai-compatible` boundary; profiles,
+logs, persisted settings, network intents, and receipts retain only the
+reference identity. vLLM has a versioned
+`gigaloom.vllm-openai-compatible.v1` profile, while other compatible servers
+must provide an explicitly reviewed profile and normalized capability/limit
+contract.
+
+The adapter supports strict model discovery, non-streaming and streaming text,
+function tools and tool deltas, usage and stop normalization, bounded SSE, and
+content-free transport failures. Provider-returned error facts are preserved
+when present; missing usage, model metadata, or capabilities are not invented.
+The hermetic fake-server suite is the default validation. A live remote vLLM
+smoke is explicit opt-in:
+
+```bash
+GPT2GIGA_RUN_VLLM_SMOKE=1 \
+GPT2GIGA_VLLM_BASE_URL=https://vllm.example/v1 \
+GPT2GIGA_VLLM_MODEL=model-id \
+uv run pytest -n 0 tests/live/test_vllm_openai_compatible_smoke.py
+```
+
+Set `GPT2GIGA_VLLM_API_KEY` only when the reviewed server requires it. The live
+smoke requires a remote HTTPS endpoint and a scoped Harness network grant.
 
 ## OpenAI Chat flow
 

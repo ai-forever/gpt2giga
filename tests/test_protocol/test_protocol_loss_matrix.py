@@ -94,7 +94,7 @@ def test_protocol_loss_matrix_is_complete_versioned_and_json_serializable():
 
     payload = protocol_loss_matrix_json()
     assert payload["schema_version"] == PROTOCOL_LOSS_MATRIX_SCHEMA_VERSION
-    assert payload["implementation_status"] == "frozen_contract"
+    assert payload["implementation_status"] == "openai_compatible_upstream_adapter"
     json.dumps(payload)
 
 

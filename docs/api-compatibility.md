@@ -200,11 +200,14 @@ A reference for each parameter: [Client parameter compatibility](./client-parame
 
 The internal normalized layer that separates public protocol formats from
 provider execution is described in [Normalized messages architecture](./architecture/normalized-messages.md).
-G7-00 also publishes the versioned OpenAI-compatible upstream ×
+G7-00 publishes the versioned OpenAI-compatible upstream ×
 OpenAI/Anthropic/Gemini semantic-loss matrix and its mandatory fail-closed
-pre-I/O admission guard. This is a frozen contract, not an active vLLM or other
-OpenAI-compatible upstream adapter; runtime support starts no earlier than
-G7-01.
+pre-I/O admission guard. G7-01 adds the internal OpenAI-compatible/vLLM
+upstream Chat Completions adapter with exact profile/model binding,
+request-specific network authorization, `SecretRef` ownership, strict model
+discovery, bounded streaming, and normalized errors/usage. It is not yet a
+public upstream-selection switch: Anthropic- and Gemini-shaped routing through
+this core remains gated by G7-02 and G7-03.
 
 ## Backend modes
 

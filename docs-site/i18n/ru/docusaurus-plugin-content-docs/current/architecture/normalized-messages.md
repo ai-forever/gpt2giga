@@ -24,10 +24,10 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
   независимо от флагов нормализации OpenAI Chat.
 - Debug-эндпоинты умеют переводить между форматами `openai`, `anthropic`, `normalized` и
   `gigachat` для защищённых admin-сценариев.
-- G7-00 фиксирует `gigaloom.normalized-chat.v1` и контракт
-  `gigaloom.protocol-loss-matrix.v1` для будущего upstream-моста,
-  совместимого с OpenAI. Контракт реализован, но upstream-адаптер
-  OpenAI-compatible/vLLM пока не активен.
+- G7-01 предоставляет нормализованный upstream-адаптер OpenAI Chat Completions
+  для явно допущенных профилей OpenAI-compatible/vLLM. Это внутренний компонент
+  исполнения, а не новый публичный переключатель маршрутов; фасады Anthropic и
+  Gemini остаются за воротами G7-02 и G7-03.
 
 ## Основные модели
 
@@ -70,11 +70,11 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
 
 ## OpenAI-compatible protocol bridge v1
 
-G7-00 фиксирует возможность трансляции, а не доступность runtime. Машиночитаемый
-источник — `PROTOCOL_LOSS_MATRIX_V1` в
-`gpt2giga.protocols.normalized`. Его сериализованный статус остаётся
-`implementation_status="frozen_contract"`, пока G7-01 не добавит
-upstream-адаптер.
+G7-00 зафиксировал возможность трансляции. G7-01 добавляет первый upstream
+runtime без изменения матрицы. Машиночитаемый источник —
+`PROTOCOL_LOSS_MATRIX_V1` в `gpt2giga.protocols.normalized`; его
+сериализованный статус теперь равен
+`implementation_status="openai_compatible_upstream_adapter"`.
 
 Принятое подмножество запроса содержит ровно четыре роли (`system`, `user`,
 `assistant`, `tool`), упорядоченные текстовые части и типизированные ссылки на
@@ -122,6 +122,41 @@ OpenAI-compatible upstream-профиле, требует явный opt-in дл
 [справочником OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create),
 [контрактом Anthropic Messages SDK](https://github.com/anthropics/anthropic-sdk-python/tree/main/src/anthropic/types)
 и [документацией Gemini GenerateContent](https://ai.google.dev/gemini-api/docs/text-generation).
+
+### Исполнение через OpenAI-compatible upstream
+
+`OpenAICompatibleProviderAdapter` исполняет только зафиксированное подмножество
+normalized v1 для Chat Completions. До любого запроса он связывает точную
+ревизию профиля и модель маршрута, запускает
+`admit_protocol_bridge_request()`, сериализует проверенное тело и получает
+сетевое разрешение для конкретного запроса. Транспорт повторно проверяет тело,
+подключённый адрес и ограниченный размер ответа. Redirect и автоматические
+retry отключены.
+
+Harness владеет профилем провайдера, маршрутом модели, `SecretRef`, ссылками на
+TLS/proxy policy и scoped network ticket. Секрет разрешается и раскрывается
+только границе `provider-execution:openai-compatible`; профили, логи,
+сохранённые настройки, сетевые intents и receipts содержат лишь идентичность
+ссылки. Для vLLM есть версионированный профиль
+`gigaloom.vllm-openai-compatible.v1`; другие совместимые серверы требуют явно
+проверенный профиль и контракт normalized capabilities/limits.
+
+Адаптер поддерживает строгий model discovery, обычный и потоковый текст,
+function tools и tool deltas, нормализацию usage/stop, ограниченный SSE и
+безопасные транспортные ошибки. Факты из provider error сохраняются, когда они
+есть; отсутствующие usage, model metadata или capabilities не выдумываются.
+По умолчанию используется герметичный fake-server suite. Live smoke удалённого
+vLLM включается только явно:
+
+```bash
+GPT2GIGA_RUN_VLLM_SMOKE=1 \
+GPT2GIGA_VLLM_BASE_URL=https://vllm.example/v1 \
+GPT2GIGA_VLLM_MODEL=model-id \
+uv run pytest -n 0 tests/live/test_vllm_openai_compatible_smoke.py
+```
+
+Задавайте `GPT2GIGA_VLLM_API_KEY` только если он нужен проверенному серверу.
+Live smoke требует удалённый HTTPS endpoint и scoped network grant Harness.
 
 ## Поток OpenAI Chat
 
