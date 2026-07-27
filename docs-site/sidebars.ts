@@ -48,6 +48,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'architecture/harness',
         'architecture/product-capability-admission-adr',
+        'architecture/authority-approval-schema-adr',
         'architecture/provider-authentication-capability-matrix',
         'architecture/remote-ui-identity-adr',
         'architecture/normalized-messages',
