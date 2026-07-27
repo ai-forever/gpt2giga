@@ -50,6 +50,7 @@ const sidebars: SidebarsConfig = {
         'architecture/product-capability-admission-adr',
         'architecture/authority-approval-schema-adr',
         'architecture/scoped-network-access-adr',
+        'architecture/github-capability-grants-adr',
         'architecture/provider-authentication-capability-matrix',
         'architecture/remote-ui-identity-adr',
         'architecture/normalized-messages',
