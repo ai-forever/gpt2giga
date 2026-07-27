@@ -183,6 +183,40 @@ def test_run_and_expiring_project_grants_stay_in_scope(tmp_path):
     )
 
 
+def test_session_grant_is_distinct_from_run_and_project_scope(tmp_path):
+    store = RuntimeCoordinationStore(tmp_path)
+    engine = PolicyEngine(store)
+    context = PolicyContext(
+        project_id="project_scope",
+        session_id="session_scope",
+        run_id="run_scope",
+        reason="Start a reviewed process.",
+    )
+    resolution = engine.resolve(
+        PermissionAction.PROCESS_SPAWN,
+        profile=permission_profile("review_every_action"),
+        context=context,
+    )
+    request = store.create_approval_request(resolution, context)
+
+    store.decide_approval_request(request.id, ApprovalDecision.ALLOW_SESSION)
+
+    assert store.consume_matching_approval_grant(
+        action=PermissionAction.PROCESS_SPAWN,
+        project_id="project_scope",
+        session_id="session_scope",
+        run_id="another_run",
+        job_id=None,
+    )
+    assert not store.consume_matching_approval_grant(
+        action=PermissionAction.PROCESS_SPAWN,
+        project_id="project_scope",
+        session_id="other_session",
+        run_id="another_run",
+        job_id=None,
+    )
+
+
 def test_hash_bound_approval_cannot_be_broadened_or_rebound(tmp_path):
     store = RuntimeCoordinationStore(tmp_path)
     binding = "reviewed-source-and-patch"
@@ -403,6 +437,10 @@ def test_approval_center_requeues_strict_profile_job_for_worker(tmp_path):
     assert inbox["pending_count"] == 1
     approval = inbox["approvals"][0]
     assert approval["action"] == "process.spawn"
+    assert approval["ux"]["target"]["kind"] == "subprocess"
+    assert approval["ux"]["risk"] == "medium"
+    assert approval["ux"]["side_effect_free"] is True
+    assert approval["ux"]["grant_created"] is False
 
     decided = client.post(
         f"/api/approvals/{approval['id']}/decision",

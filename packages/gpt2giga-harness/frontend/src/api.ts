@@ -365,6 +365,40 @@ export interface ApprovalRequest {
   expires_at: string | null;
   decided_at: string | null;
   created_at: string;
+  ux?: ApprovalUXProjection;
+}
+
+export interface ApprovalDecisionOption {
+  decision: string;
+  lifetime: string;
+  enabled: boolean;
+  expires_in_seconds: number | null;
+  why: string;
+}
+
+export interface ApprovalUXProjection {
+  schema_version: number;
+  action: string;
+  target: { kind: string; fields: Record<string, string | number | boolean> };
+  scope: {
+    operation_id: string;
+    session_id: string | null;
+    project_id: string | null;
+  };
+  duration: string;
+  policy_source: string;
+  enforcement: string;
+  risk: string;
+  preview_sha256: string;
+  preview_bound: boolean;
+  consequence: string;
+  why: string;
+  what_changed: string;
+  protected: boolean;
+  protected_reason: string | null;
+  decision_options: ApprovalDecisionOption[];
+  side_effect_free: boolean;
+  grant_created: boolean;
 }
 
 export interface RunExplanation {

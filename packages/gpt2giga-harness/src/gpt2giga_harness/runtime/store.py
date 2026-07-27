@@ -2134,6 +2134,10 @@ class RuntimeCoordinationStore:
                 if not request.run_id:
                     raise ValueError("run-scoped approval requires a run")
                 grant = ("run", request.run_id, None, None)
+            elif parsed_decision is ApprovalDecision.ALLOW_SESSION:
+                if not request.session_id:
+                    raise ValueError("session-scoped approval requires a session")
+                grant = ("session", request.session_id, None, None)
             elif parsed_decision is ApprovalDecision.ALLOW_PROJECT:
                 if not request.project_id:
                     raise ValueError("project-scoped approval requires a project")
@@ -2266,6 +2270,7 @@ class RuntimeCoordinationStore:
         project_id: str | None,
         run_id: str | None,
         job_id: str | None,
+        session_id: str | None = None,
         approval_binding: str | None = None,
         enforcement_owner: str | None = None,
     ) -> bool:
@@ -2274,6 +2279,7 @@ class RuntimeCoordinationStore:
         scopes = [
             ("job", _optional_text(job_id)),
             ("run", _optional_text(run_id)),
+            ("session", _optional_text(session_id)),
             ("project", _optional_text(project_id)),
         ]
         scopes = [(kind, value) for kind, value in scopes if value]
@@ -2307,7 +2313,10 @@ class RuntimeCoordinationStore:
                   AND (approval_grants.expires_at IS NULL OR approval_grants.expires_at > ?)
                   AND (approval_grants.uses_remaining IS NULL OR approval_grants.uses_remaining > 0)
                 ORDER BY CASE approval_grants.scope_type
-                             WHEN 'job' THEN 0 WHEN 'run' THEN 1 ELSE 2 END,
+                             WHEN 'job' THEN 0
+                             WHEN 'run' THEN 1
+                             WHEN 'session' THEN 2
+                             ELSE 3 END,
                          approval_grants.created_at DESC
                 """,
                 tuple(params),

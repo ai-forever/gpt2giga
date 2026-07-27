@@ -574,7 +574,20 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .retained-preview, .diff-preview, .promotion-review pre { max-height: 420px; overflow: auto; margin: 14px 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-muted); padding: 14px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.55; }
 .approval-block { margin: 16px 0; border: 1px solid color-mix(in srgb, var(--warning) 50%, var(--border)); border-radius: 7px; padding: 14px; }
 .approval-block h3 { margin: 0 0 9px; font-size: 13px; }
-.decision-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.decision-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 12px; }
+.approval-risk { display: inline-flex; margin: 2px 0 10px; border-radius: 999px; padding: 3px 8px; background: var(--surface-raised); color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.approval-risk.high, .approval-risk.blocked { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.approval-risk.medium { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
+.approval-scope dd { overflow-wrap: anywhere; }
+.approval-explanation { margin: 10px 0; color: var(--muted); font-size: 12px; }
+.approval-explanation summary, .permission-simulation-details summary { cursor: pointer; color: var(--text); font-weight: 700; }
+.permission-simulation-details { width: 100%; }
+.permission-simulation-list { display: grid; gap: 6px; margin-top: 8px; }
+.permission-simulation-row { display: grid; gap: 2px; border-left: 3px solid var(--border); padding: 6px 8px; background: var(--surface-raised); }
+.permission-simulation-row.approval_required { border-left-color: var(--warning); }
+.permission-simulation-row.denied { border-left-color: var(--danger); }
+.permission-simulation-row.allowed { border-left-color: var(--success); }
+.permission-simulation-row span, .permission-simulation-row small { color: var(--muted); }
 .field-control { display: grid; gap: 6px; margin: 12px 0; color: var(--muted); font-size: 11px; font-weight: 700; }
 .field-control input, .field-control select, .field-control textarea { min-width: 0; min-height: 38px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); padding: 7px 9px; }
 .field-control textarea { min-height: 100px; resize: vertical; }

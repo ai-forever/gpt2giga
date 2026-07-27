@@ -12,6 +12,7 @@ from gpt2giga_harness.application import (
 )
 from gpt2giga_harness.ui.async_execution import ConformantAPIRoute
 from gpt2giga_harness.runtime.models import ApprovalStatus
+from gpt2giga_harness.runtime.approval_ux import approval_ux_projection
 from gpt2giga_harness.runtime.policy import (
     ApprovalDecision,
     INTERACTIVE_PROFILE,
@@ -67,7 +68,7 @@ def approval_inbox(
     items = store.list_approval_requests(status=parsed_status, limit=limit)
     pending = store.list_approval_requests(status=ApprovalStatus.PENDING, limit=200)
     return {
-        "approvals": [approval_request_to_dict(item) for item in items],
+        "approvals": [_approval_payload(item) for item in items],
         "pending_count": len(pending),
     }
 
@@ -102,9 +103,16 @@ def decide_approval(
     except (InvalidStateTransitionError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
-        "approval": approval_request_to_dict(result.approval),
+        "approval": _approval_payload(result.approval),
         "job_status": result.job.status.value if result.job else None,
         "retry_action": result.retry_action,
+    }
+
+
+def _approval_payload(approval: Any) -> dict[str, Any]:
+    return {
+        **approval_request_to_dict(approval),
+        "ux": approval_ux_projection(approval),
     }
 
 
