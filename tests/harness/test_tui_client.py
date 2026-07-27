@@ -73,6 +73,9 @@ async def test_in_process_client_navigates_projects_and_sessions(tmp_path):
             "title": "First\x1b]52;c;hidden\x07 \u202esession",
             "harness_id": "echo",
             "model": "local-model",
+            "workbench_kind": "direct_chat",
+            "task_intent": "review",
+            "authority": "read_only",
         },
         validate_harness=True,
     )
@@ -88,6 +91,9 @@ async def test_in_process_client_navigates_projects_and_sessions(tmp_path):
     assert {project.root for project in snapshot.projects} == {str(first), str(second)}
     assert [session.id for session in snapshot.sessions] == [first_session.id]
     assert snapshot.sessions[0].title == "First⟦terminal-control⟧ �session"
+    assert snapshot.sessions[0].task_intent == "review"
+    assert snapshot.sessions[0].authority == "read_only"
+    assert snapshot.sessions[0].compatibility_warning is None
     assert snapshot.readiness.harness_id == "echo"
     assert snapshot.readiness.harness_status == "available"
     assert snapshot.readiness.model == "local-model"

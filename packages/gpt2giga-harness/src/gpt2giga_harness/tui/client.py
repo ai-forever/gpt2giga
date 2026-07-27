@@ -67,6 +67,7 @@ from gpt2giga_harness.project import (
     resolve_project,
     update_project_state,
 )
+from gpt2giga_harness.product_capabilities import legacy_mode_compatibility_receipt
 from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga_harness.runtime.models import ApprovalStatus
 from gpt2giga_harness.runtime.policy import PolicyEngine, approval_request_to_dict
@@ -180,6 +181,9 @@ class SessionSummary:
     revision: str = ""
     generation: int = 0
     lease: str | None = None
+    task_intent: str = "ask"
+    authority: str = "read_only"
+    compatibility_warning: str | None = None
 
 
 @dataclass(frozen=True)
@@ -3275,6 +3279,10 @@ def _session_summary(
     store: FilesystemHarnessSessionStore | None = None,
 ) -> SessionSummary:
     native = _session_native_reference(session.native, session.metadata)
+    task_intent, authority, warning = _workbench_selection_summary(
+        session.metadata,
+        mode=session.default_mode,
+    )
     runs = store.list_runs(session.id) if store is not None else ()
     messages = store.list_messages(session.id) if store is not None else ()
     active = [run.id for run in runs if run.status.value not in _TERMINAL_RUN_STATUSES]
@@ -3301,15 +3309,22 @@ def _session_summary(
         revision=session.updated_at,
         generation=_session_generation(native),
         lease=active[-1] if active else None,
+        task_intent=task_intent,
+        authority=authority,
+        compatibility_warning=warning,
     )
 
 
 def _session_summary_from_mapping(data: Mapping[str, Any]) -> SessionSummary:
+    metadata = _mapping(data.get("metadata"))
     native = _mapping(data.get("native_session_reference"))
     if not native:
-        native = _session_native_reference(
-            _mapping(data.get("native")), _mapping(data.get("metadata"))
-        )
+        native = _session_native_reference(_mapping(data.get("native")), metadata)
+    mode = _display_text(data.get("default_mode") or "plan")
+    task_intent, authority, warning = _workbench_selection_summary(
+        metadata,
+        mode=mode,
+    )
     return SessionSummary(
         id=_required_text(data.get("id"), "session id"),
         title=_display_text(data.get("title") or "Untitled session"),
@@ -3317,7 +3332,7 @@ def _session_summary_from_mapping(data: Mapping[str, Any]) -> SessionSummary:
         workspace=_optional_text(data.get("workspace")),
         harness_id=_display_text(data.get("default_harness_id") or "unknown"),
         model=_optional_display_text(data.get("default_model")),
-        mode=_display_text(data.get("default_mode") or "plan"),
+        mode=mode,
         archived=bool(data.get("archived")),
         project_id=_optional_text(data.get("project_id")),
         preview=_bounded_content_text(data.get("last_message_preview"), 120),
@@ -3336,6 +3351,35 @@ def _session_summary_from_mapping(data: Mapping[str, Any]) -> SessionSummary:
             else _session_generation(native)
         ),
         lease=_optional_identity(data.get("session_lease")),
+        task_intent=task_intent,
+        authority=authority,
+        compatibility_warning=warning,
+    )
+
+
+def _workbench_selection_summary(
+    metadata: Mapping[str, Any],
+    *,
+    mode: str,
+) -> tuple[str, str, str | None]:
+    retained = _mapping(metadata.get("workbench_selection"))
+    if retained.get("schema_version") == 1:
+        intent = str(retained.get("intent") or "")
+        authority = str(retained.get("authority") or "")
+        if intent in {"ask", "review", "change"} and authority in {
+            "read_only",
+            "workspace_write",
+        }:
+            return (
+                intent,
+                authority,
+                _optional_display_text(retained.get("compatibility_warning")),
+            )
+    legacy = legacy_mode_compatibility_receipt(mode)
+    return (
+        str(legacy["intent"]),
+        str(legacy["authority"]),
+        _optional_display_text(legacy.get("warning")),
     )
 
 

@@ -746,6 +746,110 @@ class ResourceDrawerScreen(ModalScreen[tuple[str, str] | None]):
         self.query_one("#resource-detail", Static).update(detail)
 
 
+class ContextDrawerScreen(ModalScreen[str | None]):
+    """Keyboard-first drawer for non-chat Workbench context."""
+
+    CSS = """
+    ContextDrawerScreen { align: right middle; }
+    #context-dialog {
+        width: 64;
+        max-width: 96%;
+        height: 100%;
+        padding: 1 2;
+        border-left: solid $accent;
+        background: $surface;
+    }
+    #context-body { height: 1fr; layout: horizontal; }
+    #context-list { width: 30; min-width: 24; height: 1fr; }
+    #context-detail {
+        width: 1fr;
+        height: 1fr;
+        padding: 0 1;
+        border-left: solid $primary-background;
+        overflow: auto hidden;
+    }
+    #context-drawer-actions { height: 3; align-horizontal: right; }
+    #context-drawer-actions Button { min-width: 10; margin-left: 1; }
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Close", show=False)]
+
+    def __init__(
+        self,
+        rows: tuple[tuple[str, str, str], ...],
+        *,
+        title: str,
+        open_label: str,
+        close_label: str,
+    ) -> None:
+        super().__init__()
+        self.rows = rows
+        self.dialog_title = title
+        self.open_label = open_label
+        self.close_label = close_label
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="context-dialog"):
+            yield Label(self.dialog_title, classes="dialog-title", markup=False)
+            with Horizontal(id="context-body"):
+                yield ListView(
+                    *(
+                        NavigationItem(label, command_id)
+                        for command_id, label, _ in self.rows
+                    ),
+                    id="context-list",
+                )
+                yield Static("", id="context-detail", markup=False)
+            with Horizontal(id="context-drawer-actions"):
+                yield Button(self.close_label, id="context-close")
+                yield Button(
+                    self.open_label,
+                    id="context-open",
+                    variant="primary",
+                )
+
+    def on_mount(self) -> None:
+        if self.rows:
+            self.query_one("#context-list", ListView).index = 0
+            self._render_detail(self.rows[0][0])
+        self.query_one("#context-list", ListView).focus()
+
+    @on(ListView.Highlighted, "#context-list")
+    def highlight_context(self, event: ListView.Highlighted) -> None:
+        if isinstance(event.item, NavigationItem):
+            self._render_detail(event.item.value)
+
+    @on(ListView.Selected, "#context-list")
+    def select_context(self, event: ListView.Selected) -> None:
+        if isinstance(event.item, NavigationItem):
+            self.dismiss(event.item.value)
+
+    @on(Button.Pressed, "#context-open")
+    def open_context(self) -> None:
+        highlighted = self.query_one("#context-list", ListView).highlighted_child
+        if isinstance(highlighted, NavigationItem):
+            self.dismiss(highlighted.value)
+
+    @on(Button.Pressed, "#context-close")
+    def close_context(self) -> None:
+        self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _render_detail(self, command_id: str) -> None:
+        detail = next(
+            (body for key, _, body in self.rows if key == command_id),
+            "",
+        )
+        self.query_one("#context-detail", Static).update(detail)
+
+    @property
+    def body(self) -> str:
+        """Return bounded text for tests and accessibility inspection."""
+        return "\n".join(f"{label}\n{detail}" for _, label, detail in self.rows)
+
+
 class ApprovalScreen(ModalScreen[str | None]):
     """Exact, revision-bound approval preview with explicit decision scope."""
 
@@ -1093,7 +1197,7 @@ class WorkbenchTui(App[None]):
     #body {
         height: 1fr;
         min-height: 8;
-        layout: horizontal;
+        layout: vertical;
         overflow-x: hidden;
     }
     .nav-pane {
@@ -1104,6 +1208,9 @@ class WorkbenchTui(App[None]):
     }
     #sessions-pane {
         width: 34;
+    }
+    #projects-pane, #sessions-pane, #detail-title, #readiness {
+        display: none;
     }
     .pane-title {
         height: 2;
@@ -1126,10 +1233,18 @@ class WorkbenchTui(App[None]):
         text-style: bold reverse underline;
     }
     #detail-pane {
-        width: 1fr;
+        width: 100%;
+        height: 1fr;
         min-width: 20;
-        padding: 0 2;
+        padding: 0 1;
         overflow: auto hidden;
+    }
+    #context-status {
+        height: 1;
+        padding: 0 1;
+        text-style: bold;
+        color: $text-muted;
+        overflow-x: hidden;
     }
     #detail-title {
         height: auto;
@@ -1144,7 +1259,6 @@ class WorkbenchTui(App[None]):
     #timeline {
         height: 1fr;
         min-height: 4;
-        margin-top: 1;
         padding: 0 1;
         border: round $primary-background;
         overflow: auto hidden;
@@ -1154,9 +1268,7 @@ class WorkbenchTui(App[None]):
         color: $text-muted;
     }
     #context-actions {
-        height: 3;
-        align-vertical: middle;
-        overflow-x: hidden;
+        display: none;
     }
     #context-actions Button {
         min-width: 8;
@@ -1164,13 +1276,23 @@ class WorkbenchTui(App[None]):
         margin-right: 1;
     }
     #interaction-actions {
+        display: none;
         height: 3;
         align-vertical: middle;
         overflow-x: hidden;
     }
     #interaction-actions Button {
+        display: none;
         min-width: 8;
         margin-right: 1;
+    }
+    #attention-status {
+        display: none;
+        height: auto;
+        max-height: 3;
+        padding: 0 1;
+        border-left: thick $accent;
+        color: $text;
     }
     #composer-row {
         height: 3;
@@ -1208,35 +1330,17 @@ class WorkbenchTui(App[None]):
         color: $text-muted;
     }
     #runtime-status {
+        display: none;
         height: 1;
         padding: 0 1;
         color: $text-muted;
         overflow-x: hidden;
-    }
-    #body.narrow {
-        layout: vertical;
-    }
-    #body.narrow #projects-pane {
-        display: none;
-    }
-    #body.narrow #sessions-pane {
-        width: 100%;
-        height: 4;
-        min-height: 4;
-        border-right: none;
-        border-bottom: solid $primary-background;
-    }
-    #body.narrow ListItem {
-        height: 1;
     }
     #body.narrow #detail-pane {
         width: 100%;
         height: 1fr;
         min-height: 4;
         padding: 0 1;
-    }
-    #body.narrow #readiness {
-        display: none;
     }
     #body.narrow #timeline {
         margin-top: 0;
@@ -1246,19 +1350,6 @@ class WorkbenchTui(App[None]):
         min-width: 3;
         width: 1fr;
         margin-right: 0;
-    }
-    #body.narrow #context-actions Button {
-        min-width: 3;
-        margin-right: 0;
-    }
-    #body.narrow #context-actions {
-        display: none;
-    }
-    #body.narrow .pane-title {
-        height: 1;
-    }
-    #body.narrow #detail-title {
-        display: none;
     }
     #body.narrow #actions Button {
         min-width: 3;
@@ -1322,6 +1413,7 @@ class WorkbenchTui(App[None]):
                 yield Label(self.t("pane.sessions"), classes="pane-title", markup=False)
                 yield ListView(id="session-list")
             with Vertical(id="detail-pane"):
+                yield Static("", id="context-status", markup=False)
                 yield Label(self.t("pane.readiness"), id="detail-title", markup=False)
                 yield Static(self.t("detail.empty"), id="readiness", markup=False)
                 yield TimelinePanel(
@@ -1351,6 +1443,7 @@ class WorkbenchTui(App[None]):
                 yield Static(
                     self.t("attachments.empty"), id="attachment-status", markup=False
                 )
+                yield Static("", id="attention-status", markup=False)
                 with Horizontal(id="context-actions"):
                     yield Button(self.t("button.files"), id="files")
                     yield Button(self.t("button.evidence"), id="evidence")
@@ -1384,7 +1477,7 @@ class WorkbenchTui(App[None]):
                     markup=False,
                 )
         with Horizontal(id="actions"):
-            yield Button(self.t("button.new_project"), id="project")
+            yield Button(self.t("button.context"), id="open-context")
             yield Button(
                 self.t("button.new_session"), id="new-session", variant="primary"
             )
@@ -1399,7 +1492,7 @@ class WorkbenchTui(App[None]):
         await self._reload()
         await self._apply_launch_intent()
         self.set_interval(RUN_POLL_SECONDS, self._poll_run)
-        self.query_one("#session-list", ListView).focus()
+        self.query_one("#timeline", TimelinePanel).focus()
 
     def on_resize(self, event: events.Resize) -> None:
         self._set_narrow(event.size.width)
@@ -1436,6 +1529,10 @@ class WorkbenchTui(App[None]):
     @on(Button.Pressed, "#project")
     def press_project(self) -> None:
         self.action_choose_project()
+
+    @on(Button.Pressed, "#open-context")
+    def press_context(self) -> None:
+        self.action_context_drawer()
 
     @on(Button.Pressed, "#new-session")
     def press_new_session(self) -> None:
@@ -2093,6 +2190,21 @@ class WorkbenchTui(App[None]):
         )
         self.push_screen(HelpScreen(self.t("help.title"), body))
 
+    def action_context_drawer(self) -> None:
+        self.push_screen(
+            ContextDrawerScreen(
+                self._context_rows(),
+                title=self.t("context.title"),
+                open_label=self.t("context.open"),
+                close_label=self.t("dialog.close"),
+            ),
+            self._context_chosen,
+        )
+
+    async def _context_chosen(self, command_id: str | None) -> None:
+        if command_id is not None:
+            await self._execute_registered_command(command_id)
+
     def get_system_commands(self, screen):
         """Populate Ctrl+P from the same registry used by slash and bindings."""
         del screen
@@ -2109,6 +2221,18 @@ class WorkbenchTui(App[None]):
 
     async def action_status_view(self) -> None:
         self._show_detail(self.t("status.title"), self._status_detail())
+
+    async def action_environment_view(self) -> None:
+        self._show_detail(
+            self.t("command.environment"),
+            self._environment_detail(),
+        )
+
+    async def action_advanced_transport(self) -> None:
+        self._show_detail(
+            self.t("command.advanced_transport"),
+            self._advanced_transport_detail(),
+        )
 
     async def action_tasks(self) -> None:
         snapshot = await self._load_resources()
@@ -2800,17 +2924,48 @@ class WorkbenchTui(App[None]):
     def _update_interaction_actions(self) -> None:
         snapshot = self.run_snapshot
         pending = bool(snapshot and snapshot.pending_approvals)
-        self.query_one("#approve", Button).disabled = not pending
-        self.query_one("#deny", Button).disabled = not pending
-        self.query_one("#answer", Button).disabled = self._pending_input_id() is None
-        self.query_one("#cancel-run", Button).disabled = (
-            not snapshot or snapshot.terminal
+        question_id = self._pending_input_id()
+        active = bool(snapshot and not snapshot.terminal)
+        action_visibility = {
+            "#approve": pending,
+            "#deny": pending,
+            "#answer": question_id is not None,
+            "#cancel-run": active,
+            "#fork-run": snapshot is not None,
+        }
+        for selector, visible in action_visibility.items():
+            button = self.query_one(selector, Button)
+            button.disabled = not visible
+            button.styles.display = "block" if visible else "none"
+        attention = self.query_one("#attention-status", Static)
+        if pending and snapshot is not None:
+            approval = snapshot.pending_approvals[0]
+            message = self.t("attention.approval").format(
+                action=approval.action,
+                reason=approval.reason,
+            )
+        elif question_id is not None:
+            question = next(
+                (
+                    event.message
+                    for event in reversed(self.timeline)
+                    if event.input_id == question_id
+                ),
+                question_id,
+            )
+            message = self.t("attention.question").format(question=question)
+        elif active and snapshot is not None:
+            message = self.t("attention.running").format(status=snapshot.status)
+        else:
+            message = ""
+        attention.update(message)
+        attention.styles.display = "block" if message else "none"
+        self.query_one("#interaction-actions").styles.display = (
+            "block" if any(action_visibility.values()) else "none"
         )
-        self.query_one("#fork-run", Button).disabled = snapshot is None
         self.query_one("#native-terminal", Button).disabled = not bool(
             snapshot and snapshot.native_process_id
         )
-        active = bool(snapshot and not snapshot.terminal)
         self.query_one("#send-turn", Button).disabled = active
         self.query_one("#steer-turn", Button).disabled = not active
         self.query_one("#queue-turn", Button).disabled = (
@@ -3089,11 +3244,127 @@ class WorkbenchTui(App[None]):
             )
         )
         self.query_one("#readiness", Static).update(content)
+        self._render_context_status()
         self._render_runtime_status()
+
+    def _render_context_status(self) -> None:
+        if self.snapshot is None or not any(self.query("#context-status")):
+            return
+        readiness = self.snapshot.readiness
+        session = self._selected_session_summary()
+        if session is None:
+            session_title = self.t("detail.empty")
+            intent = "ask"
+            authority = "read_only"
+        else:
+            session_title = session.title
+            intent = session.task_intent
+            authority = session.authority
+        intent_label = self.t(f"intent.{intent}")
+        authority_label = self.t(f"authority.{authority}")
+        if self.size.width < 100:
+            value = f"{readiness.harness_id} · {session_title[:20]} · {authority_label}"
+        else:
+            value = (
+                f"{self.t('label.provider')}: {readiness.provider} · "
+                f"{self.t('label.session')}: {session_title[:28]} · "
+                f"{self.t('label.intent')}: {intent_label} · "
+                f"{self.t('label.authority')}: {authority_label}"
+            )
+        self.query_one("#context-status", Static).update(value)
+
+    def _context_rows(self) -> tuple[tuple[str, str, str], ...]:
+        return (
+            (
+                "tasks",
+                self.t("command.tasks"),
+                self.t("context.tasks"),
+            ),
+            (
+                "processes",
+                self.t("command.processes"),
+                self.t("context.processes"),
+            ),
+            (
+                "preferences",
+                self.t("command.preferences"),
+                self.t("context.preferences"),
+            ),
+            (
+                "environment",
+                self.t("command.environment"),
+                self.t("context.environment"),
+            ),
+            (
+                "integrations",
+                self.t("command.integrations"),
+                self.t("context.integrations"),
+            ),
+            (
+                "diagnostics",
+                self.t("command.diagnostics"),
+                self.t("context.diagnostics"),
+            ),
+            (
+                "advanced-transport",
+                self.t("command.advanced_transport"),
+                self.t("context.advanced_transport"),
+            ),
+        )
+
+    def _environment_detail(self) -> str:
+        if self.snapshot is None:
+            return self.t("status.loading")
+        environment = self.snapshot.environment
+        branch = environment.branch or ("detached" if environment.detached else "—")
+        head = environment.head[:12] if environment.head else "—"
+        return "\n".join(
+            (
+                f"{self.t('label.environment')}: {environment.status}",
+                f"Workspace: {environment.worktree_root or '—'}",
+                f"Git: {branch} @ {head}",
+                (
+                    f"{self.t('environment.staged')}: {environment.staged_count} · "
+                    f"{self.t('environment.unstaged')}: {environment.unstaged_count} · "
+                    f"{self.t('environment.untracked')}: {environment.untracked_count}"
+                ),
+                f"Diff: +{environment.additions}/-{environment.deletions}",
+                (
+                    f"{self.t('label.github')}: "
+                    f"{environment.github_repository or self.t('environment.not_connected')} "
+                    f"[{environment.github_status}]"
+                ),
+                f"{self.t('label.captured')}: {environment.captured_at or '—'}",
+                f"Reason: {environment.reason or '—'}",
+            )
+        )
+
+    def _advanced_transport_detail(self) -> str:
+        if self.snapshot is None:
+            return self.t("status.loading")
+        level, transport, owner, generation = self._route_status()
+        controls = self._runtime_controls()
+        lines = [
+            f"{self.t('status.route_level')}: {level}",
+            f"{self.t('label.transport')}: {transport}",
+            f"{self.t('status.process_owner')}: {owner}",
+            f"{self.t('status.generation')}: {generation}",
+            f"{self.t('status.client_transport')}: {self.snapshot.transport_mode}",
+            "",
+        ]
+        lines.extend(
+            f"{self.t(f'control.{control.id}')}: {control.current} · "
+            f"{self.t(f'control.state.{control.state}')} · "
+            f"{self.t(f'scope.{control.effect_scope}')}"
+            + (f" · {control.remediation}" if control.remediation else "")
+            for control in controls.values()
+        )
+        return "\n".join(lines)
 
     def _set_narrow(self, width: int) -> None:
         self.query_one("#body").set_class(width < 84, "narrow")
         if self.is_mounted:
+            self._render_context_status()
             self._render_runtime_status()
 
     def _show_error(self, exc: Exception) -> None:
@@ -3274,25 +3545,22 @@ class WorkbenchTui(App[None]):
         if self.snapshot is None:
             return self.t("status.loading")
         readiness = self.snapshot.readiness
-        level, transport, owner, generation = self._route_status()
-        controls = self._runtime_controls()
+        session = self._selected_session_summary()
         lines = [
             f"{self.t('label.provider')}: {readiness.provider} [{readiness.provider_status}]",
-            f"{self.t('status.route_level')}: {level}",
-            f"{self.t('label.transport')}: {transport}",
-            f"{self.t('status.process_owner')}: {owner}",
-            f"{self.t('status.generation')}: {generation}",
-            f"{self.t('status.client_transport')}: {self.snapshot.transport_mode}",
+            f"{self.t('label.harness')}: {readiness.harness_id} [{readiness.harness_status}]",
             f"{self.t('label.readiness')}: {readiness.status}",
-            "",
         ]
-        lines.extend(
-            f"{self.t(f'control.{control.id}')}: {control.current} · "
-            f"{self.t(f'control.state.{control.state}')} · "
-            f"{self.t(f'scope.{control.effect_scope}')}"
-            + (f" · {control.remediation}" if control.remediation else "")
-            for control in controls.values()
-        )
+        if session is not None:
+            lines.extend(
+                (
+                    f"{self.t('label.session')}: {session.title}",
+                    f"{self.t('label.intent')}: {self.t(f'intent.{session.task_intent}')}",
+                    f"{self.t('label.authority')}: {self.t(f'authority.{session.authority}')}",
+                )
+            )
+            if session.compatibility_warning:
+                lines.append(f"Compatibility: {session.compatibility_warning}")
         if readiness.findings:
             lines.extend(
                 ("", f"{self.t('status.findings')}: {', '.join(readiness.findings)}")
