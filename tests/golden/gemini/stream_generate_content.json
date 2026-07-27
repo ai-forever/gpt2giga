@@ -1,0 +1,3 @@
+{
+  "body": "data: {\"candidates\": [{\"index\": 0, \"content\": {\"role\": \"model\", \"parts\": [{\"text\": \"Hello\"}]}}], \"modelVersion\": \"fixture-model\", \"responseId\": \"response-stream-1\"}\n\ndata: {\"candidates\": [{\"index\": 0, \"finishReason\": \"STOP\"}], \"modelVersion\": \"fixture-model\", \"responseId\": \"response-stream-1\", \"usageMetadata\": {\"promptTokenCount\": 4, \"candidatesTokenCount\": 1, \"totalTokenCount\": 5}}\n\n"
+}

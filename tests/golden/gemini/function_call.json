@@ -1,0 +1,30 @@
+{
+  "candidates": [
+    {
+      "index": 0,
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "functionCall": {
+              "id": "call-1",
+              "name": "lookup",
+              "args": {
+                "q": "ping"
+              }
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "safetyRatings": []
+    }
+  ],
+  "modelVersion": "fixture-model",
+  "responseId": "response-tool-1",
+  "usageMetadata": {
+    "promptTokenCount": 8,
+    "candidatesTokenCount": 3,
+    "totalTokenCount": 11
+  }
+}

@@ -104,9 +104,9 @@ provides more precise information.
 |---|---|---|
 | `GET /v1beta/models`, `/v1/v1beta/models`, `/v2/v1beta/models` | Supported | List of GigaChat models in the Gemini `models/*` form. |
 | `GET /v1beta/models/{model}`, `/v1/v1beta/models/{model}`, `/v2/v1beta/models/{model}` | Supported | A single model in the Gemini `Model` form. |
-| `POST /models/{model}:generateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Gemini `contents`/`parts`, `systemInstruction`, `generationConfig`, function declarations, and multimodal parts are mapped to a normalized chat request. |
+| `POST /models/{model}:generateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Maps the admitted `contents`/`parts`, `systemInstruction`, `generationConfig`, function declarations/results, typed inline images, and JSON Schema output into a bridge-admissible normalized chat request. Unmodeled safety, cache, file, and tool semantics remain explicit and fail OpenAI-compatible bridge admission before I/O. |
 | `POST /models/{model}:streamGenerateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Returns `text/event-stream` with Gemini `GenerateContentResponse` chunks. |
-| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Counts the text parts of contents/system/tools through GigaChat token counting. |
+| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Counts `systemInstruction`, `contents`, and function declarations through GigaChat token counting; normalization mode uses `NormalizedTokenCountRequest`/`Response`. |
 | `POST /models/{model}:embedContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Returns Gemini `embedding.values` using the GigaChat embeddings backend. |
 | `POST /models/{model}:batchEmbedContents`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Supported | Returns Gemini `embeddings[]` using the GigaChat embeddings backend. |
 | `POST /v1beta/files`, `GET /v1beta/files*` | Disabled | Router code is prepared but not mounted by default. |
@@ -208,8 +208,11 @@ request-specific network authorization, `SecretRef` ownership, strict model
 discovery, bounded streaming, and normalized errors/usage. G7-02 adds direct
 Anthropic request, response, SSE, tool, usage, stop-reason, error, and
 count-token projection through the normalized core when normalization mode is
-on. It is not yet a public OpenAI-compatible upstream-selection switch; the
-Gemini-shaped bridge and bridge closure remain gated by G7-03 and G7-04.
+on. G7-03 freezes the admitted Gemini request/response/SSE/function/safety-error/
+usage/model-list/count-token contracts, promotes inline images to typed
+references, and proves that unmodeled Gemini semantics fail bridge admission
+before provider I/O. It is not yet a public OpenAI-compatible upstream-selection
+switch; that closure remains gated by G7-04.
 
 ## Backend modes
 

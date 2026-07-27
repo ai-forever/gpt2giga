@@ -260,15 +260,20 @@ GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 
 - `off`: OpenAI Chat Completions и Anthropic Messages идут через прежние пути;
 - `shadow`: строит нормализованную диагностику рядом с прежней обработкой OpenAI Chat без изменения ответов клиенту;
-- `on`: переводит OpenAI Chat и принятое подмножество Anthropic Messages v1,
-  включая streaming и `count_tokens`, на нормализованный путь с откатом к
-  прежнему до старта ответа, если откат включён.
+- `on`: переводит OpenAI Chat, принятое подмножество Anthropic Messages v1 и
+  Gemini `countTokens` на нормализованный путь с откатом к прежнему до старта
+  ответа, если откат включён.
 
 Gemini GenerateContent использует свой выделенный адаптер Gemini-в-нормализованное и
-путь провайдера GigaChat независимо от этих флагов. OpenAI Responses остаётся на
-прежнем пути выполнения. Семантика Anthropic вне normalized v1, включая prompt
-caching, computer use, files и неподдерживаемые блоки контента, не объявляется
-поддержанной нормализованным путём и может использовать прежний fallback.
+путь провайдера GigaChat независимо от этих флагов. Его принятое bridge-
+подмножество использует типизированные inline-изображения и полностью
+смоделированные поля functions/JSON Schema; safety settings, cached content,
+files, неподдерживаемые tools и прочая несмоделированная семантика остаются
+явными и отклоняются admission для OpenAI-compatible bridge до provider I/O.
+OpenAI Responses остаётся на прежнем пути выполнения. Семантика Anthropic вне
+normalized v1, включая prompt caching, computer use, files и неподдерживаемые
+блоки контента, не объявляется поддержанной нормализованным путём и может
+использовать прежний fallback.
 
 Подробное описание моделей и текущих путей выполнения: [Нормализованные сообщения](./architecture/normalized-messages.md).
 

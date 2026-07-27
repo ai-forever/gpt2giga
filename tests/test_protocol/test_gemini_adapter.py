@@ -13,12 +13,18 @@ from gpt2giga.protocols.gemini.streaming import (
     normalized_stream_event_to_gemini_chunk,
 )
 from gpt2giga.protocols.normalized import (
+    BridgeFeature,
+    DownstreamProtocol,
     NormalizedChoice,
     NormalizedMessage,
+    NormalizedProtocolCapabilities,
     NormalizedResponse,
     NormalizedStreamEvent,
+    NormalizedTokenLimits,
     NormalizedToolCall,
     NormalizedUsage,
+    UnsupportedSemanticLossError,
+    admit_protocol_bridge_request,
 )
 
 
@@ -98,7 +104,14 @@ def test_gemini_adapter_maps_generate_content_to_normalized_request():
     assert payload["model"] == "gemini-pro"
     assert payload["messages"][0]["role"] == "system"
     assert payload["messages"][1]["content"][0]["text"] == "Describe this image"
-    assert payload["messages"][1]["content"][1]["type"] == "image_url"
+    assert payload["messages"][1]["content"][1]["type"] == "image_reference"
+    assert payload["messages"][1]["content"][1]["image_reference"] == {
+        "source": "data_url",
+        "uri": "data:image/png;base64,AA==",
+        "mime_type": "image/png",
+        "raw_extensions": {},
+        "provider_metadata": {},
+    }
     assert payload["tools"][0]["name"] == "lookup"
     assert payload["tools"][0]["parameters"]["type"] == "object"
     assert payload["tools"][0]["parameters"]["properties"]["q"]["type"] == "string"
@@ -151,9 +164,7 @@ def test_gemini_adapter_maps_response_json_schema_alias_to_json_schema():
             "required": ["title"],
         }
     }
-    assert payload["response_format"]["raw_extensions"] == {
-        "responseMimeType": "application/json"
-    }
+    assert payload["response_format"]["raw_extensions"] == {}
     assert normalized.raw_extensions == {}
 
 
@@ -796,10 +807,162 @@ def test_gemini_adapter_preserves_multiple_function_response_parts():
         {"value": 1},
         {"value": 2},
     ]
-    assert normalized.messages[0].raw_extensions["functionResponse"] == {
-        "name": "first",
-        "response": {"value": 1},
-    }
+    assert normalized.messages[0].raw_extensions == {}
+
+
+def test_gemini_adapter_output_is_admissible_for_reviewed_bridge_subset():
+    normalized = GeminiProtocolAdapter().generate_content_to_normalized(
+        {
+            "systemInstruction": {"parts": [{"text": "Be concise."}]},
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": "Inspect."},
+                        {
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": "AA==",
+                            }
+                        },
+                    ],
+                },
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "id": "call-1",
+                                "name": "lookup",
+                                "args": {"q": "ping"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "function",
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "id": "call-1",
+                                "name": "lookup",
+                                "response": {"answer": "pong"},
+                            }
+                        }
+                    ],
+                },
+            ],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "lookup",
+                            "parameters": {"type": "object"},
+                        }
+                    ]
+                }
+            ],
+            "toolConfig": {
+                "functionCallingConfig": {
+                    "mode": "ANY",
+                    "allowedFunctionNames": ["lookup"],
+                }
+            },
+            "generationConfig": {
+                "maxOutputTokens": 64,
+                "responseMimeType": "application/json",
+                "responseSchema": {"type": "object"},
+            },
+        },
+        model="local-model",
+    )
+
+    admission = admit_protocol_bridge_request(
+        normalized,
+        downstream=DownstreamProtocol.GEMINI,
+        upstream=_bridge_capabilities(),
+        downstream_capabilities=frozenset(BridgeFeature),
+        input_token_count=8,
+    )
+
+    assert admission.downstream is DownstreamProtocol.GEMINI
+    assert BridgeFeature.IMAGE_REFERENCES in admission.required_features
+    assert BridgeFeature.TOOL_RESULTS in admission.required_features
+    assert BridgeFeature.JSON_SCHEMA_OUTPUT in admission.required_features
+
+
+def test_gemini_bridge_rejects_unmodeled_semantics_before_transport():
+    normalized = GeminiProtocolAdapter().generate_content_to_normalized(
+        {
+            "contents": [{"parts": [{"text": "hello"}]}],
+            "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT"}],
+        },
+        model="local-model",
+    )
+    transport_called = False
+
+    def execute_after_admission():
+        nonlocal transport_called
+        admit_protocol_bridge_request(
+            normalized,
+            downstream=DownstreamProtocol.GEMINI,
+            upstream=_bridge_capabilities(),
+            downstream_capabilities=frozenset(BridgeFeature),
+            input_token_count=1,
+        )
+        transport_called = True
+
+    with pytest.raises(UnsupportedSemanticLossError, match="raw_extensions"):
+        execute_after_admission()
+
+    assert transport_called is False
+
+
+def test_gemini_adapter_maps_count_tokens_to_normalized_operation():
+    normalized = GeminiProtocolAdapter().count_tokens_to_normalized(
+        {
+            "generateContentRequest": {
+                "contents": [{"parts": [{"text": "count these words"}]}],
+                "tools": [
+                    {
+                        "functionDeclarations": [
+                            {
+                                "name": "lookup",
+                                "parameters": {"type": "object"},
+                            }
+                        ]
+                    }
+                ],
+            }
+        },
+        model="local-model",
+    )
+
+    admission = admit_protocol_bridge_request(
+        normalized,
+        downstream=DownstreamProtocol.GEMINI,
+        upstream=_bridge_capabilities(),
+        downstream_capabilities=frozenset(BridgeFeature),
+        input_token_count=3,
+    )
+
+    assert normalized.protocol == "gemini"
+    assert normalized.operation == "count_tokens"
+    assert normalized.input.stream is False
+    assert normalized.input.messages[0].content == "count these words"
+    assert BridgeFeature.COUNT_TOKENS in admission.required_features
+
+
+def _bridge_capabilities():
+    return NormalizedProtocolCapabilities(
+        profile="local-openai-compatible",
+        features=frozenset(BridgeFeature),
+        limits=NormalizedTokenLimits(
+            context_window=8192,
+            max_input_tokens=6144,
+            max_output_tokens=2048,
+        ),
+    )
 
 
 def test_gemini_adapter_preserves_mixed_text_and_function_response_parts():

@@ -399,9 +399,7 @@ def test_gemini_generate_content_maps_response_json_schema_alias():
             "required": ["title"],
         }
     }
-    assert payload["response_format"]["raw_extensions"] == {
-        "responseMimeType": "application/json"
-    }
+    assert payload["response_format"]["raw_extensions"] == {}
 
 
 def test_gemini_generate_content_preserves_tool_parameters_json_schema():
@@ -541,12 +539,6 @@ def test_gemini_generate_content_preserves_multi_function_response_payload():
             "content": '{"result": "one"}',
             "name": "first",
             "tool_call_id": "state-1",
-            "gemini_role": "function",
-            "functionResponse": {
-                "id": "state-1",
-                "name": "first",
-                "response": {"result": "one"},
-            },
         },
         {
             "role": "tool",
@@ -557,11 +549,6 @@ def test_gemini_generate_content_preserves_multi_function_response_payload():
             "content": '{"result": "two"}',
             "name": "second",
             "tool_call_id": "second",
-            "gemini_role": "function",
-            "functionResponse": {
-                "name": "second",
-                "response": {"result": "two"},
-            },
         },
     ]
 
@@ -988,6 +975,47 @@ def test_gemini_count_tokens_includes_system_contents_and_tools():
     assert app.state.gigachat_client.token_count_calls == [
         {
             "texts": ["system prompt", "hello world", "lookup", "Find fresh data"],
+            "model": "gemini-pro",
+        }
+    ]
+
+
+def test_gemini_count_tokens_normalization_on_uses_normalized_contract():
+    app = make_app(normalization_mode="on", legacy_chat_fallback=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:countTokens",
+        json={
+            "generateContentRequest": {
+                "systemInstruction": {"parts": [{"text": "Be concise."}]},
+                "contents": [{"parts": [{"text": "count these words"}]}],
+                "tools": [
+                    {
+                        "functionDeclarations": [
+                            {
+                                "name": "lookup",
+                                "description": "Lookup data",
+                                "parameters": {"type": "object"},
+                            }
+                        ]
+                    }
+                ],
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["totalTokens"] > 0
+    assert app.state.gigachat_client.token_count_calls == [
+        {
+            "texts": [
+                "Be concise.",
+                "count these words",
+                "lookup",
+                "Lookup data",
+                '{"type": "object", "properties": {}}',
+            ],
             "model": "gemini-pro",
         }
     ]

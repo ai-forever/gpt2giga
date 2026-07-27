@@ -105,9 +105,9 @@ query-параметрах чаще попадают в журналы дост�
 |---|---|---|
 | `GET /v1beta/models`, `/v1/v1beta/models`, `/v2/v1beta/models` | Поддерживается | Список моделей GigaChat в форме Gemini `models/*`. |
 | `GET /v1beta/models/{model}`, `/v1/v1beta/models/{model}`, `/v2/v1beta/models/{model}` | Поддерживается | Одна модель в форме Gemini `Model`. |
-| `POST /models/{model}:generateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | `contents`/`parts`, `systemInstruction`, `generationConfig`, объявления функций и мультимодальные части Gemini сопоставляются с нормализованным чат-запросом. |
+| `POST /models/{model}:generateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Принятые `contents`/`parts`, `systemInstruction`, `generationConfig`, объявления/результаты функций, типизированные inline-изображения и JSON Schema output сопоставляются с допустимым для bridge нормализованным чат-запросом. Несмоделированные safety, cache, file и tool-семантики остаются явными и отклоняются admission для OpenAI-compatible bridge до I/O. |
 | `POST /models/{model}:streamGenerateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает `text/event-stream` с фрагментами Gemini `GenerateContentResponse`. |
-| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Считает текстовые части contents/system/tools через подсчёт токенов GigaChat. |
+| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Считает `systemInstruction`, `contents` и объявления функций через подсчёт токенов GigaChat; режим нормализации использует `NormalizedTokenCountRequest`/`Response`. |
 | `POST /models/{model}:embedContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает Gemini `embedding.values`, используя бэкенд эмбеддингов GigaChat. |
 | `POST /models/{model}:batchEmbedContents`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает Gemini `embeddings[]`, используя бэкенд эмбеддингов GigaChat. |
 | `POST /v1beta/files`, `GET /v1beta/files*` | Отключено | Код роутера подготовлен, но по умолчанию не подключён. |
@@ -209,9 +209,11 @@ Completions для OpenAI-compatible/vLLM с точной привязкой п�
 discovery, ограниченным streaming и нормализованными errors/usage. G7-02
 добавляет прямую проекцию Anthropic request, response, SSE, tools, usage,
 stop-reason, errors и count-token через нормализованное ядро при включённом
-режиме нормализации. Это ещё не публичный переключатель OpenAI-compatible
-upstream; Gemini-shaped bridge и закрытие фазы остаются за воротами G7-03 и
-G7-04.
+режиме нормализации. G7-03 фиксирует принятые Gemini-контракты request/response/
+SSE/function/safety-error/usage/model-list/count-token, переводит inline-
+изображения в типизированные ссылки и доказывает отказ bridge admission для
+несмоделированной Gemini-семантики до provider I/O. Это ещё не публичный
+переключатель OpenAI-compatible upstream; закрытие остаётся за G7-04.
 
 ## Режимы бэкенда
 

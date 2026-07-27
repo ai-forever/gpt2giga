@@ -13,22 +13,27 @@ dedicated Gemini-to-normalized adapter in the main execution path.
   Messages go through legacy transforms.
 - `GPT2GIGA_NORMALIZATION_MODE=shadow`: OpenAI Chat builds a normalized request
   alongside the legacy path and stores a safe diagnostic shape hash without prompt content.
-- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions and the accepted
-  Anthropic Messages v1 subset are executed through their protocol adapters,
-  normalized models, and `GigaChatProviderAdapter`; a legacy fallback is
-  available before the response starts via
+- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions, the accepted
+  Anthropic Messages v1 subset, and Gemini `countTokens` are executed through
+  their protocol adapters, normalized models, and `GigaChatProviderAdapter`; a
+  legacy fallback is available before the response starts via
   `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
 - OpenAI Responses is still executed through legacy route transforms.
 - Gemini GenerateContent and streamGenerateContent are executed through
   `GeminiProtocolAdapter`, normalized models, and `GigaChatProviderAdapter`
-  independently of the OpenAI Chat normalization flags.
+  independently of the OpenAI Chat normalization flags. Their admitted request,
+  response, SSE, function-calling, usage, safety/error, model-list, and typed
+  image contracts are frozen by Gemini golden fixtures.
 - Debug endpoints can translate between the `openai`, `anthropic`, `normalized`, and
   `gigachat` formats for protected admin workflows.
 - G7-01 provides a normalized OpenAI Chat Completions upstream adapter for
   explicitly admitted OpenAI-compatible/vLLM profiles. It is an internal
   execution component, not a new public route switch. G7-02 adds the direct
-  Anthropic request/response/SSE and count-token projection; the Gemini-shaped
-  bridge still awaits G7-03.
+  Anthropic request/response/SSE and count-token projection. G7-03 makes the
+  admitted Gemini subset bridge-compatible: fully modeled fields no longer
+  masquerade as unmodeled extensions, images use typed references, and
+  `countTokens` uses `NormalizedTokenCountRequest`. Public upstream selection
+  remains gated by G7-04.
 
 ## Core models
 
@@ -243,6 +248,13 @@ The normalized layer differs as follows:
   force the built-in provider tools.
 - Gemini candidates, finish reasons, and usage metadata are formed on the way out of
   the normalized response/stream adapters.
+- Accepted inline images use typed `NormalizedImageReference` values. Fully
+  modeled function-call config, function responses, and JSON Schema output do
+  not remain in `raw_extensions`; safety settings, cached content, unsupported
+  tools, files, and other unmodeled semantics do, so OpenAI-compatible bridge
+  admission rejects them before provider I/O.
+- With normalization mode `on`, `countTokens` uses the same normalized
+  token-count request/response contract as the admitted bridge.
 
 The Gemini Files/Batches router modules are prepared but not mounted in the public
 API surface; they are not part of the current normalized execution path.

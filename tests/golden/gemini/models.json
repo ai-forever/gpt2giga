@@ -1,0 +1,19 @@
+{
+  "models": [
+    {
+      "name": "models/fixture-model",
+      "baseModelId": "fixture-model",
+      "version": "",
+      "displayName": "fixture",
+      "description": "GigaChat model exposed through the Gemini-compatible API.",
+      "inputTokenLimit": 8192,
+      "outputTokenLimit": 2048,
+      "supportedGenerationMethods": [
+        "generateContent",
+        "streamGenerateContent",
+        "countTokens"
+      ]
+    }
+  ],
+  "nextPageToken": ""
+}

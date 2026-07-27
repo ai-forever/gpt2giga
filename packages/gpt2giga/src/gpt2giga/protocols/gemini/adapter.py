@@ -18,8 +18,10 @@ from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
     NormalizedContentPart,
     NormalizedGenerationConfig,
+    NormalizedImageReference,
     NormalizedMessage,
     NormalizedResponseFormat,
+    NormalizedTokenCountRequest,
     NormalizedTool,
     NormalizedToolCall,
 )
@@ -140,6 +142,37 @@ class GeminiProtocolAdapter:
             generation_config=_normalize_generation_config(generation_config),
             metadata=metadata,
             raw_extensions=raw_extensions,
+        )
+
+    def count_tokens_to_normalized(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        model: str | None,
+        context: RequestContext | None = None,
+        builtin_tool_mapping_enabled: bool = True,
+    ) -> NormalizedTokenCountRequest:
+        """Convert Gemini countTokens input to a normalized operation."""
+        source = payload.get("generateContentRequest")
+        if source is None:
+            source = payload
+        if not isinstance(source, Mapping):
+            raise gemini_invalid_request(
+                "Gemini generateContentRequest must be an object.",
+                param="generateContentRequest",
+            )
+        chat = self.generate_content_to_normalized(
+            source,
+            model=model,
+            context=context,
+            stream=False,
+            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
+        )
+        return NormalizedTokenCountRequest(
+            id=context.request_id if context is not None else None,
+            protocol="gemini",
+            model=chat.model,
+            input=chat,
         )
 
 
@@ -472,8 +505,6 @@ def _gemini_protocol_extensions(payload: Mapping[str, Any]) -> dict[str, Any]:
     for source, target in (
         ("safetySettings", "safetySettings"),
         ("safety_settings", "safetySettings"),
-        ("toolConfig", "toolConfig"),
-        ("tool_config", "toolConfig"),
         ("cachedContent", "cachedContent"),
         ("cached_content", "cachedContent"),
         ("serviceTier", "serviceTier"),
@@ -486,6 +517,11 @@ def _gemini_protocol_extensions(payload: Mapping[str, Any]) -> dict[str, Any]:
             and target not in extensions
         ):
             extensions[target] = payload[source]
+    tool_config_extensions = _tool_config_extensions(
+        _mapping_value(payload, "toolConfig", "tool_config")
+    )
+    if tool_config_extensions:
+        extensions["toolConfig"] = tool_config_extensions
     generation_config = _mapping_value(payload, "generationConfig", "generation_config")
     ignored_generation_fields = {
         key: value
@@ -520,6 +556,34 @@ def _gemini_protocol_extensions(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
     if ignored_generation_fields:
         extensions["generationConfig"] = ignored_generation_fields
+    return extensions
+
+
+def _tool_config_extensions(value: Mapping[str, Any]) -> dict[str, Any]:
+    extensions = {
+        key: item
+        for key, item in value.items()
+        if key not in {"functionCallingConfig", "function_calling_config"}
+    }
+    function_config = _part_value(
+        value,
+        "functionCallingConfig",
+        "function_calling_config",
+    )
+    if not isinstance(function_config, Mapping):
+        return extensions
+    function_extensions = {
+        key: item
+        for key, item in function_config.items()
+        if key
+        not in {
+            "allowedFunctionNames",
+            "allowed_function_names",
+            "mode",
+        }
+    }
+    if function_extensions:
+        extensions["functionCallingConfig"] = function_extensions
     return extensions
 
 
@@ -584,7 +648,6 @@ def _normalize_content(value: Mapping[str, Any] | str) -> list[NormalizedMessage
             messages.append(
                 _function_response_to_normalized(
                     part,
-                    gemini_role=value.get("role"),
                 )
             )
             continue
@@ -928,7 +991,6 @@ def _normalize_response_format(
         return NormalizedResponseFormat(
             type="json_schema",
             json_schema={"schema": dict(schema)},
-            raw_extensions={"responseMimeType": mime_type},
         )
     return NormalizedResponseFormat(
         type=mime_type,
@@ -947,9 +1009,12 @@ def _part_to_normalized(part: Mapping[str, Any]) -> NormalizedContentPart:
         data = inline_data.get("data")
         if isinstance(mime_type, str) and mime_type.startswith("image/") and data:
             return NormalizedContentPart(
-                type="image_url",
-                data={"url": f"data:{mime_type};base64,{data}"},
-                mime_type=mime_type,
+                type="image_reference",
+                image_reference=NormalizedImageReference(
+                    source="data_url",
+                    uri=f"data:{mime_type};base64,{data}",
+                    mime_type=mime_type,
+                ),
             )
         return NormalizedContentPart(
             type="file",
@@ -1004,8 +1069,6 @@ def _function_response_payload(part: Mapping[str, Any]) -> dict[str, Any]:
 
 def _function_response_to_normalized(
     part: Mapping[str, Any],
-    *,
-    gemini_role: Any,
 ) -> NormalizedMessage:
     function_response = _function_response_payload(part)
     tool_call_id = _string_or_none(function_response.get("id"))
@@ -1015,8 +1078,9 @@ def _function_response_to_normalized(
         name=_string_or_none(function_response.get("name")),
         tool_call_id=tool_call_id or _string_or_none(function_response.get("name")),
         raw_extensions={
-            "gemini_role": gemini_role,
-            "functionResponse": function_response,
+            key: value
+            for key, value in function_response.items()
+            if key not in {"id", "name", "response"}
         },
     )
 

@@ -13,21 +13,27 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
   Messages идут через прежние преобразования.
 - `GPT2GIGA_NORMALIZATION_MODE=shadow`: OpenAI Chat строит нормализованный запрос
   рядом с прежним путём и сохраняет безопасный диагностический хеш формы без содержимого промпта.
-- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions и принятое
-  подмножество Anthropic Messages v1 исполняются через свои protocol adapters,
-  нормализованные модели и `GigaChatProviderAdapter`; до старта ответа доступен
-  откат к прежнему через `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
+- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions, принятое
+  подмножество Anthropic Messages v1 и Gemini `countTokens` исполняются через
+  свои protocol adapters, нормализованные модели и `GigaChatProviderAdapter`;
+  до старта ответа доступен откат к прежнему через
+  `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
 - OpenAI Responses пока исполняется через прежние преобразования маршрута.
 - Gemini GenerateContent и streamGenerateContent исполняются через
   `GeminiProtocolAdapter`, нормализованные модели и `GigaChatProviderAdapter`
-  независимо от флагов нормализации OpenAI Chat.
+  независимо от флагов нормализации OpenAI Chat. Их принятые контракты request,
+  response, SSE, function calling, usage, safety/error, model list и
+  типизированных изображений зафиксированы golden-фикстурами Gemini.
 - Debug-эндпоинты умеют переводить между форматами `openai`, `anthropic`, `normalized` и
   `gigachat` для защищённых admin-сценариев.
 - G7-01 предоставляет нормализованный upstream-адаптер OpenAI Chat Completions
   для явно допущенных профилей OpenAI-compatible/vLLM. Это внутренний компонент
   исполнения, а не новый публичный переключатель маршрутов. G7-02 добавляет
-  прямую проекцию Anthropic request/response/SSE и count-token; Gemini-shaped
-  bridge остаётся за воротами G7-03.
+  прямую проекцию Anthropic request/response/SSE и count-token. G7-03 делает
+  принятое подмножество Gemini совместимым с bridge: полностью смоделированные
+  поля больше не маскируются под несмоделированные extensions, изображения
+  используют типизированные ссылки, а `countTokens` — контракт
+  `NormalizedTokenCountRequest`. Публичный выбор upstream остаётся за G7-04.
 
 ## Основные модели
 
@@ -244,6 +250,14 @@ Gemini GenerateContent — отдельный публичный протоко�
   форсирует встроенные провайдерские инструменты.
 - кандидаты Gemini, причины завершения и метаданные использования формируются на выходе из
   адаптеров нормализованного ответа/потока.
+- принятые inline-изображения используют типизированные
+  `NormalizedImageReference`. Полностью смоделированные function-call config,
+  function responses и JSON Schema output не остаются в `raw_extensions`;
+  safety settings, cached content, неподдерживаемые tools, files и прочая
+  несмоделированная семантика остаются там, поэтому bridge admission для
+  OpenAI-compatible отклоняет их до provider I/O.
+- при включённом режиме нормализации `countTokens` использует тот же
+  нормализованный контракт token-count request/response, что и принятый bridge.
 
 Модули роутеров Gemini Files/Batches подготовлены, но не подключены в публичном
 наборе API; они не являются частью текущего нормализованного пути выполнения.
