@@ -7,9 +7,11 @@ on:
       - 'packages/**'
       - '!packages/**/*.md'
       - 'tests/**'
+      - 'benchmarks/gigaloom_performance/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/ci.yaml'
+      - '.github/workflows/nightly-smoke.yaml'
   pull_request:
     branches: [ main ]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -17,9 +19,11 @@ on:
       - 'packages/**'
       - '!packages/**/*.md'
       - 'tests/**'
+      - 'benchmarks/gigaloom_performance/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/ci.yaml'
+      - '.github/workflows/nightly-smoke.yaml'
 
 jobs:
   cockpit-v2-frontend:
@@ -87,6 +91,19 @@ jobs:
         run: |
           uv run pytest tests/ -n 4 --cov=. --cov-report=json:coverage.json --cov-fail-under=80
         continue-on-error: false
+
+      - name: Run deterministic GigaLoom performance budgets
+        if: matrix.python-version == '3.13'
+        run: uv run giga benchmark performance --profile ci-smoke --samples 5 --output performance-artifacts/ci-smoke.json
+
+      - name: Upload bounded performance smoke report
+        if: always() && matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v7
+        with:
+          name: gigaloom-performance-ci-smoke
+          path: performance-artifacts/ci-smoke.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload coverage artifact
         if: matrix.python-version == '3.13'

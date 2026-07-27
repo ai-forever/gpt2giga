@@ -6,10 +6,20 @@ Run the bounded, hermetic CI smoke profile:
 uv run giga benchmark performance --profile ci-smoke --samples 5 --output /tmp/gigaloom-performance.json
 ```
 
-Use `--profile local-detail` for an explicitly opt-in local capture. All
-profiles use only temporary content-free fixtures: they do not read native
-provider homes, send provider traffic, or retain prompts, responses, tokens,
-or credentials.
+The blocking profile contains only the environment-stable in-memory session
+and transcript projection budgets. Filesystem, SQLite, worker, TUI, Web, RSS,
+and process-startup measurements remain in `--profile local-detail`; they are
+scheduled or explicitly opt-in evidence and cannot make provider or external
+network latency look like a local-code regression. All profiles use only
+temporary content-free fixtures: they do not read native provider homes, send
+provider traffic, or retain prompts, responses, tokens, or credentials.
+
+Every report records the tracked G6-03 baseline and a SHA-256 fingerprint of
+its Python/platform/SQLite environment. The writer rejects reports above the
+profile limit: 64 KiB for CI smoke, 512 KiB for local detail, and 2 MiB for TUI
+or runtime detail. Pull-request CI retains the smoke artifact for 7 days.
+Nightly and manual-dispatch runs capture the three detailed profiles and retain
+their bounded artifacts for 14 days.
 
 Profile the current Textual shell and publish the G5 repair ranking with:
 
@@ -45,9 +55,8 @@ concurrency, stop-on-idle ownership, and broader API/database/event repairs
 unselected after the bounded G6-02 duplicate filesystem-scan repair; it does
 not access provider, external-network, or native-home state.
 
-The JSON report is schema-versioned. It records wall and CPU percentiles,
-process RSS, observable block I/O, stage timings, conservative CI smoke
-budgets, and the full workload contract for later TUI and durable-runtime
-profiling. Metrics that are not portable or not yet observable are `null`
-instead of inferred. Optimization targets remain unset until the owning
+The JSON report is schema-versioned. Detailed profiles record wall and CPU
+percentiles, process RSS, observable block I/O, stage timings, and the full
+workload contract. Metrics that are not portable or not yet observable are
+`null` instead of inferred. Optimization targets remain unset until the owning
 performance slice reviews a measured baseline.

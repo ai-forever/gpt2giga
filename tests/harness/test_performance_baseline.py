@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import stat
 import subprocess
 import sys
@@ -10,11 +11,44 @@ import pytest
 from gpt2giga_harness import cli
 from gpt2giga_harness.performance_baseline import (
     CI_SMOKE_BUDGETS_MS,
+    DETAIL_REFERENCE_BUDGETS_MS,
     FIXTURE_SET_VERSION,
+    REGRESSION_BASELINE_ID,
+    REPORT_ARTIFACT_MAX_BYTES,
+    REPORT_RETENTION_DAYS,
     REQUIRED_WORKLOADS,
     SCHEMA_VERSION,
     run_performance_baseline,
+    write_performance_report,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _assert_g6_03_report_contract(report, *, profile):
+    assert report["baseline"] == {
+        "id": REGRESSION_BASELINE_ID,
+        "profile": profile,
+        "schema_version": report["schema_version"],
+        "fixture_set_version": report["fixture_set_version"],
+        "comparison": "tracked_absolute_budget",
+        "budget_source": "versioned_profile_constants",
+        "ci_blocking_metrics": (
+            list(CI_SMOKE_BUDGETS_MS) if profile == "ci-smoke" else []
+        ),
+        "external_latency_failure_policy": "excluded",
+    }
+    assert report["artifact_policy"] == {
+        "max_bytes": REPORT_ARTIFACT_MAX_BYTES[profile],
+        "retention_days": REPORT_RETENTION_DAYS[profile],
+        "bounded_samples_max": 100,
+        "content_free": True,
+    }
+    fingerprint = report["environment"]["fingerprint"]
+    assert fingerprint["algorithm"] == "sha256"
+    assert len(fingerprint["value"]) == 64
+    assert fingerprint["fields"] == sorted(fingerprint["fields"])
+    assert "sqlite" in fingerprint["fields"]
 
 
 def test_cli_import_does_not_load_testclient_backend():
@@ -69,6 +103,7 @@ def test_performance_baseline_imports_without_posix_resource_module():
 def test_performance_baseline_is_bounded_content_free_and_machine_readable():
     report = run_performance_baseline(samples=2)
 
+    _assert_g6_03_report_contract(report, profile="ci-smoke")
     assert report["schema_version"] == SCHEMA_VERSION
     assert report["fixture_set_version"] == FIXTURE_SET_VERSION
     assert report["samples_per_probe"] == 2
@@ -77,6 +112,7 @@ def test_performance_baseline_is_bounded_content_free_and_machine_readable():
         "secrets_captured": False,
         "native_homes_accessed": False,
         "provider_traffic": False,
+        "network_accessed": False,
         "temporary_state_only": True,
     }
     assert report["measurement_contract"]["required_workloads"] == list(
@@ -85,14 +121,26 @@ def test_performance_baseline_is_bounded_content_free_and_machine_readable():
     assert {result["id"] for result in report["results"]} == set(CI_SMOKE_BUDGETS_MS)
     for result in report["results"]:
         assert set(result["percentiles_ms"]) == {"p50", "p95", "p99"}
+        assert result["regression_gate"]["blocking"] is True
+        assert result["regression_gate"]["classification"] == "environment_stable_ci"
         assert result["io"]["io_wait_ms"] is None
         assert result["optimization_target_ms"] is None
         assert "samples" not in result
+    assert (
+        report["measurement_contract"][
+            "provider_or_external_network_latency_is_blocking"
+        ]
+        is False
+    )
 
 
 def test_local_detail_profile_keeps_bounded_content_free_samples():
     report = run_performance_baseline(samples=1, profile="local-detail")
 
+    _assert_g6_03_report_contract(report, profile="local-detail")
+    assert {result["id"] for result in report["results"]} == set(
+        DETAIL_REFERENCE_BUDGETS_MS
+    )
     for result in report["results"]:
         assert len(result["samples"]) == 1
         assert set(result["samples"][0]) == {
@@ -103,11 +151,21 @@ def test_local_detail_profile_keeps_bounded_content_free_samples():
             "output_blocks",
             "stages_ms",
         }
+        if result["id"] not in CI_SMOKE_BUDGETS_MS:
+            assert result["regression_gate"] == {
+                "blocking": False,
+                "classification": "scheduled_or_opt_in_detail",
+                "budget_ms": {
+                    "percentile": "p95",
+                    "p95": DETAIL_REFERENCE_BUDGETS_MS[result["id"]],
+                },
+            }
 
 
 def test_tui_detail_profile_is_ranked_bounded_and_content_free():
     report = run_performance_baseline(samples=1, profile="tui-detail")
 
+    _assert_g6_03_report_contract(report, profile="tui-detail")
     assert report["schema_version"] == "gigaloom.tui-performance-profile.v3"
     assert report["fixture_set_version"] == "g5-03.v1"
     assert report["privacy"] == {
@@ -220,6 +278,7 @@ def test_tui_detail_profile_is_ranked_bounded_and_content_free():
 def test_runtime_detail_profile_is_ranked_bounded_and_content_free():
     report = run_performance_baseline(samples=1, profile="runtime-detail")
 
+    _assert_g6_03_report_contract(report, profile="runtime-detail")
     assert report["schema_version"] == "gigaloom.runtime-performance-profile.v3"
     assert report["fixture_set_version"] == "g6-02.v1"
     assert report["privacy"] == {
@@ -316,6 +375,33 @@ def test_performance_cli_writes_private_report(tmp_path, capsys):
     assert payload["schema_version"] == SCHEMA_VERSION
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert "Wrote private performance report" in capsys.readouterr().out
+
+
+def test_performance_report_rejects_artifacts_over_profile_limit(tmp_path):
+    output = tmp_path / "oversized.json"
+    report = run_performance_baseline(samples=1)
+    report["oversized_fixture"] = "x" * REPORT_ARTIFACT_MAX_BYTES["ci-smoke"]
+
+    with pytest.raises(ValueError, match="limit is 65536"):
+        write_performance_report(output, report)
+
+    assert not output.exists()
+
+
+def test_performance_workflows_split_ci_and_detailed_profiles():
+    ci = (REPO_ROOT / ".github/workflows/ci.yaml").read_text(encoding="utf-8")
+    nightly = (REPO_ROOT / ".github/workflows/nightly-smoke.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        "giga benchmark performance --profile ci-smoke --samples 5 "
+        "--output performance-artifacts/ci-smoke.json"
+    ) in ci
+    assert "retention-days: 7" in ci
+    for profile in ("local-detail", "tui-detail", "runtime-detail"):
+        assert f"giga benchmark performance --profile {profile}" in nightly
+    assert "retention-days: 14" in nightly
 
 
 def test_performance_cli_writes_private_tui_profile(tmp_path, capsys):
