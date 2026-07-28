@@ -1,6 +1,8 @@
 # Documentation
 
-This site is built from the Markdown files in `docs/` through the Docusaurus wrapper in `docs-site/` and is published to GitHub Pages.
+GigaLoom is developed in
+[`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom). This site is
+built from Markdown in `docs/` through the Docusaurus wrapper in `docs-site/`.
 
 ## Local build
 
@@ -44,16 +46,18 @@ The public site includes:
 
 - user guides from `docs/*.md`;
 - architecture notes from `docs/architecture/`;
-- links to runnable examples and integration guides in the repository;
-- GitHub links to deployment manifests and other files outside `docs/`.
+- standalone user, operations, security, architecture, and release guides;
+- links to target-owned files in `krakenalt/gigaloom`;
+- explicitly labeled historical or canonical gateway references.
 
 ## Update rules
 
 - Keep README and `docs-site/sidebars.ts` consistent with the list of core documents.
 - For links to files outside `docs/`, use GitHub URLs; otherwise the published site may lead beyond the Pages artifact.
 - Do not publish secrets, local `.env`, credentials, keys, or raw traffic payloads.
-- When deployment behavior changes, update `docs/deployment.md`, `deploy/README.md`, and the relevant Compose manifests together.
-- When compatibility behavior changes, update `docs/api-compatibility.md` and `docs/client-parameter-compatibility.md`.
+- Current development links must point to `krakenalt/gigaloom`.
+- Keep gateway links in `gateway-integration.md` and source-repository links in
+  `source-history.md` explicitly labeled.
 
 Ignored `docs/internal/**` and `docs/codex/**` are local coordination state, not
 public documentation sources. Update the English source and its Russian locale

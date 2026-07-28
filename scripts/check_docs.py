@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import re
 import subprocess
 import sys
@@ -23,6 +22,16 @@ FENCE_RE = re.compile(r"^```", re.MULTILINE)
 CHANGELOG_VERSION_RE = re.compile(r"^## \[([^]]+)]", re.MULTILINE)
 PUBLIC_DOC_PREFIX = "docs/"
 RU_DOC_ROOT = Path("docs-site/i18n/ru/docusaurus-plugin-content-docs/current")
+TARGET_REPOSITORY = "https://github.com/krakenalt/gigaloom"
+TARGET_DOCUMENTATION = "https://krakenalt.github.io/gigaloom/"
+SOURCE_REPOSITORY = "https://github.com/ai-forever/gpt2giga"
+SOURCE_LINK_ALLOWLIST = {
+    Path("README.md"),
+    Path("docs/gateway-integration.md"),
+    Path("docs/source-history.md"),
+    RU_DOC_ROOT / "gateway-integration.md",
+    RU_DOC_ROOT / "source-history.md",
+}
 
 
 @dataclass(frozen=True)
@@ -128,58 +137,83 @@ def check_locale_coverage(root: Path) -> list[Issue]:
     return issues
 
 
-def proxy_setting_names(config_path: Path) -> set[str]:
-    """Extract documented environment names from ProxySettings annotations."""
-    tree = ast.parse(config_path.read_text(encoding="utf-8"))
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == "ProxySettings":
-            return {
-                f"GPT2GIGA_{item.target.id.upper()}"
-                for item in node.body
-                if isinstance(item, ast.AnnAssign)
-                and isinstance(item.target, ast.Name)
-                and not item.target.id.startswith("_")
-            }
-    raise ValueError(f"ProxySettings not found in {config_path}")
-
-
-def check_proxy_settings(root: Path) -> list[Issue]:
-    """Require the configuration reference to name every public proxy setting."""
-    config_path = root / "packages/gpt2giga/src/gpt2giga/models/config.py"
-    docs_path = root / "docs/configuration.md"
-    locale_path = root / RU_DOC_ROOT / "configuration.md"
-    names = proxy_setting_names(config_path)
+def check_package_versions(root: Path) -> list[Issue]:
+    """Require Harness changelogs to begin with the package metadata version."""
     issues: list[Issue] = []
-    for path in (docs_path, locale_path):
-        content = path.read_text(encoding="utf-8")
-        missing = sorted(name for name in names if name not in content)
-        if missing:
+    package_root = root / "packages/gpt2giga-harness"
+    metadata = tomllib.loads(
+        (package_root / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    version = metadata["project"]["version"]
+    for filename in ("CHANGELOG.md", "CHANGELOG_en.md"):
+        path = package_root / filename
+        match = CHANGELOG_VERSION_RE.search(path.read_text(encoding="utf-8"))
+        if not match or match.group(1) != version:
+            actual = match.group(1) if match else "missing"
             issues.append(
-                Issue(path, f"undocumented ProxySettings: {', '.join(missing)}")
+                Issue(
+                    path,
+                    f"top changelog version {actual!r} does not match {version!r}",
+                )
             )
     return issues
 
 
-def check_package_versions(root: Path) -> list[Issue]:
-    """Require each shipped changelog to begin with its package metadata version."""
+def check_standalone_identity(root: Path, files: list[Path]) -> list[Issue]:
+    """Require target-owned metadata and explicitly scoped source links."""
     issues: list[Issue] = []
-    for package in ("gpt2giga", "gpt2giga-harness"):
-        package_root = root / "packages" / package
-        metadata = tomllib.loads(
-            (package_root / "pyproject.toml").read_text(encoding="utf-8")
+    package_path = root / "packages/gpt2giga-harness/pyproject.toml"
+    package = tomllib.loads(package_path.read_text(encoding="utf-8"))["project"]
+    expected_urls = {
+        "Homepage": TARGET_DOCUMENTATION,
+        "Repository": TARGET_REPOSITORY,
+        "Documentation": TARGET_DOCUMENTATION,
+        "Issues": f"{TARGET_REPOSITORY}/issues",
+        "Changelog": (
+            f"{TARGET_REPOSITORY}/blob/main/packages/gpt2giga-harness/CHANGELOG_en.md"
+        ),
+    }
+    if package.get("urls") != expected_urls:
+        issues.append(
+            Issue(package_path, "project URLs do not match standalone GigaLoom")
         )
-        version = metadata["project"]["version"]
-        for filename in ("CHANGELOG.md", "CHANGELOG_en.md"):
-            path = package_root / filename
-            match = CHANGELOG_VERSION_RE.search(path.read_text(encoding="utf-8"))
-            if not match or match.group(1) != version:
-                actual = match.group(1) if match else "missing"
-                issues.append(
-                    Issue(
-                        path,
-                        f"top changelog version {actual!r} does not match {version!r}",
-                    )
-                )
+
+    config_path = root / "docs-site/docusaurus.config.ts"
+    config = config_path.read_text(encoding="utf-8")
+    required_config = (
+        "title: 'GigaLoom'",
+        "baseUrl: '/gigaloom/'",
+        "organizationName: 'krakenalt'",
+        "projectName: 'gigaloom'",
+        f"{TARGET_REPOSITORY}/edit/main/docs/",
+    )
+    for value in required_config:
+        if value not in config:
+            issues.append(Issue(config_path, f"missing target site setting {value!r}"))
+    if SOURCE_REPOSITORY in config:
+        issues.append(
+            Issue(config_path, "source repository remains in current site links")
+        )
+
+    for path in files:
+        if "CHANGELOG" in path.name:
+            continue
+        relative = path.relative_to(root)
+        content = path.read_text(encoding="utf-8")
+        if SOURCE_REPOSITORY in content and relative not in SOURCE_LINK_ALLOWLIST:
+            issues.append(
+                Issue(path, "source repository link is not scoped to gateway/history")
+            )
+        if "packages/gpt2giga/" in content:
+            issues.append(Issue(path, "removed monorepo gateway package path remains"))
+
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    if "badges/gigaloom-coverage.svg" not in readme or "84.59%" not in (
+        root / "docs/operations.md"
+    ).read_text(encoding="utf-8"):
+        issues.append(
+            Issue(root / "README.md", "missing separate GigaLoom coverage baseline")
+        )
     return issues
 
 
@@ -212,8 +246,8 @@ def validate(root: Path) -> list[Issue]:
     return [
         *check_relative_links(root, files),
         *check_locale_coverage(root),
-        *check_proxy_settings(root),
         *check_package_versions(root),
+        *check_standalone_identity(root, files),
         *check_stale_instructions(root, files),
     ]
 

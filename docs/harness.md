@@ -163,7 +163,7 @@ During the prerelease:
 - review generated `.giga/` files before committing them, and never put secrets
   in project configuration;
 - report bugs with `giga doctor`, the Harness version, reproduction steps, and
-  redacted diagnostics in [GitHub Issues](https://github.com/ai-forever/gpt2giga/issues).
+  redacted diagnostics in [GigaLoom Issues](https://github.com/krakenalt/gigaloom/issues).
 
 ## Quickstart
 
@@ -172,8 +172,8 @@ During the prerelease:
 The source checkout is the current, always-available preview path:
 
 ```bash
-git clone https://github.com/ai-forever/gpt2giga.git
-cd gpt2giga
+git clone https://github.com/krakenalt/gigaloom.git
+cd gigaloom
 uv sync --all-packages --all-extras --dev
 source .venv/bin/activate
 giga doctor
@@ -334,7 +334,7 @@ giga harness run echo \
 ```
 
 For a complete disposable tour, use the
-[first-run demo repository](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/first-run-demo).
+[first-run demo repository](https://github.com/krakenalt/gigaloom/tree/main/examples/harness/first-run-demo).
 It contains only fictional inventory inputs. The walkthrough copies them to a
 temporary Git repository, isolates Harness runtime state under that copy, runs
 `giga init` and `giga doctor .`, then verifies a read-only Echo run and the two
@@ -342,21 +342,21 @@ generated smoke-eval cases. It needs no credentials, proxy, external agent CLI,
 or public-network access.
 
 The model-backed
-[issue-to-reviewed-patch example](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/issue-to-reviewed-patch)
+[issue-to-reviewed-patch example](https://github.com/krakenalt/gigaloom/tree/main/examples/harness/issue-to-reviewed-patch)
 packages three reviewed agent profiles, a durable workflow that retains edits
 in a Harness-owned worktree, and a post-apply eval. Its walkthrough keeps the
 source checkout unchanged before approval and leaves apply, commit, push, and
 hosted writes as explicit operator decisions.
 
 The model-backed
-[nightly compatibility guardian](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/nightly-compatibility-guardian)
+[nightly compatibility guardian](https://github.com/krakenalt/gigaloom/tree/main/examples/harness/nightly-compatibility-guardian)
 packages a pinned Codex/Claude/Gemini eval, exact baseline dimensions, a
 read-only triage workflow, and a durable nightly schedule. It runs while the UI
 is closed and moves only a failed, previously tested schedule contract into
 Attention for product/adapter/model/environment classification.
 
 The model-backed
-[cross-harness review team](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/cross-harness-review-team)
+[cross-harness review team](https://github.com/krakenalt/gigaloom/tree/main/examples/harness/cross-harness-review-team)
 fans out read-only explorer, security, tests, and maintainability roles across
 Codex, Claude, and Gemini. One synthesis step cites retained child artifacts;
 a failed child remains visible and the workflow cannot silently report partial

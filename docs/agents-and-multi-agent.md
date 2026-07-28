@@ -85,15 +85,15 @@ contract.
 
 Source authorities:
 
-- [`agents.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/agents.py)
+- [`agents.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/agents.py)
   owns Agent profile parsing, snapshots, and execution plans;
-- [`arena.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/arena.py)
+- [`arena.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/arena.py)
   owns independent comparison children and evidence;
-- [`workflows.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/workflows.py)
+- [`workflows.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/workflows.py)
   owns the validated DAG and bounded handoffs;
-- [`runtime/policy.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/runtime/policy.py)
+- [`runtime/policy.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/runtime/policy.py)
   owns Harness policy and approval receipts;
-- [`worktrees.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/worktrees.py)
+- [`worktrees.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/worktrees.py)
   owns isolated edit delivery.
 
 ## Authentication, approvals, and tools
@@ -128,7 +128,7 @@ Tool names do not cross boundaries automatically:
 - unavailable or unknown capabilities fail closed before provider execution.
 
 The independent intent/authority vocabulary comes from
-[`product_capabilities.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/product_capabilities.py):
+[`product_capabilities.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/product_capabilities.py):
 `Ask`, `Review`, and `Change` never broaden `Read only` or `Workspace write`.
 
 ## Continuity, cancellation, cost, and evidence

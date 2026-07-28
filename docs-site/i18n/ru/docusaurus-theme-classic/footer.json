@@ -1,50 +1,66 @@
 {
   "link.title.Documentation": {
     "message": "Документация",
-    "description": "The title of the footer links column with title=Documentation in the footer"
+    "description": "The title of the footer Documentation column"
   },
-  "link.title.Compatibility": {
-    "message": "Совместимость",
-    "description": "The title of the footer links column with title=Compatibility in the footer"
+  "link.title.Architecture": {
+    "message": "Архитектура",
+    "description": "The title of the footer Architecture column"
   },
   "link.title.Project": {
     "message": "Проект",
-    "description": "The title of the footer links column with title=Project in the footer"
+    "description": "The title of the footer Project column"
   },
   "link.item.label.Overview": {
     "message": "Обзор",
-    "description": "The label of footer link with label=Overview linking to /"
+    "description": "Footer link to /"
+  },
+  "link.item.label.Installation": {
+    "message": "Установка",
+    "description": "Footer link to /installation"
   },
   "link.item.label.Quickstart": {
     "message": "Быстрый старт",
-    "description": "The label of footer link with label=Quickstart linking to /quickstart"
+    "description": "Footer link to /quickstart"
   },
-  "link.item.label.Configuration": {
-    "message": "Конфигурация",
-    "description": "The label of footer link with label=Configuration linking to /configuration"
+  "link.item.label.Operations": {
+    "message": "Операции",
+    "description": "Footer link to /operations"
   },
-  "link.item.label.API compatibility": {
-    "message": "Совместимость API",
-    "description": "The label of footer link with label=API compatibility linking to /api-compatibility"
+  "link.item.label.Architecture": {
+    "message": "Архитектура",
+    "description": "Footer link to /architecture"
   },
-  "link.item.label.Client parameters": {
-    "message": "Параметры клиентов",
-    "description": "The label of footer link with label=Client parameters linking to /client-parameter-compatibility"
+  "link.item.label.Security": {
+    "message": "Безопасность",
+    "description": "Footer link to /security"
   },
-  "link.item.label.Built-in tools": {
-    "message": "Встроенные инструменты",
-    "description": "The label of footer link with label=Built-in tools linking to /builtin-tools"
+  "link.item.label.Gateway integration": {
+    "message": "Интеграция с gateway",
+    "description": "Footer link to /gateway-integration"
+  },
+  "link.item.label.Capability matrix": {
+    "message": "Матрица возможностей",
+    "description": "Footer link to /agent-capability-matrix"
   },
   "link.item.label.GitHub": {
     "message": "GitHub",
-    "description": "The label of footer link with label=GitHub linking to https://github.com/ai-forever/gpt2giga"
+    "description": "Footer link to https://github.com/krakenalt/gigaloom"
   },
-  "link.item.label.Examples": {
-    "message": "Примеры",
-    "description": "The label of footer link with label=Examples linking to https://github.com/ai-forever/gpt2giga/tree/main/examples"
+  "link.item.label.Contributing": {
+    "message": "Разработка",
+    "description": "Footer link to /contributing"
+  },
+  "link.item.label.Release": {
+    "message": "Релиз",
+    "description": "Footer link to /release"
+  },
+  "link.item.label.Source history": {
+    "message": "История исходников",
+    "description": "Footer link to /source-history"
   },
   "copyright": {
-    "message": "© 2026 участники gpt2giga. Собрано с помощью Docusaurus.",
+    "message": "© 2026 участники GigaLoom. Собрано с помощью Docusaurus.",
     "description": "The footer copyright"
   }
 }

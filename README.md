@@ -1,264 +1,103 @@
-# gpt2giga
+# GigaLoom
 
-[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ai-forever/gpt2giga/ci.yaml?&style=flat-square)](https://github.com/ai-forever/gpt2giga/actions/workflows/ci.yaml)
-[![GitHub License](https://img.shields.io/github/license/ai-forever/gpt2giga?style=flat-square)](https://opensource.org/licenses/MIT)
-[![PyPI Downloads](https://img.shields.io/pypi/dm/gpt2giga?style=flat-square)](https://pypistats.org/packages/gpt2giga)
-[![GitHub Repo stars](https://img.shields.io/github/stars/ai-forever/gpt2giga?style=flat-square)](https://star-history.com/#ai-forever/gpt2giga)
-[![GitHub Open Issues](https://img.shields.io/github/issues-raw/ai-forever/gpt2giga?style=flat-square)](https://github.com/ai-forever/gpt2giga/issues)
-[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-111827?style=flat-square)](https://ai-forever.github.io/gpt2giga/)
-[![Telegram](https://img.shields.io/badge/Maintainer-chat-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/krakenalt)
-[![Telegram Group](https://img.shields.io/badge/GigaChain-group-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/+7owoBivn9xY3NWYy)
+[![Quality](https://img.shields.io/github/actions/workflow/status/krakenalt/gigaloom/quality.yaml?branch=main&style=flat-square&label=quality)](https://github.com/krakenalt/gigaloom/actions/workflows/quality.yaml)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-111827?style=flat-square)](https://krakenalt.github.io/gigaloom/)
+[![PyPI](https://img.shields.io/pypi/v/gpt2giga-harness?style=flat-square&label=preview)](https://pypi.org/project/gpt2giga-harness/)
+[![License](https://img.shields.io/github/license/krakenalt/gigaloom?style=flat-square)](LICENSE)
+[![GigaLoom coverage baseline](./badges/gigaloom-coverage.svg)](./docs/operations.md#quality-baseline)
 
-![Coverage](./badges/coverage.svg)
+GigaLoom is a local, provider-neutral control plane for coding agents. It
+combines the `giga` CLI, a terminal UI, and a browser cockpit for governed
+sessions, approvals, worktrees, schedules, evaluations, and multi-agent
+workflows.
 
-`gpt2giga` — FastAPI-прокси, который принимает OpenAI-, Anthropic- и Gemini-like запросы и отправляет их в GigaChat. Он нужен, когда клиент, редактор, агентный фреймворк или SDK умеет работать с OpenAI/Anthropic/Gemini API, а реальный backend должен быть GigaChat.
+The project is an alpha preview. It keeps user state local, redacts sensitive
+values at storage and UI boundaries, and fails closed when an action needs
+authority that has not been granted.
 
-Локальный адрес по умолчанию: `http://localhost:8090`.
+## Install
 
-## Зачем Нужен
-
-GigaChat не является drop-in заменой OpenAI или Anthropic API. Прямое подключение существующих SDK часто ломается на формате запросов, streaming-событиях, tool schemas, model discovery, авторизации и optional-параметрах клиентов.
-
-`gpt2giga` закрывает практические несовместимости:
-
-- переводит OpenAI Chat Completions, OpenAI Responses, OpenAI Embeddings, Anthropic Messages и Gemini GenerateContent в вызовы GigaChat;
-- маппит tools/function calling, structured output, изображения, reasoning flags и SSE streaming там, где GigaChat поддерживает базовую возможность;
-- принимает и безопасно игнорирует optional-поля OpenAI/Anthropic, которые SDK присылают, но GigaChat не понимает;
-- фильтрует транспортные SDK headers, клиентские API keys, cookies и другие небезопасные метаданные перед upstream;
-- отделяет клиентскую API-key авторизацию прокси от GigaChat credentials;
-- отдаёт список моделей в OpenAI-, Anthropic-, Gemini- и LiteLLM-совместимом виде;
-- держит batch/file routes отключёнными, пока их нельзя выполнить end-to-end через GigaChat SDK/backend.
-
-Подробная матрица поддержки и список реальных ограничений вынесены в [API Compatibility](./docs/api-compatibility.md).
-
-## Быстрый Старт
-
-Создайте `.env` из шаблона и заполните GigaChat credentials:
+Python 3.10–3.14 and an installed provider CLI are required:
 
 ```sh
-cp .env.example .env
-```
-
-Запуск через Docker Compose:
-
-```sh
-docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
-```
-
-Или локальный запуск только gateway с актуальной prerelease-версией:
-
-```sh
-uv tool install --prerelease allow gpt2giga
-gpt2giga
-```
-
-Текущая alpha-preview линия Unified Harness — `0.5.1a1`. Её всегда можно
-запустить [из source checkout](./docs/harness.md#quickstart). Опубликованный
-provider-neutral пакет добавляет команды `giga` и `gpt2giga-harness`:
-
-```sh
-uv tool install 'gpt2giga-harness==0.5.1a1'
+uv tool install --prerelease allow 'gpt2giga-harness==0.5.1a1'
 giga doctor
 giga --version
+```
+
+Start the browser cockpit:
+
+```sh
 giga ui
 ```
 
-Для Direct Chat и provider preset локального gateway установите явный extra
-`gpt2giga-harness[gpt2giga]==0.5.1a1`; он закрепляет `gpt2giga==0.2.6a1`.
-
-Нативные команды Codex CLI, Claude Code и Gemini CLI получают ровно один
-префикс; общий глагол `exec` не вводится:
+Then open `http://127.0.0.1:8091/`. Prefix native provider commands without
+changing their remaining arguments:
 
 ```sh
-giga codex exec --json "проверь репозиторий"
-giga claude -p "проверь репозиторий"
-giga gemini -p "проверь репозиторий"
+giga codex exec --json "review this repository"
+giga claude -p "review this repository"
+giga gemini -p "review this repository"
 ```
 
-Суффикс команды, `--help`, `--version`, JSON/JSONL, pipe/redirect и exit status
-остаются нативными. Подробности, completion для Bash/Zsh/Fish/PowerShell и
-инструкции обновления/отката — в [руководстве Unified Harness](./docs/harness.md).
+See [Installation](./docs/installation.md) and
+[Quickstart](./docs/quickstart.md) for the complete first-run flow.
 
-Python namespace Harness — `gpt2giga_harness`; прежний
-`gpt2giga.harness` больше не поставляется. Подробности обновления со старого
-combined prerelease wheel — в [Unified Harness](./docs/harness.md#migration-from-the-combined-prerelease).
+## Documentation
 
-Минимальный OpenAI SDK вызов:
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:8090/v1", api_key="<GPT2GIGA_API_KEY>")
-
-response = client.chat.completions.create(
-    model="GigaChat-2-Max",
-    messages=[{"role": "user", "content": "Привет"}],
-)
-print(response.choices[0].message.content)
-```
-
-Минимальный Anthropic SDK вызов:
-
-```python
-from anthropic import Anthropic
-
-client = Anthropic(base_url="http://localhost:8090", api_key="<GPT2GIGA_API_KEY>")
-
-response = client.messages.create(
-    model="GigaChat-2-Max",
-    max_tokens=256,
-    messages=[{"role": "user", "content": "Привет"}],
-)
-print(response.content[0].text)
-```
-
-Больше вариантов запуска — в [Quickstart](./docs/quickstart.md).
-
-## Документация
-
-Полная документация публикуется на [GitHub Pages](https://ai-forever.github.io/gpt2giga/).
-
-Локально проверить docs можно через Docusaurus wrapper в `docs-site/`:
-
-```sh
-make docs-install
-make docs
-```
-
-После `make docs` сайт доступен на `http://127.0.0.1:3000/` и включает локали `en`/`ru`.
-Для быстрой разработки с hot reload:
-
-```sh
-make docs-dev
-```
-
-Docusaurus dev server обслуживает одну локаль за запуск. Для русского dev preview:
-
-```sh
-make docs-dev-ru
-```
-
-Чтобы проверить переключатель языков между `en` и `ru`, используйте full preview через `make docs` или `make docs-preview`.
-
-| Тема | Документ |
+| Topic | Guide |
 |---|---|
-| Быстрый запуск и первые запросы | [docs/quickstart.md](./docs/quickstart.md) |
-| Что поддерживается, отключено или намеренно игнорируется | [docs/api-compatibility.md](./docs/api-compatibility.md) |
-| Совместимость SDK `extra_*` и параметров клиентов | [docs/client-parameter-compatibility.md](./docs/client-parameter-compatibility.md) |
-| Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [docs/builtin-tools.md](./docs/builtin-tools.md) |
-| Local harness CLI/UI для smoke tests и agent CLI adapters | [docs/harness.md](./docs/harness.md) |
-| Direct Chat, Coding Agents, native Codex subagents, Arena и Workflows | [docs/agents-and-multi-agent.md](./docs/agents-and-multi-agent.md) |
-| Переменные окружения, CLI flags, backend modes | [docs/configuration.md](./docs/configuration.md) |
-| Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [docs/deployment.md](./docs/deployment.md) |
-| Logs, metrics, traffic logs, admin API, debug translation | [docs/operations.md](./docs/operations.md) |
-| Live GigaChat integration tests | [docs/live-integration-tests.md](./docs/live-integration-tests.md) |
-| Provider-owned login, status, logout и headless-границы | [docs/architecture/provider-authentication-capability-matrix.md](./docs/architecture/provider-authentication-capability-matrix.md) |
-| Внутренняя архитектура normalized messages | [docs/architecture/normalized-messages.md](./docs/architecture/normalized-messages.md) |
-| Checklist для добавления provider/protocol | [docs/architecture/how-to-add-provider.md](./docs/architecture/how-to-add-provider.md) |
-| Редакторы, агенты, SDK examples, reverse proxies | [docs/integrations.md](./docs/integrations.md) |
-| Runnable-примеры | [examples/README.md](./examples/README.md) |
-| История изменений gateway | [RU](./packages/gpt2giga/CHANGELOG.md) · [EN](./packages/gpt2giga/CHANGELOG_en.md) |
-| История изменений Harness | [RU](./packages/gpt2giga-harness/CHANGELOG.md) · [EN](./packages/gpt2giga-harness/CHANGELOG_en.md) |
+| Product overview | [Documentation home](./docs/index.md) |
+| Installation and first run | [Installation](./docs/installation.md) · [Quickstart](./docs/quickstart.md) |
+| Architecture and safety boundaries | [Architecture](./docs/architecture.md) · [Security](./docs/security.md) |
+| Runtime, backup, and troubleshooting | [Operations](./docs/operations.md) |
+| Optional gpt2giga gateway | [Gateway integration](./docs/gateway-integration.md) |
+| Development and release | [Contributing](./docs/contributing.md) · [Release](./docs/release.md) |
+| Repository migration | [Source history](./docs/source-history.md) |
 
-## Текущая API-Поверхность
+The published English and Russian documentation is at
+<https://krakenalt.github.io/gigaloom/>.
 
-Смонтированные routes доступны в корне и под versioned prefixes. Root routes
-используют `GPT2GIGA_GIGACHAT_API_MODE`, `/v1` принудительно выбирает GigaChat
-v1 contract, `/v2` принудительно выбирает GigaChat v2 contract. Например:
-`/chat/completions`, `/v1/chat/completions` и `/v2/chat/completions`.
+## Gateway integration
 
-Поддерживается:
-
-- OpenAI-compatible `GET /models`, `GET /models/{model}`, `POST /chat/completions`, `POST /responses`, `POST /embeddings`;
-- Anthropic-compatible `POST /messages`, `POST /messages/count_tokens`, а также Anthropic-shaped model responses для model-вызовов Anthropic SDK;
-- Gemini-compatible `/v1beta/models/{model}:generateContent`, `:streamGenerateContent`, `:countTokens`, `:embedContent`, `:batchEmbedContents`, а также `/v1beta/models`;
-- LiteLLM-compatible `GET /model/info`;
-- системные endpoints `GET /health` и `GET|POST /ping`.
-
-Отключено до появления нужных batch methods в GigaChat SDK/backend:
-
-- OpenAI-compatible Files API и Batches API;
-- Anthropic Message Batches API.
-- Gemini-compatible Files API и Batch GenerateContent API.
-
-Сейчас не является целью проекта:
-
-- полная OpenAI parity для audio, image generation/editing, fine-tuning, assistants, threads, runs, vector stores, uploads, moderations, realtime;
-- полная Anthropic parity для Files beta, Skills beta, Agents beta, Sessions, Environments или Admin API;
-- полная Gemini parity для Files, batchGenerateContent, cached content, Vertex/RAG tools и non-text embeddings content.
-
-## Деплой
-
-Docker Compose manifests лежат в [deploy/](./deploy/):
+The base `gpt2giga-harness` distribution is independently installable and does
+not require a gateway source checkout. Direct Chat and the legacy local-gateway
+preset are optional:
 
 ```sh
-docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
-docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
+uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]==0.5.1a1'
 ```
 
-Production mode требует API key и отключает `/docs`, `/redoc`, `/openapi.json` и `/logs*`:
+The optional extra consumes the released `gpt2giga` distribution. Its
+normalized protocol and compatibility contracts remain owned by the
+[gpt2giga gateway project](https://github.com/ai-forever/gpt2giga); see the
+[integration guide](./docs/gateway-integration.md) for canonical links.
 
-```dotenv
-GPT2GIGA_MODE=PROD
-GPT2GIGA_ENABLE_API_KEY_AUTH=True
-GPT2GIGA_API_KEY="<strong-random-secret>"
-GIGACHAT_VERIFY_SSL_CERTS=True
-```
-
-Compose profiles, reverse proxies, TLS и hardening описаны в [Deployment](./docs/deployment.md).
-
-## Структура Репозитория
-
-| Path | Назначение |
-|---|---|
-| `packages/gpt2giga/src/gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
-| `packages/gpt2giga-harness/src/gpt2giga_harness/` | Harness CLI, local UI, runtime, sessions, and agent adapters |
-| `tests/` | Unit, router, protocol, sink и integration tests |
-| `examples/` | Runnable OpenAI, Anthropic, Gemini, embeddings and agents examples; files/batches examples are prepared but not mounted |
-| `docs/` | Markdown-контент пользовательской документации и architecture notes |
-| `docs-site/` | Docusaurus wrapper, sidebar/theme config и npm tooling для GitHub Pages |
-| `integrations/` | Editor/agent/reverse-proxy integration guides |
-| `deploy/` | Docker Compose deployment manifests |
-| `traefik/` | Traefik config для `deploy/traefik.yaml` |
-| `.github/` | CI, release, Docker publish, PR/issue templates |
-
-## Разработка
-
-Установить зависимости:
+## Development
 
 ```sh
-uv sync --all-packages --all-extras --dev
-```
-
-Запустить сервис:
-
-```sh
-uv run gpt2giga
-uv run giga doctor
-```
-
-Сборка двух дистрибутивов выполняется явно:
-
-```sh
-uv build --package gpt2giga
 npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
 npm --prefix packages/gpt2giga-harness/frontend run build
-uv build --package gpt2giga-harness
+./scripts/ci-base.sh sync
+./scripts/ci-base.sh ruff-check
+./scripts/ci-base.sh pytest tests/harness -q
 ```
 
-Скомпилированные Cockpit assets не хранятся в Git. Перед локальной сборкой
-Harness producer создаёт ignored, integrity-checked дерево; Python build
-завершается ошибкой, если дерево отсутствует или не соответствует source.
-
-Проверки перед PR:
+Build the standalone distribution with:
 
 ```sh
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
+uv build --package gpt2giga-harness --no-sources
 ```
 
-Live-тесты с реальными вызовами GigaChat запускаются отдельно и требуют
-локальных секретов: см. [Live GigaChat Integration Tests](./docs/live-integration-tests.md).
+Read [Contributing](./docs/contributing.md) before submitting changes. Report
+bugs through [GitHub Issues](https://github.com/krakenalt/gigaloom/issues).
 
-Используйте Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`) и сверяйтесь с `.github/PULL_REQUEST_TEMPLATE.md`.
+## Source history
+
+GigaLoom was extracted from the combined `ai-forever/gpt2giga` repository.
+Links to that repository in older changelog entries and migration notes are
+historical source references, not current development locations. Current
+development, issues, documentation, and releases belong to
+`krakenalt/gigaloom`.
+
+Licensed under the [MIT License](LICENSE).

@@ -113,9 +113,11 @@ For development or when the prerelease is not yet mirrored by your package
 index, run it from a source checkout:
 
 ```sh
-git clone https://github.com/ai-forever/gpt2giga.git
-cd gpt2giga
-uv sync --all-packages --all-extras --dev
+git clone https://github.com/krakenalt/gigaloom.git
+cd gigaloom
+npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
+npm --prefix packages/gpt2giga-harness/frontend run build
+./scripts/ci-base.sh sync
 source .venv/bin/activate
 giga doctor
 giga ui
@@ -626,13 +628,13 @@ giga doctor
 
 ## Documentation
 
-- [Unified Harness guide](https://ai-forever.github.io/gpt2giga/harness)
-- [Harness architecture](https://ai-forever.github.io/gpt2giga/architecture/harness)
-- [Configuration and security](https://ai-forever.github.io/gpt2giga/harness#configuration)
-- [Native sessions](https://ai-forever.github.io/gpt2giga/harness#native-session-mode)
-- [Troubleshooting](https://ai-forever.github.io/gpt2giga/harness#troubleshooting)
-- [Changelog (RU)](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/CHANGELOG.md)
-- [Changelog (EN)](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/CHANGELOG_en.md)
+- [GigaLoom documentation](https://krakenalt.github.io/gigaloom/)
+- [Unified Harness guide](https://krakenalt.github.io/gigaloom/harness)
+- [Harness architecture](https://krakenalt.github.io/gigaloom/architecture/harness)
+- [Security](https://krakenalt.github.io/gigaloom/security)
+- [Operations](https://krakenalt.github.io/gigaloom/operations)
+- [Changelog (RU)](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/CHANGELOG.md)
+- [Changelog (EN)](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/CHANGELOG_en.md)
 
 ## Package verification
 
@@ -642,8 +644,8 @@ From the repository root:
 npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
 npm --prefix packages/gpt2giga-harness/frontend run build
 python packages/gpt2giga-harness/asset_contract.py
-uv sync --all-packages --all-extras --dev
-uv run pytest tests/harness -q
+./scripts/ci-base.sh sync
+./scripts/ci-base.sh pytest tests/harness -q
 uv build --package gpt2giga-harness --no-sources
 ```
 

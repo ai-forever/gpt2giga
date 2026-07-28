@@ -8,6 +8,7 @@ const sidebars: SidebarsConfig = {
       collapsible: false,
       items: [
         'index',
+        'installation',
         'quickstart',
         {
           type: 'doc',
@@ -26,9 +27,16 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Operate',
+      collapsible: false,
+      items: ['operations', 'security', 'gateway-integration'],
+    },
+    {
+      type: 'category',
       label: 'Architecture',
       collapsible: false,
       items: [
+        'architecture',
         'architecture/harness',
         'architecture/product-capability-admission-adr',
         'architecture/authority-approval-schema-adr',
@@ -42,9 +50,9 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Contributing',
+      label: 'Project',
       collapsible: false,
-      items: ['contributing'],
+      items: ['contributing', 'release', 'source-history'],
     },
   ],
 };

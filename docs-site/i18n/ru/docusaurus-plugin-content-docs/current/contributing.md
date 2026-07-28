@@ -1,7 +1,8 @@
 # Документация
 
-Сайт собирается из Markdown-файлов в `docs/` через Docusaurus wrapper в
-`docs-site/` и публикуется на GitHub Pages.
+GigaLoom разрабатывается в
+[`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom). Сайт собирается
+из Markdown в `docs/` через Docusaurus wrapper в `docs-site/`.
 
 ## Локальная сборка
 
@@ -49,8 +50,9 @@ make docs-dev-ru
 - architecture notes из `docs/architecture/`;
 - русские переводы из
   `docs-site/i18n/ru/docusaurus-plugin-content-docs/current/`;
-- ссылки на runnable examples и integration guides в репозитории;
-- GitHub-ссылки на deployment manifests и другие файлы вне `docs/`.
+- standalone user, operations, security, architecture и release guides;
+- ссылки на target-owned файлы в `krakenalt/gigaloom`;
+- явно помеченные historical или canonical gateway references.
 
 Игнорируемые `docs/internal/**` и `docs/codex/**` — локальное coordination state,
 а не источник публичного сайта.
@@ -65,10 +67,9 @@ make docs-dev-ru
   set; сохраняйте code blocks, warnings и ограничения поведения.
 - Не публикуйте секреты, локальные `.env`, credentials, keys, private code или
   raw traffic payloads.
-- При изменении deployment одновременно обновляйте `docs/deployment.md`,
-  русскую локаль, `deploy/README.md` и соответствующие Compose manifests.
-- При изменении compatibility обновляйте `docs/api-compatibility.md`,
-  `docs/client-parameter-compatibility.md`, русские локали и runnable examples.
+- Текущие development links должны вести в `krakenalt/gigaloom`.
+- Gateway links держите в `gateway-integration.md`, а source-repository links
+  в `source-history.md` с явной маркировкой.
 - При изменении Harness CLI/API/storage обновляйте user guide, architecture,
   package README и changelog соответствующего дистрибутива.
 

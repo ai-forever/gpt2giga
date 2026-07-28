@@ -1,6 +1,6 @@
 {
   "title": {
-    "message": "gpt2giga",
+    "message": "GigaLoom",
     "description": "The title in the navbar"
   },
   "item.label.Documentation": {
@@ -11,13 +11,13 @@
     "message": "Быстрый старт",
     "description": "Navbar item with label Quickstart"
   },
-  "item.label.Compatibility": {
-    "message": "Совместимость",
-    "description": "Navbar item with label Compatibility"
+  "item.label.Architecture": {
+    "message": "Архитектура",
+    "description": "Navbar item with label Architecture"
   },
-  "item.label.Operations": {
-    "message": "Операции",
-    "description": "Navbar item with label Operations"
+  "item.label.Capabilities": {
+    "message": "Возможности",
+    "description": "Navbar item with label Capabilities"
   },
   "item.label.GitHub": {
     "message": "GitHub",

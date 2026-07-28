@@ -1,8 +1,8 @@
 {
-  "name": "gpt2giga-docs-site",
+  "name": "gigaloom-docs-site",
   "version": "0.0.0",
   "private": true,
-  "description": "Docusaurus documentation site for gpt2giga",
+  "description": "Docusaurus documentation site for GigaLoom",
   "scripts": {
     "docusaurus": "docusaurus",
     "start": "docusaurus start --host 127.0.0.1",

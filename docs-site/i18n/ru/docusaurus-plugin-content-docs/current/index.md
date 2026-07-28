@@ -1,65 +1,43 @@
-# Документация gpt2giga
+# Документация GigaLoom
 
-`gpt2giga` — это шлюз совместимости на FastAPI, который принимает запросы в форматах OpenAI, Anthropic и Gemini и перенаправляет их в GigaChat. Он нужен, когда клиент, редактор, агентный фреймворк или SDK умеет работать с API OpenAI/Anthropic/Gemini, а в роли реального бэкенда должен выступать GigaChat.
+GigaLoom — локальный, нейтральный к провайдеру управляющий слой для coding
+agents. CLI, терминальный интерфейс и браузерный cockpit запускают нативных
+агентов, а worktrees, approvals, evidence, schedules и сохранённое состояние
+остаются под явной локальной политикой.
 
-Локальный адрес по умолчанию:
+Линия `0.5.1a1` — alpha preview. Начните с [Установки](installation.md), затем
+пройдите [Быстрый старт](quickstart.md).
 
-```text
-http://localhost:8090
-```
+## Выберите путь
 
-## Что закрывает прокси
-
-| Возможность | Где читать |
+| Задача | Руководство |
 |---|---|
-| Быстрый запуск через Docker Compose или `uv` | [Быстрый старт](quickstart.md) |
-| Поддерживаемые маршруты OpenAI, Anthropic, Gemini и LiteLLM | [Совместимость API](https://github.com/ai-forever/gpt2giga/blob/main/docs/api-compatibility.md) |
-| Поведение `extra_headers`, `extra_query`, `extra_body` и необязательных полей | [Параметры клиентов](https://github.com/ai-forever/gpt2giga/blob/main/docs/client-parameter-compatibility.md) |
-| Встроенные инструменты GigaChat и их сопоставление с OpenAI/Anthropic/Gemini | [Встроенные инструменты](https://github.com/ai-forever/gpt2giga/blob/main/docs/builtin-tools.md) |
-| Альфа-превью локального cockpit для запусков, сравнений, approvals и workflows | [Unified Harness](harness.md) |
-| Direct Chat, Coding Agents, нативные subagents Codex, Arena и Workflows | [Agents и multi-agent поведение](agents-and-multi-agent.md) |
-| Компоненты Unified Harness, поток выполнения, хранение и API управляющего слоя | [Архитектура Harness](architecture/harness.md) |
-| Provider-owned login, status, logout, revoke и headless-границы | [Матрица аутентификации провайдеров](architecture/provider-authentication-capability-matrix.md) |
-| Реализованная граница remote UI identity и внешние deployment gates | [ADR удалённого UI](architecture/remote-ui-identity-adr.md) |
-| Переменные окружения, аутентификация, лимиты, метрики, наблюдаемость | [Конфигурация](https://github.com/ai-forever/gpt2giga/blob/main/docs/configuration.md) |
-| Профили Compose, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развёртывание](https://github.com/ai-forever/gpt2giga/blob/main/docs/deployment.md) |
-| Журналы выполнения, журналы трафика, admin API, отладочная трансляция | [Операции](https://github.com/ai-forever/gpt2giga/blob/main/docs/operations.md) |
-| Настройка редакторов, агентов, SDK и обратного прокси | [Интеграции](https://github.com/ai-forever/gpt2giga/blob/main/docs/integrations.md) |
+| Установить или обновить preview | [Установка](installation.md) |
+| Запустить первую управляемую сессию | [Быстрый старт](quickstart.md) |
+| Понять компоненты и trust boundaries | [Архитектура](architecture.md) |
+| Сохранить состояние или устранить проблему | [Операции](operations.md) |
+| Проверить privacy и authority boundaries | [Безопасность](security.md) |
+| Подключить необязательный gateway gpt2giga | [Интеграция с gateway](gateway-integration.md) |
+| Внести вклад или подготовить релиз | [Разработка](contributing.md) · [Релиз](release.md) |
 
-## Текущий набор API
+Подробный [справочник Harness](harness.md), [agent workflows](agents-and-multi-agent.md)
+и [матрица возможностей](agent-capability-matrix.md) описывают расширенную
+поверхность продукта.
 
-Публичные маршруты доступны в корне и под версионированными префиксами:
+## Основная граница
 
-- `/chat/completions`, `/v1/chat/completions`, `/v2/chat/completions`
-- `/responses`, `/v1/responses`, `/v2/responses`
-- `/embeddings`, `/v1/embeddings`, `/v2/embeddings`
-- `/messages`, `/v1/messages`, `/v2/messages`
-- `/v1beta/models/{model}:generateContent` и совместимые пути Gemini
-- `/models`, `/model/info`, `/health`, `/ping`
+Базовый дистрибутив самодостаточен и не требует checkout исходников
+`gpt2giga`. Provider CLI сами владеют аутентификацией, а GigaLoom — локальной
+оркестрацией, approvals, redaction и evidence.
 
-Правило выбора бэкенда одинаково для маршрутов, совместимых с OpenAI, Anthropic
-и Gemini: `/v1/...` всегда отправляет чат-подобные запросы в контракт
-GigaChat v1, `/v2/...` — в контракт GigaChat v2, а корневой путь без `/v1`
-или `/v2` использует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+Gateway совместимость подключается через необязательный установленный
+дистрибутив. Нормализованный протокол и публичная API-совместимость gateway
+остаются отдельными контрактами из
+[руководства по интеграции](gateway-integration.md).
 
-OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подготовлены в коде, но намеренно не подключены до появления сквозного (end-to-end) выполнения в SDK или бэкенде вышестоящего сервиса.
+## Адреса проекта
 
-## Быстрый путь
-
-1. Скопируйте `.env.example` в `.env`.
-2. Заполните `GIGACHAT_CREDENTIALS`, `GIGACHAT_SCOPE`, `GIGACHAT_MODEL`.
-3. Запустите `docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d`.
-4. Проверьте `curl http://localhost:8090/health`.
-5. Подключите SDK к `http://localhost:8090/v1` или `http://localhost:8090/v2` для явного контракта бэкенда, либо к `http://localhost:8090`, если корень должен следовать `GPT2GIGA_GIGACHAT_API_MODE`.
-6. Чтобы попробовать локальный project cockpit в статусе альфа-превью,
-   следуйте [руководству Unified Harness](harness.md), запустите `giga doctor`
-   и `giga ui`, затем откройте `http://127.0.0.1:8091/`.
-
-## Для разработчиков
-
-- [Архитектура Harness](architecture/harness.md) описывает локальный управляющий слой, durable runtime, границы хранения и назначение каждого семейства API.
-- [Матрица аутентификации провайдеров](architecture/provider-authentication-capability-matrix.md) фиксирует версионированные provider-owned возможности без копирования credentials.
-- [ADR удалённого UI](architecture/remote-ui-identity-adr.md) определяет реализованный single-issuer OIDC/BFF profile; live IdP и deployment остаются явными gates.
-- [Нормализованные сообщения](https://github.com/ai-forever/gpt2giga/blob/main/docs/architecture/normalized-messages.md) описывают экспериментальный слой моделей, не зависящих от протокола.
-- [Логирование и наблюдаемость](https://github.com/ai-forever/gpt2giga/blob/main/docs/architecture/logging-and-observability.md) фиксирует границы между журналами выполнения, журналами трафика, метриками и трейсами.
-- [Добавление провайдера или протокола](https://github.com/ai-forever/gpt2giga/blob/main/docs/architecture/how-to-add-provider.md) даёт чек-лист для расширения набора публичных протоколов и вышестоящих провайдеров.
+- [Исходный код, issues и releases](https://github.com/krakenalt/gigaloom)
+- [Опубликованная документация](https://krakenalt.github.io/gigaloom/)
+- [Пакет](https://pypi.org/project/gpt2giga-harness/)
+- Контекст извлечения: [История исходников](source-history.md)

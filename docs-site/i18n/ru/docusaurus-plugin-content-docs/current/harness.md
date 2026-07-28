@@ -163,7 +163,7 @@ uv tool install 'gpt2giga-harness==0.5.1a1'
   remote authentication и TLS;
 - проверяйте созданные `.giga/`-файлы перед commit и никогда не храните в них
   секреты;
-- сообщайте об ошибках в [GitHub Issues](https://github.com/ai-forever/gpt2giga/issues),
+- сообщайте об ошибках в [GigaLoom Issues](https://github.com/krakenalt/gigaloom/issues),
   прикладывая вывод `giga doctor`, версию Harness, шаги воспроизведения и
   диагностику без секретов.
 
@@ -175,8 +175,8 @@ uv tool install 'gpt2giga-harness==0.5.1a1'
 запуск из source checkout:
 
 ```bash
-git clone https://github.com/ai-forever/gpt2giga.git
-cd gpt2giga
+git clone https://github.com/krakenalt/gigaloom.git
+cd gigaloom
 uv sync --all-packages --all-extras --dev
 source .venv/bin/activate
 giga doctor
@@ -337,7 +337,7 @@ giga harness run echo \
 ```
 
 Для полностью локального знакомства используйте
-[демо-репозиторий первого запуска](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/first-run-demo).
+[демо-репозиторий первого запуска](https://github.com/krakenalt/gigaloom/tree/main/examples/harness/first-run-demo).
 Он содержит только вымышленные inventory-данные. Инструкция копирует их во
 временный Git-репозиторий, изолирует Harness runtime state внутри этой копии,
 запускает `giga init` и `giga doctor .`, затем проверяет read-only Echo run и
@@ -345,21 +345,21 @@ giga harness run echo \
 доступ в публичную сеть не требуются.
 
 Model-backed
-[пример issue-to-reviewed-patch](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/issue-to-reviewed-patch)
+[пример issue-to-reviewed-patch](https://github.com/krakenalt/gigaloom/tree/main/examples/harness/issue-to-reviewed-patch)
 содержит три reviewed agent profiles, durable workflow с сохранением изменений
 в Harness-owned worktree и post-apply eval. До approval source checkout остаётся
 неизменным, а apply, commit, push и hosted writes выполняются только по явному
 решению оператора.
 
 Model-backed
-[nightly compatibility guardian](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/nightly-compatibility-guardian)
+[nightly compatibility guardian](https://github.com/krakenalt/gigaloom/tree/main/examples/harness/nightly-compatibility-guardian)
 содержит pinned Codex/Claude/Gemini eval, точные baseline dimensions,
 read-only triage workflow и durable nightly schedule. Он работает при закрытом
 UI и отправляет в Attention только failed-контракт, ранее прошедший test-now,
 для классификации product/adapter/model/environment.
 
 Model-backed
-[cross-harness review team](https://github.com/ai-forever/gpt2giga/tree/main/examples/harness/cross-harness-review-team)
+[cross-harness review team](https://github.com/krakenalt/gigaloom/tree/main/examples/harness/cross-harness-review-team)
 параллельно запускает read-only роли explorer, security, tests и maintainability
 через Codex, Claude и Gemini. Единственный synthesis-шаг цитирует сохранённые
 child artifacts; сбой одного child остаётся видимым, а частичные evidence не

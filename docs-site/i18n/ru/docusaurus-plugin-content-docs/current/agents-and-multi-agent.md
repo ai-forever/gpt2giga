@@ -81,15 +81,15 @@ authority может унифицировать ceilings, но здесь не �
 
 Авторитетные исходники:
 
-- [`agents.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/agents.py)
+- [`agents.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/agents.py)
   — Agent profiles, snapshots и execution plans;
-- [`arena.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/arena.py)
+- [`arena.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/arena.py)
   — независимые comparison children и evidence;
-- [`workflows.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/workflows.py)
+- [`workflows.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/workflows.py)
   — валидированный DAG и ограниченные handoffs;
-- [`runtime/policy.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/runtime/policy.py)
+- [`runtime/policy.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/runtime/policy.py)
   — policy Harness и approval receipts;
-- [`worktrees.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/worktrees.py)
+- [`worktrees.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/worktrees.py)
   — изолированная доставка изменений.
 
 ## Authentication, approvals и tools
@@ -124,7 +124,7 @@ provider-owned. Внешний Harness receipt не доказывает, что
 - неизвестные и недоступные capabilities отклоняются до provider execution.
 
 Независимые intent и authority определены в
-[`product_capabilities.py`](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/product_capabilities.py):
+[`product_capabilities.py`](https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/src/gpt2giga_harness/product_capabilities.py):
 `Ask`, `Review` и `Change` никогда не расширяют `Read only` или
 `Workspace write`.
 

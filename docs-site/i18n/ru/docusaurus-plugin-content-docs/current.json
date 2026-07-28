@@ -9,22 +9,18 @@
   },
   "sidebar.docs.doc.harness": {
     "message": "Unified Harness (альфа)",
-    "description": "The label for the doc item 'Unified Harness (alpha)' in sidebar 'docs', linking to the doc harness"
+    "description": "The label for the harness document"
   },
-  "sidebar.docs.category.Compatibility": {
-    "message": "Совместимость",
-    "description": "The label for category 'Compatibility' in sidebar 'docs'"
-  },
-  "sidebar.docs.category.Operations": {
+  "sidebar.docs.category.Operate": {
     "message": "Эксплуатация",
-    "description": "The label for category 'Operations' in sidebar 'docs'"
+    "description": "The label for category 'Operate' in sidebar 'docs'"
   },
   "sidebar.docs.category.Architecture": {
     "message": "Архитектура",
     "description": "The label for category 'Architecture' in sidebar 'docs'"
   },
-  "sidebar.docs.category.Contributing": {
-    "message": "Участие",
-    "description": "The label for category 'Contributing' in sidebar 'docs'"
+  "sidebar.docs.category.Project": {
+    "message": "Проект",
+    "description": "The label for category 'Project' in sidebar 'docs'"
   }
 }

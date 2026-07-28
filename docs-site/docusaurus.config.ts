@@ -3,8 +3,8 @@ import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
-  title: 'gpt2giga and GigaLoom',
-  tagline: 'FastAPI gateway from OpenAI, Anthropic and Gemini clients to GigaChat',
+  title: 'GigaLoom',
+  tagline: 'Local, provider-neutral control plane for coding agents',
   favicon: 'brand/gigaloom-mark.svg',
 
   future: {
@@ -15,6 +15,7 @@ const config: Config = {
   baseUrl: '/gigaloom/',
   organizationName: 'krakenalt',
   projectName: 'gigaloom',
+  trailingSlash: false,
 
   onBrokenLinks: 'throw',
   markdown: {
@@ -58,7 +59,10 @@ const config: Config = {
           path: '../docs',
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
-          editUrl: 'https://github.com/ai-forever/gpt2giga/edit/main/docs/',
+          editUrl: ({locale, docPath}) =>
+            locale === 'ru'
+              ? `https://github.com/krakenalt/gigaloom/edit/main/docs-site/i18n/ru/docusaurus-plugin-content-docs/current/${docPath}`
+              : `https://github.com/krakenalt/gigaloom/edit/main/docs/${docPath}`,
           exclude: ['internal/**', 'codex/**'],
         },
         blog: false,
@@ -75,7 +79,7 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'gpt2giga · GigaLoom',
+      title: 'GigaLoom',
       logo: {
         alt: 'GigaLoom',
         src: 'brand/gigaloom-mark.svg',
@@ -89,11 +93,11 @@ const config: Config = {
           label: 'Documentation',
         },
         {to: '/quickstart', label: 'Quickstart', position: 'left'},
-        {to: '/harness', label: 'Harness', position: 'left'},
+        {to: '/architecture', label: 'Architecture', position: 'left'},
         {to: '/agent-capability-matrix', label: 'Capabilities', position: 'left'},
         {type: 'localeDropdown', position: 'right'},
         {
-          href: 'https://github.com/ai-forever/gpt2giga',
+          href: 'https://github.com/krakenalt/gigaloom',
           label: 'GitHub',
           position: 'right',
         },
@@ -106,27 +110,31 @@ const config: Config = {
           title: 'Documentation',
           items: [
             {label: 'Overview', to: '/'},
+            {label: 'Installation', to: '/installation'},
             {label: 'Quickstart', to: '/quickstart'},
-            {label: 'Harness', to: '/harness'},
+            {label: 'Operations', to: '/operations'},
           ],
         },
         {
           title: 'Architecture',
           items: [
-            {label: 'Harness architecture', to: '/architecture/harness'},
+            {label: 'Architecture', to: '/architecture'},
+            {label: 'Security', to: '/security'},
+            {label: 'Gateway integration', to: '/gateway-integration'},
             {label: 'Capability matrix', to: '/agent-capability-matrix'},
-            {label: 'Contributing', to: '/contributing'},
           ],
         },
         {
           title: 'Project',
           items: [
-            {label: 'GitHub', href: 'https://github.com/ai-forever/gpt2giga'},
-            {label: 'Examples', href: 'https://github.com/ai-forever/gpt2giga/tree/main/examples'},
+            {label: 'GitHub', href: 'https://github.com/krakenalt/gigaloom'},
+            {label: 'Contributing', to: '/contributing'},
+            {label: 'Release', to: '/release'},
+            {label: 'Source history', to: '/source-history'},
           ],
         },
       ],
-      copyright: `© ${new Date().getFullYear()} gpt2giga contributors. Built with Docusaurus.`,
+      copyright: `© ${new Date().getFullYear()} GigaLoom contributors. Built with Docusaurus.`,
     },
     prism: {
       theme: prismThemes.github,

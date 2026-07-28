@@ -39,25 +39,6 @@ def test_relative_link_checker_reports_only_missing_local_targets(
     ]
 
 
-def test_proxy_setting_names_are_derived_from_annotated_fields(tmp_path: Path) -> None:
-    docs_module = load_docs_module()
-    config = tmp_path / "config.py"
-    config.write_text(
-        "class Other:\n"
-        "    ignored: str\n\n"
-        "class ProxySettings:\n"
-        "    host: str = 'localhost'\n"
-        "    api_key: str | None = None\n"
-        "    _private: bool = False\n",
-        encoding="utf-8",
-    )
-
-    assert docs_module.proxy_setting_names(config) == {
-        "GPT2GIGA_API_KEY",
-        "GPT2GIGA_HOST",
-    }
-
-
 def test_stale_harness_release_instructions_are_rejected(tmp_path: Path) -> None:
     docs_module = load_docs_module()
     guide = tmp_path / "guide.md"
@@ -77,3 +58,50 @@ def test_stale_harness_release_instructions_are_rejected(tmp_path: Path) -> None
         "line 1: obsolete 'feature/harness_enrichment'; use the current Harness preview branch",
         "line 1: obsolete 'gpt2giga-harness==0.0.1a4'; the next Harness release is 0.1.0b1",
     ]
+
+
+def test_source_repository_links_are_limited_to_history_and_gateway_docs(
+    tmp_path: Path,
+) -> None:
+    docs_module = load_docs_module()
+    package = tmp_path / "packages/gpt2giga-harness"
+    package.mkdir(parents=True)
+    (package / "pyproject.toml").write_text(
+        "[project]\n"
+        "name='gpt2giga-harness'\n"
+        "version='0.5.1a1'\n"
+        "[project.urls]\n"
+        "Homepage='https://krakenalt.github.io/gigaloom/'\n"
+        "Repository='https://github.com/krakenalt/gigaloom'\n"
+        "Documentation='https://krakenalt.github.io/gigaloom/'\n"
+        "Issues='https://github.com/krakenalt/gigaloom/issues'\n"
+        "Changelog='https://github.com/krakenalt/gigaloom/blob/main/packages/gpt2giga-harness/CHANGELOG_en.md'\n",
+        encoding="utf-8",
+    )
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "[baseline](badges/gigaloom-coverage.svg)\n",
+        encoding="utf-8",
+    )
+    current_guide = docs / "current.md"
+    current_guide.write_text(
+        "Current development: https://github.com/ai-forever/gpt2giga\n",
+        encoding="utf-8",
+    )
+    (docs / "operations.md").write_text("baseline 84.59%\n", encoding="utf-8")
+    config = tmp_path / "docs-site/docusaurus.config.ts"
+    config.parent.mkdir()
+    config.write_text(
+        "title: 'GigaLoom'\n"
+        "baseUrl: '/gigaloom/'\n"
+        "organizationName: 'krakenalt'\n"
+        "projectName: 'gigaloom'\n"
+        "https://github.com/krakenalt/gigaloom/edit/main/docs/\n",
+        encoding="utf-8",
+    )
+
+    issues = docs_module.check_standalone_identity(tmp_path, [current_guide])
+
+    assert any("not scoped to gateway/history" in issue.message for issue in issues)
