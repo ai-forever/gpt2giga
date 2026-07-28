@@ -123,10 +123,6 @@ class ProxySettings(BaseSettings):
             "v2 built-in tools; custom function tools remain enabled."
         ),
     )
-    experimental_normalized_layer: bool = Field(
-        default=False,
-        description="Enable experimental normalized protocol layer wiring.",
-    )
     normalization_mode: Literal["off", "shadow", "on"] = Field(
         default="off",
         description=(
@@ -387,6 +383,10 @@ class ProxySettings(BaseSettings):
         default_factory=list,
         description="IP-адреса, которым разрешён доступ к /logs* (пусто = без ограничений)",
     )
+    logs_trusted_proxies: list[str] = Field(
+        default_factory=list,
+        description="Exact proxy peer IPs trusted to supply X-Forwarded-For for /logs*",
+    )
     enable_api_key_auth: bool = Field(
         default=False,
         description="Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ)",
@@ -394,6 +394,11 @@ class ProxySettings(BaseSettings):
     api_key: Optional[str] = Field(
         default=None,
         description="API ключ для защиты эндпоинтов (если enable_api_key_auth=True)",
+        repr=False,
+    )
+    harness_model_key: Optional[str] = Field(
+        default=None,
+        description="Dedicated HMAC key for authenticated Harness model selection",
         repr=False,
     )
 
@@ -496,6 +501,7 @@ class ProxySettings(BaseSettings):
             cors_allow_methods=self.cors_allow_methods,
             cors_allow_headers=self.cors_allow_headers,
             logs_ip_allowlist=self.logs_ip_allowlist,
+            logs_trusted_proxies=self.logs_trusted_proxies,
             log_redact_sensitive=self.log_redact_sensitive,
             max_request_body_bytes=self.max_request_body_bytes,
             max_audio_file_size_bytes=self.max_audio_file_size_bytes,

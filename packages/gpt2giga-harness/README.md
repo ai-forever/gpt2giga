@@ -5,7 +5,7 @@ distribution provides the `giga` and `gpt2giga-harness` commands, the
 `gpt2giga_harness` Python namespace, a durable local worker, and the packaged
 Project Cockpit web UI.
 
-> **Alpha preview:** the `0.4.x` storage, API, adapter, and automation contracts
+> **Alpha preview:** the `0.5.x` storage, API, adapter, and automation contracts
 > are stabilizing but may still change between prereleases. Use supervised local
 > workflows first. The package metadata in the current checkout is the source of
 > truth for the supported gateway requirement.
@@ -15,7 +15,7 @@ Project Cockpit web UI.
 Install the published prerelease from your package index:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
 giga doctor
 giga --version
 giga
@@ -25,7 +25,7 @@ giga ui
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```sh
-uv tool install 'gpt2giga-harness[gpt2giga]==0.5.0a1'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.5.1a1'
 ```
 
 The standard install includes the terminal workbench. Start it from the project
@@ -99,7 +99,7 @@ If you installed the earlier optional-TUI prerelease, upgrade the existing tool;
 do not keep or add a `[tui]` extra:
 
 ```sh
-uv tool install --force 'gpt2giga-harness==0.5.0a1'
+uv tool install --force 'gpt2giga-harness==0.5.1a1'
 giga --version
 giga
 ```
@@ -124,8 +124,8 @@ giga ui
 Keep that environment active when you `cd` to the project you want to manage.
 On Windows PowerShell, activate `.venv\Scripts\Activate.ps1` instead.
 
-The current `gpt2giga-harness==0.5.0a1` metadata keeps
-`gpt2giga==0.2.5a1` in the `gpt2giga` optional extra. Installing only
+The current `gpt2giga-harness==0.5.1a1` metadata keeps
+`gpt2giga==0.2.6a1` in the `gpt2giga` optional extra. Installing only
 `gpt2giga` never adds Harness commands or the `gpt2giga_harness` namespace.
 
 The provider-neutral base Harness install is intentionally limited to nine
@@ -265,9 +265,10 @@ giga ui-identity validate --json
 giga ui-identity revoke-all --confirm --json
 ```
 
-The root URL opens Cockpit V2. During its release-level rollback window, the
-previous no-build cockpit remains available at `http://127.0.0.1:8091/legacy`
-without migrating or rewriting Harness runtime state.
+The root URL opens Cockpit V2. Saved links from the previous UI redirect to
+their canonical Cockpit destinations without migrating or rewriting Harness
+runtime state. If packaged Cockpit assets are unavailable, reinstall the
+Harness package or restore its verified build artifact.
 
 After the first run starts, Workbench reveals a compact Run → Evidence → Review
 → Reuse path. Once the run reaches a terminal state, the exact retained trace
@@ -619,7 +620,7 @@ migration:
 ```sh
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
 giga doctor
 ```
 
@@ -638,7 +639,14 @@ giga doctor
 From the repository root:
 
 ```sh
+npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
+npm --prefix packages/gpt2giga-harness/frontend run build
+python packages/gpt2giga-harness/asset_contract.py
 uv sync --all-packages --all-extras --dev
 uv run pytest tests/harness -q
 uv build --package gpt2giga-harness --no-sources
 ```
+
+Compiled Cockpit bundles are ignored build inputs, not tracked source. The
+producer writes commit/source provenance plus npm SBOM and license evidence;
+the Python build fails closed if that tree is missing, stale, or modified.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,15 @@ class JsonlTrafficLogSink:
 
     def _append_lines(self, lines: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as stream:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(self.path, flags, 0o600)
+        try:
+            os.fchmod(descriptor, 0o600)
+            stream = os.fdopen(descriptor, "a", encoding="utf-8")
+        except Exception:
+            os.close(descriptor)
+            raise
+        with stream:
             stream.write(lines)
             stream.write("\n")

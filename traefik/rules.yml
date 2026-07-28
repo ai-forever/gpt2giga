@@ -22,7 +22,7 @@ http:
       entryPoints:
         - dashboard
       service: api@internal
-      rule: PathPrefix(`/api`) || PathPrefix(`/dashboard`)
+      rule: Host(`localhost`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))
 
   services:
     gpt2giga:

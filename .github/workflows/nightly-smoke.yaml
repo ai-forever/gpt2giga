@@ -32,3 +32,24 @@ jobs:
 
       - name: Run smoke tests
         run: uv run pytest tests/test_api_server/test_ci_smoke.py
+
+      - name: Capture bounded local detail profile
+        if: always()
+        run: uv run giga benchmark performance --profile local-detail --samples 5 --output performance-artifacts/local-detail.json
+
+      - name: Capture bounded TUI detail profile
+        if: always()
+        run: uv run giga benchmark performance --profile tui-detail --samples 5 --output performance-artifacts/tui-detail.json
+
+      - name: Capture bounded runtime detail profile
+        if: always()
+        run: uv run giga benchmark performance --profile runtime-detail --samples 5 --output performance-artifacts/runtime-detail.json
+
+      - name: Upload bounded performance detail reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gigaloom-performance-detail
+          path: performance-artifacts/*.json
+          if-no-files-found: error
+          retention-days: 14

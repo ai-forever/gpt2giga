@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI
 from loguru import logger
 
+from gpt2giga.common.harness_model import harness_model_signature
 from gpt2giga.common.model_concurrency import (
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
@@ -139,6 +140,7 @@ def _make_app(
     limiter: ModelConcurrencyLimiter,
     gigachat: GateAnthropicGigachat,
     transformer: RecordingTransformer | None = None,
+    harness_model_key: str | None = None,
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
@@ -147,7 +149,10 @@ def _make_app(
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = transformer or RecordingTransformer()
     app.state.config = ProxyConfig(
-        proxy=ProxySettings(structured_output_mode="function_call")
+        proxy=ProxySettings(
+            structured_output_mode="function_call",
+            harness_model_key=harness_model_key,
+        )
     )
     app.state.logger = logger
     return app
@@ -263,11 +268,17 @@ async def test_claude_cli_harness_model_stays_pinned_for_messages_and_tokens() -
         limiter=limiter,
         gigachat=gigachat,
         transformer=RecordingTransformer(upstream_model="configured-fallback"),
+        harness_model_key="model-key",
     )
     headers = {
         "user-agent": "claude-cli/2.1.197 (external, sdk-cli)",
-        "x-gpt2giga-harness-model": "GigaChat-Selected",
+        "x-gigaloom-model": "GigaChat-Selected",
         "x-gpt2giga-pass-model": "false",
+        "x-gigaloom-model-signature": harness_model_signature(
+            "model-key",
+            protocol="anthropic",
+            model="GigaChat-Selected",
+        ),
     }
 
     async with httpx.AsyncClient(
@@ -309,7 +320,7 @@ async def test_non_claude_cli_cannot_activate_harness_model_pin() -> None:
             json=_message_payload("claude-haiku-4-5-20251001"),
             headers={
                 "user-agent": "anthropic-sdk-python/1.0",
-                "x-gpt2giga-harness-model": "GigaChat-Selected",
+                "x-gigaloom-model": "GigaChat-Selected",
                 "x-gpt2giga-pass-model": "false",
             },
         )

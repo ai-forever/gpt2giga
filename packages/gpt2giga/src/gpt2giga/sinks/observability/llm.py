@@ -85,11 +85,13 @@ def build_llm_request_attributes(
     if request.tool_choice is not None:
         attrs["llm.tool_choice"] = _json_attribute(request.tool_choice, policy)
     invocation = request.generation_config.to_json_dict(exclude_none=True)
+    if not policy.capture_content:
+        invocation.pop("raw_extensions", None)
     if invocation:
         attrs["llm.invocation_parameters"] = _json_attribute(invocation, policy)
     if request.response_format is not None:
         attrs["llm.response_format"] = request.response_format.type
-    if request.raw_extensions:
+    if policy.capture_content and request.raw_extensions:
         attrs["llm.request.extensions"] = _json_attribute(
             request.raw_extensions,
             policy,
@@ -170,11 +172,22 @@ def build_llm_response_attributes(
         attrs.update(
             {
                 "error_type": response.error.type,
-                "error_message": response.error.message,
                 "error.type": response.error.type,
-                "error.message": response.error.message,
             }
         )
+        if policy.capture_content:
+            attrs.update(
+                {
+                    "error_message": _content_attribute(
+                        response.error.message,
+                        policy,
+                    ),
+                    "error.message": _content_attribute(
+                        response.error.message,
+                        policy,
+                    ),
+                }
+            )
 
     if policy.capture_responses:
         attrs["llm.output_messages"] = _json_attribute(
@@ -344,10 +357,11 @@ def build_stream_event_attributes(
         attrs.update(
             {
                 "error_type": event.error.type,
-                "error_message": event.error.message,
                 "error_code": event.error.code,
             }
         )
+        if policy.capture_content:
+            attrs["error_message"] = _content_attribute(event.error.message, policy)
     if event.tool_call is not None:
         attrs["llm.tool_call.name"] = event.tool_call.name
         attrs["llm.tool_call.id"] = event.tool_call.id
@@ -652,8 +666,18 @@ def _json_attribute(value: Any, policy: LLMContentPolicy) -> str:
     if policy.redaction_enabled:
         value = redact_traffic_payload(value)
     text = json.dumps(value, ensure_ascii=False, default=str, sort_keys=True)
-    if len(text) <= policy.max_content_length:
+    return _truncate_attribute(text, policy.max_content_length)
+
+
+def _content_attribute(value: str, policy: LLMContentPolicy) -> str:
+    if policy.redaction_enabled:
+        value = redact_traffic_payload(value)
+    return _truncate_attribute(value, policy.max_content_length)
+
+
+def _truncate_attribute(text: str, max_length: int) -> str:
+    if len(text) <= max_length:
         return text
     marker = "...[truncated]"
-    keep = max(policy.max_content_length - len(marker), 0)
+    keep = max(max_length - len(marker), 0)
     return text[:keep] + marker

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import stat
 
 
 from gpt2giga.core.interfaces import TrafficLogSink
@@ -76,6 +77,18 @@ async def test_jsonl_traffic_log_sink_writes_one_event(tmp_path):
     assert payload["created_at"]
     assert payload["status_code"] == 200
     assert payload["response_body_redacted"] == {"choices": []}
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+async def test_jsonl_traffic_log_sink_repairs_existing_file_permissions(tmp_path):
+    path = tmp_path / "traffic.jsonl"
+    path.touch(mode=0o644)
+    path.chmod(0o644)
+    sink = JsonlTrafficLogSink(path)
+
+    await sink.emit({"request_id": "req-1"})
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_traffic_log_factory_defaults_to_noop(tmp_path):

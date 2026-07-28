@@ -5,7 +5,6 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping
-from urllib.parse import quote
 
 from gpt2giga_harness.claude_handoff import (
     ClaudeHandoffAction,
@@ -43,6 +42,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
 )
 from gpt2giga_harness.harnesses.adapter_parity import claude_adapter_capabilities
 from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.harness_model import signed_harness_model_headers
 from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.native import HarnessInvocationMode
 from gpt2giga_harness.managed_mcp import (
@@ -67,8 +67,6 @@ MODE_TO_PERMISSION = {
     "read": "plan",
     "edit": "default",
 }
-HARNESS_MODEL_HEADER = "X-GPT2GIGA-Harness-Model"
-PASS_MODEL_HEADER = "X-GPT2GIGA-Pass-Model"
 
 
 def claude_code_custom_headers(
@@ -77,15 +75,17 @@ def claude_code_custom_headers(
 ) -> str:
     """Pin all Claude Code requests to the Harness-selected model."""
     harness_headers = "\n".join(
-        (
-            f"{HARNESS_MODEL_HEADER}:{quote(model, safe='')}",
-            f"{PASS_MODEL_HEADER}:false",
+        f"{name}:{value}"
+        for name, value in signed_harness_model_headers(
+            protocol="anthropic",
+            model=model,
+            key=context.harness_model_key,
         )
     )
     existing_headers = context.extra_env.get("ANTHROPIC_CUSTOM_HEADERS")
-    if existing_headers:
+    if existing_headers and harness_headers:
         return f"{existing_headers.rstrip()}\n{harness_headers}"
-    return harness_headers
+    return existing_headers or harness_headers
 
 
 class ClaudeCodeHarness(BaseHarness):

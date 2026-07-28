@@ -6,7 +6,6 @@ from typing import Final
 
 
 UI_PERFORMANCE_BUDGETS: Final[dict[str, int]] = {
-    "critical_asset_bytes": 575_000,
     "initial_page_ready_ms": 3_500,
     "large_trace_nodes": 200,
     "large_trace_render_ms": 100,

@@ -12,6 +12,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
     NormalizedMessage,
     NormalizedResponseFormat,
+    NormalizedTokenCountRequest,
     NormalizedTool,
     NormalizedToolCall,
 )
@@ -71,6 +72,15 @@ class FakeAChat:
 class FakeClient:
     def __init__(self):
         self.achat = FakeAChat()
+        self.token_inputs = []
+        self.token_model = None
+
+    async def atokens_count(self, values, model=None):
+        self.token_inputs = list(values)
+        self.token_model = model
+        return [
+            type("TokenCount", (), {"tokens": len(value.split())})() for value in values
+        ]
 
 
 class FakeTransformer:
@@ -146,6 +156,46 @@ def test_normalized_chat_to_openai_payload_maps_tools_and_generation_config():
     assert payload["temperature"] == 0.2
     assert payload["max_tokens"] == 128
     assert payload["additional_fields"] == {"profanity_check": False}
+
+
+async def test_gigachat_provider_counts_normalized_text_tools_and_schema():
+    client = FakeClient()
+    adapter = GigaChatProviderAdapter(
+        config=ProxyConfig(proxy=ProxySettings()),
+        request_transformer=FakeTransformer(),
+        giga_client=client,
+        model_limiter=ModelConcurrencyLimiter({}),
+        provider_label="anthropic",
+    )
+    chat = NormalizedChatRequest(
+        protocol="anthropic",
+        model="GigaChat",
+        messages=[NormalizedMessage(role="user", content="hello world")],
+        tools=[
+            NormalizedTool(
+                name="lookup",
+                description="Lookup data",
+                parameters={"type": "object"},
+            )
+        ],
+        response_format=NormalizedResponseFormat(
+            type="json_schema",
+            json_schema={"name": "answer", "schema": {"type": "object"}},
+        ),
+    )
+
+    response = await adapter.count_tokens(
+        NormalizedTokenCountRequest(
+            protocol="anthropic",
+            model="GigaChat",
+            input=chat,
+        )
+    )
+
+    assert response.input_tokens > 0
+    assert client.token_model == "GigaChat"
+    assert client.token_inputs[0] == "hello world"
+    assert "lookup" in client.token_inputs
 
 
 def test_normalized_chat_to_openai_payload_preserves_builtin_tools():

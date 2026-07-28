@@ -14,7 +14,7 @@ def temp_log_file(tmp_path):
     return log_file
 
 
-def make_app(logs_ip_allowlist=None):
+def make_app(logs_ip_allowlist=None, logs_trusted_proxies=None):
     app = FastAPI()
     app.include_router(system_router)
     app.include_router(logs_api_router)
@@ -22,6 +22,8 @@ def make_app(logs_ip_allowlist=None):
     config = ProxyConfig()
     if logs_ip_allowlist is not None:
         config.proxy_settings.logs_ip_allowlist = logs_ip_allowlist
+    if logs_trusted_proxies is not None:
+        config.proxy_settings.logs_trusted_proxies = logs_trusted_proxies
     app.state.config = config
     return app
 
@@ -148,11 +150,27 @@ def test_logs_stream_ip_allowlist_blocks(temp_log_file):
     assert resp.status_code == 403
 
 
-def test_logs_ip_allowlist_xforwardedfor(temp_log_file):
-    """X-Forwarded-For header is used for IP detection."""
+def test_logs_ip_allowlist_rejects_untrusted_xforwardedfor(temp_log_file):
+    """A direct client cannot spoof the allowlist through forwarding headers."""
     app = make_app(logs_ip_allowlist=["10.0.0.5"])
     app.state.config.proxy_settings.log_filename = temp_log_file
     client = TestClient(app)
+    resp = client.get(
+        "/logs",
+        params={"lines": 1},
+        headers={"X-Forwarded-For": "10.0.0.5, 172.16.0.1"},
+    )
+    assert resp.status_code == 403
+
+
+def test_logs_ip_allowlist_accepts_xforwardedfor_from_trusted_proxy(temp_log_file):
+    """An exact trusted proxy peer may supply the client address."""
+    app = make_app(
+        logs_ip_allowlist=["10.0.0.5"],
+        logs_trusted_proxies=["10.0.0.2"],
+    )
+    app.state.config.proxy_settings.log_filename = temp_log_file
+    client = TestClient(app, client=("10.0.0.2", 50000))
     resp = client.get(
         "/logs",
         params={"lines": 1},

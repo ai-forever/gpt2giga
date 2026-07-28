@@ -2,7 +2,7 @@
 
 :::warning[Alpha preview — prerelease]
 
-The `gpt2giga-harness` 0.4.x line is an alpha preview for testing and feedback.
+The `gpt2giga-harness` 0.5.x line is an alpha preview for testing and feedback.
 The UI, CLI, project YAML, runtime schema, and upgrade behavior can change while
 the product is being developed. Use it for local evaluation and supervised
 workflows, not as a production-critical or unattended multi-user service.
@@ -120,8 +120,8 @@ binary, Node.js runtime, credentials, or provider configuration. Both `uv tool`
 and `pipx` create an isolated Harness environment:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.5.0a1'
-pipx install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
+pipx install 'gpt2giga-harness==0.5.1a1'
 ```
 
 Upgrade an existing optional-TUI prerelease in place; do not retain or add a
@@ -131,10 +131,10 @@ archive when a state migration occurred:
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool install --force 'gpt2giga-harness==0.5.0a1'
+uv tool install --force 'gpt2giga-harness==0.5.1a1'
 uv tool install --force 'gpt2giga-harness==<previous-version>'
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
 ```
 
 Uninstalling the package does not delete `~/.gpt2giga/harness`, project
@@ -190,19 +190,19 @@ If the standalone preview is available in your package index, the shorter
 install path is:
 
 ```bash
-uv tool install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
 giga doctor
 ```
 
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```bash
-uv tool install 'gpt2giga-harness[gpt2giga]==0.5.0a1'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.5.1a1'
 ```
 
-The current `gpt2giga-harness==0.5.0a1` distribution provides the `giga` and
+The current `gpt2giga-harness==0.5.1a1` distribution provides the `giga` and
 `gpt2giga-harness` commands; its explicit `gpt2giga` extra pins
-`gpt2giga==0.2.5a1`.
+`gpt2giga==0.2.6a1`.
 
 Requirements are Python 3.10–3.14 and `uv`. Direct GigaChat runs also need the
 gateway credentials described in the [gpt2giga quickstart](quickstart.md).
@@ -265,7 +265,7 @@ To migrate from the optional-TUI prerelease, upgrade the standard package and
 remove `[tui]` from install commands:
 
 ```bash
-uv tool install --force 'gpt2giga-harness==0.5.0a1'
+uv tool install --force 'gpt2giga-harness==0.5.1a1'
 giga --version
 giga
 ```
@@ -297,6 +297,16 @@ does not publish an absolute workspace path, and reads existing runtime worker
 state without rewriting it. It also carries a stable report kind plus exact
 Harness/gateway, Python, and platform metadata; external CLI compatibility is
 embedded from the same bounded capability probes used for execution.
+
+Schema v2 adds the UI identity boundary, scoped network contract, GitHub CLI,
+and separate MCP, Skills, and Plugins source-health checks. The report declares
+its privacy contract, bounds the check count, carries a canonical SHA-256, and
+lists every disabled action with one exact recovery step. **Settings →
+Diagnostics → Run first-run doctor** uses the same contract in offline mode:
+it does not contact provider/model routes, GitHub, skills.sh, or an IdP. The
+downloaded JSON contains counts, hashes, statuses, and recovery commands, but no
+prompts, secrets, OAuth material, raw traffic, raw paths, or private file
+content. Use the CLI doctor only when live proxy and route probes are intended.
 
 For CI, choose the failure threshold explicitly. `blocked` returns exit code 1
 only for blocked checks; `degraded` returns 1 for either degraded or blocked
@@ -425,9 +435,10 @@ Then open `http://127.0.0.1:8091/`. A useful first tour is:
 5. Inspect **Approvals**, **Attention**, **Automation**, **Evaluation**, and
    **Integrations** before enabling edits or unattended execution.
 
-Cockpit V2 is the default local UI. The previous no-build cockpit remains at
-`http://127.0.0.1:8091/legacy` for one release-level rollback window; switching
-between the two does not migrate or rewrite Harness runtime state.
+Cockpit V2 is the only packaged local UI. Saved links from the previous UI
+redirect to their canonical Cockpit destinations without migrating or
+rewriting Harness runtime state. If packaged Cockpit assets are unavailable,
+reinstall the Harness package or restore its verified build artifact.
 
 For a retained assistant response, **Copy** fetches and copies the full text
 even when the feed shows only a bounded preview. For structured and one-shot
@@ -451,6 +462,13 @@ worker with `giga worker stop-on-idle --idle-seconds 30`. Workers deliberately
 do not auto-start a proxy: start `gpt2giga` yourself and configure
 `GPT2GIGA_HARNESS_API_KEY` when a harness needs the proxy. This avoids treating
 the UI process's temporary sidecar key cache as durable worker state.
+
+An empty worker now backs off from 250 ms to a bounded 1 second idle wait.
+Queue, approval, and schedule-configuration changes send a content-free
+loopback wake signal, while schedule, retry, and lease deadlines cap the wait
+even if wake delivery is unavailable. `--poll-seconds` changes the minimum and
+`--max-idle-seconds` changes the cap. This does not increase worker concurrency
+or change lease, cancellation, recovery, or durable ownership semantics.
 
 The `Runs` area is the durable queue and history view. It filters queued,
 running, blocked, approval-needed, failed, canceled, and completed jobs; shows
@@ -585,6 +603,8 @@ public HTTPS origin, exact subject-to-role map, and explicit `--allow-remote`.
 Authorization Code + PKCE `S256`, nonce/signature/audience validation, opaque
 server-side sessions, exact-origin CSRF, `viewer`/`operator` enforcement,
 JWKS rotation, and session/actor/global/back-channel revocation fail closed.
+Discovery never follows redirects, and every advertised authorization, token,
+JWKS, and logout endpoint must use the issuer's exact scheme, host, and port.
 The old bootstrap token and Host allowlist never authenticate remote users.
 
 See the [remote UI identity ADR](architecture/remote-ui-identity-adr.md) for the
@@ -598,6 +618,8 @@ CLI flags override environment variables. Useful variables:
 ```bash
 GPT2GIGA_HARNESS_PROXY_URL=http://127.0.0.1:8090
 GPT2GIGA_HARNESS_API_KEY=<local-proxy-api-key>
+# Required only when Harness uses an externally managed proxy:
+GPT2GIGA_HARNESS_MODEL_KEY=<shared-model-signing-secret>
 GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max
 GPT2GIGA_HARNESS_DEFAULT_API_MODE=v2
 GPT2GIGA_HARNESS_UI_HOST=127.0.0.1
@@ -631,7 +653,10 @@ external agent CLIs.
 Auto-start is local-only. It supports `http://127.0.0.1:<port>`,
 `http://localhost:<port>`, and `http://[::1]:<port>`. It refuses remote hosts,
 does not create fake upstream credentials, and starts the child proxy with a
-generated local `GPT2GIGA_API_KEY` if one is not already configured.
+generated local `GPT2GIGA_API_KEY` plus a separate model-signing key. For an
+externally managed proxy, configure the same strong
+`GPT2GIGA_HARNESS_MODEL_KEY` in the Harness and proxy environments; never send
+it to agent CLIs or expose it as an HTTP API key.
 
 External agent harnesses run the same proxy preflight before launching Codex,
 Claude Code, or Gemini CLI. If a sidecar is started, the generated local proxy
@@ -1026,6 +1051,16 @@ provider, and Git/GitHub actions are classified as allowed,
 approval-required, denied, or unknown and as pre-start, runtime-dependent, or
 provider-owned. A denied required action blocks startup; runtime-dependent and
 provider-owned actions are never presented as guaranteed grants.
+
+Harness-owned outbound HTTPS is default-deny and uses the
+[scoped network access contract](architecture/scoped-network-access-adr.md).
+An exact, unexpired grant and an enabled sandbox boundary are both required;
+host, port, method class, redirect policy, purpose, request digest, and transfer
+ceilings are revalidated before connection. Public DNS answers are pinned and
+the connected peer must match. The optional reviewed proxy policy is
+loopback-only and allowlist-first, with purpose-bound expiring rules and no
+global wildcard. This policy does not activate provider or integration traffic
+by itself.
 
 Runs Center can create a Trace-to-Replay comparison that changes exactly one
 model, provider, Harness, or extensions axis. Preview hashes the retained source
@@ -1886,6 +1921,11 @@ giga harness run claude-code \
 default permission mode instead of bypassing prompts. The harness also uses
 `--bare`, `--safe-mode`, `--no-session-persistence`, and a sanitized environment
 that only includes the local proxy API key as `ANTHROPIC_API_KEY`.
+Its request-scoped `X-GigaLoom-Model` pin is accepted only when the Claude CLI
+User-Agent, `X-GPT2GIGA-Pass-Model: false`, and the
+`X-GigaLoom-Model-Signature` protocol/model HMAC from the dedicated Harness
+model key all validate. Unsigned headers cannot override the configured gateway
+model.
 
 Backward-friendly alias:
 
@@ -1922,12 +1962,14 @@ giga harness run gemini-cli \
 auth when the local proxy API key should be used.
 
 Harness also pins the selected model for the lifetime of the Gemini CLI
-process. It sends an explicit Harness model header together with
+process. It sends `X-GigaLoom-Model` and
+`X-GigaLoom-Model-Signature` together with
 `X-GPT2GIGA-Pass-Model: false`; the Gemini-compatible gateway routes initial,
 tool-continuation, streaming, and token-count requests to that pinned model even
-if Gemini CLI changes the model name in a later request path. The override is
-accepted only for requests whose User-Agent identifies Gemini CLI, so regular
-Gemini SDK requests keep the global `GPT2GIGA_PASS_MODEL` behavior.
+if Gemini CLI changes the model name in a later request path. The gateway
+accepts the override only when the request has a Gemini CLI User-Agent and a
+valid protocol/model HMAC from the dedicated Harness model key. Unsigned or
+invalid overrides fall back to the global `GPT2GIGA_PASS_MODEL` behavior.
 
 For a durable Workbench or `giga session turn --transport native_structured`
 request, a compatible Gemini CLI uses the reviewed ACP stdio driver instead of
@@ -2024,6 +2066,18 @@ the complete static single-issuer OIDC profile and explicit `--allow-remote`;
 partial configuration and the retired shared bearer exchange fail closed. The
 implemented single-issuer OIDC/BFF boundary is documented in the
 [remote UI identity ADR](architecture/remote-ui-identity-adr.md).
+
+Compiled Cockpit bundles are not tracked source. A fresh source checkout must
+run `npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts` and
+then `npm --prefix packages/gpt2giga-harness/frontend run build` before the
+first `uv sync` or Harness wheel/sdist build. The producer atomically creates an ignored,
+commit-bound asset tree with integrity metadata, npm SBOM, and license evidence.
+The Python build validates the tree without Node.js or network access and fails
+closed if it is absent, stale, substituted, or contains unexpected files.
+CI/release pass the same immutable tree between jobs; a wheel rebuilt from the
+sealed sdist remains Node-free. For rollback, check out the prior release and
+rerun the producer, or restore that release's exact asset artifact, before
+rebuilding Python packages.
 
 `giga ui-identity validate --json` validates the deployment profile without an
 issuer request. `giga ui-identity revoke-all --confirm --json` is the OS-local
@@ -2790,7 +2844,7 @@ Remove the old combined wheel before installing the split packages so stale
 
 ```bash
 python -m pip uninstall -y gpt2giga gpt2giga-harness
-python -m pip install 'gpt2giga-harness==0.5.0a1'
+python -m pip install 'gpt2giga-harness==0.5.1a1'
 ```
 
 For `uv` tool installations, recreate both tool environments:
@@ -2799,11 +2853,11 @@ For `uv` tool installations, recreate both tool environments:
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
 uv tool install --prerelease allow gpt2giga
-uv tool install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
 ```
 
-The current `gpt2giga-harness==0.5.0a1` metadata keeps
-`gpt2giga==0.2.5a1` in the explicit `gpt2giga` optional extra.
+The current `gpt2giga-harness==0.5.1a1` metadata keeps
+`gpt2giga==0.2.6a1` in the explicit `gpt2giga` optional extra.
 
 This package migration does not move or rewrite Harness state. Existing
 `~/.gpt2giga/harness` data and project-local `.giga/` directories remain in

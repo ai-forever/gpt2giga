@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
-const outputDirectory = fileURLToPath(
+const outputDirectory = process.env.GIGALOOM_COCKPIT_OUTPUT ?? fileURLToPath(
   new URL("../src/gpt2giga_harness/ui/cockpit_v2/assets", import.meta.url),
 );
 

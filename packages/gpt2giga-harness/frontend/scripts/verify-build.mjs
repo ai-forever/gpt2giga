@@ -1,11 +1,9 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
-const frontendRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputRoot = join(frontendRoot, "..", "src", "gpt2giga_harness", "ui", "cockpit_v2", "assets");
+import { outputRoot, sha256 } from "./asset-contract.mjs";
+
 const manifest = JSON.parse(await readFile(join(outputRoot, "manifest.json"), "utf8"));
 
 if (manifest.format_version !== "gpt2giga-cockpit-v2-assets-v1" || manifest.entry !== "index.html") {
@@ -19,7 +17,7 @@ let initialCompressedBytes = 0;
 let initialJavaScriptBytes = 0;
 for (const [name, record] of Object.entries(manifest.assets)) {
   const content = await readFile(join(outputRoot, name));
-  const digest = createHash("sha256").update(content).digest("hex");
+  const digest = sha256(content);
   if (digest !== record.sha256 || content.byteLength !== record.bytes) {
     throw new Error(`Asset integrity mismatch: ${name}`);
   }
@@ -30,6 +28,17 @@ for (const [name, record] of Object.entries(manifest.assets)) {
       initialJavaScriptBytes += compressedBytes;
     }
   }
+}
+
+if (
+  typeof manifest.build !== "object"
+  || typeof manifest.build.output_sha256 !== "string"
+  || !["licenses", "provenance", "sbom"].every((name) => (
+    typeof manifest.build[name]?.path === "string"
+    && typeof manifest.build[name]?.sha256 === "string"
+  ))
+) {
+  throw new Error("Cockpit build provenance or supply-chain evidence is missing");
 }
 
 if (initialCompressedBytes > 200 * 1024) {

@@ -1074,7 +1074,7 @@ wheels = [
 
 [[package]]
 name = "gpt2giga"
-version = "0.2.5a1"
+version = "0.2.6a1"
 source = { editable = "packages/gpt2giga" }
 dependencies = [
     { name = "aiohttp" },
@@ -1083,6 +1083,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "gigachat" },
     { name = "google-genai" },
+    { name = "httpx" },
     { name = "loguru" },
     { name = "openai" },
     { name = "pillow" },
@@ -1121,6 +1122,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.133.0,<1" },
     { name = "gigachat", specifier = ">=0.2.2a1,<0.3.0" },
     { name = "google-genai", specifier = ">=2.8.0,<3" },
+    { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
     { name = "openai", specifier = ">=2.3.0,<3" },
     { name = "openinference-semantic-conventions", marker = "extra == 'phoenix'", specifier = ">=0.1,<1" },
@@ -1140,7 +1142,7 @@ provides-extras = ["postgres", "opensearch", "phoenix"]
 
 [[package]]
 name = "gpt2giga-harness"
-version = "0.5.0a1"
+version = "0.5.1a1"
 source = { editable = "packages/gpt2giga-harness" }
 dependencies = [
     { name = "anyio" },

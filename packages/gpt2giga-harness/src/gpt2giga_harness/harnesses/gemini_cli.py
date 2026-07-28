@@ -13,7 +13,6 @@ from pathlib import Path
 import threading
 import time
 from typing import Any, Mapping
-from urllib.parse import quote
 
 from gpt2giga_harness.cli_capabilities import (
     CliCapabilitySnapshot,
@@ -43,6 +42,7 @@ from gpt2giga_harness.harnesses.attachment_plan import (
 )
 from gpt2giga_harness.harnesses.adapter_parity import gemini_adapter_capabilities
 from gpt2giga_harness.harnesses.base import BaseHarness
+from gpt2giga_harness.harness_model import signed_harness_model_headers
 from gpt2giga_harness.executables import ExecutableResolution, ExecutableResolver
 from gpt2giga_harness.gemini_acp import (
     GEMINI_ACP_PROTOCOL,
@@ -106,8 +106,6 @@ MODE_TO_APPROVAL = {
     "plan": "--approval-mode=plan",
     "read": "--approval-mode=plan",
 }
-HARNESS_MODEL_HEADER = "X-GPT2GIGA-Harness-Model"
-PASS_MODEL_HEADER = "X-GPT2GIGA-Pass-Model"
 
 
 def gemini_cli_custom_headers(
@@ -115,13 +113,18 @@ def gemini_cli_custom_headers(
     model: str,
 ) -> str:
     """Pin all Gemini CLI requests to the Harness-selected model."""
-    harness_headers = (
-        f"{HARNESS_MODEL_HEADER}:{quote(model, safe='')},{PASS_MODEL_HEADER}:false"
+    harness_headers = ",".join(
+        f"{name}:{value}"
+        for name, value in signed_harness_model_headers(
+            protocol="gemini",
+            model=model,
+            key=context.harness_model_key,
+        )
     )
     existing_headers = context.extra_env.get("GEMINI_CLI_CUSTOM_HEADERS")
-    if existing_headers:
+    if existing_headers and harness_headers:
         return f"{existing_headers},{harness_headers}"
-    return harness_headers
+    return existing_headers or harness_headers
 
 
 class GeminiCliHarness(BaseHarness):

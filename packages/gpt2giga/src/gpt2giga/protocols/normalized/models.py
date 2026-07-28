@@ -21,11 +21,44 @@ class NormalizedBaseModel(BaseModel):
         return self.model_dump(mode="json", exclude_none=exclude_none)
 
 
+NormalizedMessageRole = Literal["system", "user", "assistant", "tool"]
+NormalizedRequestClass = Literal["generation", "embedding", "token_count"]
+NormalizedErrorClass = Literal[
+    "invalid_request",
+    "authentication",
+    "permission",
+    "not_found",
+    "rate_limit",
+    "timeout",
+    "cancelled",
+    "upstream",
+    "internal",
+]
+NormalizedStopReason = Literal[
+    "stop",
+    "max_tokens",
+    "tool_calls",
+    "content_filter",
+    "cancelled",
+    "error",
+]
+
+
+class NormalizedImageReference(NormalizedBaseModel):
+    """Represent one admitted v1 image reference without fetching it."""
+
+    source: Literal["url", "data_url"]
+    uri: str = Field(min_length=1)
+    mime_type: Optional[str] = None
+    detail: Optional[Literal["auto", "low", "high"]] = None
+
+
 class NormalizedContentPart(NormalizedBaseModel):
     """Represent one normalized message content part."""
 
     type: str = "text"
     text: Optional[str] = None
+    image_reference: Optional[NormalizedImageReference] = None
     data: Optional[Any] = None
     mime_type: Optional[str] = None
     detail: Optional[str] = None
@@ -66,6 +99,21 @@ class NormalizedResponseFormat(NormalizedBaseModel):
     json_schema: Optional[dict[str, Any]] = None
 
 
+class NormalizedCancellation(NormalizedBaseModel):
+    """Describe cooperative cancellation admitted for one request."""
+
+    mode: Literal["client_disconnect", "deadline", "caller"]
+    deadline_ms: Optional[int] = Field(default=None, gt=0)
+
+
+class NormalizedTokenLimits(NormalizedBaseModel):
+    """Describe provider-declared token and context limits."""
+
+    context_window: Optional[int] = Field(default=None, gt=0)
+    max_input_tokens: Optional[int] = Field(default=None, gt=0)
+    max_output_tokens: Optional[int] = Field(default=None, gt=0)
+
+
 class NormalizedGenerationConfig(NormalizedBaseModel):
     """Represent common model generation parameters."""
 
@@ -92,27 +140,57 @@ class NormalizedRequest(NormalizedBaseModel):
 class NormalizedChatRequest(NormalizedRequest):
     """Represent a normalized chat completion request."""
 
+    schema_version: Literal["gigaloom.normalized-chat.v1"] = (
+        "gigaloom.normalized-chat.v1"
+    )
+    request_class: Literal["generation"] = "generation"
     protocol: str = "openai"
     operation: str = "chat"
     messages: list[NormalizedMessage] = Field(default_factory=list)
     tools: list[NormalizedTool] = Field(default_factory=list)
     tool_choice: Optional[Any] = None
+    parallel_tool_calls: Optional[bool] = None
     response_format: Optional[NormalizedResponseFormat] = None
     generation_config: NormalizedGenerationConfig = Field(
         default_factory=NormalizedGenerationConfig
     )
+    cancellation: Optional[NormalizedCancellation] = None
     user: Optional[str] = None
 
 
 class NormalizedEmbeddingRequest(NormalizedRequest):
     """Represent a normalized embeddings request."""
 
+    request_class: Literal["embedding"] = "embedding"
     protocol: str = "openai"
     operation: str = "embeddings"
     input: Any
     dimensions: Optional[int] = None
     encoding_format: Optional[str] = None
     user: Optional[str] = None
+
+
+class NormalizedTokenCountRequest(NormalizedRequest):
+    """Represent token counting over one normalized v1 chat request."""
+
+    schema_version: Literal["gigaloom.normalized-token-count.v1"] = (
+        "gigaloom.normalized-token-count.v1"
+    )
+    request_class: Literal["token_count"] = "token_count"
+    protocol: str = "normalized"
+    operation: str = "count_tokens"
+    input: NormalizedChatRequest
+
+
+class NormalizedTokenCountResponse(NormalizedBaseModel):
+    """Represent a provider token-count result and its declared limits."""
+
+    schema_version: Literal["gigaloom.normalized-token-count.v1"] = (
+        "gigaloom.normalized-token-count.v1"
+    )
+    model: Optional[str] = None
+    input_tokens: int = Field(ge=0)
+    limits: Optional[NormalizedTokenLimits] = None
 
 
 class NormalizedUsage(NormalizedBaseModel):
@@ -130,6 +208,8 @@ class NormalizedError(NormalizedBaseModel):
     message: str
     code: Optional[str | int] = None
     param: Optional[str] = None
+    error_class: Optional[NormalizedErrorClass] = None
+    retryable: Optional[bool] = None
 
 
 class NormalizedChoice(NormalizedBaseModel):
@@ -139,6 +219,7 @@ class NormalizedChoice(NormalizedBaseModel):
     message: Optional[NormalizedMessage] = None
     delta: Optional[NormalizedMessage] = None
     finish_reason: Optional[str] = None
+    stop_reason: Optional[NormalizedStopReason] = None
 
 
 class NormalizedResponse(NormalizedBaseModel):
@@ -151,6 +232,7 @@ class NormalizedResponse(NormalizedBaseModel):
     choices: list[NormalizedChoice] = Field(default_factory=list)
     usage: Optional[NormalizedUsage] = None
     error: Optional[NormalizedError] = None
+    limits: Optional[NormalizedTokenLimits] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -162,6 +244,7 @@ NormalizedStreamEventType = Literal[
     "tool_call_delta",
     "usage",
     "message_end",
+    "cancelled",
     "error",
     "heartbeat",
 ]
@@ -183,6 +266,8 @@ class NormalizedStreamEvent(NormalizedBaseModel):
     tool_call: Optional[NormalizedToolCall] = None
     usage: Optional[NormalizedUsage] = None
     error: Optional[NormalizedError] = None
+    cancellation: Optional[NormalizedCancellation] = None
     finish_reason: Optional[str] = None
+    stop_reason: Optional[NormalizedStopReason] = None
     heartbeat: Optional[dict[str, Any]] = None
     metadata: dict[str, Any] = Field(default_factory=dict)

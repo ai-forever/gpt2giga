@@ -102,9 +102,15 @@ describe("Cockpit V2 route contract", () => {
     expect(shellSource).not.toContain('message(preferences.locale, "connected")');
   });
 
-  it("keeps only working full-document authoring transitions", () => {
+  it("removes retired full-document authoring transitions", () => {
     const automationSource = readFileSync(
       fileURLToPath(new URL("./surfaces/automation.tsx", import.meta.url)),
+      "utf8",
+    );
+    const authoringSource = readFileSync(
+      fileURLToPath(
+        new URL("./components/AutomationAuthoringDrawer.tsx", import.meta.url),
+      ),
       "utf8",
     );
     const evaluationSource = readFileSync(
@@ -114,6 +120,10 @@ describe("Cockpit V2 route contract", () => {
 
     expect(automationSource).not.toContain('data-legacy-transition="true"');
     expect(automationSource).toContain("<AutomationAuthoringDrawer");
-    expect(evaluationSource).toContain('data-legacy-transition="true"');
+    expect(evaluationSource).not.toContain('data-legacy-transition="true"');
+    expect(authoringSource).toContain('aria-modal="true"');
+    expect(authoringSource).toContain('role="dialog"');
+    expect(authoringSource).toContain('role="alert"');
+    expect(authoringSource).toContain('role="status"');
   });
 });

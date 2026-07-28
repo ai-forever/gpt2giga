@@ -218,7 +218,10 @@ from gpt2giga_harness.state_backup import (
     verify_state_backup,
 )
 from gpt2giga_harness.ui.app import create_app
-from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
+from gpt2giga_harness.ui.cockpit_v2 import (
+    load_cockpit_v2_manifest,
+    load_cockpit_v2_shell,
+)
 from gpt2giga_harness.types import HarnessContext, HarnessRequest
 
 assert Path(gpt2giga_harness.__file__).resolve().is_relative_to(installed_root)
@@ -311,8 +314,9 @@ write_doctor_support_report(
 )
 assert json.loads(doctor_output.read_text(encoding="utf-8"))["schema_version"] == 1
 assert stat.S_IMODE(doctor_output.stat().st_mode) == 0o600
-assert "function boot()" in load_text_asset("app.js")
-assert ".app {" in load_text_asset("app.css")
+manifest = load_cockpit_v2_manifest()
+assert manifest.entry == "index.html"
+assert "<title>GigaLoom</title>" in load_cockpit_v2_shell()
 
 data_dir = installed_root.parent / "runtime-smoke-state"
 client = TestClient(
@@ -324,7 +328,7 @@ assert client.get("/healthz").status_code == 200
 shell = client.get("/")
 assert shell.status_code == 200
 assert "GigaLoom" in shell.text
-assert client.get("/assets/app.css").status_code == 200
+assert client.get("/legacy", follow_redirects=False).status_code == 404
 harnesses = client.get("/api/harnesses")
 assert harnesses.status_code == 200
 ids = {item["spec"]["id"] for item in harnesses.json()["harnesses"]}

@@ -30,6 +30,7 @@ from gpt2giga.middlewares.request_validation import RequestValidationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.openapi_tags import build_openapi_tags_metadata
+from gpt2giga.protocols.anthropic import AnthropicProtocolAdapter
 from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.routers.litellm import router as litellm_router
@@ -65,6 +66,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         ),
     )
     app.state.config = config
+    app.state.anthropic_protocol_adapter = AnthropicProtocolAdapter()
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     app.state.gemini_protocol_adapter = GeminiProtocolAdapter()
     app.state.traffic_log_sink = create_traffic_log_sink(config.proxy_settings)

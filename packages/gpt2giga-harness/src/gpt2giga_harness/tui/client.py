@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import re
 import threading
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, AsyncIterator, Mapping, Protocol, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import (
@@ -67,6 +67,7 @@ from gpt2giga_harness.project import (
     resolve_project,
     update_project_state,
 )
+from gpt2giga_harness.product_capabilities import legacy_mode_compatibility_receipt
 from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga_harness.runtime.models import ApprovalStatus
 from gpt2giga_harness.runtime.policy import PolicyEngine, approval_request_to_dict
@@ -81,6 +82,10 @@ from gpt2giga_harness.sessions.models import (
     HarnessStoredEvent,
     run_to_dict,
     session_to_dict,
+)
+from gpt2giga_harness.sessions.event_stream import (
+    StreamCapacityError,
+    StreamSignal,
 )
 from gpt2giga_harness.sessions.store import new_id, utc_now
 from gpt2giga_harness.settings import HarnessSettingsStore
@@ -120,6 +125,8 @@ MAX_NATIVE_SCROLLBACK_CHARS = 64 * 1024
 MAX_NATIVE_INPUT_CHARS = 8 * 1024
 HTTP_TIMEOUT_SECONDS = 10.0
 RUN_START_TIMEOUT_SECONDS = 5.0
+RUN_STREAM_RESNAPSHOT_SECONDS = 15.0
+MAX_SSE_LINE_BYTES = 256 * 1024
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _BIDI_CONTROL_RE = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
 _TERMINAL_SEQUENCE_RE = re.compile(
@@ -143,10 +150,32 @@ _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "failed", "canceled"})
 _TERMINAL_PROCESS_STATUSES = frozenset(
     {"exited", "stopped", "failed", "timed_out", "interrupted", "unknown"}
 )
+_RUN_RESNAPSHOT_EVENT_TYPES = frozenset(
+    {
+        "approval_requested",
+        "approval_decided",
+        "cancel_requested",
+        "error",
+        "input_requested",
+        "question_requested",
+        "run_canceled",
+        "run_failed",
+        "run_finished",
+    }
+)
 
 
 class WorkbenchClientError(RuntimeError):
     """Bounded client failure safe for presentation."""
+
+
+@dataclass(frozen=True)
+class _SseFrame:
+    """One bounded decoded server-sent event."""
+
+    event: str
+    id: str | None
+    data: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -180,6 +209,9 @@ class SessionSummary:
     revision: str = ""
     generation: int = 0
     lease: str | None = None
+    task_intent: str = "ask"
+    authority: str = "read_only"
+    compatibility_warning: str | None = None
 
 
 @dataclass(frozen=True)
@@ -697,6 +729,14 @@ class WorkbenchClient(Protocol):
     ) -> RunSnapshot:
         """Read a bounded authoritative incremental run snapshot."""
 
+    def stream_run(
+        self,
+        run_id: str,
+        *,
+        cursor: str | None = None,
+    ) -> AsyncIterator[RunSnapshot]:
+        """Deliver active run changes with bounded heartbeat resnapshots."""
+
     async def latest_run(self, session_id: str) -> RunSnapshot | None:
         """Return the newest retained run for session reconnect, if any."""
 
@@ -766,6 +806,14 @@ class WorkbenchClient(Protocol):
         self, process_id: str, *, cursor: int = 0
     ) -> NativeTerminalSnapshot:
         """Read bounded native output after an exact cursor."""
+
+    def stream_native_terminal(
+        self,
+        process_id: str,
+        *,
+        cursor: int = 0,
+    ) -> AsyncIterator[NativeTerminalSnapshot]:
+        """Deliver native output from one persistent bounded stream."""
 
     async def status_native_terminal(self, process_id: str) -> NativeTerminalSnapshot:
         """Read authoritative native-process lifecycle state."""
@@ -1430,6 +1478,42 @@ class InProcessWorkbenchClient:
             resnapshot_reason=reason,
         )
 
+    async def stream_run(
+        self,
+        run_id: str,
+        *,
+        cursor: str | None = None,
+    ) -> AsyncIterator[RunSnapshot]:
+        """Use the store broker plus a four-per-minute durability heartbeat."""
+        try:
+            subscription = self.store.event_broker.subscribe(run_id)
+        except StreamCapacityError as exc:
+            raise WorkbenchClientError(str(exc)) from exc
+        current_cursor = cursor
+        first = True
+        try:
+            while True:
+                signal = (
+                    StreamSignal.CHANGED
+                    if first
+                    else await subscription.wait(RUN_STREAM_RESNAPSHOT_SECONDS)
+                )
+                first = False
+                snapshot = await self.snapshot_run(
+                    run_id,
+                    cursor=(
+                        None
+                        if signal is StreamSignal.RESNAPSHOT_REQUIRED
+                        else current_cursor
+                    ),
+                )
+                current_cursor = snapshot.cursor
+                yield snapshot
+                if snapshot.terminal:
+                    return
+        finally:
+            subscription.close()
+
     async def latest_run(self, session_id: str) -> RunSnapshot | None:
         runs = self.store.list_runs(session_id)
         if not runs:
@@ -1646,6 +1730,16 @@ class InProcessWorkbenchClient:
     async def snapshot_native_terminal(
         self, process_id: str, *, cursor: int = 0
     ) -> NativeTerminalSnapshot:
+        raise _in_process_native_terminal_error(process_id, cursor=cursor)
+
+    async def stream_native_terminal(
+        self,
+        process_id: str,
+        *,
+        cursor: int = 0,
+    ) -> AsyncIterator[NativeTerminalSnapshot]:
+        if False:  # pragma: no cover - preserve the async-iterator contract.
+            yield await self.snapshot_native_terminal(process_id, cursor=cursor)
         raise _in_process_native_terminal_error(process_id, cursor=cursor)
 
     async def status_native_terminal(self, process_id: str) -> NativeTerminalSnapshot:
@@ -2350,6 +2444,67 @@ class AttachedWorkbenchClient:
             native_process_id=_optional_text(run.get("native_process_id")),
         )
 
+    async def stream_run(
+        self,
+        run_id: str,
+        *,
+        cursor: str | None = None,
+    ) -> AsyncIterator[RunSnapshot]:
+        """Follow the existing durable SSE endpoint and resnapshot on delivery."""
+        validated_run_id = _path_identity(run_id)
+        event_id, _generation, cursor_invalid = _parse_attach_cursor(cursor)
+        query = (
+            urlencode({"tail_only": "true"})
+            if event_id is None or cursor_invalid
+            else urlencode({"after_id": event_id})
+        )
+        current_cursor = None if cursor_invalid else cursor
+        current_snapshot: RunSnapshot | None = None
+        snapshot_event_ids: set[str] = set()
+        async for frame in self._stream_sse(
+            f"/api/runs/{validated_run_id}/events/stream?{query}"
+        ):
+            if frame.event != "resnapshot" and (
+                _optional_text(frame.data.get("run_id")) != run_id
+            ):
+                raise WorkbenchClientError("run stream identity changed")
+            if current_snapshot is None:
+                current_snapshot = await self.snapshot_run(
+                    run_id,
+                    cursor=current_cursor,
+                )
+                current_cursor = current_snapshot.cursor
+                snapshot_event_ids = {event.id for event in current_snapshot.events}
+                yield current_snapshot
+                if current_snapshot.terminal:
+                    return
+            if frame.event == "resnapshot" or _event_requires_run_resnapshot(
+                frame.data
+            ):
+                current_snapshot = await self.snapshot_run(
+                    run_id,
+                    cursor=None if frame.event == "resnapshot" else current_cursor,
+                )
+                current_cursor = current_snapshot.cursor
+                snapshot_event_ids = {event.id for event in current_snapshot.events}
+                yield current_snapshot
+                if current_snapshot.terminal:
+                    return
+                continue
+            raw_event = _event_from_mapping(frame.data)
+            if raw_event.id in snapshot_event_ids:
+                continue
+            event = _timeline_event(raw_event)
+            current_cursor = f"at1.{current_snapshot.binding.generation}.{event.id}"
+            current_snapshot = replace(
+                current_snapshot,
+                events=(event,),
+                cursor=current_cursor,
+                resnapshot_reason=None,
+            )
+            snapshot_event_ids = {event.id}
+            yield current_snapshot
+
     async def latest_run(self, session_id: str) -> RunSnapshot | None:
         response = await self._request(
             "GET", f"/api/sessions/{_path_identity(session_id)}"
@@ -2570,6 +2725,26 @@ class AttachedWorkbenchClient:
         )
         return _native_terminal_snapshot_from_mapping(response)
 
+    async def stream_native_terminal(
+        self,
+        process_id: str,
+        *,
+        cursor: int = 0,
+    ) -> AsyncIterator[NativeTerminalSnapshot]:
+        """Follow the existing native-output SSE endpoint without active polling."""
+        validated_process_id = _path_identity(process_id)
+        validated_cursor = _non_negative_cursor(cursor)
+        query = urlencode({"cursor": validated_cursor})
+        async for frame in self._stream_sse(
+            f"/api/native/processes/{validated_process_id}/output/stream?{query}"
+        ):
+            snapshot = _native_terminal_snapshot_from_mapping(frame.data)
+            if snapshot.process_id != process_id:
+                raise WorkbenchClientError("native stream identity changed")
+            yield snapshot
+            if snapshot.terminal:
+                return
+
     async def status_native_terminal(self, process_id: str) -> NativeTerminalSnapshot:
         response = await self._request(
             "GET", f"/api/native/processes/{_path_identity(process_id)}"
@@ -2611,6 +2786,84 @@ class AttachedWorkbenchClient:
             or current.binding.generation != binding.generation
         ):
             raise WorkbenchClientError("run changed; authoritative resnapshot required")
+
+    async def _stream_sse(self, path: str) -> AsyncIterator[_SseFrame]:
+        await self._ensure_session()
+
+        def open_stream():
+            request = Request(
+                f"{self.base_url}{path}",
+                headers={"Accept": "text/event-stream"},
+                method="GET",
+            )
+            try:
+                return self._opener.open(
+                    request,
+                    timeout=max(self.timeout_seconds, 30.0),
+                )
+            except HTTPError as exc:
+                raise WorkbenchClientError(
+                    f"attach stream rejected ({exc.code})"
+                ) from exc
+            except (OSError, URLError) as exc:
+                raise WorkbenchClientError("attach stream is unavailable") from exc
+
+        response = await anyio.to_thread.run_sync(
+            open_stream,
+            abandon_on_cancel=True,
+        )
+        content_type = str(response.headers.get("Content-Type") or "")
+        if not content_type.lower().startswith("text/event-stream"):
+            response.close()
+            raise WorkbenchClientError("attach stream returned an invalid content type")
+        event_name = "message"
+        event_id: str | None = None
+        data_lines: list[str] = []
+        frame_bytes = 0
+        try:
+            while True:
+                try:
+                    raw_line = await anyio.to_thread.run_sync(
+                        lambda: response.readline(MAX_SSE_LINE_BYTES + 1),
+                        abandon_on_cancel=True,
+                    )
+                except (OSError, TimeoutError) as exc:
+                    raise WorkbenchClientError("attach stream was interrupted") from exc
+                if not raw_line:
+                    break
+                if len(raw_line) > MAX_SSE_LINE_BYTES:
+                    raise WorkbenchClientError("attach stream line exceeded the limit")
+                frame_bytes += len(raw_line)
+                if frame_bytes > MAX_RESPONSE_BYTES:
+                    raise WorkbenchClientError("attach stream frame exceeded the limit")
+                try:
+                    line = raw_line.decode("utf-8").rstrip("\r\n")
+                except UnicodeDecodeError as exc:
+                    raise WorkbenchClientError(
+                        "attach stream is not valid UTF-8"
+                    ) from exc
+                if not line:
+                    if data_lines:
+                        yield _decode_sse_frame(event_name, event_id, data_lines)
+                    event_name = "message"
+                    event_id = None
+                    data_lines = []
+                    frame_bytes = 0
+                    continue
+                if line.startswith(":"):
+                    continue
+                field, separator, value = line.partition(":")
+                value = value.lstrip(" ") if separator else ""
+                if field == "event":
+                    event_name = value or "message"
+                elif field == "id":
+                    event_id = value[:512] or None
+                elif field == "data":
+                    data_lines.append(value)
+            if data_lines:
+                yield _decode_sse_frame(event_name, event_id, data_lines)
+        finally:
+            response.close()
 
     async def _parallel_get(
         self,
@@ -2699,6 +2952,20 @@ class AttachedWorkbenchClient:
             return parsed
 
         return await anyio.to_thread.run_sync(send)
+
+
+def _decode_sse_frame(
+    event: str,
+    event_id: str | None,
+    data_lines: Sequence[str],
+) -> _SseFrame:
+    try:
+        payload = json.loads("\n".join(data_lines))
+    except json.JSONDecodeError as exc:
+        raise WorkbenchClientError("attach stream returned invalid JSON") from exc
+    if not isinstance(payload, Mapping):
+        raise WorkbenchClientError("attach stream event must be an object")
+    return _SseFrame(event=event, id=event_id, data=dict(payload))
 
 
 def _workspace_limits(workspace: str) -> AttachmentLimits:
@@ -3275,6 +3542,10 @@ def _session_summary(
     store: FilesystemHarnessSessionStore | None = None,
 ) -> SessionSummary:
     native = _session_native_reference(session.native, session.metadata)
+    task_intent, authority, warning = _workbench_selection_summary(
+        session.metadata,
+        mode=session.default_mode,
+    )
     runs = store.list_runs(session.id) if store is not None else ()
     messages = store.list_messages(session.id) if store is not None else ()
     active = [run.id for run in runs if run.status.value not in _TERMINAL_RUN_STATUSES]
@@ -3301,15 +3572,22 @@ def _session_summary(
         revision=session.updated_at,
         generation=_session_generation(native),
         lease=active[-1] if active else None,
+        task_intent=task_intent,
+        authority=authority,
+        compatibility_warning=warning,
     )
 
 
 def _session_summary_from_mapping(data: Mapping[str, Any]) -> SessionSummary:
+    metadata = _mapping(data.get("metadata"))
     native = _mapping(data.get("native_session_reference"))
     if not native:
-        native = _session_native_reference(
-            _mapping(data.get("native")), _mapping(data.get("metadata"))
-        )
+        native = _session_native_reference(_mapping(data.get("native")), metadata)
+    mode = _display_text(data.get("default_mode") or "plan")
+    task_intent, authority, warning = _workbench_selection_summary(
+        metadata,
+        mode=mode,
+    )
     return SessionSummary(
         id=_required_text(data.get("id"), "session id"),
         title=_display_text(data.get("title") or "Untitled session"),
@@ -3317,7 +3595,7 @@ def _session_summary_from_mapping(data: Mapping[str, Any]) -> SessionSummary:
         workspace=_optional_text(data.get("workspace")),
         harness_id=_display_text(data.get("default_harness_id") or "unknown"),
         model=_optional_display_text(data.get("default_model")),
-        mode=_display_text(data.get("default_mode") or "plan"),
+        mode=mode,
         archived=bool(data.get("archived")),
         project_id=_optional_text(data.get("project_id")),
         preview=_bounded_content_text(data.get("last_message_preview"), 120),
@@ -3336,6 +3614,35 @@ def _session_summary_from_mapping(data: Mapping[str, Any]) -> SessionSummary:
             else _session_generation(native)
         ),
         lease=_optional_identity(data.get("session_lease")),
+        task_intent=task_intent,
+        authority=authority,
+        compatibility_warning=warning,
+    )
+
+
+def _workbench_selection_summary(
+    metadata: Mapping[str, Any],
+    *,
+    mode: str,
+) -> tuple[str, str, str | None]:
+    retained = _mapping(metadata.get("workbench_selection"))
+    if retained.get("schema_version") == 1:
+        intent = str(retained.get("intent") or "")
+        authority = str(retained.get("authority") or "")
+        if intent in {"ask", "review", "change"} and authority in {
+            "read_only",
+            "workspace_write",
+        }:
+            return (
+                intent,
+                authority,
+                _optional_display_text(retained.get("compatibility_warning")),
+            )
+    legacy = legacy_mode_compatibility_receipt(mode)
+    return (
+        str(legacy["intent"]),
+        str(legacy["authority"]),
+        _optional_display_text(legacy.get("warning")),
     )
 
 
@@ -4059,6 +4366,11 @@ def _approval_network_label(preview: Mapping[str, Any]) -> str:
     if isinstance(value, bool):
         return "required" if value else "not required"
     return _display_text(value or "not declared")
+
+
+def _event_requires_run_resnapshot(value: Mapping[str, Any]) -> bool:
+    event_type = str(value.get("type") or "").lower().replace("-", "_")
+    return event_type in _RUN_RESNAPSHOT_EVENT_TYPES
 
 
 def _binding_payload(binding: RunActionBinding) -> dict[str, Any]:

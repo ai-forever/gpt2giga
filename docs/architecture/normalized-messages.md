@@ -9,47 +9,62 @@ dedicated Gemini-to-normalized adapter in the main execution path.
 
 ## Current status
 
-- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions goes through legacy
-  transforms.
+- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions and Anthropic
+  Messages go through legacy transforms.
 - `GPT2GIGA_NORMALIZATION_MODE=shadow`: OpenAI Chat builds a normalized request
   alongside the legacy path and stores a safe diagnostic shape hash without prompt content.
-- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions is executed through the
-  normalized path and `GigaChatProviderAdapter`; a legacy fallback is available
-  before the response starts via `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
-- OpenAI Responses and Anthropic Messages are still executed through legacy route
-  transforms, but observability and debug translation already use a normalized
-  representation where possible.
+- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions, the accepted
+  Anthropic Messages v1 subset, and Gemini `countTokens` are executed through
+  their protocol adapters, normalized models, and `GigaChatProviderAdapter`; a
+  legacy fallback is available before the response starts via
+  `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
+- OpenAI Responses is still executed through legacy route transforms.
 - Gemini GenerateContent and streamGenerateContent are executed through
   `GeminiProtocolAdapter`, normalized models, and `GigaChatProviderAdapter`
-  independently of the OpenAI Chat normalization flags.
+  independently of the OpenAI Chat normalization flags. Their admitted request,
+  response, SSE, function-calling, usage, safety/error, model-list, and typed
+  image contracts are frozen by Gemini golden fixtures.
 - Debug endpoints can translate between the `openai`, `anthropic`, `normalized`, and
   `gigachat` formats for protected admin workflows.
+- G7-01 provides a normalized OpenAI Chat Completions upstream adapter for
+  explicitly admitted OpenAI-compatible/vLLM profiles. It is an internal
+  execution component, not a new public route switch. G7-02 adds the direct
+  Anthropic request/response/SSE and count-token projection. G7-03 makes the
+  admitted Gemini subset bridge-compatible: fully modeled fields no longer
+  masquerade as unmodeled extensions, images use typed references, and
+  `countTokens` uses `NormalizedTokenCountRequest`. Public upstream selection
+  remains gated by G7-04.
 
 ## Core models
 
 The normalized request envelope:
 
-- `NormalizedChatRequest`: `protocol`, `operation`, `model`, `stream`,
-  `messages`, `tools`, `tool_choice`, `response_format`,
-  `generation_config`, `user`, `metadata`.
+- `NormalizedChatRequest`: versioned request class, `protocol`, `operation`,
+  `model`, `stream`, `messages`, `tools`, `tool_choice`,
+  `parallel_tool_calls`, `response_format`, `generation_config`,
+  `cancellation`, `user`, `metadata`.
 - `NormalizedMessage`: `role`, `content`, `name`, `tool_call_id`,
   `tool_calls`.
-- `NormalizedContentPart`: a generic content part with `type`, `text`, `data`,
-  `mime_type`, `detail`.
+- `NormalizedContentPart`: a generic content part plus a typed
+  `NormalizedImageReference` for admitted `url` and `data_url` images.
 - `NormalizedTool`: a flattened tool/function contract with `name`,
   `description`, `parameters`.
 - `NormalizedGenerationConfig`: common generation knobs:
   `temperature`, `top_p`, `max_tokens`, penalties, `stop`, `seed`.
+- `NormalizedTokenCountRequest`, `NormalizedTokenCountResponse`, and
+  `NormalizedTokenLimits`: explicit token-count and context-limit contracts.
 
 Normalized output:
 
 - `NormalizedResponse`: a provider-independent non-streaming response:
   `choices`, `usage`, `error`, `metadata`, `provider_metadata`.
-- `NormalizedChoice`: `message` or `delta`, `finish_reason`, `index`.
+- `NormalizedChoice`: `message` or `delta`, legacy `finish_reason`, normalized
+  v1 `stop_reason`, and `index`.
 - `NormalizedUsage`: `input_tokens`, `output_tokens`, `total_tokens`.
 - `NormalizedStreamEvent`: canonical stream events:
   `message_start`, `content_delta`, `reasoning_delta`, `tool_call_start`,
-  `tool_call_delta`, `usage`, `message_end`, `error`, `heartbeat`.
+  `tool_call_delta`, `usage`, `message_end`, `cancelled`, `error`,
+  `heartbeat`.
 
 All normalized models inherit two extension buckets:
 
@@ -57,6 +72,118 @@ All normalized models inherit two extension buckets:
   keep but not promote into the canonical model.
 - `provider_metadata`: provider-specific data, for example GigaChat
   `additional_fields` or safe metadata from the upstream response.
+
+## OpenAI-compatible protocol bridge v1
+
+G7-00 froze translation feasibility. G7-01 adds the first upstream runtime
+without changing the matrix. The machine-readable source is
+`PROTOCOL_LOSS_MATRIX_V1` in `gpt2giga.protocols.normalized`; its serialized
+status is now `implementation_status="openai_compatible_upstream_adapter"`.
+
+The accepted request subset has exactly four roles (`system`, `user`,
+`assistant`, `tool`), ordered text and typed image-reference parts, function
+tools/calls/results, admitted tool choice, optional parallel-call control,
+JSON Schema output, streaming with terminal events, normalized stop/usage/model
+and request/error classes, cooperative cancellation, declared context/token
+limits, and explicit token counting. Files, audio, arbitrary content parts,
+provider metadata, and unmodeled extension semantics are outside v1.
+
+`E` means the normalized meaning has an exact downstream representation. `C`
+means a reviewed adapter/model profile must opt into the feature. `U` means the
+meaning cannot be preserved in v1 and admission fails.
+
+| Normalized v1 feature | OpenAI downstream | Anthropic downstream | Gemini downstream |
+| --- | --- | --- | --- |
+| Roles | E | E | E |
+| Ordered content parts | E | E | E |
+| Text | E | E | E |
+| Image references | C | C | C |
+| Generation controls | C | C | C |
+| Function tools/calls | E | E | E |
+| Tool choice | E | E | C |
+| Explicit parallel-tool toggle | E | E | U |
+| Tool results | E | E | E |
+| JSON Schema output | C | C | C |
+| Streaming deltas | E | E | E |
+| Streaming terminal events | E | E | E |
+| Stop reason | E | E | E |
+| Usage | E | E | E |
+| Model identity | E | E | E |
+| Request/error classes | E | E | E |
+| Cancellation | E | E | E |
+| Context/token limits | C | C | C |
+| Count tokens | U | E | E |
+
+`admit_protocol_bridge_request()` is the mandatory pre-I/O guard. It derives
+the request's semantic requirements, requires each one in the reviewed
+OpenAI-compatible upstream profile, requires explicit opt-in for every `C`
+cell, enforces declared token limits, and rejects every `U` cell or unmodeled
+extension. `UnsupportedSemanticLossError` is raised before an adapter may open
+a network connection.
+
+The matrix was revalidated against the current
+[OpenAI Chat Completions reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create),
+[Anthropic Messages SDK contract](https://github.com/anthropics/anthropic-sdk-python/tree/main/src/anthropic/types),
+and [Gemini GenerateContent documentation](https://ai.google.dev/gemini-api/docs/text-generation).
+
+### OpenAI-compatible upstream execution
+
+`OpenAICompatibleProviderAdapter` executes only the frozen normalized v1 Chat
+Completions subset. Before any request it binds the exact profile revision and
+route model, runs `admit_protocol_bridge_request()`, serializes the reviewed
+body, and obtains a request-specific network authorization. The transport
+revalidates the serialized body, connected peer, and bounded response size.
+Redirects and automatic retries are disabled.
+
+Harness owns the provider profile, model route, `SecretRef`, TLS/proxy policy
+references, and scoped network ticket. A credential is resolved and revealed
+only to the exact `provider-execution:openai-compatible` boundary; profiles,
+logs, persisted settings, network intents, and receipts retain only the
+reference identity. vLLM has a versioned
+`gigaloom.vllm-openai-compatible.v1` profile, while other compatible servers
+must provide an explicitly reviewed profile and normalized capability/limit
+contract.
+
+The adapter supports strict model discovery, non-streaming and streaming text,
+function tools and tool deltas, usage and stop normalization, bounded SSE, and
+content-free transport failures. Provider-returned error facts are preserved
+when present; missing usage, model metadata, or capabilities are not invented.
+The hermetic fake-server suite is the default validation. A live remote vLLM
+smoke is explicit opt-in:
+
+```bash
+GPT2GIGA_RUN_VLLM_SMOKE=1 \
+GPT2GIGA_VLLM_BASE_URL=https://vllm.example/v1 \
+GPT2GIGA_VLLM_MODEL=model-id \
+uv run pytest -n 0 tests/live/test_vllm_openai_compatible_smoke.py
+```
+
+Set `GPT2GIGA_VLLM_API_KEY` only when the reviewed server requires it. The live
+smoke requires a remote HTTPS endpoint and a scoped Harness network grant.
+
+### Protocol bridge closure
+
+The G7-04 hermetic closure suite composes the same reviewed
+`OpenAICompatibleProviderAdapter` with the OpenAI, Anthropic, and Gemini
+downstream adapters. Text, streaming, partial usage, and function-tool
+workloads reach an identical OpenAI Chat Completions upstream payload and are
+then projected back into each requested wire shape. OpenAI image inputs are
+promoted to the same typed `NormalizedImageReference` contract already used by
+Anthropic and Gemini.
+
+The streaming parser rejects data after a terminal choice, usage before a
+terminal choice, data after the usage summary, malformed JSON, and incomplete
+streams with stable non-retryable protocol errors. Cooperative disconnects,
+timeouts, and provider HTTP failures retain distinct normalized cancellation,
+retryability, error class, code, and parameter facts. Partial usage stays
+partial; missing token counts are not invented.
+
+This closes the internal normalized v1 composition contract. It does not add a
+gateway environment switch that accepts an arbitrary upstream URL or secret.
+OpenAI-compatible profiles, credentials, TLS/proxy policy, and network grants
+remain owned by the reviewed Harness execution boundary. Batches, files,
+embeddings, prompt caching, computer use, audio, and unsupported multimodal
+forms remain outside bridge v1.
 
 ## OpenAI Chat flow
 
@@ -145,6 +272,13 @@ The normalized layer differs as follows:
   force the built-in provider tools.
 - Gemini candidates, finish reasons, and usage metadata are formed on the way out of
   the normalized response/stream adapters.
+- Accepted inline images use typed `NormalizedImageReference` values. Fully
+  modeled function-call config, function responses, and JSON Schema output do
+  not remain in `raw_extensions`; safety settings, cached content, unsupported
+  tools, files, and other unmodeled semantics do, so OpenAI-compatible bridge
+  admission rejects them before provider I/O.
+- With normalization mode `on`, `countTokens` uses the same normalized
+  token-count request/response contract as the admitted bridge.
 
 The Gemini Files/Batches router modules are prepared but not mounted in the public
 API surface; they are not part of the current normalized execution path.
@@ -191,10 +325,14 @@ The normalized layer differs as follows:
 - Anthropic `usage.input_tokens` and `usage.output_tokens` already match the
   normalized naming, and `total_tokens` is computed when both values are present.
 
-Currently the Anthropic execution path stays legacy:
-the Anthropic payload is first brought to an OpenAI-like payload, then the
-common GigaChat route transform is used. Debug translation and observability can build
-a normalized representation on top of this path.
+With `GPT2GIGA_NORMALIZATION_MODE=on`, `AnthropicProtocolAdapter` builds the
+normalized request directly, `GigaChatProviderAdapter` executes it, and the
+Anthropic response/SSE projector restores the client wire contract. The same
+path represents `count_tokens` with `NormalizedTokenCountRequest` and
+`NormalizedTokenCountResponse`. Legacy execution remains the default and the
+pre-response fallback for semantics outside the accepted v1 subset. Prompt
+caching, computer use, files, and other unmodeled Anthropic features are not
+claimed by the normalized path.
 
 ## Observability
 

@@ -1,5 +1,6 @@
 import ast
 from pathlib import Path
+import subprocess
 
 try:
     import tomllib
@@ -95,6 +96,9 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
 
     assert set(members) == {"packages/gpt2giga", "packages/gpt2giga-harness"}
     harness_metadata = _load_toml(HARNESS_MEMBER / "pyproject.toml")["project"]
+    harness_build = _load_toml(HARNESS_MEMBER / "pyproject.toml")["tool"]["hatch"][
+        "build"
+    ]
     assert gateway_metadata["name"] == "gpt2giga"
     assert gateway_metadata["version"]
     assert gateway_metadata["scripts"] == {"gpt2giga": "gpt2giga:run"}
@@ -130,6 +134,7 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
         "giga-skills-catalog-proxy": "gpt2giga_harness.skills_catalog_proxy:main",
         "gpt2giga-harness": "gpt2giga_harness.entrypoint:main",
     }
+    assert harness_build["hooks"]["custom"]["path"] == "hatch_build.py"
     entry_point_groups = harness_metadata["entry-points"]
     assert set(entry_point_groups) == {
         "agent_workbench.environment_providers.v1",
@@ -174,7 +179,22 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
     assert not (gateway_source / "protocols/openai/stream_accumulator.py").exists()
     assert (harness_source / "tools").is_dir()
     assert (harness_source / "protocols/openai/stream_accumulator.py").is_file()
-    assert (harness_source / "ui/assets/index.html").is_file()
+    assert not (harness_source / "ui/static.py").is_file()
+    assert not (harness_source / "ui/assets/index.html").is_file()
+    assert (harness_source / "ui/cockpit_v2/assets/manifest.json").is_file()
+    tracked_assets = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets",
+            "packages/gpt2giga-harness/frontend/public/brand",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert tracked_assets.stdout == ""
 
 
 def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
@@ -190,6 +210,13 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     ]
     assert "build-artifacts:" in workflow
     assert "artifact-smoke:" in workflow
+    assert "cockpit-v2-assets-${{ github.sha }}" in workflow
+    assert workflow.count("Download verified Cockpit assets") == 4
+    assert "npm@11.17.0" in workflow
+    assert (
+        "python3 packages/gpt2giga-harness/asset_contract.py --require-clean"
+        in workflow
+    )
     assert "package: [gateway, harness]" in workflow
     assert "- '!packages/**/*.md'" in workflow
     assert 'python-version: ["3.10", "3.13", "3.14"]' in workflow
@@ -205,12 +232,23 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert "HARNESS_VERSION: ${{ steps.versions.outputs.harness }}" in workflow
     assert "- name: Commit coverage badge on main" in workflow
     assert "if: github.event_name == 'push'" in workflow
+    coverage_badge_job = workflow[workflow.index("  coverage-badge:") :]
+    assert "python3 scripts/generate_badge.py" in coverage_badge_job
+    assert "uv run python scripts/generate_badge.py" not in coverage_badge_job
+    assert "astral-sh/setup-uv" not in coverage_badge_job
     assert gateway_version not in workflow
     assert harness_version not in workflow
     assert ".venv-artifact/bin/gpt2giga --help" in workflow
     assert ".venv-artifact/bin/giga --help" in workflow
     assert ".venv-artifact/bin/giga --version" in workflow
     assert ".venv-artifact/bin/gpt2giga-harness --help" in workflow
+    assert (
+        "r.files('gpt2giga_harness.ui.cockpit_v2')"
+        ".joinpath('assets/index.html').is_file()"
+    ) in workflow
+    assert (
+        "r.files('gpt2giga_harness.ui').joinpath('assets/index.html')" not in workflow
+    )
     assert "python -I -m gpt2giga_harness.base_install --json" in workflow
     assert (
         workflow.index("Install Harness base artifact")
@@ -270,7 +308,13 @@ def test_release_workflow_routes_and_publishes_both_workspace_members():
     assert 'elif ref_name == f"v{gateway_version}":' in workflow
     assert 'elif ref_name == f"gpt2giga-harness-v{harness_version}":' in workflow
     assert "gateway_release:" in workflow
+    assert "harness_assets:" in workflow
     assert "harness_release:" in workflow
+    assert "needs: [release_metadata, harness_assets]" in workflow
+    assert "gpt2giga-harness-assets-${{ github.sha }}" in workflow
+    assert "npm@11.17.0" in workflow
+    assert "npm run build:release" in workflow
+    assert "assets/_build/*" in workflow
     assert "environment: pypi-harness" in workflow
     assert "uv build --package gpt2giga --wheel --sdist --no-sources" in workflow
     assert (
@@ -278,7 +322,7 @@ def test_release_workflow_routes_and_publishes_both_workspace_members():
     )
     assert workflow.count("uses: actions/attest-build-provenance@v4") == 2
     assert "subject-path: dist/gpt2giga/*" in workflow
-    assert "subject-path: dist/gpt2giga-harness/*" in workflow
+    assert "dist/gpt2giga-harness/*" in workflow
     assert workflow.count("\\( -name '*.whl' -o -name '*.tar.gz' \\)") == 2
     assert '-name "gpt2giga-${GATEWAY_VERSION}*.whl"' in workflow
     assert '-name "gpt2giga-${GATEWAY_VERSION}.tar.gz"' in workflow

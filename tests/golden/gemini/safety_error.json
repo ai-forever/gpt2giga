@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": 400,
+    "message": "The response was blocked by the upstream safety policy.",
+    "status": "SAFETY"
+  }
+}

@@ -21,6 +21,7 @@ from gpt2giga.openapi_tags import (
     OPENAPI_TAG_SYSTEM_HEALTH,
     OPENAPI_TAG_SYSTEM_LOGS,
 )
+from gpt2giga.protocols.anthropic import AnthropicProtocolAdapter
 from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
@@ -150,6 +151,15 @@ def test_app_factory_creates_openai_protocol_adapter():
     app = create_app()
 
     assert isinstance(app.state.openai_protocol_adapter, OpenAIProtocolAdapter)
+
+
+def test_app_factory_creates_anthropic_protocol_adapter():
+    app = create_app()
+
+    assert isinstance(
+        app.state.anthropic_protocol_adapter,
+        AnthropicProtocolAdapter,
+    )
 
 
 def test_app_factory_creates_gemini_protocol_adapter():

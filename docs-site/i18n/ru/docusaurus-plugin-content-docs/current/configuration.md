@@ -128,6 +128,7 @@ GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch
 | `GPT2GIGA_HTTPS_KEY_FILE` / `GPT2GIGA_HTTPS_CERT_FILE` | empty | Локальные файлы ключа/сертификата для встроенного HTTPS. |
 | `GPT2GIGA_ENABLE_API_KEY_AUTH` | `False` | Требовать аутентификацию по API-ключу прокси для публичных API-маршрутов. В `PROD` обязательно. |
 | `GPT2GIGA_API_KEY` | empty | API-ключ прокси. Для общих окружений используйте сильное случайное значение. |
+| `GPT2GIGA_HARNESS_MODEL_KEY` | empty | Отдельный HMAC-ключ, доступный только Harness и внешнему proxy, который должен принимать request-scoped model pins Claude/Gemini. |
 | `GPT2GIGA_PASS_MODEL` | `True` | Передавать `model` из запроса в GigaChat. Поставьте `False`, чтобы всегда использовать настроенную модель GigaChat. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Разбирать клиентский `Authorization` как учётные данные GigaChat для авторизации в вышестоящем сервисе для каждого запроса. |
 | `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Максимум неактивных клиентов для отдельных учётных данных, сохраняемых для переиспользования соединений. |
@@ -249,23 +250,36 @@ function/local tools остаются включены.
 
 ## Флаги нормализованного слоя
 
-Экспериментальные флаги управляют нормализованным путём OpenAI Chat Completions и по
-умолчанию сохраняют прежнее поведение для этого маршрута:
+Режим нормализации управляет нормализованными путями OpenAI Chat Completions
+и Anthropic Messages и по умолчанию сохраняет прежнее поведение для этих маршрутов:
 
 ```dotenv
-GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER=False
 GPT2GIGA_NORMALIZATION_MODE=off
 GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 ```
 
-- `off`: OpenAI Chat Completions идёт через прежний путь;
+Неиспользуемый ключ `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` удалён. Для
+детерминированной миграции используйте `GPT2GIGA_NORMALIZATION_MODE=on`, чтобы
+выполнять запросы через нормализованный путь, `shadow` только для диагностики
+перевода или `off`, чтобы сохранить прежний путь.
+`GPT2GIGA_LEGACY_CHAT_FALLBACK` настраивается независимо.
+
+- `off`: OpenAI Chat Completions и Anthropic Messages идут через прежние пути;
 - `shadow`: строит нормализованную диагностику рядом с прежней обработкой OpenAI Chat без изменения ответов клиенту;
-- `on`: переводит OpenAI Chat на нормализованный путь, с откатом к прежнему до старта ответа, если откат включён.
+- `on`: переводит OpenAI Chat, принятое подмножество Anthropic Messages v1 и
+  Gemini `countTokens` на нормализованный путь с откатом к прежнему до старта
+  ответа, если откат включён.
 
 Gemini GenerateContent использует свой выделенный адаптер Gemini-в-нормализованное и
-путь провайдера GigaChat независимо от этих флагов OpenAI Chat. OpenAI Responses и
-Anthropic Messages остаются на прежних путях выполнения, но используют нормализованное
-представление для наблюдаемости и отладочных помощников там, где это возможно.
+путь провайдера GigaChat независимо от этих флагов. Его принятое bridge-
+подмножество использует типизированные inline-изображения и полностью
+смоделированные поля functions/JSON Schema; safety settings, cached content,
+files, неподдерживаемые tools и прочая несмоделированная семантика остаются
+явными и отклоняются admission для OpenAI-compatible bridge до provider I/O.
+OpenAI Responses остаётся на прежнем пути выполнения. Семантика Anthropic вне
+normalized v1, включая prompt caching, computer use, files и неподдерживаемые
+блоки контента, не объявляется поддержанной нормализованным путём и может
+использовать прежний fallback.
 
 Подробное описание моделей и текущих путей выполнения: [Нормализованные сообщения](./architecture/normalized-messages.md).
 
@@ -374,7 +388,11 @@ GPT2GIGA_LOG_REDACT_SENSITIVE=True
 
 ```dotenv
 GPT2GIGA_LOGS_IP_ALLOWLIST='["10.0.0.1"]'
+GPT2GIGA_LOGS_TRUSTED_PROXIES='["127.0.0.1"]'
 ```
+
+`X-Forwarded-For` учитывается только тогда, когда прямой peer входит в
+`GPT2GIGA_LOGS_TRUSTED_PROXIES`; иначе allowlist проверяет адрес соединения.
 
 Не используйте `GPT2GIGA_LOG_LEVEL=DEBUG` в production: отладочный вывод может
 содержать операционный контекст, который не должен попадать в общие логи.

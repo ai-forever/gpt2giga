@@ -45,6 +45,15 @@ COMMAND_REGISTRY: tuple[CommandSpec, ...] = (
         "ctrl+p",
     ),
     CommandSpec(
+        "context",
+        "/context",
+        "context_drawer",
+        "command.context",
+        "command.context.help",
+        "ctrl+k",
+        show_in_footer=True,
+    ),
+    CommandSpec(
         "status", "/status", "status_view", "command.status", "command.status.help"
     ),
     CommandSpec(
@@ -142,6 +151,27 @@ COMMAND_REGISTRY: tuple[CommandSpec, ...] = (
         "integrations",
         "command.integrations",
         "command.integrations.help",
+    ),
+    CommandSpec(
+        "environment",
+        "/environment",
+        "environment_view",
+        "command.environment",
+        "command.environment.help",
+    ),
+    CommandSpec(
+        "diagnostics",
+        "/diagnostics",
+        "status_view",
+        "command.diagnostics",
+        "command.diagnostics.help",
+    ),
+    CommandSpec(
+        "advanced-transport",
+        "/advanced",
+        "advanced_transport",
+        "command.advanced_transport",
+        "command.advanced_transport.help",
     ),
     CommandSpec(
         "refresh",

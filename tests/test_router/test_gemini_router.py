@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from gpt2giga.common.harness_model import harness_model_signature
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocol.request.transformer import RequestTransformer
@@ -314,13 +315,18 @@ def test_gemini_generate_content_roundtrips_through_gigachat_provider():
 
 
 def test_gemini_cli_harness_model_stays_pinned_across_requests():
-    app = make_app(mode="v2", pass_model=False)
+    app = make_app(mode="v2", pass_model=False, harness_model_key="model-key")
     app.state.request_transformer = RequestTransformer(app.state.config, logger)
     client = TestClient(app)
     headers = {
         "user-agent": "GeminiCLI/0.46.0/GigaChat-Selected (darwin; arm64; headless)",
-        "x-gpt2giga-harness-model": "GigaChat-Selected",
+        "x-gigaloom-model": "GigaChat-Selected",
         "x-gpt2giga-pass-model": "false",
+        "x-gigaloom-model-signature": harness_model_signature(
+            "model-key",
+            protocol="gemini",
+            model="GigaChat-Selected",
+        ),
     }
     payload = {"contents": [{"parts": [{"text": "Hello"}]}]}
 
@@ -352,16 +358,16 @@ def test_gemini_cli_harness_model_stays_pinned_across_requests():
     )
 
 
-def test_non_gemini_cli_cannot_activate_harness_model_pin():
-    app = make_app()
+def test_unsigned_gemini_cli_cannot_activate_harness_model_pin():
+    app = make_app(harness_model_key="model-key")
     client = TestClient(app)
 
     response = client.post(
         "/models/gemini-pro:generateContent",
         json={"contents": [{"parts": [{"text": "Hello"}]}]},
         headers={
-            "user-agent": "google-genai-sdk/1.30.0",
-            "x-gpt2giga-harness-model": "GigaChat-Selected",
+            "user-agent": "GeminiCLI/0.46.0 (darwin; arm64; headless)",
+            "x-gigaloom-model": "GigaChat-Selected",
             "x-gpt2giga-pass-model": "false",
         },
     )
@@ -399,9 +405,7 @@ def test_gemini_generate_content_maps_response_json_schema_alias():
             "required": ["title"],
         }
     }
-    assert payload["response_format"]["raw_extensions"] == {
-        "responseMimeType": "application/json"
-    }
+    assert payload["response_format"]["raw_extensions"] == {}
 
 
 def test_gemini_generate_content_preserves_tool_parameters_json_schema():
@@ -541,12 +545,6 @@ def test_gemini_generate_content_preserves_multi_function_response_payload():
             "content": '{"result": "one"}',
             "name": "first",
             "tool_call_id": "state-1",
-            "gemini_role": "function",
-            "functionResponse": {
-                "id": "state-1",
-                "name": "first",
-                "response": {"result": "one"},
-            },
         },
         {
             "role": "tool",
@@ -557,11 +555,6 @@ def test_gemini_generate_content_preserves_multi_function_response_payload():
             "content": '{"result": "two"}',
             "name": "second",
             "tool_call_id": "second",
-            "gemini_role": "function",
-            "functionResponse": {
-                "name": "second",
-                "response": {"result": "two"},
-            },
         },
     ]
 
@@ -988,6 +981,47 @@ def test_gemini_count_tokens_includes_system_contents_and_tools():
     assert app.state.gigachat_client.token_count_calls == [
         {
             "texts": ["system prompt", "hello world", "lookup", "Find fresh data"],
+            "model": "gemini-pro",
+        }
+    ]
+
+
+def test_gemini_count_tokens_normalization_on_uses_normalized_contract():
+    app = make_app(normalization_mode="on", legacy_chat_fallback=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:countTokens",
+        json={
+            "generateContentRequest": {
+                "systemInstruction": {"parts": [{"text": "Be concise."}]},
+                "contents": [{"parts": [{"text": "count these words"}]}],
+                "tools": [
+                    {
+                        "functionDeclarations": [
+                            {
+                                "name": "lookup",
+                                "description": "Lookup data",
+                                "parameters": {"type": "object"},
+                            }
+                        ]
+                    }
+                ],
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["totalTokens"] > 0
+    assert app.state.gigachat_client.token_count_calls == [
+        {
+            "texts": [
+                "Be concise.",
+                "count these words",
+                "lookup",
+                "Lookup data",
+                '{"type": "object", "properties": {}}',
+            ],
             "model": "gemini-pro",
         }
     ]

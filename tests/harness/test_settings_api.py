@@ -4,6 +4,7 @@ import stat
 from fastapi.testclient import TestClient
 import pytest
 
+from gpt2giga_harness import proxy
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.provider_profiles import ProviderProtocol
@@ -16,6 +17,7 @@ from gpt2giga_harness.settings import (
     SettingsConflictError,
 )
 from gpt2giga_harness.ui.app import create_app
+from gpt2giga_harness.ui.routers import settings as settings_router
 
 
 def test_settings_read_model_is_bounded_and_never_exposes_secrets(
@@ -54,6 +56,92 @@ def test_settings_read_model_is_bounded_and_never_exposes_secrets(
     assert "provider-secret" not in serialized
     assert "proxy-secret" not in serialized
     assert "token=hidden" not in serialized
+
+
+def test_guided_doctor_api_is_content_free_and_offline(
+    tmp_path,
+    monkeypatch,
+):
+    def unexpected_online_probe(*_args, **_kwargs):
+        raise AssertionError("Web doctor must not perform online probes")
+
+    monkeypatch.setattr(proxy, "health_check", unexpected_online_probe)
+    monkeypatch.setattr(proxy, "discover_models", unexpected_online_probe)
+    monkeypatch.setattr(proxy, "probe_json_route", unexpected_online_probe)
+    monkeypatch.setattr(
+        proxy,
+        "sidecar_preflight",
+        lambda _context: proxy.SidecarPreflight(ok=True, reason="ready"),
+    )
+    client = _client(tmp_path)
+    assert client.get("/cockpit-v2/settings").status_code == 200
+
+    response = client.get("/api/doctor", params={"workspace": str(tmp_path)})
+
+    assert response.status_code == 200
+    body = response.json()
+    by_id = {check["id"]: check for check in body["checks"]}
+    assert body["schema_version"] == 2
+    assert body["guided"]["online_checks"] is False
+    assert body["privacy"]["content_free"] is True
+    assert body["privacy"]["raw_traffic_collected"] is False
+    assert body["privacy"]["private_file_content_collected"] is False
+    assert by_id["ui-identity"]["status"] == "ready"
+    assert by_id["proxy-health"]["evidence"]["network_contacted"] is False
+    assert {
+        "durable-worker",
+        "git-readiness",
+        "github-cli",
+        "scoped-network",
+        "mcp-sources",
+        "skills-sources",
+        "plugin-sources",
+    }.issubset(by_id)
+    serialized = json.dumps(body)
+    assert str(tmp_path) not in serialized
+    assert "giga-skills-catalog-proxy" in serialized
+    assert "request-scoped OIDC token" in serialized
+
+
+def test_guided_doctor_api_does_not_forward_browser_workspace_paths(
+    tmp_path,
+    monkeypatch,
+):
+    captured = {}
+
+    def fake_build_doctor_report(
+        config,
+        registry,
+        *,
+        workspace,
+        online_checks,
+        ui_identity,
+    ):
+        captured.update(
+            {
+                "workspace": workspace,
+                "online_checks": online_checks,
+                "ui_identity": ui_identity,
+            }
+        )
+        return {"schema_version": 2, "checks": []}
+
+    monkeypatch.setattr(
+        settings_router,
+        "build_doctor_report",
+        fake_build_doctor_report,
+    )
+    client = _client(tmp_path)
+
+    response = client.get(
+        "/api/doctor",
+        params={"workspace": str(tmp_path / "untrusted-workspace")},
+    )
+
+    assert response.status_code == 200
+    assert captured["workspace"] is None
+    assert captured["online_checks"] is False
+    assert captured["ui_identity"]["local"] is True
 
 
 def test_provider_settings_api_crud_is_reference_only_and_optimistic(tmp_path):

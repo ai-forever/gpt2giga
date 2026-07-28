@@ -5,6 +5,22 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.2.6a1] - 2026-07-28
+
+### Добавлено
+- **Normalized protocol bridge v1**: versioned semantic-loss matrix и обязательный `admit_protocol_bridge_request()` проверяют OpenAI-, Anthropic- и Gemini-shaped запросы до I/O и отклоняют неподдерживаемую или неописанную потерю семантики.
+- **OpenAI-compatible upstream adapter**: внутренний Harness-owned execution path поддерживает exact profile/model binding, strict model discovery, bounded Chat Completions streaming, function tools, usage, cancellation и нормализованные transport/provider errors для проверенных OpenAI-compatible и vLLM profiles.
+- **Anthropic normalization**: Messages, SSE, function tools, stop reasons, usage, errors и `count_tokens` получили прямые request/response projections через normalized core при включённом normalization mode.
+- **Gemini bridge contracts**: function calls/results, JSON Schema output, typed inline image references, streaming, usage, safety errors, model discovery и `countTokens` закреплены golden fixtures и общей normalized моделью.
+
+### Изменено
+- **Normalized mode**: `GPT2GIGA_NORMALIZATION_MODE=on` теперь охватывает принятый Anthropic Messages v1 subset и Gemini token counting; неактивный `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` удалён.
+- **Runtime dependencies**: `httpx` объявлен прямой зависимостью gateway для OpenAI-compatible upstream transport.
+
+### Исправлено
+- **Streaming closure**: malformed или incomplete SSE, события после terminal choice, некорректная usage ordering, disconnect, timeout и provider failures завершаются стабильными fail-closed error/cancellation contracts без выдуманных token counts.
+- **Gateway security**: request-scoped Harness model override требует protocol-bound HMAC signature; forwarded client IP принимается только от trusted proxy, а error text и protocol extensions попадают в traffic/OTel только при явном content capture с redaction и truncation.
+
 ## [0.2.5a1] - 2026-07-26
 
 ### Добавлено
@@ -502,6 +518,7 @@
 
 ---
 
+[0.2.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.5a1...v0.2.6a1
 [0.2.5a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.4a1...v0.2.5a1
 [0.2.4a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a2...v0.2.4a1
 [0.2.3a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a1...v0.2.3a2

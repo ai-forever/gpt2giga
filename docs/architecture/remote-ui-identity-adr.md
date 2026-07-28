@@ -160,9 +160,10 @@ password recovery, or live provider onboarding. Those remain out of scope.
 G3-05 implements this profile with hermetic issuer fixtures. Non-loopback
 startup now requires complete static OIDC configuration plus explicit
 `--allow-remote`; partial configuration, legacy bootstrap-token input, and Host
-allowlists fail closed. The OS-local `giga ui-identity` command validates the
-profile without contacting the issuer and can revoke all sessions while
-rotating the server-side session generation.
+allowlists fail closed. Discovery redirects and endpoints outside the configured
+issuer's exact scheme, host, and port are rejected. The OS-local
+`giga ui-identity` command validates the profile without contacting the issuer
+and can revoke all sessions while rotating the server-side session generation.
 
 Live client registration, secret provisioning, users or groups, public
 callbacks, reverse-proxy deployment, and starting a listener against a real

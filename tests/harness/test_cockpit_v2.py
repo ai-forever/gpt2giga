@@ -62,12 +62,13 @@ def test_cockpit_v2_loader_rejects_unknown_and_direct_compressed_paths():
         load_cockpit_v2_asset("../manifest.json")
 
 
-def test_cockpit_v2_is_default_and_legacy_remains_explicit_fallback(tmp_path):
+def test_cockpit_v2_is_only_packaged_shell_and_legacy_routes_are_removed(tmp_path):
     client = _client(tmp_path)
 
     default_redirect = client.get("/", follow_redirects=False)
     cockpit_default = client.get("/")
-    legacy_recovery = client.get("/legacy/runs/run_123")
+    legacy_root = client.get("/legacy", follow_redirects=False)
+    legacy_nested = client.get("/legacy/runs/run_123", follow_redirects=False)
     cockpit = client.get("/cockpit-v2/work/session_123")
     unknown = client.get("/cockpit-v2/unknown")
 
@@ -76,10 +77,8 @@ def test_cockpit_v2_is_default_and_legacy_remains_explicit_fallback(tmp_path):
     assert default_redirect.headers["cache-control"] == "no-cache"
     assert cockpit_default.status_code == 200
     assert "<title>GigaLoom</title>" in cockpit_default.text
-    assert legacy_recovery.status_code == 200
-    assert (
-        '<link rel="stylesheet" href="/assets/app.css?v=38.44">' in legacy_recovery.text
-    )
+    assert legacy_root.status_code == 404
+    assert legacy_nested.status_code == 404
     assert cockpit.status_code == 200
     assert "<title>GigaLoom</title>" in cockpit.text
     assert cockpit.headers["content-security-policy"].startswith(
@@ -205,7 +204,7 @@ def test_cockpit_v2_serves_uncompressed_fonts_when_browser_accepts_brotli(tmp_pa
     assert len(response.content) == manifest.assets[font].byte_count
 
 
-def test_cockpit_v2_manifest_failure_is_clear_and_keeps_legacy_available(
+def test_cockpit_v2_manifest_failure_has_package_recovery_guidance(
     monkeypatch, tmp_path
 ):
     from gpt2giga_harness.ui import routers
@@ -222,11 +221,16 @@ def test_cockpit_v2_manifest_failure_is_clear_and_keeps_legacy_available(
     assert failed.status_code == 503
     assert failed.json() == {
         "detail": (
-            "Cockpit V2 packaged assets are unavailable; use /legacy while the "
-            "installation is repaired"
+            "Cockpit packaged assets are unavailable. Reinstall the "
+            "gpt2giga-harness package or restore its verified build artifact."
         )
     }
-    assert client.get("/legacy").status_code == 200
+    assert client.get("/legacy", follow_redirects=False).status_code == 404
+    saved_link = client.get("/workflows/review-team", follow_redirects=False)
+    assert saved_link.status_code == 307
+    assert saved_link.headers["location"] == (
+        "/cockpit-v2/automation/workflows?selected=review-team"
+    )
 
 
 def test_cockpit_v2_manifest_is_content_free():

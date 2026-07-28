@@ -55,8 +55,19 @@ def test_openai_adapter_maps_chat_payload_to_normalized_request():
     assert payload["id"] == "req-1"
     assert payload["model"] == "GigaChat-2-Max"
     assert payload["stream"] is True
-    assert payload["messages"][1]["content"][1]["type"] == "image_url"
-    assert payload["messages"][1]["content"][1]["detail"] == "low"
+    assert payload["messages"][1]["content"][1] == {
+        "type": "image_reference",
+        "image_reference": {
+            "source": "data_url",
+            "uri": "data:image/png;base64,AA==",
+            "mime_type": "image/png",
+            "detail": "low",
+            "raw_extensions": {},
+            "provider_metadata": {},
+        },
+        "raw_extensions": {},
+        "provider_metadata": {},
+    }
     assert payload["generation_config"] == {
         "temperature": 0.3,
         "top_p": 0.8,
@@ -233,6 +244,7 @@ def test_openai_adapter_reuses_chat_compatibility_policy():
     payload = normalized.to_json_dict()
     assert "n" not in payload["raw_extensions"]
     assert "parallel_tool_calls" not in payload["raw_extensions"]
+    assert payload["parallel_tool_calls"] is True
 
 
 def test_openai_adapter_reuses_chat_compatibility_policy_errors():

@@ -31,9 +31,9 @@ contract.
 - External commands must use explicit argv, controlled cwd/env, bounded output,
   and redacted records. Do not introduce `shell=True` or mutate a user's
   native Codex, Claude, or Gemini home.
-- Keep `src/gpt2giga_harness/ui/assets/**` in the packaged no-build
-  HTML/CSS/JavaScript stack. Do not introduce a frontend build toolchain unless
-  explicitly requested.
+- Keep Cockpit assets integrity-checked and available from installed artifacts.
+  Do not add a second packaged UI or a new frontend build architecture without
+  an explicit roadmap slice.
 
 ## Ownership guide
 
@@ -56,6 +56,8 @@ in tests; never exercise real user state.
 Run from the repository root:
 
 ```bash
+npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
+npm --prefix packages/gpt2giga-harness/frontend run build
 uv sync --all-packages --all-extras --dev
 uv run ruff check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness
 uv run ruff format --check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness

@@ -9,47 +9,63 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
 
 ## Текущий статус
 
-- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions идёт через прежние
-  преобразования.
+- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions и Anthropic
+  Messages идут через прежние преобразования.
 - `GPT2GIGA_NORMALIZATION_MODE=shadow`: OpenAI Chat строит нормализованный запрос
   рядом с прежним путём и сохраняет безопасный диагностический хеш формы без содержимого промпта.
-- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions исполняется через
-  нормализованный путь и `GigaChatProviderAdapter`; до старта ответа доступен откат
-  к прежнему через `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
-- OpenAI Responses и Anthropic Messages пока исполняются через прежние
-  преобразования маршрута, но наблюдаемость и отладочная трансляция уже используют нормализованное
-  представление там, где это возможно.
+- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions, принятое
+  подмножество Anthropic Messages v1 и Gemini `countTokens` исполняются через
+  свои protocol adapters, нормализованные модели и `GigaChatProviderAdapter`;
+  до старта ответа доступен откат к прежнему через
+  `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
+- OpenAI Responses пока исполняется через прежние преобразования маршрута.
 - Gemini GenerateContent и streamGenerateContent исполняются через
   `GeminiProtocolAdapter`, нормализованные модели и `GigaChatProviderAdapter`
-  независимо от флагов нормализации OpenAI Chat.
+  независимо от флагов нормализации OpenAI Chat. Их принятые контракты request,
+  response, SSE, function calling, usage, safety/error, model list и
+  типизированных изображений зафиксированы golden-фикстурами Gemini.
 - Debug-эндпоинты умеют переводить между форматами `openai`, `anthropic`, `normalized` и
   `gigachat` для защищённых admin-сценариев.
+- G7-01 предоставляет нормализованный upstream-адаптер OpenAI Chat Completions
+  для явно допущенных профилей OpenAI-compatible/vLLM. Это внутренний компонент
+  исполнения, а не новый публичный переключатель маршрутов. G7-02 добавляет
+  прямую проекцию Anthropic request/response/SSE и count-token. G7-03 делает
+  принятое подмножество Gemini совместимым с bridge: полностью смоделированные
+  поля больше не маскируются под несмоделированные extensions, изображения
+  используют типизированные ссылки, а `countTokens` — контракт
+  `NormalizedTokenCountRequest`. Публичный выбор upstream остаётся за G7-04.
 
 ## Основные модели
 
 Конверт нормализованного запроса:
 
-- `NormalizedChatRequest`: `protocol`, `operation`, `model`, `stream`,
-  `messages`, `tools`, `tool_choice`, `response_format`,
-  `generation_config`, `user`, `metadata`.
+- `NormalizedChatRequest`: версионированный класс запроса, `protocol`,
+  `operation`, `model`, `stream`, `messages`, `tools`, `tool_choice`,
+  `parallel_tool_calls`, `response_format`, `generation_config`,
+  `cancellation`, `user`, `metadata`.
 - `NormalizedMessage`: `role`, `content`, `name`, `tool_call_id`,
   `tool_calls`.
-- `NormalizedContentPart`: универсальная часть контента с `type`, `text`, `data`,
-  `mime_type`, `detail`.
+- `NormalizedContentPart`: универсальная часть контента и типизированный
+  `NormalizedImageReference` для разрешённых изображений `url` и `data_url`.
 - `NormalizedTool`: уплощённый контракт инструмента/функции с `name`,
   `description`, `parameters`.
 - `NormalizedGenerationConfig`: общие параметры генерации:
   `temperature`, `top_p`, `max_tokens`, penalties, `stop`, `seed`.
+- `NormalizedTokenCountRequest`, `NormalizedTokenCountResponse` и
+  `NormalizedTokenLimits`: явные контракты подсчёта токенов и контекстных
+  лимитов.
 
 Нормализованный вывод:
 
 - `NormalizedResponse`: ответ без потоковой передачи, не зависящий от провайдера:
   `choices`, `usage`, `error`, `metadata`, `provider_metadata`.
-- `NormalizedChoice`: `message` или `delta`, `finish_reason`, `index`.
+- `NormalizedChoice`: `message` или `delta`, прежний `finish_reason`,
+  нормализованный v1 `stop_reason` и `index`.
 - `NormalizedUsage`: `input_tokens`, `output_tokens`, `total_tokens`.
 - `NormalizedStreamEvent`: канонические события потока:
   `message_start`, `content_delta`, `reasoning_delta`, `tool_call_start`,
-  `tool_call_delta`, `usage`, `message_end`, `error`, `heartbeat`.
+  `tool_call_delta`, `usage`, `message_end`, `cancelled`, `error`,
+  `heartbeat`.
 
 Все нормализованные модели наследуют два набора расширений:
 
@@ -57,6 +73,120 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
   сохранить, но не поднимать в каноническую модель.
 - `provider_metadata`: данные, специфичные для провайдера, например GigaChat
   `additional_fields` или безопасные метаданные из ответа вышестоящего сервиса.
+
+## OpenAI-compatible protocol bridge v1
+
+G7-00 зафиксировал возможность трансляции. G7-01 добавляет первый upstream
+runtime без изменения матрицы. Машиночитаемый источник —
+`PROTOCOL_LOSS_MATRIX_V1` в `gpt2giga.protocols.normalized`; его
+сериализованный статус теперь равен
+`implementation_status="openai_compatible_upstream_adapter"`.
+
+Принятое подмножество запроса содержит ровно четыре роли (`system`, `user`,
+`assistant`, `tool`), упорядоченные текстовые части и типизированные ссылки на
+изображения, function tools/calls/results, допустимый tool choice, необязательное
+управление параллельными вызовами, JSON Schema output, streaming с терминальными
+событиями, нормализованные stop/usage/model и классы request/error,
+кооперативную отмену, объявленные контекстные/токенные лимиты и явный подсчёт
+токенов. Файлы, аудио, произвольные части контента, provider metadata и
+несмоделированная семантика расширений находятся вне v1.
+
+`E` означает точное downstream-представление. `C` требует явного допуска
+проверенным профилем адаптера/модели. `U` означает, что смысл нельзя сохранить
+в v1 и admission завершается отказом.
+
+| Возможность normalized v1 | OpenAI downstream | Anthropic downstream | Gemini downstream |
+| --- | --- | --- | --- |
+| Роли | E | E | E |
+| Порядок частей контента | E | E | E |
+| Текст | E | E | E |
+| Ссылки на изображения | C | C | C |
+| Параметры генерации | C | C | C |
+| Function tools/calls | E | E | E |
+| Tool choice | E | E | C |
+| Явный переключатель parallel tools | E | E | U |
+| Результаты tools | E | E | E |
+| JSON Schema output | C | C | C |
+| Streaming deltas | E | E | E |
+| Терминальные события streaming | E | E | E |
+| Stop reason | E | E | E |
+| Usage | E | E | E |
+| Идентичность модели | E | E | E |
+| Классы request/error | E | E | E |
+| Отмена | E | E | E |
+| Контекстные/токенные лимиты | C | C | C |
+| Подсчёт токенов | U | E | E |
+
+`admit_protocol_bridge_request()` — обязательный guard до I/O. Он выводит
+семантические требования запроса, требует каждое из них в проверенном
+OpenAI-compatible upstream-профиле, требует явный opt-in для каждой ячейки
+`C`, проверяет объявленные токенные лимиты и отклоняет каждую ячейку `U` или
+несмоделированное расширение. `UnsupportedSemanticLossError` возникает до того,
+как адаптер может открыть сетевое соединение.
+
+Матрица повторно сверена с актуальными
+[справочником OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create),
+[контрактом Anthropic Messages SDK](https://github.com/anthropics/anthropic-sdk-python/tree/main/src/anthropic/types)
+и [документацией Gemini GenerateContent](https://ai.google.dev/gemini-api/docs/text-generation).
+
+### Исполнение через OpenAI-compatible upstream
+
+`OpenAICompatibleProviderAdapter` исполняет только зафиксированное подмножество
+normalized v1 для Chat Completions. До любого запроса он связывает точную
+ревизию профиля и модель маршрута, запускает
+`admit_protocol_bridge_request()`, сериализует проверенное тело и получает
+сетевое разрешение для конкретного запроса. Транспорт повторно проверяет тело,
+подключённый адрес и ограниченный размер ответа. Redirect и автоматические
+retry отключены.
+
+Harness владеет профилем провайдера, маршрутом модели, `SecretRef`, ссылками на
+TLS/proxy policy и scoped network ticket. Секрет разрешается и раскрывается
+только границе `provider-execution:openai-compatible`; профили, логи,
+сохранённые настройки, сетевые intents и receipts содержат лишь идентичность
+ссылки. Для vLLM есть версионированный профиль
+`gigaloom.vllm-openai-compatible.v1`; другие совместимые серверы требуют явно
+проверенный профиль и контракт normalized capabilities/limits.
+
+Адаптер поддерживает строгий model discovery, обычный и потоковый текст,
+function tools и tool deltas, нормализацию usage/stop, ограниченный SSE и
+безопасные транспортные ошибки. Факты из provider error сохраняются, когда они
+есть; отсутствующие usage, model metadata или capabilities не выдумываются.
+По умолчанию используется герметичный fake-server suite. Live smoke удалённого
+vLLM включается только явно:
+
+```bash
+GPT2GIGA_RUN_VLLM_SMOKE=1 \
+GPT2GIGA_VLLM_BASE_URL=https://vllm.example/v1 \
+GPT2GIGA_VLLM_MODEL=model-id \
+uv run pytest -n 0 tests/live/test_vllm_openai_compatible_smoke.py
+```
+
+Задавайте `GPT2GIGA_VLLM_API_KEY` только если он нужен проверенному серверу.
+Live smoke требует удалённый HTTPS endpoint и scoped network grant Harness.
+
+### Закрытие protocol bridge
+
+Герметичный closure-suite G7-04 компонует один и тот же проверенный
+`OpenAICompatibleProviderAdapter` с downstream-адаптерами OpenAI, Anthropic и
+Gemini. Text, streaming, partial usage и function-tool нагрузки превращаются в
+одинаковый upstream payload OpenAI Chat Completions, а затем проецируются в
+запрошенную wire-форму. Входные OpenAI-изображения переводятся в тот же
+типизированный контракт `NormalizedImageReference`, который уже используют
+Anthropic и Gemini.
+
+Streaming parser отклоняет данные после terminal choice, usage до terminal
+choice, данные после usage summary, некорректный JSON и незавершённые потоки
+стабильными non-retryable protocol errors. Кооперативное отключение клиента,
+timeouts и provider HTTP failures сохраняют разные нормализованные признаки
+cancellation, retryability, error class, code и parameter. Partial usage
+остаётся частичным: отсутствующие token counts не выдумываются.
+
+Это закрывает внутренний normalized v1 composition contract. Оно не добавляет
+gateway environment switch для произвольного upstream URL или secret.
+OpenAI-compatible profiles, credentials, TLS/proxy policy и network grants
+по-прежнему принадлежат проверенной Harness execution boundary. Batches, files,
+embeddings, prompt caching, computer use, audio и неподдерживаемые multimodal
+формы остаются вне bridge v1.
 
 ## Поток OpenAI Chat
 
@@ -144,6 +274,14 @@ Gemini GenerateContent — отдельный публичный протоко�
   форсирует встроенные провайдерские инструменты.
 - кандидаты Gemini, причины завершения и метаданные использования формируются на выходе из
   адаптеров нормализованного ответа/потока.
+- принятые inline-изображения используют типизированные
+  `NormalizedImageReference`. Полностью смоделированные function-call config,
+  function responses и JSON Schema output не остаются в `raw_extensions`;
+  safety settings, cached content, неподдерживаемые tools, files и прочая
+  несмоделированная семантика остаются там, поэтому bridge admission для
+  OpenAI-compatible отклоняет их до provider I/O.
+- при включённом режиме нормализации `countTokens` использует тот же
+  нормализованный контракт token-count request/response, что и принятый bridge.
 
 Модули роутеров Gemini Files/Batches подготовлены, но не подключены в публичном
 наборе API; они не являются частью текущего нормализованного пути выполнения.
@@ -190,10 +328,14 @@ Anthropic Messages — отдельный публичный протокол с
 - `usage.input_tokens` и `usage.output_tokens` в Anthropic уже совпадают с
   нормализованными именами, а `total_tokens` вычисляется при наличии обоих значений.
 
-Сейчас путь выполнения Anthropic остаётся прежним:
-полезная нагрузка Anthropic сначала приводится к OpenAI-подобной, затем используется
-общее преобразование маршрута GigaChat. Отладочная трансляция и наблюдаемость могут строить
-нормализованное представление поверх этого пути.
+При `GPT2GIGA_NORMALIZATION_MODE=on` `AnthropicProtocolAdapter` напрямую строит
+нормализованный запрос, `GigaChatProviderAdapter` исполняет его, а проектор
+Anthropic response/SSE восстанавливает сетевой контракт клиента. Тот же путь
+представляет `count_tokens` через `NormalizedTokenCountRequest` и
+`NormalizedTokenCountResponse`. Прежнее исполнение остаётся default и
+pre-response fallback для семантики вне принятого подмножества v1. Prompt
+caching, computer use, files и другие несмоделированные возможности Anthropic
+не объявляются поддержанными нормализованным путём.
 
 ## Наблюдаемость
 

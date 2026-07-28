@@ -7,20 +7,21 @@ const brandingRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(brandingRoot, "..", "..", "..");
 const sourcePath = join(brandingRoot, "gigaloom-mark.svg");
 
+const frontendTarget = join(
+  repositoryRoot,
+  "packages",
+  "gpt2giga-harness",
+  "frontend",
+  "public",
+  "brand",
+);
 const targets = [
-  join(repositoryRoot, "packages", "gpt2giga-harness", "frontend", "public", "brand"),
-  join(
-    repositoryRoot,
-    "packages",
-    "gpt2giga-harness",
-    "src",
-    "gpt2giga_harness",
-    "ui",
-    "assets",
-    "brand",
-  ),
+  frontendTarget,
   join(repositoryRoot, "docs-site", "static", "brand"),
 ];
+const selectedTargets = process.argv.includes("--frontend-only")
+  ? [frontendTarget]
+  : targets;
 
 function replaceColors(source, palette) {
   return source.replace(
@@ -74,7 +75,7 @@ const webManifest = `${JSON.stringify({
   ],
 }, null, 2)}\n`;
 
-for (const target of targets) {
+for (const target of selectedTargets) {
   await mkdir(target, { recursive: true });
   await Promise.all([
     writeFile(join(target, "gigaloom-mark.svg"), light),
@@ -83,7 +84,7 @@ for (const target of targets) {
   ]);
 }
 
-const applicationTargets = targets.slice(0, 2);
+const applicationTargets = selectedTargets.filter((target) => target === frontendTarget);
 await Promise.all(
   applicationTargets.map((target) => writeFile(
     join(target, "gigaloom.webmanifest"),

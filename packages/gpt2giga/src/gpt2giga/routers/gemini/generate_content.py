@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import unquote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -18,6 +17,7 @@ from gpt2giga.common.conversation import (
 )
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import extract_gigachat_request_options
+from gpt2giga.common.harness_model import trusted_harness_model
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.openapi_specs.gemini import (
@@ -49,9 +49,6 @@ from gpt2giga.sinks.observability.llm import (
 router = APIRouter(tags=[OPENAPI_TAG_GEMINI_GENERATE_CONTENT])
 
 GEMINI_SPAN_NAME = "Gemini-Content"
-HARNESS_MODEL_HEADER = "x-gpt2giga-harness-model"
-PASS_MODEL_HEADER = "x-gpt2giga-pass-model"
-MAX_MODEL_LENGTH = 256
 
 
 @router.post(
@@ -324,6 +321,13 @@ async def count_tokens(model: str, request: Request):
         model_requested=requested_model,
         metadata={"protocol": "gemini", "api_format": "count_tokens"},
     )
+    normalized = await _try_normalized_count_tokens(
+        request,
+        data,
+        effective_model=effective_model,
+    )
+    if normalized is not None:
+        return normalized
     texts = _extract_texts_for_token_count(data)
     if not texts:
         return {"totalTokens": 0}
@@ -341,6 +345,37 @@ async def count_tokens(model: str, request: Request):
             )
     total_tokens = sum(int(getattr(item, "tokens", 0)) for item in token_counts)
     return {"totalTokens": total_tokens}
+
+
+async def _try_normalized_count_tokens(
+    request: Request,
+    payload: dict[str, Any],
+    *,
+    effective_model: str,
+) -> dict[str, int] | None:
+    settings = _normalization_settings(request)
+    if settings is None or settings.normalization_mode != "on":
+        return None
+    try:
+        context = get_request_context()
+        normalized_request = _gemini_adapter(request).count_tokens_to_normalized(
+            payload,
+            model=effective_model,
+            context=context,
+            builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
+        )
+        request_options = extract_gigachat_request_options(request, payload)
+        response = await _provider_adapter(
+            request,
+            request_options=request_options,
+            forced_model=_gemini_cli_harness_model(request),
+        ).count_tokens(normalized_request, context=context)
+        return {"totalTokens": response.input_tokens}
+    except Exception as exc:
+        if not settings.legacy_chat_fallback:
+            raise
+        _log_normalized_fallback(request, exc, event="gemini_count_tokens_fallback")
+        return None
 
 
 def _provider_adapter(
@@ -365,21 +400,13 @@ def _provider_adapter(
 
 
 def _gemini_cli_harness_model(request: Request) -> str | None:
-    """Return the Harness-pinned model for an explicit Gemini CLI request."""
-    user_agent = request.headers.get("user-agent", "").strip().lower()
-    if not user_agent.startswith("geminicli"):
-        return None
-    if request.headers.get(PASS_MODEL_HEADER, "").strip().lower() != "false":
-        return None
-    encoded_model = request.headers.get(HARNESS_MODEL_HEADER)
-    if not encoded_model:
-        return None
-    model = _normalize_model_name(unquote(encoded_model).strip())
-    if not model or len(model) > MAX_MODEL_LENGTH:
-        return None
-    if any(ord(character) < 32 or ord(character) == 127 for character in model):
-        return None
-    return model
+    """Return an authenticated Harness-pinned Gemini model."""
+    return trusted_harness_model(
+        request,
+        protocol="gemini",
+        user_agent_prefix="geminicli",
+        normalize=_normalize_model_name,
+    )
 
 
 def _gemini_adapter(request: Request) -> GeminiProtocolAdapter:
@@ -392,6 +419,32 @@ def _gemini_adapter(request: Request) -> GeminiProtocolAdapter:
 
 def _builtin_tool_mapping_enabled(request: Request) -> bool:
     return not request.app.state.config.proxy_settings.disable_builtin_tool_mapping
+
+
+def _normalization_settings(request: Request) -> Any:
+    return getattr(
+        getattr(request.app.state, "config", None),
+        "proxy_settings",
+        None,
+    )
+
+
+def _log_normalized_fallback(
+    request: Request,
+    exc: Exception,
+    *,
+    event: str,
+) -> None:
+    logger = getattr(request.app.state, "logger", None)
+    if logger is None:
+        return
+    context = get_request_context()
+    logger.bind(
+        event=event,
+        route=request.url.path,
+        error_type=type(exc).__name__,
+        request_id=getattr(context, "request_id", None),
+    ).warning("Normalized Gemini path failed; using legacy fallback")
 
 
 async def _stitch_gemini_request(

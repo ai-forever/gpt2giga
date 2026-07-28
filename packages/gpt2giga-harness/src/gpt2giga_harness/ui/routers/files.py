@@ -10,7 +10,7 @@ import re
 import tempfile
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from gpt2giga_harness.attachments.limits import AttachmentLimits, is_denied_path
@@ -144,10 +144,17 @@ def create_file_preview_router(data_dir: str | None = None) -> APIRouter:
 
     @router.get("/api/files/preview", response_class=FileResponse)
     def preview_file(
+        request: Request,
         path: str = Query(min_length=1),
         workspace: str | None = Query(default=None),
+        session_id: str | None = Query(default=None, min_length=1, max_length=512),
     ) -> FileResponse:
-        resolved, allowed_root = _resolve_preview_path(path, workspace)
+        remote_root = _remote_preview_root(request, workspace, session_id)
+        resolved, allowed_root = _resolve_preview_path(
+            path,
+            workspace,
+            remote_root=remote_root,
+        )
         relative = resolved.relative_to(allowed_root).as_posix()
         if is_denied_path(relative, AttachmentLimits()):
             raise HTTPException(status_code=403, detail="File preview is denied")
@@ -240,8 +247,13 @@ def _safe_download_name(value: str, suffix: str) -> str:
     return candidate
 
 
-def _resolve_preview_path(path: str, workspace: str | None) -> tuple[Path, Path]:
-    workspace_root = _directory_root(workspace) if workspace else None
+def _resolve_preview_path(
+    path: str,
+    workspace: str | None,
+    *,
+    remote_root: Path | None = None,
+) -> tuple[Path, Path]:
+    workspace_root = remote_root or (_directory_root(workspace) if workspace else None)
     if os.path.isabs(path):
         resolved = resolve_operator_path(path)
     elif workspace_root is not None:
@@ -260,7 +272,13 @@ def _resolve_preview_path(path: str, workspace: str | None) -> tuple[Path, Path]
     if not resolved.exists() or not resolved.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
-    roots = [root for root in (workspace_root, *_temporary_roots()) if root is not None]
+    roots = (
+        [remote_root]
+        if remote_root is not None
+        else [
+            root for root in (workspace_root, *_temporary_roots()) if root is not None
+        ]
+    )
     for root in roots:
         if resolved.is_relative_to(root):
             return resolved, root
@@ -268,6 +286,36 @@ def _resolve_preview_path(path: str, workspace: str | None) -> tuple[Path, Path]
         status_code=403,
         detail="File is outside the workspace and temporary directories",
     )
+
+
+def _remote_preview_root(
+    request: Request,
+    workspace: str | None,
+    session_id: str | None,
+) -> Path | None:
+    if getattr(request.state, "ui_actor", None) is None:
+        return None
+    if session_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Remote file previews require an admitted session",
+        )
+    try:
+        session = request.app.state.harness_session_store.get_session(session_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+    if session.workspace is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Remote file preview session has no admitted workspace",
+        )
+    admitted_root = _directory_root(session.workspace)
+    if workspace is not None and _directory_root(workspace) != admitted_root:
+        raise HTTPException(
+            status_code=403,
+            detail="Remote file preview workspace is not admitted",
+        )
+    return admitted_root
 
 
 def _directory_root(value: str) -> Path:

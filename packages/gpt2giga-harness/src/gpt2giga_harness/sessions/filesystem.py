@@ -440,22 +440,34 @@ class FilesystemHarnessSessionStore:
         return run
 
     def update_run(self, run_id: str, **patch: Any) -> HarnessRun:
-        session_id, _, _, _ = self._find_run(run_id)
-        path = self._session_dir(session_id) / RUNS_FILE
-        with exclusive_file_lock(path):
-            runs = _read_jsonl(path, run_from_dict)
-            for index, run in enumerate(runs):
-                if run.id != run_id:
-                    continue
-                updated = _patch_run(run, patch)
-                runs[index] = updated
-                _write_jsonl_atomic_unlocked(
-                    path,
-                    [redact_for_storage(run_to_dict(item)) for item in runs],
-                )
-                self._session_read_index().upsert_run(updated, index)
-                self.event_broker.publish_runs_center()
-                return updated
+        self._ensure_read_index()
+        indexed = self._session_read_index().lookup_run(run_id)
+        if indexed is None:
+            raise RunNotFoundError(run_id)
+        for attempt in range(2):
+            session_id = indexed[0]
+            path = self._session_dir(session_id) / RUNS_FILE
+            with exclusive_file_lock(path):
+                runs = _read_jsonl(path, run_from_dict)
+                for index, run in enumerate(runs):
+                    if run.id != run_id:
+                        continue
+                    updated = _patch_run(run, patch)
+                    runs[index] = updated
+                    _write_jsonl_atomic_unlocked(
+                        path,
+                        [redact_for_storage(run_to_dict(item)) for item in runs],
+                    )
+                    self._session_read_index().upsert_run(updated, index)
+                    self.event_broker.publish_runs_center()
+                    return updated
+            if attempt == 0:
+                # The JSONL log is authoritative. Rebuild the derived index once
+                # if another writer left its row pointing at the wrong session.
+                self._rebuild_read_index()
+                indexed = self._session_read_index().lookup_run(run_id)
+                if indexed is None:
+                    break
         raise RunNotFoundError(run_id)
 
     def get_run(self, run_id: str) -> HarnessRun:

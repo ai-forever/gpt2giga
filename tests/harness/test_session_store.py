@@ -1,5 +1,7 @@
+from dataclasses import replace
 import json
 
+import gpt2giga_harness.sessions.filesystem as filesystem_sessions
 from gpt2giga_harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga_harness.native import HarnessInvocationMode, NativeSessionStatus
 from gpt2giga_harness.sessions.models import (
@@ -111,6 +113,65 @@ def test_filesystem_store_persists_invocation_mode_on_runs(tmp_path):
         ]
         == "native"
     )
+
+
+def test_filesystem_store_updates_run_with_one_authoritative_log_scan(
+    tmp_path, monkeypatch
+):
+    store = FilesystemHarnessSessionStore(tmp_path)
+    session = store.create_session(title="bounded update")
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="fixture",
+        model=None,
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="read",
+        workspace=None,
+    )
+    assert store.get_run(run.id) == run
+    original_read_jsonl = filesystem_sessions._read_jsonl
+    scans = 0
+
+    def counted_read_jsonl(*args, **kwargs):
+        nonlocal scans
+        scans += 1
+        return original_read_jsonl(*args, **kwargs)
+
+    monkeypatch.setattr(filesystem_sessions, "_read_jsonl", counted_read_jsonl)
+
+    updated = store.update_run(run.id, status="succeeded")
+
+    assert updated.status.value == "succeeded"
+    assert scans == 1
+
+
+def test_filesystem_store_update_run_rebuilds_stale_session_lookup(tmp_path):
+    store = FilesystemHarnessSessionStore(tmp_path)
+    session = store.create_session(title="authoritative")
+    wrong_session = store.create_session(title="stale derived row")
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="fixture",
+        model=None,
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="read",
+        workspace=None,
+    )
+    assert store.get_run(run.id) == run
+    store._session_read_index().upsert_run(
+        replace(run, session_id=wrong_session.id),
+        0,
+    )
+
+    updated = store.update_run(run.id, status="succeeded")
+
+    assert updated.session_id == session.id
+    assert updated.status.value == "succeeded"
+    assert store.get_run(run.id) == updated
 
 
 def test_filesystem_store_persists_native_links_in_bundle(tmp_path, monkeypatch):

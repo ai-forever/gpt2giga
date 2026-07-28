@@ -100,9 +100,10 @@ authority может унифицировать ceilings, но здесь не �
 - нативные CLI Codex, Claude и Gemini сами владеют login, refresh, credential
   storage, logout и revocation.
 
-GigaLoom пока не является broker нативного provider login и не считает
-установленный binary доказательством готового account. Проекция provider
-account относится к следующей фазе roadmap.
+Native login broker GigaLoom может запускать provider-owned операции login,
+status, logout и revocation, а также привязывать подтверждённый account к
+допущенной session. Credentials и refresh по-прежнему принадлежат provider CLI.
+Само наличие binary никогда не доказывает готовность account.
 
 Approvals тоже разделены. Harness approvals покрывают действия, которыми
 владеет Harness: например, process admission, integration mutation или apply
@@ -200,6 +201,7 @@ giga harness inspect codex-cli --json
 giga harness capabilities
 giga harness capabilities --agents
 giga harness capabilities --agents --json
+giga harness capabilities --inventory --json
 ```
 
 Arena сейчас доступна через Web/API, отдельной команды `giga arena` нет.
@@ -209,13 +211,23 @@ Arena сейчас доступна через Web/API, отдельной ко�
 
 ## Генерируемая capability matrix
 
-[Матрица agent surfaces](agent-capability-matrix.md) строится из встроенных
-`HarnessSpec` и adapter capability claims. Её точный Markdown генерирует:
+Versioned product inventory строится из product schemas, встроенных registries,
+установленных entry points, provider compatibility profiles, CLI parser,
+registry команд TUI, API routes и contract tests. First-run doctor включает
+его schema, version, digest, provider contracts и documentation ids:
+
+```bash
+giga harness capabilities --inventory --json
+```
+
+[Матрица agent surfaces](agent-capability-matrix.md) — проекция того же
+inventory. Её точный Markdown генерирует:
 
 ```bash
 giga harness capabilities --agents
 ```
 
-JSON-форма предназначена для tooling. Checked-in Markdown побайтово
-сравнивается с generator, поэтому документация не может незаметно разойтись с
-runtime claims.
+CI запускает `giga harness capabilities --inventory --check` и проверяет
+inventory digest, CLI/TUI/API surfaces, protocol, transport, mode и deprecation
+records, локальные documentation targets, contract-test evidence и
+сгенерированные ячейки английской и русской матриц.

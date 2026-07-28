@@ -59,7 +59,6 @@ function EvaluationList({ section, query, selectedId }: {
     <>
       <div className="operations-toolbar">
         <div><span className="section-kicker">{message(locale, section)}</span><strong>{rows.length} {message(locale, "retainedItems")}</strong></div>
-        {section === "arena" ? <a className="primary-link" data-legacy-transition="true" href="/arena">{message(locale, "openLegacyArenaAuthoring")}</a> : null}
       </div>
       {rows.length === 0 ? <div className="empty-state">{message(locale, section === "evals" ? "noEvaluationResults" : "noItems")}</div> : (
         <div className="operations-table" role="table">

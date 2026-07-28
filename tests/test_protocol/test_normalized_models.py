@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from gpt2giga.protocols.normalized import (
+    NormalizedCancellation,
     NormalizedChatRequest,
     NormalizedChoice,
     NormalizedContentPart,
@@ -14,6 +15,8 @@ from gpt2giga.protocols.normalized import (
     NormalizedResponse,
     NormalizedResponseFormat,
     NormalizedStreamEvent,
+    NormalizedTokenCountResponse,
+    NormalizedTokenLimits,
     NormalizedTool,
     NormalizedToolCall,
     NormalizedUsage,
@@ -148,3 +151,24 @@ def test_normalized_error_can_be_embedded_in_response():
         "raw_extensions": {},
         "provider_metadata": {},
     }
+
+
+def test_normalized_v1_terminal_and_token_contracts_are_explicit():
+    limits = NormalizedTokenLimits(
+        context_window=8192,
+        max_input_tokens=6144,
+        max_output_tokens=2048,
+    )
+    count = NormalizedTokenCountResponse(
+        model="local-model",
+        input_tokens=42,
+        limits=limits,
+    )
+    event = NormalizedStreamEvent(
+        type="cancelled",
+        cancellation=NormalizedCancellation(mode="caller"),
+        stop_reason="cancelled",
+    )
+
+    assert count.to_json_dict()["limits"]["context_window"] == 8192
+    assert event.to_json_dict()["stop_reason"] == "cancelled"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+import json
 import os
 from pathlib import Path
 
@@ -9,10 +10,11 @@ import pytest
 
 pytest.importorskip("textual")
 
+from textual import events
 from textual.widgets import Input, ListView
 
 from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
-from gpt2giga_harness.tui.app import SessionBrowserScreen, WorkbenchTui
+from gpt2giga_harness.tui.app import SessionBrowserScreen, TimelinePanel, WorkbenchTui
 from gpt2giga_harness.tui.commands import (
     COMMAND_REGISTRY,
     command_bindings,
@@ -20,6 +22,7 @@ from gpt2giga_harness.tui.commands import (
     slash_commands,
 )
 from gpt2giga_harness.tui.i18n import CATALOGS, translator
+from gpt2giga_harness.tui.shell_contract import minimal_shell_contract
 from gpt2giga_harness.tui.client import (
     ApprovalSummary,
     ArtifactSummary,
@@ -64,6 +67,7 @@ class FakeClient:
         self.submitted: list[str] = []
         self.submitted_attachments: list[tuple[str, ...]] = []
         self.decisions: list[str] = []
+        self.answers: list[tuple[str, str]] = []
         self.environment_commit_approved = False
         self.environment_commit_preview = EnvironmentCommitPreviewSummary(
             "commit_" + "c" * 64,
@@ -527,6 +531,18 @@ class FakeClient:
         return self.current_run
 
     async def answer_input(self, binding, input_id, answer):
+        self.answers.append((input_id, answer))
+        self.current_run = replace(
+            self.current_run,
+            events=(
+                TimelineEvent(
+                    "evt_answered",
+                    "input_answered",
+                    "Answer accepted",
+                ),
+            ),
+            resnapshot_reason="cursor_gap",
+        )
         return self.current_run
 
     async def search_files(self, session_id, query):
@@ -635,6 +651,48 @@ def _run_snapshot(
     )
 
 
+def test_timeline_panel_suppresses_unchanged_updates_and_reuses_stable_cards(
+    monkeypatch,
+):
+    panel = TimelinePanel("empty", {"message": "MESSAGE"}, id="timeline")
+    events = tuple(
+        TimelineEvent(
+            f"evt_{index}",
+            "message_delta",
+            f"event {index}",
+            category="message",
+        )
+        for index in range(100)
+    )
+    rendered = 0
+    render_card = panel._render_card
+
+    def counted(*args, **kwargs):
+        nonlocal rendered
+        rendered += 1
+        return render_card(*args, **kwargs)
+
+    monkeypatch.setattr(panel, "_render_card", counted)
+
+    assert panel.set_events(events) is True
+    assert rendered == 100
+    rendered = 0
+    assert panel.set_events(events) is False
+    assert rendered == 0
+
+    shifted = (
+        *events[1:],
+        TimelineEvent(
+            "evt_100",
+            "message_delta",
+            "event 100",
+            category="message",
+        ),
+    )
+    assert panel.set_events(shifted) is True
+    assert rendered <= 3
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("size", ((120, 40), (80, 24), (60, 20)))
 async def test_tui_renders_keyboard_navigation_without_horizontal_overflow(size):
@@ -649,10 +707,19 @@ async def test_tui_renders_keyboard_navigation_without_horizontal_overflow(size)
         assert "Commit: Ready · Push: Ready" in str(
             app.query_one("#readiness").render()
         )
+        context = str(app.query_one("#context-status").render())
+        if size[0] >= 100:
+            assert "pending execution snapshot" in context
+        else:
+            assert "echo" in context
+        assert "Existing" in context
+        assert "Read only" in context
+        assert app.query_one("#projects-pane").styles.display == "none"
+        assert app.query_one("#sessions-pane").styles.display == "none"
         assert app.query_one("#body").has_class("narrow") is (size[0] < 84)
         for widget in app.screen.query(
-            "#body, #sessions-pane, #detail-pane, #timeline, "
-            "#interaction-actions, #composer-row, #actions"
+            "#body, #detail-pane, #context-status, #timeline, "
+            "#composer-row, #actions, #open-context"
         ):
             assert widget.region.x >= 0
             assert widget.region.right <= size[0]
@@ -924,6 +991,57 @@ async def test_tui_composer_renders_incremental_content_and_tool_lifecycle():
         assert "hello" in timeline
         assert "search" in timeline
         assert app.run_snapshot.binding.run_id == "run_1"
+
+
+@pytest.mark.anyio
+async def test_tui_composer_accepts_bounded_bracketed_paste():
+    client = FakeClient()
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        composer = app.query_one("#composer", Input)
+        composer.focus()
+        composer.post_message(events.Paste("Review pasted change\nignored second line"))
+        await pilot.pause()
+
+        assert composer.value == "Review pasted change"
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert client.submitted == ["Review pasted change"]
+
+
+@pytest.mark.anyio
+async def test_tui_applies_event_driven_run_delivery_without_poll_timer():
+    class StreamingClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.updates: asyncio.Queue[RunSnapshot] = asyncio.Queue()
+            self.stream_started = asyncio.Event()
+
+        async def stream_run(self, run_id, *, cursor=None):
+            assert run_id == "run_1"
+            self.stream_started.set()
+            while True:
+                yield await self.updates.get()
+
+    client = StreamingClient()
+    client.current_run = _run_snapshot(
+        events=(TimelineEvent("evt_1", "run_started", "started"),)
+    )
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await asyncio.wait_for(client.stream_started.wait(), timeout=1)
+        await client.updates.put(
+            _run_snapshot(
+                events=(TimelineEvent("evt_2", "message_delta", "delivered"),)
+            )
+        )
+        await pilot.pause()
+
+        assert "delivered" in str(app.query_one("#timeline").render())
 
 
 @pytest.mark.anyio
@@ -1231,9 +1349,17 @@ async def test_tui_quality_states_have_headless_artifacts_and_primary_actions(
         elif state == "disconnected":
             app._set_status(app.t("status.disconnected"))
         await pilot.pause()
+        if state == "approval":
+            assert "Approval required: write · review" in str(
+                app.query_one("#attention-status").render()
+            )
+        elif state == "question":
+            assert "Question: Which target?" in str(
+                app.query_one("#attention-status").render()
+            )
 
         screenshot = app.export_screenshot(
-            title=f"N5-05 {state} {size[0]}x{size[1]}", simplify=True
+            title=f"G5-03 {state} {size[0]}x{size[1]}", simplify=True
         )
         assert screenshot.startswith("<svg")
         if artifact_root := os.getenv("GIGALOOM_TUI_ARTIFACT_DIR"):
@@ -1245,24 +1371,48 @@ async def test_tui_quality_states_have_headless_artifacts_and_primary_actions(
             )
         for selector in (
             "#body",
-            "#sessions-pane",
             "#detail-pane",
+            "#context-status",
             "#timeline",
+            "#attention-status",
             "#composer-row",
             "#composer-state",
             "#send-turn",
             "#steer-turn",
             "#queue-turn",
             "#actions",
+            "#open-context",
             "#new-session",
             "#status",
-            "#runtime-status",
         ):
             widget = app.query_one(selector)
             assert widget.region.x >= 0
             assert widget.region.right <= size[0]
             assert widget.region.y >= 0
             assert widget.region.bottom <= size[1]
+
+
+@pytest.mark.anyio
+async def test_tui_answers_question_and_clears_resnapshotted_prompt():
+    client = FakeClient()
+    client.current_run = _quality_state_snapshot("question")
+    app = WorkbenchTui(client, workspace="/tmp/demo")
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await pilot.click("#answer")
+        await pilot.pause()
+        prompt = app.screen.query_one("#prompt-input", Input)
+        prompt.post_message(events.Paste("workspace"))
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        answer = app.query_one("#answer")
+        assert client.answers == [("input_1", "workspace")]
+        assert answer.disabled is True
+        assert answer.styles.display == "none"
+        assert "Answer accepted" in str(app.query_one("#timeline").render())
 
 
 @pytest.mark.anyio
@@ -1277,19 +1427,95 @@ async def test_tui_keyboard_focus_help_palette_and_semantic_status_are_non_color
         for _ in range(24):
             focused_ids.add(app.focused.id if app.focused is not None else None)
             await pilot.press("tab")
-        assert {"session-list", "composer", "steer-turn", "queue-turn", "help"} <= (
+        assert {"composer", "steer-turn", "queue-turn", "open-context", "help"} <= (
             focused_ids
         )
 
         timeline = str(app.query_one("#timeline").render())
         assert "[РАЗРЕШЕНИЕ]" in timeline
-        app.query_one("#session-list").focus()
+        app.query_one("#timeline").focus()
         await pilot.press("?")
         assert "Ctrl+P" in app.screen.body
         await pilot.press("escape")
         await pilot.press("ctrl+p")
         await pilot.pause()
         assert type(app.screen).__name__ == "CommandPalette"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("size", ((120, 40), (80, 24), (60, 20)))
+async def test_tui_context_drawer_keeps_non_chat_surfaces_out_of_default_shell(size):
+    app = WorkbenchTui(FakeClient(), workspace="/tmp/demo")
+
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        assert app.query_one("#projects-pane").styles.display == "none"
+        assert app.query_one("#sessions-pane").styles.display == "none"
+        await pilot.press("ctrl+k")
+        await pilot.pause()
+
+        assert type(app.screen).__name__ == "ContextDrawerScreen"
+        dialog = app.screen.query_one("#context-dialog")
+        assert dialog.region.x >= 0
+        assert dialog.region.right <= size[0]
+        assert dialog.region.y >= 0
+        assert dialog.region.bottom <= size[1]
+        body = app.screen.body
+        for label in (
+            "Tasks and subagents",
+            "Background processes",
+            "Workbench preferences",
+            "Environment",
+            "Integrations",
+            "Diagnostics",
+            "Advanced transport",
+        ):
+            assert label in body
+        if artifact_root := os.getenv("GIGALOOM_TUI_ARTIFACT_DIR"):
+            root = Path(artifact_root)
+            root.mkdir(parents=True, exist_ok=True)
+            (root / f"context-drawer-{size[0]}x{size[1]}.svg").write_text(
+                app.export_screenshot(
+                    title=f"G5-03 context drawer {size[0]}x{size[1]}",
+                    simplify=True,
+                ),
+                encoding="utf-8",
+            )
+
+        await pilot.press("down", "down", "down", "enter")
+        await pilot.pause()
+        assert type(app.screen).__name__ == "DetailScreen"
+        assert "Git: main @ aaaaaaaaaaaa" in app.screen.body
+        assert "staged: 1" in app.screen.body
+
+
+def test_minimal_shell_contract_compares_every_g2_journey_without_new_authority():
+    fixture = Path("tests/harness/fixtures/task_ux_journeys.json")
+    journeys = {
+        item["id"]
+        for item in json.loads(fixture.read_text(encoding="utf-8"))["journeys"]
+    }
+    contract = minimal_shell_contract()
+
+    assert set(contract["default_regions"]) == {
+        "compact_context",
+        "transcript",
+        "contextual_decision",
+        "composer",
+    }
+    assert set(contract["journey_dispositions"]) == journeys
+    assert contract["journey_dispositions"]["run-or-author-automation"] == (
+        "external_surface_not_claimed"
+    )
+    assert contract["journey_dispositions"]["provider-login-guidance"] == (
+        "provider_owned_handoff_not_claimed"
+    )
+    assert contract["claims"] == {
+        "authority_owner": "existing_application_services",
+        "second_frontend": False,
+        "event_delivery_changed": False,
+        "differential_rendering_changed": False,
+    }
 
 
 def test_tui_command_registry_is_the_single_discovery_inventory():
@@ -1389,6 +1615,14 @@ async def test_tui_slash_status_and_runtime_controls_are_contextual(transport_mo
         composer = app.query_one("#composer")
         composer.focus()
         await pilot.press(*"/status")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "Готовность" in app.screen.body
+        assert "Полномочия" in app.screen.body
+        await pilot.press("escape")
+
+        composer.focus()
+        await pilot.press(*"/advanced")
         await pilot.press("enter")
         await pilot.pause()
         assert "Транспорт клиента" in app.screen.body

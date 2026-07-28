@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from contextlib import closing
 from datetime import datetime, timezone
+import hashlib
 from importlib.metadata import PackageNotFoundError, version
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -24,18 +26,33 @@ from gpt2giga_harness.config import (
 from gpt2giga_harness.managed_mcp import HeadlessManagedMCPSnapshotStore
 from gpt2giga_harness.integration_catalog import IntegrationCatalogStore
 from gpt2giga_harness.integration_flows import IntegrationFlowService
+from gpt2giga_harness.mcp import build_mcp_inventory
 from gpt2giga_harness.native_cli_contracts import WORKBENCH_INTEGRATION_SPECS
 from gpt2giga_harness.project import load_project_config, resolve_project
+from gpt2giga_harness.product_inventory import product_inventory_summary
 from gpt2giga_harness.provider_settings import ProviderSettingsService
 from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
+from gpt2giga_harness.runtime.network_access import network_access_manifest
 from gpt2giga_harness.runtime.store import RUNTIME_DB_NAME
 from gpt2giga_harness.types import AvailabilityStatus, redact_secrets
 
-DOCTOR_SCHEMA_VERSION = 1
+DOCTOR_SCHEMA_VERSION = 2
 DOCTOR_REPORT_KIND = "gpt2giga_harness_doctor_report"
 _WORKER_STALE_AFTER_SECONDS = 30.0
 _MAX_SNAPSHOT_VALIDATIONS = 100
 _MAX_SNAPSHOT_BYTES = 1_000_000
+_MAX_DOCTOR_CHECKS = 128
+_GUIDED_DOMAINS = (
+    "provider",
+    "ui_identity",
+    "worker",
+    "git",
+    "github",
+    "network",
+    "mcp",
+    "skills",
+    "plugins",
+)
 
 
 def build_doctor_report(
@@ -43,17 +60,12 @@ def build_doctor_report(
     registry: HarnessRegistry | None = None,
     *,
     workspace: str | Path | None = None,
+    online_checks: bool = True,
+    ui_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a redaction-safe, machine-readable first-run readiness report."""
     registry = registry or create_default_registry()
-    health = proxy.health_check(config)
     sidecar = proxy.sidecar_preflight(config.to_context())
-    models = proxy.discover_models(config, config.default_api_mode)
-    route_probes = (
-        _chat_route_probes(config, _route_probe_model(config, models))
-        if health.ok
-        else {}
-    )
     checks: list[dict[str, Any]] = []
     checks.append(
         _check(
@@ -64,13 +76,31 @@ def build_doctor_report(
             evidence={"python": platform.python_version(), "package_import": True},
         )
     )
-    checks.extend(_proxy_checks(config, health, sidecar, models, route_probes))
+    if online_checks:
+        health = proxy.health_check(config)
+        models = proxy.discover_models(config, config.default_api_mode)
+        route_probes = (
+            _chat_route_probes(config, _route_probe_model(config, models))
+            if health.ok
+            else {}
+        )
+        checks.extend(_proxy_checks(config, health, sidecar, models, route_probes))
+    else:
+        health = proxy.ProxyHealth(
+            ok=False,
+            url=config.proxy_url,
+            error="online checks disabled",
+        )
+        checks.extend(_offline_proxy_checks(sidecar))
     checks.append(_gigachat_check(config, health))
     checks.extend(_harness_checks(registry))
     checks.extend(_workspace_checks(config, workspace))
+    checks.append(_ui_identity_check(config, ui_identity))
     checks.append(_worker_check(config))
+    checks.append(_network_availability_check())
     checks.append(_managed_homes_check(config))
     checks.append(_managed_mcp_check(config))
+    checks.extend(_extension_source_checks(config, workspace))
     checks.extend(_bootstrap_discovery_checks(config))
     if registry.discovery_errors:
         checks.append(
@@ -79,7 +109,12 @@ def build_doctor_report(
                 "harnesses",
                 "degraded",
                 f"Harness plugins: {len(registry.discovery_errors)} discovery error(s)",
-                evidence={"errors": list(registry.discovery_errors)},
+                evidence={
+                    "error_count": len(registry.discovery_errors),
+                    "error_sha256": [
+                        _text_sha256(error) for error in registry.discovery_errors[:20]
+                    ],
+                },
                 remediation=(
                     _remedy(
                         "Inspect or remove the failing Harness plugin.",
@@ -88,13 +123,29 @@ def build_doctor_report(
                 ),
             )
         )
+    checks = checks[:_MAX_DOCTOR_CHECKS]
     summary = {
         status: sum(check["status"] == status for check in checks)
         for status in ("ready", "degraded", "blocked")
     }
-    report = {
+    report: dict[str, Any] = {
         "schema_version": DOCTOR_SCHEMA_VERSION,
         "kind": DOCTOR_REPORT_KIND,
+        "guided": {
+            "first_run": True,
+            "online_checks": online_checks,
+            "domains": list(_GUIDED_DOMAINS),
+            "disabled_actions": _disabled_actions(checks),
+        },
+        "privacy": {
+            "content_free": True,
+            "prompts_collected": False,
+            "sensitive_values_collected": False,
+            "oauth_material_collected": False,
+            "raw_traffic_collected": False,
+            "private_file_content_collected": False,
+            "raw_paths_collected": False,
+        },
         "environment": {
             "packages": {
                 "gpt2giga": _package_version("gpt2giga"),
@@ -110,9 +161,17 @@ def build_doctor_report(
                 "machine": platform.machine(),
             },
         },
+        "product_inventory": product_inventory_summary(),
         "ok": summary["blocked"] == 0,
         "summary": summary,
         "checks": checks,
+    }
+    report["export"] = {
+        "format": "canonical_json",
+        "private_mode": "0600",
+        "check_count": len(checks),
+        "max_check_count": _MAX_DOCTOR_CHECKS,
+        "content_sha256": _json_sha256(report),
     }
     return dict(_sanitize_report(report))
 
@@ -342,6 +401,84 @@ def _proxy_checks(
     return checks
 
 
+def _offline_proxy_checks(
+    sidecar: proxy.SidecarPreflight,
+) -> list[dict[str, Any]]:
+    """Describe proxy readiness without model discovery or chat traffic."""
+    checks = [
+        _check(
+            "proxy-health",
+            "proxy",
+            "degraded",
+            "Proxy / Health: not checked by the privacy-safe Web doctor",
+            evidence={"checked": False, "network_contacted": False},
+            remediation=(
+                _remedy(
+                    "Run the explicit CLI doctor when live route checks are intended.",
+                    "giga doctor --json",
+                ),
+            ),
+        ),
+        _check(
+            "proxy-autostart",
+            "proxy",
+            "ready" if sidecar.ok else "degraded",
+            (
+                "Proxy / Auto-start: local prerequisites are ready"
+                if sidecar.ok
+                else "Proxy / Auto-start: local prerequisites are incomplete"
+            ),
+            evidence={
+                "ready": sidecar.ok,
+                "reason_sha256": (None if sidecar.ok else _text_sha256(sidecar.reason)),
+                "network_contacted": False,
+            },
+            remediation=(
+                ()
+                if sidecar.ok
+                else (
+                    _remedy(
+                        "Configure local proxy prerequisites, then rerun doctor.",
+                        "giga doctor --no-start-proxy --json",
+                    ),
+                )
+            ),
+        ),
+    ]
+    checks.extend(
+        _check(
+            f"route-{api_mode}",
+            "routes",
+            "degraded",
+            f"/{api_mode}/chat/completions: not checked",
+            evidence={"checked": False, "network_contacted": False},
+            remediation=(
+                _remedy(
+                    "Run the explicit CLI doctor to check this route.",
+                    "giga doctor --json",
+                ),
+            ),
+        )
+        for api_mode in ("v1", "v2")
+    )
+    checks.append(
+        _check(
+            "model-discovery",
+            "routes",
+            "degraded",
+            "Models: discovery not checked",
+            evidence={"checked": False, "network_contacted": False},
+            remediation=(
+                _remedy(
+                    "Use the explicit model discovery action when provider traffic is intended.",
+                    "giga provider list --json",
+                ),
+            ),
+        )
+    )
+    return checks
+
+
 def _gigachat_check(
     config: HarnessConfig,
     health: proxy.ProxyHealth,
@@ -401,7 +538,9 @@ def _harness_checks(
         )
         evidence: dict[str, Any] = {
             "availability": availability.status.value,
-            "reason": availability.reason,
+            "reason_sha256": (
+                _text_sha256(availability.reason) if availability.reason else None
+            ),
         }
         probe_method = getattr(harness, "capability_probe", None)
         if include_compatibility and callable(probe_method):
@@ -428,13 +567,12 @@ def _harness_checks(
                         resolution.source if resolution is not None else "unknown"
                     ),
                 )
-        suffix = f" - {availability.reason}" if availability.reason else ""
         checks.append(
             _check(
                 f"harness-{spec.id}",
                 "harnesses",
                 status,
-                f"Harness / {spec.id}: {availability.status.value}{suffix}",
+                f"Harness / {spec.id}: {availability.status.value}",
                 evidence=evidence,
                 remediation=(
                     ()
@@ -494,7 +632,8 @@ def _native_facade_evidence(
         )
     return {
         "namespace": namespace,
-        "executable": executable,
+        "executable": Path(executable).name if executable is not None else None,
+        "executable_present": executable is not None,
         "executable_source": executable_source,
         "version": version,
         "levels": {
@@ -561,11 +700,10 @@ def _workspace_checks(
             "workspace",
             "workspace",
             "ready",
-            f"Workspace: ready ({project.name})",
+            "Workspace: ready",
             evidence={
                 "exists": True,
                 "project_id": project.id,
-                "project_name": project.name,
             },
         ),
         _check(
@@ -612,6 +750,146 @@ def _workspace_checks(
             ),
         ),
     ]
+
+
+def _ui_identity_check(
+    config: HarnessConfig,
+    current: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Project local or remote UI identity without cookies or principal data."""
+    if current is not None:
+        local = bool(current.get("local"))
+        authenticated = bool(current.get("authenticated"))
+        status = "ready" if authenticated else "blocked"
+        return _check(
+            "ui-identity",
+            "ui_identity",
+            status,
+            (
+                "UI identity: current local browser session is active"
+                if local and authenticated
+                else "UI identity: current remote browser session is active"
+                if authenticated
+                else "UI identity: current browser session is unavailable"
+            ),
+            evidence={
+                "mode": "local" if local else "remote",
+                "authenticated": authenticated,
+                "claimable": bool(current.get("claimable")),
+                "role": _safe_enum(current.get("role"), {"viewer", "operator"}),
+                "session_content_retained": False,
+            },
+            remediation=(
+                ()
+                if authenticated
+                else (
+                    _remedy(
+                        "Recover the current UI identity boundary.",
+                        "giga ui" if local else "giga ui-identity validate --json",
+                    ),
+                )
+            ),
+        )
+    if _is_loopback_host(config.ui_host):
+        try:
+            from gpt2giga_harness.ui.local_access import LocalUIAccessStore
+
+            local_status = LocalUIAccessStore(config.data_dir).status()
+        except (OSError, RuntimeError, ValueError) as exc:
+            return _check(
+                "ui-identity",
+                "ui_identity",
+                "blocked",
+                "UI identity: local access state is unreadable",
+                evidence={
+                    "mode": "local",
+                    "error_type": type(exc).__name__,
+                    "error_sha256": _text_sha256(str(exc)),
+                },
+                remediation=(_remedy("Recover local UI access.", "giga ui"),),
+            )
+        return _check(
+            "ui-identity",
+            "ui_identity",
+            "ready",
+            "UI identity: private loopback access state is readable",
+            evidence={
+                "mode": "local",
+                "claimable": local_status.claimable,
+                "current_browser_session": "not_checked",
+                "session_content_retained": False,
+            },
+            remediation=(
+                _remedy(
+                    "Open the UI to claim or inspect the current browser session.",
+                    "giga ui",
+                ),
+            ),
+        )
+    try:
+        from gpt2giga_harness.ui.remote_identity import RemoteOIDCSettings
+
+        settings = RemoteOIDCSettings.from_config(config)
+    except (RuntimeError, ValueError) as exc:
+        return _check(
+            "ui-identity",
+            "ui_identity",
+            "blocked",
+            "UI identity: remote OIDC configuration is incomplete or invalid",
+            evidence={
+                "mode": "remote",
+                "error_type": type(exc).__name__,
+                "error_sha256": _text_sha256(str(exc)),
+            },
+            remediation=(
+                _remedy(
+                    "Validate the deployment-owned remote identity profile.",
+                    "giga ui-identity validate --json",
+                ),
+            ),
+        )
+    return _check(
+        "ui-identity",
+        "ui_identity",
+        "ready",
+        "UI identity: remote OIDC boundary is configured",
+        evidence={
+            "mode": "remote",
+            "role_mapping_count": len(settings.roles),
+            "trusted_proxy_count": len(settings.trusted_proxies),
+            "current_browser_session": "not_checked",
+            "issuer_content_retained": False,
+        },
+        remediation=(
+            _remedy(
+                "Validate remote identity without starting a listener.",
+                "giga ui-identity validate --json",
+            ),
+        ),
+    )
+
+
+def _network_availability_check() -> dict[str, Any]:
+    manifest = network_access_manifest()
+    return _check(
+        "scoped-network",
+        "network",
+        "ready",
+        "Network: scoped HTTPS authority is available and defaults to deny",
+        evidence={
+            "schema_version": manifest["schema_version"],
+            "default": manifest["default_sandbox_network_access"],
+            "reviewed_proxy_optional": manifest["reviewed_proxy"]["optional"],
+            "blanket_internet_switch": manifest["blanket_internet_switch"],
+            "live_network_side_effect": False,
+        },
+        remediation=(
+            _remedy(
+                "Preview the exact network action and approve only its bounded grant.",
+                "giga doctor --json",
+            ),
+        ),
+    )
 
 
 def _worker_check(config: HarnessConfig) -> dict[str, Any]:
@@ -723,6 +1001,148 @@ def _managed_mcp_check(config: HarnessConfig) -> dict[str, Any]:
             )
         ),
     )
+
+
+def _extension_source_checks(
+    config: HarnessConfig,
+    workspace: str | Path | None,
+) -> list[dict[str, Any]]:
+    """Inspect bounded local source metadata without probing or installing."""
+    requested = Path.cwd() if workspace is None else Path(workspace).expanduser()
+    try:
+        project = resolve_project(
+            requested,
+            data_dir=config.data_dir,
+            load_config_name=False,
+        )
+        project_config = load_project_config(project.root)
+        descriptors, errors = build_mcp_inventory(project_config.tool_profiles)
+        enabled = sum(descriptor.enabled for descriptor in descriptors)
+        mcp_check = _check(
+            "mcp-sources",
+            "mcp",
+            "ready" if not errors else "degraded",
+            (
+                f"MCP sources: {len(descriptors)} configured; "
+                f"{enabled} enabled; {len(errors)} invalid"
+            ),
+            evidence={
+                "configured": len(descriptors),
+                "enabled": enabled,
+                "disabled": len(descriptors) - enabled,
+                "invalid": len(errors),
+                "probed": False,
+                "tool_content_retained": False,
+            },
+            remediation=(
+                ()
+                if not errors
+                else (
+                    _remedy(
+                        "Fix invalid project MCP descriptors, then rerun doctor.",
+                        "giga doctor . --json",
+                    ),
+                )
+            ),
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        mcp_check = _check(
+            "mcp-sources",
+            "mcp",
+            "blocked",
+            "MCP sources: project descriptors are unreadable",
+            evidence={
+                "error_type": type(exc).__name__,
+                "error_sha256": _text_sha256(str(exc)),
+                "probed": False,
+            },
+            remediation=(
+                _remedy(
+                    "Repair the project configuration before using MCP.",
+                    "giga doctor . --json",
+                ),
+            ),
+        )
+    try:
+        snapshot = IntegrationCatalogStore(config.data_dir).snapshot()
+        source_ready = sum(item.last_attempt_succeeded for item in snapshot.sources)
+        source_failed = len(snapshot.sources) - source_ready
+        entry_components = {"skill": 0, "plugin": 0, "mcp": 0}
+        for entry in snapshot.entries:
+            package = entry.package
+            for component in () if package is None else package.components:
+                kind = str(component.type.value)
+                if kind in entry_components:
+                    entry_components[kind] += 1
+    except (OSError, RuntimeError, ValueError) as exc:
+        catalog_error = {
+            "error_type": type(exc).__name__,
+            "error_sha256": _text_sha256(str(exc)),
+        }
+        source_ready = 0
+        source_failed = 1
+        entry_components = {"skill": 0, "plugin": 0, "mcp": 0}
+    else:
+        catalog_error = {}
+    skills_proxy_configured = bool(os.environ.get("GIGA_SKILLS_PROXY_ORIGIN"))
+    skills_check = _check(
+        "skills-sources",
+        "skills",
+        "ready" if skills_proxy_configured and source_failed == 0 else "degraded",
+        (
+            "Skills sources: local metadata available; skills.sh proxy configured"
+            if skills_proxy_configured
+            else "Skills sources: skills.sh request-scoped OIDC proxy is not configured"
+        ),
+        evidence={
+            "cached_entries": entry_components["skill"],
+            "catalog_sources_ready": source_ready,
+            "catalog_sources_unavailable": source_failed,
+            "skills_sh_proxy_configured": skills_proxy_configured,
+            "skills_sh_oidc_ownership": "request_scoped_proxy",
+            "oidc_material_readable": False,
+            **catalog_error,
+        },
+        remediation=(
+            ()
+            if skills_proxy_configured and source_failed == 0
+            else (
+                _remedy(
+                    "Start the read-only skills.sh proxy with a request-scoped OIDC token.",
+                    "giga-skills-catalog-proxy",
+                ),
+                _remedy(
+                    "Point GigaLoom at the loopback catalog proxy.",
+                    "GIGA_SKILLS_PROXY_ORIGIN=http://127.0.0.1:8092 giga ui",
+                ),
+            )
+        ),
+    )
+    plugins_check = _check(
+        "plugin-sources",
+        "plugins",
+        "ready" if source_failed == 0 else "degraded",
+        "Plugin sources: governed local and cached catalog metadata is readable",
+        evidence={
+            "cached_entries": entry_components["plugin"],
+            "catalog_sources_ready": source_ready,
+            "catalog_sources_unavailable": source_failed,
+            "root_metadata_scan": "not_checked",
+            "plugin_content_retained": False,
+            **catalog_error,
+        },
+        remediation=(
+            ()
+            if source_failed == 0
+            else (
+                _remedy(
+                    "Inspect cached integration source health.",
+                    "giga integration list --json",
+                ),
+            )
+        ),
+    )
+    return [mcp_check, skills_check, plugins_check]
 
 
 def _bootstrap_discovery_checks(config: HarnessConfig) -> list[dict[str, Any]]:
@@ -973,6 +1393,54 @@ def _check(
 
 def _remedy(message: str, command: str) -> dict[str, str]:
     return {"message": message, "command": command}
+
+
+def _disabled_actions(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    actions = []
+    for check in checks:
+        if check["status"] == "ready":
+            continue
+        remediation = check.get("remediation") or []
+        first = remediation[0] if remediation else {}
+        actions.append(
+            {
+                "check_id": check["id"],
+                "status": check["status"],
+                "reason": f"{check['id']}_{check['status']}",
+                "recovery": first.get("message"),
+                "command": first.get("command"),
+            }
+        )
+    return actions[:_MAX_DOCTOR_CHECKS]
+
+
+def _safe_enum(value: Any, allowed: set[str]) -> str | None:
+    text = str(value) if value is not None else None
+    return text if text in allowed else None
+
+
+def _is_loopback_host(host: str) -> bool:
+    normalized = host.strip().strip("[]").lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _text_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _json_sha256(value: Any) -> str:
+    payload = json.dumps(
+        _sanitize_report(value),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _sanitize_report(value: Any) -> Any:

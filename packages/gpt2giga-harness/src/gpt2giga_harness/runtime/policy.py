@@ -46,6 +46,7 @@ class ApprovalDecision(str, Enum):
 
     ALLOW_ONCE = "allow_once"
     ALLOW_RUN = "allow_run"
+    ALLOW_SESSION = "allow_session"
     ALLOW_PROJECT = "allow_project"
     DENY = "deny"
 
@@ -239,6 +240,7 @@ class GrantStore(Protocol):
         project_id: str | None,
         run_id: str | None,
         job_id: str | None,
+        session_id: str | None = None,
         approval_binding: str | None = None,
         enforcement_owner: str | None = None,
     ) -> bool:
@@ -251,7 +253,7 @@ INTERACTIVE_PROFILE = PermissionProfile(
         PermissionAction.WORKSPACE_READ: PolicyDecision.ALLOW,
         PermissionAction.WORKSPACE_WRITE: PolicyDecision.ALLOW,
         PermissionAction.PROCESS_SPAWN: PolicyDecision.ALLOW,
-        PermissionAction.NETWORK_CONNECT: PolicyDecision.ALLOW,
+        PermissionAction.NETWORK_CONNECT: PolicyDecision.ASK,
         PermissionAction.MCP_SERVER_START: PolicyDecision.ASK,
         PermissionAction.MCP_TOOL_CALL: PolicyDecision.ASK,
         PermissionAction.GIT_COMMIT: PolicyDecision.ASK,
@@ -347,6 +349,7 @@ class PolicyEngine:
             granted = self.grant_store.consume_matching_approval_grant(
                 action=parsed_action,
                 project_id=context.project_id,
+                session_id=context.session_id,
                 run_id=context.run_id,
                 job_id=context.job_id,
                 approval_binding=context.approval_binding,

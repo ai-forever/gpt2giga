@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from gpt2giga_harness.harness_model import signed_harness_model_headers
 from gpt2giga_harness.native.base import native_command_plan_to_dict
 from gpt2giga_harness.native.claude import ClaudeNativeHistoryConnector
 from gpt2giga_harness.native.models import NativeSessionStatus
@@ -453,6 +454,7 @@ def test_claude_native_start_command_uses_managed_home_and_redacts_key(
     context = HarnessContext(
         proxy_url="http://127.0.0.1:8090",
         api_key=secret,
+        harness_model_key="model-key",
         default_model="GigaChat-2-Max",
     )
 
@@ -475,8 +477,13 @@ def test_claude_native_start_command_uses_managed_home_and_redacts_key(
     assert "GIGACHAT_CREDENTIALS" not in plan.env
     assert plan.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v1"
     assert plan.env["ANTHROPIC_AUTH_TOKEN"] == secret
-    assert plan.env["ANTHROPIC_CUSTOM_HEADERS"] == (
-        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max\nX-GPT2GIGA-Pass-Model:false"
+    assert plan.env["ANTHROPIC_CUSTOM_HEADERS"] == "\n".join(
+        f"{name}:{value}"
+        for name, value in signed_harness_model_headers(
+            protocol="anthropic",
+            model="GigaChat-2-Max",
+            key="model-key",
+        )
     )
     assert "ANTHROPIC_API_KEY" not in plan.env
     assert plan.env["HOME"] == plan.native_home
@@ -519,7 +526,10 @@ def test_claude_native_start_command_applies_attachment_plan(tmp_path):
             "metadata": {"transport": "at_file_reference"},
         },
     )
-    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="proxy-key",
+    )
 
     plan = connector.build_start_command(request, context)
 
@@ -538,7 +548,11 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
     workspace.mkdir()
     project_id = project_id_for_root(workspace)
     connector = ClaudeNativeHistoryConnector(data_dir=data_dir, executable="claude")
-    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="proxy-key",
+        harness_model_key="model-key",
+    )
     start_plan = connector.build_start_command(
         HarnessRequest(
             prompt="start",
@@ -603,8 +617,13 @@ def test_claude_native_resume_command_requires_managed_ref(tmp_path):
     assert plan.execution_snapshot == start_plan.execution_snapshot
     assert plan.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v1"
     assert plan.env["ANTHROPIC_AUTH_TOKEN"] == "proxy-key"
-    assert plan.env["ANTHROPIC_CUSTOM_HEADERS"] == (
-        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max\nX-GPT2GIGA-Pass-Model:false"
+    assert plan.env["ANTHROPIC_CUSTOM_HEADERS"] == "\n".join(
+        f"{name}:{value}"
+        for name, value in signed_harness_model_headers(
+            protocol="anthropic",
+            model="GigaChat-2-Max",
+            key="model-key",
+        )
     )
     with pytest.raises(ValueError, match="Only managed"):
         connector.build_resume_command(external, context)

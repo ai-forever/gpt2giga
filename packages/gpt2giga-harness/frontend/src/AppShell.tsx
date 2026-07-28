@@ -162,7 +162,6 @@ export function AppShell() {
         {migratedSurface ? null : (
           <div className="shell-notice">
             <span>{message(preferences.locale, "shellNotice")}</span>
-            <a href="/legacy">{message(preferences.locale, "legacy")}</a>
           </div>
         )}
         <main className={migratedSurface ? "surface-shell migrated" : "surface-shell"}>

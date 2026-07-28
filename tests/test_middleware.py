@@ -436,6 +436,25 @@ def test_rquid_middleware_emits_traffic_event_for_completed_request():
     assert event.latency_ms >= 0
 
 
+def test_rquid_middleware_omits_exception_message_without_content_capture():
+    test_app = FastAPI()
+    sink = RecordingTrafficSink()
+    test_app.state.traffic_log_sink = sink
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.get("/v1/models")
+    async def models():
+        raise RuntimeError("Bearer secret-exception-token")
+
+    response = TestClient(test_app, raise_server_exceptions=False).get("/v1/models")
+
+    assert response.status_code == 500
+    assert len(sink.events) == 1
+    assert sink.events[0].error_type == "RuntimeError"
+    assert sink.events[0].error_message is None
+    assert "secret-exception-token" not in str(sink.events[0].to_json_dict())
+
+
 def test_rquid_middleware_keeps_context_through_stream_completion():
     test_app = FastAPI()
     sink = RecordingTrafficSink()

@@ -8,13 +8,14 @@
     "npm": ">=11.0.0"
   },
   "scripts": {
-    "build": "npm run generate:brand && npm run build:bundle && npm run build:package && npm run build:verify",
+    "build": "node scripts/produce-assets.mjs",
+    "build:release": "node scripts/produce-assets.mjs --require-clean",
     "build:bundle": "vite build",
     "build:package": "node scripts/package-assets.mjs",
     "build:verify": "node scripts/verify-build.mjs",
     "check": "npm run typecheck && npm run lint && npm run test && npm run check:determinism",
     "check:determinism": "node scripts/check-determinism.mjs",
-    "generate:brand": "node ../branding/generate-assets.mjs",
+    "generate:brand": "node ../branding/generate-assets.mjs --frontend-only",
     "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

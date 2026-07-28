@@ -13,6 +13,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
     NormalizedContentPart,
     NormalizedGenerationConfig,
+    NormalizedImageReference,
     NormalizedMessage,
     NormalizedResponseFormat,
     NormalizedTool,
@@ -101,6 +102,7 @@ class OpenAIProtocolAdapter:
             messages=_normalize_messages(sanitized.get("messages", [])),
             tools=_normalize_tools(sanitized),
             tool_choice=_normalize_tool_choice(original, sanitized),
+            parallel_tool_calls=_optional_bool(original.get("parallel_tool_calls")),
             response_format=_normalize_response_format(
                 sanitized.get("response_format")
             ),
@@ -232,11 +234,42 @@ def _normalize_content_part(part: Mapping[str, Any]) -> NormalizedContentPart:
         )
     if part_type == "image_url":
         image_url = part.get("image_url")
-        detail = image_url.get("detail") if isinstance(image_url, Mapping) else None
+        if not isinstance(image_url, Mapping):
+            return NormalizedContentPart(
+                type="image_url",
+                data=image_url,
+                raw_extensions=raw_extensions,
+            )
+        uri = image_url.get("url")
+        if not isinstance(uri, str) or not uri:
+            return NormalizedContentPart(
+                type="image_url",
+                data=dict(image_url),
+                raw_extensions=raw_extensions,
+            )
+        detail = image_url.get("detail")
+        image_extensions = {
+            key: value
+            for key, value in image_url.items()
+            if key not in {"url", "detail"}
+        }
+        if detail not in {None, "auto", "low", "high"}:
+            image_extensions["detail"] = detail
+            detail = None
+        mime_type = None
+        if uri.startswith("data:"):
+            media_header = uri[5:].partition(",")[0]
+            candidate = media_header.partition(";")[0]
+            mime_type = candidate or None
         return NormalizedContentPart(
-            type="image_url",
-            data=dict(image_url) if isinstance(image_url, Mapping) else image_url,
-            detail=_string_or_none(detail),
+            type="image_reference",
+            image_reference=NormalizedImageReference(
+                source="data_url" if uri.startswith("data:") else "url",
+                uri=uri,
+                mime_type=mime_type,
+                detail=detail,
+                raw_extensions=image_extensions,
+            ),
             raw_extensions=raw_extensions,
         )
     if part_type == "file":
@@ -375,3 +408,7 @@ def _string_or_none(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _optional_bool(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else None

@@ -104,9 +104,10 @@ Authentication has two current paths:
 - Codex, Claude, and Gemini native CLIs own their own login, refresh, credential
   storage, logout, and revocation.
 
-GigaLoom does not yet broker native provider login or treat an installed binary
-as proof that an account is ready. Provider account projection belongs to the
-later provider-login roadmap phase.
+GigaLoom's native login broker can start provider-owned login, status, logout,
+and revocation operations and bind admitted account evidence to a session. The
+provider CLI still owns credentials and refresh behavior. An installed binary
+alone never proves that an account is ready.
 
 Approvals are similarly split. Harness approvals cover actions Harness owns,
 such as process admission, integration mutation, or applying a retained patch.
@@ -203,6 +204,7 @@ giga harness inspect codex-cli --json
 giga harness capabilities
 giga harness capabilities --agents
 giga harness capabilities --agents --json
+giga harness capabilities --inventory --json
 ```
 
 Arena is currently a Web/API surface rather than a separate `giga arena`
@@ -212,14 +214,24 @@ command. Open **Evaluation → Arena** in `giga ui`, or use the authenticated
 
 ## Generated capability matrix
 
-The [agent surface capability matrix](agent-capability-matrix.md) is generated
-from the built-in `HarnessSpec` records and their adapter capability claims.
-Regenerate its exact Markdown with:
+The versioned product inventory is generated from product schemas, built-in
+registries, installed entry points, provider compatibility profiles, the CLI
+parser, TUI command registry, API routes, and contract tests. The first-run
+doctor includes its schema, version, digest, provider contracts, and
+documentation ids. Inspect it with:
+
+```bash
+giga harness capabilities --inventory --json
+```
+
+The [agent surface capability matrix](agent-capability-matrix.md) is a
+projection of the same inventory. Regenerate its exact Markdown with:
 
 ```bash
 giga harness capabilities --agents
 ```
 
-The JSON form is intended for tooling. The checked-in Markdown is tested
-byte-for-byte against the generator so documentation cannot silently drift from
-the runtime claims.
+CI runs `giga harness capabilities --inventory --check`. It verifies the
+packaged inventory digest, CLI/TUI/API surfaces, protocol, transport, mode and
+deprecation records, local documentation targets, contract-test evidence, and
+the generated English/Russian matrix cells.

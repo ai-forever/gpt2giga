@@ -10,6 +10,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any, Mapping
 
@@ -37,9 +38,14 @@ from gpt2giga_harness.agents import (
 )
 from gpt2giga_harness.capability_matrix import (
     build_adapter_capability_matrix,
-    build_agent_surface_capability_matrix,
     render_adapter_capability_matrix_markdown,
     render_agent_surface_capability_matrix_markdown,
+)
+from gpt2giga_harness.product_inventory import (
+    build_product_inventory,
+    canonical_inventory_json,
+    load_product_inventory,
+    validate_product_inventory,
 )
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.completion import SHELLS, render_completion
@@ -760,6 +766,7 @@ def build_parser() -> argparse.ArgumentParser:
     worker_start = worker_subparsers.add_parser("start", parents=[common])
     worker_start.add_argument("--once", action="store_true")
     worker_start.add_argument("--poll-seconds", type=float, default=0.25)
+    worker_start.add_argument("--max-idle-seconds", type=float, default=1.0)
     worker_start.add_argument("--lease-seconds", type=float, default=15.0)
     worker_start.add_argument("--heartbeat-seconds", type=float, default=2.0)
     worker_start.set_defaults(handler=_handle_worker_start)
@@ -771,6 +778,7 @@ def build_parser() -> argparse.ArgumentParser:
     worker_idle = worker_subparsers.add_parser("stop-on-idle", parents=[common])
     worker_idle.add_argument("--idle-seconds", type=float, default=5.0)
     worker_idle.add_argument("--poll-seconds", type=float, default=0.25)
+    worker_idle.add_argument("--max-idle-seconds", type=float, default=1.0)
     worker_idle.add_argument("--lease-seconds", type=float, default=15.0)
     worker_idle.add_argument("--heartbeat-seconds", type=float, default=2.0)
     worker_idle.set_defaults(handler=_handle_worker_stop_on_idle)
@@ -780,7 +788,7 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_performance = benchmark_subparsers.add_parser("performance")
     benchmark_performance.add_argument(
         "--profile",
-        choices=("ci-smoke", "local-detail"),
+        choices=("ci-smoke", "local-detail", "tui-detail", "runtime-detail"),
         default="ci-smoke",
     )
     benchmark_performance.add_argument("--samples", type=int, default=5)
@@ -1054,6 +1062,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show Direct Chat and coding-agent behavior contracts",
     )
+    harness_capabilities.add_argument(
+        "--inventory",
+        action="store_true",
+        help="Show the complete versioned product truth inventory",
+    )
+    harness_capabilities.add_argument(
+        "--check",
+        action="store_true",
+        help="Fail when the packaged inventory, docs, or contract evidence drift",
+    )
+    harness_capabilities.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Write canonical inventory JSON to this path",
+    )
     harness_capabilities.set_defaults(handler=_handle_harness_capabilities)
 
     harness_inspect = harness_subparsers.add_parser("inspect", parents=[common])
@@ -1308,8 +1332,47 @@ def _handle_harness_capabilities(
     config: HarnessConfig,
 ) -> int:
     registry = create_default_registry(include_entry_points=False)
+    if args.agents and args.inventory:
+        print(
+            "product inventory: --agents and --inventory are mutually exclusive",
+            file=sys.stderr,
+        )
+        return 2
+    if args.inventory:
+        with tempfile.TemporaryDirectory(prefix="gigaloom-product-inventory-") as root:
+            app = create_app(
+                HarnessConfig(data_dir=root),
+                registry=registry,
+            )
+            inventory = build_product_inventory(
+                registry,
+                cli_parser=build_parser(),
+                api_routes=app.routes,
+            )
+        if args.check:
+            errors = validate_product_inventory(
+                inventory,
+                repository_root=Path.cwd(),
+            )
+            if errors:
+                for error in errors:
+                    print(f"product inventory: {error}", file=sys.stderr)
+                return 1
+        payload = canonical_inventory_json(inventory)
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(payload, encoding="utf-8")
+        if args.json or (not args.check and args.output is None):
+            print(payload, end="")
+        return 0
+    if args.check or args.output is not None:
+        print(
+            "product inventory: --check and --output require --inventory",
+            file=sys.stderr,
+        )
+        return 2
     if args.agents:
-        matrix = build_agent_surface_capability_matrix(registry)
+        matrix = load_product_inventory()["agent_surface_capability_matrix"]
         renderer = render_agent_surface_capability_matrix_markdown
     else:
         matrix = build_adapter_capability_matrix(registry)
@@ -2251,7 +2314,10 @@ def _handle_worker_start(args: argparse.Namespace, config: HarnessConfig) -> int
     print(f"Starting durable Harness worker {worker.worker_id}")
     print("Proxy auto-start is disabled; configure a running proxy/API key if needed.")
     try:
-        worker.run_forever(poll_seconds=args.poll_seconds)
+        worker.run_forever(
+            poll_seconds=args.poll_seconds,
+            max_idle_seconds=args.max_idle_seconds,
+        )
     except KeyboardInterrupt:
         return 130
     return 0
@@ -2281,6 +2347,7 @@ def _handle_worker_stop_on_idle(args: argparse.Namespace, config: HarnessConfig)
     )
     worker.run_forever(
         poll_seconds=args.poll_seconds,
+        max_idle_seconds=args.max_idle_seconds,
         stop_on_idle_seconds=max(args.idle_seconds, 0.0),
     )
     print(f"Worker {worker.worker_id} stopped after idle timeout.")
@@ -2301,7 +2368,8 @@ def _handle_benchmark_performance(
         print(f"Wrote private performance report to {Path(args.output).expanduser()}")
     else:
         _print_json(report)
-    return 0 if report["status"] == "passed" else 1
+    ci_blocking_metrics = report["baseline"]["ci_blocking_metrics"]
+    return 1 if ci_blocking_metrics and report["status"] != "passed" else 0
 
 
 def _handle_schedule_list(args: argparse.Namespace, config: HarnessConfig) -> int:

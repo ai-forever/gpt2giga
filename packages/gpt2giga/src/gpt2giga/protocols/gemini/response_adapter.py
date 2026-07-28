@@ -100,6 +100,18 @@ def _content_part_to_gemini(part: NormalizedContentPart) -> dict[str, Any]:
         inline_data = _data_url_to_inline_data(url)
         if inline_data:
             return {"inlineData": inline_data}
+    if part.type == "image_reference" and part.image_reference is not None:
+        inline_data = _data_url_to_inline_data(part.image_reference.uri)
+        if inline_data:
+            return {"inlineData": inline_data}
+        return {
+            "fileData": _compact_dict(
+                {
+                    "fileUri": part.image_reference.uri,
+                    "mimeType": part.image_reference.mime_type,
+                }
+            )
+        }
     if part.type == "file":
         file_data = part.raw_extensions.get("gemini_file_data")
         if isinstance(file_data, dict):

@@ -86,6 +86,10 @@ def parse_editor_command(command: str | None = None) -> tuple[str, ...]:
             "Unsupported editor command. Supported commands: "
             f"{', '.join(sorted(SUPPORTED_EDITOR_COMMANDS))}"
         )
+    if parts[0] != executable:
+        raise EditorOpenError(
+            "Editor command must use an allowlisted launcher name without a path."
+        )
     return parts
 
 

@@ -58,8 +58,8 @@ GigaChat v2, а корневые маршруты без версиониров�
 |---|---|---|
 | `GET /models` | Поддерживается | Возвращается в форме Anthropic, когда запрос содержит заголовки Anthropic SDK. |
 | `GET /models/{model_id}` | Поддерживается | Возвращается в форме Anthropic, когда запрос содержит заголовки Anthropic SDK. |
-| `POST /messages` | Поддерживается | Messages API, потоковая передача, локальные инструменты, сопоставление с GigaChat v2 для совместимых провайдерских инструментов Anthropic, запасной путь для структурированного вывода. |
-| `POST /messages/count_tokens` | Поддерживается | Считает текст сообщений, system, инструментов и структурированного вывода через подсчёт токенов GigaChat. |
+| `POST /messages` | Поддерживается | Messages API, потоковая передача, локальные инструменты, сопоставление с GigaChat v2 для совместимых провайдерских инструментов Anthropic и запасной путь для структурированного вывода. При `GPT2GIGA_NORMALIZATION_MODE=on` принятое подмножество v1 использует нормализованное ядро запросов, ответов и SSE. |
+| `POST /messages/count_tokens` | Поддерживается | Считает текст сообщений, system, инструментов и структурированного вывода через подсчёт токенов GigaChat; нормализованный режим использует `NormalizedTokenCountRequest`/`Response`. |
 | `POST /messages/batches`, `GET /messages/batches*` | Отключено | Код роутера есть, но он не подключён до появления пакетных методов в SDK/бэкенде GigaChat. |
 | Files API beta | Не реализовано | Сейчас вне области поддержки. |
 | Skills API beta | Не реализовано | Сейчас вне области поддержки. |
@@ -105,9 +105,9 @@ query-параметрах чаще попадают в журналы дост�
 |---|---|---|
 | `GET /v1beta/models`, `/v1/v1beta/models`, `/v2/v1beta/models` | Поддерживается | Список моделей GigaChat в форме Gemini `models/*`. |
 | `GET /v1beta/models/{model}`, `/v1/v1beta/models/{model}`, `/v2/v1beta/models/{model}` | Поддерживается | Одна модель в форме Gemini `Model`. |
-| `POST /models/{model}:generateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | `contents`/`parts`, `systemInstruction`, `generationConfig`, объявления функций и мультимодальные части Gemini сопоставляются с нормализованным чат-запросом. |
+| `POST /models/{model}:generateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Принятые `contents`/`parts`, `systemInstruction`, `generationConfig`, объявления/результаты функций, типизированные inline-изображения и JSON Schema output сопоставляются с допустимым для bridge нормализованным чат-запросом. Несмоделированные safety, cache, file и tool-семантики остаются явными и отклоняются admission для OpenAI-compatible bridge до I/O. |
 | `POST /models/{model}:streamGenerateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает `text/event-stream` с фрагментами Gemini `GenerateContentResponse`. |
-| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Считает текстовые части contents/system/tools через подсчёт токенов GigaChat. |
+| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Считает `systemInstruction`, `contents` и объявления функций через подсчёт токенов GigaChat; режим нормализации использует `NormalizedTokenCountRequest`/`Response`. |
 | `POST /models/{model}:embedContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает Gemini `embedding.values`, используя бэкенд эмбеддингов GigaChat. |
 | `POST /models/{model}:batchEmbedContents`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает Gemini `embeddings[]`, используя бэкенд эмбеддингов GigaChat. |
 | `POST /v1beta/files`, `GET /v1beta/files*` | Отключено | Код роутера подготовлен, но по умолчанию не подключён. |
@@ -201,6 +201,24 @@ GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests
 
 Внутренний нормализованный слой, который отделяет публичные форматы протоколов от
 выполнения у провайдера, описан в [Нормализованных сообщениях](./architecture/normalized-messages.md).
+G7-00 публикует версионированную матрицу семантических потерь для
+OpenAI-compatible upstream × OpenAI/Anthropic/Gemini и обязательный fail-closed
+guard допуска до I/O. G7-01 добавляет внутренний upstream-адаптер Chat
+Completions для OpenAI-compatible/vLLM с точной привязкой профиля/модели,
+сетевым разрешением на каждый запрос, владением `SecretRef`, строгим model
+discovery, ограниченным streaming и нормализованными errors/usage. G7-02
+добавляет прямую проекцию Anthropic request, response, SSE, tools, usage,
+stop-reason, errors и count-token через нормализованное ядро при включённом
+режиме нормализации. G7-03 фиксирует принятые Gemini-контракты request/response/
+SSE/function/safety-error/usage/model-list/count-token, переводит inline-
+изображения в типизированные ссылки и доказывает отказ bridge admission для
+несмоделированной Gemini-семантики до provider I/O. G7-04 закрывает внутренний
+bridge v1 герметичными контрактами OpenAI/Anthropic/Gemini для text, streaming,
+partial usage, function tools, semantic loss, cancellation, malformed streams,
+timeouts и provider errors. Он также переводит входные OpenAI-изображения в
+типизированные ссылки. Публичный environment switch для произвольного upstream
+не добавляется: проверенные profiles, secrets и network authority остаются во
+владении Harness.
 
 ## Режимы бэкенда
 

@@ -21,6 +21,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedTool,
     NormalizedToolCall,
 )
+from gpt2giga.protocols.anthropic import AnthropicProtocolAdapter
 from gpt2giga.protocols.openai import normalized_chat_response_to_openai
 from gpt2giga.providers.gigachat.adapter import (
     gigachat_response_to_normalized,
@@ -93,20 +94,13 @@ async def openai_to_normalized(request: Request):
 async def anthropic_to_normalized(request: Request):
     """Translate an Anthropic Messages request to normalized form."""
     payload = await _read_json_object(request)
-    logger = getattr(request.app.state, "logger", None)
-    openai_payload = _build_openai_data_from_anthropic_request(
+    normalized = await _anthropic_payload_to_normalized(
+        request,
         payload,
-        logger,
-        builtin_tool_mapping_enabled=_builtin_tool_mapping_enabled(request),
-    )
-    normalized = await request.app.state.openai_protocol_adapter.to_normalized(
-        openai_payload,
-        context=None,
     )
     return {
         "source": "anthropic",
         "target": "normalized",
-        "intermediate_openai": openai_payload,
         "normalized": normalized.to_json_dict(),
     }
 
@@ -196,15 +190,14 @@ async def _translate_payload(
         )
 
     if source == "anthropic":
-        openai_payload = _anthropic_payload_to_openai(request, payload)
         if target == "openai":
-            return {"payload": openai_payload}
-        normalized = await _openai_payload_to_normalized(request, openai_payload)
+            return {"payload": _anthropic_payload_to_openai(request, payload)}
+        normalized = await _anthropic_payload_to_normalized(request, payload)
         return await _translate_normalized_request_to_target(
             request,
             normalized=normalized,
             target=target,
-            intermediate={"openai": openai_payload},
+            intermediate={},
         )
 
     if source == "normalized":
@@ -317,6 +310,17 @@ async def _openai_payload_to_normalized(
         payload,
         context=None,
     )
+
+
+async def _anthropic_payload_to_normalized(
+    request: Request,
+    payload: dict[str, Any],
+) -> NormalizedChatRequest:
+    adapter = getattr(request.app.state, "anthropic_protocol_adapter", None)
+    if adapter is None:
+        adapter = AnthropicProtocolAdapter()
+        request.app.state.anthropic_protocol_adapter = adapter
+    return await adapter.to_normalized(payload, context=None)
 
 
 def _anthropic_payload_to_openai(

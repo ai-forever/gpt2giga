@@ -365,6 +365,40 @@ export interface ApprovalRequest {
   expires_at: string | null;
   decided_at: string | null;
   created_at: string;
+  ux?: ApprovalUXProjection;
+}
+
+export interface ApprovalDecisionOption {
+  decision: string;
+  lifetime: string;
+  enabled: boolean;
+  expires_in_seconds: number | null;
+  why: string;
+}
+
+export interface ApprovalUXProjection {
+  schema_version: number;
+  action: string;
+  target: { kind: string; fields: Record<string, string | number | boolean> };
+  scope: {
+    operation_id: string;
+    session_id: string | null;
+    project_id: string | null;
+  };
+  duration: string;
+  policy_source: string;
+  enforcement: string;
+  risk: string;
+  preview_sha256: string;
+  preview_bound: boolean;
+  consequence: string;
+  why: string;
+  what_changed: string;
+  protected: boolean;
+  protected_reason: string | null;
+  decision_options: ApprovalDecisionOption[];
+  side_effect_free: boolean;
+  grant_created: boolean;
 }
 
 export interface RunExplanation {
@@ -728,6 +762,49 @@ export interface BrowserAccessStatusResponse {
   claimable: boolean;
   expires_at: string | null;
   recovery: string;
+}
+
+export interface DoctorReport {
+  schema_version: number;
+  kind: "gpt2giga_harness_doctor_report";
+  ok: boolean;
+  summary: { ready: number; degraded: number; blocked: number };
+  guided: {
+    first_run: true;
+    online_checks: boolean;
+    domains: string[];
+    disabled_actions: Array<{
+      check_id: string;
+      status: string;
+      reason: string;
+      recovery: string | null;
+      command: string | null;
+    }>;
+  };
+  privacy: {
+    content_free: true;
+    prompts_collected: false;
+    sensitive_values_collected: false;
+    oauth_material_collected: false;
+    raw_traffic_collected: false;
+    private_file_content_collected: false;
+    raw_paths_collected: false;
+  };
+  checks: Array<{
+    id: string;
+    category: string;
+    status: "ready" | "degraded" | "blocked";
+    summary: string;
+    evidence: Record<string, unknown>;
+    remediation: Array<{ message: string; command: string }>;
+  }>;
+  export: {
+    format: "canonical_json";
+    private_mode: "0600";
+    check_count: number;
+    max_check_count: number;
+    content_sha256: string;
+  };
 }
 
 export interface SettingsSaveResponse {
