@@ -1,3 +1,5 @@
+"""Transitional source-workspace assertions grouped by future owner."""
+
 import ast
 from pathlib import Path
 import subprocess
@@ -287,6 +289,8 @@ def test_pr_labeler_tracks_harness_owned_paths():
     assert "harness:" in labeler
     assert "- 'packages/gpt2giga-harness/**'" in labeler
     assert "- 'tests/harness/**'" in labeler
+    assert "- 'tests/test_gigaloom_*.py'" in labeler
+    assert "- 'tests/test_cross_repository_artifact_smoke.py'" in labeler
     assert "- 'docs/harness.md'" in labeler
 
 

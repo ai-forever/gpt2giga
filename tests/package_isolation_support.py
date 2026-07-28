@@ -1,3 +1,5 @@
+"""Transitional artifact helpers used by future repository-owned suites."""
+
 import ast
 from dataclasses import dataclass
 import hashlib
@@ -86,8 +88,7 @@ def _build_member(package: str, output: Path) -> tuple[Path, Path]:
     return wheel, sdist
 
 
-@pytest.fixture(scope="module")
-def built_artifacts(tmp_path_factory) -> BuiltArtifacts:
+def _build_artifacts(tmp_path_factory) -> BuiltArtifacts:
     root = tmp_path_factory.mktemp("workspace-artifacts")
     direct = root / "direct"
     direct.mkdir()
@@ -99,6 +100,11 @@ def built_artifacts(tmp_path_factory) -> BuiltArtifacts:
         harness_wheel=harness_wheel,
         harness_sdist=harness_sdist,
     )
+
+
+@pytest.fixture(scope="module")
+def built_artifacts(tmp_path_factory) -> BuiltArtifacts:
+    return _build_artifacts(tmp_path_factory)
 
 
 def _install_artifacts(target: Path, *artifacts: Path) -> None:
