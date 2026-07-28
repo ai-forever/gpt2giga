@@ -1,4 +1,4 @@
-name: Nightly smoke tests
+name: GigaLoom detail profiles
 
 on:
   schedule:
@@ -8,48 +8,65 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: gigaloom-detail-profiles
+  cancel-in-progress: true
+
 jobs:
-  smoke:
-    name: Run local app smoke tests
+  profiles:
+    name: Performance / non-blocking detail profiles
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Set up Node.js 22.13
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22.13.0"
+          cache: npm
+          cache-dependency-path: packages/gpt2giga-harness/frontend/package-lock.json
+
+      - name: Produce frontend assets
+        run: |
+          npm install --global --ignore-scripts npm@11.17.0
+          npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
+          npm --prefix packages/gpt2giga-harness/frontend run build:release
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: |
+            pyproject.toml
+            packages/gpt2giga-harness/pyproject.toml
 
-      - name: Set up Python 3.13
-        run: uv python install 3.13
-
-      - name: Install dependencies
-        run: uv sync --all-packages --all-extras --dev
-
-      - name: Run smoke tests
-        run: uv run pytest tests/test_api_server/test_ci_smoke.py
+      - name: Install standalone profiling environment
+        env:
+          GIGALOOM_PYTHON: "3.13"
+        run: ./scripts/ci-base.sh sync
 
       - name: Capture bounded local detail profile
-        if: always()
-        run: uv run giga benchmark performance --profile local-detail --samples 5 --output performance-artifacts/local-detail.json
+        run: .venv/bin/giga benchmark performance --profile local-detail --samples 5 --output performance-artifacts/local-detail.json
+        continue-on-error: true
 
       - name: Capture bounded TUI detail profile
         if: always()
-        run: uv run giga benchmark performance --profile tui-detail --samples 5 --output performance-artifacts/tui-detail.json
+        run: .venv/bin/giga benchmark performance --profile tui-detail --samples 5 --output performance-artifacts/tui-detail.json
+        continue-on-error: true
 
       - name: Capture bounded runtime detail profile
         if: always()
-        run: uv run giga benchmark performance --profile runtime-detail --samples 5 --output performance-artifacts/runtime-detail.json
+        run: .venv/bin/giga benchmark performance --profile runtime-detail --samples 5 --output performance-artifacts/runtime-detail.json
+        continue-on-error: true
 
-      - name: Upload bounded performance detail reports
+      - name: Upload bounded detail evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: gigaloom-performance-detail
           path: performance-artifacts/*.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14

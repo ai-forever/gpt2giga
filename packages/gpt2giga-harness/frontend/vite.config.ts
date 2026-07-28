@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const outputDirectory = process.env.GIGALOOM_COCKPIT_OUTPUT ?? fileURLToPath(
   new URL("../src/gpt2giga_harness/ui/cockpit_v2/assets", import.meta.url),
@@ -42,5 +42,6 @@ export default defineConfig({
   plugins: [katexWoff2Only(), react()],
   test: {
     environment: "node",
+    exclude: [...configDefaults.exclude, "e2e/**"],
   },
 });

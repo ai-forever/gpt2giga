@@ -2,9 +2,9 @@
 
 ## Scope
 
-The root pytest configuration collects the entire `tests/` tree: gateway,
-Harness, compatibility/golden, integration, smoke, live, scripts, and workspace
-packaging contracts. Do not infer coverage from an old directory inventory.
+The root pytest configuration collects the standalone Harness, compatibility,
+integration, smoke, script, and packaging contracts. Do not infer coverage
+from an old directory inventory.
 
 ## Test design
 
@@ -17,8 +17,8 @@ packaging contracts. Do not infer coverage from an old directory inventory.
   call real upstream services, and those tests must remain explicit opt-in.
 - Pytest asyncio auto mode is enabled. Do not add
   `@pytest.mark.asyncio` unless a test needs explicit plugin options.
-- Use `create_app()` plus an explicit `ProxyConfig` for app-wide gateway
-  behavior. Avoid ambient env and singleton state.
+- Use `create_app()` plus an explicit temporary Harness configuration for
+  app-wide behavior. Avoid ambient env and singleton state.
 - Use `tmp_path`, isolated Git repositories, temporary homes, and a temporary
   Harness data dir. Never read or mutate real `.giga/`,
   `~/.gpt2giga/harness`, or native agent state.
@@ -26,9 +26,9 @@ packaging contracts. Do not infer coverage from an old directory inventory.
   environment values, stored events, previews, or provenance are involved.
 - Change golden fixtures only for an intentional client-visible wire contract;
   review the human-readable diff.
-- Keep package-boundary tests strict: gateway-only installs must not expose
-  Harness surfaces, and Harness artifacts must include their commands, entry
-  points, dependencies, and no-build UI assets.
+- Keep package-boundary tests strict: Harness base artifacts must not install
+  the optional gateway and must include their commands, entry points,
+  dependencies, and no-build UI assets.
 - Files/Batches modules exist without public aggregator mounts; tests must not
   assume that importing a router makes its API public.
 - Admin, debug, replay, and metrics route tests must explicitly enable the
@@ -46,13 +46,13 @@ it with the workflow's explicit `-n 4`.
 Harness-focused gate:
 
 ```bash
-uv run pytest tests/harness -q
+./scripts/ci-base.sh pytest tests/harness -q
 ```
 
 Full pytest/coverage gate:
 
 ```bash
-uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
+./scripts/ci-base.sh pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 ```
 
 Run the full gate after shared fixtures/config, app composition, public protocol,

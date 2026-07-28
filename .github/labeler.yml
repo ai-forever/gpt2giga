@@ -1,71 +1,70 @@
-openai:
+backend:
   - changed-files:
       - any-glob-to-any-file:
-          - 'packages/gpt2giga/src/gpt2giga/routers/openai/**'
-          - 'packages/gpt2giga/src/gpt2giga/openapi_specs/openai.py'
-          - 'examples/openai/**'
-          - 'examples/weather_agent.py'
+          - "packages/gpt2giga-harness/src/**/*.py"
 
-anthropic:
+frontend:
   - changed-files:
       - any-glob-to-any-file:
-          - 'packages/gpt2giga/src/gpt2giga/routers/anthropic/**'
-          - 'packages/gpt2giga/src/gpt2giga/openapi_specs/anthropic.py'
-          - 'examples/anthropic/**'
+          - "packages/gpt2giga-harness/frontend/**"
+          - "packages/gpt2giga-harness/branding/**"
 
-protocol:
+terminal:
   - changed-files:
       - any-glob-to-any-file:
-          - 'packages/gpt2giga/src/gpt2giga/protocols/**'
+          - "packages/gpt2giga-harness/src/gpt2giga_harness/terminal_*.py"
+          - "packages/gpt2giga-harness/src/gpt2giga_harness/tui*.py"
+          - "packages/gpt2giga-harness/src/gpt2giga_harness/native/**"
+          - "tests/harness/test_terminal_*.py"
+          - "tests/harness/test_tui*.py"
+          - "tests/harness/test_native_*.py"
 
-harness:
+performance:
   - changed-files:
       - any-glob-to-any-file:
-          - 'packages/gpt2giga-harness/**'
-          - 'tests/harness/**'
-          - 'tests/package_isolation_support.py'
-          - 'tests/workspace_split_contract_support.py'
-          - 'tests/test_gigaloom_*.py'
-          - 'tests/test_cross_repository_artifact_smoke.py'
-          - 'docs/harness.md'
-          - 'docs-site/i18n/**/docusaurus-plugin-content-docs/current/harness.md'
+          - "benchmarks/gigaloom_performance/**"
+          - "packages/gpt2giga-harness/src/gpt2giga_harness/*performance*.py"
+          - "tests/harness/test_*performance*.py"
 
-docker:
+packaging:
   - changed-files:
       - any-glob-to-any-file:
-          - 'Dockerfile'
-          - 'Dockerfile.mitmproxy'
-          - '.dockerignore'
-          - 'deploy/**'
-          - 'traefik/**'
+          - "pyproject.toml"
+          - "packages/gpt2giga-harness/pyproject.toml"
+          - "packages/gpt2giga-harness/hatch_build.py"
+          - "packages/gpt2giga-harness/asset_contract.py"
+          - "tests/test_gigaloom_artifact_isolation.py"
+          - "tests/test_cross_repository_artifact_smoke.py"
 
 ci:
   - changed-files:
       - any-glob-to-any-file:
-          - '.github/workflows/**'
-          - '.github/dependabot.yml'
-          - '.github/labeler.yml'
-          - '.github/release-drafter.yml'
-          - '.github/AGENTS.md'
+          - ".github/workflows/**"
+          - ".github/dependabot.yml"
+          - ".github/labeler.yml"
+          - ".github/release-drafter.yml"
+          - ".github/AGENTS.md"
+          - "scripts/ci-*.sh"
 
 docs:
   - changed-files:
       - any-glob-to-any-file:
-          - 'README.md'
-          - 'docs/**'
-          - 'integrations/**'
-          - 'examples/**/*.md'
-          - '.github/PULL_REQUEST_TEMPLATE.md'
-          - '.github/ISSUE_TEMPLATE/**'
+          - "README.md"
+          - "docs/**"
+          - "docs-site/**"
+          - "examples/**/*.md"
+          - ".github/PULL_REQUEST_TEMPLATE.md"
+          - ".github/ISSUE_TEMPLATE/**"
 
 tests:
   - changed-files:
       - any-glob-to-any-file:
-          - 'tests/**'
+          - "tests/**"
 
 dependencies:
   - changed-files:
       - any-glob-to-any-file:
-          - 'pyproject.toml'
-          - 'packages/*/pyproject.toml'
-          - 'uv.lock'
+          - "pyproject.toml"
+          - "packages/gpt2giga-harness/pyproject.toml"
+          - "packages/gpt2giga-harness/frontend/package.json"
+          - "packages/gpt2giga-harness/frontend/package-lock.json"

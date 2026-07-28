@@ -17,17 +17,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Set up Node.js 22.13
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22.13.0"
+          cache: npm
+          cache-dependency-path: packages/gpt2giga-harness/frontend/package-lock.json
+
+      - name: Produce frontend assets
+        run: |
+          npm install --global --ignore-scripts npm@11.17.0
+          npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
+          npm --prefix packages/gpt2giga-harness/frontend run build:release
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: |
+            pyproject.toml
+            packages/gpt2giga-harness/pyproject.toml
 
-      - name: Set up Python 3.13
-        run: uv python install 3.13
-
-      - name: Install dependencies
-        run: uv sync --all-packages --all-extras --dev
+      - name: Install standalone audit environment
+        env:
+          GIGALOOM_PYTHON: "3.13"
+        run: ./scripts/ci-base.sh sync
 
       - name: Seed pip for the audit action
         run: uv pip install --python .venv/bin/python pip

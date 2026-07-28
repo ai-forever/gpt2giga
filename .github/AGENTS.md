@@ -8,14 +8,18 @@ their behavior deliberately and verify claims against the YAML itself.
 
 ## Invariants
 
-- Keep the CI Python matrix aligned with both package `requires-python`
-  declarations. CI must continue to run Ruff check, Ruff format check, pytest
-  coverage, both member builds, and installed-artifact smoke checks.
-- Keep the production Docker image gateway-only. Harness commands, namespace,
-  dependencies, and UI assets must not enter `Dockerfile` or Docker workflows.
-- Treat `publish-pypi.yml` package selection, tag filters, attestations, and
-  manual-dispatch behavior as release policy. Do not widen publishing scope or
-  trigger a release as part of validation.
+- Keep the CI Python matrix aligned with the Harness `requires-python`
+  declaration. Required checks must keep Python 3.10, 3.13, and 3.14 Harness
+  tests, Ruff, frontend, base artifact, terminal, performance, and browser QA
+  independently visible.
+- No quality job may rely on a gateway source tree, editable sibling, project
+  lock, real provider, native user home, or mutable external service.
+- Keep public registry/all-extras readiness explicitly
+  `blocked_pending_S5_03B`. Candidate compatibility accepts only an explicit
+  HTTPS wheel whose approved SHA-256 is checked before installation.
+- Publication remains absent until its roadmap-owned release slice. Quality
+  workflows must not push, publish, write badges, or broaden repository
+  permissions.
 - Minimize `permissions:`; never expose secrets to untrusted pull-request code
   or print secret values.
 - Keep action versions explicit. Review third-party actions and permission
@@ -23,10 +27,8 @@ their behavior deliberately and verify claims against the YAML itself.
 
 ## Coupled changes
 
-- Keep `ci.yaml`, `scripts/generate_badge.py`, coverage artifact names, and
-  `badges/coverage.svg` expectations aligned.
-- Keep `docker_image.yaml`, `publish-ghcr.yml`, `docker-smoke.yaml`, the
-  Dockerfile, and documented tag/health semantics aligned.
+- Keep `ci.yaml`, `nightly-smoke.yaml`, `scripts/ci-*.sh`, and their stable
+  check and artifact names aligned.
 - Keep `docs-pages.yaml`, `docs-site/package-lock.json`, and Docusaurus
   commands aligned.
 - Keep English and Russian PR/issue templates structurally aligned.
@@ -38,6 +40,6 @@ their behavior deliberately and verify claims against the YAML itself.
 - Run the exact local commands represented by a changed workflow when feasible.
 - Run `actionlint` if it is installed; otherwise inspect the complete workflow
   diff and rely on repository contract tests plus GitHub validation.
-- For release or packaging changes, run the full root quality gate, both
-  `--no-sources` package builds, and the relevant package-isolation tests.
+- For packaging changes, run the full Harness quality gate, the standalone
+  `--no-sources` build, and the relevant package-isolation tests.
 - For docs workflow changes, run `npm --prefix docs-site run build`.

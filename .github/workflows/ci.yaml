@@ -1,35 +1,43 @@
-name: CI
+name: GigaLoom quality
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
-      - 'packages/**'
-      - '!packages/**/*.md'
-      - 'tests/**'
-      - 'benchmarks/gigaloom_performance/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/ci.yaml'
-      - '.github/workflows/nightly-smoke.yaml'
+      - "packages/gpt2giga-harness/**"
+      - "tests/**"
+      - "benchmarks/gigaloom_performance/**"
+      - "scripts/ci-*.sh"
+      - "pyproject.toml"
+      - ".github/workflows/ci.yaml"
   pull_request:
-    branches: [ main ]
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'packages/**'
-      - '!packages/**/*.md'
-      - 'tests/**'
-      - 'benchmarks/gigaloom_performance/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/ci.yaml'
-      - '.github/workflows/nightly-smoke.yaml'
+      - "packages/gpt2giga-harness/**"
+      - "tests/**"
+      - "benchmarks/gigaloom_performance/**"
+      - "scripts/ci-*.sh"
+      - "pyproject.toml"
+      - ".github/workflows/ci.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gigaloom-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GIGALOOM_UV_CACHE_DIR: ${{ github.workspace }}/.cache/uv
 
 jobs:
-  cockpit-v2-frontend:
-    name: Cockpit V2 frontend gates
+  frontend:
+    name: Frontend / static and browser
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    timeout-minutes: 25
 
     steps:
       - name: Checkout repository
@@ -38,7 +46,7 @@ jobs:
       - name: Set up Node.js 22.13
         uses: actions/setup-node@v7
         with:
-          node-version: '22.13.0'
+          node-version: "22.13.0"
           cache: npm
           cache-dependency-path: packages/gpt2giga-harness/frontend/package-lock.json
 
@@ -46,249 +54,169 @@ jobs:
         run: npm install --global --ignore-scripts npm@11.17.0
 
       - name: Install pinned frontend dependencies
-        working-directory: packages/gpt2giga-harness/frontend
-        run: npm ci --ignore-scripts
+        run: npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
 
-      - name: Run typecheck, lint, unit, build, determinism, and bundle gates
-        working-directory: packages/gpt2giga-harness/frontend
-        run: npm run check
+      - name: Run typecheck, lint, unit, and determinism gates
+        run: npm --prefix packages/gpt2giga-harness/frontend run check
 
-      - name: Produce clean commit-bound Cockpit assets
-        working-directory: packages/gpt2giga-harness/frontend
-        run: npm run build:release
+      - name: Produce clean commit-bound assets
+        run: npm --prefix packages/gpt2giga-harness/frontend run build:release
 
-      - name: Verify Cockpit provenance and supply-chain evidence
-        run: python3 packages/gpt2giga-harness/asset_contract.py --require-clean
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            packages/gpt2giga-harness/pyproject.toml
 
-      - name: Upload commit-bound Cockpit assets
+      - name: Install standalone browser-QA runtime
+        env:
+          GIGALOOM_PYTHON: "3.13"
+        run: ./scripts/ci-base.sh sync
+
+      - name: Install Chromium
+        run: npm --prefix packages/gpt2giga-harness/frontend exec -- playwright install --with-deps chromium
+
+      - name: Run desktop and 390x844 browser QA
+        env:
+          CI: "true"
+        run: npm --prefix packages/gpt2giga-harness/frontend run test:e2e
+
+      - name: Verify asset provenance, SBOM, and licenses
+        run: .venv/bin/python packages/gpt2giga-harness/asset_contract.py --require-clean
+
+      - name: Upload commit-bound assets
         uses: actions/upload-artifact@v7
         with:
-          name: cockpit-v2-assets-${{ github.sha }}
+          name: gigaloom-assets-${{ github.sha }}
           path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
           if-no-files-found: error
           retention-days: 7
 
-  test:
-    name: Test on Python ${{ matrix.python-version }}
+      - name: Upload browser evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: gigaloom-browser-qa-${{ github.sha }}
+          path: test-results/browser-qa
+          if-no-files-found: error
+          retention-days: 7
+
+  python:
+    name: Python / ${{ matrix.python-version }}
     runs-on: ubuntu-latest
-    needs: cockpit-v2-frontend
+    needs: frontend
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        # Exercise the supported boundaries plus the release/build runtime.
         python-version: ["3.10", "3.13", "3.14"]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Download verified Cockpit assets
+      - name: Download verified frontend assets
         uses: actions/download-artifact@v7
         with:
-          name: cockpit-v2-assets-${{ github.sha }}
+          name: gigaloom-assets-${{ github.sha }}
           path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: |
+            pyproject.toml
+            packages/gpt2giga-harness/pyproject.toml
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+      - name: Install standalone test environment
+        env:
+          GIGALOOM_PYTHON: ${{ matrix.python-version }}
+        run: ./scripts/ci-base.sh sync
 
-      - name: Install dependencies
-        run: uv sync --all-packages --all-extras --dev
-
-      - name: Lint with Ruff
+      - name: Run Ruff
         if: matrix.python-version == '3.13'
-        run: uv run ruff check .
-
-      - name: Check formatting with Ruff
-        if: matrix.python-version == '3.13'
-        run: uv run ruff format --check .
-
-      - name: Validate generated product and documentation truth
-        if: matrix.python-version == '3.13'
-        run: uv run giga harness capabilities --inventory --check
-
-      - name: Run tests with coverage
         run: |
-          uv run pytest tests/ -n 4 --cov=. --cov-report=json:coverage.json --cov-fail-under=80
-        continue-on-error: false
+          ./scripts/ci-base.sh ruff-check .
+          ./scripts/ci-base.sh ruff-format-check .
 
-      - name: Run deterministic GigaLoom performance budgets
-        if: matrix.python-version == '3.13'
-        run: uv run giga benchmark performance --profile ci-smoke --samples 5 --output performance-artifacts/ci-smoke.json
+      - name: Run Harness tests
+        run: >-
+          ./scripts/ci-base.sh pytest tests/harness -n 4
+          --cov=. --cov-report=json:coverage.json --cov-fail-under=80
 
-      - name: Upload bounded performance smoke report
+      - name: Upload coverage evidence
         if: always() && matrix.python-version == '3.13'
         uses: actions/upload-artifact@v7
         with:
-          name: gigaloom-performance-ci-smoke
-          path: performance-artifacts/ci-smoke.json
+          name: gigaloom-coverage-3.13
+          path: coverage.json
           if-no-files-found: error
           retention-days: 7
 
-      - name: Upload coverage artifact
-        if: matrix.python-version == '3.13'
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-${{ matrix.python-version }}
-          path: coverage.json
-
-  build-artifacts:
-    name: Build workspace artifacts
+  package:
+    name: Package / base artifact
     runs-on: ubuntu-latest
-    needs: cockpit-v2-frontend
+    needs: frontend
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Download verified Cockpit assets
+      - name: Download verified frontend assets
         uses: actions/download-artifact@v7
         with:
-          name: cockpit-v2-assets-${{ github.sha }}
+          name: gigaloom-assets-${{ github.sha }}
           path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: |
+            pyproject.toml
+            packages/gpt2giga-harness/pyproject.toml
 
-      - name: Set up Python 3.13
-        run: uv python install 3.13
+      - name: Install artifact-test environment
+        env:
+          GIGALOOM_PYTHON: "3.13"
+        run: ./scripts/ci-base.sh sync
 
-      - name: Resolve package versions
-        id: versions
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "gateway=$(uv version --package gpt2giga --short --frozen)" >> "$GITHUB_OUTPUT"
-          echo "harness=$(uv version --package gpt2giga-harness --short --frozen)" >> "$GITHUB_OUTPUT"
+      - name: Build standalone wheel and sdist
+        run: uv build --package gpt2giga-harness --wheel --sdist --no-sources --out-dir dist/gigaloom
 
-      - name: Build gateway wheel and sdist without workspace sources
-        run: uv build --package gpt2giga --wheel --sdist --no-sources --out-dir dist/gpt2giga
+      - name: Verify base isolation and installed artifact evidence
+        run: >-
+          ./scripts/ci-base.sh pytest
+          tests/test_gigaloom_artifact_isolation.py
+          tests/test_gigaloom_quality_workflows.py
+          tests/harness/test_ui_packaging.py
+          -q -n 0
 
-      - name: Build Harness wheel and sdist without workspace sources
-        run: uv build --package gpt2giga-harness --wheel --sdist --no-sources --out-dir dist/gpt2giga-harness
-
-      - name: Upload gateway artifacts
+      - name: Upload standalone distribution
         uses: actions/upload-artifact@v7
         with:
-          name: gpt2giga-${{ steps.versions.outputs.gateway }}
-          path: dist/gpt2giga/*
+          name: gpt2giga-harness-${{ github.sha }}
+          path: dist/gigaloom/*
           if-no-files-found: error
+          retention-days: 7
 
-      - name: Upload Harness artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: gpt2giga-harness-${{ steps.versions.outputs.harness }}
-          path: dist/gpt2giga-harness/*
-          if-no-files-found: error
-
-  artifact-smoke:
-    name: ${{ matrix.package }} artifact smoke on Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    needs: cockpit-v2-frontend
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    strategy:
-      fail-fast: false
-      matrix:
-        package: [gateway, harness]
-        # The canonical TUI dependency is resolved across every supported minor.
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Download verified Cockpit assets
-        uses: actions/download-artifact@v7
-        with:
-          name: cockpit-v2-assets-${{ github.sha }}
-          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Resolve package versions
-        id: versions
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "gateway=$(uv version --package gpt2giga --short --frozen)" >> "$GITHUB_OUTPUT"
-          echo "harness=$(uv version --package gpt2giga-harness --short --frozen)" >> "$GITHUB_OUTPUT"
-
-      - name: Build gateway wheel without workspace sources
-        run: uv build --package gpt2giga --wheel --no-sources --out-dir dist/smoke
-
-      - name: Build Harness wheel without workspace sources
-        if: matrix.package == 'harness'
-        run: uv build --package gpt2giga-harness --wheel --no-sources --out-dir dist/smoke
-
-      - name: Create clean artifact environment
-        run: uv venv --python ${{ matrix.python-version }} .venv-artifact
-
-      - name: Install gateway artifact
-        if: matrix.package == 'gateway'
-        run: uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl
-
-      - name: Install Harness base artifact
-        if: matrix.package == 'harness'
-        run: uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga_harness-*.whl
-
-      - name: Audit Harness base installation
-        if: matrix.package == 'harness'
-        run: .venv-artifact/bin/python -I -m gpt2giga_harness.base_install --json
-
-      - name: Install gateway artifact for combined smoke
-        if: matrix.package == 'harness'
-        run: uv pip install --python .venv-artifact/bin/python dist/smoke/gpt2giga-*.whl
-
-      - name: Smoke gateway-only imports and command
-        if: matrix.package == 'gateway'
-        env:
-          GATEWAY_VERSION: ${{ steps.versions.outputs.gateway }}
-        run: |
-          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.util, os, gpt2giga; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert importlib.util.find_spec('gpt2giga_harness') is None"
-          .venv-artifact/bin/gpt2giga --help
-          test ! -e .venv-artifact/bin/giga
-          test ! -e .venv-artifact/bin/gpt2giga-harness
-
-      - name: Smoke combined imports, UI assets, and commands
-        if: matrix.package == 'harness'
-        env:
-          GATEWAY_VERSION: ${{ steps.versions.outputs.gateway }}
-          HARNESS_VERSION: ${{ steps.versions.outputs.harness }}
-        run: |
-          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, os, gpt2giga, gpt2giga_harness; from gpt2giga_harness.ui.cockpit_v2 import load_cockpit_v2_manifest; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert m.version('gpt2giga-harness') == os.environ['HARNESS_VERSION']; assert r.files('gpt2giga_harness.ui.cockpit_v2').joinpath('assets/index.html').is_file(); assert load_cockpit_v2_manifest().entry == 'index.html'"
-          .venv-artifact/bin/gpt2giga --help
-          .venv-artifact/bin/giga --help
-          .venv-artifact/bin/giga --version
-          .venv-artifact/bin/gpt2giga-harness --help
-
-  harness-terminal-artifact-smoke:
-    name: Harness terminal wheel on ${{ matrix.os }} / Python ${{ matrix.python-version }}
+  terminal:
+    name: Terminal / ${{ matrix.os }} / ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
-    needs: cockpit-v2-frontend
+    needs: frontend
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-
+        python-version: ["3.10", "3.13", "3.14"]
     defaults:
       run:
         shell: bash
@@ -297,30 +225,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Download verified Cockpit assets
+      - name: Download verified frontend assets
         uses: actions/download-artifact@v7
         with:
-          name: cockpit-v2-assets-${{ github.sha }}
+          name: gigaloom-assets-${{ github.sha }}
           path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: packages/gpt2giga-harness/pyproject.toml
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         run: uv python install ${{ matrix.python-version }}
 
-      - name: Build standard Harness wheel
-        run: uv build --package gpt2giga-harness --wheel --no-sources --out-dir dist/terminal-smoke
-
-      - name: Install standard wheel in a clean environment
+      - name: Build and install standard wheel
         run: |
+          uv build --package gpt2giga-harness --wheel --no-sources --out-dir dist/terminal
           uv venv --python ${{ matrix.python-version }} .venv-terminal
-          uv pip install --python .venv-terminal dist/terminal-smoke/gpt2giga_harness-*.whl
+          uv pip install --python .venv-terminal dist/terminal/gpt2giga_harness-*.whl
 
-      - name: Smoke TUI metadata, deep links, and machine CLI
+      - name: Smoke terminal dispatch and CLI
         run: |
           uv run --python .venv-terminal --no-project python -I -c "import importlib.metadata as m; assert any(r.casefold().startswith('textual') for r in m.requires('gpt2giga-harness')); assert all(x != 'tui' for x in (m.metadata('gpt2giga-harness').get_all('Provides-Extra') or ()))"
           uv run --python .venv-terminal --no-project python -I -c "from gpt2giga_harness.terminal_dispatch import TerminalContext, plan_terminal_dispatch; from gpt2giga_harness.terminal_intent import parse_tui_launch_intent; p=plan_terminal_dispatch(('run','--agent','codex','inspect'), context=TerminalContext(True,True,True,'xterm-256color')); i,_=parse_tui_launch_intent(('run','--agent','codex','inspect')); assert p.initialize_textual and i.harness_id == 'codex-cli' and i.prompt == 'inspect'"
@@ -328,75 +254,73 @@ jobs:
           uv run --python .venv-terminal --no-project giga --version
           uv run --python .venv-terminal --no-project giga --non-interactive --help
 
-      - name: Smoke in-place upgrade and exact-wheel rollback mechanics
+      - name: Smoke reinstall, rollback, and uninstall mechanics
         run: |
-          uv pip install --python .venv-terminal --reinstall dist/terminal-smoke/gpt2giga_harness-*.whl
-          uv run --python .venv-terminal --no-project giga --version
+          uv pip install --python .venv-terminal --reinstall dist/terminal/gpt2giga_harness-*.whl
           uv pip uninstall --python .venv-terminal gpt2giga-harness
-          uv pip install --python .venv-terminal dist/terminal-smoke/gpt2giga_harness-*.whl
+          uv pip install --python .venv-terminal dist/terminal/gpt2giga_harness-*.whl
           uv run --python .venv-terminal --no-project giga --version
-
-      - name: Smoke uninstall
-        run: |
           uv pip uninstall --python .venv-terminal gpt2giga-harness
           uv run --python .venv-terminal --no-project python -I -c "import importlib.util; assert importlib.util.find_spec('gpt2giga_harness') is None"
 
-
-  coverage-badge:
-    name: Generate coverage badge
+  performance:
+    name: Performance / ci-smoke
     runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-
-    permissions:
-      contents: write
-      pull-requests: write
+    needs: frontend
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
 
-      - name: Download coverage artifact from one Python version
+      - name: Download verified frontend assets
         uses: actions/download-artifact@v7
         with:
-          name: coverage-3.13
-          path: .
+          name: gigaloom-assets-${{ github.sha }}
+          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
 
-      - name: Generate badge
-        run: |
-          COVERAGE=$(jq '.totals.percent_covered' coverage.json)
-          echo "COVERAGE=$COVERAGE" >> "$GITHUB_ENV"
-          python3 scripts/generate_badge.py "$COVERAGE" badges/coverage.svg
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            packages/gpt2giga-harness/pyproject.toml
 
-      - name: Upload badge artifact
+      - name: Install standalone performance environment
+        env:
+          GIGALOOM_PYTHON: "3.13"
+        run: ./scripts/ci-base.sh sync
+
+      - name: Run deterministic performance budgets
+        run: .venv/bin/giga benchmark performance --profile ci-smoke --samples 5 --output performance-artifacts/ci-smoke.json
+
+      - name: Upload bounded performance evidence
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-badge
-          path: badges/coverage.svg
+          name: gigaloom-performance-ci-smoke
+          path: performance-artifacts/ci-smoke.json
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Commit coverage badge on main
-        if: github.event_name == 'push'
-        env:
-          BRANCH_NAME: ${{ github.ref_name }}
+  registry-readiness:
+    name: Public registry / blocked_pending_S5_03B
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Assert fail-closed public-registry readiness
+        shell: bash
         run: |
-          echo "Pushing coverage badge to branch: $BRANCH_NAME"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add badges/coverage.svg
-          git commit -m "Update coverage badge for $BRANCH_NAME" || echo "No changes to commit"
-          git push origin "HEAD:$BRANCH_NAME"
-
-      - name: Comment coverage badge on PR
-        if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v3
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          header: coverage-badge
-          message: |
-            ## 🧪 Test Coverage Report
-            Coverage: ${{ env.COVERAGE }}%
-
-            ![Coverage Badge](https://raw.githubusercontent.com/${{ github.repository }}/${{ github.head_ref || github.ref_name }}/badges/coverage.svg)
+          set -euo pipefail
+          test ! -e uv.lock
+          test ! -e .github/workflows/publish-pypi.yml
+          test -x scripts/ci-candidate-gateway.sh
+          echo "status=blocked_pending_S5_03B"
+          echo "The exact checksum-bound candidate smoke is manual until S5-03B."

@@ -17,5 +17,12 @@
     "target": "ES2022",
     "types": ["vite/client", "vitest/globals", "node"]
   },
-  "include": ["eslint.config.js", "scripts", "src", "vite.config.ts"]
+  "include": [
+    "e2e",
+    "eslint.config.js",
+    "playwright.config.ts",
+    "scripts",
+    "src",
+    "vite.config.ts"
+  ]
 }
