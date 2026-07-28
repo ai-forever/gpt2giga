@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import queue
 import stat
+import threading
+import time
 from types import SimpleNamespace
 from typing import Any, Mapping
 
@@ -23,6 +25,8 @@ from gpt2giga_harness.gemini_acp import (
     GeminiAcpDriver,
     GeminiAcpError,
     create_gemini_acp_stdio_scope,
+    normalize_gemini_acp_event,
+    probe_gemini_acp_handshake,
 )
 from gpt2giga_harness.harnesses.gemini_cli import GeminiCliHarness
 from gpt2giga_harness.structured_processes import (
@@ -61,15 +65,18 @@ class _ProductionAcpTransport:
         runtime_id: str,
         *,
         session_id: str,
+        emit_prompt_events: bool = True,
         request_filesystem: bool = False,
     ) -> None:
         self._runtime_id = runtime_id
         self.session_id = session_id
+        self.emit_prompt_events = emit_prompt_events
         self.request_filesystem = request_filesystem
         self.incoming: queue.Queue[Mapping[str, Any] | object] = queue.Queue()
         self.sent: list[dict[str, Any]] = []
         self._alive = False
         self.prompt_ids: list[str] = []
+        self.prompt_started = threading.Event()
 
     @property
     def runtime_id(self):
@@ -99,6 +106,9 @@ class _ProductionAcpTransport:
             self._respond(request_id, {})
         elif method == "session/prompt":
             self.prompt_ids.append(request_id)
+            self.prompt_started.set()
+            if not self.emit_prompt_events:
+                return
             self._event(
                 {
                     "sessionUpdate": "agent_message_chunk",
@@ -207,9 +217,11 @@ class _TransportFactory:
         self,
         *,
         session_id: str = SESSION_ID,
+        emit_prompt_events: bool = True,
         request_filesystem: bool = False,
     ) -> None:
         self.session_id = session_id
+        self.emit_prompt_events = emit_prompt_events
         self.request_filesystem = request_filesystem
         self.transports: list[_ProductionAcpTransport] = []
 
@@ -217,6 +229,7 @@ class _TransportFactory:
         transport = _ProductionAcpTransport(
             f"gemini-acp-production-{len(self.transports) + 1}",
             session_id=self.session_id,
+            emit_prompt_events=self.emit_prompt_events,
             request_filesystem=self.request_filesystem,
         )
         self.transports.append(transport)
@@ -277,6 +290,55 @@ def _config(managed_home_id="gemini-acp-home-fixture"):
         cli_sdk_version="0.46.0",
         managed_home_id=managed_home_id,
     )
+
+
+def test_installed_046_fixture_freezes_only_reviewed_capabilities():
+    handshake = probe_gemini_acp_handshake(
+        cli_help=_help_fixture(),
+        cli_version="0.46.0",
+        adapter_version="0.1.0b1",
+        result=_initialize_fixture(),
+    )
+
+    assert handshake.protocol_version == 1
+    assert handshake.auth_method_ids == (
+        "oauth-personal",
+        "gemini-api-key",
+        "vertex-ai",
+        "gateway",
+    )
+    assert handshake.mcp_transports == ("http", "sse")
+    capabilities = handshake.capability_snapshot
+    assert capabilities.protocol == "agent-client-protocol"
+    assert capabilities.resume is True
+    assert capabilities.recovery_after_process_loss is True
+    assert capabilities.live_approvals is True
+    assert capabilities.interrupt is True
+    assert capabilities.dynamic_mcp is True
+    assert capabilities.attachment_kinds == ("audio", "embedded-context", "image")
+    assert capabilities.durable_approval is False
+    assert capabilities.steer is False
+    assert capabilities.fork is False
+    assert capabilities.session_list is False
+    assert capabilities.session_close is False
+    assert capabilities.dynamic_model is False
+
+    with pytest.raises(GeminiAcpError, match="does not advertise"):
+        probe_gemini_acp_handshake(
+            cli_help="gemini help without structured mode",
+            cli_version="0.46.0",
+            adapter_version="0.1.0b1",
+            result=_initialize_fixture(),
+        )
+    mismatched = _initialize_fixture()
+    mismatched["agentInfo"]["version"] = "0.47.0"
+    with pytest.raises(GeminiAcpError, match="versions differ"):
+        probe_gemini_acp_handshake(
+            cli_help=_help_fixture(),
+            cli_version="0.46.0",
+            adapter_version="0.1.0b1",
+            result=mismatched,
+        )
 
 
 def test_production_driver_maps_uuid_and_permission_through_generic_coordinator(
@@ -341,6 +403,56 @@ def test_production_driver_maps_uuid_and_permission_through_generic_coordinator(
     assert link.capability_snapshot.session_list is False
     assert link.capability_snapshot.dynamic_model is False
     assert link.capability_snapshot.interactive_input is False
+    driver.close()
+
+    invalid_driver, _ = _driver()
+    invalid_driver.open_or_resume(_execution(), None)
+    with pytest.raises(GeminiAcpError, match="approval decision is invalid"):
+        invalid_driver.start_turn(
+            StructuredTurnInput("turn-invalid-approval", "prompt-canary"),
+            lambda event: None,
+            lambda contract: "invented",
+        )
+    invalid_driver.close()
+
+
+def test_active_turn_interrupt_sends_exact_session_cancel():
+    factory = _TransportFactory(emit_prompt_events=False)
+    driver, _ = _driver(factory)
+    driver.open_or_resume(_execution(), None)
+    results = []
+    failures = []
+
+    def run_turn():
+        try:
+            results.append(
+                driver.start_turn(
+                    StructuredTurnInput("turn-cancel", "cancel-canary"),
+                    lambda event: None,
+                    lambda contract: "deny",
+                )
+            )
+        except Exception as exc:  # pragma: no cover - asserted through failures
+            failures.append(exc)
+
+    thread = threading.Thread(target=run_turn)
+    thread.start()
+    assert factory.transports[0].prompt_started.wait(timeout=1.0)
+    active_turn_id = driver.active_turn_id
+    assert active_turn_id is not None
+    with pytest.raises(GeminiAcpError, match="turn is not active"):
+        driver.interrupt("wrong-turn")
+    driver.interrupt(active_turn_id)
+    thread.join(timeout=1.0)
+
+    assert thread.is_alive() is False
+    assert failures == []
+    assert results[0].status == "interrupted"
+    assert factory.transports[0].sent[-1] == {
+        "jsonrpc": "2.0",
+        "method": "session/cancel",
+        "params": {"sessionId": SESSION_ID},
+    }
     driver.close()
 
 
@@ -477,6 +589,45 @@ def test_idle_recycle_reauthenticates_and_loads_exact_uuid_without_replay(tmp_pa
     driver.close()
 
 
+def test_process_loss_reauthenticates_and_loads_exact_uuid_without_replay(tmp_path):
+    driver, factory = _driver()
+    coordinator = StructuredSessionCoordinator(
+        driver,
+        StructuredSessionLinkStore(tmp_path),
+        owner_id="gemini-worker-1",
+    )
+    link = coordinator.open_or_resume(
+        link_id="gemini-link-1",
+        harness_session_id="harness-session-1",
+        harness_run_id="harness-run-1",
+        execution_snapshot=_execution(),
+        config_snapshot=_config(),
+    )
+
+    factory.transports[0].lose()
+    deadline = time.monotonic() + 1.0
+    while (
+        driver.supervisor.state is not StructuredProcessState.LOST
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.001)
+    assert driver.supervisor.state is StructuredProcessState.LOST
+
+    state = driver.recover(link)
+
+    assert state.external_session_id == SESSION_ID
+    recovery = factory.transports[1].sent
+    assert [message.get("method") for message in recovery] == [
+        "initialize",
+        "authenticate",
+        "session/load",
+    ]
+    assert recovery[-1]["params"]["sessionId"] == SESSION_ID
+    assert "prompt" not in json.dumps(recovery)
+    assert not hasattr(driver, "auth_metadata")
+    driver.close()
+
+
 def test_mcp_transports_are_probe_bound_and_filesystem_requests_fail_closed():
     def mcp():
         return ({"name": "reviewed-http", "type": "http", "url": "http://fixture"},)
@@ -545,3 +696,34 @@ def test_noncanonical_or_cross_session_uuid_fails_closed():
             lambda contract: "deny",
         )
     driver.close()
+
+
+def test_event_normalization_rejects_malformed_updates_and_bounds_state():
+    event = normalize_gemini_acp_event(
+        "session/update",
+        {
+            "sessionId": SESSION_ID,
+            "update": {
+                "sessionUpdate": "available_commands_update",
+                "availableCommands": [{"name": "private command"}],
+            },
+        },
+    )
+    assert event is not None
+    assert event.type == "session_state"
+    assert event.payload == {
+        "session_id": SESSION_ID,
+        "kind": "available_commands_update",
+    }
+    with pytest.raises(GeminiAcpError, match="tool status"):
+        normalize_gemini_acp_event(
+            "session/update",
+            {
+                "sessionId": SESSION_ID,
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-1",
+                    "status": "future-status",
+                },
+            },
+        )
