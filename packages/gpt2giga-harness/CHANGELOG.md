@@ -23,6 +23,7 @@
 ### Исправлено
 - **Security boundaries**: request-scoped Claude/Gemini model pins подписываются отдельным HMAC key; OIDC discovery и endpoints ограничены exact origin, proxy forwarding доверяется только явному allowlist, а file/editor paths и observability сохраняют fail-closed redaction и containment.
 - **Settings и wakeup races**: исправлены CodeQL findings в provider settings update и очистке runtime wakeup waiters без изменения публичных API contracts.
+- **Кроссплатформенные release gates**: Cockpit inputs закреплены с LF для стабильных asset hashes на Windows, artifact smoke проверяет фактический package-data path, а только детерминированный `ci-smoke` остаётся blocking performance profile.
 
 ## [0.5.0a1] - 2026-07-26
 

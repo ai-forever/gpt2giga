@@ -14,6 +14,13 @@ HARNESS_ROOT = REPO_ROOT / "packages/gpt2giga-harness"
 ASSET_ROOT = HARNESS_ROOT / "src/gpt2giga_harness/ui/cockpit_v2/assets"
 
 
+def test_authored_cockpit_inputs_use_stable_line_endings():
+    attributes = (REPO_ROOT / ".gitattributes").read_text(encoding="utf-8")
+
+    assert "packages/gpt2giga-harness/branding/** text eol=lf" in attributes
+    assert "packages/gpt2giga-harness/frontend/** text eol=lf" in attributes
+
+
 def _contract_module():
     specification = importlib.util.spec_from_file_location(
         "gpt2giga_harness_asset_contract",

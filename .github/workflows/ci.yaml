@@ -272,7 +272,7 @@ jobs:
           GATEWAY_VERSION: ${{ steps.versions.outputs.gateway }}
           HARNESS_VERSION: ${{ steps.versions.outputs.harness }}
         run: |
-          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, os, gpt2giga, gpt2giga_harness; from gpt2giga_harness.ui.cockpit_v2 import load_cockpit_v2_manifest; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert m.version('gpt2giga-harness') == os.environ['HARNESS_VERSION']; assert r.files('gpt2giga_harness.ui').joinpath('assets/index.html').is_file(); assert load_cockpit_v2_manifest().entry == 'index.html'"
+          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, os, gpt2giga, gpt2giga_harness; from gpt2giga_harness.ui.cockpit_v2 import load_cockpit_v2_manifest; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert m.version('gpt2giga-harness') == os.environ['HARNESS_VERSION']; assert r.files('gpt2giga_harness.ui.cockpit_v2').joinpath('assets/index.html').is_file(); assert load_cockpit_v2_manifest().entry == 'index.html'"
           .venv-artifact/bin/gpt2giga --help
           .venv-artifact/bin/giga --help
           .venv-artifact/bin/giga --version

@@ -377,6 +377,38 @@ def test_performance_cli_writes_private_report(tmp_path, capsys):
     assert "Wrote private performance report" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("profile", "ci_blocking_metrics", "expected_exit_code"),
+    (
+        ("ci-smoke", ["session_projection"], 1),
+        ("local-detail", [], 0),
+        ("tui-detail", [], 0),
+        ("runtime-detail", [], 0),
+    ),
+)
+def test_performance_cli_only_fails_for_ci_blocking_metrics(
+    monkeypatch,
+    capsys,
+    profile,
+    ci_blocking_metrics,
+    expected_exit_code,
+):
+    monkeypatch.setattr(
+        cli,
+        "run_performance_baseline",
+        lambda **_kwargs: {
+            "status": "failed",
+            "baseline": {"ci_blocking_metrics": ci_blocking_metrics},
+        },
+    )
+
+    assert (
+        cli.main(["benchmark", "performance", "--profile", profile])
+        == expected_exit_code
+    )
+    assert '"status": "failed"' in capsys.readouterr().out
+
+
 def test_performance_report_rejects_artifacts_over_profile_limit(tmp_path):
     output = tmp_path / "oversized.json"
     report = run_performance_baseline(samples=1)

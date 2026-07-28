@@ -238,6 +238,13 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert ".venv-artifact/bin/giga --help" in workflow
     assert ".venv-artifact/bin/giga --version" in workflow
     assert ".venv-artifact/bin/gpt2giga-harness --help" in workflow
+    assert (
+        "r.files('gpt2giga_harness.ui.cockpit_v2')"
+        ".joinpath('assets/index.html').is_file()"
+    ) in workflow
+    assert (
+        "r.files('gpt2giga_harness.ui').joinpath('assets/index.html')" not in workflow
+    )
     assert "python -I -m gpt2giga_harness.base_install --json" in workflow
     assert (
         workflow.index("Install Harness base artifact")

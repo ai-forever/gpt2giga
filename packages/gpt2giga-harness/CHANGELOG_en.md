@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Security boundaries**: request-scoped Claude/Gemini model pins use a dedicated HMAC key; OIDC discovery and endpoints are restricted to the exact origin, proxy forwarding is trusted only from an explicit allowlist, and file/editor paths plus observability retain fail-closed redaction and containment.
 - **Settings and wakeup races**: resolved CodeQL findings in provider settings updates and runtime wakeup waiter cleanup without changing public API contracts.
+- **Cross-platform release gates**: Cockpit inputs are pinned to LF for stable asset hashes on Windows, artifact smoke checks the actual package-data path, and only deterministic `ci-smoke` remains a blocking performance profile.
 
 ## [0.5.0a1] - 2026-07-26
 

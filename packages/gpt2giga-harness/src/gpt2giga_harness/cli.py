@@ -2368,7 +2368,8 @@ def _handle_benchmark_performance(
         print(f"Wrote private performance report to {Path(args.output).expanduser()}")
     else:
         _print_json(report)
-    return 0 if report["status"] == "passed" else 1
+    ci_blocking_metrics = report["baseline"]["ci_blocking_metrics"]
+    return 1 if ci_blocking_metrics and report["status"] != "passed" else 0
 
 
 def _handle_schedule_list(args: argparse.Namespace, config: HarnessConfig) -> int:
