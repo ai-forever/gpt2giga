@@ -17,9 +17,10 @@ their behavior deliberately and verify claims against the YAML itself.
 - Keep public registry/all-extras readiness explicitly
   `blocked_pending_S5_03B`. Candidate compatibility accepts only an explicit
   HTTPS wheel whose approved SHA-256 is checked before installation.
-- Publication remains absent until its roadmap-owned release slice. Quality
-  workflows must not push, publish, write badges, or broaden repository
-  permissions.
+- Keep release publication restricted to the exact published-release path and
+  target policy. Manual dispatch may build and attest but must not reach a
+  publish step. Trusted Publisher registration remains external and absent
+  until S5-03B.
 - Minimize `permissions:`; never expose secrets to untrusted pull-request code
   or print secret values.
 - Keep action versions explicit. Review third-party actions and permission
@@ -29,6 +30,8 @@ their behavior deliberately and verify claims against the YAML itself.
 
 - Keep `ci.yaml`, `nightly-smoke.yaml`, `scripts/ci-*.sh`, and their stable
   check and artifact names aligned.
+- Keep `publish-pypi.yml`, `release-policy.json`, `RELEASE_RECOVERY.md`, and
+  `scripts/release_guard.py` aligned.
 - Keep `docs-pages.yaml`, `docs-site/package-lock.json`, and Docusaurus
   commands aligned.
 - Keep English and Russian PR/issue templates structurally aligned.

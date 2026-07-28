@@ -1,0 +1,226 @@
+name: GigaLoom release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gigaloom-release-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Release / identity and registry guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.guard.outputs.mode }}
+      tag: ${{ steps.guard.outputs.tag }}
+      version: ${{ steps.guard.outputs.version }}
+
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.release.tag_name || github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Fetch target main for ancestry proof
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
+      - name: Verify repository, tag, version, commit, and ancestry
+        id: guard
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TARGET: ${{ github.event.release.target_commitish }}
+        run: >-
+          python3 scripts/release_guard.py
+          --policy .github/release-policy.json
+          --metadata packages/gpt2giga-harness/pyproject.toml
+          --event-name "${GITHUB_EVENT_NAME}"
+          --repository "${GITHUB_REPOSITORY}"
+          --ref "${GITHUB_REF}"
+          --commit "${GITHUB_SHA}"
+          --release-tag "${RELEASE_TAG}"
+          --release-target "${RELEASE_TARGET}"
+          --main-ref origin/main
+          --github-output "${GITHUB_OUTPUT}"
+
+      - name: Fail closed if the public version already exists
+        if: github.event_name == 'release'
+        env:
+          RELEASE_VERSION: ${{ steps.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+          status="$(
+            curl --proto '=https' --tlsv1.2 \
+              --output /dev/null --silent --show-error \
+              --write-out '%{http_code}' \
+              "https://pypi.org/pypi/gpt2giga-harness/${RELEASE_VERSION}/json"
+          )"
+          case "${status}" in
+            404) ;;
+            200)
+              echo "gpt2giga-harness ${RELEASE_VERSION} already exists on PyPI" >&2
+              exit 1
+              ;;
+            *)
+              echo "PyPI existence check returned HTTP ${status}" >&2
+              exit 1
+              ;;
+          esac
+
+  assets:
+    name: Release / frontend evidence
+    needs: metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Node.js 22.13
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22.13.0"
+          cache: npm
+          cache-dependency-path: packages/gpt2giga-harness/frontend/package-lock.json
+
+      - name: Install pinned npm 11.17
+        run: npm install --global --ignore-scripts npm@11.17.0
+
+      - name: Build verified release assets
+        run: |
+          npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
+          npm --prefix packages/gpt2giga-harness/frontend run check
+          npm --prefix packages/gpt2giga-harness/frontend run build:release
+          python3 packages/gpt2giga-harness/asset_contract.py --require-clean
+
+      - name: Upload commit-bound frontend evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: gigaloom-release-assets-${{ github.sha }}
+          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
+          if-no-files-found: error
+          retention-days: 90
+
+  build:
+    name: Release / package and hashes
+    needs: [metadata, assets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download verified frontend evidence
+        uses: actions/download-artifact@v7
+        with:
+          name: gigaloom-release-assets-${{ github.sha }}
+          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Build target-only wheel and sdist
+        run: >-
+          uv build --package gpt2giga-harness --wheel --sdist --no-sources
+          --out-dir dist/gigaloom
+
+      - name: Verify artifacts, assets, SBOM, licenses, and hashes
+        env:
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(find dist/gigaloom -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' \) | wc -l | tr -d ' ')" = "2"
+          test "$(find dist/gigaloom -maxdepth 1 -type f -name "gpt2giga_harness-${RELEASE_VERSION}-*.whl" | wc -l | tr -d ' ')" = "1"
+          test "$(find dist/gigaloom -maxdepth 1 -type f -name "gpt2giga_harness-${RELEASE_VERSION}.tar.gz" | wc -l | tr -d ' ')" = "1"
+          python3 packages/gpt2giga-harness/asset_contract.py --require-clean
+          cp packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/_build/sbom.cdx.json dist/gigaloom/
+          cp packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/_build/THIRD_PARTY_LICENSES.txt dist/gigaloom/
+          sha256sum dist/gigaloom/* > dist/gigaloom/SHA256SUMS
+          cat dist/gigaloom/SHA256SUMS
+
+      - name: Upload immutable release bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: gigaloom-release-${{ needs.metadata.outputs.version }}
+          path: dist/gigaloom/*
+          if-no-files-found: error
+          retention-days: 90
+
+  release-assets:
+    name: Release / attach verified bundle
+    if: github.event_name == 'release'
+    needs: [metadata, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download immutable release bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: gigaloom-release-${{ needs.metadata.outputs.version }}
+          path: dist/gigaloom
+
+      - name: Attach bundle to the exact published release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+        run: gh release upload "${RELEASE_TAG}" dist/gigaloom/*
+
+  trusted-publish:
+    name: Release / attest and trusted publish
+    if: >-
+      always() &&
+      needs.metadata.result == 'success' &&
+      needs.build.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' ||
+       needs.release-assets.result == 'success')
+    needs: [metadata, build, release-assets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download immutable release bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: gigaloom-release-${{ needs.metadata.outputs.version }}
+          path: dist/gigaloom
+
+      - name: Attest distributions and retained evidence
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/gigaloom/*
+
+      - name: Set up uv for trusted publishing
+        if: github.event_name == 'release'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Publish immutable Python distributions
+        if: github.event_name == 'release'
+        run: >-
+          uv publish --trusted-publishing always
+          dist/gigaloom/*.whl dist/gigaloom/*.tar.gz

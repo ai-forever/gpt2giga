@@ -13,18 +13,18 @@ http://localhost:8090
 | Capability | Where to read |
 |---|---|
 | Quick start via Docker Compose or `uv` | [Quickstart](quickstart.md) |
-| Supported OpenAI, Anthropic, Gemini, and LiteLLM routes | [API compatibility](api-compatibility.md) |
-| Behavior of `extra_headers`, `extra_query`, `extra_body`, and optional fields | [Client parameters](client-parameter-compatibility.md) |
-| GigaChat built-in tools and their mapping to OpenAI/Anthropic/Gemini | [Built-in tools](builtin-tools.md) |
+| Supported OpenAI, Anthropic, Gemini, and LiteLLM routes | [API compatibility](https://github.com/ai-forever/gpt2giga/blob/main/docs/api-compatibility.md) |
+| Behavior of `extra_headers`, `extra_query`, `extra_body`, and optional fields | [Client parameters](https://github.com/ai-forever/gpt2giga/blob/main/docs/client-parameter-compatibility.md) |
+| GigaChat built-in tools and their mapping to OpenAI/Anthropic/Gemini | [Built-in tools](https://github.com/ai-forever/gpt2giga/blob/main/docs/builtin-tools.md) |
 | Alpha-preview project cockpit for agent runs, comparisons, approvals, and workflows | [Unified Harness](harness.md) |
 | Direct Chat, Coding Agents, native Codex subagents, Arena, and Workflows | [Agents and multi-agent behavior](agents-and-multi-agent.md) |
 | Unified Harness components, execution flow, storage, and control-plane API | [Harness architecture](architecture/harness.md) |
 | Provider-owned login, status, logout, revoke, and headless boundaries | [Provider authentication matrix](architecture/provider-authentication-capability-matrix.md) |
 | Accepted remote UI identity boundary and current fail-closed gate | [Remote UI identity ADR](architecture/remote-ui-identity-adr.md) |
-| Environment variables, authentication, limits, metrics, observability | [Configuration](configuration.md) |
-| Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Deployment](deployment.md) |
-| Runtime logs, traffic logs, admin API, debug translate | [Operations](operations.md) |
-| Editor, agent, SDK, and reverse-proxy setup | [Integrations](integrations.md) |
+| Environment variables, authentication, limits, metrics, observability | [Configuration](https://github.com/ai-forever/gpt2giga/blob/main/docs/configuration.md) |
+| Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Deployment](https://github.com/ai-forever/gpt2giga/blob/main/docs/deployment.md) |
+| Runtime logs, traffic logs, admin API, debug translate | [Operations](https://github.com/ai-forever/gpt2giga/blob/main/docs/operations.md) |
+| Editor, agent, SDK, and reverse-proxy setup | [Integrations](https://github.com/ai-forever/gpt2giga/blob/main/docs/integrations.md) |
 
 ## Current API surface
 
@@ -60,6 +60,6 @@ OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are pr
 - [Harness architecture](architecture/harness.md) explains the local control plane, durable runtime, storage boundaries, and why each API family exists.
 - [Provider authentication matrix](architecture/provider-authentication-capability-matrix.md) freezes source-backed, versioned login capabilities without copying provider credentials.
 - [Remote UI identity ADR](architecture/remote-ui-identity-adr.md) defines the implemented single-issuer OIDC/BFF profile; live IdP and deployment work remain explicit gates.
-- [Normalized messages](architecture/normalized-messages.md) describes the experimental layer of protocol-independent models.
-- [Logging and observability](architecture/logging-and-observability.md) sets the boundaries between runtime logs, traffic logs, metrics, and traces.
-- [Adding a provider or protocol](architecture/how-to-add-provider.md) gives a checklist for extending the public protocol surface and upstream providers.
+- [Normalized messages](https://github.com/ai-forever/gpt2giga/blob/main/docs/architecture/normalized-messages.md) describes the experimental layer of protocol-independent models.
+- [Logging and observability](https://github.com/ai-forever/gpt2giga/blob/main/docs/architecture/logging-and-observability.md) sets the boundaries between runtime logs, traffic logs, metrics, and traces.
+- [Adding a provider or protocol](https://github.com/ai-forever/gpt2giga/blob/main/docs/architecture/how-to-add-provider.md) gives a checklist for extending the public protocol surface and upstream providers.

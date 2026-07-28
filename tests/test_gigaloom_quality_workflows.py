@@ -51,6 +51,8 @@ def test_required_quality_jobs_are_independent_and_standalone():
         assert forbidden not in text
     assert text.count("uv.lock") == 1
     assert "blocked_pending_S5_03B" in text
+    assert "test -e .github/workflows/publish-pypi.yml" in text
+    assert "test -e .github/release-policy.json" in text
     assert "benchmark performance --profile ci-smoke" in text
     assert "test-results/browser-qa" in text
 

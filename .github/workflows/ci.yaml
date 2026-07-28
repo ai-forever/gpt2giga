@@ -320,7 +320,8 @@ jobs:
         run: |
           set -euo pipefail
           test ! -e uv.lock
-          test ! -e .github/workflows/publish-pypi.yml
+          test -e .github/workflows/publish-pypi.yml
+          test -e .github/release-policy.json
           test -x scripts/ci-candidate-gateway.sh
           echo "status=blocked_pending_S5_03B"
-          echo "The exact checksum-bound candidate smoke is manual until S5-03B."
+          echo "Trusted Publisher registration and the public gateway pin remain absent until S5-03B."

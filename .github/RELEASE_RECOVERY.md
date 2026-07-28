@@ -1,0 +1,31 @@
+# GigaLoom release recovery
+
+The release workflow is intentionally fail-closed. It accepts only a published
+GitHub release whose exact `gpt2giga-harness-v<version>` tag points at a commit
+on target `main` after the history floor in `release-policy.json`. Manual
+dispatch builds and attests the same artifacts but cannot publish them.
+
+Before S5-03B, PyPI Trusted Publisher configuration is intentionally absent.
+Do not add a token secret or bypass the publisher failure. The candidate gateway
+bridge remains the only approved optional-extra smoke until that gate.
+
+## Failure handling
+
+- Guard or ancestry failure: do not retag. Delete or correct only an unpublished
+  draft release, then create a new published release from the intended `main`
+  commit after the policy and package version are reviewed.
+- Existing PyPI version: stop. Published versions are immutable; increment the
+  package version and create a new tag instead of overwriting files.
+- Build, hash, SBOM, license, or attestation failure: keep the release visible
+  as failed evidence, fix the source, and create a new version. Never upload an
+  unverified local artifact.
+- GitHub release-asset failure before publication: rerun the failed job only if
+  the attached files are absent and PyPI still reports the version missing.
+- PyPI success followed by a later failure: do not rerun publication. Verify
+  the public file hashes against the retained workflow artifact and repair only
+  missing GitHub release assets from that exact artifact.
+- Pages failure: keep the previous deployment. Rebuild the same commit locally;
+  do not change `url` or `baseUrl` to work around a broken documentation link.
+
+Rollback means reverting the automation commit before any release is published.
+It never means deleting or replacing an immutable package-index version.

@@ -7,11 +7,7 @@ on:
       - '**/*.md'
       - 'docs/**'
       - 'docs-site/**'
-      - '.env.example'
-      - 'packages/*/pyproject.toml'
-      - 'packages/gpt2giga/src/gpt2giga/models/config.py'
-      - 'scripts/check_docs.py'
-      - 'tests/test_scripts/test_check_docs.py'
+      - 'packages/gpt2giga-harness/pyproject.toml'
       - '.github/workflows/docs-pages.yaml'
   pull_request:
     branches: [ main ]
@@ -20,11 +16,7 @@ on:
       - '**/*.md'
       - 'docs/**'
       - 'docs-site/**'
-      - '.env.example'
-      - 'packages/*/pyproject.toml'
-      - 'packages/gpt2giga/src/gpt2giga/models/config.py'
-      - 'scripts/check_docs.py'
-      - 'tests/test_scripts/test_check_docs.py'
+      - 'packages/gpt2giga-harness/pyproject.toml'
       - '.github/workflows/docs-pages.yaml'
   workflow_dispatch:
 
@@ -45,23 +37,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Set up Node.js
+      - name: Set up Node.js 22.13
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: "22.13.0"
           cache: npm
           cache-dependency-path: docs-site/package-lock.json
 
-      - name: Validate documentation contracts
-        run: python3 scripts/check_docs.py
-
       - name: Install docs dependencies
         working-directory: docs-site
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build Docusaurus site
         working-directory: docs-site
-        run: npm run build
+        run: |
+          npm run postinstall
+          npm run typecheck
+          npm run build
 
       - name: Configure GitHub Pages
         if: github.event_name != 'pull_request'

@@ -13,18 +13,18 @@ http://localhost:8090
 | Возможность | Где читать |
 |---|---|
 | Быстрый запуск через Docker Compose или `uv` | [Быстрый старт](quickstart.md) |
-| Поддерживаемые маршруты OpenAI, Anthropic, Gemini и LiteLLM | [Совместимость API](api-compatibility.md) |
-| Поведение `extra_headers`, `extra_query`, `extra_body` и необязательных полей | [Параметры клиентов](client-parameter-compatibility.md) |
-| Встроенные инструменты GigaChat и их сопоставление с OpenAI/Anthropic/Gemini | [Встроенные инструменты](builtin-tools.md) |
+| Поддерживаемые маршруты OpenAI, Anthropic, Gemini и LiteLLM | [Совместимость API](https://github.com/ai-forever/gpt2giga/blob/main/docs/api-compatibility.md) |
+| Поведение `extra_headers`, `extra_query`, `extra_body` и необязательных полей | [Параметры клиентов](https://github.com/ai-forever/gpt2giga/blob/main/docs/client-parameter-compatibility.md) |
+| Встроенные инструменты GigaChat и их сопоставление с OpenAI/Anthropic/Gemini | [Встроенные инструменты](https://github.com/ai-forever/gpt2giga/blob/main/docs/builtin-tools.md) |
 | Альфа-превью локального cockpit для запусков, сравнений, approvals и workflows | [Unified Harness](harness.md) |
 | Direct Chat, Coding Agents, нативные subagents Codex, Arena и Workflows | [Agents и multi-agent поведение](agents-and-multi-agent.md) |
 | Компоненты Unified Harness, поток выполнения, хранение и API управляющего слоя | [Архитектура Harness](architecture/harness.md) |
 | Provider-owned login, status, logout, revoke и headless-границы | [Матрица аутентификации провайдеров](architecture/provider-authentication-capability-matrix.md) |
 | Реализованная граница remote UI identity и внешние deployment gates | [ADR удалённого UI](architecture/remote-ui-identity-adr.md) |
-| Переменные окружения, аутентификация, лимиты, метрики, наблюдаемость | [Конфигурация](configuration.md) |
-| Профили Compose, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развёртывание](deployment.md) |
-| Журналы выполнения, журналы трафика, admin API, отладочная трансляция | [Операции](operations.md) |
-| Настройка редакторов, агентов, SDK и обратного прокси | [Интеграции](integrations.md) |
+| Переменные окружения, аутентификация, лимиты, метрики, наблюдаемость | [Конфигурация](https://github.com/ai-forever/gpt2giga/blob/main/docs/configuration.md) |
+| Профили Compose, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развёртывание](https://github.com/ai-forever/gpt2giga/blob/main/docs/deployment.md) |
+| Журналы выполнения, журналы трафика, admin API, отладочная трансляция | [Операции](https://github.com/ai-forever/gpt2giga/blob/main/docs/operations.md) |
+| Настройка редакторов, агентов, SDK и обратного прокси | [Интеграции](https://github.com/ai-forever/gpt2giga/blob/main/docs/integrations.md) |
 
 ## Текущий набор API
 
@@ -60,6 +60,6 @@ OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подг
 - [Архитектура Harness](architecture/harness.md) описывает локальный управляющий слой, durable runtime, границы хранения и назначение каждого семейства API.
 - [Матрица аутентификации провайдеров](architecture/provider-authentication-capability-matrix.md) фиксирует версионированные provider-owned возможности без копирования credentials.
 - [ADR удалённого UI](architecture/remote-ui-identity-adr.md) определяет реализованный single-issuer OIDC/BFF profile; live IdP и deployment остаются явными gates.
-- [Нормализованные сообщения](architecture/normalized-messages.md) описывают экспериментальный слой моделей, не зависящих от протокола.
-- [Логирование и наблюдаемость](architecture/logging-and-observability.md) фиксирует границы между журналами выполнения, журналами трафика, метриками и трейсами.
-- [Добавление провайдера или протокола](architecture/how-to-add-provider.md) даёт чек-лист для расширения набора публичных протоколов и вышестоящих провайдеров.
+- [Нормализованные сообщения](https://github.com/ai-forever/gpt2giga/blob/main/docs/architecture/normalized-messages.md) описывают экспериментальный слой моделей, не зависящих от протокола.
+- [Логирование и наблюдаемость](https://github.com/ai-forever/gpt2giga/blob/main/docs/architecture/logging-and-observability.md) фиксирует границы между журналами выполнения, журналами трафика, метриками и трейсами.
+- [Добавление провайдера или протокола](https://github.com/ai-forever/gpt2giga/blob/main/docs/architecture/how-to-add-provider.md) даёт чек-лист для расширения набора публичных протоколов и вышестоящих провайдеров.

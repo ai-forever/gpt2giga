@@ -21,25 +21,8 @@ const sidebars: SidebarsConfig = {
           label: 'Agents and multi-agent behavior',
           key: 'agents-and-multi-agent',
         },
-        'configuration',
+        'agent-capability-matrix',
       ],
-    },
-    {
-      type: 'category',
-      label: 'Compatibility',
-      collapsible: false,
-      items: [
-        'api-compatibility',
-        'client-parameter-compatibility',
-        'builtin-tools',
-        'integrations',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Operations',
-      collapsible: false,
-      items: ['deployment', 'operations', 'live-integration-tests'],
     },
     {
       type: 'category',
@@ -54,9 +37,7 @@ const sidebars: SidebarsConfig = {
         'architecture/provider-authentication-capability-matrix',
         'architecture/remote-ui-identity-adr',
         'architecture/frontend-asset-build-architecture-adr',
-        'architecture/normalized-messages',
-        'architecture/logging-and-observability',
-        'architecture/how-to-add-provider',
+        'architecture/provider-native-cli-facade-adr',
       ],
     },
     {

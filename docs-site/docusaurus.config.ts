@@ -11,10 +11,10 @@ const config: Config = {
     v4: true,
   },
 
-  url: 'https://ai-forever.github.io',
-  baseUrl: '/gpt2giga/',
-  organizationName: 'ai-forever',
-  projectName: 'gpt2giga',
+  url: 'https://krakenalt.github.io',
+  baseUrl: '/gigaloom/',
+  organizationName: 'krakenalt',
+  projectName: 'gigaloom',
 
   onBrokenLinks: 'throw',
   markdown: {
@@ -89,8 +89,8 @@ const config: Config = {
           label: 'Documentation',
         },
         {to: '/quickstart', label: 'Quickstart', position: 'left'},
-        {to: '/api-compatibility', label: 'Compatibility', position: 'left'},
-        {to: '/operations', label: 'Operations', position: 'left'},
+        {to: '/harness', label: 'Harness', position: 'left'},
+        {to: '/agent-capability-matrix', label: 'Capabilities', position: 'left'},
         {type: 'localeDropdown', position: 'right'},
         {
           href: 'https://github.com/ai-forever/gpt2giga',
@@ -107,15 +107,15 @@ const config: Config = {
           items: [
             {label: 'Overview', to: '/'},
             {label: 'Quickstart', to: '/quickstart'},
-            {label: 'Configuration', to: '/configuration'},
+            {label: 'Harness', to: '/harness'},
           ],
         },
         {
-          title: 'Compatibility',
+          title: 'Architecture',
           items: [
-            {label: 'API compatibility', to: '/api-compatibility'},
-            {label: 'Client parameters', to: '/client-parameter-compatibility'},
-            {label: 'Built-in tools', to: '/builtin-tools'},
+            {label: 'Harness architecture', to: '/architecture/harness'},
+            {label: 'Capability matrix', to: '/agent-capability-matrix'},
+            {label: 'Contributing', to: '/contributing'},
           ],
         },
         {

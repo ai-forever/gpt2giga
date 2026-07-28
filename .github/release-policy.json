@@ -1,0 +1,11 @@
+{
+  "default_branch": "main",
+  "distribution": "gpt2giga-harness",
+  "first_target_release": {
+    "history_floor": "b6983b5036a70061a3f436e6a28f9a56fcd64bdc",
+    "tag": "gpt2giga-harness-v0.5.1a1",
+    "version": "0.5.1a1"
+  },
+  "repository": "krakenalt/gigaloom",
+  "tag_prefix": "gpt2giga-harness-v"
+}

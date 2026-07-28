@@ -1,8 +1,6 @@
-name: Update release draft
+name: Refresh GigaLoom release draft
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 permissions:
