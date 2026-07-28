@@ -249,14 +249,19 @@ function/local tools остаются включены.
 
 ## Флаги нормализованного слоя
 
-Экспериментальные флаги управляют нормализованными путями OpenAI Chat Completions
-и Anthropic Messages и по умолчанию сохраняют прежнее поведение для этих маршрутов:
+Режим нормализации управляет нормализованными путями OpenAI Chat Completions
+и Anthropic Messages и по умолчанию сохраняет прежнее поведение для этих маршрутов:
 
 ```dotenv
-GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER=False
 GPT2GIGA_NORMALIZATION_MODE=off
 GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 ```
+
+Неиспользуемый ключ `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` удалён. Для
+детерминированной миграции используйте `GPT2GIGA_NORMALIZATION_MODE=on`, чтобы
+выполнять запросы через нормализованный путь, `shadow` только для диагностики
+перевода или `off`, чтобы сохранить прежний путь.
+`GPT2GIGA_LEGACY_CHAT_FALLBACK` настраивается независимо.
 
 - `off`: OpenAI Chat Completions и Anthropic Messages идут через прежние пути;
 - `shadow`: строит нормализованную диагностику рядом с прежней обработкой OpenAI Chat без изменения ответов клиенту;

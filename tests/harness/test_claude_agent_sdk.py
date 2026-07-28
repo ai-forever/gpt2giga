@@ -27,7 +27,6 @@ from gpt2giga_harness.claude_agent_sdk import (  # noqa: E402
     probe_installed_claude_agent_sdk,
     review_claude_agent_sdk_surface,
 )
-from gpt2giga_harness import claude_agent_sdk_poc  # noqa: E402
 
 
 FIXTURE = Path("tests/fixtures/harness_cli/claude/2.1.212/agent_sdk_surface.json")
@@ -36,28 +35,6 @@ _CLOSED = object()
 
 def _surface_fixture() -> dict[str, Any]:
     return json.loads(FIXTURE.read_text())
-
-
-def test_legacy_poc_module_reexports_accepted_sdk_owner():
-    assert claude_agent_sdk_poc.ClaudeAgentSdkPocError is ClaudeAgentSdkPocError
-    assert claude_agent_sdk_poc.ClaudeSdkAuthMode is ClaudeSdkAuthMode
-    assert (
-        claude_agent_sdk_poc.build_claude_agent_sdk_options
-        is build_claude_agent_sdk_options
-    )
-    assert (
-        claude_agent_sdk_poc.normalize_claude_sdk_message
-        is normalize_claude_sdk_message
-    )
-    assert claude_agent_sdk_poc.permission_binding is permission_binding
-    assert (
-        claude_agent_sdk_poc.probe_installed_claude_agent_sdk
-        is probe_installed_claude_agent_sdk
-    )
-    assert (
-        claude_agent_sdk_poc.review_claude_agent_sdk_surface
-        is review_claude_agent_sdk_surface
-    )
 
 
 class _ScriptedSdkTransport(Transport):

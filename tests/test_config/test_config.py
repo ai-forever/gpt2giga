@@ -12,7 +12,6 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING", raising=False)
-    monkeypatch.delenv("GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER", raising=False)
     monkeypatch.delenv("GPT2GIGA_NORMALIZATION_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", raising=False)
     monkeypatch.delenv("GPT2GIGA_TRAFFIC_LOG_ENABLED", raising=False)
@@ -67,7 +66,6 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.structured_output_mode == "function_call"
     assert s.gigachat_api_mode == "v1"
     assert s.disable_builtin_tool_mapping is False
-    assert s.experimental_normalized_layer is False
     assert s.normalization_mode == "off"
     assert s.legacy_chat_fallback is True
     assert s.conversation_stitching_enabled is False
@@ -239,7 +237,6 @@ def test_proxy_settings_disable_builtin_tool_mapping_from_env(monkeypatch):
 
 
 def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
-    monkeypatch.setenv("GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER", "true")
     monkeypatch.setenv("GPT2GIGA_NORMALIZATION_MODE", " SHADOW ")
     monkeypatch.setenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", "false")
     monkeypatch.setenv("GPT2GIGA_CONVERSATION_STITCHING_ENABLED", "true")
@@ -295,7 +292,6 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
 
     s = ProxySettings()
 
-    assert s.experimental_normalized_layer is True
     assert s.normalization_mode == "shadow"
     assert s.legacy_chat_fallback is False
     assert s.conversation_stitching_enabled is True
@@ -408,6 +404,22 @@ def test_proxy_settings_invalid_normalization_mode(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_NORMALIZATION_MODE", "unsupported")
     with pytest.raises(Exception):
         ProxySettings()
+
+
+def test_removed_experimental_normalized_layer_key_has_deterministic_migration(
+    monkeypatch,
+):
+    monkeypatch.setenv("GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER", "true")
+    monkeypatch.setenv("GPT2GIGA_NORMALIZATION_MODE", "on")
+    monkeypatch.setenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", "false")
+
+    settings = ProxySettings()
+
+    assert not hasattr(settings, "experimental_normalized_layer")
+    assert settings.normalization_mode == "on"
+    assert settings.legacy_chat_fallback is False
+    with pytest.raises(Exception):
+        ProxySettings(experimental_normalized_layer=True)
 
 
 def test_proxy_settings_api_mode_normalized(monkeypatch):

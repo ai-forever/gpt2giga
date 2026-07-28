@@ -249,14 +249,18 @@ enabled.
 
 ## Normalized layer flags
 
-Experimental flags control the OpenAI Chat Completions and Anthropic Messages
-normalized paths and by default keep the legacy behavior for these routes:
+The normalized mode controls the OpenAI Chat Completions and Anthropic Messages
+normalized paths and by default keeps the legacy behavior for these routes:
 
 ```dotenv
-GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER=False
 GPT2GIGA_NORMALIZATION_MODE=off
 GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 ```
+
+The inert `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` key was removed. Replace it
+deterministically with `GPT2GIGA_NORMALIZATION_MODE=on` to execute through the
+normalized path, `shadow` for diagnostics-only translation, or `off` to retain
+the legacy path. Configure `GPT2GIGA_LEGACY_CHAT_FALLBACK` independently.
 
 - `off`: OpenAI Chat Completions and Anthropic Messages go through the legacy paths;
 - `shadow`: builds normalized diagnostics alongside the legacy OpenAI Chat handling without changing client responses;
