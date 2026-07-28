@@ -53,6 +53,7 @@ const sidebars: SidebarsConfig = {
         'architecture/github-capability-grants-adr',
         'architecture/provider-authentication-capability-matrix',
         'architecture/remote-ui-identity-adr',
+        'architecture/frontend-asset-build-architecture-adr',
         'architecture/normalized-messages',
         'architecture/logging-and-observability',
         'architecture/how-to-add-provider',
