@@ -2,7 +2,6 @@
 
 from collections.abc import AsyncIterator
 from typing import Any, Dict, List
-from urllib.parse import unquote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -19,6 +18,7 @@ from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
+from gpt2giga.common.harness_model import trusted_harness_model
 from gpt2giga.common.model_concurrency import resolve_gigachat_model
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.context import get_request_context, update_request_context
@@ -55,27 +55,15 @@ from gpt2giga.sinks.observability.anthropic import (
 )
 
 router = APIRouter(tags=[OPENAPI_TAG_ANTHROPIC_MESSAGES])
-HARNESS_MODEL_HEADER = "x-gpt2giga-harness-model"
-PASS_MODEL_HEADER = "x-gpt2giga-pass-model"
-MAX_MODEL_LENGTH = 256
 
 
 def _claude_cli_harness_model(request: Request) -> str | None:
-    """Return the Harness-pinned model for an explicit Claude CLI request."""
-    user_agent = request.headers.get("user-agent", "").strip().lower()
-    if not user_agent.startswith("claude-cli/"):
-        return None
-    if request.headers.get(PASS_MODEL_HEADER, "").strip().lower() != "false":
-        return None
-    encoded_model = request.headers.get(HARNESS_MODEL_HEADER)
-    if not encoded_model:
-        return None
-    model = unquote(encoded_model).strip()
-    if not model or len(model) > MAX_MODEL_LENGTH:
-        return None
-    if any(ord(character) < 32 or ord(character) == 127 for character in model):
-        return None
-    return model
+    """Return an authenticated Harness-pinned Claude model."""
+    return trusted_harness_model(
+        request,
+        protocol="anthropic",
+        user_agent_prefix="claude-cli/",
+    )
 
 
 def _force_harness_model(payload: Any, model: str | None) -> Any:

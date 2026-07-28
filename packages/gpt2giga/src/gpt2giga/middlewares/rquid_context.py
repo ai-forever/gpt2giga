@@ -191,6 +191,9 @@ class _ResponseLifecycle:
                 logger=app_logger,
                 error_type=error_type,
                 error_message=error_message,
+                capture_content=self.capture_content,
+                redact_sensitive=self.redact_sensitive,
+                redact_extra_keys=self.redact_extra_keys,
             ),
             emit_request_observability_event(
                 getattr(state, "observability_sink", None),

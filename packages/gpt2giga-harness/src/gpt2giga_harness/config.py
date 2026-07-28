@@ -33,6 +33,7 @@ class HarnessConfig:
 
     proxy_url: str = DEFAULT_PROXY_URL
     api_key: str | None = None
+    harness_model_key: str | None = field(default=None, repr=False)
     default_model: str | None = None
     default_api_mode: GigaChatApiMode = GigaChatApiMode.V2
     ui_host: str = DEFAULT_UI_HOST
@@ -57,6 +58,7 @@ class HarnessConfig:
         """Load config from environment variables."""
         proxy_url = _env_first("GPT2GIGA_HARNESS_PROXY_URL") or DEFAULT_PROXY_URL
         api_key = _env_first("GPT2GIGA_HARNESS_API_KEY", "GPT2GIGA_API_KEY")
+        harness_model_key = _env_first("GPT2GIGA_HARNESS_MODEL_KEY")
         default_model = _env_first("GPT2GIGA_HARNESS_DEFAULT_MODEL", "GIGACHAT_MODEL")
         default_api_mode = parse_api_mode(
             _env_first(
@@ -105,6 +107,7 @@ class HarnessConfig:
         return cls(
             proxy_url=_normalize_proxy_url(proxy_url),
             api_key=api_key,
+            harness_model_key=harness_model_key,
             default_model=default_model,
             default_api_mode=default_api_mode,
             ui_host=ui_host,
@@ -137,6 +140,7 @@ class HarnessConfig:
         return HarnessConfig(
             proxy_url=_normalize_proxy_url(proxy_url or self.proxy_url),
             api_key=self.api_key,
+            harness_model_key=self.harness_model_key,
             default_model=self.default_model,
             default_api_mode=self.default_api_mode,
             ui_host=ui_host or self.ui_host,
@@ -166,6 +170,7 @@ class HarnessConfig:
         return HarnessContext(
             proxy_url=self.proxy_url,
             api_key=self.api_key,
+            harness_model_key=self.harness_model_key,
             default_model=self.default_model,
             timeout_seconds=self.timeout_seconds,
             auto_start_proxy=self.auto_start_proxy,

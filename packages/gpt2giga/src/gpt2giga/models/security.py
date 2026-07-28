@@ -43,6 +43,7 @@ class SecuritySettings(BaseModel):
 
     # --- Logs access ---
     logs_ip_allowlist: list[str] = Field(default_factory=list)
+    logs_trusted_proxies: list[str] = Field(default_factory=list)
     log_redact_sensitive: bool = Field(default=True)
 
     # --- Request / attachment size limits ---
@@ -92,6 +93,7 @@ class SecuritySettings(BaseModel):
             "has_wildcard_cors": self.has_wildcard_cors,
             "log_redact_sensitive": self.log_redact_sensitive,
             "logs_ip_allowlist": self.logs_ip_allowlist,
+            "logs_trusted_proxies": self.logs_trusted_proxies,
             "max_request_body_bytes": self.max_request_body_bytes,
             "max_audio_file_size_bytes": self.max_audio_file_size_bytes,
             "max_image_file_size_bytes": self.max_image_file_size_bytes,

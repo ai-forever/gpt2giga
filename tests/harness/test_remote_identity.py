@@ -9,12 +9,14 @@ from urllib.parse import parse_qs, urlsplit
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 import jwt
+import pytest
 
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.registry import create_default_registry
 from gpt2giga_harness.ui.app import create_app
 from gpt2giga_harness.ui.remote_identity import (
     RemoteActor,
+    RemoteIdentityError,
     RemoteIdentityStore,
     RemoteOIDCClient,
     RemoteOIDCSettings,
@@ -232,8 +234,41 @@ def test_remote_oidc_login_enforces_pkce_nonce_roles_and_audit_identity(tmp_path
 
 def test_remote_viewer_revocation_and_backchannel_logout_fail_closed(tmp_path):
     app, issuer = _app(tmp_path)
+    admitted_workspace = tmp_path / "admitted"
+    admitted_workspace.mkdir()
+    admitted_file = admitted_workspace / "visible.txt"
+    admitted_file.write_text("admitted", encoding="utf-8")
+    arbitrary_workspace = tmp_path / "arbitrary"
+    arbitrary_workspace.mkdir()
+    arbitrary_file = arbitrary_workspace / "private.txt"
+    arbitrary_file.write_text("private", encoding="utf-8")
+    admitted_session = app.state.harness_session_store.create_session(
+        title="Admitted",
+        workspace=str(admitted_workspace),
+    )
     operator = _client(app, address="203.0.113.11")
     _login(operator, issuer)
+
+    remote_launch = operator.post(
+        "/api/editor/open-workspace",
+        headers={
+            "Origin": "https://harness.example",
+            "X-GigaLoom-CSRF": "1",
+        },
+        json={"workspace": str(admitted_workspace), "dry_run": False},
+    )
+    dry_run = operator.post(
+        "/api/editor/open-workspace",
+        headers={
+            "Origin": "https://harness.example",
+            "X-GigaLoom-CSRF": "1",
+        },
+        json={"workspace": str(admitted_workspace), "dry_run": True},
+    )
+    assert remote_launch.status_code == 403
+    assert remote_launch.json()["detail"] == "Remote editor execution is disabled"
+    assert dry_run.status_code == 200
+    assert dry_run.json()["editor"]["executed"] is False
 
     issuer.subject = "viewer-sub"
     issuer.sid = "issuer-session-viewer"
@@ -252,6 +287,34 @@ def test_remote_viewer_revocation_and_backchannel_logout_fail_closed(tmp_path):
     assert denied.status_code == 403
     assert denied.json()["detail"] == "Operator role required"
     assert viewer.get("/api/defaults").status_code == 200
+
+    admitted_preview = viewer.get(
+        "/api/files/preview",
+        params={
+            "path": "visible.txt",
+            "workspace": str(admitted_workspace),
+            "session_id": admitted_session.id,
+        },
+    )
+    arbitrary_preview = viewer.get(
+        "/api/files/preview",
+        params={
+            "path": "private.txt",
+            "workspace": str(arbitrary_workspace),
+            "session_id": admitted_session.id,
+        },
+    )
+    unbound_preview = viewer.get(
+        "/api/files/preview",
+        params={
+            "path": "visible.txt",
+            "workspace": str(admitted_workspace),
+        },
+    )
+    assert admitted_preview.status_code == 200
+    assert admitted_preview.text == "admitted"
+    assert arbitrary_preview.status_code == 403
+    assert unbound_preview.status_code == 403
 
     logout = viewer.post(
         "/auth/logout",
@@ -306,6 +369,27 @@ def test_remote_oidc_refreshes_jwks_after_signing_key_rotation(tmp_path):
 
     assert issuer.jwks_fetches == 2
     assert second.get("/api/defaults").status_code == 200
+
+
+def test_remote_oidc_rejects_cross_origin_or_private_discovery_endpoints(tmp_path):
+    settings = RemoteOIDCSettings.from_config(_config(tmp_path))
+
+    def malicious_discovery(method, url, headers, data):
+        del method, url, headers, data
+        return {
+            "issuer": settings.issuer,
+            "authorization_endpoint": f"{settings.issuer}/authorize",
+            "token_endpoint": "https://127.0.0.1/token",
+            "jwks_uri": "https://metadata.internal/jwks",
+            "id_token_signing_alg_values_supported": ["RS256"],
+            "response_types_supported": ["code"],
+            "code_challenge_methods_supported": ["S256"],
+        }
+
+    oidc = RemoteOIDCClient(settings, fetch_json=malicious_discovery)
+
+    with pytest.raises(RemoteIdentityError, match="configured issuer origin"):
+        oidc.metadata()
 
 
 def test_remote_session_idle_expiry_and_role_change_revoke_access(tmp_path):

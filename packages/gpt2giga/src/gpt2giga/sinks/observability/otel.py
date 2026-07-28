@@ -27,6 +27,9 @@ CONTENT_ATTRIBUTE_KEYS = frozenset(
         "output.value",
         "output.messages",
         "prompt",
+        "error.message",
+        "error_message",
+        "llm.request.extensions",
         "request.body",
         "request_body",
         "response.body",
@@ -182,7 +185,12 @@ def _should_keep_attribute(
         return False
     if capture_content:
         return True
-    return key.lower() not in CONTENT_ATTRIBUTE_KEYS
+    normalized_key = key.lower()
+    return (
+        normalized_key not in CONTENT_ATTRIBUTE_KEYS
+        and not normalized_key.endswith(".extensions")
+        and not normalized_key.endswith("_extensions")
+    )
 
 
 def _coerce_otel_attribute_value(value: Any) -> Any:

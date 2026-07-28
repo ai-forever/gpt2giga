@@ -128,6 +128,7 @@ can be visible to other processes.
 | `GPT2GIGA_HTTPS_KEY_FILE` / `GPT2GIGA_HTTPS_CERT_FILE` | empty | Local key/cert files for built-in HTTPS. |
 | `GPT2GIGA_ENABLE_API_KEY_AUTH` | `False` | Require proxy API-key authentication for public API routes. Mandatory in `PROD`. |
 | `GPT2GIGA_API_KEY` | empty | Proxy API key. For shared environments, use a strong random value. |
+| `GPT2GIGA_HARNESS_MODEL_KEY` | empty | Dedicated HMAC key shared only with Harness when an external proxy must accept request-scoped Claude/Gemini model pins. |
 | `GPT2GIGA_PASS_MODEL` | `True` | Pass the `model` from the request to GigaChat. Set `False` to always use the configured GigaChat model. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Parse the client `Authorization` as GigaChat credentials for per-request upstream authorization. |
 | `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Maximum idle credential-specific clients retained for connection reuse. |
@@ -385,7 +386,11 @@ An IP allowlist for `/logs*`:
 
 ```dotenv
 GPT2GIGA_LOGS_IP_ALLOWLIST='["10.0.0.1"]'
+GPT2GIGA_LOGS_TRUSTED_PROXIES='["127.0.0.1"]'
 ```
+
+`X-Forwarded-For` учитывается только когда прямой peer входит в
+`GPT2GIGA_LOGS_TRUSTED_PROXIES`; иначе allowlist проверяет адрес соединения.
 
 Do not use `GPT2GIGA_LOG_LEVEL=DEBUG` in production: debug output may
 contain operational context that should not end up in shared logs.

@@ -603,6 +603,8 @@ public HTTPS origin, exact subject-to-role map, and explicit `--allow-remote`.
 Authorization Code + PKCE `S256`, nonce/signature/audience validation, opaque
 server-side sessions, exact-origin CSRF, `viewer`/`operator` enforcement,
 JWKS rotation, and session/actor/global/back-channel revocation fail closed.
+Discovery never follows redirects, and every advertised authorization, token,
+JWKS, and logout endpoint must use the issuer's exact scheme, host, and port.
 The old bootstrap token and Host allowlist never authenticate remote users.
 
 See the [remote UI identity ADR](architecture/remote-ui-identity-adr.md) for the
@@ -616,6 +618,8 @@ CLI flags override environment variables. Useful variables:
 ```bash
 GPT2GIGA_HARNESS_PROXY_URL=http://127.0.0.1:8090
 GPT2GIGA_HARNESS_API_KEY=<local-proxy-api-key>
+# Required only when Harness uses an externally managed proxy:
+GPT2GIGA_HARNESS_MODEL_KEY=<shared-model-signing-secret>
 GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max
 GPT2GIGA_HARNESS_DEFAULT_API_MODE=v2
 GPT2GIGA_HARNESS_UI_HOST=127.0.0.1
@@ -649,7 +653,10 @@ external agent CLIs.
 Auto-start is local-only. It supports `http://127.0.0.1:<port>`,
 `http://localhost:<port>`, and `http://[::1]:<port>`. It refuses remote hosts,
 does not create fake upstream credentials, and starts the child proxy with a
-generated local `GPT2GIGA_API_KEY` if one is not already configured.
+generated local `GPT2GIGA_API_KEY` plus a separate model-signing key. For an
+externally managed proxy, configure the same strong
+`GPT2GIGA_HARNESS_MODEL_KEY` in the Harness and proxy environments; never send
+it to agent CLIs or expose it as an HTTP API key.
 
 External agent harnesses run the same proxy preflight before launching Codex,
 Claude Code, or Gemini CLI. If a sidecar is started, the generated local proxy
@@ -1914,6 +1921,11 @@ giga harness run claude-code \
 default permission mode instead of bypassing prompts. The harness also uses
 `--bare`, `--safe-mode`, `--no-session-persistence`, and a sanitized environment
 that only includes the local proxy API key as `ANTHROPIC_API_KEY`.
+Its request-scoped `X-GigaLoom-Model` pin is accepted only when the Claude CLI
+User-Agent, `X-GPT2GIGA-Pass-Model: false`, and the
+`X-GigaLoom-Model-Signature` protocol/model HMAC from the dedicated Harness
+model key all validate. Unsigned headers cannot override the configured gateway
+model.
 
 Backward-friendly alias:
 
@@ -1950,12 +1962,14 @@ giga harness run gemini-cli \
 auth when the local proxy API key should be used.
 
 Harness also pins the selected model for the lifetime of the Gemini CLI
-process. It sends an explicit Harness model header together with
+process. It sends `X-GigaLoom-Model` and
+`X-GigaLoom-Model-Signature` together with
 `X-GPT2GIGA-Pass-Model: false`; the Gemini-compatible gateway routes initial,
 tool-continuation, streaming, and token-count requests to that pinned model even
-if Gemini CLI changes the model name in a later request path. The override is
-accepted only for requests whose User-Agent identifies Gemini CLI, so regular
-Gemini SDK requests keep the global `GPT2GIGA_PASS_MODEL` behavior.
+if Gemini CLI changes the model name in a later request path. The gateway
+accepts the override only when the request has a Gemini CLI User-Agent and a
+valid protocol/model HMAC from the dedicated Harness model key. Unsigned or
+invalid overrides fall back to the global `GPT2GIGA_PASS_MODEL` behavior.
 
 For a durable Workbench or `giga session turn --transport native_structured`
 request, a compatible Gemini CLI uses the reviewed ACP stdio driver instead of

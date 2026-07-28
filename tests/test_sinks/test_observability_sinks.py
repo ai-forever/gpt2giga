@@ -10,6 +10,7 @@ from gpt2giga.models.config import ProxySettings
 from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
     NormalizedChoice,
+    NormalizedError,
     NormalizedGenerationConfig,
     NormalizedMessage,
     NormalizedResponse,
@@ -251,7 +252,7 @@ def test_build_llm_request_attributes_default_omits_raw_content():
     assert "llm.tools" not in attributes
 
 
-def test_build_llm_request_attributes_exposes_redacted_request_extensions():
+def test_build_llm_request_attributes_omits_request_extensions_without_capture():
     request = NormalizedChatRequest(
         protocol="gemini",
         model="GigaChat",
@@ -273,18 +274,31 @@ def test_build_llm_request_attributes_exposes_redacted_request_extensions():
 
     attributes = build_llm_request_attributes(request, settings=capture_off_settings())
 
-    extensions = json.loads(attributes["llm.request.extensions"])
     invocation = json.loads(attributes["llm.invocation_parameters"])
 
-    assert extensions["safetySettings"] == [{"category": "HARM_CATEGORY_HARASSMENT"}]
-    assert extensions["cachedContent"] == "cachedContents/1"
+    assert "llm.request.extensions" not in attributes
+    assert "raw_extensions" not in invocation
+    assert "secret-gemini-key" not in str(attributes)
+
+
+def test_build_llm_request_attributes_captures_redacted_request_extensions():
+    request = NormalizedChatRequest(
+        model="GigaChat",
+        messages=[NormalizedMessage(role="user", content="hello")],
+        raw_extensions={
+            "serviceTier": "flex",
+            "unsupportedTools": [{"googleMaps": {"api_key": "secret-gemini-key"}}],
+        },
+    )
+
+    attributes = build_llm_request_attributes(
+        request,
+        settings=ProxySettings(observability_capture_content=True),
+    )
+
+    extensions = json.loads(attributes["llm.request.extensions"])
     assert extensions["serviceTier"] == "flex"
     assert extensions["unsupportedTools"] == [{"googleMaps": {"api_key": "***"}}]
-    assert invocation["raw_extensions"] == {
-        "candidateCount": 2,
-        "topK": 40,
-        "responseModalities": ["TEXT"],
-    }
     assert "secret-gemini-key" not in attributes["llm.request.extensions"]
 
 
@@ -421,6 +435,67 @@ def test_build_llm_response_attributes_maps_usage_finish_and_safe_payloads():
     assert "reasoning_content" in captured_attributes["llm.output_messages"]
     assert '"password": "***"' in captured_attributes["llm.tool_calls"]
     assert "secret" not in captured_attributes["llm.tool_calls"]
+
+
+def test_llm_error_messages_require_content_capture():
+    response = NormalizedResponse(
+        model="GigaChat",
+        provider="gigachat",
+        error=NormalizedError(
+            type="upstream_error",
+            code="provider_failed",
+            message="Bearer secret-provider-error",
+        ),
+    )
+    event = NormalizedStreamEvent(
+        type="error",
+        error=response.error,
+    )
+
+    response_attributes = build_llm_response_attributes(
+        response,
+        settings=capture_off_settings(),
+    )
+    stream_attributes = build_stream_span_events(
+        event,
+        settings=capture_off_settings(),
+    )[0]["attributes"]
+
+    assert response_attributes["error_type"] == "upstream_error"
+    assert "error_message" not in response_attributes
+    assert "error.message" not in response_attributes
+    assert stream_attributes["error_type"] == "upstream_error"
+    assert stream_attributes["error_code"] == "provider_failed"
+    assert "error_message" not in stream_attributes
+    assert "secret-provider-error" not in str(response_attributes)
+    assert "secret-provider-error" not in str(stream_attributes)
+
+    captured_response = build_llm_response_attributes(
+        response,
+        settings=ProxySettings(observability_capture_content=True),
+    )
+    captured_stream = build_stream_span_events(
+        event,
+        settings=ProxySettings(observability_capture_content=True),
+    )[0]["attributes"]
+
+    assert captured_response["error_message"] == "Bearer ***"
+    assert captured_response["error.message"] == "Bearer ***"
+    assert captured_stream["error_message"] == "Bearer ***"
+
+
+def test_build_otel_attributes_drops_extension_and_error_content_without_capture():
+    attributes = build_otel_attributes(
+        {
+            "provider_extensions": {"private": "extension-canary"},
+            "llm.request.extensions": '{"private": "extension-canary"}',
+            "error_message": "error-canary",
+            "error.message": "error-canary",
+            "error_type": "upstream_error",
+        }
+    )
+
+    assert attributes == {"error_type": "upstream_error"}
 
 
 def test_build_llm_response_attributes_maps_called_tools_metadata_safely():

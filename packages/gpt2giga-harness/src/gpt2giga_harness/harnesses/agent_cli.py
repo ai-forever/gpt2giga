@@ -126,7 +126,11 @@ def prepare_proxy_for_agent(
             ),
         )
 
-    prepared_context = replace(context, api_key=startup.api_key or context.api_key)
+    prepared_context = replace(
+        context,
+        api_key=startup.api_key or context.api_key,
+        harness_model_key=(startup.harness_model_key or context.harness_model_key),
+    )
     events: tuple[HarnessEvent, ...] = ()
     if startup.started:
         events = (

@@ -53,6 +53,14 @@ def test_editor_rejects_unsupported_command(tmp_path):
         build_open_file_plan(workspace, "app.py", command="python -c print")
 
 
+def test_editor_rejects_allowlisted_command_path(tmp_path):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    with pytest.raises(EditorOpenError, match="without a path"):
+        build_open_file_plan(workspace, "app.py", command="/tmp/code")
+
+
 def test_terminal_plan_uses_allowlisted_shell_free_launcher(tmp_path):
     workspace = tmp_path / "repo"
     workspace.mkdir()

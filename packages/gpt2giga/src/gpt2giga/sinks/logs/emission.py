@@ -78,16 +78,26 @@ async def emit_request_traffic_event(
     error_type: str | None = None,
     error_message: str | None = None,
     metadata: dict[str, Any] | None = None,
+    capture_content: bool = False,
+    redact_sensitive: bool = True,
+    redact_extra_keys: list[str] | None = None,
 ) -> None:
     """Emit one request traffic event without propagating sink failures."""
     if sink is None:
         return
+    safe_error_message = None
+    if capture_content and error_message is not None:
+        safe_error_message = redact_traffic_payload(
+            error_message,
+            enabled=redact_sensitive,
+            extra_keys=redact_extra_keys,
+        )
     event = build_request_traffic_event(
         context,
         status_code=status_code,
         lifecycle=lifecycle,
         error_type=error_type,
-        error_message=error_message,
+        error_message=safe_error_message,
         metadata=metadata,
     )
     await emit_traffic_log(sink, event, logger=logger)
@@ -140,6 +150,9 @@ async def wrap_traffic_log_body_iterator(
             logger=logger,
             error_type=type(exc).__name__,
             error_message=str(exc),
+            capture_content=capture_content,
+            redact_sensitive=redact_sensitive,
+            redact_extra_keys=redact_extra_keys,
         )
         raise
     else:

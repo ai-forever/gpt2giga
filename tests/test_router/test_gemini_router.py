@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from gpt2giga.common.harness_model import harness_model_signature
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocol.request.transformer import RequestTransformer
@@ -314,13 +315,18 @@ def test_gemini_generate_content_roundtrips_through_gigachat_provider():
 
 
 def test_gemini_cli_harness_model_stays_pinned_across_requests():
-    app = make_app(mode="v2", pass_model=False)
+    app = make_app(mode="v2", pass_model=False, harness_model_key="model-key")
     app.state.request_transformer = RequestTransformer(app.state.config, logger)
     client = TestClient(app)
     headers = {
         "user-agent": "GeminiCLI/0.46.0/GigaChat-Selected (darwin; arm64; headless)",
-        "x-gpt2giga-harness-model": "GigaChat-Selected",
+        "x-gigaloom-model": "GigaChat-Selected",
         "x-gpt2giga-pass-model": "false",
+        "x-gigaloom-model-signature": harness_model_signature(
+            "model-key",
+            protocol="gemini",
+            model="GigaChat-Selected",
+        ),
     }
     payload = {"contents": [{"parts": [{"text": "Hello"}]}]}
 
@@ -352,16 +358,16 @@ def test_gemini_cli_harness_model_stays_pinned_across_requests():
     )
 
 
-def test_non_gemini_cli_cannot_activate_harness_model_pin():
-    app = make_app()
+def test_unsigned_gemini_cli_cannot_activate_harness_model_pin():
+    app = make_app(harness_model_key="model-key")
     client = TestClient(app)
 
     response = client.post(
         "/models/gemini-pro:generateContent",
         json={"contents": [{"parts": [{"text": "Hello"}]}]},
         headers={
-            "user-agent": "google-genai-sdk/1.30.0",
-            "x-gpt2giga-harness-model": "GigaChat-Selected",
+            "user-agent": "GeminiCLI/0.46.0 (darwin; arm64; headless)",
+            "x-gigaloom-model": "GigaChat-Selected",
             "x-gpt2giga-pass-model": "false",
         },
     )

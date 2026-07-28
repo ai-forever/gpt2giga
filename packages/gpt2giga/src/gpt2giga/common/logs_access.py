@@ -1,16 +1,28 @@
+import ipaddress
+
 from fastapi import HTTPException
 from starlette.requests import Request
 from starlette.status import HTTP_403_FORBIDDEN
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP from X-Forwarded-For or request.client."""
+    """Resolve client IP, trusting forwarding only from an explicit proxy peer."""
+    peer = request.client.host if request.client else ""
+    trusted_proxies = getattr(
+        getattr(getattr(request.app.state, "config", None), "proxy_settings", None),
+        "logs_trusted_proxies",
+        (),
+    )
+    if peer not in trusted_proxies:
+        return peer
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return ""
+    if not forwarded:
+        return peer
+    candidate = forwarded.split(",")[0].strip()
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return peer
 
 
 def verify_logs_ip_allowlist(request: Request) -> None:

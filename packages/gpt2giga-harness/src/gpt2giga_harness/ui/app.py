@@ -16,7 +16,7 @@ import threading
 from time import monotonic
 from typing import Any, Mapping
 
-from fastapi import Body, FastAPI, Header, HTTPException, Query
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from gpt2giga_harness.arena import (
@@ -868,8 +868,10 @@ def create_app(
 
     @app.post("/api/editor/open-workspace")
     def editor_open_workspace(
+        request: Request,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
+        dry_run = _editor_dry_run(request, payload)
         try:
             project_context = resolve_project(
                 _optional_text(payload.get("workspace")),
@@ -881,7 +883,7 @@ def create_app(
             plan = build_open_workspace_plan(project_context.root, command=command)
             result = execute_editor_plan(
                 plan,
-                dry_run=bool(payload.get("dry_run", False)),
+                dry_run=dry_run,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -892,8 +894,10 @@ def create_app(
 
     @app.post("/api/editor/open-file")
     def editor_open_file(
+        request: Request,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
+        dry_run = _editor_dry_run(request, payload)
         try:
             project_context = resolve_project(
                 _optional_text(payload.get("workspace")),
@@ -911,7 +915,7 @@ def create_app(
             )
             result = execute_editor_plan(
                 plan,
-                dry_run=bool(payload.get("dry_run", False)),
+                dry_run=dry_run,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -922,8 +926,10 @@ def create_app(
 
     @app.post("/api/editor/open-diff")
     def editor_open_diff(
+        request: Request,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
+        dry_run = _editor_dry_run(request, payload)
         try:
             run_id = _required_text(payload.get("run_id"), "run_id is required")
             run = store.get_run(run_id)
@@ -941,7 +947,7 @@ def create_app(
             )
             result = execute_editor_plan(
                 plan,
-                dry_run=bool(payload.get("dry_run", False)),
+                dry_run=dry_run,
             )
         except RunNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Run not found") from exc
@@ -955,8 +961,10 @@ def create_app(
 
     @app.post("/api/editor/open-terminal")
     def editor_open_terminal(
+        request: Request,
         payload: dict[str, Any] = Body(default_factory=dict),
     ) -> dict[str, Any]:
+        dry_run = _editor_dry_run(request, payload)
         try:
             run_id = _required_text(payload.get("run_id"), "run_id is required")
             run = store.get_run(run_id)
@@ -975,7 +983,7 @@ def create_app(
             plan = build_open_terminal_plan(workspace, command=command)
             result = execute_editor_plan(
                 plan,
-                dry_run=bool(payload.get("dry_run", False)),
+                dry_run=dry_run,
             )
         except RunNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Run not found") from exc
@@ -4558,6 +4566,9 @@ def _native_process_new_options(
         context = replace(
             context,
             api_key=route_preflight.api_key or context.api_key,
+            harness_model_key=(
+                route_preflight.harness_model_key or context.harness_model_key
+            ),
         )
     try:
         plan = connector.build_start_command(request, context)
@@ -4668,6 +4679,9 @@ def _native_process_resume_options(
         context = replace(
             context,
             api_key=route_preflight.api_key or context.api_key,
+            harness_model_key=(
+                route_preflight.harness_model_key or context.harness_model_key
+            ),
         )
     try:
         plan = connector.build_resume_command(ref, context)
@@ -5733,6 +5747,17 @@ def _optional_int(value: Any) -> int | None:
     if value is None or str(value).strip() == "":
         return None
     return int(value)
+
+
+def _editor_dry_run(request: Request, payload: Mapping[str, Any]) -> bool:
+    """Keep remote UI identities from crossing the local process boundary."""
+    dry_run = bool(payload.get("dry_run", False))
+    if getattr(request.state, "ui_actor", None) is not None and not dry_run:
+        raise HTTPException(
+            status_code=403,
+            detail="Remote editor execution is disabled",
+        )
+    return dry_run
 
 
 def _decode_attachment_payload(value: Any) -> bytes:

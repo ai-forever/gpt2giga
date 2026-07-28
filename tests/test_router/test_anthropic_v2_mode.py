@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from gigachat.models.chat_completions import ChatCompletionChunk, ChatCompletionResponse
 from loguru import logger
 
+from gpt2giga.common.harness_model import harness_model_signature
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
@@ -405,8 +406,8 @@ def test_anthropic_normalized_failure_falls_back_before_response():
     ]
 
 
-def test_anthropic_messages_v2_pins_claude_cli_harness_model():
-    app = make_app("v2", pass_model=False)
+def test_anthropic_messages_v2_pins_signed_claude_cli_harness_model():
+    app = make_app("v2", pass_model=False, harness_model_key="model-key")
     client = TestClient(app)
 
     response = client.post(
@@ -418,8 +419,13 @@ def test_anthropic_messages_v2_pins_claude_cli_harness_model():
         },
         headers={
             "user-agent": "claude-cli/2.1.197 (external, sdk-cli)",
-            "x-gpt2giga-harness-model": "GigaChat-Selected",
+            "x-gigaloom-model": "GigaChat-Selected",
             "x-gpt2giga-pass-model": "false",
+            "x-gigaloom-model-signature": harness_model_signature(
+                "model-key",
+                protocol="anthropic",
+                model="GigaChat-Selected",
+            ),
         },
     )
 
@@ -427,6 +433,30 @@ def test_anthropic_messages_v2_pins_claude_cli_harness_model():
     assert response.json()["model"] == "claude-haiku-4-5-20251001"
     assert app.state.gigachat_client.achat.chat_completion_calls == [
         {"contract": "anthropic-v2", "model": "GigaChat-Selected"}
+    ]
+
+
+def test_anthropic_messages_v2_ignores_unsigned_claude_cli_model_override():
+    app = make_app("v2", pass_model=False, harness_model_key="model-key")
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages",
+        json={
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={
+            "user-agent": "claude-cli/2.1.197 (external, sdk-cli)",
+            "x-gigaloom-model": "GigaChat-Selected",
+            "x-gpt2giga-pass-model": "false",
+        },
+    )
+
+    assert response.status_code == 200
+    assert app.state.gigachat_client.achat.chat_completion_calls == [
+        {"contract": "anthropic-v2"}
     ]
 
 
