@@ -29,6 +29,7 @@ from gpt2giga_harness.integration_flows import IntegrationFlowService
 from gpt2giga_harness.mcp import build_mcp_inventory
 from gpt2giga_harness.native_cli_contracts import WORKBENCH_INTEGRATION_SPECS
 from gpt2giga_harness.project import load_project_config, resolve_project
+from gpt2giga_harness.product_inventory import product_inventory_summary
 from gpt2giga_harness.provider_settings import ProviderSettingsService
 from gpt2giga_harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga_harness.runtime.network_access import network_access_manifest
@@ -160,6 +161,7 @@ def build_doctor_report(
                 "machine": platform.machine(),
             },
         },
+        "product_inventory": product_inventory_summary(),
         "ok": summary["blocked"] == 0,
         "summary": summary,
         "checks": checks,

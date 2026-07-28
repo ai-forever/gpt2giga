@@ -109,6 +109,10 @@ jobs:
         if: matrix.python-version == '3.13'
         run: uv run ruff format --check .
 
+      - name: Validate generated product and documentation truth
+        if: matrix.python-version == '3.13'
+        run: uv run giga harness capabilities --inventory --check
+
       - name: Run tests with coverage
         run: |
           uv run pytest tests/ -n 4 --cov=. --cov-report=json:coverage.json --cov-fail-under=80
