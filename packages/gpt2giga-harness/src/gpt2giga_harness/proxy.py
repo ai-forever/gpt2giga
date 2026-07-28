@@ -11,7 +11,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import quote
 from urllib.parse import urlparse
@@ -83,6 +83,7 @@ class ProxyStartup:
     proxy_url: str | None = None
     started: bool = False
     api_key: str | None = None
+    harness_model_key: str | None = field(default=None, repr=False)
     pid: int | None = None
     ownership_id: str | None = None
     health_path: str | None = None
@@ -109,8 +110,14 @@ class ProxyRoutePreflight:
         """Return the transient proxy key without serializing it as evidence."""
         return self.startup.api_key
 
+    @property
+    def harness_model_key(self) -> str | None:
+        """Return the transient model-signing key without serializing it."""
+        return self.startup.harness_model_key
+
 
 _SIDECAR_API_KEYS: dict[str, str] = {}
+_SIDECAR_MODEL_KEYS: dict[str, str] = {}
 _OWNED_SIDECARS: dict[str, subprocess.Popen[Any]] = {}
 _OWNED_SIDECARS_LOCK = threading.RLock()
 _STREAM_POLL_SECONDS = 0.02
@@ -386,6 +393,11 @@ def cached_sidecar_api_key(proxy_url: str) -> str | None:
     return _SIDECAR_API_KEYS.get(proxy_url)
 
 
+def cached_sidecar_model_key(proxy_url: str) -> str | None:
+    """Return the generated sidecar model-signing key for this process."""
+    return _SIDECAR_MODEL_KEYS.get(proxy_url)
+
+
 def ensure_proxy_available(
     context: HarnessContext,
     api_mode: GigaChatApiMode,
@@ -396,12 +408,16 @@ def ensure_proxy_available(
     cached_api_key = context.api_key
     if cached_api_key is None and use_cached_sidecar_key:
         cached_api_key = cached_sidecar_api_key(context.proxy_url)
+    harness_model_key = context.harness_model_key or cached_sidecar_model_key(
+        context.proxy_url
+    )
     health = _health_check_url(context.proxy_url)
     if health.ok:
         return ProxyStartup(
             ok=True,
             proxy_url=context.proxy_url,
             api_key=cached_api_key,
+            harness_model_key=harness_model_key,
             health_path=health.path,
             health_status_code=health.status_code,
             detail=f"proxy already reachable via {health.path}",
@@ -413,6 +429,7 @@ def ensure_proxy_available(
             ok=False,
             proxy_url=context.proxy_url,
             api_key=cached_api_key,
+            harness_model_key=harness_model_key,
             error=preflight.reason,
         )
 
@@ -519,6 +536,7 @@ def stop_owned_sidecar(startup: ProxyStartup) -> bool:
         startup.proxy_url
     ):
         _SIDECAR_API_KEYS.pop(startup.proxy_url, None)
+        _SIDECAR_MODEL_KEYS.pop(startup.proxy_url, None)
     return True
 
 
@@ -676,12 +694,14 @@ def _start_local_sidecar(
     port = parsed.port or 80
     bind_host = "::1" if parsed.hostname == "::1" else "127.0.0.1"
     api_key = api_key or secrets.token_urlsafe(32)
+    harness_model_key = secrets.token_urlsafe(32)
     env = _sidecar_env(
         context,
         api_mode,
         host=bind_host,
         port=port,
         api_key=api_key,
+        harness_model_key=harness_model_key,
     )
     process = subprocess.Popen(
         [sys.executable, "-c", "from gpt2giga import run; run()"],
@@ -698,11 +718,13 @@ def _start_local_sidecar(
                 ok=False,
                 proxy_url=context.proxy_url,
                 api_key=api_key,
+                harness_model_key=harness_model_key,
                 error=f"proxy sidecar exited early with code {process.returncode}",
             )
         health = _health_check_url(context.proxy_url)
         if health.ok:
             _SIDECAR_API_KEYS[context.proxy_url] = api_key
+            _SIDECAR_MODEL_KEYS[context.proxy_url] = harness_model_key
             with _OWNED_SIDECARS_LOCK:
                 _OWNED_SIDECARS[ownership_id] = process
             return ProxyStartup(
@@ -710,6 +732,7 @@ def _start_local_sidecar(
                 proxy_url=context.proxy_url,
                 started=True,
                 api_key=api_key,
+                harness_model_key=harness_model_key,
                 pid=process.pid,
                 ownership_id=ownership_id,
                 health_path=health.path,
@@ -727,6 +750,7 @@ def _start_local_sidecar(
         ok=False,
         proxy_url=context.proxy_url,
         api_key=api_key,
+        harness_model_key=harness_model_key,
         error=(
             f"timed out waiting for local proxy sidecar to start at {context.proxy_url}"
         ),
@@ -740,6 +764,7 @@ def _sidecar_env(
     host: str,
     port: int,
     api_key: str,
+    harness_model_key: str,
 ) -> dict[str, str]:
     env = dict(os.environ)
     env.update(
@@ -749,6 +774,7 @@ def _sidecar_env(
             "GPT2GIGA_PORT": str(port),
             "GPT2GIGA_ENABLE_API_KEY_AUTH": "True",
             "GPT2GIGA_API_KEY": api_key,
+            "GPT2GIGA_HARNESS_MODEL_KEY": harness_model_key,
             "GPT2GIGA_GIGACHAT_API_MODE": api_mode.value,
             "GPT2GIGA_PASS_MODEL": "False",
             "GPT2GIGA_DISABLE_REASONING": "True",

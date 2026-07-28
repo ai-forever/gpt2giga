@@ -21,7 +21,6 @@ from gpt2giga_harness.ui.remote_identity import (
     REMOTE_TRANSACTION_COOKIE,
     RemoteIdentityError,
 )
-from gpt2giga_harness.ui.static import INDEX_HTML, UIAssetNotFoundError, load_asset
 from gpt2giga_harness.ui.cockpit_v2 import (
     CockpitV2AssetNotFoundError,
     CockpitV2UnavailableError,
@@ -114,8 +113,8 @@ def _cockpit_unavailable(exc: CockpitV2UnavailableError) -> HTTPException:
     return HTTPException(
         status_code=503,
         detail=(
-            "Cockpit V2 packaged assets are unavailable; use /legacy while the "
-            "installation is repaired"
+            "Cockpit packaged assets are unavailable. Reinstall the "
+            "gpt2giga-harness package or restore its verified build artifact."
         ),
     )
 
@@ -356,29 +355,6 @@ def create_shell_router(security: HarnessUISecurity) -> APIRouter:
             },
         )
 
-    @router.get("/assets/{asset_name:path}", include_in_schema=False)
-    def ui_asset(asset_name: str) -> Response:
-        media_types = {
-            "app.css": "text/css; charset=utf-8",
-            "app.js": "text/javascript; charset=utf-8",
-            "brand/gigaloom-mark.svg": "image/svg+xml",
-            "brand/gigaloom-mark-dark.svg": "image/svg+xml",
-            "brand/gigaloom-mask.svg": "image/svg+xml",
-            "brand/gigaloom.webmanifest": "application/manifest+json",
-        }
-        media_type = media_types.get(asset_name)
-        if media_type is None:
-            raise HTTPException(status_code=404, detail="UI asset not found")
-        try:
-            content = load_asset(asset_name)
-        except UIAssetNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="UI asset not found") from exc
-        return Response(
-            content=content,
-            media_type=media_type,
-            headers={"Cache-Control": "public, max-age=3600"},
-        )
-
     @router.get("/cockpit-v2/assets/{asset_name:path}", include_in_schema=False)
     def cockpit_v2_asset(asset_name: str, request: Request) -> Response:
         encoding = _accepted_encoding(request.headers.get("accept-encoding"))
@@ -425,22 +401,6 @@ def create_shell_router(security: HarnessUISecurity) -> APIRouter:
         except CockpitV2UnavailableError as exc:
             raise _cockpit_unavailable(exc) from exc
         return HTMLResponse(content, headers=_COCKPIT_V2_SHELL_HEADERS)
-
-    @router.get(
-        "/legacy",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-    )
-    @router.get(
-        "/legacy/{spa_path:path}",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-    )
-    def legacy_shell(spa_path: str = "") -> HTMLResponse:
-        normalized = spa_path.strip("/")
-        if normalized and _SPA_PATH.fullmatch(normalized) is None:
-            raise HTTPException(status_code=404, detail="Not found")
-        return HTMLResponse(INDEX_HTML, headers={"Cache-Control": "no-cache"})
 
     @router.get(
         "/{spa_path:path}", response_class=RedirectResponse, include_in_schema=False

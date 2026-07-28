@@ -262,6 +262,7 @@ class HarnessContext:
 
     proxy_url: str
     api_key: str | None = None
+    harness_model_key: str | None = field(default=None, repr=False)
     default_model: str | None = None
     timeout_seconds: float = 3600.0
     auto_start_proxy: bool = False

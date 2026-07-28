@@ -29,7 +29,7 @@ from gpt2giga_harness.anthropic_compatible import (
     official_anthropic_profile,
     parse_anthropic_models_response,
 )
-from gpt2giga_harness.claude_agent_sdk_poc import ClaudeSdkAuthMode
+from gpt2giga_harness.claude_agent_sdk import ClaudeSdkAuthMode
 from gpt2giga_harness.execution import ExecutionTransport
 from gpt2giga_harness.provider_profiles import (
     AuthenticationOwnership,

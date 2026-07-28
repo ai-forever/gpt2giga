@@ -51,6 +51,7 @@ OPENAI_CHAT_COMPLETIONS_DIALECT = "openai-chat-completions-v1"
 OPENAI_MODELS_DISCOVERY_STRATEGY = "openai-models-v1"
 OPENAI_PROBE_OWNER = "provider-probe:openai-compatible"
 OPENAI_DISCOVERY_CACHE_TTL_SECONDS = 300
+VLLM_OPENAI_COMPATIBLE_PROFILE_VERSION = "gigaloom.vllm-openai-compatible.v1"
 MAX_OPENAI_MODELS = 500
 MAX_OPENAI_MODEL_ID_CHARS = 256
 
@@ -326,6 +327,48 @@ def custom_openai_compatible_profile(
         offline=offline,
         discovery_cache_ttl_seconds=discovery_cache_ttl_seconds,
         capability_source="openai-compatible-template",
+    )
+
+
+def vllm_openai_compatible_profile(
+    *,
+    provider_id: str,
+    base_url: str,
+    model: str,
+    display_name: str = "vLLM",
+    route_prefix: str | None = "/v1",
+    secret_reference: SecretReference | None = None,
+    ownership: ProviderOwnership = ProviderOwnership.USER,
+    proxy_policy_ref: str | None = None,
+    tls_policy_ref: str | None = None,
+    egress_policy_ref: str | None = None,
+    offline: bool = False,
+    discovery_cache_ttl_seconds: int = OPENAI_DISCOVERY_CACHE_TTL_SECONDS,
+) -> ProviderProfile:
+    """Build the reviewed v1 vLLM Chat Completions profile."""
+    authentication = (
+        ProviderAuthentication(
+            AuthenticationOwnership.SECRET_REFERENCE,
+            secret_reference,
+        )
+        if secret_reference is not None
+        else ProviderAuthentication(AuthenticationOwnership.NONE)
+    )
+    return _build_profile(
+        provider_id=provider_id,
+        display_name=display_name,
+        base_url=base_url,
+        route_prefix=route_prefix,
+        wire_api=OpenAIWireAPI.CHAT_COMPLETIONS,
+        authentication=authentication,
+        ownership=ownership,
+        default_models=(ModelPurposeDefault(ModelPurpose.CODING, model),),
+        proxy_policy_ref=proxy_policy_ref,
+        tls_policy_ref=tls_policy_ref,
+        egress_policy_ref=egress_policy_ref,
+        offline=offline,
+        discovery_cache_ttl_seconds=discovery_cache_ttl_seconds,
+        capability_source=VLLM_OPENAI_COMPATIBLE_PROFILE_VERSION,
     )
 
 

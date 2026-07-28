@@ -187,6 +187,8 @@ cython_debug/
 
 
 node_modules/
+packages/gpt2giga-harness/frontend/public/brand/
+packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/
 docs/internal/
 scripts/internal/
 .python-version

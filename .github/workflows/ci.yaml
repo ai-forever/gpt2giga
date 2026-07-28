@@ -7,9 +7,11 @@ on:
       - 'packages/**'
       - '!packages/**/*.md'
       - 'tests/**'
+      - 'benchmarks/gigaloom_performance/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/ci.yaml'
+      - '.github/workflows/nightly-smoke.yaml'
   pull_request:
     branches: [ main ]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -17,9 +19,11 @@ on:
       - 'packages/**'
       - '!packages/**/*.md'
       - 'tests/**'
+      - 'benchmarks/gigaloom_performance/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/ci.yaml'
+      - '.github/workflows/nightly-smoke.yaml'
 
 jobs:
   cockpit-v2-frontend:
@@ -38,6 +42,9 @@ jobs:
           cache: npm
           cache-dependency-path: packages/gpt2giga-harness/frontend/package-lock.json
 
+      - name: Install pinned npm 11.17
+        run: npm install --global --ignore-scripts npm@11.17.0
+
       - name: Install pinned frontend dependencies
         working-directory: packages/gpt2giga-harness/frontend
         run: npm ci --ignore-scripts
@@ -46,12 +53,25 @@ jobs:
         working-directory: packages/gpt2giga-harness/frontend
         run: npm run check
 
-      - name: Reject stale generated Cockpit V2 assets
-        run: git diff --exit-code -- packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
+      - name: Produce clean commit-bound Cockpit assets
+        working-directory: packages/gpt2giga-harness/frontend
+        run: npm run build:release
+
+      - name: Verify Cockpit provenance and supply-chain evidence
+        run: python3 packages/gpt2giga-harness/asset_contract.py --require-clean
+
+      - name: Upload commit-bound Cockpit assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: cockpit-v2-assets-${{ github.sha }}
+          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
+          if-no-files-found: error
+          retention-days: 7
 
   test:
     name: Test on Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    needs: cockpit-v2-frontend
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
@@ -62,6 +82,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Download verified Cockpit assets
+        uses: actions/download-artifact@v7
+        with:
+          name: cockpit-v2-assets-${{ github.sha }}
+          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -83,10 +109,27 @@ jobs:
         if: matrix.python-version == '3.13'
         run: uv run ruff format --check .
 
+      - name: Validate generated product and documentation truth
+        if: matrix.python-version == '3.13'
+        run: uv run giga harness capabilities --inventory --check
+
       - name: Run tests with coverage
         run: |
           uv run pytest tests/ -n 4 --cov=. --cov-report=json:coverage.json --cov-fail-under=80
         continue-on-error: false
+
+      - name: Run deterministic GigaLoom performance budgets
+        if: matrix.python-version == '3.13'
+        run: uv run giga benchmark performance --profile ci-smoke --samples 5 --output performance-artifacts/ci-smoke.json
+
+      - name: Upload bounded performance smoke report
+        if: always() && matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v7
+        with:
+          name: gigaloom-performance-ci-smoke
+          path: performance-artifacts/ci-smoke.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload coverage artifact
         if: matrix.python-version == '3.13'
@@ -98,11 +141,18 @@ jobs:
   build-artifacts:
     name: Build workspace artifacts
     runs-on: ubuntu-latest
+    needs: cockpit-v2-frontend
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Download verified Cockpit assets
+        uses: actions/download-artifact@v7
+        with:
+          name: cockpit-v2-assets-${{ github.sha }}
+          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -144,6 +194,7 @@ jobs:
   artifact-smoke:
     name: ${{ matrix.package }} artifact smoke on Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    needs: cockpit-v2-frontend
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
@@ -155,6 +206,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Download verified Cockpit assets
+        uses: actions/download-artifact@v7
+        with:
+          name: cockpit-v2-assets-${{ github.sha }}
+          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -215,7 +272,7 @@ jobs:
           GATEWAY_VERSION: ${{ steps.versions.outputs.gateway }}
           HARNESS_VERSION: ${{ steps.versions.outputs.harness }}
         run: |
-          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, os, gpt2giga, gpt2giga_harness; from gpt2giga_harness.ui.cockpit_v2 import load_cockpit_v2_manifest; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert m.version('gpt2giga-harness') == os.environ['HARNESS_VERSION']; assert r.files('gpt2giga_harness.ui').joinpath('assets/index.html').is_file(); assert load_cockpit_v2_manifest().entry == 'index.html'"
+          .venv-artifact/bin/python -I -c "import importlib.metadata as m, importlib.resources as r, os, gpt2giga, gpt2giga_harness; from gpt2giga_harness.ui.cockpit_v2 import load_cockpit_v2_manifest; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']; assert m.version('gpt2giga-harness') == os.environ['HARNESS_VERSION']; assert r.files('gpt2giga_harness.ui.cockpit_v2').joinpath('assets/index.html').is_file(); assert load_cockpit_v2_manifest().entry == 'index.html'"
           .venv-artifact/bin/gpt2giga --help
           .venv-artifact/bin/giga --help
           .venv-artifact/bin/giga --version
@@ -224,6 +281,7 @@ jobs:
   harness-terminal-artifact-smoke:
     name: Harness terminal wheel on ${{ matrix.os }} / Python ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
+    needs: cockpit-v2-frontend
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
@@ -238,6 +296,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Download verified Cockpit assets
+        uses: actions/download-artifact@v7
+        with:
+          name: cockpit-v2-assets-${{ github.sha }}
+          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -300,17 +364,11 @@ jobs:
           name: coverage-3.13
           path: .
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Set up Python
-        run: uv python install 3.13
-
       - name: Generate badge
         run: |
           COVERAGE=$(jq '.totals.percent_covered' coverage.json)
           echo "COVERAGE=$COVERAGE" >> "$GITHUB_ENV"
-          uv run python scripts/generate_badge.py "$COVERAGE" badges/coverage.svg
+          python3 scripts/generate_badge.py "$COVERAGE" badges/coverage.svg
 
       - name: Upload badge artifact
         uses: actions/upload-artifact@v7

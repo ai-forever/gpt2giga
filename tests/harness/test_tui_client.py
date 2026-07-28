@@ -23,10 +23,15 @@ from gpt2giga_harness.terminal_intent import parse_tui_launch_intent
 from gpt2giga_harness.tui.client import (
     AttachedWorkbenchClient,
     InProcessWorkbenchClient,
+    NativeTerminalSnapshot,
+    RunActionBinding,
+    RunSnapshot,
+    TimelineEvent,
     WorkbenchClientError,
     session_action_binding,
 )
 from gpt2giga_harness.tui.i18n import CATALOGS, resolve_locale, translator
+from gpt2giga_harness.types import HarnessCapability
 from gpt2giga_harness.workbench_resources import (
     InventoryProjection,
     PreferenceSnapshot,
@@ -73,6 +78,9 @@ async def test_in_process_client_navigates_projects_and_sessions(tmp_path):
             "title": "First\x1b]52;c;hidden\x07 \u202esession",
             "harness_id": "echo",
             "model": "local-model",
+            "workbench_kind": "direct_chat",
+            "task_intent": "review",
+            "authority": "read_only",
         },
         validate_harness=True,
     )
@@ -88,6 +96,9 @@ async def test_in_process_client_navigates_projects_and_sessions(tmp_path):
     assert {project.root for project in snapshot.projects} == {str(first), str(second)}
     assert [session.id for session in snapshot.sessions] == [first_session.id]
     assert snapshot.sessions[0].title == "First⟦terminal-control⟧ �session"
+    assert snapshot.sessions[0].task_intent == "review"
+    assert snapshot.sessions[0].authority == "read_only"
+    assert snapshot.sessions[0].compatibility_warning is None
     assert snapshot.readiness.harness_id == "echo"
     assert snapshot.readiness.harness_status == "available"
     assert snapshot.readiness.model == "local-model"
@@ -366,6 +377,47 @@ async def test_in_process_client_submits_idempotent_turn_and_resnapshots(tmp_pat
     assert run.model == "intent-model"
     assert run.mode == "read"
     assert run.metadata["execution_transport"] == "one_shot"
+
+
+@pytest.mark.anyio
+async def test_in_process_client_streams_broker_updates_without_active_polling(
+    tmp_path,
+):
+    client = InProcessWorkbenchClient(HarnessConfig(data_dir=str(tmp_path / "state")))
+    session = client.store.create_session(title="Live delivery")
+    run = client.store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="content-free",
+        model=None,
+        api_mode=session.default_api_mode,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="read",
+        workspace=None,
+        status="running",
+    )
+    stream = client.stream_run(run.id)
+
+    initial = await anext(stream)
+    pending = asyncio.create_task(anext(stream))
+    await asyncio.sleep(0)
+    client.store.append_event(
+        HarnessStoredEvent(
+            id="evt-live",
+            session_id=session.id,
+            run_id=run.id,
+            type="message_delta",
+            message="content-free update",
+            payload={"delta": "ready"},
+            created_at=utc_now(),
+        )
+    )
+    delivered = await asyncio.wait_for(pending, timeout=1)
+    await stream.aclose()
+
+    assert initial.events == ()
+    assert [event.id for event in delivered.events] == ["evt-live"]
+    assert client.store.event_broker.subscriber_count(run.id) == 0
 
 
 @pytest.mark.anyio
@@ -841,6 +893,165 @@ async def test_attach_client_stream_snapshot_and_actions_share_exact_binding(
     )
     assert steer_payload["revision"] == "a" * 64
     assert steer_payload["generation"] == 3
+
+
+@pytest.mark.anyio
+async def test_attach_client_converts_run_and_native_sse_delivery(monkeypatch):
+    client = AttachedWorkbenchClient("http://127.0.0.1:8091")
+    paths: list[str] = []
+    snapshots = [
+        RunSnapshot(
+            RunActionBinding("sess_1", "run_1", "a" * 64, 1, "turn_1"),
+            "running",
+            (TimelineEvent("evt_1", "message_delta", "delta", delta="ready"),),
+            "at1.1.evt_1",
+        ),
+        RunSnapshot(
+            RunActionBinding("sess_1", "run_1", "b" * 64, 1, "turn_1"),
+            "succeeded",
+            (TimelineEvent("evt_3", "run_finished", "finished"),),
+            "at1.1.evt_3",
+        ),
+    ]
+
+    async def stream_sse(path):
+        paths.append(path)
+        if "/api/runs/" in path:
+            yield SimpleNamespace(
+                event="message",
+                data={
+                    "id": "evt_1",
+                    "session_id": "sess_1",
+                    "run_id": "run_1",
+                    "type": "message_delta",
+                    "message": "delta",
+                    "payload": {"delta": "ready"},
+                    "created_at": "2026-07-20T00:00:00Z",
+                },
+            )
+            yield SimpleNamespace(
+                event="message",
+                data={
+                    "id": "evt_2",
+                    "session_id": "sess_1",
+                    "run_id": "run_1",
+                    "type": "message_delta",
+                    "message": "second delta",
+                    "payload": {"delta": "second"},
+                    "created_at": "2026-07-20T00:00:01Z",
+                },
+            )
+            yield SimpleNamespace(
+                event="message",
+                data={
+                    "id": "evt_3",
+                    "session_id": "sess_1",
+                    "run_id": "run_1",
+                    "type": "run_finished",
+                    "message": "finished",
+                    "payload": {"status": "succeeded"},
+                    "created_at": "2026-07-20T00:00:02Z",
+                },
+            )
+            return
+        yield SimpleNamespace(
+            event="message",
+            data={
+                "process": {
+                    "id": "proc_1",
+                    "session_id": "sess_1",
+                    "run_id": "run_native",
+                    "harness_id": "codex-cli",
+                    "transport": "pty",
+                    "status": "exited",
+                    "terminal_cursor": 3,
+                    "exit_code": 0,
+                },
+                "cursor": 3,
+                "outputs": [{"cursor": 3, "stream": "stdout", "text": "done"}],
+                "run": {"id": "run_native", "session_id": "sess_1"},
+            },
+        )
+
+    async def snapshot_run(run_id, *, cursor=None):
+        assert run_id == "run_1"
+        return snapshots.pop(0)
+
+    monkeypatch.setattr(client, "_stream_sse", stream_sse)
+    monkeypatch.setattr(client, "snapshot_run", snapshot_run)
+
+    delivered = [
+        snapshot
+        async for snapshot in client.stream_run(
+            "run_1",
+            cursor="at1.1.evt_0",
+        )
+    ]
+    native = [
+        snapshot async for snapshot in client.stream_native_terminal("proc_1", cursor=2)
+    ]
+
+    assert [snapshot.status for snapshot in delivered] == [
+        "running",
+        "running",
+        "succeeded",
+    ]
+    assert delivered[1].events[0].id == "evt_2"
+    assert snapshots == []
+    assert native == [
+        NativeTerminalSnapshot(
+            "proc_1",
+            "sess_1",
+            "run_native",
+            "codex-cli",
+            "pty",
+            "exited",
+            3,
+            output="done",
+            exit_code=0,
+        )
+    ]
+    assert paths == [
+        "/api/runs/run_1/events/stream?after_id=evt_0",
+        "/api/native/processes/proc_1/output/stream?cursor=2",
+    ]
+
+
+@pytest.mark.anyio
+async def test_attach_client_sse_parser_is_bounded_and_preserves_event_metadata():
+    class Response:
+        headers = {"Content-Type": "text/event-stream; charset=utf-8"}
+
+        def __init__(self):
+            self.lines = iter(
+                (
+                    b": connected\n",
+                    b"id: cursor_1\n",
+                    b"event: resnapshot\n",
+                    b'data: {"reason":"slow_consumer"}\n',
+                    b"\n",
+                    b"",
+                )
+            )
+            self.closed = False
+
+        def readline(self, _limit):
+            return next(self.lines)
+
+        def close(self):
+            self.closed = True
+
+    response = Response()
+    client = AttachedWorkbenchClient("http://127.0.0.1:8091")
+    client._bootstrapped = True
+    client._opener = SimpleNamespace(open=lambda *_args, **_kwargs: response)
+
+    frames = [frame async for frame in client._stream_sse("/events")]
+
+    assert [(frame.event, frame.id, frame.data) for frame in frames] == [
+        ("resnapshot", "cursor_1", {"reason": "slow_consumer"})
+    ]
+    assert response.closed is True
 
 
 @pytest.mark.anyio

@@ -32,6 +32,8 @@ def test_native_facade_doctor_evidence_keeps_l0_ready_when_l2_drifts():
     }
     assert evidence["transport"] == "app-server"
     assert evidence["degradation"] == "structured_above_window"
+    assert evidence["executable"] == "codex"
+    assert evidence["executable_present"] is True
     assert "L0 remains available" in evidence["remediation"]
 
 
@@ -248,8 +250,19 @@ def test_doctor_report_is_redacted_actionable_and_workspace_scoped(
 
     serialized = json.dumps(report)
     by_id = {check["id"]: check for check in report["checks"]}
-    assert report["schema_version"] == 1
+    assert report["schema_version"] == 2
     assert report["kind"] == "gpt2giga_harness_doctor_report"
+    assert report["privacy"] == {
+        "content_free": True,
+        "prompts_collected": False,
+        "sensitive_values_collected": False,
+        "oauth_material_collected": False,
+        "raw_traffic_collected": False,
+        "private_file_content_collected": False,
+        "raw_paths_collected": False,
+    }
+    assert report["export"]["check_count"] == len(report["checks"])
+    assert len(report["export"]["content_sha256"]) == 64
     assert report["environment"]["packages"] == {
         "gpt2giga": "0.2.3a2",
         "gpt2giga-harness": "0.0.1a4",
@@ -263,11 +276,68 @@ def test_doctor_report_is_redacted_actionable_and_workspace_scoped(
     assert by_id["durable-worker"]["remediation"][0]["command"] == "giga worker start"
     assert by_id["managed-homes"]["evidence"]["storage_writable"] is True
     assert by_id["managed-mcp-snapshots"]["evidence"]["stored"] == 0
+    assert by_id["ui-identity"]["evidence"]["mode"] == "local"
+    assert by_id["scoped-network"]["evidence"]["default"] == "deny"
+    assert by_id["mcp-sources"]["evidence"]["probed"] is False
+    assert by_id["skills-sources"]["evidence"]["oidc_material_readable"] is False
+    assert by_id["plugin-sources"]["evidence"]["plugin_content_retained"] is False
     assert by_id["provider-profiles"]["evidence"]["values_resolved"] is False
     assert by_id["extensions"]["evidence"]["installation_authorized"] is False
     assert by_id["github-cli"]["evidence"]["network_contacted"] is False
     assert by_id["optional-dependencies"]["status"] == "ready"
     assert by_id["support-export"]["evidence"]["mode"] == "0600"
+
+
+def test_privacy_safe_web_doctor_skips_online_model_and_route_checks(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        proxy,
+        "health_check",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("health probe must not run")
+        ),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "discover_models",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("model discovery must not run")
+        ),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "probe_json_route",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("route probe must not run")
+        ),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "sidecar_preflight",
+        lambda _context: proxy.SidecarPreflight(ok=True, reason="ready"),
+    )
+
+    report = build_doctor_report(
+        HarnessConfig(data_dir=str(tmp_path / "state")),
+        HarnessRegistry(),
+        workspace=tmp_path,
+        online_checks=False,
+        ui_identity={
+            "local": True,
+            "authenticated": True,
+            "claimable": False,
+        },
+    )
+
+    by_id = {check["id"]: check for check in report["checks"]}
+    assert report["guided"]["online_checks"] is False
+    assert by_id["ui-identity"]["status"] == "ready"
+    assert by_id["proxy-health"]["evidence"]["network_contacted"] is False
+    assert by_id["route-v1"]["evidence"]["checked"] is False
+    assert by_id["route-v2"]["evidence"]["checked"] is False
+    assert by_id["model-discovery"]["evidence"]["checked"] is False
 
 
 def test_doctor_reads_worker_status_without_rewriting_runtime_state(

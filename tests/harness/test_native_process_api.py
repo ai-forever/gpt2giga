@@ -1389,6 +1389,59 @@ def test_native_proxy_preflight_failure_prevents_plan_and_process_start(
     assert store.list_runs(session.id) == ()
 
 
+def test_native_proxy_preflight_supplies_transient_model_key_to_plan(
+    tmp_path,
+    monkeypatch,
+):
+    script = _write_once_cli(tmp_path)
+    observed_keys: list[tuple[str | None, str | None]] = []
+
+    class CapturingConnector(FakeProcessConnector):
+        def build_start_command(self, request, context):
+            observed_keys.append((context.api_key, context.harness_model_key))
+            return super().build_start_command(request, context)
+
+    connector = CapturingConnector(
+        start_script=script,
+        requires_proxy_preflight=True,
+    )
+    client, store = _client(tmp_path, connector)
+    session = store.create_session(
+        workspace=str(tmp_path),
+        default_harness_id="fake-cli",
+    )
+    startup = proxy.ProxyStartup(
+        ok=True,
+        proxy_url="http://127.0.0.1:8090",
+        api_key="owned-proxy-key",
+        harness_model_key="owned-model-key",
+    )
+    monkeypatch.setattr(
+        proxy,
+        "ensure_proxy_route_available",
+        lambda context, api_mode: proxy.ProxyRoutePreflight(
+            ok=True,
+            proxy_url=context.proxy_url,
+            api_mode=api_mode,
+            route_path=f"/{api_mode.value}/models",
+            startup=startup,
+            status_code=200,
+        ),
+    )
+
+    response = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert response.status_code == 200
+    assert observed_keys == [("owned-proxy-key", "owned-model-key")]
+
+
 def test_native_spawn_failure_stops_new_owned_sidecar(tmp_path, monkeypatch):
     missing_script = tmp_path / "missing-native-cli"
 

@@ -3,6 +3,7 @@ from dataclasses import replace
 
 import pytest
 
+from gpt2giga_harness.harness_model import signed_harness_model_headers
 from gpt2giga_harness.native.base import native_command_plan_to_dict
 from gpt2giga_harness.native.gemini import (
     GeminiNativeHistoryConnector,
@@ -573,6 +574,7 @@ def test_gemini_native_start_command_uses_managed_home_and_redacts_key(
     context = HarnessContext(
         proxy_url="http://127.0.0.1:8090",
         api_key=secret,
+        harness_model_key="model-key",
         default_model="GigaChat-2-Max",
     )
 
@@ -602,8 +604,13 @@ def test_gemini_native_start_command_uses_managed_home_and_redacts_key(
     assert plan.env["GOOGLE_GEMINI_BASE_URL"] == "http://127.0.0.1:8090/v2"
     assert plan.env["GEMINI_API_KEY"] == secret
     assert plan.env["GEMINI_MODEL"] == "GigaChat-2-Max"
-    assert plan.env["GEMINI_CLI_CUSTOM_HEADERS"] == (
-        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max,X-GPT2GIGA-Pass-Model:false"
+    assert plan.env["GEMINI_CLI_CUSTOM_HEADERS"] == ",".join(
+        f"{name}:{value}"
+        for name, value in signed_harness_model_headers(
+            protocol="gemini",
+            model="GigaChat-2-Max",
+            key="model-key",
+        )
     )
     assert plan.env["HOME"] == plan.native_home
     assert json.loads(settings_path.read_text(encoding="utf-8")) == {
@@ -650,7 +657,10 @@ def test_gemini_native_start_command_delivers_attachment_prompt_without_trimming
             "metadata": {"transport": "at_file_reference"},
         },
     )
-    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="proxy-key",
+    )
 
     plan = connector.build_start_command(request, context)
 
@@ -713,7 +723,11 @@ def test_gemini_native_resume_command_requires_managed_ref(tmp_path):
         executable="gemini",
         capability_probe_runner=_supported_prompt_probe,
     )
-    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+    context = HarnessContext(
+        proxy_url="http://127.0.0.1:8090",
+        api_key="proxy-key",
+        harness_model_key="model-key",
+    )
     start_plan = connector.build_start_command(
         HarnessRequest(
             prompt="start",
@@ -772,8 +786,13 @@ def test_gemini_native_resume_command_requires_managed_ref(tmp_path):
     assert plan.execution_snapshot == start_plan.execution_snapshot
     assert plan.env["GOOGLE_GEMINI_BASE_URL"] == "http://127.0.0.1:8090/v1"
     assert plan.env["GEMINI_MODEL"] == "GigaChat-2-Max"
-    assert plan.env["GEMINI_CLI_CUSTOM_HEADERS"] == (
-        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max,X-GPT2GIGA-Pass-Model:false"
+    assert plan.env["GEMINI_CLI_CUSTOM_HEADERS"] == ",".join(
+        f"{name}:{value}"
+        for name, value in signed_harness_model_headers(
+            protocol="gemini",
+            model="GigaChat-2-Max",
+            key="model-key",
+        )
     )
     with pytest.raises(ValueError, match="Only managed"):
         connector.build_resume_command(external, context)

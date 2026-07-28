@@ -13,11 +13,10 @@ import sys
 from gpt2giga_harness import __version__
 from gpt2giga_harness.config import HarnessConfig
 from gpt2giga_harness.terminal_dispatch import TuiLaunchIntent
-from gpt2giga_harness.tui.client import (
-    AttachedWorkbenchClient,
-    InProcessWorkbenchClient,
-)
 from gpt2giga_harness.tui.i18n import resolve_locale
+
+AttachedWorkbenchClient = None
+InProcessWorkbenchClient = None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -95,6 +94,16 @@ def main(
             proxy_url=intent.proxy_url,
             auto_start_proxy=intent.auto_start_proxy,
         )
+        global AttachedWorkbenchClient, InProcessWorkbenchClient
+        if AttachedWorkbenchClient is None or InProcessWorkbenchClient is None:
+            from gpt2giga_harness.tui.client import (
+                AttachedWorkbenchClient as attached_client,
+                InProcessWorkbenchClient as in_process_client,
+            )
+
+            AttachedWorkbenchClient = attached_client
+            InProcessWorkbenchClient = in_process_client
+
         if args.attach:
             token = os.getenv(args.bootstrap_token_env)
             client = AttachedWorkbenchClient(args.attach, bootstrap_token=token)

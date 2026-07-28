@@ -2,7 +2,7 @@
 
 :::warning[Альфа-превью — prerelease]
 
-Линейка `gpt2giga-harness` 0.4.x — alpha-preview для тестирования и обратной
+Линейка `gpt2giga-harness` 0.5.x — alpha-preview для тестирования и обратной
 связи. UI, CLI, YAML-файлы проекта, схема runtime-хранилища и процесс обновления
 могут меняться. Используйте Harness локально, для контролируемой работы под
 наблюдением, а не как критичный production-сервис или удалённую multi-user
@@ -120,8 +120,8 @@ Node.js runtime, credentials или provider config. `uv tool` и `pipx` соз�
 изолированное окружение Harness:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.5.0a1'
-pipx install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
+pipx install 'gpt2giga-harness==0.5.1a1'
 ```
 
 Существующий prerelease с optional TUI обновляйте на месте без extra `[tui]`.
@@ -131,10 +131,10 @@ pipx install 'gpt2giga-harness==0.5.0a1'
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool install --force 'gpt2giga-harness==0.5.0a1'
+uv tool install --force 'gpt2giga-harness==0.5.1a1'
 uv tool install --force 'gpt2giga-harness==<previous-version>'
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
 ```
 
 Удаление пакета не удаляет `~/.gpt2giga/harness`, проектные `.giga/` или
@@ -193,19 +193,19 @@ giga harness list
 короткий вариант:
 
 ```bash
-uv tool install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
 giga doctor
 ```
 
 Для Direct Chat и provider preset `gpt2giga` установите явный extra:
 
 ```bash
-uv tool install 'gpt2giga-harness[gpt2giga]==0.5.0a1'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.5.1a1'
 ```
 
-Текущий дистрибутив `gpt2giga-harness==0.5.0a1` добавляет команды `giga` и
+Текущий дистрибутив `gpt2giga-harness==0.5.1a1` добавляет команды `giga` и
 `gpt2giga-harness`; его явный extra `gpt2giga` закрепляет
-`gpt2giga==0.2.5a1`.
+`gpt2giga==0.2.6a1`.
 
 Для Direct Chat понадобятся credentials из [быстрого старта gpt2giga](quickstart.md).
 Codex, Claude Code и Gemini — опциональные интеграции: соответствующий CLI
@@ -269,7 +269,7 @@ bytes, exit code и разделение stdout/stderr CLI.
 пакет и удалите `[tui]` из команд установки:
 
 ```bash
-uv tool install --force 'gpt2giga-harness==0.5.0a1'
+uv tool install --force 'gpt2giga-harness==0.5.1a1'
 giga --version
 giga
 ```
@@ -301,6 +301,17 @@ workspace не публикуется, а существующий runtime worke
 перезаписи. Отчёт также содержит стабильный kind, точные версии Harness/gateway,
 Python и platform metadata; совместимость внешних CLI берётся из тех же
 ограниченных capability probes, которые используются перед execution.
+
+Schema v2 добавляет UI identity boundary, scoped network contract, GitHub CLI и
+раздельные проверки источников MCP, Skills и Plugins. Отчёт явно фиксирует
+privacy contract, ограничивает число checks, содержит канонический SHA-256 и
+показывает для каждого отключённого действия точный шаг восстановления.
+**Настройки → Диагностика → Запустить first-run doctor** использует тот же
+контракт в offline-режиме: Web-проверка не обращается к provider/model routes,
+GitHub, skills.sh или IdP. Экспортируемый JSON содержит только счётчики, хэши,
+статусы и recovery-команды — без prompts, secrets, OAuth material, raw traffic,
+raw paths и содержимого приватных файлов. CLI doctor следует запускать только
+когда нужны live-проверки proxy и routes.
 
 Для CI порог задаётся явно. `--fail-on blocked` возвращает exit code 1 только
 при blocked checks, а `--fail-on degraded` — при degraded или blocked. Без
@@ -411,10 +422,10 @@ giga ui
 5. Изучите **Approvals**, **Attention**, **Automation**, **Evaluation** и
    **Integrations**, прежде чем включать edits или unattended execution.
 
-Cockpit V2 является локальным UI по умолчанию. Предыдущий no-build cockpit
-остаётся доступен по адресу `http://127.0.0.1:8091/legacy` на release-level
-период отката; переключение между ними не мигрирует и не переписывает runtime
-state Harness.
+Cockpit V2 — единственный поставляемый локальный UI. Сохранённые ссылки из
+предыдущего UI перенаправляются на канонические маршруты Cockpit без миграции
+или перезаписи runtime state Harness. Если пакетные assets Cockpit недоступны,
+переустановите пакет Harness или восстановите проверенный build artifact.
 
 У сохранённого ответа assistant кнопка Copy запрашивает и копирует полный
 текст, даже если в ленте показан ограниченный preview. Для structured и
@@ -739,6 +750,15 @@ approval-required, denied или unknown, а также как pre-start,
 runtime-dependent или provider-owned. Обязательный deny блокирует запуск;
 runtime-dependent и provider-owned действия не выдаются за гарантированное
 разрешение.
+
+Harness-owned исходящий HTTPS по умолчанию запрещён и использует
+[контракт ограниченного сетевого доступа](architecture/scoped-network-access-adr.md).
+Одновременно нужны точный непросроченный grant и включённая sandbox boundary;
+host, port, method class, redirect policy, purpose, digest request и transfer
+ceilings повторно проверяются до соединения. Публичные DNS answers pin-ятся, а
+connected peer обязан совпасть. Опциональная reviewed proxy policy работает
+только на loopback и по allowlist-first модели с purpose-bound expiring rules и
+без global wildcard. Сама policy не активирует provider или integration traffic.
 
 Runs Center может создать Trace-to-Replay comparison, изменив ровно одну ось:
 model, provider, Harness или extensions. Preview связывает сохранённое source
@@ -1100,6 +1120,17 @@ transcript автоматически и не переписывает homes Cod
 
 ## Browser UI, Smart Router и Arena
 
+Скомпилированные Cockpit bundles не хранятся в Git. В свежем source checkout до
+первого `uv sync` или сборки Harness wheel/sdist выполните
+`npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts`, затем
+`npm --prefix packages/gpt2giga-harness/frontend run build`. Producer атомарно
+создаёт ignored, привязанное к commit дерево с integrity metadata, npm SBOM и
+license evidence. Python build проверяет его без Node.js и network access и
+завершается ошибкой при отсутствии, stale source, подмене или неожиданных
+файлах. CI/release передают то же immutable дерево между jobs; wheel из sealed
+sdist остаётся Node-free. Для rollback checkout предыдущий release и повторите
+producer либо восстановите его точный asset artifact до Python build.
+
 UI состоит из **Work**, **Runs**, **Native**, **Arena**, **Approvals**,
 **Agents**, **Workflows**, **Evaluate**, **Tools** и **Scheduled**. Runs Center
 читает durable queue, trace и artifacts; reasoning model не отображается в
@@ -1153,6 +1184,13 @@ Schedule нельзя включить без live worker и успешного 
 content hash. Изменение material field ставит schedule на pause. Occurrence
 history не удаляется при archive, а unattended edit fail-closed без worktree и
 нужных approvals.
+
+Пустой worker теперь увеличивает idle wait от 250 мс до ограниченной 1 секунды.
+Изменения queue, approval и конфигурации schedule посылают content-free
+loopback wake signal, а ближайшие schedule, retry и lease deadlines ограничивают
+ожидание даже при недоступной доставке wake. `--poll-seconds` задаёт минимум,
+`--max-idle-seconds` — верхнюю границу. Это не увеличивает concurrency workers
+и не меняет семантику lease, cancellation, recovery или durable ownership.
 
 Форма Schedule следует модели Codex Scheduled для частых сценариев: выберите
 **Once**, **Daily**, **Weekdays** или **Weekly**, затем задайте первый запуск,
@@ -1654,12 +1692,12 @@ project state:
 ```bash
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
 giga doctor
 ```
 
-Текущая metadata `gpt2giga-harness==0.5.0a1` сохраняет
-`gpt2giga==0.2.5a1` в явном optional extra `gpt2giga`. Старый import
+Текущая metadata `gpt2giga-harness==0.5.1a1` сохраняет
+`gpt2giga==0.2.6a1` в явном optional extra `gpt2giga`. Старый import
 `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
 перезаписывает `~/.gpt2giga/harness`, `.giga/` или vendor-owned CLI homes.

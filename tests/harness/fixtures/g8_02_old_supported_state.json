@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "source_commit": "4622794a9e3a1cc1d0756fcdf0ebbe287899a391",
+  "files": {
+    "workflows/recovered-review.yaml": "id: recovered-review\ntitle: Recovered review\nversion: '1.0.0'\nsteps:\n  - id: retain\n    kind: transform\n    transform: identity\n"
+  }
+}

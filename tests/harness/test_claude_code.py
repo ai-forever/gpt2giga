@@ -23,7 +23,11 @@ def test_claude_code_sanitizes_env(monkeypatch):
 
     env = ClaudeCodeHarness().build_env(
         HarnessRequest(prompt="inspect", api_mode=GigaChatApiMode.V1),
-        HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key"),
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            api_key="proxy-key",
+            harness_model_key="model-key",
+        ),
     )
 
     assert "GIGACHAT_CREDENTIALS" not in env
@@ -31,7 +35,10 @@ def test_claude_code_sanitizes_env(monkeypatch):
     assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8090/v1"
     assert env["ANTHROPIC_API_KEY"] == "proxy-key"
     assert env["ANTHROPIC_CUSTOM_HEADERS"] == (
-        "X-GPT2GIGA-Harness-Model:GigaChat\nX-GPT2GIGA-Pass-Model:false"
+        "X-GigaLoom-Model:GigaChat\n"
+        "X-GPT2GIGA-Pass-Model:false\n"
+        "X-GigaLoom-Model-Signature:"
+        "v1:233a3bf9982a21ae07d6571616b23a8e5290922d69a92794a77997489676efe7"
     )
     assert env["GPT2GIGA_HARNESS_API_MODE"] == "v1"
 
@@ -41,14 +48,17 @@ def test_claude_code_preserves_custom_headers_and_encodes_pinned_model():
         HarnessRequest(prompt="inspect", model="team/model,preview"),
         HarnessContext(
             proxy_url="http://127.0.0.1:8090",
+            harness_model_key="model-key",
             extra_env={"ANTHROPIC_CUSTOM_HEADERS": "X-Team:blue"},
         ),
     )
 
     assert env["ANTHROPIC_CUSTOM_HEADERS"] == (
         "X-Team:blue\n"
-        "X-GPT2GIGA-Harness-Model:team%2Fmodel%2Cpreview\n"
-        "X-GPT2GIGA-Pass-Model:false"
+        "X-GigaLoom-Model:team%2Fmodel%2Cpreview\n"
+        "X-GPT2GIGA-Pass-Model:false\n"
+        "X-GigaLoom-Model-Signature:"
+        "v1:ee6d79b7b9667cc758a3eac1420caaa002910ea9142c5c5894e41dc1b746a12c"
     )
 
 

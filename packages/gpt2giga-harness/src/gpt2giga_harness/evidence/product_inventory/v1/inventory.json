@@ -1,0 +1,3101 @@
+{
+  "adapter_capability_matrix": {
+    "adapters": [
+      {
+        "id": "claude-code",
+        "protocol_capability_scope": "harness_surface",
+        "title": "Claude Code"
+      },
+      {
+        "id": "codex-cli",
+        "protocol_capability_scope": "harness_surface",
+        "title": "Codex CLI"
+      },
+      {
+        "id": "gemini-cli",
+        "protocol_capability_scope": "harness_surface",
+        "title": "Gemini CLI"
+      }
+    ],
+    "built_in_only": true,
+    "capabilities": [
+      {
+        "id": "agent_profile_options",
+        "support": {
+          "claude-code": {
+            "detail": "Applies model, mode, route, workspace, durable timeout/retry budgets, capability-proven effort, allowed/disallowed tool restrictions, and managed MCP tool ids; token limits remain unsupported before queueing.",
+            "status": "partial"
+          },
+          "codex-cli": {
+            "detail": "Applies model, mode, route, workspace, durable timeout/retry budgets, capability-proven reasoning effort, and managed MCP tool ids; token limits remain unsupported before queueing.",
+            "status": "partial"
+          },
+          "gemini-cli": {
+            "detail": "Applies model, mode, route, workspace, durable timeout/retry budgets, and managed MCP tool ids; reasoning effort and token limits are reported unsupported before queueing.",
+            "status": "partial"
+          }
+        }
+      },
+      {
+        "id": "attachment_transport",
+        "support": {
+          "claude-code": {
+            "detail": "Attachment delivery is exposed per kind and invocation mode; path-only delivery remains explicit when no richer CLI capability is proven.",
+            "status": "partial"
+          },
+          "codex-cli": {
+            "detail": "Images use the version-probed --image flag for one-shot and native CLI runs; other files remain path references and structured app-server image transport is not claimed.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Attachment delivery is exposed per kind and invocation mode; path-only delivery remains explicit when no richer CLI capability is proven.",
+            "status": "partial"
+          }
+        }
+      },
+      {
+        "id": "cli_capability_probe",
+        "support": {
+          "claude-code": {
+            "detail": "Uses bounded isolated --version and --help probes, caches evidence by command and version, and rejects binaries missing required adapter flags.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Uses bounded isolated --version and --help probes, caches evidence by command and version, and rejects binaries missing required adapter flags.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Uses bounded isolated --version and --help probes, caches evidence by command and version, and rejects binaries missing required adapter flags.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "external_history",
+        "support": {
+          "claude-code": {
+            "detail": "Discovery and import remain heuristic and use coarse project identity, while supported shapes are frozen in versioned additive-field-tolerant fixtures.",
+            "status": "partial"
+          },
+          "codex-cli": {
+            "detail": "Discovery and import remain heuristic and use coarse project identity, while supported shapes are frozen in versioned additive-field-tolerant fixtures.",
+            "status": "partial"
+          },
+          "gemini-cli": {
+            "detail": "Discovery and import remain heuristic and use coarse project identity, while supported shapes are frozen in versioned additive-field-tolerant fixtures.",
+            "status": "partial"
+          }
+        }
+      },
+      {
+        "id": "headless_continuity",
+        "support": {
+          "claude-code": {
+            "detail": "Headless execution consumes only the current prompt; native_session_id and normalized history are not consumed.",
+            "status": "unsupported"
+          },
+          "codex-cli": {
+            "detail": "Uses a supervised Codex app-server thread for repeated turns when the capability probe succeeds; codex exec history replay remains an explicit degraded fallback.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Headless execution consumes only the current prompt; native_session_id and normalized history are not consumed.",
+            "status": "unsupported"
+          }
+        }
+      },
+      {
+        "id": "headless_one_shot",
+        "support": {
+          "claude-code": {
+            "detail": "Runs one bounded CLI process with the normalized prompt, model, route, mode, stream, workspace, and attachment request fields.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Runs one bounded CLI process with the normalized prompt, model, route, mode, stream, workspace, and attachment request fields.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Runs one bounded CLI process with the normalized prompt, model, route, mode, stream, workspace, and attachment request fields.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "headless_structured_events",
+        "support": {
+          "claude-code": {
+            "detail": "Consumes the CLI JSON or JSONL surface and emits normalized Harness events.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Consumes the CLI JSON or JSONL surface and emits normalized Harness events.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Consumes the CLI JSON or JSONL surface and emits normalized Harness events.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "interactive_approvals",
+        "support": {
+          "claude-code": {
+            "detail": "Interactive approval prompts remain owned by the external CLI terminal.",
+            "status": "delegated"
+          },
+          "codex-cli": {
+            "detail": "Interactive approval prompts remain owned by the external CLI terminal.",
+            "status": "delegated"
+          },
+          "gemini-cli": {
+            "detail": "Interactive approval prompts remain owned by the external CLI terminal.",
+            "status": "delegated"
+          }
+        }
+      },
+      {
+        "id": "managed_mcp_headless",
+        "support": {
+          "claude-code": {
+            "detail": "Freezes selected trusted project MCP descriptors into an immutable redaction-safe snapshot, resolves secret references only at subprocess construction, and materializes it into the active temporary CLI home.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Freezes selected trusted project MCP descriptors into an immutable redaction-safe snapshot, resolves secret references only at subprocess construction, and materializes it into the active temporary CLI home.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Freezes selected trusted project MCP descriptors into an immutable redaction-safe snapshot, resolves secret references only at subprocess construction, and materializes it into the active temporary CLI home.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "managed_mcp_native",
+        "support": {
+          "claude-code": {
+            "detail": "Reviewed managed MCP configuration can be applied to the project native home.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Reviewed managed MCP configuration can be applied to the project native home.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Reviewed managed MCP configuration can be applied to the project native home.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "native_durable_lifecycle",
+        "support": {
+          "claude-code": {
+            "detail": "Persists owner leases, heartbeats, cancellation, timeouts, bounded terminal cursors, and explicit non-adopting recovery after owner restart.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Persists owner leases, heartbeats, cancellation, timeouts, bounded terminal cursors, and explicit non-adopting recovery after owner restart.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Persists owner leases, heartbeats, cancellation, timeouts, bounded terminal cursors, and explicit non-adopting recovery after owner restart.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "native_initial_prompt",
+        "support": {
+          "claude-code": {
+            "detail": "Delivers the composed prompt and attachment references in native argv.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Delivers the composed prompt and attachment arguments in native argv.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "A capability-probed --prompt-interactive invocation delivers the composed prompt once and records a redaction-safe outcome.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "native_permission_mode",
+        "support": {
+          "claude-code": {
+            "detail": "Maps plan and read to Claude plan mode and edit to default permission mode; interactive approvals remain delegated to Claude Code.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Maps plan and read to read-only and edit to workspace-write sandbox argv; interactive approvals remain delegated to Codex.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Maps plan and read to Gemini plan approval mode and edit to default approval mode; interactive approvals remain delegated to Gemini CLI.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "native_resume",
+        "support": {
+          "claude-code": {
+            "detail": "Uses a deterministic managed session name and preserves its immutable execution snapshot for immediate native resume.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Managed resume works after history discovery reconciles a native session id; the execution snapshot is preserved once that id is reconciled.",
+            "status": "partial"
+          },
+          "gemini-cli": {
+            "detail": "Managed resume works after history discovery reconciles a native session id; the execution snapshot is preserved once that id is reconciled.",
+            "status": "partial"
+          }
+        }
+      },
+      {
+        "id": "native_route_snapshot",
+        "support": {
+          "claude-code": {
+            "detail": "Managed starts persist route, model, home, workspace, permission, and tool configuration identity through discovery and resume; legacy refs require an explicit reviewed route override.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Managed starts persist route, model, home, workspace, permission, and tool configuration identity through discovery and resume; legacy refs require an explicit reviewed route override.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Managed starts persist route, model, home, workspace, permission, and tool configuration identity through discovery and resume; legacy refs require an explicit reviewed route override.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "native_telemetry",
+        "support": {
+          "claude-code": {
+            "detail": "Interactive TUI output remains a redacted raw-terminal stream because no reviewed native structured-event capability is proven; structured artifacts are emitted only by version-probed headless or app-server paths.",
+            "status": "delegated"
+          },
+          "codex-cli": {
+            "detail": "Interactive TUI output remains a redacted raw-terminal stream because no reviewed native structured-event capability is proven; structured artifacts are emitted only by version-probed headless or app-server paths.",
+            "status": "delegated"
+          },
+          "gemini-cli": {
+            "detail": "Interactive TUI output remains a redacted raw-terminal stream because no reviewed native structured-event capability is proven; structured artifacts are emitted only by version-probed headless or app-server paths.",
+            "status": "delegated"
+          }
+        }
+      },
+      {
+        "id": "native_terminal_transport",
+        "support": {
+          "claude-code": {
+            "detail": "Provides authenticated cursor-based streaming, reconnect, bounded polling fallback, terminal resize, stdin, and stop for owned native processes.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Provides authenticated cursor-based streaming, reconnect, bounded polling fallback, terminal resize, stdin, and stop for owned native processes.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Provides authenticated cursor-based streaming, reconnect, bounded polling fallback, terminal resize, stdin, and stop for owned native processes.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "native_workspace",
+        "support": {
+          "claude-code": {
+            "detail": "Native process spawn passes through shared policy and edit mode uses an isolated Git worktree under the safe auto or worktree policy.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Native process spawn passes through shared policy and edit mode uses an isolated Git worktree under the safe auto or worktree policy.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Native process spawn passes through shared policy and edit mode uses an isolated Git worktree under the safe auto or worktree policy.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "provider_ui_handoff",
+        "support": {
+          "claude-code": {
+            "detail": "Projects version-probed, documented Remote Control and Desktop actions without claiming embedded control, durable ownership, provider session identity, or a machine-readable provider URL.",
+            "status": "supported"
+          },
+          "codex-cli": null,
+          "gemini-cli": null
+        }
+      },
+      {
+        "id": "structured_app_server",
+        "support": {
+          "claude-code": {
+            "detail": "No supervised structured app-server transport is currently active.",
+            "status": "unsupported"
+          },
+          "codex-cli": {
+            "detail": "Maps Harness sessions, turns, forks, cancellation, and reconnect to the version-probed Codex app-server JSON-RPC protocol.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Uses version-probed Gemini ACP with isolated process scopes, exact session UUID links, permission bridging, cancellation, and load-based recovery; list, close, model switch, filesystem callbacks, and general elicitation remain explicitly unsupported.",
+            "status": "supported"
+          }
+        }
+      }
+    ],
+    "generated_from": "HarnessSpec.adapter_capabilities",
+    "schema_version": 1
+  },
+  "agent_surface_capability_matrix": {
+    "built_in_only": true,
+    "capabilities": [
+      {
+        "id": "execution_route",
+        "support": {
+          "claude-code": {
+            "detail": "Starts the selected external coding-agent adapter; the provider CLI owns behavior inside its process.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Starts the selected external coding-agent adapter; the provider CLI owns behavior inside its process.",
+            "status": "supported"
+          },
+          "direct-chat": {
+            "detail": "Calls GigaChat through the local gpt2giga Chat Completions route; it is a model conversation, not a repository coding-agent loop.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Starts the selected external coding-agent adapter; the provider CLI owns behavior inside its process.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "provider_authentication",
+        "support": {
+          "claude-code": {
+            "detail": "The native provider CLI owns login, refresh, credential storage, logout, and revocation. An installed executable is not proof of a ready account.",
+            "status": "delegated"
+          },
+          "codex-cli": {
+            "detail": "The native provider CLI owns login, refresh, credential storage, logout, and revocation. An installed executable is not proof of a ready account.",
+            "status": "delegated"
+          },
+          "direct-chat": {
+            "detail": "The gateway owns its SecretRef or local proxy credential boundary. GigaLoom does not turn this into a native provider account login.",
+            "status": "delegated"
+          },
+          "gemini-cli": {
+            "detail": "The native provider CLI owns login, refresh, credential storage, logout, and revocation. An installed executable is not proof of a ready account.",
+            "status": "delegated"
+          }
+        }
+      },
+      {
+        "id": "session_continuity",
+        "support": {
+          "claude-code": {
+            "detail": "Headless: Headless execution consumes only the current prompt; native_session_id and normalized history are not consumed. Native: Uses a deterministic managed session name and preserves its immutable execution snapshot for immediate native resume.",
+            "status": "partial"
+          },
+          "codex-cli": {
+            "detail": "Headless: Uses a supervised Codex app-server thread for repeated turns when the capability probe succeeds; codex exec history replay remains an explicit degraded fallback. Native: Managed resume works after history discovery reconciles a native session id; the execution snapshot is preserved once that id is reconciled.",
+            "status": "partial"
+          },
+          "direct-chat": {
+            "detail": "Harness replays normalized visible chat history (structured_replay); there is no provider-native agent session to transfer.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Headless: Headless execution consumes only the current prompt; native_session_id and normalized history are not consumed. Native: Managed resume works after history discovery reconciles a native session id; the execution snapshot is preserved once that id is reconciled.",
+            "status": "partial"
+          }
+        }
+      },
+      {
+        "id": "cancellation",
+        "support": {
+          "claude-code": {
+            "detail": "Harness exposes cooperative cancellation for the admitted route; already-completed provider side effects are not rolled back.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Harness exposes cooperative cancellation for the admitted route; already-completed provider side effects are not rolled back.",
+            "status": "supported"
+          },
+          "direct-chat": {
+            "detail": "Harness exposes cooperative cancellation for the admitted route; already-completed provider side effects are not rolled back.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Harness exposes cooperative cancellation for the admitted route; already-completed provider side effects are not rolled back.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "harness_and_provider_approvals",
+        "support": {
+          "claude-code": {
+            "detail": "Harness approvals cover Harness-owned actions such as process spawn or patch apply. Provider-internal approval prompts remain provider-owned and cannot be inferred from the outer receipt.",
+            "status": "partial"
+          },
+          "codex-cli": {
+            "detail": "Harness approvals cover Harness-owned actions such as process spawn or patch apply. Provider-internal approval prompts remain provider-owned and cannot be inferred from the outer receipt.",
+            "status": "partial"
+          },
+          "direct-chat": {
+            "detail": "Harness approvals cover Harness-owned actions such as process spawn or patch apply. Provider-internal approval prompts remain provider-owned and cannot be inferred from the outer receipt.",
+            "status": "partial"
+          },
+          "gemini-cli": {
+            "detail": "Harness approvals cover Harness-owned actions such as process spawn or patch apply. Provider-internal approval prompts remain provider-owned and cannot be inferred from the outer receipt.",
+            "status": "partial"
+          }
+        }
+      },
+      {
+        "id": "managed_mcp",
+        "support": {
+          "claude-code": {
+            "detail": "Freezes selected trusted project MCP descriptors into an immutable redaction-safe snapshot, resolves secret references only at subprocess construction, and materializes it into the active temporary CLI home. Reviewed managed MCP configuration can be applied to the project native home.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Freezes selected trusted project MCP descriptors into an immutable redaction-safe snapshot, resolves secret references only at subprocess construction, and materializes it into the active temporary CLI home. Reviewed managed MCP configuration can be applied to the project native home.",
+            "status": "supported"
+          },
+          "direct-chat": {
+            "detail": "Direct Chat does not project managed MCP descriptors as GigaChat built-in tools.",
+            "status": "unsupported"
+          },
+          "gemini-cli": {
+            "detail": "Freezes selected trusted project MCP descriptors into an immutable redaction-safe snapshot, resolves secret references only at subprocess construction, and materializes it into the active temporary CLI home. Reviewed managed MCP configuration can be applied to the project native home.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "skills_and_plugins",
+        "support": {
+          "claude-code": {
+            "detail": "GigaLoom can discover and manage reviewed integrations, but catalog presence never grants execution authority or proves automatic prompt/tool injection for this surface.",
+            "status": "partial"
+          },
+          "codex-cli": {
+            "detail": "GigaLoom can discover and manage reviewed integrations, but catalog presence never grants execution authority or proves automatic prompt/tool injection for this surface.",
+            "status": "partial"
+          },
+          "direct-chat": {
+            "detail": "GigaLoom can discover and manage reviewed integrations, but catalog presence never grants execution authority or proves automatic prompt/tool injection for this surface.",
+            "status": "partial"
+          },
+          "gemini-cli": {
+            "detail": "GigaLoom can discover and manage reviewed integrations, but catalog presence never grants execution authority or proves automatic prompt/tool injection for this surface.",
+            "status": "partial"
+          }
+        }
+      },
+      {
+        "id": "gigachat_builtin_tools",
+        "support": {
+          "claude-code": {
+            "detail": "Provider-native tools remain owned by the external CLI; GigaChat built-in tool names are not projected as equivalent capabilities.",
+            "status": "delegated"
+          },
+          "codex-cli": {
+            "detail": "Provider-native tools remain owned by the external CLI; GigaChat built-in tool names are not projected as equivalent capabilities.",
+            "status": "delegated"
+          },
+          "direct-chat": {
+            "detail": "The admitted GigaChat built-ins are: web_search, url_content_extraction, code_interpreter, image_generate, model_3d_generate.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Provider-native tools remain owned by the external CLI; GigaChat built-in tool names are not projected as equivalent capabilities.",
+            "status": "delegated"
+          }
+        }
+      },
+      {
+        "id": "isolated_edit_delivery",
+        "support": {
+          "claude-code": {
+            "detail": "Native process spawn passes through shared policy and edit mode uses an isolated Git worktree under the safe auto or worktree policy.",
+            "status": "supported"
+          },
+          "codex-cli": {
+            "detail": "Native process spawn passes through shared policy and edit mode uses an isolated Git worktree under the safe auto or worktree policy.",
+            "status": "supported"
+          },
+          "direct-chat": {
+            "detail": "Direct Chat has no repository edit loop or isolated patch-delivery contract.",
+            "status": "unsupported"
+          },
+          "gemini-cli": {
+            "detail": "Native process spawn passes through shared policy and edit mode uses an isolated Git worktree under the safe auto or worktree policy.",
+            "status": "supported"
+          }
+        }
+      },
+      {
+        "id": "multi_agent_delivery",
+        "support": {
+          "claude-code": {
+            "detail": "GigaLoom can coordinate independent Arena or workflow runs and pass bounded summaries/artifact references. That is not native subagent state or private reasoning transfer.",
+            "status": "partial"
+          },
+          "codex-cli": {
+            "detail": "GigaLoom can coordinate independent Arena or workflow runs and pass bounded summaries/artifact references. That is not native subagent state or private reasoning transfer.",
+            "status": "partial"
+          },
+          "direct-chat": {
+            "detail": "GigaLoom can coordinate independent Arena or workflow runs and pass bounded summaries/artifact references. That is not native subagent state or private reasoning transfer.",
+            "status": "partial"
+          },
+          "gemini-cli": {
+            "detail": "GigaLoom can coordinate independent Arena or workflow runs and pass bounded summaries/artifact references. That is not native subagent state or private reasoning transfer.",
+            "status": "partial"
+          }
+        }
+      },
+      {
+        "id": "usage_and_monetary_cost",
+        "support": {
+          "claude-code": {
+            "detail": "Provider-emitted usage may be retained when available; monetary cost remains unknown unless the provider returns explicit cost evidence.",
+            "status": "partial"
+          },
+          "codex-cli": {
+            "detail": "Provider-emitted usage may be retained when available; monetary cost remains unknown unless the provider returns explicit cost evidence.",
+            "status": "partial"
+          },
+          "direct-chat": {
+            "detail": "Provider-emitted usage may be retained when available; monetary cost remains unknown unless the provider returns explicit cost evidence.",
+            "status": "partial"
+          },
+          "gemini-cli": {
+            "detail": "Provider-emitted usage may be retained when available; monetary cost remains unknown unless the provider returns explicit cost evidence.",
+            "status": "partial"
+          }
+        }
+      },
+      {
+        "id": "structured_evidence",
+        "support": {
+          "claude-code": {
+            "detail": "Version-probed headless or app-server routes emit normalized events. Native terminal evidence: Interactive TUI output remains a redacted raw-terminal stream because no reviewed native structured-event capability is proven; structured artifacts are emitted only by version-probed headless or app-server paths.",
+            "status": "partial"
+          },
+          "codex-cli": {
+            "detail": "Version-probed headless or app-server routes emit normalized events. Native terminal evidence: Interactive TUI output remains a redacted raw-terminal stream because no reviewed native structured-event capability is proven; structured artifacts are emitted only by version-probed headless or app-server paths.",
+            "status": "partial"
+          },
+          "direct-chat": {
+            "detail": "Direct Chat normalizes visible response, tool, usage, and completion events; it does not expose hidden reasoning.",
+            "status": "supported"
+          },
+          "gemini-cli": {
+            "detail": "Version-probed headless or app-server routes emit normalized events. Native terminal evidence: Interactive TUI output remains a redacted raw-terminal stream because no reviewed native structured-event capability is proven; structured artifacts are emitted only by version-probed headless or app-server paths.",
+            "status": "partial"
+          }
+        }
+      },
+      {
+        "id": "cross_provider_session_transfer",
+        "support": {
+          "claude-code": {
+            "detail": "A retained Harness summary or handoff capsule does not transfer a provider-native session identity to another provider or adapter.",
+            "status": "unsupported"
+          },
+          "codex-cli": {
+            "detail": "A retained Harness summary or handoff capsule does not transfer a provider-native session identity to another provider or adapter.",
+            "status": "unsupported"
+          },
+          "direct-chat": {
+            "detail": "A retained Harness summary or handoff capsule does not transfer a provider-native session identity to another provider or adapter.",
+            "status": "unsupported"
+          },
+          "gemini-cli": {
+            "detail": "A retained Harness summary or handoff capsule does not transfer a provider-native session identity to another provider or adapter.",
+            "status": "unsupported"
+          }
+        }
+      },
+      {
+        "id": "hidden_reasoning_transfer",
+        "support": {
+          "claude-code": {
+            "detail": "Only visible summaries, messages, events, and retained artifacts may cross a boundary; hidden reasoning is neither requested nor claimed.",
+            "status": "unsupported"
+          },
+          "codex-cli": {
+            "detail": "Only visible summaries, messages, events, and retained artifacts may cross a boundary; hidden reasoning is neither requested nor claimed.",
+            "status": "unsupported"
+          },
+          "direct-chat": {
+            "detail": "Only visible summaries, messages, events, and retained artifacts may cross a boundary; hidden reasoning is neither requested nor claimed.",
+            "status": "unsupported"
+          },
+          "gemini-cli": {
+            "detail": "Only visible summaries, messages, events, and retained artifacts may cross a boundary; hidden reasoning is neither requested nor claimed.",
+            "status": "unsupported"
+          }
+        }
+      }
+    ],
+    "generated_from": "HarnessSpec+HarnessSpec.adapter_capabilities+agent_surface_contracts_v1",
+    "schema_version": 1,
+    "surfaces": [
+      {
+        "id": "direct-chat",
+        "kind": "built-in",
+        "title": "Direct Chat Completions"
+      },
+      {
+        "id": "codex-cli",
+        "kind": "agent-cli",
+        "title": "Codex CLI"
+      },
+      {
+        "id": "claude-code",
+        "kind": "agent-cli",
+        "title": "Claude Code"
+      },
+      {
+        "id": "gemini-cli",
+        "kind": "agent-cli",
+        "title": "Gemini CLI"
+      }
+    ]
+  },
+  "content_sha256": "f45fb0bbfbabd97f99aef43b4486ae46228429448ccf985465181752c73756ea",
+  "contract_tests": [
+    "tests/harness/test_capability_matrix.py",
+    "tests/harness/test_cli_capabilities.py",
+    "tests/harness/test_doctor.py",
+    "tests/harness/test_harness_cli.py",
+    "tests/harness/test_product_capabilities.py",
+    "tests/harness/test_product_inventory.py",
+    "tests/harness/test_provider_profiles.py",
+    "tests/harness/test_terminal_dispatch.py",
+    "tests/harness/test_tui_app.py",
+    "tests/harness/test_ui.py"
+  ],
+  "deprecations": {
+    "entry_point_compatibility": {
+      "compatibility_groups": [
+        "gpt2giga.harnesses"
+      ],
+      "preferred": "agent_workbench.harness_adapters.v1"
+    },
+    "integration_sdk": {
+      "minimum_days": 30,
+      "minimum_releases": 2
+    },
+    "legacy_capability_mappings": [
+      {
+        "authority": "read_only",
+        "field": "mode",
+        "intent": "ask",
+        "note": "Compatibility alias; planning semantics remain visible during migration.",
+        "transport": null,
+        "value": "plan"
+      },
+      {
+        "authority": "read_only",
+        "field": "mode",
+        "intent": "review",
+        "note": "Compatibility alias for a read-only review request.",
+        "transport": null,
+        "value": "read"
+      },
+      {
+        "authority": "workspace_write",
+        "field": "mode",
+        "intent": "change",
+        "note": "Compatibility alias for a workspace-changing request.",
+        "transport": null,
+        "value": "edit"
+      },
+      {
+        "authority": null,
+        "field": "execution_transport",
+        "intent": null,
+        "note": "Machine-only transport override; provider evidence still gates admission.",
+        "transport": "structured_session",
+        "value": "native_structured"
+      },
+      {
+        "authority": null,
+        "field": "execution_transport",
+        "intent": null,
+        "note": "Machine-only provider-terminal override.",
+        "transport": "terminal_session",
+        "value": "native_terminal"
+      },
+      {
+        "authority": null,
+        "field": "execution_transport",
+        "intent": null,
+        "note": "Machine-only compatibility execution override.",
+        "transport": "one_shot",
+        "value": "one_shot"
+      },
+      {
+        "authority": null,
+        "field": "invocation_mode",
+        "intent": null,
+        "note": "Does not select a transport; route evidence must provide one.",
+        "transport": null,
+        "value": "headless"
+      },
+      {
+        "authority": null,
+        "field": "stream",
+        "intent": null,
+        "note": "Compatibility request; streaming is no longer an ordinary UI choice.",
+        "transport": "streaming_events",
+        "value": "true"
+      },
+      {
+        "authority": null,
+        "field": "stream",
+        "intent": null,
+        "note": "Compatibility opt-out; it does not select a transport.",
+        "transport": null,
+        "value": "false"
+      }
+    ],
+    "legacy_mode_receipts": [
+      {
+        "artifacts": [
+          "plan"
+        ],
+        "authority": "read_only",
+        "field": "mode",
+        "intent": "ask",
+        "permission_projection": "read_only",
+        "removal": {
+          "condition": "one_released_schema_v1_window_and_zero_tracked_callers_or_saved_state",
+          "earliest_version": "1.0.0"
+        },
+        "router_branches": [
+          "ask_or_plan"
+        ],
+        "schema_version": 1,
+        "state_transitions": [
+          "planning"
+        ],
+        "status": "supported_alias",
+        "value": "plan",
+        "warning": "legacy_mode_alias"
+      },
+      {
+        "artifacts": [
+          "review_findings"
+        ],
+        "authority": "read_only",
+        "field": "mode",
+        "intent": "review",
+        "permission_projection": "read_only",
+        "removal": {
+          "condition": "one_released_schema_v1_window_and_zero_tracked_callers_or_saved_state",
+          "earliest_version": "1.0.0"
+        },
+        "router_branches": [
+          "review"
+        ],
+        "schema_version": 1,
+        "state_transitions": [
+          "reviewing"
+        ],
+        "status": "supported_alias",
+        "value": "read",
+        "warning": "legacy_mode_alias"
+      },
+      {
+        "artifacts": [
+          "workspace_diff"
+        ],
+        "authority": "workspace_write",
+        "field": "mode",
+        "intent": "change",
+        "permission_projection": "workspace_write",
+        "removal": {
+          "condition": "one_released_schema_v1_window_and_zero_tracked_callers_or_saved_state",
+          "earliest_version": "1.0.0"
+        },
+        "router_branches": [
+          "change"
+        ],
+        "schema_version": 1,
+        "state_transitions": [
+          "editing",
+          "promotion_eligible"
+        ],
+        "status": "supported_alias",
+        "value": "edit",
+        "warning": "legacy_mode_alias"
+      }
+    ]
+  },
+  "documentation": [
+    {
+      "id": "agents-guide-en",
+      "path": "docs/agents-and-multi-agent.md"
+    },
+    {
+      "id": "agents-guide-ru",
+      "path": "docs-site/i18n/ru/docusaurus-plugin-content-docs/current/agents-and-multi-agent.md"
+    },
+    {
+      "id": "agent-capability-matrix-en",
+      "path": "docs/agent-capability-matrix.md"
+    },
+    {
+      "id": "agent-capability-matrix-ru",
+      "path": "docs-site/i18n/ru/docusaurus-plugin-content-docs/current/agent-capability-matrix.md"
+    },
+    {
+      "id": "provider-authentication-en",
+      "path": "docs/architecture/provider-authentication-capability-matrix.md"
+    },
+    {
+      "id": "provider-authentication-ru",
+      "path": "docs-site/i18n/ru/docusaurus-plugin-content-docs/current/architecture/provider-authentication-capability-matrix.md"
+    },
+    {
+      "id": "product-capability-admission-en",
+      "path": "docs/architecture/product-capability-admission-adr.md"
+    },
+    {
+      "id": "product-capability-admission-ru",
+      "path": "docs-site/i18n/ru/docusaurus-plugin-content-docs/current/architecture/product-capability-admission-adr.md"
+    }
+  ],
+  "entry_points": [
+    {
+      "group": "agent_workbench.harness_adapters.v1",
+      "name": "claude-code",
+      "value": "gpt2giga_harness.harnesses.claude_code:ClaudeCodeHarness"
+    },
+    {
+      "group": "agent_workbench.harness_adapters.v1",
+      "name": "codex-cli",
+      "value": "gpt2giga_harness.harnesses.codex_cli:CodexCliHarness"
+    },
+    {
+      "group": "agent_workbench.harness_adapters.v1",
+      "name": "direct-chat",
+      "value": "gpt2giga_harness.harnesses.direct_chat:DirectChatHarness"
+    },
+    {
+      "group": "agent_workbench.harness_adapters.v1",
+      "name": "echo",
+      "value": "gpt2giga_harness.harnesses.echo:EchoHarness"
+    },
+    {
+      "group": "agent_workbench.harness_adapters.v1",
+      "name": "gemini-cli",
+      "value": "gpt2giga_harness.harnesses.gemini_cli:GeminiCliHarness"
+    },
+    {
+      "group": "agent_workbench.provider_adapters.v1",
+      "name": "claude-legacy",
+      "value": "gpt2giga_harness.provider_profiles:claude_legacy_compatibility"
+    },
+    {
+      "group": "agent_workbench.provider_adapters.v1",
+      "name": "codex-legacy",
+      "value": "gpt2giga_harness.provider_profiles:codex_legacy_compatibility"
+    },
+    {
+      "group": "agent_workbench.provider_adapters.v1",
+      "name": "direct-chat-legacy",
+      "value": "gpt2giga_harness.provider_profiles:direct_chat_legacy_compatibility"
+    },
+    {
+      "group": "agent_workbench.provider_adapters.v1",
+      "name": "gemini-legacy",
+      "value": "gpt2giga_harness.provider_profiles:gemini_legacy_compatibility"
+    },
+    {
+      "group": "gpt2giga.harnesses",
+      "name": "claude-code",
+      "value": "gpt2giga_harness.harnesses.claude_code:ClaudeCodeHarness"
+    },
+    {
+      "group": "gpt2giga.harnesses",
+      "name": "codex-cli",
+      "value": "gpt2giga_harness.harnesses.codex_cli:CodexCliHarness"
+    },
+    {
+      "group": "gpt2giga.harnesses",
+      "name": "direct-chat",
+      "value": "gpt2giga_harness.harnesses.direct_chat:DirectChatHarness"
+    },
+    {
+      "group": "gpt2giga.harnesses",
+      "name": "echo",
+      "value": "gpt2giga_harness.harnesses.echo:EchoHarness"
+    },
+    {
+      "group": "gpt2giga.harnesses",
+      "name": "gemini-cli",
+      "value": "gpt2giga_harness.harnesses.gemini_cli:GeminiCliHarness"
+    }
+  ],
+  "generated_from": "schemas+registries+entry_points+provider_profiles+cli+tui+api+contract_tests",
+  "harnesses": [
+    {
+      "capabilities": [
+        "agent_cli"
+      ],
+      "default_invocation_mode": "native",
+      "id": "claude-code",
+      "kind": "agent-cli",
+      "protocol_capability_scope": "harness_surface",
+      "supports": {
+        "api_mode_selection": true,
+        "attachments": true,
+        "builtin_tools": false,
+        "cancellation": true,
+        "external_history": true,
+        "headless": true,
+        "model_selection": true,
+        "native": true,
+        "native_sessions": true,
+        "streaming": true,
+        "structured_events": true,
+        "workspace": true
+      },
+      "title": "Claude Code"
+    },
+    {
+      "capabilities": [
+        "agent_cli"
+      ],
+      "default_invocation_mode": "headless",
+      "id": "codex-cli",
+      "kind": "agent-cli",
+      "protocol_capability_scope": "harness_surface",
+      "supports": {
+        "api_mode_selection": true,
+        "attachments": true,
+        "builtin_tools": false,
+        "cancellation": true,
+        "external_history": true,
+        "headless": true,
+        "model_selection": true,
+        "native": true,
+        "native_sessions": true,
+        "streaming": true,
+        "structured_events": true,
+        "workspace": true
+      },
+      "title": "Codex CLI"
+    },
+    {
+      "capabilities": [
+        "chat_completions"
+      ],
+      "default_invocation_mode": "headless",
+      "id": "direct-chat",
+      "kind": "built-in",
+      "protocol_capability_scope": "harness_surface",
+      "supports": {
+        "api_mode_selection": true,
+        "attachments": true,
+        "builtin_tools": true,
+        "cancellation": true,
+        "external_history": false,
+        "headless": true,
+        "model_selection": true,
+        "native": false,
+        "native_sessions": false,
+        "streaming": true,
+        "structured_events": true,
+        "workspace": false
+      },
+      "title": "Direct Chat Completions"
+    },
+    {
+      "capabilities": [
+        "chat_completions"
+      ],
+      "default_invocation_mode": "headless",
+      "id": "echo",
+      "kind": "test",
+      "protocol_capability_scope": "harness_surface",
+      "supports": {
+        "api_mode_selection": true,
+        "attachments": true,
+        "builtin_tools": false,
+        "cancellation": false,
+        "external_history": false,
+        "headless": true,
+        "model_selection": true,
+        "native": false,
+        "native_sessions": false,
+        "streaming": false,
+        "structured_events": false,
+        "workspace": false
+      },
+      "title": "Echo"
+    },
+    {
+      "capabilities": [
+        "agent_cli"
+      ],
+      "default_invocation_mode": "native",
+      "id": "gemini-cli",
+      "kind": "agent-cli",
+      "protocol_capability_scope": "harness_surface",
+      "supports": {
+        "api_mode_selection": true,
+        "attachments": true,
+        "builtin_tools": false,
+        "cancellation": true,
+        "external_history": true,
+        "headless": true,
+        "model_selection": true,
+        "native": true,
+        "native_sessions": true,
+        "streaming": true,
+        "structured_events": true,
+        "workspace": true
+      },
+      "title": "Gemini CLI"
+    }
+  ],
+  "interfaces": {
+    "api_operations": [
+      {
+        "method": "GET",
+        "name": "agent_list",
+        "path": "/api/agents"
+      },
+      {
+        "method": "POST",
+        "name": "agent_validate",
+        "path": "/api/agents/validate"
+      },
+      {
+        "method": "GET",
+        "name": "agent_detail",
+        "path": "/api/agents/{agent_id}"
+      },
+      {
+        "method": "POST",
+        "name": "agent_apply",
+        "path": "/api/agents/{agent_id}/apply"
+      },
+      {
+        "method": "POST",
+        "name": "agent_delete",
+        "path": "/api/agents/{agent_id}/delete"
+      },
+      {
+        "method": "POST",
+        "name": "agent_delete_preview",
+        "path": "/api/agents/{agent_id}/delete-preview"
+      },
+      {
+        "method": "POST",
+        "name": "agent_draft",
+        "path": "/api/agents/{agent_id}/draft"
+      },
+      {
+        "method": "POST",
+        "name": "agent_duplicate",
+        "path": "/api/agents/{agent_id}/duplicate"
+      },
+      {
+        "method": "POST",
+        "name": "agent_run",
+        "path": "/api/agents/{agent_id}/run"
+      },
+      {
+        "method": "GET",
+        "name": "approval_inbox",
+        "path": "/api/approvals"
+      },
+      {
+        "method": "POST",
+        "name": "decide_approval",
+        "path": "/api/approvals/{approval_id}/decision"
+      },
+      {
+        "method": "GET",
+        "name": "list_arena_runs",
+        "path": "/api/arena/runs"
+      },
+      {
+        "method": "POST",
+        "name": "create_arena_run",
+        "path": "/api/arena/runs"
+      },
+      {
+        "method": "GET",
+        "name": "get_arena_run",
+        "path": "/api/arena/runs/{arena_id}"
+      },
+      {
+        "method": "POST",
+        "name": "retry_arena_child",
+        "path": "/api/arena/runs/{arena_id}/children/{child_index}/retry"
+      },
+      {
+        "method": "GET",
+        "name": "arena_events_stream",
+        "path": "/api/arena/runs/{arena_id}/events/stream"
+      },
+      {
+        "method": "POST",
+        "name": "create_arena_follow_up",
+        "path": "/api/arena/runs/{arena_id}/turns"
+      },
+      {
+        "method": "POST",
+        "name": "create_arena_verdict",
+        "path": "/api/arena/runs/{arena_id}/verdict"
+      },
+      {
+        "method": "DELETE",
+        "name": "delete_attachment",
+        "path": "/api/attachments/{attachment_id}"
+      },
+      {
+        "method": "GET",
+        "name": "attachment_blob",
+        "path": "/api/attachments/{attachment_id}"
+      },
+      {
+        "method": "GET",
+        "name": "attachment_metadata",
+        "path": "/api/attachments/{attachment_id}/metadata"
+      },
+      {
+        "method": "GET",
+        "name": "attention_inbox",
+        "path": "/api/attention"
+      },
+      {
+        "method": "POST",
+        "name": "attention_read",
+        "path": "/api/attention/read"
+      },
+      {
+        "method": "GET",
+        "name": "automation_center",
+        "path": "/api/automation"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_run",
+        "path": "/api/cockpit/runs/{run_id}"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_run_diff",
+        "path": "/api/cockpit/runs/{run_id}/diff"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_run_raw",
+        "path": "/api/cockpit/runs/{run_id}/raw"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_run_report",
+        "path": "/api/cockpit/runs/{run_id}/report"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_sessions",
+        "path": "/api/cockpit/sessions"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_session",
+        "path": "/api/cockpit/sessions/{session_id}"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_artifacts",
+        "path": "/api/cockpit/sessions/{session_id}/artifacts"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_events",
+        "path": "/api/cockpit/sessions/{session_id}/events"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_messages",
+        "path": "/api/cockpit/sessions/{session_id}/messages"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_message_content",
+        "path": "/api/cockpit/sessions/{session_id}/messages/{message_id}/content"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_session_runs",
+        "path": "/api/cockpit/sessions/{session_id}/runs"
+      },
+      {
+        "method": "GET",
+        "name": "cockpit_session_updates",
+        "path": "/api/cockpit/sessions/{session_id}/updates/stream"
+      },
+      {
+        "method": "GET",
+        "name": "compatibility_guardian",
+        "path": "/api/compatibility/guardian"
+      },
+      {
+        "method": "GET",
+        "name": "defaults",
+        "path": "/api/defaults"
+      },
+      {
+        "method": "GET",
+        "name": "doctor_read_model",
+        "path": "/api/doctor"
+      },
+      {
+        "method": "POST",
+        "name": "editor_open_diff",
+        "path": "/api/editor/open-diff"
+      },
+      {
+        "method": "POST",
+        "name": "editor_open_file",
+        "path": "/api/editor/open-file"
+      },
+      {
+        "method": "POST",
+        "name": "editor_open_terminal",
+        "path": "/api/editor/open-terminal"
+      },
+      {
+        "method": "POST",
+        "name": "editor_open_workspace",
+        "path": "/api/editor/open-workspace"
+      },
+      {
+        "method": "GET",
+        "name": "local_environment",
+        "path": "/api/environment"
+      },
+      {
+        "method": "POST",
+        "name": "apply_environment_commit",
+        "path": "/api/environment/commit/apply"
+      },
+      {
+        "method": "POST",
+        "name": "preview_environment_commit",
+        "path": "/api/environment/commit/preview"
+      },
+      {
+        "method": "POST",
+        "name": "apply_environment_pull_request",
+        "path": "/api/environment/pull-request/apply"
+      },
+      {
+        "method": "POST",
+        "name": "preview_environment_pull_request",
+        "path": "/api/environment/pull-request/preview"
+      },
+      {
+        "method": "POST",
+        "name": "apply_environment_push",
+        "path": "/api/environment/push/apply"
+      },
+      {
+        "method": "POST",
+        "name": "preview_environment_push",
+        "path": "/api/environment/push/preview"
+      },
+      {
+        "method": "GET",
+        "name": "evals",
+        "path": "/api/evals"
+      },
+      {
+        "method": "GET",
+        "name": "get_eval_run",
+        "path": "/api/evals/runs/{eval_run_id}"
+      },
+      {
+        "method": "POST",
+        "name": "create_eval_run",
+        "path": "/api/evals/{eval_name}/runs"
+      },
+      {
+        "method": "GET",
+        "name": "evaluate_inventory",
+        "path": "/api/evaluate"
+      },
+      {
+        "method": "POST",
+        "name": "pin_eval_baseline",
+        "path": "/api/evaluate/runs/{eval_run_id}/baseline"
+      },
+      {
+        "method": "POST",
+        "name": "cancel_eval_run",
+        "path": "/api/evaluate/runs/{eval_run_id}/cancel"
+      },
+      {
+        "method": "GET",
+        "name": "evaluate_matrix",
+        "path": "/api/evaluate/{eval_name}/matrix"
+      },
+      {
+        "method": "GET",
+        "name": "generated_file",
+        "path": "/api/files/generated/{run_key}/{filename}"
+      },
+      {
+        "method": "GET",
+        "name": "preview_file",
+        "path": "/api/files/preview"
+      },
+      {
+        "method": "GET",
+        "name": "harnesses",
+        "path": "/api/harnesses"
+      },
+      {
+        "method": "GET",
+        "name": "health",
+        "path": "/api/health"
+      },
+      {
+        "method": "GET",
+        "name": "integration_inventory",
+        "path": "/api/integrations"
+      },
+      {
+        "method": "GET",
+        "name": "integration_flow",
+        "path": "/api/integrations/flows/{flow_id}"
+      },
+      {
+        "method": "POST",
+        "name": "apply_integration",
+        "path": "/api/integrations/flows/{flow_id}/apply"
+      },
+      {
+        "method": "POST",
+        "name": "preview_flow_lifecycle",
+        "path": "/api/integrations/flows/{flow_id}/lifecycle/preview"
+      },
+      {
+        "method": "POST",
+        "name": "rollback_integration",
+        "path": "/api/integrations/flows/{flow_id}/rollback"
+      },
+      {
+        "method": "POST",
+        "name": "import_git_skill",
+        "path": "/api/integrations/git/import-skill"
+      },
+      {
+        "method": "POST",
+        "name": "inspect_git_repository",
+        "path": "/api/integrations/git/inspect"
+      },
+      {
+        "method": "POST",
+        "name": "preview_integration_group",
+        "path": "/api/integrations/groups/preview"
+      },
+      {
+        "method": "GET",
+        "name": "integration_group",
+        "path": "/api/integrations/groups/{group_id}"
+      },
+      {
+        "method": "POST",
+        "name": "apply_integration_group",
+        "path": "/api/integrations/groups/{group_id}/apply"
+      },
+      {
+        "method": "POST",
+        "name": "preview_group_lifecycle",
+        "path": "/api/integrations/groups/{group_id}/lifecycle/preview"
+      },
+      {
+        "method": "POST",
+        "name": "recover_integration_group",
+        "path": "/api/integrations/groups/{group_id}/recover"
+      },
+      {
+        "method": "POST",
+        "name": "rollback_integration_group",
+        "path": "/api/integrations/groups/{group_id}/rollback"
+      },
+      {
+        "method": "POST",
+        "name": "apply_integration_lifecycle",
+        "path": "/api/integrations/lifecycle/{operation_id}/apply"
+      },
+      {
+        "method": "POST",
+        "name": "preview_integration",
+        "path": "/api/integrations/preview"
+      },
+      {
+        "method": "GET",
+        "name": "search_integrations",
+        "path": "/api/integrations/search"
+      },
+      {
+        "method": "GET",
+        "name": "preview_skill",
+        "path": "/api/integrations/skills/preview"
+      },
+      {
+        "method": "GET",
+        "name": "integration_source_detail",
+        "path": "/api/integrations/source-detail"
+      },
+      {
+        "method": "GET",
+        "name": "models",
+        "path": "/api/models"
+      },
+      {
+        "method": "POST",
+        "name": "native_process_start",
+        "path": "/api/native/processes/start"
+      },
+      {
+        "method": "DELETE",
+        "name": "native_process_stop",
+        "path": "/api/native/processes/{process_id}"
+      },
+      {
+        "method": "GET",
+        "name": "native_process_status",
+        "path": "/api/native/processes/{process_id}"
+      },
+      {
+        "method": "POST",
+        "name": "native_process_input",
+        "path": "/api/native/processes/{process_id}/input"
+      },
+      {
+        "method": "GET",
+        "name": "native_process_output",
+        "path": "/api/native/processes/{process_id}/output"
+      },
+      {
+        "method": "GET",
+        "name": "native_process_output_stream",
+        "path": "/api/native/processes/{process_id}/output/stream"
+      },
+      {
+        "method": "POST",
+        "name": "native_process_resize",
+        "path": "/api/native/processes/{process_id}/resize"
+      },
+      {
+        "method": "GET",
+        "name": "native_sessions",
+        "path": "/api/native/sessions"
+      },
+      {
+        "method": "POST",
+        "name": "native_sessions_sync",
+        "path": "/api/native/sessions/sync"
+      },
+      {
+        "method": "POST",
+        "name": "native_session_import",
+        "path": "/api/native/sessions/{native_ref_id}/import"
+      },
+      {
+        "method": "GET",
+        "name": "native_session_preview",
+        "path": "/api/native/sessions/{native_ref_id}/preview"
+      },
+      {
+        "method": "GET",
+        "name": "policy_profiles",
+        "path": "/api/policy/profiles"
+      },
+      {
+        "method": "POST",
+        "name": "preflight_run",
+        "path": "/api/preflight/run"
+      },
+      {
+        "method": "GET",
+        "name": "project",
+        "path": "/api/project"
+      },
+      {
+        "method": "GET",
+        "name": "project_config",
+        "path": "/api/project/config"
+      },
+      {
+        "method": "POST",
+        "name": "project_init",
+        "path": "/api/project/init"
+      },
+      {
+        "method": "GET",
+        "name": "project_memory",
+        "path": "/api/project/memory"
+      },
+      {
+        "method": "POST",
+        "name": "add_project_memory",
+        "path": "/api/project/memory"
+      },
+      {
+        "method": "DELETE",
+        "name": "delete_project_memory",
+        "path": "/api/project/memory/{memory_id}"
+      },
+      {
+        "method": "PATCH",
+        "name": "update_project_memory",
+        "path": "/api/project/memory/{memory_id}"
+      },
+      {
+        "method": "GET",
+        "name": "project_presets",
+        "path": "/api/project/presets"
+      },
+      {
+        "method": "POST",
+        "name": "render_preset",
+        "path": "/api/project/presets/{preset_name}/render"
+      },
+      {
+        "method": "GET",
+        "name": "project_state",
+        "path": "/api/project/state"
+      },
+      {
+        "method": "PATCH",
+        "name": "update_state",
+        "path": "/api/project/state"
+      },
+      {
+        "method": "GET",
+        "name": "list_provider_accounts",
+        "path": "/api/provider-accounts"
+      },
+      {
+        "method": "POST",
+        "name": "cancel_provider_login",
+        "path": "/api/provider-accounts/{provider_id}/cancel"
+      },
+      {
+        "method": "POST",
+        "name": "start_provider_login",
+        "path": "/api/provider-accounts/{provider_id}/login"
+      },
+      {
+        "method": "POST",
+        "name": "logout_provider_account",
+        "path": "/api/provider-accounts/{provider_id}/logout"
+      },
+      {
+        "method": "POST",
+        "name": "refresh_provider_account",
+        "path": "/api/provider-accounts/{provider_id}/refresh"
+      },
+      {
+        "method": "GET",
+        "name": "provider_handoff_preview",
+        "path": "/api/provider-handoffs/{harness_id}/preview"
+      },
+      {
+        "method": "GET",
+        "name": "list_provider_settings",
+        "path": "/api/providers"
+      },
+      {
+        "method": "POST",
+        "name": "create_provider_settings",
+        "path": "/api/providers"
+      },
+      {
+        "method": "GET",
+        "name": "get_provider_settings",
+        "path": "/api/providers/{provider_id}"
+      },
+      {
+        "method": "PATCH",
+        "name": "update_provider_settings",
+        "path": "/api/providers/{provider_id}"
+      },
+      {
+        "method": "POST",
+        "name": "discover_provider_models",
+        "path": "/api/providers/{provider_id}/discover"
+      },
+      {
+        "method": "POST",
+        "name": "test_provider_settings",
+        "path": "/api/providers/{provider_id}/test"
+      },
+      {
+        "method": "POST",
+        "name": "route_recommendation",
+        "path": "/api/route/recommendation"
+      },
+      {
+        "method": "POST",
+        "name": "run",
+        "path": "/api/run"
+      },
+      {
+        "method": "GET",
+        "name": "list_runs_center",
+        "path": "/api/runs"
+      },
+      {
+        "method": "GET",
+        "name": "runs_center_updates_stream",
+        "path": "/api/runs/updates/stream"
+      },
+      {
+        "method": "GET",
+        "name": "run_bundle",
+        "path": "/api/runs/{run_id}"
+      },
+      {
+        "method": "POST",
+        "name": "apply_run_patch",
+        "path": "/api/runs/{run_id}/apply"
+      },
+      {
+        "method": "POST",
+        "name": "create_run_branch",
+        "path": "/api/runs/{run_id}/branch"
+      },
+      {
+        "method": "POST",
+        "name": "cancel_run",
+        "path": "/api/runs/{run_id}/cancel"
+      },
+      {
+        "method": "GET",
+        "name": "run_diff",
+        "path": "/api/runs/{run_id}/diff"
+      },
+      {
+        "method": "POST",
+        "name": "discard_run_worktree_endpoint",
+        "path": "/api/runs/{run_id}/discard"
+      },
+      {
+        "method": "GET",
+        "name": "run_events_stream",
+        "path": "/api/runs/{run_id}/events/stream"
+      },
+      {
+        "method": "GET",
+        "name": "run_event_payload",
+        "path": "/api/runs/{run_id}/events/{event_id}"
+      },
+      {
+        "method": "POST",
+        "name": "fork_run",
+        "path": "/api/runs/{run_id}/fork"
+      },
+      {
+        "method": "GET",
+        "name": "handoff_capsule",
+        "path": "/api/runs/{run_id}/handoff-capsule"
+      },
+      {
+        "method": "POST",
+        "name": "answer_run_input",
+        "path": "/api/runs/{run_id}/input"
+      },
+      {
+        "method": "POST",
+        "name": "open_run_worktree",
+        "path": "/api/runs/{run_id}/open-worktree"
+      },
+      {
+        "method": "GET",
+        "name": "run_patch",
+        "path": "/api/runs/{run_id}/patch"
+      },
+      {
+        "method": "GET",
+        "name": "run_pr_artifact",
+        "path": "/api/runs/{run_id}/pr"
+      },
+      {
+        "method": "POST",
+        "name": "run_promotion_apply",
+        "path": "/api/runs/{run_id}/promotions/apply"
+      },
+      {
+        "method": "POST",
+        "name": "run_promotion_preview",
+        "path": "/api/runs/{run_id}/promotions/preview"
+      },
+      {
+        "method": "GET",
+        "name": "run_provenance",
+        "path": "/api/runs/{run_id}/provenance"
+      },
+      {
+        "method": "POST",
+        "name": "replay_run",
+        "path": "/api/runs/{run_id}/replay"
+      },
+      {
+        "method": "POST",
+        "name": "retry_run",
+        "path": "/api/runs/{run_id}/retry"
+      },
+      {
+        "method": "POST",
+        "name": "steer_run",
+        "path": "/api/runs/{run_id}/steer"
+      },
+      {
+        "method": "GET",
+        "name": "run_center_summary",
+        "path": "/api/runs/{run_id}/summary"
+      },
+      {
+        "method": "GET",
+        "name": "run_support_bundle",
+        "path": "/api/runs/{run_id}/support-bundle"
+      },
+      {
+        "method": "GET",
+        "name": "run_trace",
+        "path": "/api/runs/{run_id}/trace"
+      },
+      {
+        "method": "GET",
+        "name": "get_trace_replay",
+        "path": "/api/runs/{run_id}/trace-replay"
+      },
+      {
+        "method": "POST",
+        "name": "start_trace_replay",
+        "path": "/api/runs/{run_id}/trace-replays"
+      },
+      {
+        "method": "POST",
+        "name": "preview_trace_replay",
+        "path": "/api/runs/{run_id}/trace-replays/preview"
+      },
+      {
+        "method": "GET",
+        "name": "schedule_list",
+        "path": "/api/schedules"
+      },
+      {
+        "method": "POST",
+        "name": "schedule_create",
+        "path": "/api/schedules"
+      },
+      {
+        "method": "POST",
+        "name": "schedule_preview",
+        "path": "/api/schedules/preview"
+      },
+      {
+        "method": "DELETE",
+        "name": "schedule_delete",
+        "path": "/api/schedules/{schedule_id}"
+      },
+      {
+        "method": "GET",
+        "name": "schedule_detail",
+        "path": "/api/schedules/{schedule_id}"
+      },
+      {
+        "method": "PUT",
+        "name": "schedule_update",
+        "path": "/api/schedules/{schedule_id}"
+      },
+      {
+        "method": "POST",
+        "name": "schedule_delete_preview",
+        "path": "/api/schedules/{schedule_id}/delete-preview"
+      },
+      {
+        "method": "POST",
+        "name": "schedule_enable",
+        "path": "/api/schedules/{schedule_id}/enable"
+      },
+      {
+        "method": "POST",
+        "name": "schedule_pause",
+        "path": "/api/schedules/{schedule_id}/pause"
+      },
+      {
+        "method": "POST",
+        "name": "schedule_resume",
+        "path": "/api/schedules/{schedule_id}/resume"
+      },
+      {
+        "method": "POST",
+        "name": "schedule_run_now",
+        "path": "/api/schedules/{schedule_id}/run-now"
+      },
+      {
+        "method": "POST",
+        "name": "schedule_test_now",
+        "path": "/api/schedules/{schedule_id}/test-now"
+      },
+      {
+        "method": "GET",
+        "name": "sessions",
+        "path": "/api/sessions"
+      },
+      {
+        "method": "POST",
+        "name": "create_session",
+        "path": "/api/sessions"
+      },
+      {
+        "method": "POST",
+        "name": "create_session_and_run",
+        "path": "/api/sessions/run"
+      },
+      {
+        "method": "POST",
+        "name": "create_session_and_start_run",
+        "path": "/api/sessions/run/start"
+      },
+      {
+        "method": "DELETE",
+        "name": "delete_session",
+        "path": "/api/sessions/{session_id}"
+      },
+      {
+        "method": "GET",
+        "name": "get_session",
+        "path": "/api/sessions/{session_id}"
+      },
+      {
+        "method": "PATCH",
+        "name": "update_session",
+        "path": "/api/sessions/{session_id}"
+      },
+      {
+        "method": "GET",
+        "name": "session_attachments",
+        "path": "/api/sessions/{session_id}/attachments"
+      },
+      {
+        "method": "POST",
+        "name": "create_attachment",
+        "path": "/api/sessions/{session_id}/attachments"
+      },
+      {
+        "method": "POST",
+        "name": "create_workspace_attachment",
+        "path": "/api/sessions/{session_id}/attachments/workspace"
+      },
+      {
+        "method": "GET",
+        "name": "preview_session_workspace_attachment",
+        "path": "/api/sessions/{session_id}/attachments/workspace/preview"
+      },
+      {
+        "method": "GET",
+        "name": "search_session_workspace_attachments",
+        "path": "/api/sessions/{session_id}/attachments/workspace/search"
+      },
+      {
+        "method": "GET",
+        "name": "session_events",
+        "path": "/api/sessions/{session_id}/events"
+      },
+      {
+        "method": "POST",
+        "name": "native_session_link",
+        "path": "/api/sessions/{session_id}/native/link"
+      },
+      {
+        "method": "POST",
+        "name": "session_navigation_delete",
+        "path": "/api/sessions/{session_id}/navigation-delete"
+      },
+      {
+        "method": "POST",
+        "name": "session_navigation_export",
+        "path": "/api/sessions/{session_id}/navigation-export"
+      },
+      {
+        "method": "POST",
+        "name": "session_navigation_fork",
+        "path": "/api/sessions/{session_id}/navigation-fork"
+      },
+      {
+        "method": "GET",
+        "name": "session_navigation_preview",
+        "path": "/api/sessions/{session_id}/navigation-preview"
+      },
+      {
+        "method": "POST",
+        "name": "session_navigation_update",
+        "path": "/api/sessions/{session_id}/navigation-update"
+      },
+      {
+        "method": "POST",
+        "name": "run_in_session",
+        "path": "/api/sessions/{session_id}/run"
+      },
+      {
+        "method": "POST",
+        "name": "start_run_in_session",
+        "path": "/api/sessions/{session_id}/run/start"
+      },
+      {
+        "method": "GET",
+        "name": "settings_read_model",
+        "path": "/api/settings"
+      },
+      {
+        "method": "PATCH",
+        "name": "update_settings_defaults",
+        "path": "/api/settings/defaults"
+      },
+      {
+        "method": "POST",
+        "name": "apply_tool_config",
+        "path": "/api/tool-config/apply"
+      },
+      {
+        "method": "POST",
+        "name": "preview_tool_config",
+        "path": "/api/tool-config/preview"
+      },
+      {
+        "method": "POST",
+        "name": "rollback_tool_config",
+        "path": "/api/tool-config/rollback"
+      },
+      {
+        "method": "GET",
+        "name": "tool_inventory",
+        "path": "/api/tool-servers"
+      },
+      {
+        "method": "GET",
+        "name": "tool_server_detail",
+        "path": "/api/tool-servers/{server_id}"
+      },
+      {
+        "method": "POST",
+        "name": "probe_tool_server",
+        "path": "/api/tool-servers/{server_id}/probe"
+      },
+      {
+        "method": "GET",
+        "name": "tools",
+        "path": "/api/tools"
+      },
+      {
+        "method": "POST",
+        "name": "tools_sync",
+        "path": "/api/tools/sync"
+      },
+      {
+        "method": "PUT",
+        "name": "save_workbench_preferences",
+        "path": "/api/workbench/preferences"
+      },
+      {
+        "method": "POST",
+        "name": "stop_workbench_process",
+        "path": "/api/workbench/processes/{process_id}/stop"
+      },
+      {
+        "method": "GET",
+        "name": "workbench_resources",
+        "path": "/api/workbench/resources"
+      },
+      {
+        "method": "GET",
+        "name": "workbench_state",
+        "path": "/api/workbench/state"
+      },
+      {
+        "method": "POST",
+        "name": "cancel_workbench_task",
+        "path": "/api/workbench/tasks/{task_id}/cancel"
+      },
+      {
+        "method": "GET",
+        "name": "workflow_run_status",
+        "path": "/api/workflow-runs/{run_id}"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_run_cancel",
+        "path": "/api/workflow-runs/{run_id}/cancel"
+      },
+      {
+        "method": "GET",
+        "name": "workflow_handoff_status",
+        "path": "/api/workflow-runs/{run_id}/handoffs"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_handoff_choose",
+        "path": "/api/workflow-runs/{run_id}/handoffs/{step_id}/choose"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_handoff_discard",
+        "path": "/api/workflow-runs/{run_id}/handoffs/{step_id}/discard"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_merge_prepare",
+        "path": "/api/workflow-runs/{run_id}/merge-queue"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_merge_apply",
+        "path": "/api/workflow-runs/{run_id}/merge-queue/apply"
+      },
+      {
+        "method": "GET",
+        "name": "workflow_list",
+        "path": "/api/workflows"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_import",
+        "path": "/api/workflows/import"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_validate",
+        "path": "/api/workflows/validate"
+      },
+      {
+        "method": "GET",
+        "name": "workflow_detail",
+        "path": "/api/workflows/{workflow_id}"
+      },
+      {
+        "method": "PUT",
+        "name": "workflow_save",
+        "path": "/api/workflows/{workflow_id}"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_apply",
+        "path": "/api/workflows/{workflow_id}/apply"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_delete",
+        "path": "/api/workflows/{workflow_id}/delete"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_delete_preview",
+        "path": "/api/workflows/{workflow_id}/delete-preview"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_draft",
+        "path": "/api/workflows/{workflow_id}/draft"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_duplicate",
+        "path": "/api/workflows/{workflow_id}/duplicate"
+      },
+      {
+        "method": "GET",
+        "name": "workflow_export",
+        "path": "/api/workflows/{workflow_id}/export"
+      },
+      {
+        "method": "POST",
+        "name": "workflow_run",
+        "path": "/api/workflows/{workflow_id}/run"
+      },
+      {
+        "method": "GET",
+        "name": "workspace_file_metadata_endpoint",
+        "path": "/api/workspace/file/metadata"
+      },
+      {
+        "method": "GET",
+        "name": "workspace_tree_endpoint",
+        "path": "/api/workspace/tree"
+      }
+    ],
+    "cli_commands": [
+      "agent",
+      "agent list",
+      "agent run",
+      "agent show",
+      "agent validate",
+      "benchmark",
+      "benchmark performance",
+      "bootstrap",
+      "bootstrap apply",
+      "bootstrap preview",
+      "bootstrap rollback",
+      "bootstrap status",
+      "chat",
+      "compatibility",
+      "compatibility check",
+      "completion",
+      "config",
+      "config path",
+      "config set",
+      "config unset",
+      "doctor",
+      "eval",
+      "eval list",
+      "eval run",
+      "handoff",
+      "handoff capsule",
+      "harness",
+      "harness capabilities",
+      "harness conformance",
+      "harness inspect",
+      "harness list",
+      "harness run",
+      "harness scaffold",
+      "harness validate",
+      "init",
+      "integration",
+      "integration apply",
+      "integration conformance",
+      "integration group-apply",
+      "integration group-preview",
+      "integration group-recover",
+      "integration group-rollback",
+      "integration group-status",
+      "integration list",
+      "integration pack-preview",
+      "integration preview",
+      "integration rollback",
+      "integration scaffold",
+      "integration status",
+      "memory",
+      "memory add",
+      "memory delete",
+      "memory disable",
+      "memory enable",
+      "memory list",
+      "native",
+      "native import",
+      "native list",
+      "native sync",
+      "open",
+      "open file",
+      "open run",
+      "open session",
+      "preset",
+      "preset list",
+      "preset run",
+      "project",
+      "project info",
+      "project init",
+      "provider",
+      "provider add",
+      "provider discover",
+      "provider edit",
+      "provider list",
+      "provider migrate",
+      "provider migrate-legacy",
+      "provider show",
+      "provider test",
+      "run",
+      "runtime",
+      "runtime export",
+      "runtime inspect",
+      "schedule",
+      "schedule create",
+      "schedule delete",
+      "schedule enable",
+      "schedule list",
+      "schedule pause",
+      "schedule preview",
+      "schedule resume",
+      "schedule run-now",
+      "schedule show",
+      "schedule test-now",
+      "schedule update",
+      "session",
+      "session approve",
+      "session create",
+      "session events",
+      "session list",
+      "session show",
+      "session turn",
+      "state",
+      "state backup",
+      "state migrate-providers",
+      "state restore",
+      "state verify",
+      "ui",
+      "ui-identity",
+      "ui-identity revoke-all",
+      "ui-identity validate",
+      "worker",
+      "worker start",
+      "worker status",
+      "worker stop-on-idle",
+      "workflow",
+      "workflow cancel",
+      "workflow list",
+      "workflow run",
+      "workflow show",
+      "workflow status",
+      "workflow validate"
+    ],
+    "tui_commands": [
+      {
+        "action": "command_palette",
+        "id": "commands",
+        "requires_session": false,
+        "slash": "/commands"
+      },
+      {
+        "action": "context_drawer",
+        "id": "context",
+        "requires_session": false,
+        "slash": "/context"
+      },
+      {
+        "action": "status_view",
+        "id": "status",
+        "requires_session": false,
+        "slash": "/status"
+      },
+      {
+        "action": "choose_project",
+        "id": "project",
+        "requires_session": false,
+        "slash": "/project"
+      },
+      {
+        "action": "new_session",
+        "id": "new-session",
+        "requires_session": false,
+        "slash": "/new"
+      },
+      {
+        "action": "sessions",
+        "id": "sessions",
+        "requires_session": false,
+        "slash": "/sessions"
+      },
+      {
+        "action": "rename_session",
+        "id": "rename-session",
+        "requires_session": true,
+        "slash": "/rename"
+      },
+      {
+        "action": "archive_session",
+        "id": "archive-session",
+        "requires_session": true,
+        "slash": "/archive"
+      },
+      {
+        "action": "delete_session",
+        "id": "delete-session",
+        "requires_session": true,
+        "slash": "/delete"
+      },
+      {
+        "action": "fork_session",
+        "id": "fork-session",
+        "requires_session": true,
+        "slash": "/fork"
+      },
+      {
+        "action": "transcript_search",
+        "id": "transcript-search",
+        "requires_session": true,
+        "slash": "/search"
+      },
+      {
+        "action": "export_session",
+        "id": "export-session",
+        "requires_session": true,
+        "slash": "/export"
+      },
+      {
+        "action": "tasks",
+        "id": "tasks",
+        "requires_session": false,
+        "slash": "/tasks"
+      },
+      {
+        "action": "processes",
+        "id": "processes",
+        "requires_session": false,
+        "slash": "/processes"
+      },
+      {
+        "action": "usage",
+        "id": "usage",
+        "requires_session": false,
+        "slash": "/usage"
+      },
+      {
+        "action": "preferences",
+        "id": "preferences",
+        "requires_session": false,
+        "slash": "/preferences"
+      },
+      {
+        "action": "integrations",
+        "id": "integrations",
+        "requires_session": false,
+        "slash": "/integrations"
+      },
+      {
+        "action": "environment_view",
+        "id": "environment",
+        "requires_session": false,
+        "slash": "/environment"
+      },
+      {
+        "action": "status_view",
+        "id": "diagnostics",
+        "requires_session": false,
+        "slash": "/diagnostics"
+      },
+      {
+        "action": "advanced_transport",
+        "id": "advanced-transport",
+        "requires_session": false,
+        "slash": "/advanced"
+      },
+      {
+        "action": "refresh",
+        "id": "refresh",
+        "requires_session": false,
+        "slash": "/refresh"
+      },
+      {
+        "action": "environment_commit",
+        "id": "environment-commit",
+        "requires_session": true,
+        "slash": "/commit"
+      },
+      {
+        "action": "environment_push",
+        "id": "environment-push",
+        "requires_session": true,
+        "slash": "/push"
+      },
+      {
+        "action": "environment_pull_request",
+        "id": "environment-pull-request",
+        "requires_session": true,
+        "slash": "/pr"
+      },
+      {
+        "action": "files",
+        "id": "files",
+        "requires_session": true,
+        "slash": "/files"
+      },
+      {
+        "action": "evidence",
+        "id": "evidence",
+        "requires_session": true,
+        "slash": "/evidence"
+      },
+      {
+        "action": "native_terminal",
+        "id": "terminal",
+        "requires_session": true,
+        "slash": "/terminal"
+      },
+      {
+        "action": "provider_handoff",
+        "id": "provider-handoff",
+        "requires_session": true,
+        "slash": "/provider-ui"
+      },
+      {
+        "action": "web_handoff",
+        "id": "web-handoff",
+        "requires_session": true,
+        "slash": "/web"
+      },
+      {
+        "action": "runtime_control('harness')",
+        "id": "harness",
+        "requires_session": false,
+        "slash": "/harness"
+      },
+      {
+        "action": "runtime_control('model')",
+        "id": "model",
+        "requires_session": false,
+        "slash": "/model"
+      },
+      {
+        "action": "runtime_control('effort')",
+        "id": "effort",
+        "requires_session": false,
+        "slash": "/effort"
+      },
+      {
+        "action": "runtime_control('mode')",
+        "id": "mode",
+        "requires_session": false,
+        "slash": "/mode"
+      },
+      {
+        "action": "runtime_control('permission')",
+        "id": "permission",
+        "requires_session": false,
+        "slash": "/permission"
+      },
+      {
+        "action": "runtime_control('policy')",
+        "id": "policy",
+        "requires_session": false,
+        "slash": "/policy"
+      },
+      {
+        "action": "runtime_control('sandbox')",
+        "id": "sandbox",
+        "requires_session": false,
+        "slash": "/sandbox"
+      },
+      {
+        "action": "help",
+        "id": "help",
+        "requires_session": false,
+        "slash": "/help"
+      },
+      {
+        "action": "quit",
+        "id": "quit",
+        "requires_session": false,
+        "slash": "/quit"
+      }
+    ]
+  },
+  "kind": "gigaloom_product_inventory",
+  "modes": {
+    "authority_levels": [
+      "read_only",
+      "workspace_write"
+    ],
+    "invocation_modes": [
+      "headless",
+      "native"
+    ],
+    "legacy_modes": [
+      "plan",
+      "read",
+      "edit"
+    ],
+    "task_intents": [
+      "ask",
+      "review",
+      "change"
+    ]
+  },
+  "product": {
+    "distribution": "gpt2giga-harness",
+    "name": "GigaLoom",
+    "version": "0.5.1a1"
+  },
+  "protocols": [
+    "openai_compatible",
+    "anthropic_compatible",
+    "gemini_compatible"
+  ],
+  "provider_compatibility_profiles": [
+    {
+      "adapter_version": "0.5.1a1",
+      "capabilities": [
+        "chat",
+        "streaming",
+        "usage"
+      ],
+      "dialects": [
+        "anthropic-bedrock-v1",
+        "anthropic-foundry-v1",
+        "anthropic-vertex-v1"
+      ],
+      "evidence": [
+        {
+          "id": "anthropic-cloud-claude-code-fixture",
+          "revision": "882b1af8e2549a64fa4c54e481376f52ed911c963dfd902ab42189f2e3de6971",
+          "source": "built-in-contract",
+          "status": "supported"
+        }
+      ],
+      "harness_id": "claude-code",
+      "id": "anthropic-cloud-claude-code",
+      "native_auth": true,
+      "protocol": "anthropic_compatible",
+      "revision": "882b1af8e2549a64fa4c54e481376f52ed911c963dfd902ab42189f2e3de6971",
+      "transports": [
+        "native_terminal",
+        "one_shot"
+      ]
+    },
+    {
+      "adapter_version": "0.5.1a1",
+      "capabilities": [
+        "chat",
+        "streaming",
+        "usage"
+      ],
+      "dialects": [
+        "anthropic-messages-v1"
+      ],
+      "evidence": [
+        {
+          "id": "anthropic-compatible-claude-code-fixture",
+          "revision": "40f46028654877391a5c8b88fab412e17cfbf259ee0854192854ddd8c7dfdc3f",
+          "source": "built-in-contract",
+          "status": "supported"
+        }
+      ],
+      "harness_id": "claude-code",
+      "id": "anthropic-compatible-claude-code",
+      "native_auth": false,
+      "protocol": "anthropic_compatible",
+      "revision": "40f46028654877391a5c8b88fab412e17cfbf259ee0854192854ddd8c7dfdc3f",
+      "transports": [
+        "native_terminal",
+        "one_shot"
+      ]
+    },
+    {
+      "adapter_version": "0.5.1a1",
+      "capabilities": [
+        "chat",
+        "streaming",
+        "usage"
+      ],
+      "dialects": [
+        "gemini-generate-content-v1beta"
+      ],
+      "evidence": [
+        {
+          "id": "gemini-compatible-gemini-cli-fixture",
+          "revision": "2c67b2c2ba3d3c19757aedbf425ba38fd302abff91a3c82e2c2a2e19c9cc5dcd",
+          "source": "built-in-gemini-cli-0.46-contract",
+          "status": "supported"
+        }
+      ],
+      "harness_id": "gemini-cli",
+      "id": "gemini-compatible-gemini-cli",
+      "native_auth": false,
+      "protocol": "gemini_compatible",
+      "revision": "2c67b2c2ba3d3c19757aedbf425ba38fd302abff91a3c82e2c2a2e19c9cc5dcd",
+      "transports": [
+        "native_structured",
+        "native_terminal",
+        "one_shot"
+      ]
+    },
+    {
+      "adapter_version": "0.5.1a1",
+      "capabilities": [
+        "chat",
+        "streaming",
+        "usage"
+      ],
+      "dialects": [
+        "gemini-vertex-v1"
+      ],
+      "evidence": [
+        {
+          "id": "gemini-vertex-gemini-cli-fixture",
+          "revision": "da7da31518119a7fd71e814691039ac860f5882f19367833af83d1d77bc4a419",
+          "source": "built-in-gemini-cli-0.46-contract",
+          "status": "supported"
+        }
+      ],
+      "harness_id": "gemini-cli",
+      "id": "gemini-vertex-gemini-cli",
+      "native_auth": true,
+      "protocol": "gemini_compatible",
+      "revision": "da7da31518119a7fd71e814691039ac860f5882f19367833af83d1d77bc4a419",
+      "transports": [
+        "native_structured",
+        "native_terminal",
+        "one_shot"
+      ]
+    },
+    {
+      "adapter_version": "0.5.1a1",
+      "capabilities": [
+        "chat",
+        "streaming",
+        "tools"
+      ],
+      "dialects": [
+        "gpt2giga-v1",
+        "gpt2giga-v2"
+      ],
+      "evidence": [
+        {
+          "id": "legacy-claude-code-compatibility",
+          "revision": "cc14d4b5c28b29db6468e27c41ebe96af1dd8575410aee9ccf77067bd283b086",
+          "source": "built-in-contract",
+          "status": "supported"
+        }
+      ],
+      "harness_id": "claude-code",
+      "id": "legacy-gpt2giga-claude-code",
+      "native_auth": false,
+      "protocol": "anthropic_compatible",
+      "revision": "cc14d4b5c28b29db6468e27c41ebe96af1dd8575410aee9ccf77067bd283b086",
+      "transports": [
+        "native_terminal",
+        "one_shot"
+      ]
+    },
+    {
+      "adapter_version": "0.5.1a1",
+      "capabilities": [
+        "chat",
+        "streaming",
+        "tools"
+      ],
+      "dialects": [
+        "gpt2giga-v1",
+        "gpt2giga-v2"
+      ],
+      "evidence": [
+        {
+          "id": "legacy-codex-cli-compatibility",
+          "revision": "ae07cdd3fecd0ca19f1dafe2943f5ad5db8a90317323bfd94d639f9eaf55bad1",
+          "source": "built-in-contract",
+          "status": "supported"
+        }
+      ],
+      "harness_id": "codex-cli",
+      "id": "legacy-gpt2giga-codex-cli",
+      "native_auth": false,
+      "protocol": "openai_compatible",
+      "revision": "ae07cdd3fecd0ca19f1dafe2943f5ad5db8a90317323bfd94d639f9eaf55bad1",
+      "transports": [
+        "native_structured",
+        "native_terminal",
+        "one_shot"
+      ]
+    },
+    {
+      "adapter_version": "0.5.1a1",
+      "capabilities": [
+        "chat",
+        "streaming",
+        "tools"
+      ],
+      "dialects": [
+        "gpt2giga-v1",
+        "gpt2giga-v2"
+      ],
+      "evidence": [
+        {
+          "id": "legacy-direct-chat-compatibility",
+          "revision": "b3d6faaa2d9a306ad035b22395726fef6cd2612d9dffe35eb0e3fb76d73489d1",
+          "source": "built-in-contract",
+          "status": "supported"
+        }
+      ],
+      "harness_id": "direct-chat",
+      "id": "legacy-gpt2giga-direct-chat",
+      "native_auth": false,
+      "protocol": "openai_compatible",
+      "revision": "b3d6faaa2d9a306ad035b22395726fef6cd2612d9dffe35eb0e3fb76d73489d1",
+      "transports": [
+        "one_shot"
+      ]
+    },
+    {
+      "adapter_version": "0.5.1a1",
+      "capabilities": [
+        "chat",
+        "streaming",
+        "tools"
+      ],
+      "dialects": [
+        "gpt2giga-v1",
+        "gpt2giga-v2"
+      ],
+      "evidence": [
+        {
+          "id": "legacy-gemini-cli-compatibility",
+          "revision": "b00bba2a4bef899824ea969d284649bc1966ebae16ab422f136f88584d3ea94d",
+          "source": "built-in-contract",
+          "status": "supported"
+        }
+      ],
+      "harness_id": "gemini-cli",
+      "id": "legacy-gpt2giga-gemini-cli",
+      "native_auth": true,
+      "protocol": "gemini_compatible",
+      "revision": "b00bba2a4bef899824ea969d284649bc1966ebae16ab422f136f88584d3ea94d",
+      "transports": [
+        "native_structured",
+        "native_terminal",
+        "one_shot"
+      ]
+    },
+    {
+      "adapter_version": "0.5.1a1",
+      "capabilities": [
+        "chat",
+        "streaming",
+        "usage"
+      ],
+      "dialects": [
+        "openai-responses-v1"
+      ],
+      "evidence": [
+        {
+          "id": "codex-cli-openai-compatible-fixture",
+          "revision": "4ff54bfba8c1c843ff354653e45d34d54e3ed43069c7fc19888d291936bf5a10",
+          "source": "built-in-contract",
+          "status": "supported"
+        }
+      ],
+      "harness_id": "codex-cli",
+      "id": "openai-compatible-codex-cli",
+      "native_auth": false,
+      "protocol": "openai_compatible",
+      "revision": "4ff54bfba8c1c843ff354653e45d34d54e3ed43069c7fc19888d291936bf5a10",
+      "transports": [
+        "native_structured",
+        "native_terminal",
+        "one_shot"
+      ]
+    },
+    {
+      "adapter_version": "0.5.1a1",
+      "capabilities": [
+        "chat",
+        "streaming",
+        "usage"
+      ],
+      "dialects": [
+        "openai-chat-completions-v1"
+      ],
+      "evidence": [
+        {
+          "id": "direct-chat-openai-compatible-fixture",
+          "revision": "e60dfd1f3c3b6346bf8faa1c5def08f90a4cd1536c086a2b597f7e39f64a6979",
+          "source": "built-in-contract",
+          "status": "supported"
+        }
+      ],
+      "harness_id": "direct-chat",
+      "id": "openai-compatible-direct-chat",
+      "native_auth": false,
+      "protocol": "openai_compatible",
+      "revision": "e60dfd1f3c3b6346bf8faa1c5def08f90a4cd1536c086a2b597f7e39f64a6979",
+      "transports": [
+        "one_shot"
+      ]
+    }
+  ],
+  "readiness": {
+    "doctor_consumer": {
+      "inventory_kind": "gigaloom_product_inventory",
+      "inventory_schema_version": 1,
+      "report_kind": "gpt2giga_harness_doctor_report"
+    },
+    "installed_executable_proves_account_ready": false,
+    "provider_cli_contracts": [
+      {
+        "evidence_required": [
+          "executable_resolution",
+          "bounded_version_probe",
+          "bounded_help_probe",
+          "provider_owned_account_status"
+        ],
+        "harness_id": "claude-code",
+        "maximum_version_exclusive": "2.2.0",
+        "minimum_version": "2.1.0",
+        "required_tokens": [
+          "--output-format",
+          "stream-json",
+          "--permission-mode",
+          "--no-session-persistence"
+        ]
+      },
+      {
+        "evidence_required": [
+          "executable_resolution",
+          "bounded_version_probe",
+          "bounded_help_probe",
+          "provider_owned_account_status"
+        ],
+        "harness_id": "codex-cli",
+        "maximum_version_exclusive": "0.145.0",
+        "minimum_version": "0.144.0",
+        "required_tokens": [
+          "--json",
+          "--sandbox",
+          "--ephemeral"
+        ]
+      },
+      {
+        "evidence_required": [
+          "executable_resolution",
+          "bounded_version_probe",
+          "bounded_help_probe",
+          "provider_owned_account_status"
+        ],
+        "harness_id": "gemini-cli",
+        "maximum_version_exclusive": "0.47.0",
+        "minimum_version": "0.46.0",
+        "required_tokens": [
+          "--output-format",
+          "stream-json",
+          "--approval-mode",
+          "--skip-trust"
+        ]
+      }
+    ]
+  },
+  "schema_version": 1,
+  "sources": [
+    "product_capabilities.capability_manifest",
+    "HarnessRegistry.with_builtins",
+    "ProviderCompatibilityRegistry.with_builtins",
+    "installed gpt2giga-harness entry points",
+    "cli.build_parser",
+    "tui.commands.COMMAND_REGISTRY",
+    "ui.app.create_app routes",
+    "contract tests"
+  ],
+  "transports": [
+    "native_structured",
+    "native_terminal",
+    "one_shot"
+  ],
+  "vocabulary": {
+    "authority_levels": [
+      "read_only",
+      "workspace_write"
+    ],
+    "integration_lifecycle": [
+      "definition_only",
+      "enabled",
+      "disabled",
+      "uninstalled",
+      "definition_deleted"
+    ],
+    "legacy_mappings": [
+      {
+        "authority": "read_only",
+        "field": "mode",
+        "intent": "ask",
+        "note": "Compatibility alias; planning semantics remain visible during migration.",
+        "transport": null,
+        "value": "plan"
+      },
+      {
+        "authority": "read_only",
+        "field": "mode",
+        "intent": "review",
+        "note": "Compatibility alias for a read-only review request.",
+        "transport": null,
+        "value": "read"
+      },
+      {
+        "authority": "workspace_write",
+        "field": "mode",
+        "intent": "change",
+        "note": "Compatibility alias for a workspace-changing request.",
+        "transport": null,
+        "value": "edit"
+      },
+      {
+        "authority": null,
+        "field": "execution_transport",
+        "intent": null,
+        "note": "Machine-only transport override; provider evidence still gates admission.",
+        "transport": "structured_session",
+        "value": "native_structured"
+      },
+      {
+        "authority": null,
+        "field": "execution_transport",
+        "intent": null,
+        "note": "Machine-only provider-terminal override.",
+        "transport": "terminal_session",
+        "value": "native_terminal"
+      },
+      {
+        "authority": null,
+        "field": "execution_transport",
+        "intent": null,
+        "note": "Machine-only compatibility execution override.",
+        "transport": "one_shot",
+        "value": "one_shot"
+      },
+      {
+        "authority": null,
+        "field": "invocation_mode",
+        "intent": null,
+        "note": "Does not select a transport; route evidence must provide one.",
+        "transport": null,
+        "value": "headless"
+      },
+      {
+        "authority": null,
+        "field": "stream",
+        "intent": null,
+        "note": "Compatibility request; streaming is no longer an ordinary UI choice.",
+        "transport": "streaming_events",
+        "value": "true"
+      },
+      {
+        "authority": null,
+        "field": "stream",
+        "intent": null,
+        "note": "Compatibility opt-out; it does not select a transport.",
+        "transport": null,
+        "value": "false"
+      }
+    ],
+    "legacy_mode_receipts": [
+      {
+        "artifacts": [
+          "plan"
+        ],
+        "authority": "read_only",
+        "field": "mode",
+        "intent": "ask",
+        "permission_projection": "read_only",
+        "removal": {
+          "condition": "one_released_schema_v1_window_and_zero_tracked_callers_or_saved_state",
+          "earliest_version": "1.0.0"
+        },
+        "router_branches": [
+          "ask_or_plan"
+        ],
+        "schema_version": 1,
+        "state_transitions": [
+          "planning"
+        ],
+        "status": "supported_alias",
+        "value": "plan",
+        "warning": "legacy_mode_alias"
+      },
+      {
+        "artifacts": [
+          "review_findings"
+        ],
+        "authority": "read_only",
+        "field": "mode",
+        "intent": "review",
+        "permission_projection": "read_only",
+        "removal": {
+          "condition": "one_released_schema_v1_window_and_zero_tracked_callers_or_saved_state",
+          "earliest_version": "1.0.0"
+        },
+        "router_branches": [
+          "review"
+        ],
+        "schema_version": 1,
+        "state_transitions": [
+          "reviewing"
+        ],
+        "status": "supported_alias",
+        "value": "read",
+        "warning": "legacy_mode_alias"
+      },
+      {
+        "artifacts": [
+          "workspace_diff"
+        ],
+        "authority": "workspace_write",
+        "field": "mode",
+        "intent": "change",
+        "permission_projection": "workspace_write",
+        "removal": {
+          "condition": "one_released_schema_v1_window_and_zero_tracked_callers_or_saved_state",
+          "earliest_version": "1.0.0"
+        },
+        "router_branches": [
+          "change"
+        ],
+        "schema_version": 1,
+        "state_transitions": [
+          "editing",
+          "promotion_eligible"
+        ],
+        "status": "supported_alias",
+        "value": "edit",
+        "warning": "legacy_mode_alias"
+      }
+    ],
+    "schema_version": 1,
+    "task_intents": [
+      "ask",
+      "review",
+      "change"
+    ],
+    "title_provenance": [
+      "untitled",
+      "legacy",
+      "fallback",
+      "provider_native",
+      "manual"
+    ],
+    "tool_capabilities": [
+      "filesystem_read",
+      "filesystem_write",
+      "process",
+      "network",
+      "github",
+      "browser",
+      "mcp",
+      "child_agent"
+    ],
+    "transport_capabilities": [
+      "structured_session",
+      "terminal_session",
+      "one_shot",
+      "streaming_events"
+    ]
+  }
+}

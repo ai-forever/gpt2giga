@@ -9,6 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from gpt2giga_harness.config import DEFAULT_MODEL_HINTS
+from gpt2giga_harness.doctor import build_doctor_report
 from gpt2giga_harness.mcp import MCPProbeHistoryStore, build_mcp_inventory
 from gpt2giga_harness.project import (
     load_project_config,
@@ -46,6 +47,34 @@ from gpt2giga_harness.workbench_execution import (
 
 
 router = APIRouter(route_class=ConformantAPIRoute)
+
+
+@router.get("/api/doctor")
+def doctor_read_model(request: Request) -> dict[str, Any]:
+    """Return one guided content-free doctor snapshot without online probes."""
+    security = request.app.state.harness_ui_security
+    if security.local_mode:
+        status = security.local_status(request)
+        identity = {
+            "local": True,
+            "authenticated": status.authenticated,
+            "claimable": status.claimable,
+        }
+    else:
+        session = security.remote_session(request)
+        identity = {
+            "local": False,
+            "authenticated": session is not None,
+            "claimable": False,
+            "role": session.actor.role if session is not None else None,
+        }
+    return build_doctor_report(
+        request.app.state.harness_config,
+        request.app.state.harness_registry,
+        workspace=None,
+        online_checks=False,
+        ui_identity=identity,
+    )
 
 
 @router.get("/api/settings")

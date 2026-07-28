@@ -9,6 +9,7 @@ CATALOGS: dict[str, dict[str, str]] = {
     "en": {
         "app.subtitle": "Provider-neutral terminal workbench",
         "button.help": "Help",
+        "button.context": "Context",
         "button.answer": "Answer",
         "button.approve": "Approve",
         "button.cancel_run": "Cancel run",
@@ -57,6 +58,7 @@ CATALOGS: dict[str, dict[str, str]] = {
             "Tab / Shift+Tab: move focus\n"
             "Arrow keys: navigate lists\n"
             "Ctrl+P: command palette\n"
+            "Ctrl+K: context drawer\n"
             "Enter: resume selected session\n"
             "P: choose project path\n"
             "N: create session\n"
@@ -72,6 +74,8 @@ CATALOGS: dict[str, dict[str, str]] = {
         "command.status": "Runtime status",
         "command.commands": "Command palette",
         "command.commands.help": "Search every registered Workbench command",
+        "command.context": "Context drawer",
+        "command.context.help": "Open tasks, processes, preferences, environment, integrations, and diagnostics",
         "command.status.help": "Show route, transport, controls, and remediation",
         "command.project": "Choose project",
         "command.project.help": "Select a project root",
@@ -101,6 +105,12 @@ CATALOGS: dict[str, dict[str, str]] = {
         "command.preferences.help": "Review private accessibility and presentation settings",
         "command.integrations": "Integrations",
         "command.integrations.help": "Show capability-safe MCP, plugin, and extension handoffs",
+        "command.environment": "Environment",
+        "command.environment.help": "Inspect the bounded project, Git, GitHub, and change summary",
+        "command.diagnostics": "Diagnostics",
+        "command.diagnostics.help": "Inspect provider, session, authority, and readiness findings",
+        "command.advanced_transport": "Advanced transport",
+        "command.advanced_transport.help": "Inspect internal route, transport, process owner, and runtime controls",
         "command.refresh": "Refresh",
         "command.refresh.help": "Reload authoritative state",
         "command.environment_commit": "Governed Git commit",
@@ -175,6 +185,26 @@ CATALOGS: dict[str, dict[str, str]] = {
         "label.provider": "Provider",
         "label.readiness": "Readiness",
         "label.transport": "Transport",
+        "label.session": "Session",
+        "label.intent": "Intent",
+        "label.authority": "Authority",
+        "intent.ask": "Ask",
+        "intent.review": "Review",
+        "intent.change": "Change",
+        "authority.read_only": "Read only",
+        "authority.workspace_write": "Workspace write",
+        "context.title": "Workbench context",
+        "context.open": "Open",
+        "context.tasks": "Inspect retained tasks and subagents.",
+        "context.processes": "Inspect owned background processes.",
+        "context.preferences": "Review private presentation and accessibility preferences.",
+        "context.environment": "Inspect bounded project, Git, GitHub, and change state.",
+        "context.integrations": "Inspect capability-safe MCP, Skill, and Plugin handoffs.",
+        "context.diagnostics": "Inspect readiness, identity, and recovery findings.",
+        "context.advanced_transport": "Inspect internal transport details hidden from the default shell.",
+        "attention.approval": "Approval required: {action} · {reason}",
+        "attention.question": "Question: {question}",
+        "attention.running": "Run active: {status}",
         "environment.staged": "staged",
         "environment.unstaged": "unstaged",
         "environment.untracked": "untracked",
@@ -278,6 +308,7 @@ CATALOGS: dict[str, dict[str, str]] = {
     "ru": {
         "app.subtitle": "Провайдер-независимая рабочая среда",
         "button.help": "Помощь",
+        "button.context": "Контекст",
         "button.answer": "Ответить",
         "button.approve": "Разрешить",
         "button.cancel_run": "Отменить запуск",
@@ -326,6 +357,7 @@ CATALOGS: dict[str, dict[str, str]] = {
             "Tab / Shift+Tab: сменить фокус\n"
             "Стрелки: навигация по спискам\n"
             "Ctrl+P: палитра команд\n"
+            "Ctrl+K: панель контекста\n"
             "Enter: продолжить выбранную сессию\n"
             "P: выбрать путь проекта\n"
             "N: создать сессию\n"
@@ -341,6 +373,8 @@ CATALOGS: dict[str, dict[str, str]] = {
         "command.status": "Состояние runtime",
         "command.commands": "Палитра команд",
         "command.commands.help": "Найти любую зарегистрированную команду Workbench",
+        "command.context": "Панель контекста",
+        "command.context.help": "Открыть задачи, процессы, настройки, окружение, интеграции и диагностику",
         "command.status.help": "Показать маршрут, транспорт, controls и remediation",
         "command.project": "Выбрать проект",
         "command.project.help": "Выбрать корень проекта",
@@ -370,6 +404,12 @@ CATALOGS: dict[str, dict[str, str]] = {
         "command.preferences.help": "Просмотреть приватные настройки доступности и интерфейса",
         "command.integrations": "Интеграции",
         "command.integrations.help": "Показать безопасные переходы MCP, плагинов и расширений",
+        "command.environment": "Окружение",
+        "command.environment.help": "Просмотреть ограниченную сводку проекта, Git, GitHub и изменений",
+        "command.diagnostics": "Диагностика",
+        "command.diagnostics.help": "Просмотреть провайдера, сессию, полномочия и проблемы готовности",
+        "command.advanced_transport": "Расширенный транспорт",
+        "command.advanced_transport.help": "Просмотреть внутренний маршрут, транспорт, владельца процесса и runtime controls",
         "command.refresh": "Обновить",
         "command.refresh.help": "Перезагрузить авторитетное состояние",
         "command.environment_commit": "Управляемый Git-коммит",
@@ -444,6 +484,26 @@ CATALOGS: dict[str, dict[str, str]] = {
         "label.provider": "Провайдер",
         "label.readiness": "Готовность",
         "label.transport": "Транспорт",
+        "label.session": "Сессия",
+        "label.intent": "Задача",
+        "label.authority": "Полномочия",
+        "intent.ask": "Вопрос",
+        "intent.review": "Проверка",
+        "intent.change": "Изменение",
+        "authority.read_only": "Только чтение",
+        "authority.workspace_write": "Запись в workspace",
+        "context.title": "Контекст Workbench",
+        "context.open": "Открыть",
+        "context.tasks": "Просмотреть сохранённые задачи и субагентов.",
+        "context.processes": "Просмотреть принадлежащие Harness фоновые процессы.",
+        "context.preferences": "Проверить приватные настройки интерфейса и доступности.",
+        "context.environment": "Просмотреть ограниченное состояние проекта, Git, GitHub и изменений.",
+        "context.integrations": "Просмотреть безопасные переходы MCP, Skills и Plugins.",
+        "context.diagnostics": "Просмотреть готовность, identity и способы восстановления.",
+        "context.advanced_transport": "Просмотреть внутренние детали транспорта, скрытые из основной оболочки.",
+        "attention.approval": "Нужно решение: {action} · {reason}",
+        "attention.question": "Вопрос: {question}",
+        "attention.running": "Запуск активен: {status}",
         "environment.staged": "в индексе",
         "environment.unstaged": "не в индексе",
         "environment.untracked": "неотслеживаемых",

@@ -33,7 +33,11 @@ def test_gemini_cli_sanitizes_env(monkeypatch):
             model="GigaChat-2-Max",
             api_mode=GigaChatApiMode.V2,
         ),
-        HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key"),
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            api_key="proxy-key",
+            harness_model_key="model-key",
+        ),
         home="/tmp/gemini-home",
     )
 
@@ -44,7 +48,10 @@ def test_gemini_cli_sanitizes_env(monkeypatch):
     assert env["GEMINI_API_KEY"] == "proxy-key"
     assert env["GEMINI_MODEL"] == "GigaChat-2-Max"
     assert env["GEMINI_CLI_CUSTOM_HEADERS"] == (
-        "X-GPT2GIGA-Harness-Model:GigaChat-2-Max,X-GPT2GIGA-Pass-Model:false"
+        "X-GigaLoom-Model:GigaChat-2-Max,"
+        "X-GPT2GIGA-Pass-Model:false,"
+        "X-GigaLoom-Model-Signature:"
+        "v1:7598e976c49d03ab5b2ad622261518a05cfed7cce8360a0c2a61c4546c24fa0f"
     )
     assert env["GEMINI_CLI_TRUST_WORKSPACE"] == "true"
 
@@ -54,14 +61,17 @@ def test_gemini_cli_preserves_custom_headers_and_encodes_pinned_model():
         HarnessRequest(prompt="inspect", model="team/model,preview"),
         HarnessContext(
             proxy_url="http://127.0.0.1:8090",
+            harness_model_key="model-key",
             extra_env={"GEMINI_CLI_CUSTOM_HEADERS": "X-Existing:value"},
         ),
     )
 
     assert env["GEMINI_CLI_CUSTOM_HEADERS"] == (
         "X-Existing:value,"
-        "X-GPT2GIGA-Harness-Model:team%2Fmodel%2Cpreview,"
-        "X-GPT2GIGA-Pass-Model:false"
+        "X-GigaLoom-Model:team%2Fmodel%2Cpreview,"
+        "X-GPT2GIGA-Pass-Model:false,"
+        "X-GigaLoom-Model-Signature:"
+        "v1:7a152ee1521e71d8604ee99ed42829617af43834962b1dbd5e46384c5d7fd5ed"
     )
 
 

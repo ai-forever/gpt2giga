@@ -18,7 +18,7 @@ from claude_agent_sdk import (  # noqa: E402
     Transport,
 )
 
-from gpt2giga_harness.claude_agent_sdk_poc import (  # noqa: E402
+from gpt2giga_harness.claude_agent_sdk import (  # noqa: E402
     ClaudeAgentSdkPocError,
     ClaudeSdkAuthMode,
     build_claude_agent_sdk_options,

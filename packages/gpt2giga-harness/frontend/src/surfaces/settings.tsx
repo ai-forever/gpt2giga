@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   type BrowserAccessStatusResponse,
+  type DoctorReport,
   fetchCockpit,
   mutateCockpit,
   patchCockpit,
@@ -127,6 +128,9 @@ export function SettingsSurface() {
   });
   const runtimeCheck = useMutation({
     mutationFn: () => fetchCockpit<Record<string, unknown>>("/api/health"),
+  });
+  const doctor = useMutation({
+    mutationFn: () => fetchCockpit<DoctorReport>("/api/doctor"),
   });
   const rotateBrowserAccess = useMutation({
     mutationFn: () =>
@@ -655,6 +659,20 @@ export function SettingsSurface() {
           <SettingsSection id="diagnostics" title={message(locale, "diagnostics")} description={message(locale, "diagnosticsHint")}>
             <dl className="settings-facts"><Fact label={message(locale, "requestsObserved")} value={String(data.diagnostics.async_data_plane.requests ?? 0)} /><Fact label={message(locale, "contentCapture")} value="off" /></dl>
             <p className="muted-copy">{message(locale, "diagnosticsPrivacy")}</p>
+            <div className="doctor-actions">
+              <button disabled={doctor.isPending} onClick={() => doctor.mutate()} type="button">
+                {doctor.isPending ? message(locale, "doctorRunning") : message(locale, "runFirstRunDoctor")}
+              </button>
+              <button
+                disabled={doctor.data === undefined}
+                onClick={() => doctor.data && downloadDoctorReport(doctor.data)}
+                type="button"
+              >
+                {message(locale, "exportDiagnostics")}
+              </button>
+            </div>
+            {doctor.data ? <DoctorResult locale={locale} report={doctor.data} /> : null}
+            {doctor.isError ? <p className="mutation-error" role="alert">{doctor.error.message}</p> : null}
             <SettingsInspectorBoundary />
             <Boundary source="runtime_aggregates" effect="live" />
           </SettingsSection>
@@ -677,6 +695,53 @@ function Fact({ label, mono = false, value }: { label: string; mono?: boolean; v
 
 function Boundary({ effect, source }: { effect: string; source: string }) {
   return <div className="settings-boundary"><span>{source}</span><span>{effect.replaceAll("_", " ")}</span></div>;
+}
+
+function DoctorResult({ locale, report }: { locale: LocalePreference; report: DoctorReport }) {
+  const status = report.summary.blocked > 0
+    ? "blocked"
+    : report.summary.degraded > 0
+      ? "degraded"
+      : "ready";
+  return (
+    <div className="guided-doctor-result" data-status={status}>
+      <header>
+        <strong>{message(locale, "firstRunDoctor")}</strong>
+        <span>
+          {report.summary.ready} {message(locale, "ready")} · {report.summary.degraded} {message(locale, "degraded")} · {report.summary.blocked} {message(locale, "blocked")}
+        </span>
+      </header>
+      <p>{message(locale, "doctorOfflinePrivacy")}</p>
+      <div className="guided-doctor-grid">
+        {report.checks.map((check) => (
+          <article className={`guided-doctor-check ${check.status}`} key={check.id}>
+            <div>
+              <strong>{check.category.replaceAll("_", " ")}</strong>
+              <span>{check.status}</span>
+            </div>
+            <p>{check.summary}</p>
+            {check.remediation[0] ? (
+              <div className="guided-doctor-remedy">
+                <span>{check.remediation[0].message}</span>
+                <code>{check.remediation[0].command}</code>
+              </div>
+            ) : null}
+          </article>
+        ))}
+      </div>
+      <small>SHA-256 {report.export.content_sha256}</small>
+    </div>
+  );
+}
+
+function downloadDoctorReport(report: DoctorReport) {
+  const blob = new Blob([`${JSON.stringify(report, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.download = "gigaloom-doctor.json";
+  link.href = url;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function ProviderField({ children, error, label }: { children: React.ReactNode; error?: string; label: string }) {

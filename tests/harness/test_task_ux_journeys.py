@@ -39,6 +39,9 @@ from gpt2giga_harness.ui.app import create_app
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "task_ux_journeys.json"
+OLD_SUPPORTED_STATE_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "g8_02_old_supported_state.json"
+)
 EXPECTED_JOURNEYS = {
     "ask-question",
     "review-repository",
@@ -281,6 +284,87 @@ def test_automation_journey_authors_and_runs_one_revision_bound_workflow(tmp_pat
     assert run["definition_hash"]
     assert run["status"] == "succeeded"
     assert run["steps"][0]["status"] == "succeeded"
+
+
+def test_old_supported_automation_state_recovers_through_cockpit_contracts(tmp_path):
+    client, worker = _workflow_client(tmp_path)
+    workspace = tmp_path / "workspace"
+    fixture = json.loads(OLD_SUPPORTED_STATE_FIXTURE.read_text(encoding="utf-8"))
+    assert fixture["schema_version"] == 1
+    assert fixture["source_commit"] == ("4622794a9e3a1cc1d0756fcdf0ebbe287899a391")
+    for relative_path, content in fixture["files"].items():
+        target = workspace / ".giga" / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    saved_link = client.get("/workflows/recovered-review", follow_redirects=False)
+    assert saved_link.status_code == 307
+    assert saved_link.headers["location"] == (
+        "/cockpit-v2/automation/workflows?selected=recovered-review"
+    )
+    recovered = client.get(
+        "/api/workflows/recovered-review",
+        params={"workspace": str(workspace)},
+    )
+    assert recovered.status_code == 200
+    original = recovered.json()
+    assert original["workflow"]["title"] == "Recovered review"
+
+    edited_source = original["source"].replace(
+        "title: Recovered review",
+        "title: Recovered review after upgrade",
+    )
+    edited = client.put(
+        "/api/workflows/recovered-review",
+        json={
+            "workspace": str(workspace),
+            "content": edited_source,
+            "expected_hash": original["workflow"]["source_hash"],
+        },
+    )
+    assert edited.status_code == 200
+    assert edited.json()["workflow"]["title"] == "Recovered review after upgrade"
+    assert len(edited.json()["history"]) == 1
+
+    copy_source = edited_source.replace(
+        "id: recovered-review",
+        "id: recovered-review-copy",
+        1,
+    ).replace(
+        "title: Recovered review after upgrade",
+        "title: Recovered review copy",
+        1,
+    )
+    preview = client.post(
+        "/api/workflows/recovered-review-copy/draft",
+        json={"workspace": str(workspace), "content": copy_source},
+    )
+    assert preview.status_code == 200
+    created = client.post(
+        "/api/workflows/recovered-review-copy/apply",
+        json={
+            "workspace": str(workspace),
+            "content": copy_source,
+            "expected_hash": preview.json()["source_hash"],
+        },
+    )
+    assert created.status_code == 200
+
+    worker["online"] = True
+    started = client.post(
+        "/api/workflows/recovered-review/run",
+        json={
+            "idempotency_key": "g8-02-recovery-run",
+            "prompt": "Execute the recovered definition.",
+            "workspace": str(workspace),
+        },
+    )
+    assert started.status_code == 200
+    assert started.json()["run"]["status"] == "succeeded"
+    assert (
+        started.json()["run"]["definition_hash"]
+        == (edited.json()["workflow"]["source_hash"])
+    )
 
 
 def test_provider_login_journey_stays_native_owned_and_non_authoritative():

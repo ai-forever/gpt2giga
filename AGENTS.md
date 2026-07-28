@@ -80,8 +80,14 @@ When continuing a named local roadmap:
 Install workspace runtime and development dependencies:
 
 ```bash
+npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
+npm --prefix packages/gpt2giga-harness/frontend run build
 uv sync --all-packages --all-extras --dev
 ```
+
+The frontend producer must run before the first clean-checkout `uv sync`;
+subsequent sync/build commands consume and verify its ignored asset tree without
+running Node.
 
 Repository quality gate:
 

@@ -114,6 +114,7 @@ import {
   type ProductExecutionSelection,
   type WorkbenchKind,
 } from "../workbench-execution";
+import { permissionSimulationRows } from "../approval-ux";
 
 const layoutKey = "gpt2giga.cockpit-v2.workbench-layout.v1";
 const runPreferencesKey = "gpt2giga.cockpit-v2.run-preferences.v1";
@@ -513,6 +514,9 @@ export function WorkbenchSurface() {
   const [atSelection, setAtSelection] = useState(0);
   const [previewReport, setPreviewReport] = useState<RunPreflightResponse["preflight"] | null>(null);
   const permissionHighlights = permissionSimulationHighlights(
+    previewReport?.permission_simulation,
+  );
+  const permissionRows = permissionSimulationRows(
     previewReport?.permission_simulation,
   );
   const [startedRuns, setStartedRuns] = useState<Record<string, string>>({});
@@ -1834,9 +1838,26 @@ export function WorkbenchSurface() {
                     {message(locale, "previewExecutionEvidence")} · {previewReport.findings.length} {message(locale, "previewFindings")}
                   </small>
                   {permissionHighlights === null ? null : (
-                    <small className="permission-simulation-summary">
-                      {message(locale, "permissionSimulation")} · {permissionHighlights.approvalCount} {message(locale, "approvalRequired")} · {permissionHighlights.unknownCount} {message(locale, "permissionSimulationUnknown")} · {message(locale, "permissionSimulationEvidence")} {permissionHighlights.evidence}
-                    </small>
+                    <>
+                      <small className="permission-simulation-summary">
+                        {message(locale, "permissionSimulation")} · {permissionHighlights.approvalCount} {message(locale, "approvalRequired")} · {permissionHighlights.unknownCount} {message(locale, "permissionSimulationUnknown")} · {message(locale, "permissionSimulationEvidence")} {permissionHighlights.evidence}
+                      </small>
+                      <details className="permission-simulation-details">
+                        <summary>{message(locale, "whyAllowedOrBlocked")}</summary>
+                        <div className="permission-simulation-list">
+                          {permissionRows.map((row) => (
+                            <div
+                              className={`permission-simulation-row ${row.prediction}`}
+                              key={`${row.action}-${row.occurrence}-${row.consequence}`}
+                            >
+                              <strong>{row.action}</strong>
+                              <span>{row.prediction} · {row.occurrence}</span>
+                              <small>{row.owner} · {row.consequence}</small>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    </>
                   )}
                 </div>
               )}

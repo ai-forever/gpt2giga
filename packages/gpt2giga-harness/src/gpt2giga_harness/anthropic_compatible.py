@@ -9,7 +9,7 @@ from importlib import metadata
 import json
 from typing import Any, Mapping, Protocol
 
-from gpt2giga_harness.claude_agent_sdk_poc import ClaudeSdkAuthMode
+from gpt2giga_harness.claude_agent_sdk import ClaudeSdkAuthMode
 from gpt2giga_harness.execution import (
     ExecutionTransport,
     ProviderRef,

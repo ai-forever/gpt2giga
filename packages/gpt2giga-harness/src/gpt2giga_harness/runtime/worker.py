@@ -52,6 +52,7 @@ from gpt2giga_harness.types import HarnessEventType
 DEFAULT_LEASE_SECONDS = 15.0
 DEFAULT_HEARTBEAT_SECONDS = 2.0
 DEFAULT_POLL_SECONDS = 0.25
+DEFAULT_MAX_IDLE_SECONDS = 1.0
 DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
 RECOVERY_MARKER_IDENTITY_FIELD = "_runtime_recovery_marker_sha256"
 MAX_SIDE_EFFECT_TOKEN_CHARS = 4096
@@ -484,22 +485,48 @@ class DurableJobWorker:
         self,
         *,
         poll_seconds: float = DEFAULT_POLL_SECONDS,
+        max_idle_seconds: float = DEFAULT_MAX_IDLE_SECONDS,
         stop_on_idle_seconds: float | None = None,
     ) -> None:
-        """Poll until interrupted or an optional idle deadline expires."""
+        """Wait demand-first until interrupted or an optional idle deadline expires."""
+        from gpt2giga_harness.runtime.wakeup import WorkerWakeReceiver
+
+        minimum_wait = max(float(poll_seconds), 0.05)
+        maximum_wait = max(float(max_idle_seconds), minimum_wait)
         idle_since = time.monotonic()
+        idle_cycles = 0
+        receiver = WorkerWakeReceiver(self.config.data_dir, self.worker_id)
         try:
+            self._register()
             while True:
                 if self.run_once():
                     idle_since = time.monotonic()
+                    idle_cycles = 0
                     continue
                 if (
                     stop_on_idle_seconds is not None
                     and time.monotonic() - idle_since >= stop_on_idle_seconds
                 ):
                     return
-                time.sleep(max(poll_seconds, 0.05))
+                idle_cycles += 1
+                wait_seconds = _adaptive_idle_delay(
+                    minimum_wait,
+                    maximum_wait,
+                    idle_cycles,
+                )
+                wait_seconds = self.runtime_store.next_worker_maintenance_delay(
+                    wait_seconds
+                )
+                if stop_on_idle_seconds is not None:
+                    idle_remaining = max(
+                        stop_on_idle_seconds - (time.monotonic() - idle_since),
+                        0.0,
+                    )
+                    wait_seconds = min(wait_seconds, idle_remaining)
+                if receiver.wait(wait_seconds):
+                    idle_cycles = 0
         finally:
+            receiver.close()
             if self._registered:
                 self.runtime_store.stop_worker(self.worker_id)
 
@@ -698,6 +725,18 @@ def worker_status(
         "workers": workers,
         "online": sum(item["status"] == "online" for item in workers),
     }
+
+
+def _adaptive_idle_delay(
+    minimum_seconds: float,
+    maximum_seconds: float,
+    idle_cycles: int,
+) -> float:
+    """Return bounded exponential idle delay after consecutive empty cycles."""
+    minimum = max(float(minimum_seconds), 0.05)
+    maximum = max(float(maximum_seconds), minimum)
+    exponent = max(min(int(idle_cycles) - 1, 16), 0)
+    return min(minimum * (2**exponent), maximum)
 
 
 def _idempotency_class(payload: Mapping[str, Any]) -> str:

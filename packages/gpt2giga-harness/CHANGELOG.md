@@ -5,6 +5,26 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.5.1a1] - 2026-07-28
+
+### Добавлено
+- **Fail-closed authority boundary**: versioned approval schema, permission simulator, scoped HTTPS tickets и отдельные GitHub capability grants связывают разрешение с точным target, preview digest, сроком действия и dispatch state без неявного переноса authority.
+- **Privacy-safe diagnostics**: doctor schema v2 и Settings export создают content-free отчёты с проверяемым digest, ограниченными checks и точными recovery steps без prompts, secrets, OAuth material, raw traffic или private file content.
+- **Chat-first terminal shell**: минимальный TUI получил локализованные команды, bounded broker/SSE delivery, reconnect и backpressure contracts, diagnostics и детерминированные performance profiles.
+- **Machine-readable product truth**: `giga harness capabilities --inventory` публикует versioned inventory CLI, TUI, API, protocol, transport, readiness и documentation contracts и проверяет его drift в CI.
+- **OpenAI-compatible upstream bridge**: Harness-owned provider profiles могут запускать проверенный normalized v1 subset через exact model/profile binding, `SecretRef` и scoped network authority.
+
+### Изменено
+- **Durable runtime performance**: worker использует demand-driven wakeup и bounded idle backoff, `update_run` ограничен одним normal-path JSONL scan, а детерминированные in-memory projections получили CI regression gates.
+- **Cockpit packaging**: legacy UI удалён; frontend producer теперь создаёт ignored commit-bound asset tree с integrity, SBOM и license evidence, а Python build проверяет его без Node.js и network access.
+- **Adapter ownership**: production Claude Agent SDK module стал каноническим owner, proof-only Gemini ACP и временные compatibility paths удалены после проверки imports, routes, tests и package artifacts.
+- **Gateway preset**: optional integration теперь закрепляет `gpt2giga==0.2.6a1`.
+
+### Исправлено
+- **Security boundaries**: request-scoped Claude/Gemini model pins подписываются отдельным HMAC key; OIDC discovery и endpoints ограничены exact origin, proxy forwarding доверяется только явному allowlist, а file/editor paths и observability сохраняют fail-closed redaction и containment.
+- **Settings и wakeup races**: исправлены CodeQL findings в provider settings update и очистке runtime wakeup waiters без изменения публичных API contracts.
+- **Кроссплатформенные release gates**: Cockpit inputs закреплены с LF для стабильных asset hashes на Windows, artifact smoke проверяет фактический package-data path, а только детерминированный `ci-smoke` остаётся blocking performance profile.
+
 ## [0.5.0a1] - 2026-07-26
 
 ### Добавлено
@@ -178,6 +198,7 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
+[0.5.1a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.5.0a1...gpt2giga-harness-v0.5.1a1
 [0.5.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.4.0a1...gpt2giga-harness-v0.5.0a1
 [0.4.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.3.0a1...gpt2giga-harness-v0.4.0a1
 [0.3.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.2.0a1...gpt2giga-harness-v0.3.0a1

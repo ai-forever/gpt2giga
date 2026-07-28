@@ -15,7 +15,11 @@ import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
-from urllib.request import Request as URLRequest, urlopen
+from urllib.request import (
+    HTTPRedirectHandler,
+    Request as URLRequest,
+    build_opener,
+)
 from uuid import uuid4
 
 import jwt
@@ -273,15 +277,23 @@ class RemoteOIDCClient:
             raise RemoteIdentityError("OIDC issuer does not advertise PKCE S256")
         self._metadata = OIDCMetadata(
             issuer=self.settings.issuer,
-            authorization_endpoint=_https_url(
-                _required_text(payload, "authorization_endpoint"), allow_path=True
+            authorization_endpoint=_issuer_endpoint(
+                _required_text(payload, "authorization_endpoint"),
+                issuer=self.settings.issuer,
             ),
-            token_endpoint=_https_url(
-                _required_text(payload, "token_endpoint"), allow_path=True
+            token_endpoint=_issuer_endpoint(
+                _required_text(payload, "token_endpoint"),
+                issuer=self.settings.issuer,
             ),
-            jwks_uri=_https_url(_required_text(payload, "jwks_uri"), allow_path=True),
+            jwks_uri=_issuer_endpoint(
+                _required_text(payload, "jwks_uri"),
+                issuer=self.settings.issuer,
+            ),
             end_session_endpoint=(
-                _https_url(str(payload["end_session_endpoint"]), allow_path=True)
+                _issuer_endpoint(
+                    str(payload["end_session_endpoint"]),
+                    issuer=self.settings.issuer,
+                )
                 if isinstance(payload.get("end_session_endpoint"), str)
                 else None
             ),
@@ -736,6 +748,31 @@ def _https_url(value: str, *, allow_path: bool) -> str:
     return value.strip().rstrip("/")
 
 
+def _issuer_endpoint(value: str, *, issuer: str) -> str:
+    endpoint = _https_url(value, allow_path=True)
+    parsed_endpoint = urlsplit(endpoint)
+    parsed_issuer = urlsplit(issuer)
+    if (
+        parsed_endpoint.scheme,
+        parsed_endpoint.hostname,
+        parsed_endpoint.port,
+    ) != (
+        parsed_issuer.scheme,
+        parsed_issuer.hostname,
+        parsed_issuer.port,
+    ):
+        raise RemoteIdentityError(
+            "OIDC endpoints must use the configured issuer origin"
+        )
+    return endpoint
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        del req, fp, code, msg, headers, newurl
+        return None
+
+
 def _validated_proxy(value: str) -> str:
     import ipaddress
 
@@ -760,7 +797,7 @@ def _fetch_json(
 ) -> Mapping[str, Any]:
     request = URLRequest(url, data=data, headers=dict(headers), method=method)
     try:
-        with urlopen(request, timeout=10) as response:
+        with build_opener(_NoRedirectHandler()).open(request, timeout=10) as response:
             if response.status < 200 or response.status >= 300:
                 raise RemoteIdentityError("OIDC endpoint returned an error")
             raw = response.read(512 * 1024 + 1)

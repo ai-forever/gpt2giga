@@ -13,7 +13,6 @@ from gpt2giga_harness.ui.local_access import (
     LocalUIAccessError,
     LocalUIAccessStore,
 )
-from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 
 
 def test_local_shell_issues_strict_httponly_session_cookie(tmp_path):
@@ -64,7 +63,7 @@ def test_local_arena_deep_link_issues_browser_session_cookie(tmp_path):
 
 @pytest.mark.parametrize(
     "path",
-    ["/cockpit-v2/work", "/cockpit-v2/runs/run_123", "/legacy/runs/run_123"],
+    ["/cockpit-v2/work", "/cockpit-v2/runs/run_123"],
 )
 def test_local_selectable_shell_deep_links_issue_browser_session_cookie(path, tmp_path):
     app = create_app(
@@ -82,47 +81,6 @@ def test_local_selectable_shell_deep_links_issue_browser_session_cookie(path, tm
     assert response.status_code == 200
     assert "gpt2giga_harness_session=" in response.headers["set-cookie"]
     assert client.get("/api/defaults").status_code == 200
-
-
-def test_ui_assets_include_url_authoritative_routes_and_bootstrap_form():
-    script = load_text_asset("app.js")
-
-    for fragment in (
-        'id="work-nav-link"',
-        'id="arena-nav-link"',
-        'id="runs-nav-link"',
-        'id="tools-nav-link"',
-        'id="agents-nav-link"',
-        'id="approvals-nav-link"',
-        'id="evaluate-nav-link"',
-        'id="scheduled-nav-link"',
-        'id="auth-form"',
-        'id="auth-token-input" type="password"',
-    ):
-        assert fragment in INDEX_HTML
-    for fragment in (
-        "function currentRoute()",
-        "function syncBrowserRoute",
-        "function applyCurrentRoute",
-        "function loadCurrentRoute",
-        "function bindPrimaryNavigation",
-        "function loadApprovals",
-        "function loadScheduledCenter",
-        "function notifyAttentionItems",
-        'window.addEventListener("popstate"',
-        'document.querySelectorAll(".primary-nav-link")',
-        "event.preventDefault()",
-        "`/work/${encodeURIComponent(session.id)}`",
-        "`/runs/${encodeURIComponent(run.id)}`",
-        "headers: { Authorization: `Bearer ${token}` }",
-        '"X-GigaLoom-CSRF": "1"',
-    ):
-        assert fragment in script
-    assert "const secondaryLoads = Promise.all([" in script
-    assert "loadMemory(),\n        loadTools(),\n        loadEvals()," in script
-    assert "state.routeLoadKey === routeKey && state.routeLoadPromise" in script
-    assert "state.routeLoadedKey === routeKey" in script
-    assert "localStorage" not in script
 
 
 def test_local_access_persists_only_hashed_expiring_sessions(tmp_path):
