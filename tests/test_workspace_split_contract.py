@@ -232,6 +232,10 @@ def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
     assert "HARNESS_VERSION: ${{ steps.versions.outputs.harness }}" in workflow
     assert "- name: Commit coverage badge on main" in workflow
     assert "if: github.event_name == 'push'" in workflow
+    coverage_badge_job = workflow[workflow.index("  coverage-badge:") :]
+    assert "python3 scripts/generate_badge.py" in coverage_badge_job
+    assert "uv run python scripts/generate_badge.py" not in coverage_badge_job
+    assert "astral-sh/setup-uv" not in coverage_badge_job
     assert gateway_version not in workflow
     assert harness_version not in workflow
     assert ".venv-artifact/bin/gpt2giga --help" in workflow

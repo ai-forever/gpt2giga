@@ -364,17 +364,11 @@ jobs:
           name: coverage-3.13
           path: .
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Set up Python
-        run: uv python install 3.13
-
       - name: Generate badge
         run: |
           COVERAGE=$(jq '.totals.percent_covered' coverage.json)
           echo "COVERAGE=$COVERAGE" >> "$GITHUB_ENV"
-          uv run python scripts/generate_badge.py "$COVERAGE" badges/coverage.svg
+          python3 scripts/generate_badge.py "$COVERAGE" badges/coverage.svg
 
       - name: Upload badge artifact
         uses: actions/upload-artifact@v7
