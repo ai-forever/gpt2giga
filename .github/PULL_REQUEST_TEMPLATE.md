@@ -1,133 +1,37 @@
-## Description
+# GigaLoom pull request
 
-<!-- Provide a clear and concise description of what this PR does -->
+## Outcome
 
-## Motivation
+<!-- What user-visible or repository behavior changes? Link target issues. -->
 
-<!-- Why is this change needed? Link to related issues if applicable -->
+## Scope and compatibility
 
-Closes #<!-- issue number -->
+- Affected owner:
+- Public CLI/UI/API/protocol/storage impact:
+- Migration and rollback:
+- Historical source link, if this continues earlier work:
 
-## Type of Change
+## Verification
 
-<!-- Mark the relevant option with an "x" -->
+<!-- List exact commands and manual checks with their results. -->
 
-- [ ] Bug fix (non-breaking change that fixes an issue)
-- [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
-- [ ] Code refactoring (no functional changes)
-- [ ] Performance improvement
-- [ ] Test coverage improvement
-- [ ] CI/CD or tooling change
+```text
 
-## Changes Made
-
-<!-- List the main changes made in this PR -->
-
--
--
--
-
-## Testing
-
-<!-- Describe the tests you ran and how to reproduce them -->
-
-### Test Coverage
-
-- [ ] Unit tests added/updated
-- [ ] Integration tests added/updated (if applicable)
-- [ ] All existing tests pass locally
-
-### Manual Testing
-
-<!-- Describe any manual testing performed -->
-
-#### Method Used
-
-- [ ] OpenAI Python SDK
-- [ ] curl
-- [ ] Docker
-- [ ] Other: <!-- specify -->
-
-<details>
-<summary>Test commands / code</summary>
-
-**Example with OpenAI SDK:**
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:8090", api_key="your-key")
-
-completion = client.chat.completions.create(
-    model="gpt-4",
-    messages=[
-        {"role": "user", "content": "Test message"}
-    ],
-)
-print(completion.choices[0].message.content)
 ```
 
-**Example with curl:**
+## Safety and release checklist
 
-```bash
-curl -X POST http://localhost:8090/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-key" \
-  -d '{
-    "model": "gpt-4",
-    "messages": [{"role": "user", "content": "Test"}]
-  }'
-```
+- [ ] The change is focused and has tests at the owning layer.
+- [ ] No credential, token, private user content, native-home data, or raw traffic is included.
+- [ ] English and Russian public documentation are aligned when applicable.
+- [ ] Public compatibility changes have focused contract tests.
+- [ ] Dependencies are justified; no editable sibling, source override, or root `uv.lock` was added.
+- [ ] Workflow permissions remain minimal and untrusted PR code receives no secrets.
+- [ ] Release/security/governance changes have the required owner review.
+- [ ] Historical issues, reviews, authorship, and timestamps are linked rather than represented as transferred.
 
-</details>
+## Maintainer review
 
-## Checklist
-
-<!-- Mark completed items with an "x" -->
-
-### Code Quality
-
-- [ ] Code follows the project's style guidelines
-- [ ] I have performed a self-review of my code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] My changes generate no new linter warnings (`make lint`)
-- [ ] Type checking passes (`make mypy`)
-- [ ] All tests pass (`make test`)
-
-### Documentation
-
-- [ ] I have updated the documentation accordingly
-- [ ] Docstrings follow Google style with imperative mood
-- [ ] I have added examples for new features (if applicable)
-- [ ] README.md updated (if applicable)
-
-### Dependencies
-
-- [ ] No new dependencies added
-- [ ] If dependencies added, they are justified and minimal
-- [ ] `uv.lock` updated (if dependencies changed)
-
-### Compatibility
-
-- [ ] Changes are compatible with Python 3.10-3.14
-- [ ] No use of `type[...]` syntax (use `Type[...]` for Python 3.8)
-- [ ] Async/sync variants both work correctly (if applicable)
-
-### Commits
-
-- [ ] Commit messages are clear and follow conventional commits style
-- [ ] Commits are logically organized
-- [ ] No debug code or commented-out code left in
-
-## Additional Context
-
-<!-- Add any other context, screenshots, or information about the PR here -->
-
-## Pre-merge Actions
-
-<!-- For maintainers -->
-
-- [ ] Changelog updated (if applicable)
-- [ ] Version bump considered (if applicable)
+- [ ] Required stable checks match `.github/repository-policy.json`.
+- [ ] Changelog/version/release notes were considered.
+- [ ] Any emergency bypass has an audit record and follow-up review.

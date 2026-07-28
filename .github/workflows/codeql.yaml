@@ -5,7 +5,10 @@ on:
     branches: [ main ]
     paths:
       - 'packages/gpt2giga-harness/**/*.py'
+      - 'packages/gpt2giga-harness/frontend/**/*.{js,jsx,ts,tsx}'
       - 'packages/gpt2giga-harness/pyproject.toml'
+      - 'packages/gpt2giga-harness/frontend/package.json'
+      - 'packages/gpt2giga-harness/frontend/package-lock.json'
       - 'tests/**/*.py'
       - 'pyproject.toml'
       - '.github/workflows/codeql.yaml'
@@ -14,7 +17,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'packages/gpt2giga-harness/**/*.py'
+      - 'packages/gpt2giga-harness/frontend/**/*.{js,jsx,ts,tsx}'
       - 'packages/gpt2giga-harness/pyproject.toml'
+      - 'packages/gpt2giga-harness/frontend/package.json'
+      - 'packages/gpt2giga-harness/frontend/package-lock.json'
       - 'tests/**/*.py'
       - 'pyproject.toml'
       - '.github/workflows/codeql.yaml'
@@ -29,14 +35,14 @@ permissions:
 
 jobs:
   analyze:
-    name: Analyze Python
+    name: Analyze / ${{ matrix.language }}
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
 
     strategy:
       fail-fast: false
       matrix:
-        language: [ python ]
+        language: [ python, javascript-typescript ]
 
     steps:
       - name: Checkout repository

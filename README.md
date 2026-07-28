@@ -89,8 +89,11 @@ Build the standalone distribution with:
 uv build --package gpt2giga-harness --no-sources
 ```
 
-Read [Contributing](./docs/contributing.md) before submitting changes. Report
-bugs through [GitHub Issues](https://github.com/krakenalt/gigaloom/issues).
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before submitting changes and
+[GOVERNANCE.md](./GOVERNANCE.md) for ownership and recovery rules. Report bugs
+through [GitHub Issues](https://github.com/krakenalt/gigaloom/issues), but send
+suspected vulnerabilities through the private channel in
+[SECURITY.md](./SECURITY.md).
 
 ## Source history
 

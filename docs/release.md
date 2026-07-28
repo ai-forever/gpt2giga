@@ -5,12 +5,16 @@ as `gpt2giga-harness-vX.Y.Z`.
 
 ## Maintainer checklist
 
-1. Update both package changelogs and confirm the package version.
-2. Build frontend assets and run the complete non-live quality gate.
-3. Build wheel and sdist without workspace sources.
-4. Verify package metadata, included assets, checksums, and isolated install.
-5. Ensure the release commit is on `main`.
-6. Create the exact immutable tag only after external publication prerequisites
+1. Confirm the named GitHub and PyPI backup owners have accepted access with
+   2FA under the
+   [governance policy](https://github.com/krakenalt/gigaloom/blob/main/GOVERNANCE.md).
+2. Update both package changelogs and confirm the package version.
+3. Build frontend assets and run the complete non-live quality gate.
+4. Build wheel and sdist without workspace sources.
+5. Verify package metadata, included assets, checksums, and isolated install.
+6. Ensure the release commit is on `main` and the documented main/tag rulesets
+   are active.
+7. Create the exact immutable tag only after external publication prerequisites
    are authorized and ready.
 
 The release workflow validates repository identity, tag/version agreement,

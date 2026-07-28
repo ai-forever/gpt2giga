@@ -3,6 +3,10 @@
 GigaLoom разрабатывается в
 [`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom). Сайт собирается
 из Markdown в `docs/` через Docusaurus wrapper в `docs-site/`.
+Общие правила contribution, disclosure и ownership находятся в
+[`CONTRIBUTING.md`](https://github.com/krakenalt/gigaloom/blob/main/CONTRIBUTING.md),
+[`SECURITY.md`](https://github.com/krakenalt/gigaloom/blob/main/SECURITY.md) и
+[`GOVERNANCE.md`](https://github.com/krakenalt/gigaloom/blob/main/GOVERNANCE.md).
 
 ## Локальная сборка
 

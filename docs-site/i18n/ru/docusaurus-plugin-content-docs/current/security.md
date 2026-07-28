@@ -20,10 +20,18 @@ fixtures с секретами.
 
 ## Сообщение об уязвимостях
 
-До появления repository security policy в следующем governance slice не
-раскрывайте уязвимости в публичном issue. Свяжитесь с владельцем приватно через
-его проверенный GitHub profile и передайте минимальный redacted reproduction.
-S3-04 установит постоянную policy и поддерживаемый канал.
+Не раскрывайте предполагаемые уязвимости в публичном issue, discussion или pull
+request. Следуйте repository
+[security policy](https://github.com/krakenalt/gigaloom/blob/main/SECURITY.md)
+и используйте
+[GitHub private vulnerability reporting](https://github.com/krakenalt/gigaloom/security/advisories/new).
+Передавайте минимальный redacted reproduction и никогда не отправляйте
+credentials, user content, native-home data или raw provider traffic.
 
-Страница описывает поведение продукта и не утверждает, что внешняя governance
-или private reporting infrastructure уже настроена.
+Primary security owner —
+[`@krakenalt`](https://github.com/krakenalt). Роль backup maintainer, response
+targets, 2FA gate и восстановление compromised publisher определены в security
+и
+[governance](https://github.com/krakenalt/gigaloom/blob/main/GOVERNANCE.md)
+policies. Public cutover заблокирован, пока отдельный backup owner не принял
+доступ.

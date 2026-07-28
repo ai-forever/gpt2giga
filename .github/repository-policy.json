@@ -1,0 +1,89 @@
+{
+  "actions": {
+    "default_workflow_permissions": "read",
+    "can_approve_pull_request_reviews": false,
+    "elevated_jobs": [
+      {
+        "job": "Release / attest and trusted publish",
+        "permissions": ["attestations:write", "id-token:write"],
+        "purpose": "PyPI trusted publishing and artifact attestations",
+        "workflow": ".github/workflows/publish-pypi.yml"
+      },
+      {
+        "job": "Deploy docs",
+        "permissions": ["id-token:write", "pages:write"],
+        "purpose": "GitHub Pages deployment",
+        "workflow": ".github/workflows/docs-pages.yaml"
+      }
+    ]
+  },
+  "backup_owners": {
+    "github": {
+      "acceptance_gate": "S5-02",
+      "distinct_from_primary": true,
+      "role": "backup-github-maintainer",
+      "state": "blocked_pending_acceptance",
+      "two_factor_authentication_required": true
+    },
+    "pypi": {
+      "acceptance_gate": "S5-04",
+      "distinct_from_primary": true,
+      "role": "backup-pypi-owner",
+      "state": "blocked_pending_acceptance",
+      "two_factor_authentication_required": true
+    }
+  },
+  "primary_owner": {
+    "github": {
+      "account": "krakenalt",
+      "name": "Ruslan Yakupov"
+    },
+    "pypi": {
+      "account": "blocked_pending_S5_04_verification",
+      "name": "Ruslan Yakupov",
+      "role": "primary-pypi-owner"
+    }
+  },
+  "rulesets": {
+    "main": {
+      "bypass": "repository_admin_emergency_only_with_audit",
+      "enforcement": "active_after_S5-02",
+      "name": "protect-main",
+      "required_checks": [
+        "Frontend / static and browser",
+        "Python / 3.10",
+        "Python / 3.13",
+        "Python / 3.14",
+        "Package / base artifact",
+        "Terminal / ubuntu-latest / 3.10",
+        "Terminal / ubuntu-latest / 3.13",
+        "Terminal / ubuntu-latest / 3.14",
+        "Terminal / macos-latest / 3.10",
+        "Terminal / macos-latest / 3.13",
+        "Terminal / macos-latest / 3.14",
+        "Terminal / windows-latest / 3.10",
+        "Terminal / windows-latest / 3.13",
+        "Terminal / windows-latest / 3.14",
+        "Performance / ci-smoke",
+        "Public registry / blocked_pending_S5_03B"
+      ],
+      "required_review_count": 1,
+      "require_code_owner_review": true,
+      "require_conversation_resolution": true,
+      "require_last_push_approval": true,
+      "target": "refs/heads/main",
+      "block_deletions": true,
+      "block_force_pushes": true
+    },
+    "release_tags": {
+      "bypass": "release_workflow_and_repository_admin_emergency_only_with_audit",
+      "enforcement": "active_after_S5-02",
+      "name": "protect-gpt2giga-harness-release-tags",
+      "target": "refs/tags/gpt2giga-harness-v*",
+      "block_deletions": true,
+      "block_force_pushes": true,
+      "restrict_creation": true,
+      "restrict_updates": true
+    }
+  }
+}

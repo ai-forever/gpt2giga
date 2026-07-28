@@ -21,11 +21,18 @@ secret-bearing fixtures.
 
 ## Reporting vulnerabilities
 
-Until the repository security policy is established in the next governance
-slice, do not disclose suspected vulnerabilities in a public issue. Contact the
-repository owner privately through their verified GitHub profile and provide a
-minimal redacted reproduction. S3-04 will establish the durable policy and
-supported reporting channel.
+Do not disclose suspected vulnerabilities in a public issue, discussion, or
+pull request. Follow the repository
+[security policy](https://github.com/krakenalt/gigaloom/blob/main/SECURITY.md)
+and use
+[GitHub private vulnerability reporting](https://github.com/krakenalt/gigaloom/security/advisories/new).
+Provide a minimal redacted reproduction and never send credentials, user
+content, native-home data, or raw provider traffic.
 
-This page describes product behavior; it does not claim that external
-governance or private reporting infrastructure is already configured.
+The primary security owner is
+[`@krakenalt`](https://github.com/krakenalt). The backup maintainer role,
+response targets, 2FA gate, and compromised-publisher recovery are defined in
+the security and
+[governance](https://github.com/krakenalt/gigaloom/blob/main/GOVERNANCE.md)
+policies. Public cutover remains blocked until the distinct backup owner has
+accepted access.

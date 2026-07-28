@@ -1,146 +1,49 @@
 ---
-name: Bug Report
-about: Report a bug to help us improve gpt2giga
-title: "[BUG] "
+name: GigaLoom bug report
+about: Report a reproducible GigaLoom defect
+title: "[Bug] "
 labels: bug
 assignees: ''
 ---
 
-## Bug Description
+<!-- Security issue? Stop and use SECURITY.md. Never post secrets or private data. -->
 
-<!-- A clear and concise description of the bug -->
+## Summary
 
 ## Environment
 
-### gpt2giga Setup
+- GigaLoom version or commit:
+- Installation method:
+- Python version:
+- Operating system and terminal:
+- Optional gateway package/version, if used:
 
-- **gpt2giga version**: <!-- e.g., 0.5.0 -->
-- **Installation method**:
-  - [ ] pip (`pip install gpt2giga`)
-  - [ ] uv (`uv tool install gpt2giga/ uv add gpt2giga`)
-  - [ ] Docker (`docker compose up`)
-  - [ ] From source (`pip install git+...`)
+## Reproduction
 
-- **Python version**: <!-- e.g., 3.10 -->
-- **OS**: <!-- e.g., Ubuntu 22.04, macOS 14.0, Windows 11 -->
+1.
+2.
+3.
 
-### GigaChat Configuration
+Minimal redacted command or input:
 
-- **GigaChat model**: <!-- e.g., GigaChat, GigaChat-2-Max -->
-- **Auth settings**: <!-- e.g., OAuth(scope+creds), Basic(user+password) -->
-
-## How to Reproduce
-
-### Method Used
-
-- [ ] OpenAI Python SDK
-- [ ] curl
-- [ ] Other: <!-- specify -->
-
-### Request Payload
-
-<!--
-Provide the full request you're sending.
-Remove any sensitive data (credentials, tokens, etc.)
--->
-
-<details>
-<summary>Request</summary>
-
-**For OpenAI SDK:**
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:8090", api_key="your-key")
-
-# Your request here
-completion = client.chat.completions.create(
-    model="gpt-4",
-    messages=[
-        {"role": "user", "content": "Your message"}
-    ],
-    # ... other parameters
-)
-```
-
-**For curl:**
-
-```bash
-curl -X POST http://localhost:8090/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-key" \
-  -d '{
-    "model": "gpt-4",
-    "messages": [
-      {"role": "user", "content": "Your message"}
-    ]
-  }'
-```
-
-</details>
-
-### Steps to Reproduce
-
-1. Start gpt2giga with: `...`
-2. Send request: `...`
-3. See error
-
-## Expected Behavior
-
-<!-- What you expected to happen -->
-
-## Actual Behavior
-
-<!-- What actually happened -->
-
-## Error Output
-
-<details>
-<summary>Error message / Traceback</summary>
+```text
 
 ```
-Paste your error or traceback here
-```
 
-</details>
+## Expected result
 
-## Logs
+## Actual result
 
-<!--
-Set GPT2GIGA_LOG_LEVEL=DEBUG and provide relevant logs.
-Remove any sensitive information!
--->
+## Redacted diagnostics
 
-<details>
-<summary>gpt2giga logs (DEBUG level)</summary>
+<!-- Remove credentials, tokens, native-home contents, user content, and raw provider traffic. -->
+
+```text
 
 ```
-Paste relevant logs here
-```
 
-</details>
+## Additional context
 
-## Configuration
-
-<!-- Provide your .env file content (remove sensitive values!) -->
-
-<details>
-<summary>.env configuration</summary>
-
-```dotenv
-GPT2GIGA_HOST=localhost
-GPT2GIGA_PORT=8090
-GPT2GIGA_LOG_LEVEL=DEBUG
-# ... other settings
-```
-
-</details>
-
-## Additional Context
-
-<!-- Add any other context about the problem here -->
-
-## Possible Solution
-
-<!-- Optional: If you have any ideas on how to fix this -->
+- [ ] I searched existing GigaLoom issues.
+- [ ] This report contains no secrets or private user/provider content.
+- [ ] This is not a vulnerability report.

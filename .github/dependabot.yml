@@ -13,3 +13,59 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: ci
+
+  - package-ecosystem: pip
+    directory: "/packages/gpt2giga-harness"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:15"
+      timezone: "Europe/Moscow"
+    labels:
+      - dependencies
+      - backend
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+    groups:
+      python-runtime:
+        dependency-type: production
+      python-development:
+        dependency-type: development
+
+  - package-ecosystem: npm
+    directory: "/packages/gpt2giga-harness/frontend"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:30"
+      timezone: "Europe/Moscow"
+    labels:
+      - dependencies
+      - frontend
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+    groups:
+      frontend-runtime:
+        dependency-type: production
+      frontend-development:
+        dependency-type: development
+
+  - package-ecosystem: npm
+    directory: "/docs-site"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:45"
+      timezone: "Europe/Moscow"
+    labels:
+      - dependencies
+      - docs
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: docs
+    groups:
+      documentation:
+        patterns:
+          - "*"

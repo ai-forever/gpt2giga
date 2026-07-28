@@ -13,13 +13,6 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "packages/gpt2giga-harness/**"
-      - "tests/**"
-      - "benchmarks/gigaloom_performance/**"
-      - "scripts/ci-*.sh"
-      - "pyproject.toml"
-      - ".github/workflows/ci.yaml"
   workflow_dispatch:
 
 permissions:
@@ -194,6 +187,7 @@ jobs:
         run: >-
           ./scripts/ci-base.sh pytest
           tests/test_gigaloom_artifact_isolation.py
+          tests/test_gigaloom_governance_contract.py
           tests/test_gigaloom_quality_workflows.py
           tests/harness/test_ui_packaging.py
           -q -n 0

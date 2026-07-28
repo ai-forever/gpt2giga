@@ -1,0 +1,10 @@
+# Primary ownership. The accepted backup-github-maintainer is added here in a
+# reviewed change after the S5-02 invitation and 2FA gate succeeds.
+* @krakenalt
+
+/.github/ @krakenalt
+/SECURITY.md @krakenalt
+/GOVERNANCE.md @krakenalt
+/packages/gpt2giga-harness/ @krakenalt
+/scripts/ @krakenalt
+/tests/ @krakenalt

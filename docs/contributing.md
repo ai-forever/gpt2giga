@@ -3,6 +3,11 @@
 GigaLoom is developed in
 [`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom). This site is
 built from Markdown in `docs/` through the Docusaurus wrapper in `docs-site/`.
+Repository-wide contribution, disclosure, and ownership rules live in
+[`CONTRIBUTING.md`](https://github.com/krakenalt/gigaloom/blob/main/CONTRIBUTING.md),
+[`SECURITY.md`](https://github.com/krakenalt/gigaloom/blob/main/SECURITY.md),
+and
+[`GOVERNANCE.md`](https://github.com/krakenalt/gigaloom/blob/main/GOVERNANCE.md).
 
 ## Local build
 

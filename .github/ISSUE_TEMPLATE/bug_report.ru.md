@@ -1,146 +1,49 @@
 ---
-name: Отчет об ошибке
-about: Сообщите об ошибке, чтобы помочь нам улучшить gpt2giga
-title: "[БАГ] "
+name: Отчёт об ошибке GigaLoom
+about: Сообщите о воспроизводимом дефекте GigaLoom
+title: "[Баг] "
 labels: bug
 assignees: ''
 ---
 
-## Описание ошибки
+<!-- Уязвимость? Остановитесь и используйте SECURITY.md. Не публикуйте секреты или приватные данные. -->
 
-<!-- Четко и кратко опишите ошибку -->
+## Краткое описание
 
 ## Окружение
 
-### Настройка gpt2giga
+- Версия или commit GigaLoom:
+- Способ установки:
+- Версия Python:
+- Операционная система и terminal:
+- Пакет/версия optional gateway, если используется:
 
-- **Версия gpt2giga**: <!-- например, 0.5.0 -->
-- **Способ установки**:
-  - [ ] pip (`pip install gpt2giga`)
-  - [ ] uv (`uv tool install gpt2giga` / `uv add gpt2giga`)
-  - [ ] Docker (`docker compose up`)
-  - [ ] Из исходников (`pip install git+...`)
+## Воспроизведение
 
-- **Версия Python**: <!-- например, 3.10 -->
-- **ОС**: <!-- например, Ubuntu 22.04, macOS 14.0, Windows 11 -->
+1.
+2.
+3.
 
-### Конфигурация GigaChat
+Минимальная redacted-команда или вход:
 
-- **Модель GigaChat**: <!-- например, GigaChat, GigaChat-2-Max -->
-- **Настройки авторизации**: <!-- например, OAuth(scope+creds), Basic(user+password) -->
-
-## Как воспроизвести
-
-### Используемый метод
-
-- [ ] OpenAI Python SDK
-- [ ] curl
-- [ ] Другое: <!-- укажите -->
-
-### Тело запроса
-
-<!--
-Приведите полный запрос, который вы отправляете.
-Удалите любые чувствительные данные (учетные данные, токены и т. д.)
--->
-
-<details>
-<summary>Запрос</summary>
-
-**Для OpenAI SDK:**
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:8090", api_key="your-key")
-
-# Ваш запрос здесь
-completion = client.chat.completions.create(
-    model="gpt-4",
-    messages=[
-        {"role": "user", "content": "Ваше сообщение"}
-    ],
-    # ... другие параметры
-)
-```
-
-**Для curl:**
-
-```bash
-curl -X POST http://localhost:8090/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-key" \
-  -d '{
-    "model": "gpt-4",
-    "messages": [
-      {"role": "user", "content": "Ваше сообщение"}
-    ]
-  }'
-```
-
-</details>
-
-### Шаги для воспроизведения
-
-1. Запустите gpt2giga командой: `...`
-2. Отправьте запрос: `...`
-3. Наблюдайте ошибку
-
-## Ожидаемое поведение
-
-<!-- Что, по вашему ожиданию, должно было произойти -->
-
-## Фактическое поведение
-
-<!-- Что произошло на самом деле -->
-
-## Вывод ошибки
-
-<details>
-<summary>Сообщение об ошибке / Traceback</summary>
+```text
 
 ```
-Вставьте сюда текст ошибки или traceback
-```
 
-</details>
+## Ожидаемый результат
 
-## Логи
+## Фактический результат
 
-<!--
-Установите GPT2GIGA_LOG_LEVEL=DEBUG и приложите релевантные логи.
-Удалите любую чувствительную информацию!
--->
+## Redacted-диагностика
 
-<details>
-<summary>Логи gpt2giga (уровень DEBUG)</summary>
+<!-- Удалите credentials, tokens, native-home contents, user content и raw provider traffic. -->
+
+```text
 
 ```
-Вставьте сюда релевантные логи
-```
-
-</details>
-
-## Конфигурация
-
-<!-- Приведите содержимое вашего .env файла (удалите чувствительные значения!) -->
-
-<details>
-<summary>Конфигурация .env</summary>
-
-```dotenv
-GPT2GIGA_HOST=localhost
-GPT2GIGA_PORT=8090
-GPT2GIGA_LOG_LEVEL=DEBUG
-# ... другие настройки
-```
-
-</details>
 
 ## Дополнительный контекст
 
-<!-- Добавьте сюда любой дополнительный контекст по проблеме -->
-
-## Возможное решение
-
-<!-- Необязательно: если у вас есть идеи по исправлению, опишите их здесь -->
+- [ ] Я проверил(а) существующие issues GigaLoom.
+- [ ] В отчёте нет секретов или приватного user/provider content.
+- [ ] Это не отчёт об уязвимости.

@@ -43,8 +43,41 @@ ci:
           - ".github/dependabot.yml"
           - ".github/labeler.yml"
           - ".github/release-drafter.yml"
+          - ".github/repository-policy.json"
           - ".github/AGENTS.md"
           - "scripts/ci-*.sh"
+
+governance:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "CODEOWNERS"
+          - "CONTRIBUTING.md"
+          - "GOVERNANCE.md"
+          - "SECURITY.md"
+          - ".github/CODEOWNERS"
+          - ".github/ISSUE_TEMPLATE/**"
+          - ".github/PULL_REQUEST_TEMPLATE*"
+          - ".github/repository-policy.json"
+
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "SECURITY.md"
+          - "docs/security.md"
+          - ".github/RELEASE_RECOVERY.md"
+          - ".github/workflows/codeql.yaml"
+          - ".github/workflows/dependency-review.yaml"
+          - ".github/workflows/pip-audit.yaml"
+
+release:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/RELEASE_RECOVERY.md"
+          - ".github/release-policy.json"
+          - ".github/repository-policy.json"
+          - ".github/workflows/publish-pypi.yml"
+          - "packages/gpt2giga-harness/CHANGELOG*.md"
+          - "packages/gpt2giga-harness/pyproject.toml"
 
 docs:
   - changed-files:
@@ -54,6 +87,7 @@ docs:
           - "docs-site/**"
           - "examples/**/*.md"
           - ".github/PULL_REQUEST_TEMPLATE.md"
+          - ".github/PULL_REQUEST_TEMPLATE/**"
           - ".github/ISSUE_TEMPLATE/**"
 
 tests:

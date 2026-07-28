@@ -4,18 +4,26 @@ template: |
   $CHANGES
 
 categories:
-  - title: OpenAI compatibility
+  - title: Agent and provider integrations
     labels:
-      - openai
-  - title: Anthropic compatibility
+      - backend
+  - title: Cockpit and frontend
     labels:
-      - anthropic
-  - title: Protocol and translation
+      - frontend
+  - title: Terminal and TUI
     labels:
-      - protocol
-  - title: Docker and deployment
+      - terminal
+  - title: Performance
     labels:
-      - docker
+      - performance
+  - title: Packaging and releases
+    labels:
+      - packaging
+      - release
+  - title: Security and governance
+    labels:
+      - security
+      - governance
   - title: CI and automation
     labels:
       - ci
@@ -32,3 +40,5 @@ categories:
 change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
 change-title-escapes: '\<*_&'
 no-changes-template: "- No categorized changes yet."
+exclude-labels:
+  - skip-changelog

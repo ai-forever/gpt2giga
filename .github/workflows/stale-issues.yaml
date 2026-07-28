@@ -18,17 +18,19 @@ jobs:
         uses: actions/stale@v10
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          days-before-issue-stale: 30
-          days-before-issue-close: 7
+          days-before-issue-stale: 60
+          days-before-issue-close: 14
           days-before-pr-stale: -1
           days-before-pr-close: -1
           stale-issue-label: stale
+          exempt-issue-labels: security,pinned,priority
           remove-stale-when-updated: true
           operations-per-run: 200
           stale-issue-message: >
             This issue has been automatically marked as stale because it has not had
-            recent activity. If there is still work to do here, leave a comment and
-            the stale label will be removed.
+            recent activity. Security reports never belong in public issues. If
+            there is still public work to do here, leave a redacted comment and the
+            stale label will be removed.
           close-issue-message: >
             This issue has been automatically closed because it has not had recent
             activity after being marked stale. If this is still relevant, comment and

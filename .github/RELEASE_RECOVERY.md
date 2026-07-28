@@ -9,6 +9,12 @@ Before S5-03B, PyPI Trusted Publisher configuration is intentionally absent.
 Do not add a token secret or bypass the publisher failure. The candidate gateway
 bridge remains the only approved optional-extra smoke until that gate.
 
+The primary release and recovery owner is `@krakenalt`. The named
+`backup-github-maintainer` and `backup-pypi-owner` roles, their distinct-account
+and 2FA criteria, and the unavailable-owner boundary are defined in
+[`GOVERNANCE.md`](../GOVERNANCE.md). Release and public cutover remain blocked
+while either required role is `blocked_pending_acceptance`.
+
 ## Failure handling
 
 - Guard or ancestry failure: do not retag. Delete or correct only an unpublished
@@ -26,6 +32,14 @@ bridge remains the only approved optional-extra smoke until that gate.
   missing GitHub release assets from that exact artifact.
 - Pages failure: keep the previous deployment. Rebuild the same commit locally;
   do not change `url` or `baseUrl` to work around a broken documentation link.
+- Compromised publisher or OIDC binding: freeze releases, preserve workflow and
+  package-index evidence, remove only the compromised binding, and verify
+  published hashes. The accepted backup PyPI owner may yank an unsafe version
+  but must never delete or overwrite it.
+- Primary owner unavailable: the accepted backup GitHub maintainer freezes
+  repository release paths and preserves refs; the accepted backup PyPI owner
+  freezes or removes the publisher. If either role has not accepted, stop
+  instead of weakening rulesets or inventing a replacement identity.
 
 Rollback means reverting the automation commit before any release is published.
 It never means deleting or replacing an immutable package-index version.
