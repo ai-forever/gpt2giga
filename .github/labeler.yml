@@ -23,8 +23,10 @@ harness:
       - any-glob-to-any-file:
           - 'packages/gpt2giga-harness/**'
           - 'tests/harness/**'
-          - 'tests/test_package_isolation.py'
-          - 'tests/test_workspace_split_contract.py'
+          - 'tests/package_isolation_support.py'
+          - 'tests/workspace_split_contract_support.py'
+          - 'tests/test_gigaloom_*.py'
+          - 'tests/test_cross_repository_artifact_smoke.py'
           - 'docs/harness.md'
           - 'docs-site/i18n/**/docusaurus-plugin-content-docs/current/harness.md'
 
