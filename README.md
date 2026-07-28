@@ -241,8 +241,14 @@ uv run giga doctor
 
 ```sh
 uv build --package gpt2giga
+npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
+npm --prefix packages/gpt2giga-harness/frontend run build
 uv build --package gpt2giga-harness
 ```
+
+Скомпилированные Cockpit assets не хранятся в Git. Перед локальной сборкой
+Harness producer создаёт ignored, integrity-checked дерево; Python build
+завершается ошибкой, если дерево отсутствует или не соответствует source.
 
 Проверки перед PR:
 

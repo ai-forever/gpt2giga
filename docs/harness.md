@@ -2053,6 +2053,18 @@ partial configuration and the retired shared bearer exchange fail closed. The
 implemented single-issuer OIDC/BFF boundary is documented in the
 [remote UI identity ADR](architecture/remote-ui-identity-adr.md).
 
+Compiled Cockpit bundles are not tracked source. A fresh source checkout must
+run `npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts` and
+then `npm --prefix packages/gpt2giga-harness/frontend run build` before the
+first `uv sync` or Harness wheel/sdist build. The producer atomically creates an ignored,
+commit-bound asset tree with integrity metadata, npm SBOM, and license evidence.
+The Python build validates the tree without Node.js or network access and fails
+closed if it is absent, stale, substituted, or contains unexpected files.
+CI/release pass the same immutable tree between jobs; a wheel rebuilt from the
+sealed sdist remains Node-free. For rollback, check out the prior release and
+rerun the producer, or restore that release's exact asset artifact, before
+rebuilding Python packages.
+
 `giga ui-identity validate --json` validates the deployment profile without an
 issuer request. `giga ui-identity revoke-all --confirm --json` is the OS-local
 recovery path that revokes all remote sessions and rotates their generation.

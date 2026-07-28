@@ -639,7 +639,14 @@ giga doctor
 From the repository root:
 
 ```sh
+npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
+npm --prefix packages/gpt2giga-harness/frontend run build
+python packages/gpt2giga-harness/asset_contract.py
 uv sync --all-packages --all-extras --dev
 uv run pytest tests/harness -q
 uv build --package gpt2giga-harness --no-sources
 ```
+
+Compiled Cockpit bundles are ignored build inputs, not tracked source. The
+producer writes commit/source provenance plus npm SBOM and license evidence;
+the Python build fails closed if that tree is missing, stale, or modified.

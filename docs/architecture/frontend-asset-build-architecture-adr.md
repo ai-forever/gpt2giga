@@ -2,9 +2,10 @@
 
 Status: accepted for GigaLoom roadmap slice G8-03 on 2026-07-28.
 
-Implementation status: selected, not yet implemented. G8-04 owns removal of
-tracked compiled bundles and the build, CI, release, and rollback changes
-described here.
+Implementation status: implemented by G8-04 on 2026-07-28. Compiled bundles are
+ignored; the deterministic producer, Python-only fail-closed consumer,
+commit-bound CI/release handoff, sealed sdist, SBOM/license evidence, and
+rollback contract described here are enforced in source and tests.
 
 ## Context
 

@@ -1120,6 +1120,17 @@ transcript автоматически и не переписывает homes Cod
 
 ## Browser UI, Smart Router и Arena
 
+Скомпилированные Cockpit bundles не хранятся в Git. В свежем source checkout до
+первого `uv sync` или сборки Harness wheel/sdist выполните
+`npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts`, затем
+`npm --prefix packages/gpt2giga-harness/frontend run build`. Producer атомарно
+создаёт ignored, привязанное к commit дерево с integrity metadata, npm SBOM и
+license evidence. Python build проверяет его без Node.js и network access и
+завершается ошибкой при отсутствии, stale source, подмене или неожиданных
+файлах. CI/release передают то же immutable дерево между jobs; wheel из sealed
+sdist остаётся Node-free. Для rollback checkout предыдущий release и повторите
+producer либо восстановите его точный asset artifact до Python build.
+
 UI состоит из **Work**, **Runs**, **Native**, **Arena**, **Approvals**,
 **Agents**, **Workflows**, **Evaluate**, **Tools** и **Scheduled**. Runs Center
 читает durable queue, trace и artifacts; reasoning model не отображается в

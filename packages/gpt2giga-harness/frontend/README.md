@@ -13,16 +13,29 @@ npm run check
 
 `npm run check` runs type checking, lint, unit tests, two deterministic
 production builds, manifest validation, compression, and initial bundle
-budgets. Generated content-hashed assets are committed under
-`src/gpt2giga_harness/ui/cockpit_v2/assets/` and packaged into the Python wheel.
-Node.js and npm are build/CI inputs only; installed Harness wheels do not need
-them.
+budgets. The one production producer command is:
+
+```bash
+npm --prefix packages/gpt2giga-harness/frontend run build
+```
+
+Run it from the repository root before a local Harness build. It atomically
+refreshes the ignored `src/gpt2giga_harness/ui/cockpit_v2/assets/` staging tree
+and writes the runtime manifest, source/commit provenance, npm SBOM, and license
+evidence. The Python-only Hatch consumer rejects a missing, substituted, or
+stale tree. Node.js and npm are producer/CI inputs only; installed Harness
+wheels and wheels rebuilt from the sealed sdist do not need them.
 
 The GigaLoom vector master lives in `../branding/gigaloom-mark.svg`.
-`npm run generate:brand` deterministically refreshes the local light, dark,
-mask, Web manifest, and documentation copies. The normal production
-build runs that step before Vite so a stale generated mark cannot enter the
-packaged asset graph.
+`npm run generate:brand` deterministically refreshes the ignored local light,
+dark, mask, and Web manifest copies. The normal production build runs that step
+before Vite so a stale generated mark cannot enter the packaged asset graph.
+
+CI and release run `npm run build:release` on pinned Node.js 22.13.0 and npm
+11.17.0 with clean authored inputs, upload the commit-bound tree, and inject it
+into the Python artifact job. Rollback checks out the prior release and reruns
+the producer, or restores that release's exact asset artifact, before rebuilding
+the wheel and sdist.
 
 Cockpit V2 is the only packaged UI at `/` and `/cockpit-v2/**`. Saved links
 from the previous UI continue to redirect to canonical Cockpit routes. If the

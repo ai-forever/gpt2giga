@@ -131,9 +131,51 @@ jobs:
           set -euo pipefail
           uv publish --token "${PYPI_TOKEN}" dist/gpt2giga/*
 
+  harness_assets:
+    name: Produce verified Harness frontend assets
+    needs: release_metadata
+    if: ${{ needs.release_metadata.outputs.release_target == 'harness' || needs.release_metadata.outputs.release_target == 'manual' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 22.13
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.13.0'
+          cache: npm
+          cache-dependency-path: packages/gpt2giga-harness/frontend/package-lock.json
+
+      - name: Install pinned npm 11.17
+        run: npm install --global --ignore-scripts npm@11.17.0
+
+      - name: Install pinned frontend dependencies
+        working-directory: packages/gpt2giga-harness/frontend
+        run: npm ci --ignore-scripts
+
+      - name: Run frontend gates and produce release assets
+        working-directory: packages/gpt2giga-harness/frontend
+        run: |
+          npm run check
+          npm run build:release
+
+      - name: Verify clean commit-bound asset evidence
+        run: python3 packages/gpt2giga-harness/asset_contract.py --require-clean
+
+      - name: Upload commit-bound Harness assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: gpt2giga-harness-assets-${{ github.sha }}
+          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
+          if-no-files-found: error
+          retention-days: 30
+
   harness_release:
     name: Build, attest, and publish Harness
-    needs: release_metadata
+    needs: [release_metadata, harness_assets]
     if: ${{ needs.release_metadata.outputs.release_target == 'harness' || needs.release_metadata.outputs.release_target == 'manual' }}
     runs-on: ubuntu-latest
     environment: pypi-harness
@@ -144,6 +186,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Download verified Harness assets
+        uses: actions/download-artifact@v7
+        with:
+          name: gpt2giga-harness-assets-${{ github.sha }}
+          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -167,6 +215,7 @@ jobs:
           test "$(find dist/gpt2giga-harness -maxdepth 1 -type f -name "gpt2giga_harness-${HARNESS_VERSION}.tar.gz" | wc -l | tr -d ' ')" = "1"
           sha256sum dist/gpt2giga-harness/* > dist/gpt2giga-harness-SHA256SUMS
           cat dist/gpt2giga-harness-SHA256SUMS
+          python3 packages/gpt2giga-harness/asset_contract.py --require-clean
 
       - name: Validate published gateway dependency
         if: ${{ needs.release_metadata.outputs.release_target == 'harness' }}
@@ -181,7 +230,9 @@ jobs:
       - name: Attest Harness artifacts
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/gpt2giga-harness/*
+          subject-path: |
+            dist/gpt2giga-harness/*
+            packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/_build/*
 
       - name: Upload Harness release evidence
         uses: actions/upload-artifact@v7
@@ -190,6 +241,7 @@ jobs:
           path: |
             dist/gpt2giga-harness/*
             dist/gpt2giga-harness-SHA256SUMS
+            packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/_build/*
           if-no-files-found: error
 
       - name: Publish Harness to PyPI

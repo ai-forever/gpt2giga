@@ -1,33 +1,15 @@
-import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join, relative, sep } from "node:path";
 import process from "node:process";
 
-const frontendRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputRoot = join(frontendRoot, "..", "src", "gpt2giga_harness", "ui", "cockpit_v2", "assets");
-
-async function treeDigest(directory) {
-  const hash = createHash("sha256");
-  async function visit(current) {
-    const entries = await readdir(current, { withFileTypes: true });
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      const absolute = join(current, entry.name);
-      if (entry.isDirectory()) {
-        await visit(absolute);
-      } else if (entry.isFile()) {
-        hash.update(relative(directory, absolute).split(sep).join("/"));
-        hash.update(await readFile(absolute));
-      }
-    }
-  }
-  await visit(directory);
-  return hash.digest("hex");
-}
+import {
+  frontendRoot,
+  outputRoot,
+  treeDigest,
+  walkFiles,
+} from "./asset-contract.mjs";
 
 function build() {
-  const result = spawnSync("npm", ["run", "build"], {
+  const result = spawnSync(process.execPath, ["scripts/produce-assets.mjs"], {
     cwd: frontendRoot,
     encoding: "utf8",
     stdio: "pipe",
@@ -39,11 +21,16 @@ function build() {
   }
 }
 
+async function completeTreeDigest() {
+  const files = await walkFiles(outputRoot);
+  return treeDigest(outputRoot, files);
+}
+
 build();
-const first = await treeDigest(outputRoot);
+const first = await completeTreeDigest();
 build();
-const second = await treeDigest(outputRoot);
+const second = await completeTreeDigest();
 if (first !== second) {
   throw new Error(`Cockpit V2 build is not deterministic: ${first} != ${second}`);
 }
-process.stdout.write(`deterministic asset tree ${second}\n`);
+process.stdout.write(`deterministic verified asset tree ${second}\n`);

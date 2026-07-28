@@ -56,6 +56,8 @@ in tests; never exercise real user state.
 Run from the repository root:
 
 ```bash
+npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
+npm --prefix packages/gpt2giga-harness/frontend run build
 uv sync --all-packages --all-extras --dev
 uv run ruff check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness
 uv run ruff format --check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness

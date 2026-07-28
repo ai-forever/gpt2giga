@@ -2,9 +2,10 @@
 
 Статус: принято для slice G8-03 roadmap GigaLoom 2026-07-28.
 
-Статус реализации: архитектура выбрана, но ещё не реализована. Удаление
-tracked compiled bundles и изменения build, CI, release и rollback принадлежат
-G8-04.
+Статус реализации: реализовано в G8-04 2026-07-28. Compiled bundles теперь
+ignored; source и tests закрепляют deterministic producer, Python-only
+fail-closed consumer, commit-bound передачу между CI/release jobs, sealed sdist,
+SBOM/license evidence и rollback contract.
 
 ## Контекст
 

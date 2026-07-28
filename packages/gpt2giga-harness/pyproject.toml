@@ -66,6 +66,9 @@ artifacts = [
     "src/gpt2giga_harness/ui/cockpit_v2/assets/**",
 ]
 
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/gpt2giga_harness"]
 

@@ -1,4 +1,5 @@
 import os
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -45,6 +46,16 @@ def test_packaged_ui_assets_survive_wheel_install(tmp_path):
     with zipfile.ZipFile(wheel_path) as wheel:
         wheel.extractall(installed_root)
     with zipfile.ZipFile(harness_wheel_path) as wheel:
+        harness_members = set(wheel.namelist())
+        assert any(
+            name.endswith("/assets/_build/provenance.json") for name in harness_members
+        )
+        assert any(
+            name.endswith("/assets/_build/sbom.cdx.json") for name in harness_members
+        )
+        assert any(
+            name.endswith("/assets/_build/licenses.json") for name in harness_members
+        )
         wheel.extractall(installed_root)
 
     smoke = """
@@ -77,7 +88,7 @@ assert "<title>GigaLoom</title>" in load_cockpit_v2_shell()
     )
 
 
-def test_harness_sdist_omits_frontend_build_toolchain(tmp_path):
+def test_harness_sdist_seals_assets_and_rebuilds_identical_node_free_wheel(tmp_path):
     repo_root = Path(__file__).resolve().parents[2]
     dist_dir = tmp_path / "dist"
     subprocess.run(
@@ -86,6 +97,7 @@ def test_harness_sdist_omits_frontend_build_toolchain(tmp_path):
             "build",
             "--package",
             "gpt2giga-harness",
+            "--wheel",
             "--sdist",
             "--no-sources",
             "--out-dir",
@@ -97,10 +109,39 @@ def test_harness_sdist_omits_frontend_build_toolchain(tmp_path):
         text=True,
     )
     archive = next(dist_dir.glob("gpt2giga_harness-*.tar.gz"))
+    direct_wheel = next(dist_dir.glob("gpt2giga_harness-*.whl"))
 
     with tarfile.open(archive, "r:gz") as source:
         members = source.getnames()
+        source.extractall(tmp_path / "source")
 
     assert not any("/frontend/" in name for name in members)
     assert not any("/ui/assets/" in name for name in members)
     assert any("/ui/cockpit_v2/assets/manifest.json" in name for name in members)
+    assert any(
+        "/ui/cockpit_v2/assets/_build/provenance.json" in name for name in members
+    )
+    assert any(name.endswith("/asset_contract.py") for name in members)
+    assert any(name.endswith("/hatch_build.py") for name in members)
+
+    extracted = next((tmp_path / "source").iterdir())
+    rebuilt = tmp_path / "rebuilt"
+    subprocess.run(
+        [
+            "uv",
+            "build",
+            "--wheel",
+            "--no-sources",
+            "--out-dir",
+            str(rebuilt),
+        ],
+        cwd=extracted,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    rebuilt_wheel = next(rebuilt.glob("gpt2giga_harness-*.whl"))
+    assert (
+        hashlib.sha256(direct_wheel.read_bytes()).hexdigest()
+        == hashlib.sha256(rebuilt_wheel.read_bytes()).hexdigest()
+    )
