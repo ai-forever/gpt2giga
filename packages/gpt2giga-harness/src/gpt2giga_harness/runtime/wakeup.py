@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 import hashlib
 import json
 import os
@@ -78,10 +79,8 @@ class WorkerWakeReceiver:
             except (OSError, ValueError):
                 payload = None
             if payload is not None and payload.get("token") == self.token:
-                try:
+                with suppress(FileNotFoundError):
                     endpoint.unlink()
-                except FileNotFoundError:
-                    pass
         if self._socket is not None:
             self._socket.close()
             self._socket = None
@@ -91,10 +90,8 @@ class WorkerWakeReceiver:
         directory.mkdir(parents=True, exist_ok=True)
         if directory.is_symlink():
             raise OSError("worker wake directory must not be a symlink")
-        try:
+        with suppress(OSError):
             directory.chmod(0o700)
-        except OSError:
-            pass
         identity = hashlib.sha256(self.worker_id.encode("utf-8")).hexdigest()
         endpoint = directory / f"{identity}.json"
         temporary = directory / f".{identity}.{uuid4().hex}.tmp"
@@ -149,10 +146,8 @@ def signal_workers(data_dir: str | Path) -> int:
             except (KeyError, OSError, TypeError, ValueError):
                 continue
             if not _process_is_running(process_id):
-                try:
+                with suppress(OSError):
                     endpoint.unlink()
-                except OSError:
-                    pass
                 continue
             if not 1 <= port <= 65535 or not _valid_token(token):
                 continue

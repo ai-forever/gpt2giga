@@ -130,8 +130,7 @@ export function SettingsSurface() {
     mutationFn: () => fetchCockpit<Record<string, unknown>>("/api/health"),
   });
   const doctor = useMutation({
-    mutationFn: () =>
-      fetchCockpit<DoctorReport>(withQuery("/api/doctor", { workspace: "." })),
+    mutationFn: () => fetchCockpit<DoctorReport>("/api/doctor"),
   });
   const rotateBrowserAccess = useMutation({
     mutationFn: () =>

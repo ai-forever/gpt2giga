@@ -17,6 +17,7 @@ from gpt2giga_harness.settings import (
     SettingsConflictError,
 )
 from gpt2giga_harness.ui.app import create_app
+from gpt2giga_harness.ui.routers import settings as settings_router
 
 
 def test_settings_read_model_is_bounded_and_never_exposes_secrets(
@@ -100,6 +101,47 @@ def test_guided_doctor_api_is_content_free_and_offline(
     assert str(tmp_path) not in serialized
     assert "giga-skills-catalog-proxy" in serialized
     assert "request-scoped OIDC token" in serialized
+
+
+def test_guided_doctor_api_does_not_forward_browser_workspace_paths(
+    tmp_path,
+    monkeypatch,
+):
+    captured = {}
+
+    def fake_build_doctor_report(
+        config,
+        registry,
+        *,
+        workspace,
+        online_checks,
+        ui_identity,
+    ):
+        captured.update(
+            {
+                "workspace": workspace,
+                "online_checks": online_checks,
+                "ui_identity": ui_identity,
+            }
+        )
+        return {"schema_version": 2, "checks": []}
+
+    monkeypatch.setattr(
+        settings_router,
+        "build_doctor_report",
+        fake_build_doctor_report,
+    )
+    client = _client(tmp_path)
+
+    response = client.get(
+        "/api/doctor",
+        params={"workspace": str(tmp_path / "untrusted-workspace")},
+    )
+
+    assert response.status_code == 200
+    assert captured["workspace"] is None
+    assert captured["online_checks"] is False
+    assert captured["ui_identity"]["local"] is True
 
 
 def test_provider_settings_api_crud_is_reference_only_and_optimistic(tmp_path):

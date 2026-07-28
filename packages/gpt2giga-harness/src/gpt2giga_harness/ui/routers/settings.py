@@ -50,10 +50,7 @@ router = APIRouter(route_class=ConformantAPIRoute)
 
 
 @router.get("/api/doctor")
-def doctor_read_model(
-    request: Request,
-    workspace: str | None = Query(default=None),
-) -> dict[str, Any]:
+def doctor_read_model(request: Request) -> dict[str, Any]:
     """Return one guided content-free doctor snapshot without online probes."""
     security = request.app.state.harness_ui_security
     if security.local_mode:
@@ -74,7 +71,7 @@ def doctor_read_model(
     return build_doctor_report(
         request.app.state.harness_config,
         request.app.state.harness_registry,
-        workspace=workspace,
+        workspace=None,
         online_checks=False,
         ui_identity=identity,
     )
