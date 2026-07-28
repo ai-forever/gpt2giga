@@ -435,9 +435,10 @@ Then open `http://127.0.0.1:8091/`. A useful first tour is:
 5. Inspect **Approvals**, **Attention**, **Automation**, **Evaluation**, and
    **Integrations** before enabling edits or unattended execution.
 
-Cockpit V2 is the default local UI. The previous no-build cockpit remains at
-`http://127.0.0.1:8091/legacy` for one release-level rollback window; switching
-between the two does not migrate or rewrite Harness runtime state.
+Cockpit V2 is the only packaged local UI. Saved links from the previous UI
+redirect to their canonical Cockpit destinations without migrating or
+rewriting Harness runtime state. If packaged Cockpit assets are unavailable,
+reinstall the Harness package or restore its verified build artifact.
 
 For a retained assistant response, **Copy** fetches and copies the full text
 even when the feed shows only a bounded preview. For structured and one-shot

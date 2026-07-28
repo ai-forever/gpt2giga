@@ -63,7 +63,6 @@ build-backend = "hatchling.build"
 artifacts = [
     "src/gpt2giga_harness/evidence/**",
     "src/gpt2giga_harness/integration_sdk_preview/**",
-    "src/gpt2giga_harness/ui/assets/**",
     "src/gpt2giga_harness/ui/cockpit_v2/assets/**",
 ]
 

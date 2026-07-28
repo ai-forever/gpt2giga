@@ -48,20 +48,17 @@ def test_packaged_ui_assets_survive_wheel_install(tmp_path):
         wheel.extractall(installed_root)
 
     smoke = """
+import importlib.util
 from pathlib import Path
 
 import gpt2giga
 import gpt2giga_harness
-from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 from gpt2giga_harness.ui.cockpit_v2 import load_cockpit_v2_manifest, load_cockpit_v2_shell
 
 installed_root = Path(__import__("sys").argv[1]).resolve()
 assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
 assert Path(gpt2giga_harness.__file__).resolve().is_relative_to(installed_root)
-assert '<link rel="stylesheet" href="/assets/app.css?v=38.44">' in INDEX_HTML
-assert '<script src="/assets/app.js?v=38.54"></script>' in INDEX_HTML
-assert "function boot()" in load_text_asset("app.js")
-assert ".app {" in load_text_asset("app.css")
+assert importlib.util.find_spec("gpt2giga_harness.ui.static") is None
 manifest = load_cockpit_v2_manifest()
 assert manifest.entry == "index.html"
 assert any(name.startswith("assets/workbench-") for name in manifest.assets)
@@ -105,4 +102,5 @@ def test_harness_sdist_omits_frontend_build_toolchain(tmp_path):
         members = source.getnames()
 
     assert not any("/frontend/" in name for name in members)
+    assert not any("/ui/assets/" in name for name in members)
     assert any("/ui/cockpit_v2/assets/manifest.json" in name for name in members)

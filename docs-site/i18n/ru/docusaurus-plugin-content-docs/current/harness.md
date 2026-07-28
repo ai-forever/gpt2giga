@@ -422,10 +422,10 @@ giga ui
 5. Изучите **Approvals**, **Attention**, **Automation**, **Evaluation** и
    **Integrations**, прежде чем включать edits или unattended execution.
 
-Cockpit V2 является локальным UI по умолчанию. Предыдущий no-build cockpit
-остаётся доступен по адресу `http://127.0.0.1:8091/legacy` на release-level
-период отката; переключение между ними не мигрирует и не переписывает runtime
-state Harness.
+Cockpit V2 — единственный поставляемый локальный UI. Сохранённые ссылки из
+предыдущего UI перенаправляются на канонические маршруты Cockpit без миграции
+или перезаписи runtime state Harness. Если пакетные assets Cockpit недоступны,
+переустановите пакет Harness или восстановите проверенный build artifact.
 
 У сохранённого ответа assistant кнопка Copy запрашивает и копирует полный
 текст, даже если в ленте показан ограниченный preview. Для structured и

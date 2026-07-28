@@ -265,9 +265,10 @@ giga ui-identity validate --json
 giga ui-identity revoke-all --confirm --json
 ```
 
-The root URL opens Cockpit V2. During its release-level rollback window, the
-previous no-build cockpit remains available at `http://127.0.0.1:8091/legacy`
-without migrating or rewriting Harness runtime state.
+The root URL opens Cockpit V2. Saved links from the previous UI redirect to
+their canonical Cockpit destinations without migrating or rewriting Harness
+runtime state. If packaged Cockpit assets are unavailable, reinstall the
+Harness package or restore its verified build artifact.
 
 After the first run starts, Workbench reveals a compact Run → Evidence → Review
 → Reuse path. Once the run reaches a terminal state, the exact retained trace

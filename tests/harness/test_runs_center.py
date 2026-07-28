@@ -22,7 +22,6 @@ from gpt2giga_harness.ui.routers.runs import (
     _runs_center_update_sse,
     _stream_runs_center_updates,
 )
-from gpt2giga_harness.ui.static import INDEX_HTML, load_text_asset
 from gpt2giga_harness.tools.policy import PolicyDecision
 
 
@@ -413,40 +412,6 @@ def test_runs_center_retry_requeues_only_safe_failed_attempt(tmp_path):
     assert retried.json()["job"]["max_attempts"] == 2
     assert runtime.get_job(job_id).status.value == "queued"
     assert duplicate.status_code == 409
-
-
-def test_runs_center_assets_expose_bounded_live_routable_surface():
-    script = load_text_asset("app.js")
-
-    for fragment in (
-        'id="runs-center"',
-        'data-run-status="approval-needed"',
-        'id="runs-trace-list"',
-        'id="runs-retry-button"',
-        'id="runs-inspect-artifact-button"',
-        'id="runs-support-bundle-button"',
-        'id="runs-ownership-panel"',
-        'id="runs-ownership-grid"',
-        'id="runs-explanations-panel"',
-        'id="runs-explanations-grid"',
-        'id="runs-team-tree"',
-        'data-tab="team"',
-    ):
-        assert fragment in INDEX_HTML
-    for fragment in (
-        "RUNS_TRACE_DOM_LIMIT = 200",
-        "function loadRunsCenter",
-        "function loadRunsTrace",
-        "function appendRunsLiveEvent",
-        "function openRunsCenterEventStream",
-        "function renderRunsOwnership",
-        "function renderRunsExplanations",
-        'runCenterAction("support_bundle")',
-        "function renderAgentTeam",
-        "function loadWorkAgentTeam",
-        "/events/stream",
-    ):
-        assert fragment in script
 
 
 def _failed_run(tmp_path):

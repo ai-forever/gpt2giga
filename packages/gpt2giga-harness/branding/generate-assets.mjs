@@ -9,16 +9,6 @@ const sourcePath = join(brandingRoot, "gigaloom-mark.svg");
 
 const targets = [
   join(repositoryRoot, "packages", "gpt2giga-harness", "frontend", "public", "brand"),
-  join(
-    repositoryRoot,
-    "packages",
-    "gpt2giga-harness",
-    "src",
-    "gpt2giga_harness",
-    "ui",
-    "assets",
-    "brand",
-  ),
   join(repositoryRoot, "docs-site", "static", "brand"),
 ];
 
@@ -83,7 +73,7 @@ for (const target of targets) {
   ]);
 }
 
-const applicationTargets = targets.slice(0, 2);
+const applicationTargets = targets.slice(0, 1);
 await Promise.all(
   applicationTargets.map((target) => writeFile(
     join(target, "gigaloom.webmanifest"),

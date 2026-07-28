@@ -301,7 +301,6 @@ const catalogs = {
     loading: "Loading",
     localSessions: "Local sessions",
     loadingInspector: "Loading inspector…",
-    legacy: "Open legacy cockpit",
     markdown: "Markdown",
     markdownDescription: "Markdown rendering loads only when opened.",
     migrationNote:
@@ -629,8 +628,6 @@ const catalogs = {
     newWorkflow: "New workflow",
     noEvaluationResults: "No evaluation results yet. Run an eval from a retained specification.",
     openAuthoring: "Open authoring",
-    openLegacyArenaAuthoring: "Open legacy arena authoring",
-    openLegacyAuthoring: "Open legacy authoring",
     authoringUnavailable: "Authoring unavailable",
     authoringDeferredRecovery:
       "Use project YAML or the CLI until native authoring is available here.",
@@ -942,7 +939,6 @@ const catalogs = {
     loading: "Загрузка",
     localSessions: "Локальные сессии",
     loadingInspector: "Загрузка inspector…",
-    legacy: "Открыть legacy cockpit",
     markdown: "Markdown",
     markdownDescription: "Отображение Markdown загружается только при открытии.",
     migrationNote:
@@ -1302,8 +1298,6 @@ const catalogs = {
     newWorkflow: "Новый workflow",
     noEvaluationResults: "Результатов оценки пока нет. Запустите eval из сохранённой спецификации.",
     openAuthoring: "Открыть редактирование",
-    openLegacyArenaAuthoring: "Открыть legacy-редактор arena",
-    openLegacyAuthoring: "Открыть legacy-редактор",
     authoringUnavailable: "Редактирование пока недоступно",
     authoringDeferredRecovery:
       "Пока используйте YAML проекта или CLI; native-редактор появится здесь позже.",

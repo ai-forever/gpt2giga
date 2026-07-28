@@ -20,11 +20,11 @@ them.
 
 The GigaLoom vector master lives in `../branding/gigaloom-mark.svg`.
 `npm run generate:brand` deterministically refreshes the local light, dark,
-mask, Web manifest, legacy-UI, and documentation copies. The normal production
+mask, Web manifest, and documentation copies. The normal production
 build runs that step before Vite so a stale generated mark cannot enter the
 packaged asset graph.
 
-Cockpit V2 is the default UI at `/` and `/cockpit-v2/**`. The previous no-build
-cockpit remains available under `/legacy/**` as the release-level recovery
-route. Do not move backend ownership or surface migration into this frontend
-package.
+Cockpit V2 is the only packaged UI at `/` and `/cockpit-v2/**`. Saved links
+from the previous UI continue to redirect to canonical Cockpit routes. If the
+verified Cockpit asset artifact is missing, repair or reinstall the package.
+Do not move backend ownership or surface migration into this frontend package.

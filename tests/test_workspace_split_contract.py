@@ -174,7 +174,9 @@ def test_workspace_member_metadata_and_source_ownership_when_present():
     assert not (gateway_source / "protocols/openai/stream_accumulator.py").exists()
     assert (harness_source / "tools").is_dir()
     assert (harness_source / "protocols/openai/stream_accumulator.py").is_file()
-    assert (harness_source / "ui/assets/index.html").is_file()
+    assert not (harness_source / "ui/static.py").is_file()
+    assert not (harness_source / "ui/assets/index.html").is_file()
+    assert (harness_source / "ui/cockpit_v2/assets/manifest.json").is_file()
 
 
 def test_ci_builds_and_smokes_both_workspace_artifacts_when_present():
