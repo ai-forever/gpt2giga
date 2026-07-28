@@ -128,6 +128,7 @@ GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch
 | `GPT2GIGA_HTTPS_KEY_FILE` / `GPT2GIGA_HTTPS_CERT_FILE` | empty | Локальные файлы ключа/сертификата для встроенного HTTPS. |
 | `GPT2GIGA_ENABLE_API_KEY_AUTH` | `False` | Требовать аутентификацию по API-ключу прокси для публичных API-маршрутов. В `PROD` обязательно. |
 | `GPT2GIGA_API_KEY` | empty | API-ключ прокси. Для общих окружений используйте сильное случайное значение. |
+| `GPT2GIGA_HARNESS_MODEL_KEY` | empty | Отдельный HMAC-ключ, доступный только Harness и внешнему proxy, который должен принимать request-scoped model pins Claude/Gemini. |
 | `GPT2GIGA_PASS_MODEL` | `True` | Передавать `model` из запроса в GigaChat. Поставьте `False`, чтобы всегда использовать настроенную модель GigaChat. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Разбирать клиентский `Authorization` как учётные данные GigaChat для авторизации в вышестоящем сервисе для каждого запроса. |
 | `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Максимум неактивных клиентов для отдельных учётных данных, сохраняемых для переиспользования соединений. |
@@ -387,7 +388,11 @@ GPT2GIGA_LOG_REDACT_SENSITIVE=True
 
 ```dotenv
 GPT2GIGA_LOGS_IP_ALLOWLIST='["10.0.0.1"]'
+GPT2GIGA_LOGS_TRUSTED_PROXIES='["127.0.0.1"]'
 ```
+
+`X-Forwarded-For` учитывается только тогда, когда прямой peer входит в
+`GPT2GIGA_LOGS_TRUSTED_PROXIES`; иначе allowlist проверяет адрес соединения.
 
 Не используйте `GPT2GIGA_LOG_LEVEL=DEBUG` в production: отладочный вывод может
 содержать операционный контекст, который не должен попадать в общие логи.

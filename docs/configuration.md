@@ -389,8 +389,9 @@ GPT2GIGA_LOGS_IP_ALLOWLIST='["10.0.0.1"]'
 GPT2GIGA_LOGS_TRUSTED_PROXIES='["127.0.0.1"]'
 ```
 
-`X-Forwarded-For` учитывается только когда прямой peer входит в
-`GPT2GIGA_LOGS_TRUSTED_PROXIES`; иначе allowlist проверяет адрес соединения.
+`X-Forwarded-For` is honored only when the direct peer is listed in
+`GPT2GIGA_LOGS_TRUSTED_PROXIES`; otherwise the allowlist checks the connection
+address.
 
 Do not use `GPT2GIGA_LOG_LEVEL=DEBUG` in production: debug output may
 contain operational context that should not end up in shared logs.

@@ -680,7 +680,7 @@
       }
     ]
   },
-  "content_sha256": "89c5e00eb0542b3e9ec2af9a625177df9ec7bc3301dc5bb40f356e5b01ba16ba",
+  "content_sha256": "f45fb0bbfbabd97f99aef43b4486ae46228429448ccf985465181752c73756ea",
   "contract_tests": [
     "tests/harness/test_capability_matrix.py",
     "tests/harness/test_cli_capabilities.py",
@@ -2536,7 +2536,7 @@
   "product": {
     "distribution": "gpt2giga-harness",
     "name": "GigaLoom",
-    "version": "0.5.0a1"
+    "version": "0.5.1a1"
   },
   "protocols": [
     "openai_compatible",
@@ -2545,7 +2545,7 @@
   ],
   "provider_compatibility_profiles": [
     {
-      "adapter_version": "0.5.0a1",
+      "adapter_version": "0.5.1a1",
       "capabilities": [
         "chat",
         "streaming",
@@ -2559,7 +2559,7 @@
       "evidence": [
         {
           "id": "anthropic-cloud-claude-code-fixture",
-          "revision": "cc19bc2f911c432c98a773d1141304503dc90c431a2b8bd8106c0e0bdbcfb53d",
+          "revision": "882b1af8e2549a64fa4c54e481376f52ed911c963dfd902ab42189f2e3de6971",
           "source": "built-in-contract",
           "status": "supported"
         }
@@ -2568,14 +2568,14 @@
       "id": "anthropic-cloud-claude-code",
       "native_auth": true,
       "protocol": "anthropic_compatible",
-      "revision": "cc19bc2f911c432c98a773d1141304503dc90c431a2b8bd8106c0e0bdbcfb53d",
+      "revision": "882b1af8e2549a64fa4c54e481376f52ed911c963dfd902ab42189f2e3de6971",
       "transports": [
         "native_terminal",
         "one_shot"
       ]
     },
     {
-      "adapter_version": "0.5.0a1",
+      "adapter_version": "0.5.1a1",
       "capabilities": [
         "chat",
         "streaming",
@@ -2587,7 +2587,7 @@
       "evidence": [
         {
           "id": "anthropic-compatible-claude-code-fixture",
-          "revision": "7d439783a02a57e32da804212940821cbfe35a73ccc4101475e46ce800069e58",
+          "revision": "40f46028654877391a5c8b88fab412e17cfbf259ee0854192854ddd8c7dfdc3f",
           "source": "built-in-contract",
           "status": "supported"
         }
@@ -2596,14 +2596,14 @@
       "id": "anthropic-compatible-claude-code",
       "native_auth": false,
       "protocol": "anthropic_compatible",
-      "revision": "7d439783a02a57e32da804212940821cbfe35a73ccc4101475e46ce800069e58",
+      "revision": "40f46028654877391a5c8b88fab412e17cfbf259ee0854192854ddd8c7dfdc3f",
       "transports": [
         "native_terminal",
         "one_shot"
       ]
     },
     {
-      "adapter_version": "0.5.0a1",
+      "adapter_version": "0.5.1a1",
       "capabilities": [
         "chat",
         "streaming",
@@ -2615,7 +2615,7 @@
       "evidence": [
         {
           "id": "gemini-compatible-gemini-cli-fixture",
-          "revision": "d3fde7cd788916b834f8b11ca28e5e91e634b5ad6655354091390e05b4b88cb4",
+          "revision": "2c67b2c2ba3d3c19757aedbf425ba38fd302abff91a3c82e2c2a2e19c9cc5dcd",
           "source": "built-in-gemini-cli-0.46-contract",
           "status": "supported"
         }
@@ -2624,7 +2624,7 @@
       "id": "gemini-compatible-gemini-cli",
       "native_auth": false,
       "protocol": "gemini_compatible",
-      "revision": "d3fde7cd788916b834f8b11ca28e5e91e634b5ad6655354091390e05b4b88cb4",
+      "revision": "2c67b2c2ba3d3c19757aedbf425ba38fd302abff91a3c82e2c2a2e19c9cc5dcd",
       "transports": [
         "native_structured",
         "native_terminal",
@@ -2632,7 +2632,7 @@
       ]
     },
     {
-      "adapter_version": "0.5.0a1",
+      "adapter_version": "0.5.1a1",
       "capabilities": [
         "chat",
         "streaming",
@@ -2644,7 +2644,7 @@
       "evidence": [
         {
           "id": "gemini-vertex-gemini-cli-fixture",
-          "revision": "58e4e79386464254ee06ed751caf7304acf8ac097f200334341a4deeed60b58c",
+          "revision": "da7da31518119a7fd71e814691039ac860f5882f19367833af83d1d77bc4a419",
           "source": "built-in-gemini-cli-0.46-contract",
           "status": "supported"
         }
@@ -2653,7 +2653,7 @@
       "id": "gemini-vertex-gemini-cli",
       "native_auth": true,
       "protocol": "gemini_compatible",
-      "revision": "58e4e79386464254ee06ed751caf7304acf8ac097f200334341a4deeed60b58c",
+      "revision": "da7da31518119a7fd71e814691039ac860f5882f19367833af83d1d77bc4a419",
       "transports": [
         "native_structured",
         "native_terminal",
@@ -2661,7 +2661,7 @@
       ]
     },
     {
-      "adapter_version": "0.5.0a1",
+      "adapter_version": "0.5.1a1",
       "capabilities": [
         "chat",
         "streaming",
@@ -2674,7 +2674,7 @@
       "evidence": [
         {
           "id": "legacy-claude-code-compatibility",
-          "revision": "c1ee2348fd0b44a3a4e536b655605be0303a57e49af4b4f74b6fd79e44ba0a5a",
+          "revision": "cc14d4b5c28b29db6468e27c41ebe96af1dd8575410aee9ccf77067bd283b086",
           "source": "built-in-contract",
           "status": "supported"
         }
@@ -2683,14 +2683,14 @@
       "id": "legacy-gpt2giga-claude-code",
       "native_auth": false,
       "protocol": "anthropic_compatible",
-      "revision": "c1ee2348fd0b44a3a4e536b655605be0303a57e49af4b4f74b6fd79e44ba0a5a",
+      "revision": "cc14d4b5c28b29db6468e27c41ebe96af1dd8575410aee9ccf77067bd283b086",
       "transports": [
         "native_terminal",
         "one_shot"
       ]
     },
     {
-      "adapter_version": "0.5.0a1",
+      "adapter_version": "0.5.1a1",
       "capabilities": [
         "chat",
         "streaming",
@@ -2703,7 +2703,7 @@
       "evidence": [
         {
           "id": "legacy-codex-cli-compatibility",
-          "revision": "56c065641cb1487bfe2c1877847978a1c4fd0200897a31ad8f6f09650db5db87",
+          "revision": "ae07cdd3fecd0ca19f1dafe2943f5ad5db8a90317323bfd94d639f9eaf55bad1",
           "source": "built-in-contract",
           "status": "supported"
         }
@@ -2712,7 +2712,7 @@
       "id": "legacy-gpt2giga-codex-cli",
       "native_auth": false,
       "protocol": "openai_compatible",
-      "revision": "56c065641cb1487bfe2c1877847978a1c4fd0200897a31ad8f6f09650db5db87",
+      "revision": "ae07cdd3fecd0ca19f1dafe2943f5ad5db8a90317323bfd94d639f9eaf55bad1",
       "transports": [
         "native_structured",
         "native_terminal",
@@ -2720,7 +2720,7 @@
       ]
     },
     {
-      "adapter_version": "0.5.0a1",
+      "adapter_version": "0.5.1a1",
       "capabilities": [
         "chat",
         "streaming",
@@ -2733,7 +2733,7 @@
       "evidence": [
         {
           "id": "legacy-direct-chat-compatibility",
-          "revision": "76fb6dbff66c1e4cab8aa99542e335a0130c4e891dfb078ff379e23cd1e54f64",
+          "revision": "b3d6faaa2d9a306ad035b22395726fef6cd2612d9dffe35eb0e3fb76d73489d1",
           "source": "built-in-contract",
           "status": "supported"
         }
@@ -2742,13 +2742,13 @@
       "id": "legacy-gpt2giga-direct-chat",
       "native_auth": false,
       "protocol": "openai_compatible",
-      "revision": "76fb6dbff66c1e4cab8aa99542e335a0130c4e891dfb078ff379e23cd1e54f64",
+      "revision": "b3d6faaa2d9a306ad035b22395726fef6cd2612d9dffe35eb0e3fb76d73489d1",
       "transports": [
         "one_shot"
       ]
     },
     {
-      "adapter_version": "0.5.0a1",
+      "adapter_version": "0.5.1a1",
       "capabilities": [
         "chat",
         "streaming",
@@ -2761,7 +2761,7 @@
       "evidence": [
         {
           "id": "legacy-gemini-cli-compatibility",
-          "revision": "d92d9dee15b16dc2753ab3ff8b31989df6cd71572d6763fc8bfa92bb525aabc4",
+          "revision": "b00bba2a4bef899824ea969d284649bc1966ebae16ab422f136f88584d3ea94d",
           "source": "built-in-contract",
           "status": "supported"
         }
@@ -2770,7 +2770,7 @@
       "id": "legacy-gpt2giga-gemini-cli",
       "native_auth": true,
       "protocol": "gemini_compatible",
-      "revision": "d92d9dee15b16dc2753ab3ff8b31989df6cd71572d6763fc8bfa92bb525aabc4",
+      "revision": "b00bba2a4bef899824ea969d284649bc1966ebae16ab422f136f88584d3ea94d",
       "transports": [
         "native_structured",
         "native_terminal",
@@ -2778,7 +2778,7 @@
       ]
     },
     {
-      "adapter_version": "0.5.0a1",
+      "adapter_version": "0.5.1a1",
       "capabilities": [
         "chat",
         "streaming",
@@ -2790,7 +2790,7 @@
       "evidence": [
         {
           "id": "codex-cli-openai-compatible-fixture",
-          "revision": "463f233b6d80471dab52d224605174b6438e4a0d7eddf1cb02b6d0b02ebb08fb",
+          "revision": "4ff54bfba8c1c843ff354653e45d34d54e3ed43069c7fc19888d291936bf5a10",
           "source": "built-in-contract",
           "status": "supported"
         }
@@ -2799,7 +2799,7 @@
       "id": "openai-compatible-codex-cli",
       "native_auth": false,
       "protocol": "openai_compatible",
-      "revision": "463f233b6d80471dab52d224605174b6438e4a0d7eddf1cb02b6d0b02ebb08fb",
+      "revision": "4ff54bfba8c1c843ff354653e45d34d54e3ed43069c7fc19888d291936bf5a10",
       "transports": [
         "native_structured",
         "native_terminal",
@@ -2807,7 +2807,7 @@
       ]
     },
     {
-      "adapter_version": "0.5.0a1",
+      "adapter_version": "0.5.1a1",
       "capabilities": [
         "chat",
         "streaming",
@@ -2819,7 +2819,7 @@
       "evidence": [
         {
           "id": "direct-chat-openai-compatible-fixture",
-          "revision": "561119986f4b997ed9bb185097f9d6544a8ede732b2de0f91aaf189cbcbfd242",
+          "revision": "e60dfd1f3c3b6346bf8faa1c5def08f90a4cd1536c086a2b597f7e39f64a6979",
           "source": "built-in-contract",
           "status": "supported"
         }
@@ -2828,7 +2828,7 @@
       "id": "openai-compatible-direct-chat",
       "native_auth": false,
       "protocol": "openai_compatible",
-      "revision": "561119986f4b997ed9bb185097f9d6544a8ede732b2de0f91aaf189cbcbfd242",
+      "revision": "e60dfd1f3c3b6346bf8faa1c5def08f90a4cd1536c086a2b597f7e39f64a6979",
       "transports": [
         "one_shot"
       ]

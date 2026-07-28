@@ -5,6 +5,25 @@ All notable changes to gpt2giga-harness are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1a1] - 2026-07-28
+
+### Added
+- **Fail-closed authority boundary**: a versioned approval schema, permission simulator, scoped HTTPS tickets, and separate GitHub capability grants bind authorization to the exact target, preview digest, lifetime, and dispatch state without transferring authority implicitly.
+- **Privacy-safe diagnostics**: doctor schema v2 and the Settings export produce content-free reports with a verifiable digest, bounded checks, and exact recovery steps without prompts, secrets, OAuth material, raw traffic, or private file content.
+- **Chat-first terminal shell**: the minimal TUI gains localized commands, bounded broker/SSE delivery, reconnect and backpressure contracts, diagnostics, and deterministic performance profiles.
+- **Machine-readable product truth**: `giga harness capabilities --inventory` publishes a versioned inventory of CLI, TUI, API, protocol, transport, readiness, and documentation contracts and checks it for drift in CI.
+- **OpenAI-compatible upstream bridge**: Harness-owned provider profiles can execute the reviewed normalized v1 subset through exact model/profile binding, `SecretRef`, and scoped network authority.
+
+### Changed
+- **Durable runtime performance**: the worker now uses demand-driven wakeup and bounded idle backoff, `update_run` is bounded to one normal-path JSONL scan, and deterministic in-memory projections have CI regression gates.
+- **Cockpit packaging**: the legacy UI was removed; the frontend producer now creates an ignored commit-bound asset tree with integrity, SBOM, and license evidence, while the Python build validates it without Node.js or network access.
+- **Adapter ownership**: the production Claude Agent SDK module is now the canonical owner, while the proof-only Gemini ACP and temporary compatibility paths were removed after imports, routes, tests, and package artifacts were verified.
+- **Gateway preset**: the optional integration now pins `gpt2giga==0.2.6a1`.
+
+### Fixed
+- **Security boundaries**: request-scoped Claude/Gemini model pins use a dedicated HMAC key; OIDC discovery and endpoints are restricted to the exact origin, proxy forwarding is trusted only from an explicit allowlist, and file/editor paths plus observability retain fail-closed redaction and containment.
+- **Settings and wakeup races**: resolved CodeQL findings in provider settings updates and runtime wakeup waiter cleanup without changing public API contracts.
+
 ## [0.5.0a1] - 2026-07-26
 
 ### Added
@@ -179,6 +198,7 @@ considered stable.
 
 ---
 
+[0.5.1a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.5.0a1...gpt2giga-harness-v0.5.1a1
 [0.5.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.4.0a1...gpt2giga-harness-v0.5.0a1
 [0.4.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.3.0a1...gpt2giga-harness-v0.4.0a1
 [0.3.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.2.0a1...gpt2giga-harness-v0.3.0a1

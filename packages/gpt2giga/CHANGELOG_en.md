@@ -5,6 +5,22 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6a1] - 2026-07-28
+
+### Added
+- **Normalized protocol bridge v1**: a versioned semantic-loss matrix and mandatory `admit_protocol_bridge_request()` validate OpenAI-, Anthropic-, and Gemini-shaped requests before I/O and reject unsupported or unmodeled semantic loss.
+- **OpenAI-compatible upstream adapter**: the internal Harness-owned execution path supports exact profile/model binding, strict model discovery, bounded Chat Completions streaming, function tools, usage, cancellation, and normalized transport/provider errors for reviewed OpenAI-compatible and vLLM profiles.
+- **Anthropic normalization**: Messages, SSE, function tools, stop reasons, usage, errors, and `count_tokens` now have direct request/response projections through the normalized core when normalization mode is enabled.
+- **Gemini bridge contracts**: function calls/results, JSON Schema output, typed inline image references, streaming, usage, safety errors, model discovery, and `countTokens` are frozen by golden fixtures and the shared normalized model.
+
+### Changed
+- **Normalized mode**: `GPT2GIGA_NORMALIZATION_MODE=on` now covers the admitted Anthropic Messages v1 subset and Gemini token counting; the inert `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` key was removed.
+- **Runtime dependencies**: `httpx` is now a declared direct gateway dependency for the OpenAI-compatible upstream transport.
+
+### Fixed
+- **Streaming closure**: malformed or incomplete SSE, events after a terminal choice, invalid usage ordering, disconnects, timeouts, and provider failures now end in stable fail-closed error/cancellation contracts without inventing token counts.
+- **Gateway security**: request-scoped Harness model overrides require a protocol-bound HMAC signature; forwarded client IPs are accepted only from trusted proxies, while error text and protocol extensions enter traffic/OTel data only under explicit content capture with redaction and truncation.
+
 ## [0.2.5a1] - 2026-07-26
 
 ### Added
@@ -505,6 +521,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.2.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.5a1...v0.2.6a1
 [0.2.5a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.4a1...v0.2.5a1
 [0.2.4a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a2...v0.2.4a1
 [0.2.3a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a1...v0.2.3a2

@@ -2,7 +2,7 @@
 
 :::warning[Alpha preview — prerelease]
 
-The `gpt2giga-harness` 0.4.x line is an alpha preview for testing and feedback.
+The `gpt2giga-harness` 0.5.x line is an alpha preview for testing and feedback.
 The UI, CLI, project YAML, runtime schema, and upgrade behavior can change while
 the product is being developed. Use it for local evaluation and supervised
 workflows, not as a production-critical or unattended multi-user service.
@@ -120,8 +120,8 @@ binary, Node.js runtime, credentials, or provider configuration. Both `uv tool`
 and `pipx` create an isolated Harness environment:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.5.0a1'
-pipx install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
+pipx install 'gpt2giga-harness==0.5.1a1'
 ```
 
 Upgrade an existing optional-TUI prerelease in place; do not retain or add a
@@ -131,10 +131,10 @@ archive when a state migration occurred:
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool install --force 'gpt2giga-harness==0.5.0a1'
+uv tool install --force 'gpt2giga-harness==0.5.1a1'
 uv tool install --force 'gpt2giga-harness==<previous-version>'
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
 ```
 
 Uninstalling the package does not delete `~/.gpt2giga/harness`, project
@@ -190,19 +190,19 @@ If the standalone preview is available in your package index, the shorter
 install path is:
 
 ```bash
-uv tool install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
 giga doctor
 ```
 
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```bash
-uv tool install 'gpt2giga-harness[gpt2giga]==0.5.0a1'
+uv tool install 'gpt2giga-harness[gpt2giga]==0.5.1a1'
 ```
 
-The current `gpt2giga-harness==0.5.0a1` distribution provides the `giga` and
+The current `gpt2giga-harness==0.5.1a1` distribution provides the `giga` and
 `gpt2giga-harness` commands; its explicit `gpt2giga` extra pins
-`gpt2giga==0.2.5a1`.
+`gpt2giga==0.2.6a1`.
 
 Requirements are Python 3.10–3.14 and `uv`. Direct GigaChat runs also need the
 gateway credentials described in the [gpt2giga quickstart](quickstart.md).
@@ -265,7 +265,7 @@ To migrate from the optional-TUI prerelease, upgrade the standard package and
 remove `[tui]` from install commands:
 
 ```bash
-uv tool install --force 'gpt2giga-harness==0.5.0a1'
+uv tool install --force 'gpt2giga-harness==0.5.1a1'
 giga --version
 giga
 ```
@@ -2844,7 +2844,7 @@ Remove the old combined wheel before installing the split packages so stale
 
 ```bash
 python -m pip uninstall -y gpt2giga gpt2giga-harness
-python -m pip install 'gpt2giga-harness==0.5.0a1'
+python -m pip install 'gpt2giga-harness==0.5.1a1'
 ```
 
 For `uv` tool installations, recreate both tool environments:
@@ -2853,11 +2853,11 @@ For `uv` tool installations, recreate both tool environments:
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
 uv tool install --prerelease allow gpt2giga
-uv tool install 'gpt2giga-harness==0.5.0a1'
+uv tool install 'gpt2giga-harness==0.5.1a1'
 ```
 
-The current `gpt2giga-harness==0.5.0a1` metadata keeps
-`gpt2giga==0.2.5a1` in the explicit `gpt2giga` optional extra.
+The current `gpt2giga-harness==0.5.1a1` metadata keeps
+`gpt2giga==0.2.6a1` in the explicit `gpt2giga` optional extra.
 
 This package migration does not move or rewrite Harness state. Existing
 `~/.gpt2giga/harness` data and project-local `.giga/` directories remain in
