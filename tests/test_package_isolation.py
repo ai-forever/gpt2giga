@@ -1,5 +1,6 @@
 import ast
 from dataclasses import dataclass
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -7,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tarfile
+import zipfile
 
 import pytest
 
@@ -110,6 +112,19 @@ def _install_artifacts(target: Path, *artifacts: Path) -> None:
         *(str(artifact) for artifact in artifacts),
         cwd=target.parent,
     )
+
+
+def _install_checksum_bound_artifacts(
+    target: Path,
+    artifacts: dict[Path, str],
+) -> None:
+    for artifact, expected_sha256 in artifacts.items():
+        if len(expected_sha256) != 64:
+            raise ValueError(f"invalid SHA-256 for candidate artifact: {artifact.name}")
+        actual_sha256 = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if actual_sha256 != expected_sha256:
+            raise ValueError(f"candidate artifact digest changed: {artifact.name}")
+    _install_artifacts(target, *artifacts)
 
 
 def _run_clean_python(target: Path, source: str) -> None:
@@ -484,8 +499,25 @@ def test_gpt2giga_preset_artifacts_restore_gateway_runtime(
         else built_artifacts.harness_sdist
     )
     installed = tmp_path / "installed"
-    _install_artifacts(installed, gateway_artifact, harness_artifact)
+    candidate_artifacts = {
+        gateway_artifact: hashlib.sha256(gateway_artifact.read_bytes()).hexdigest(),
+        harness_artifact: hashlib.sha256(harness_artifact.read_bytes()).hexdigest(),
+    }
+    _install_checksum_bound_artifacts(installed, candidate_artifacts)
     _run_clean_python(installed, GPT2GIGA_PRESET_SMOKE)
+
+
+def test_candidate_artifact_digest_mismatch_fails_before_install(
+    built_artifacts: BuiltArtifacts,
+    tmp_path,
+):
+    installed = tmp_path / "installed"
+    with pytest.raises(ValueError, match="candidate artifact digest changed"):
+        _install_checksum_bound_artifacts(
+            installed,
+            {built_artifacts.gateway_wheel: "0" * 64},
+        )
+    assert not installed.exists()
 
 
 def test_neutral_third_party_wheel_registers_without_core_edits(
@@ -612,6 +644,44 @@ def test_harness_gateway_imports_stay_within_the_reviewed_boundary():
     assert "from gpt2giga import run; run()" in proxy_source
 
 
+def test_all_late_bound_gateway_imports_are_characterized():
+    late_bound_imports: set[tuple[str, str]] = set()
+    for path in HARNESS_SOURCE.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        relative_path = path.relative_to(HARNESS_SOURCE).as_posix()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            function_name = (
+                node.func.id
+                if isinstance(node.func, ast.Name)
+                else node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else None
+            )
+            if function_name == "import_module":
+                module = node.args[0]
+                if (
+                    isinstance(module, ast.Constant)
+                    and isinstance(module.value, str)
+                    and module.value.startswith("gpt2giga.")
+                ):
+                    late_bound_imports.add((relative_path, module.value))
+            for argument in ast.walk(node.args[0]):
+                if (
+                    isinstance(argument, ast.Constant)
+                    and isinstance(argument.value, str)
+                    and "from gpt2giga import" in argument.value
+                ):
+                    late_bound_imports.add((relative_path, argument.value))
+
+    assert late_bound_imports == {
+        ("gpt2giga_preset.py", "gpt2giga.cli"),
+        ("openai_upstream.py", "gpt2giga.providers.openai_compatible"),
+        ("proxy.py", "from gpt2giga import run; run()"),
+    }
+
+
 def _write_minimal_plugin(source_root: Path) -> None:
     package = source_root / "src/example_harness_plugin"
     package.mkdir(parents=True)
@@ -709,3 +779,34 @@ def test_sdists_are_self_contained(built_artifacts: BuiltArtifacts):
             names = archive.getnames()
         assert any(name.endswith("/pyproject.toml") for name in names)
         assert any(name.endswith("/README.md") for name in names)
+
+
+def _artifact_members(path: Path) -> tuple[str, ...]:
+    if path.suffix == ".whl":
+        with zipfile.ZipFile(path) as archive:
+            return tuple(archive.namelist())
+    with tarfile.open(path) as archive:
+        return tuple(archive.getnames())
+
+
+@pytest.mark.parametrize(
+    ("artifact_attribute", "forbidden_package"),
+    [
+        ("gateway_wheel", "gpt2giga_harness"),
+        ("gateway_sdist", "gpt2giga_harness"),
+        ("harness_wheel", "gpt2giga"),
+        ("harness_sdist", "gpt2giga"),
+    ],
+)
+def test_artifacts_do_not_package_the_other_distribution(
+    built_artifacts: BuiltArtifacts,
+    artifact_attribute: str,
+    forbidden_package: str,
+):
+    artifact = getattr(built_artifacts, artifact_attribute)
+    violations = [
+        name
+        for name in _artifact_members(artifact)
+        if forbidden_package in Path(name).parts
+    ]
+    assert violations == []
