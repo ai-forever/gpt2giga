@@ -74,6 +74,3 @@ packages = ["src/gpt2giga_harness"]
 
 [tool.hatch.build.targets.sdist]
 exclude = ["/frontend"]
-
-[tool.uv.sources]
-gpt2giga = { workspace = true }

@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/gpt2giga-harness"]
 
 [tool.coverage.run]
 omit = [
@@ -31,7 +31,7 @@ dev = [
     "pytest-asyncio (>=1.2.0,<2.0.0)",
     "pytest-mock (>=3.15.1,<4.0.0)",
     "pytest-xdist (>=3.8.0,<4.0.0)",
-    "ruff (>=0.15,<1)",
+    "ruff (>=0.15,<0.16)",
     "pytest-cov (>=7.0.0,<8.0.0)",
     "pre-commit (>=4.3.0,<5.0.0)",
 ]
@@ -39,5 +39,4 @@ integrations = [
     "openai-agents (>=0.17,<1)",
     "pyjwt (>=2.12.0)",
     "python-multipart (>=0.0.27, <0.1.0)"
-
 ]

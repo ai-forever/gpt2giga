@@ -1,19 +1,18 @@
 """Transitional artifact helpers used by future repository-owned suites."""
 
 import ast
-from dataclasses import dataclass
 import hashlib
 import importlib.metadata
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tarfile
 import zipfile
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
-
 from gpt2giga_harness.base_install import BASE_DIRECT_DISTRIBUTIONS
 
 try:
@@ -34,8 +33,20 @@ def _project_version(member: Path) -> str:
         return tomllib.load(file)["project"]["version"]
 
 
-GATEWAY_VERSION = _project_version(GATEWAY_MEMBER)
 HARNESS_VERSION = _project_version(HARNESS_MEMBER)
+
+
+def _optional_gateway_version() -> str:
+    with (HARNESS_MEMBER / "pyproject.toml").open("rb") as file:
+        metadata = tomllib.load(file)
+    requirement = metadata["project"]["optional-dependencies"]["gpt2giga"][0]
+    prefix = "gpt2giga=="
+    if not requirement.startswith(prefix):
+        raise ValueError("GigaLoom gateway compatibility dependency must be exact")
+    return requirement.removeprefix(prefix)
+
+
+GATEWAY_VERSION = _optional_gateway_version()
 IMPORT_DISTRIBUTIONS = {
     "anyio": "anyio",
     "dateutil": "python-dateutil",
@@ -54,8 +65,8 @@ IMPORT_DISTRIBUTIONS = {
 
 @dataclass(frozen=True)
 class BuiltArtifacts:
-    gateway_wheel: Path
-    gateway_sdist: Path
+    gateway_wheel: Path | None
+    gateway_sdist: Path | None
     harness_wheel: Path
     harness_sdist: Path
 
@@ -92,7 +103,9 @@ def _build_artifacts(tmp_path_factory) -> BuiltArtifacts:
     root = tmp_path_factory.mktemp("workspace-artifacts")
     direct = root / "direct"
     direct.mkdir()
-    gateway_wheel, gateway_sdist = _build_member("gpt2giga", direct)
+    gateway_wheel = gateway_sdist = None
+    if GATEWAY_MEMBER.is_dir():
+        gateway_wheel, gateway_sdist = _build_member("gpt2giga", direct)
     harness_wheel, harness_sdist = _build_member("gpt2giga-harness", direct)
     return BuiltArtifacts(
         gateway_wheel=gateway_wheel,
@@ -532,12 +545,7 @@ def test_neutral_third_party_wheel_registers_without_core_edits(
 ):
     plugin_wheel = _build_neutral_plugin(tmp_path)
     installed = tmp_path / "installed"
-    _install_artifacts(
-        installed,
-        built_artifacts.gateway_wheel,
-        built_artifacts.harness_wheel,
-        plugin_wheel,
-    )
+    _install_artifacts(installed, built_artifacts.harness_wheel, plugin_wheel)
     _run_clean_python(installed, NEUTRAL_PLUGIN_SMOKE)
 
 
@@ -607,18 +615,12 @@ def test_harness_imports_only_declared_distributions():
 def test_optional_and_development_dependencies_stay_with_their_owner():
     with (REPO_ROOT / "pyproject.toml").open("rb") as file:
         root_metadata = tomllib.load(file)
-    with (GATEWAY_MEMBER / "pyproject.toml").open("rb") as file:
-        gateway_metadata = tomllib.load(file)
     with (HARNESS_MEMBER / "pyproject.toml").open("rb") as file:
         harness_metadata = tomllib.load(file)
 
     assert "project" not in root_metadata
     assert set(root_metadata["dependency-groups"]) == {"dev", "integrations"}
-    assert set(gateway_metadata["project"]["optional-dependencies"]) == {
-        "opensearch",
-        "phoenix",
-        "postgres",
-    }
+    assert "sources" not in harness_metadata.get("tool", {}).get("uv", {})
     assert harness_metadata["project"]["optional-dependencies"] == {
         "claude-sdk": ["claude-agent-sdk>=0.2.122,<0.3"],
         "gpt2giga": [
@@ -759,7 +761,6 @@ def test_installed_third_party_plugin_is_discovered(
     installed = tmp_path / "installed"
     _install_artifacts(
         installed,
-        built_artifacts.gateway_wheel,
         built_artifacts.harness_wheel,
         next(plugin_dist.glob("example_harness_plugin-*.whl")),
     )

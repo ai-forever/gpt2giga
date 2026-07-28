@@ -37,6 +37,9 @@ def test_product_inventory_joins_runtime_owners_without_readiness_guessing(
     assert inventory["schema_version"] == 1
     assert inventory["kind"] == PRODUCT_INVENTORY_KIND
     assert inventory["product"]["version"]
+    assert inventory["product"]["repository"] == (
+        "https://github.com/krakenalt/gigaloom"
+    )
     assert inventory["content_sha256"]
     assert "harness capabilities" in inventory["interfaces"]["cli_commands"]
     assert "/diagnostics" in {

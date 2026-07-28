@@ -15,21 +15,6 @@ def test_packaged_ui_assets_survive_wheel_install(tmp_path):
             "uv",
             "build",
             "--package",
-            "gpt2giga",
-            "--wheel",
-            "--out-dir",
-            str(dist_dir),
-        ],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(
-        [
-            "uv",
-            "build",
-            "--package",
             "gpt2giga-harness",
             "--wheel",
             "--out-dir",
@@ -40,11 +25,8 @@ def test_packaged_ui_assets_survive_wheel_install(tmp_path):
         capture_output=True,
         text=True,
     )
-    wheel_path = next(dist_dir.glob("gpt2giga-*.whl"))
     harness_wheel_path = next(dist_dir.glob("gpt2giga_harness-*.whl"))
     installed_root = tmp_path / "installed"
-    with zipfile.ZipFile(wheel_path) as wheel:
-        wheel.extractall(installed_root)
     with zipfile.ZipFile(harness_wheel_path) as wheel:
         harness_members = set(wheel.namelist())
         assert any(
@@ -62,13 +44,12 @@ def test_packaged_ui_assets_survive_wheel_install(tmp_path):
 import importlib.util
 from pathlib import Path
 
-import gpt2giga
 import gpt2giga_harness
 from gpt2giga_harness.ui.cockpit_v2 import load_cockpit_v2_manifest, load_cockpit_v2_shell
 
 installed_root = Path(__import__("sys").argv[1]).resolve()
-assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
 assert Path(gpt2giga_harness.__file__).resolve().is_relative_to(installed_root)
+assert importlib.util.find_spec("gpt2giga") is None
 assert importlib.util.find_spec("gpt2giga_harness.ui.static") is None
 manifest = load_cockpit_v2_manifest()
 assert manifest.entry == "index.html"

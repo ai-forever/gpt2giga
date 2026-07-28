@@ -680,7 +680,7 @@
       }
     ]
   },
-  "content_sha256": "f45fb0bbfbabd97f99aef43b4486ae46228429448ccf985465181752c73756ea",
+  "content_sha256": "5e49ab5b435faf1a8af8e792dc7126559f189a059216e1bf7b9805db5c2288cf",
   "contract_tests": [
     "tests/harness/test_capability_matrix.py",
     "tests/harness/test_cli_capabilities.py",
@@ -2536,6 +2536,7 @@
   "product": {
     "distribution": "gpt2giga-harness",
     "name": "GigaLoom",
+    "repository": "https://github.com/krakenalt/gigaloom",
     "version": "0.5.1a1"
   },
   "protocols": [

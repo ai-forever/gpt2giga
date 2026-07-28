@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
-from importlib import metadata, resources
 import hashlib
 import json
+from collections.abc import Iterable, Mapping
+from importlib import metadata, resources
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from gpt2giga_harness import __version__
 from gpt2giga_harness.capability_matrix import (
@@ -31,7 +32,6 @@ from gpt2giga_harness.registry import (
 )
 from gpt2giga_harness.tui.commands import COMMAND_REGISTRY
 from gpt2giga_harness.types import spec_to_dict
-
 
 PRODUCT_INVENTORY_SCHEMA_VERSION = 1
 PRODUCT_INVENTORY_KIND = "gigaloom_product_inventory"
@@ -132,6 +132,7 @@ def build_product_inventory(
             "name": "GigaLoom",
             "distribution": "gpt2giga-harness",
             "version": __version__,
+            "repository": "https://github.com/krakenalt/gigaloom",
         },
         "generated_from": PRODUCT_INVENTORY_SOURCE,
         "sources": [

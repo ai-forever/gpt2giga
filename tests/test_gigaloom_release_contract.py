@@ -1,27 +1,15 @@
-"""Release, documentation, and CI contracts owned by krakenalt/gigaloom."""
+"""Bootstrap-time publication guards owned by krakenalt/gigaloom."""
 
-from workspace_split_contract_support import (
-    test_ci_builds_and_smokes_both_workspace_artifacts_when_present as _check_artifact_ci,
-    test_pr_labeler_tracks_harness_owned_paths as _check_labeler,
-    test_release_workflow_routes_and_publishes_both_workspace_members as _check_release_workflow,
-    test_split_install_and_namespace_migration_are_documented as _check_migration_docs,
-)
+from pathlib import Path
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
-FUTURE_REPOSITORY_OWNER = "krakenalt/gigaloom"
+def test_publication_is_absent_until_target_release_workflow_slice():
+    assert not (REPOSITORY_ROOT / ".github/workflows/publish-pypi.yml").exists()
 
 
-def test_gigaloom_artifact_ci_builds_and_smokes_distribution():
-    _check_artifact_ci()
-
-
-def test_gigaloom_paths_have_release_label_ownership():
-    _check_labeler()
-
-
-def test_gigaloom_release_workflow_routes_only_owned_distribution():
-    _check_release_workflow()
-
-
-def test_gigaloom_install_and_namespace_migration_are_documented():
-    _check_migration_docs()
+def test_release_ready_lock_is_deferred_until_s5_03b():
+    assert not (REPOSITORY_ROOT / "uv.lock").exists()
+    ignore = (REPOSITORY_ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "\nuv.lock\n" in ignore

@@ -4,7 +4,6 @@ from email.parser import BytesParser
 from email.policy import default
 
 import pytest
-
 from gpt2giga_harness import proxy
 from gpt2giga_harness.types import GigaChatApiMode, HarnessContext
 
@@ -196,6 +195,7 @@ def test_sidecar_preflight_rejects_remote_proxy_url(monkeypatch):
 
 def test_ensure_proxy_available_starts_local_sidecar(monkeypatch):
     captured = {}
+    monkeypatch.setattr(proxy, "gpt2giga_preset_available", lambda: True)
     health_results = [
         proxy.ProxyHealth(
             ok=False,

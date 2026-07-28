@@ -58,15 +58,15 @@ Run from the repository root:
 ```bash
 npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
 npm --prefix packages/gpt2giga-harness/frontend run build
-uv sync --all-packages --all-extras --dev
-uv run ruff check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness
-uv run ruff format --check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness
-uv run pytest tests/harness -q
+./scripts/ci-base.sh sync
+./scripts/ci-base.sh ruff-check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness
+./scripts/ci-base.sh ruff-format-check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness
+./scripts/ci-base.sh pytest tests/harness -q
 uv build --package gpt2giga-harness --no-sources
 ```
 
 `uv run giga doctor` is an environment smoke check, not a hermetic quality
 gate. For UI changes, also verify the packaged asset test and perform browser QA
 at relevant desktop and mobile widths. For metadata, imports, package data, or
-release changes, run the root coverage gate, both member builds, and workspace
-package-isolation tests.
+release changes, run the root coverage gate plus the standalone artifact and
+checksum-bound candidate tests.

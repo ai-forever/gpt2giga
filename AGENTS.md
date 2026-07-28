@@ -24,17 +24,20 @@ work merely because it is present in the checkout.
 
 ## Repository contract
 
-- This is a two-member `uv` workspace:
-  - `packages/gpt2giga/` owns the compatibility gateway and `gpt2giga`
-    Python namespace.
-  - `packages/gpt2giga-harness/` owns the local agentic control plane and
-    `gpt2giga_harness` Python namespace.
-- The Harness may depend on reviewed gateway contracts; gateway code must never import `gpt2giga_harness`.
-- Keep both distributions independently buildable and installable. Treat both
-  member `pyproject.toml` files as the source of truth for versions,
-  dependencies, entry points, and the supported Python range.
-- Keep gateway FastAPI handlers and network upstream calls async-first. Use
-  absolute imports, Ruff formatting, and concise Google-style docstrings.
+- This is the standalone GigaLoom repository and a one-member `uv` workspace.
+- `packages/gpt2giga-harness/` owns the `gpt2giga-harness` distribution and
+  `gpt2giga_harness` Python namespace.
+- The base distribution must install, test, and build without a gateway source
+  checkout.
+- Optional gateway compatibility consumes only the exact public dependency or
+  an explicitly checksum-bound candidate artifact. Never add an editable
+  sibling, local source override, submodule, or branch dependency.
+- The release-ready target `uv.lock` is intentionally absent until the
+  repository-split roadmap reaches S5-03B. Bootstrap and candidate scripts must
+  not create or persist a lockfile.
+- Treat `packages/gpt2giga-harness/pyproject.toml` as the source of truth for
+  version, dependencies, entry points, and the supported Python range.
+- Use absolute imports, Ruff formatting, and concise Google-style docstrings.
 - Treat OpenAI-, Anthropic-, Gemini-, and GigaChat-shaped behavior as public
   compatibility contracts. A response shape, SSE event, route alias, default,
   or accepted parameter change requires focused compatibility tests and docs.
@@ -77,12 +80,12 @@ When continuing a named local roadmap:
 
 ## Commands and validation
 
-Install workspace runtime and development dependencies:
+Produce frontend assets and install standalone development dependencies:
 
 ```bash
 npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
 npm --prefix packages/gpt2giga-harness/frontend run build
-uv sync --all-packages --all-extras --dev
+./scripts/ci-base.sh sync
 ```
 
 The frontend producer must run before the first clean-checkout `uv sync`;
@@ -92,15 +95,14 @@ running Node.
 Repository quality gate:
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
+./scripts/ci-base.sh ruff-check
+./scripts/ci-base.sh ruff-format-check
+./scripts/ci-base.sh pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 ```
 
-Independent package builds:
+Standalone package build:
 
 ```bash
-uv build --package gpt2giga --no-sources
 uv build --package gpt2giga-harness --no-sources
 ```
 

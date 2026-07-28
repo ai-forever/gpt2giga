@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-from gpt2giga.providers.openai_compatible import OPENAI_CHAT_EXECUTION_OWNER
+pytest.importorskip(
+    "gpt2giga",
+    reason="optional gateway integration is exercised by the candidate smoke",
+)
+
 from gpt2giga.protocols.normalized import (
     BridgeFeature,
     DownstreamProtocol,
@@ -13,6 +17,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedProtocolCapabilities,
     NormalizedTokenLimits,
 )
+from gpt2giga.providers.openai_compatible import OPENAI_CHAT_EXECUTION_OWNER
 from gpt2giga_harness.openai_compatible import (
     VLLM_OPENAI_COMPATIBLE_PROFILE_VERSION,
     openai_compatible_route,
@@ -37,7 +42,6 @@ from gpt2giga_harness.secrets import (
     SecretReferenceKind,
     SecretResolutionService,
 )
-
 
 NOW = datetime(2026, 7, 27, 10, 5, tzinfo=timezone.utc)
 
