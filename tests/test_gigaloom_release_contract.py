@@ -29,6 +29,7 @@ def test_release_workflow_is_target_only_and_manual_runs_cannot_publish():
     }
 
     jobs = workflow["jobs"]
+    assert jobs["trusted-publish"]["environment"] == "pypi-harness"
     assert jobs["trusted-publish"]["permissions"] == {
         "attestations": "write",
         "contents": "read",
@@ -46,6 +47,8 @@ def test_release_workflow_is_target_only_and_manual_runs_cannot_publish():
     assert "gpt2giga-harness-v" not in text
     assert "actions/attest-build-provenance@v4" in text
     assert "uv publish --trusted-publishing always" in text
+    assert "assets/_build/licenses.json dist/gigaloom/" in text
+    assert "THIRD_PARTY_LICENSES.txt" not in text
     assert "./scripts/ci-base.sh sync-all-extras" in text
     assert "./scripts/ci-public-gateway.sh" in text
     assert text.count("if: github.event_name == 'release'") >= 4
