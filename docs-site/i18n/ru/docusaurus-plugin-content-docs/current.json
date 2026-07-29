@@ -7,10 +7,6 @@
     "message": "Обзор",
     "description": "The label for category 'Overview' in sidebar 'docs'"
   },
-  "sidebar.docs.doc.harness": {
-    "message": "Unified Harness (альфа)",
-    "description": "The label for the doc item 'Unified Harness (alpha)' in sidebar 'docs', linking to the doc harness"
-  },
   "sidebar.docs.category.Compatibility": {
     "message": "Совместимость",
     "description": "The label for category 'Compatibility' in sidebar 'docs'"

@@ -10,8 +10,9 @@
 Gemini-совместимыми клиентами и GigaChat. Дистрибутив содержит только gateway:
 команду `gpt2giga` и Python namespace `gpt2giga`.
 
-Unified Harness поставляется отдельно в дистрибутиве `gpt2giga-harness` и не
-устанавливается вместе с gateway.
+GigaLoom (ранее Unified Harness) развивается отдельно в
+[`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom), поставляется
+дистрибутивом `gpt2giga-harness` и не устанавливается вместе с gateway.
 
 ## Установка
 
@@ -141,6 +142,7 @@ Per-request GigaChat authorization через клиентский `Authorizatio
 - [Examples](https://github.com/ai-forever/gpt2giga/tree/main/examples)
 - [Gateway changelog (RU)](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga/CHANGELOG.md)
 - [Gateway changelog (EN)](https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga/CHANGELOG_en.md)
+- [GigaLoom migration notice](https://ai-forever.github.io/gpt2giga/gigaloom-migration)
 
 ## Разработка из исходников
 

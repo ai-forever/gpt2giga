@@ -1,9 +1,0 @@
-{
-  "capabilities": ["mcp.install", "mcp.verify"],
-  "component_types": ["mcp"],
-  "id": "sample-codex-mcp",
-  "revision": "0.1.0",
-  "schema_version": 1,
-  "scopes": ["managed_home", "project"],
-  "trust_evidence": [{"authority": "sdk-sample", "id": "target-contract", "kind": "source", "revision": "v1", "status": "unverified"}]
-}

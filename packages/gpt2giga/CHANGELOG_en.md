@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Gemini bridge contracts**: function calls/results, JSON Schema output, typed inline image references, streaming, usage, safety errors, model discovery, and `countTokens` are frozen by golden fixtures and the shared normalized model.
 
 ### Changed
+- **Repository separation**: the source repository, documentation site,
+  automation, package metadata, and coverage baseline now describe only the
+  `gpt2giga` compatibility gateway. GigaLoom (formerly Unified Harness) moved
+  to [`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom), while
+  legacy source documentation URLs retain migration notices.
 - **Normalized mode**: `GPT2GIGA_NORMALIZATION_MODE=on` now covers the admitted Anthropic Messages v1 subset and Gemini token counting; the inert `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` key was removed.
 - **Runtime dependencies**: `httpx` is now a declared direct gateway dependency for the OpenAI-compatible upstream transport.
 

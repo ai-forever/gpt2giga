@@ -55,59 +55,19 @@ Check:
 curl http://localhost:8090/health
 ```
 
-## Choose an installation
+## Install the gateway
 
-Install only the compatibility gateway when you need the OpenAI-, Anthropic-,
-or Gemini-shaped HTTP API:
+Install the compatibility gateway when you need the OpenAI-, Anthropic-, or
+Gemini-shaped HTTP API:
 
 ```sh
 uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-The current Unified Harness alpha line is `0.5.1a1`. Install the local control
-plane from your package index with:
-
-```sh
-uv tool install 'gpt2giga-harness==0.5.1a1'
-giga doctor
-giga --version
-giga ui
-```
-
-Install `gpt2giga-harness[gpt2giga]==0.5.1a1` instead when this environment
-should also provide Direct Chat and the local `gpt2giga` provider preset.
-
-The [Unified Harness guide](harness.md) also documents the always-available
-source-checkout path for development and prerelease evaluation.
-
-Prefix an existing native agent command with exactly `giga`:
-
-```sh
-giga codex exec --json "inspect this repository"
-giga claude -p "inspect this repository"
-giga gemini -p "inspect this repository"
-```
-
-Do not replace Claude or Gemini syntax with an invented common `exec` command.
-Run `giga doctor --json` for L0/L1/L2 compatibility and `giga completion
-bash|zsh|fish|powershell` to generate conservative root completion.
-
-The Harness distribution uses the `gpt2giga_harness` Python namespace and
-provides the `giga` and `gpt2giga-harness` commands. The gateway distribution
-provides only the `gpt2giga` command.
-
-:::warning[Alpha preview]
-
-Unified Harness is under active development. Start with local, supervised
-workflows and read the [Unified Harness prerelease guide](harness.md) before enabling
-edit mode, remote access, or scheduled jobs.
-
-:::
-
 ## Run from the repository
 
-Install both editable workspace members and the development dependencies:
+Install the editable gateway workspace member and development dependencies:
 
 ```sh
 uv sync --all-packages --all-extras --dev

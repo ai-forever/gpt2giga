@@ -84,9 +84,10 @@ query-параметре `?key=...`.
 
 Объекты моделей в форме OpenAI содержат расширение gpt2giga
 `metadata.type="chat"|"embedder"`. Gateway сохраняет тип от бэкенда, когда он
-доступен, а иначе определяет embedding-модели по их идентификатору. Harness
-использует эти метаданные, чтобы не показывать модели только для эмбеддингов в
-селекторе чат-моделей, не изменяя стандартные поля модели OpenAI.
+доступен, а иначе определяет embedding-модели по их идентификатору. Отдельный
+[workbench GigaLoom](https://github.com/krakenalt/gigaloom) может использовать
+эти метаданные, чтобы не показывать модели только для эмбеддингов в селекторе
+чат-моделей, не изменяя стандартные поля модели OpenAI.
 
 Если включена аутентификация по API-ключу прокси, клиенты, совместимые с
 Gemini, могут передавать ключ через `x-goog-api-key` или `?key=...`, помимо
@@ -217,8 +218,10 @@ bridge v1 герметичными контрактами OpenAI/Anthropic/Gemin
 partial usage, function tools, semantic loss, cancellation, malformed streams,
 timeouts и provider errors. Он также переводит входные OpenAI-изображения в
 типизированные ссылки. Публичный environment switch для произвольного upstream
-не добавляется: проверенные profiles, secrets и network authority остаются во
-владении Harness.
+не добавляется. Когда этот adapter оркестрируется GigaLoom, проверенные
+profiles, secrets и network authority принадлежат
+[отдельному workbench](https://github.com/krakenalt/gigaloom), а не этому
+gateway-репозиторию.
 
 ## Режимы бэкенда
 

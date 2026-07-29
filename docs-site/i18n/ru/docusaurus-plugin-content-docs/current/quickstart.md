@@ -55,7 +55,7 @@ docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
 curl http://localhost:8090/health
 ```
 
-## Выбор пакета
+## Установка gateway
 
 Если нужен только HTTP API, совместимый с OpenAI, Anthropic и Gemini,
 установите gateway:
@@ -65,49 +65,9 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Текущая alpha-preview линия Unified Harness — `0.5.1a1`. Установите локальный
-control plane из package index:
-
-```sh
-uv tool install 'gpt2giga-harness==0.5.1a1'
-giga doctor
-giga --version
-giga ui
-```
-
-Если в этом окружении также нужны Direct Chat и локальный provider preset
-`gpt2giga`, установите `gpt2giga-harness[gpt2giga]==0.5.1a1`.
-
-В [руководстве Unified Harness](harness.md) также описан всегда доступный запуск
-из source checkout для разработки и проверки prerelease.
-
-Добавьте ровно `giga` перед существующей нативной командой агента:
-
-```sh
-giga codex exec --json "проверь репозиторий"
-giga claude -p "проверь репозиторий"
-giga gemini -p "проверь репозиторий"
-```
-
-Не заменяйте синтаксис Claude или Gemini выдуманной общей командой `exec`.
-`giga doctor --json` показывает совместимость L0/L1/L2, а `giga completion
-bash|zsh|fish|powershell` генерирует консервативный completion корневых команд.
-
-Дистрибутив Harness использует Python namespace `gpt2giga_harness` и добавляет
-команды `giga` и `gpt2giga-harness`. Дистрибутив gateway добавляет только
-команду `gpt2giga`.
-
-:::warning[Альфа-превью]
-
-Unified Harness активно разрабатывается. Начните с локальных запусков под
-наблюдением и прочитайте [руководство по prerelease](harness.md), прежде чем
-включать режим редактирования, удалённый доступ или расписания.
-
-:::
-
 ## Запуск из репозитория
 
-Установите оба editable workspace member и зависимости разработки:
+Установите editable gateway workspace member и зависимости разработки:
 
 ```sh
 uv sync --all-packages --all-extras --dev

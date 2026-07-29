@@ -1,91 +1,66 @@
-name: Publish Python packages
+name: Publish gateway package
 
 on:
   release:
     types: [published]
   workflow_dispatch:
 
-jobs:
-  release_metadata:
-    name: Resolve package release metadata
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      gateway_version: ${{ steps.metadata.outputs.gateway_version }}
-      harness_version: ${{ steps.metadata.outputs.harness_version }}
-      release_target: ${{ steps.metadata.outputs.release_target }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+permissions:
+  contents: read
 
-      - name: Set up Python
+concurrency:
+  group: gateway-release-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Gateway release / tag and version guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.guard.outputs.mode }}
+      tag: ${{ steps.guard.outputs.tag }}
+      version: ${{ steps.guard.outputs.version }}
+
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || github.sha }}
+
+      - name: Set up Python 3.13
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
-      - name: Resolve versions and release target
-        id: metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          import tomllib
+      - name: Verify gateway tag and version
+        id: guard
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: >-
+          python3 scripts/gateway_release_guard.py
+          --event-name "${GITHUB_EVENT_NAME}"
+          --ref-name "${GITHUB_REF_NAME}"
+          --release-tag "${RELEASE_TAG}"
+          --github-output "${GITHUB_OUTPUT}"
 
-          gateway = tomllib.loads(
-              Path("packages/gpt2giga/pyproject.toml").read_text("utf-8")
-          )["project"]
-          harness = tomllib.loads(
-              Path("packages/gpt2giga-harness/pyproject.toml").read_text("utf-8")
-          )["project"]
-          gateway_version = gateway["version"]
-          harness_version = harness["version"]
-          gateway_requirement = f"gpt2giga=={gateway_version}"
-          gateway_extra = harness.get("optional-dependencies", {}).get(
-              "gpt2giga", []
-          )
-          if gateway_requirement not in gateway_extra:
-              raise SystemExit(
-                  "Harness gpt2giga extra must pin the current gateway release: "
-                  f"missing {gateway_requirement}"
-              )
-
-          event_name = os.environ["GITHUB_EVENT_NAME"]
-          ref_name = os.environ["GITHUB_REF_NAME"]
-          if event_name == "workflow_dispatch":
-              release_target = "manual"
-          elif ref_name == f"v{gateway_version}":
-              release_target = "gateway"
-          elif ref_name == f"gpt2giga-harness-v{harness_version}":
-              release_target = "harness"
-          else:
-              raise SystemExit(
-                  f"Unsupported release tag {ref_name!r}; expected "
-                  f"v{gateway_version} or gpt2giga-harness-v{harness_version}"
-              )
-
-          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
-              print(f"gateway_version={gateway_version}", file=output)
-              print(f"harness_version={harness_version}", file=output)
-              print(f"release_target={release_target}", file=output)
-          PY
-
-  gateway_release:
-    name: Build, attest, and publish gateway
-    needs: release_metadata
-    if: ${{ needs.release_metadata.outputs.release_target == 'gateway' || needs.release_metadata.outputs.release_target == 'manual' }}
+  build:
+    name: Gateway release / build and attest
+    needs: metadata
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       attestations: write
       contents: read
       id-token: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
 
-      - name: Set up Python
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || github.sha }}
+
+      - name: Set up Python 3.13
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -93,17 +68,16 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Build gateway artifacts
+      - name: Build gateway wheel and sdist
         run: uv build --package gpt2giga --wheel --sdist --no-sources --out-dir dist/gpt2giga
 
-      - name: Guard gateway artifacts
-        shell: bash
+      - name: Guard gateway artifacts and write checksums
         env:
-          GATEWAY_VERSION: ${{ needs.release_metadata.outputs.gateway_version }}
+          GATEWAY_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           set -euo pipefail
           test "$(find dist/gpt2giga -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' \) | wc -l | tr -d ' ')" = "2"
-          test "$(find dist/gpt2giga -maxdepth 1 -type f -name "gpt2giga-${GATEWAY_VERSION}*.whl" | wc -l | tr -d ' ')" = "1"
+          test "$(find dist/gpt2giga -maxdepth 1 -type f -name "gpt2giga-${GATEWAY_VERSION}-*.whl" | wc -l | tr -d ' ')" = "1"
           test "$(find dist/gpt2giga -maxdepth 1 -type f -name "gpt2giga-${GATEWAY_VERSION}.tar.gz" | wc -l | tr -d ' ')" = "1"
           sha256sum dist/gpt2giga/* > dist/gpt2giga-SHA256SUMS
           cat dist/gpt2giga-SHA256SUMS
@@ -116,137 +90,15 @@ jobs:
       - name: Upload gateway release evidence
         uses: actions/upload-artifact@v7
         with:
-          name: gpt2giga-${{ needs.release_metadata.outputs.gateway_version }}
+          name: gateway-release-${{ needs.metadata.outputs.version }}
           path: |
             dist/gpt2giga/*
             dist/gpt2giga-SHA256SUMS
           if-no-files-found: error
+          retention-days: 90
 
       - name: Publish gateway to PyPI
-        if: ${{ needs.release_metadata.outputs.release_target == 'gateway' }}
-        shell: bash
+        if: needs.metadata.outputs.mode == 'publish'
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_API_KEY }}
-        run: |
-          set -euo pipefail
-          uv publish --token "${PYPI_TOKEN}" dist/gpt2giga/*
-
-  harness_assets:
-    name: Produce verified Harness frontend assets
-    needs: release_metadata
-    if: ${{ needs.release_metadata.outputs.release_target == 'harness' || needs.release_metadata.outputs.release_target == 'manual' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js 22.13
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22.13.0'
-          cache: npm
-          cache-dependency-path: packages/gpt2giga-harness/frontend/package-lock.json
-
-      - name: Install pinned npm 11.17
-        run: npm install --global --ignore-scripts npm@11.17.0
-
-      - name: Install pinned frontend dependencies
-        working-directory: packages/gpt2giga-harness/frontend
-        run: npm ci --ignore-scripts
-
-      - name: Run frontend gates and produce release assets
-        working-directory: packages/gpt2giga-harness/frontend
-        run: |
-          npm run check
-          npm run build:release
-
-      - name: Verify clean commit-bound asset evidence
-        run: python3 packages/gpt2giga-harness/asset_contract.py --require-clean
-
-      - name: Upload commit-bound Harness assets
-        uses: actions/upload-artifact@v7
-        with:
-          name: gpt2giga-harness-assets-${{ github.sha }}
-          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
-          if-no-files-found: error
-          retention-days: 30
-
-  harness_release:
-    name: Build, attest, and publish Harness
-    needs: [release_metadata, harness_assets]
-    if: ${{ needs.release_metadata.outputs.release_target == 'harness' || needs.release_metadata.outputs.release_target == 'manual' }}
-    runs-on: ubuntu-latest
-    environment: pypi-harness
-    permissions:
-      attestations: write
-      contents: read
-      id-token: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Download verified Harness assets
-        uses: actions/download-artifact@v7
-        with:
-          name: gpt2giga-harness-assets-${{ github.sha }}
-          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Build Harness artifacts
-        run: uv build --package gpt2giga-harness --wheel --sdist --no-sources --out-dir dist/gpt2giga-harness
-
-      - name: Guard Harness artifacts
-        shell: bash
-        env:
-          HARNESS_VERSION: ${{ needs.release_metadata.outputs.harness_version }}
-        run: |
-          set -euo pipefail
-          test "$(find dist/gpt2giga-harness -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' \) | wc -l | tr -d ' ')" = "2"
-          test "$(find dist/gpt2giga-harness -maxdepth 1 -type f -name "gpt2giga_harness-${HARNESS_VERSION}*.whl" | wc -l | tr -d ' ')" = "1"
-          test "$(find dist/gpt2giga-harness -maxdepth 1 -type f -name "gpt2giga_harness-${HARNESS_VERSION}.tar.gz" | wc -l | tr -d ' ')" = "1"
-          sha256sum dist/gpt2giga-harness/* > dist/gpt2giga-harness-SHA256SUMS
-          cat dist/gpt2giga-harness-SHA256SUMS
-          python3 packages/gpt2giga-harness/asset_contract.py --require-clean
-
-      - name: Validate published gateway dependency
-        if: ${{ needs.release_metadata.outputs.release_target == 'harness' }}
-        shell: bash
-        env:
-          GATEWAY_VERSION: ${{ needs.release_metadata.outputs.gateway_version }}
-        run: |
-          set -euo pipefail
-          uv venv --python 3.13 .venv-release-check
-          uv pip install --prerelease allow --python .venv-release-check/bin/python "gpt2giga==${GATEWAY_VERSION}"
-
-      - name: Attest Harness artifacts
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: |
-            dist/gpt2giga-harness/*
-            packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/_build/*
-
-      - name: Upload Harness release evidence
-        uses: actions/upload-artifact@v7
-        with:
-          name: gpt2giga-harness-${{ needs.release_metadata.outputs.harness_version }}
-          path: |
-            dist/gpt2giga-harness/*
-            dist/gpt2giga-harness-SHA256SUMS
-            packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/_build/*
-          if-no-files-found: error
-
-      - name: Publish Harness to PyPI
-        if: ${{ needs.release_metadata.outputs.release_target == 'harness' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          uv publish --trusted-publishing always dist/gpt2giga-harness/*
+        run: uv publish --token "${PYPI_TOKEN}" dist/gpt2giga/*

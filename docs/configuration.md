@@ -128,7 +128,7 @@ can be visible to other processes.
 | `GPT2GIGA_HTTPS_KEY_FILE` / `GPT2GIGA_HTTPS_CERT_FILE` | empty | Local key/cert files for built-in HTTPS. |
 | `GPT2GIGA_ENABLE_API_KEY_AUTH` | `False` | Require proxy API-key authentication for public API routes. Mandatory in `PROD`. |
 | `GPT2GIGA_API_KEY` | empty | Proxy API key. For shared environments, use a strong random value. |
-| `GPT2GIGA_HARNESS_MODEL_KEY` | empty | Dedicated HMAC key shared only with Harness when an external proxy must accept request-scoped Claude/Gemini model pins. |
+| `GPT2GIGA_HARNESS_MODEL_KEY` | empty | Backward-compatible HMAC setting shared only with a trusted external controller, such as standalone GigaLoom, when the gateway must accept request-scoped Claude/Gemini model pins. |
 | `GPT2GIGA_PASS_MODEL` | `True` | Pass the `model` from the request to GigaChat. Set `False` to always use the configured GigaChat model. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Parse the client `Authorization` as GigaChat credentials for per-request upstream authorization. |
 | `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Maximum idle credential-specific clients retained for connection reuse. |

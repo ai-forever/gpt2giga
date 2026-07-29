@@ -25,6 +25,13 @@ dependencies = [
     "google-genai>=2.8.0,<3",
 ]
 
+[project.urls]
+Homepage = "https://ai-forever.github.io/gpt2giga/"
+Documentation = "https://ai-forever.github.io/gpt2giga/"
+Repository = "https://github.com/ai-forever/gpt2giga"
+Issues = "https://github.com/ai-forever/gpt2giga/issues"
+Changelog = "https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga/CHANGELOG_en.md"
+
 [project.scripts]
 gpt2giga = "gpt2giga:run"
 

@@ -1,4 +1,4 @@
-name: Deploy documentation
+name: Gateway documentation
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
       - 'docs/**'
       - 'docs-site/**'
       - '.env.example'
-      - 'packages/*/pyproject.toml'
+      - 'packages/gpt2giga/pyproject.toml'
       - 'packages/gpt2giga/src/gpt2giga/models/config.py'
       - 'scripts/check_docs.py'
       - 'tests/test_scripts/test_check_docs.py'
@@ -21,7 +21,7 @@ on:
       - 'docs/**'
       - 'docs-site/**'
       - '.env.example'
-      - 'packages/*/pyproject.toml'
+      - 'packages/gpt2giga/pyproject.toml'
       - 'packages/gpt2giga/src/gpt2giga/models/config.py'
       - 'scripts/check_docs.py'
       - 'tests/test_scripts/test_check_docs.py'
@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build docs
+    name: Gateway docs / build
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
 
@@ -74,7 +74,7 @@ jobs:
           path: docs-site/build
 
   deploy:
-    name: Deploy docs
+    name: Gateway docs / deploy
     if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest

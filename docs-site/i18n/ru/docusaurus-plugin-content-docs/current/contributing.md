@@ -51,9 +51,22 @@ make docs-dev-ru
   `docs-site/i18n/ru/docusaurus-plugin-content-docs/current/`;
 - ссылки на runnable examples и integration guides в репозитории;
 - GitHub-ссылки на deployment manifests и другие файлы вне `docs/`.
+- migration-only страницы для старых URL документации GigaLoom/Harness;
+  актуальная документация GigaLoom принадлежит
+  [`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom).
 
 Игнорируемые `docs/internal/**` и `docs/codex/**` — локальное coordination state,
 а не источник публичного сайта.
+
+## Граница качества и release gateway
+
+Coverage badge репозитория и gate `--cov-fail-under=80` измеряют только
+standalone gateway `gpt2giga`. Coverage GigaLoom в них не агрегируется.
+
+Только точный release gateway `v<version>` может публиковать `gpt2giga` из
+этого репозитория. Ручной запуск release workflow собирает и аттестует
+артефакты без публикации. У GigaLoom и дистрибутива `gpt2giga-harness` нет
+publisher в этом репозитории.
 
 ## Правила обновления
 
@@ -69,9 +82,6 @@ make docs-dev-ru
   русскую локаль, `deploy/README.md` и соответствующие Compose manifests.
 - При изменении compatibility обновляйте `docs/api-compatibility.md`,
   `docs/client-parameter-compatibility.md`, русские локали и runnable examples.
-- При изменении Harness CLI/API/storage обновляйте user guide, architecture,
-  package README и changelog соответствующего дистрибутива.
-
 ## Проверка перед PR
 
 ```sh
