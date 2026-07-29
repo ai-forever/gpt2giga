@@ -14,10 +14,6 @@ _OWNED_SUITE_FILES = (
     "test_gateway_artifact_isolation.py",
     "test_gateway_repository_layout.py",
     "test_gateway_release_contract.py",
-    "test_gigaloom_artifact_isolation.py",
-    "test_gigaloom_repository_layout.py",
-    "test_gigaloom_release_contract.py",
-    "test_cross_repository_artifact_smoke.py",
 )
 
 
@@ -43,7 +39,4 @@ def test_split_contract_suites_declare_one_future_repository_owner():
             if line.startswith("FUTURE_REPOSITORY_OWNER = ")
         ]
         assert len(declarations) == 1, filename
-        assert any(
-            owner in declarations[0]
-            for owner in ("ai-forever/gpt2giga", "krakenalt/gigaloom")
-        ), filename
+        assert "ai-forever/gpt2giga" in declarations[0], filename

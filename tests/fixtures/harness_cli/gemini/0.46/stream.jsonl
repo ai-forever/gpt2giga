@@ -1,3 +1,0 @@
-{"type":"init","session_id":"gemini-stream-1","future_field":"ignored"}
-{"type":"message","role":"assistant","content":"Gemini fixture"}
-{"type":"result","status":"success","stats":{"input_tokens":3,"output_tokens":2}}

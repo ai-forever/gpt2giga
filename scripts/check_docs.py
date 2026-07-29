@@ -163,7 +163,7 @@ def check_proxy_settings(root: Path) -> list[Issue]:
 def check_package_versions(root: Path) -> list[Issue]:
     """Require each shipped changelog to begin with its package metadata version."""
     issues: list[Issue] = []
-    for package in ("gpt2giga", "gpt2giga-harness"):
+    for package in ("gpt2giga",):
         package_root = root / "packages" / package
         metadata = tomllib.loads(
             (package_root / "pyproject.toml").read_text(encoding="utf-8")
@@ -186,11 +186,7 @@ def check_package_versions(root: Path) -> list[Issue]:
 def check_stale_instructions(root: Path, files: list[Path]) -> list[Issue]:
     """Reject known obsolete public installation instructions."""
     forbidden = {
-        "feature/unified_harness": "use the current Harness preview branch",
-        "feature/harness_enrichment": "use the current Harness preview branch",
-        "gpt2giga-harness==0.0.1a4": "the next Harness release is 0.1.0b1",
         'gpt2giga==0.2.3a1"': "do not pin the previous gateway alpha in current install docs",
-        'gpt2giga-harness==0.0.1"': "do not pin the pre-split Harness version",
     }
     issues: list[Issue] = []
     for path in files:

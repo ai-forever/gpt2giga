@@ -3,10 +3,8 @@ import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
-  title: 'gpt2giga and GigaLoom',
+  title: 'gpt2giga',
   tagline: 'FastAPI gateway from OpenAI, Anthropic and Gemini clients to GigaChat',
-  favicon: 'brand/gigaloom-mark.svg',
-
   future: {
     v4: true,
   },
@@ -75,12 +73,7 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'gpt2giga · GigaLoom',
-      logo: {
-        alt: 'GigaLoom',
-        src: 'brand/gigaloom-mark.svg',
-        srcDark: 'brand/gigaloom-mark-dark.svg',
-      },
+      title: 'gpt2giga',
       items: [
         {
           type: 'docSidebar',

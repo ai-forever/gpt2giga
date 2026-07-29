@@ -69,9 +69,6 @@ make docs-dev-ru
   русскую локаль, `deploy/README.md` и соответствующие Compose manifests.
 - При изменении compatibility обновляйте `docs/api-compatibility.md`,
   `docs/client-parameter-compatibility.md`, русские локали и runnable examples.
-- При изменении Harness CLI/API/storage обновляйте user guide, architecture,
-  package README и changelog соответствующего дистрибутива.
-
 ## Проверка перед PR
 
 ```sh

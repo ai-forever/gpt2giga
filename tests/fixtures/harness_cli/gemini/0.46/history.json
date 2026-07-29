@@ -1,1 +1,0 @@
-{"id":"gemini-history-1","model":"GigaChat","future_field":true,"messages":[{"createdAt":"2026-07-14T10:00:00Z","role":"user","parts":[{"text":"Inspect fixture"}]},{"createdAt":"2026-07-14T10:00:01Z","role":"model","parts":[{"text":"Gemini history fixture"}]}]}

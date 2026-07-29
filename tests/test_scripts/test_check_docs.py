@@ -58,22 +58,21 @@ def test_proxy_setting_names_are_derived_from_annotated_fields(tmp_path: Path) -
     }
 
 
-def test_stale_harness_release_instructions_are_rejected(tmp_path: Path) -> None:
+def test_stale_gateway_release_instructions_are_rejected(tmp_path: Path) -> None:
     docs_module = load_docs_module()
     guide = tmp_path / "guide.md"
     guide.write_text(
-        "Install gpt2giga-harness==0.0.1a4 from feature/harness_enrichment.\n",
+        'Install "gpt2giga==0.2.3a1" from the package index.\n',
         encoding="utf-8",
     )
     changelog = tmp_path / "CHANGELOG.md"
     changelog.write_text(
-        "Historical gpt2giga-harness==0.0.1a4 note.\n",
+        'Historical "gpt2giga==0.2.3a1" note.\n',
         encoding="utf-8",
     )
 
     issues = docs_module.check_stale_instructions(tmp_path, [guide, changelog])
 
     assert [issue.message for issue in issues] == [
-        "line 1: obsolete 'feature/harness_enrichment'; use the current Harness preview branch",
-        "line 1: obsolete 'gpt2giga-harness==0.0.1a4'; the next Harness release is 0.1.0b1",
+        "line 1: obsolete 'gpt2giga==0.2.3a1\"'; do not pin the previous gateway alpha in current install docs",
     ]

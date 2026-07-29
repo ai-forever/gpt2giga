@@ -1,1 +1,0 @@
-"""Harness-owned protocol helpers."""

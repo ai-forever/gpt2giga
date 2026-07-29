@@ -1,2 +1,0 @@
-      --acp                       Starts the agent in ACP mode  [boolean]
-      --experimental-acp          Starts the agent in ACP mode (deprecated, use --acp instead)  [boolean]
