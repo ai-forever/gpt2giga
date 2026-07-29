@@ -1,83 +1,44 @@
-"""Cross-repository artifact smoke owned by krakenalt/gigaloom.
+"""Public gateway compatibility owned by krakenalt/gigaloom."""
 
-Manual candidate invocation:
-
-GIGALOOM_GATEWAY_CANDIDATE_WHEEL=/absolute/path/gpt2giga.whl
-GIGALOOM_GATEWAY_CANDIDATE_SHA256=<sha256>
-GIGALOOM_GATEWAY_CANDIDATE_VERSION=<exact-version>
-uv run pytest tests/test_cross_repository_artifact_smoke.py -q -n 0
-"""
-
-import hashlib
-import os
+import importlib.metadata
+import importlib.util
 from pathlib import Path
+import tomllib
 
 import pytest
-from package_isolation_support import (
-    GATEWAY_VERSION,
-    GPT2GIGA_PRESET_SMOKE,
-    _build_member,
-    _install_checksum_bound_artifacts,
-    _run_clean_python,
-)
-
-FUTURE_REPOSITORY_OWNER = "krakenalt/gigaloom"
-_CANDIDATE_INPUTS = {
-    "wheel": "GIGALOOM_GATEWAY_CANDIDATE_WHEEL",
-    "sha256": "GIGALOOM_GATEWAY_CANDIDATE_SHA256",
-    "version": "GIGALOOM_GATEWAY_CANDIDATE_VERSION",
-}
+from package_isolation_support import GATEWAY_VERSION
 
 
-def _manual_gateway_candidate() -> tuple[Path, str, str]:
-    values = {
-        name: os.environ.get(variable) for name, variable in _CANDIDATE_INPUTS.items()
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _locked_packages() -> dict[str, dict]:
+    with (REPOSITORY_ROOT / "uv.lock").open("rb") as file:
+        lock = tomllib.load(file)
+    return {package["name"]: package for package in lock["package"]}
+
+
+def test_target_lock_resolves_exact_gateway_from_public_registry():
+    packages = _locked_packages()
+    assert packages["gpt2giga"]["version"] == GATEWAY_VERSION
+    assert packages["gpt2giga"]["source"] == {"registry": "https://pypi.org/simple"}
+    assert packages["gpt2giga-harness"]["source"] == {
+        "editable": "packages/gpt2giga-harness"
     }
-    if not any(values.values()):
-        pytest.skip(
-            "manual gateway candidate not provided; no workspace artifact fallback"
-        )
-    missing = [
-        variable for name, variable in _CANDIDATE_INPUTS.items() if not values[name]
-    ]
-    if missing:
-        pytest.fail(f"incomplete manual gateway candidate inputs: {', '.join(missing)}")
-    wheel = Path(values["wheel"]).expanduser().resolve()
-    if not wheel.is_file() or wheel.suffix != ".whl":
-        pytest.fail("manual gateway candidate must be an existing wheel")
-    if values["version"] != GATEWAY_VERSION:
-        pytest.fail(
-            "manual gateway candidate version does not match the exact optional dependency"
-        )
-    return wheel, values["sha256"], values["version"]
-
-
-def test_candidate_artifact_digest_mismatch_fails_before_install(tmp_path):
-    harness_dist = tmp_path / "harness-dist"
-    harness_dist.mkdir()
-    harness_wheel, _ = _build_member("gpt2giga-harness", harness_dist)
-    installed = tmp_path / "installed"
-    with pytest.raises(ValueError, match="candidate artifact digest changed"):
-        _install_checksum_bound_artifacts(
-            installed,
-            {harness_wheel: "0" * 64},
-        )
-    assert not installed.exists()
-
-
-def test_manual_gateway_candidate_never_falls_back_to_workspace_source(tmp_path):
-    gateway_wheel, gateway_sha256, gateway_version = _manual_gateway_candidate()
-    assert gateway_version == GATEWAY_VERSION
-
-    harness_dist = tmp_path / "harness-dist"
-    harness_dist.mkdir()
-    harness_wheel, _ = _build_member("gpt2giga-harness", harness_dist)
-    installed = tmp_path / "installed"
-    _install_checksum_bound_artifacts(
-        installed,
-        {
-            gateway_wheel: gateway_sha256,
-            harness_wheel: hashlib.sha256(harness_wheel.read_bytes()).hexdigest(),
-        },
+    assert all(
+        package["source"] == {"registry": "https://pypi.org/simple"}
+        for name, package in packages.items()
+        if name != "gpt2giga-harness"
     )
-    _run_clean_python(installed, GPT2GIGA_PRESET_SMOKE)
+
+
+def test_locked_public_gateway_restores_optional_runtime():
+    if importlib.util.find_spec("gpt2giga") is None:
+        pytest.skip("public gateway extra is exercised by the all-extras gate")
+
+    from gpt2giga_harness.gpt2giga_preset import require_gpt2giga_preset
+
+    assert importlib.metadata.version("gpt2giga") == GATEWAY_VERSION
+    runtime = require_gpt2giga_preset()
+    assert runtime.client_type.__module__.split(".", 1)[0] == "gigachat"
+    assert runtime.load_config.__module__ == "gpt2giga.cli"

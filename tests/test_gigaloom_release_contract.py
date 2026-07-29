@@ -46,6 +46,8 @@ def test_release_workflow_is_target_only_and_manual_runs_cannot_publish():
     assert "gpt2giga-harness-v" not in text
     assert "actions/attest-build-provenance@v4" in text
     assert "uv publish --trusted-publishing always" in text
+    assert "./scripts/ci-base.sh sync-all-extras" in text
+    assert "./scripts/ci-public-gateway.sh" in text
     assert text.count("if: github.event_name == 'release'") >= 4
     assert text.index("Fail closed if the public version already exists") < text.index(
         "Upload commit-bound frontend evidence"
@@ -67,9 +69,9 @@ def test_release_policy_freezes_target_identity_and_first_release():
         "repository": "krakenalt/gigaloom",
         "tag_prefix": "gpt2giga-harness-v",
     }
-    assert not (REPOSITORY_ROOT / "uv.lock").exists()
+    assert (REPOSITORY_ROOT / "uv.lock").is_file()
     ignore = (REPOSITORY_ROOT / ".gitignore").read_text(encoding="utf-8")
-    assert "\nuv.lock\n" in ignore
+    assert "\nuv.lock\n" not in ignore
 
 
 def test_pages_workflow_and_docusaurus_use_target_project_path():
@@ -102,7 +104,7 @@ def test_release_recovery_is_fail_closed_and_preserves_immutable_versions():
     )
     for contract in (
         "Manual\ndispatch builds and attests",
-        "Trusted Publisher configuration is intentionally absent",
+        "Trusted Publisher configuration remains",
         "Published versions are immutable",
         "do not rerun publication",
         "previous deployment",

@@ -43,16 +43,15 @@ def test_required_quality_jobs_are_independent_and_standalone():
 
     text = _workflow_text("ci.yaml")
     for forbidden in (
-        "--all-extras",
         "git push",
         "packages/gpt2giga/",
-        "uv sync",
+        "blocked_pending_S5_03B",
     ):
         assert forbidden not in text
-    assert text.count("uv.lock") == 1
-    assert "blocked_pending_S5_03B" in text
-    assert "test -e .github/workflows/publish-pypi.yml" in text
-    assert "test -e .github/release-policy.json" in text
+    assert "Public registry / exact gateway lock" in text
+    assert "./scripts/ci-base.sh sync-all-extras" in text
+    assert "./scripts/ci-public-gateway.sh" in text
+    assert "cache-dependency-glob: uv.lock" in text
     assert "benchmark performance --profile ci-smoke" in text
     assert "test-results/browser-qa" in text
 
@@ -78,21 +77,10 @@ def test_browser_gate_covers_required_viewports_console_and_overflow():
     assert 'getByRole("link", { name: "Settings" })' in smoke
 
 
-def test_candidate_smoke_is_manual_checksum_bound_and_non_publishing():
-    workflow = _workflow("candidate-gateway-smoke.yaml")
-    dispatch = workflow["on"]["workflow_dispatch"]["inputs"]
-    assert set(dispatch) == {
-        "candidate-wheel-sha256",
-        "candidate-wheel-url",
-    }
-    assert workflow["permissions"] == {"contents": "read"}
-
-    text = _workflow_text("candidate-gateway-smoke.yaml")
-    assert "curl --proto '=https' --tlsv1.2" in text
-    assert "./scripts/ci-candidate-gateway.sh" in text
-    assert "test ! -e uv.lock" in text
-    assert "uv publish" not in text
-    assert "git push" not in text
+def test_candidate_injection_paths_are_removed():
+    assert not (WORKFLOWS / "candidate-gateway-smoke.yaml").exists()
+    assert not (REPOSITORY_ROOT / "scripts/ci-candidate-gateway.sh").exists()
+    assert (REPOSITORY_ROOT / "scripts/ci-public-gateway.sh").is_file()
 
 
 def test_detail_profiles_are_scheduled_and_non_blocking():

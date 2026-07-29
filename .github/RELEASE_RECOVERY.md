@@ -5,9 +5,10 @@ GitHub release whose exact `gpt2giga-harness-v<version>` tag points at a commit
 on target `main` after the history floor in `release-policy.json`. Manual
 dispatch builds and attests the same artifacts but cannot publish them.
 
-Before S5-03B, PyPI Trusted Publisher configuration is intentionally absent.
-Do not add a token secret or bypass the publisher failure. The candidate gateway
-bridge remains the only approved optional-extra smoke until that gate.
+The committed target lock resolves the exact optional gateway dependency from
+the public package index. Do not add a token secret, candidate artifact,
+temporary index, or publisher bypass. Trusted Publisher configuration remains
+an external S5-04 gate.
 
 The primary release and recovery owner is `@krakenalt`. The named
 `backup-github-maintainer` and `backup-pypi-owner` roles, their distinct-account

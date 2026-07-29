@@ -68,5 +68,5 @@ uv build --package gpt2giga-harness --no-sources
 `uv run giga doctor` is an environment smoke check, not a hermetic quality
 gate. For UI changes, also verify the packaged asset test and perform browser QA
 at relevant desktop and mobile widths. For metadata, imports, package data, or
-release changes, run the root coverage gate plus the standalone artifact and
-checksum-bound candidate tests.
+release changes, run the root coverage gate plus the standalone base-artifact
+and locked public-gateway tests.
