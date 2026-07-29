@@ -16,11 +16,6 @@ http://localhost:8090
 | Supported OpenAI, Anthropic, Gemini, and LiteLLM routes | [API compatibility](api-compatibility.md) |
 | Behavior of `extra_headers`, `extra_query`, `extra_body`, and optional fields | [Client parameters](client-parameter-compatibility.md) |
 | GigaChat built-in tools and their mapping to OpenAI/Anthropic/Gemini | [Built-in tools](builtin-tools.md) |
-| Alpha-preview project cockpit for agent runs, comparisons, approvals, and workflows | [Unified Harness](harness.md) |
-| Direct Chat, Coding Agents, native Codex subagents, Arena, and Workflows | [Agents and multi-agent behavior](agents-and-multi-agent.md) |
-| Unified Harness components, execution flow, storage, and control-plane API | [Harness architecture](architecture/harness.md) |
-| Provider-owned login, status, logout, revoke, and headless boundaries | [Provider authentication matrix](architecture/provider-authentication-capability-matrix.md) |
-| Accepted remote UI identity boundary and current fail-closed gate | [Remote UI identity ADR](architecture/remote-ui-identity-adr.md) |
 | Environment variables, authentication, limits, metrics, observability | [Configuration](configuration.md) |
 | Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Deployment](deployment.md) |
 | Runtime logs, traffic logs, admin API, debug translate | [Operations](operations.md) |
@@ -51,15 +46,9 @@ OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are pr
 3. Run `docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d`.
 4. Check `curl http://localhost:8090/health`.
 5. Point the SDK at `http://localhost:8090/v1` or `http://localhost:8090/v2` for an explicit backend contract, or at `http://localhost:8090` if the root should follow `GPT2GIGA_GIGACHAT_API_MODE`.
-6. To try the alpha-preview project cockpit, follow the
-   [Unified Harness guide](harness.md), run `giga doctor` and `giga ui`, then
-   open `http://127.0.0.1:8091/`.
 
 ## For developers
 
-- [Harness architecture](architecture/harness.md) explains the local control plane, durable runtime, storage boundaries, and why each API family exists.
-- [Provider authentication matrix](architecture/provider-authentication-capability-matrix.md) freezes source-backed, versioned login capabilities without copying provider credentials.
-- [Remote UI identity ADR](architecture/remote-ui-identity-adr.md) defines the implemented single-issuer OIDC/BFF profile; live IdP and deployment work remain explicit gates.
 - [Normalized messages](architecture/normalized-messages.md) describes the experimental layer of protocol-independent models.
 - [Logging and observability](architecture/logging-and-observability.md) sets the boundaries between runtime logs, traffic logs, metrics, and traces.
 - [Adding a provider or protocol](architecture/how-to-add-provider.md) gives a checklist for extending the public protocol surface and upstream providers.

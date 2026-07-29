@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/gpt2giga"]
 
 [tool.coverage.run]
 omit = [

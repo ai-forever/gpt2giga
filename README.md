@@ -52,37 +52,6 @@ uv tool install --prerelease allow gpt2giga
 gpt2giga
 ```
 
-Текущая alpha-preview линия Unified Harness — `0.5.1a1`. Её всегда можно
-запустить [из source checkout](./docs/harness.md#quickstart). Опубликованный
-provider-neutral пакет добавляет команды `giga` и `gpt2giga-harness`:
-
-```sh
-uv tool install 'gpt2giga-harness==0.5.1a1'
-giga doctor
-giga --version
-giga ui
-```
-
-Для Direct Chat и provider preset локального gateway установите явный extra
-`gpt2giga-harness[gpt2giga]==0.5.1a1`; он закрепляет `gpt2giga==0.2.6a1`.
-
-Нативные команды Codex CLI, Claude Code и Gemini CLI получают ровно один
-префикс; общий глагол `exec` не вводится:
-
-```sh
-giga codex exec --json "проверь репозиторий"
-giga claude -p "проверь репозиторий"
-giga gemini -p "проверь репозиторий"
-```
-
-Суффикс команды, `--help`, `--version`, JSON/JSONL, pipe/redirect и exit status
-остаются нативными. Подробности, completion для Bash/Zsh/Fish/PowerShell и
-инструкции обновления/отката — в [руководстве Unified Harness](./docs/harness.md).
-
-Python namespace Harness — `gpt2giga_harness`; прежний
-`gpt2giga.harness` больше не поставляется. Подробности обновления со старого
-combined prerelease wheel — в [Unified Harness](./docs/harness.md#migration-from-the-combined-prerelease).
-
 Минимальный OpenAI SDK вызов:
 
 ```python
@@ -146,19 +115,15 @@ make docs-dev-ru
 | Что поддерживается, отключено или намеренно игнорируется | [docs/api-compatibility.md](./docs/api-compatibility.md) |
 | Совместимость SDK `extra_*` и параметров клиентов | [docs/client-parameter-compatibility.md](./docs/client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [docs/builtin-tools.md](./docs/builtin-tools.md) |
-| Local harness CLI/UI для smoke tests и agent CLI adapters | [docs/harness.md](./docs/harness.md) |
-| Direct Chat, Coding Agents, native Codex subagents, Arena и Workflows | [docs/agents-and-multi-agent.md](./docs/agents-and-multi-agent.md) |
 | Переменные окружения, CLI flags, backend modes | [docs/configuration.md](./docs/configuration.md) |
 | Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [docs/deployment.md](./docs/deployment.md) |
 | Logs, metrics, traffic logs, admin API, debug translation | [docs/operations.md](./docs/operations.md) |
 | Live GigaChat integration tests | [docs/live-integration-tests.md](./docs/live-integration-tests.md) |
-| Provider-owned login, status, logout и headless-границы | [docs/architecture/provider-authentication-capability-matrix.md](./docs/architecture/provider-authentication-capability-matrix.md) |
 | Внутренняя архитектура normalized messages | [docs/architecture/normalized-messages.md](./docs/architecture/normalized-messages.md) |
 | Checklist для добавления provider/protocol | [docs/architecture/how-to-add-provider.md](./docs/architecture/how-to-add-provider.md) |
 | Редакторы, агенты, SDK examples, reverse proxies | [docs/integrations.md](./docs/integrations.md) |
 | Runnable-примеры | [examples/README.md](./examples/README.md) |
 | История изменений gateway | [RU](./packages/gpt2giga/CHANGELOG.md) · [EN](./packages/gpt2giga/CHANGELOG_en.md) |
-| История изменений Harness | [RU](./packages/gpt2giga-harness/CHANGELOG.md) · [EN](./packages/gpt2giga-harness/CHANGELOG_en.md) |
 
 ## Текущая API-Поверхность
 
@@ -212,7 +177,6 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 | Path | Назначение |
 |---|---|
 | `packages/gpt2giga/src/gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
-| `packages/gpt2giga-harness/src/gpt2giga_harness/` | Harness CLI, local UI, runtime, sessions, and agent adapters |
 | `tests/` | Unit, router, protocol, sink и integration tests |
 | `examples/` | Runnable OpenAI, Anthropic, Gemini, embeddings and agents examples; files/batches examples are prepared but not mounted |
 | `docs/` | Markdown-контент пользовательской документации и architecture notes |
@@ -234,21 +198,13 @@ uv sync --all-packages --all-extras --dev
 
 ```sh
 uv run gpt2giga
-uv run giga doctor
 ```
 
-Сборка двух дистрибутивов выполняется явно:
+Сборка дистрибутива выполняется явно:
 
 ```sh
 uv build --package gpt2giga
-npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
-npm --prefix packages/gpt2giga-harness/frontend run build
-uv build --package gpt2giga-harness
 ```
-
-Скомпилированные Cockpit assets не хранятся в Git. Перед локальной сборкой
-Harness producer создаёт ignored, integrity-checked дерево; Python build
-завершается ошибкой, если дерево отсутствует или не соответствует source.
 
 Проверки перед PR:
 

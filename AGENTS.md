@@ -24,15 +24,11 @@ work merely because it is present in the checkout.
 
 ## Repository contract
 
-- This is a two-member `uv` workspace:
-  - `packages/gpt2giga/` owns the compatibility gateway and `gpt2giga`
-    Python namespace.
-  - `packages/gpt2giga-harness/` owns the local agentic control plane and
-    `gpt2giga_harness` Python namespace.
-- The Harness may depend on reviewed gateway contracts; gateway code must never import `gpt2giga_harness`.
-- Keep both distributions independently buildable and installable. Treat both
-  member `pyproject.toml` files as the source of truth for versions,
-  dependencies, entry points, and the supported Python range.
+- This is a one-member `uv` workspace. `packages/gpt2giga/` owns the
+  compatibility gateway and `gpt2giga` Python namespace.
+- The gateway must never import or package `gpt2giga_harness`.
+- Treat `packages/gpt2giga/pyproject.toml` as the source of truth for the
+  version, dependencies, entry point, and supported Python range.
 - Keep gateway FastAPI handlers and network upstream calls async-first. Use
   absolute imports, Ruff formatting, and concise Google-style docstrings.
 - Treat OpenAI-, Anthropic-, Gemini-, and GigaChat-shaped behavior as public
@@ -40,9 +36,9 @@ work merely because it is present in the checkout.
   or accepted parameter change requires focused compatibility tests and docs.
 - Never commit credentials, tokens, real `.env` values, local certificates,
   raw captured traffic, or secret-bearing fixtures.
-- Preserve redaction at storage, observability, diagnostics, admin-preview, and
-  Harness UI boundaries. Do not apply blanket redaction to public compatibility
-  responses. Content capture remains opt-in.
+- Preserve redaction at storage, observability, diagnostics, and admin-preview
+  boundaries. Do not apply blanket redaction to public compatibility responses.
+  Content capture remains opt-in.
 
 ## Unscoped surfaces
 
@@ -62,9 +58,6 @@ work merely because it is present in the checkout.
   them.
 - Treat `docs/internal/**` and `docs/codex/**` as local coordination state.
   Never force-add them unless the user explicitly asks to publish those files.
-- Harness runtime state under `~/.gpt2giga/harness` and project `.giga/`
-  belongs to the user. Tests must use temporary directories and must not mutate
-  real native Codex, Claude, or Gemini homes.
 
 When continuing a named local roadmap:
 
@@ -80,14 +73,8 @@ When continuing a named local roadmap:
 Install workspace runtime and development dependencies:
 
 ```bash
-npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
-npm --prefix packages/gpt2giga-harness/frontend run build
 uv sync --all-packages --all-extras --dev
 ```
-
-The frontend producer must run before the first clean-checkout `uv sync`;
-subsequent sync/build commands consume and verify its ignored asset tree without
-running Node.
 
 Repository quality gate:
 
@@ -97,11 +84,10 @@ uv run ruff format --check .
 uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 ```
 
-Independent package builds:
+Independent package build:
 
 ```bash
 uv build --package gpt2giga --no-sources
-uv build --package gpt2giga-harness --no-sources
 ```
 
 Documentation build:
@@ -114,8 +100,8 @@ Use focused pytest node IDs during iteration. Local pytest defaults to `-n auto`
 for directory, multi-file, and full-suite runs; GitHub Actions explicitly pins
 `-n 4`. Pass `-n 0` for a focused single-node run when worker startup would cost
 more than the test. Run the full quality gate for
-cross-package changes, broad refactors, public compatibility changes, release
-work, or whenever the user asks for full verification. Run both package builds
+cross-cutting changes, broad refactors, public compatibility changes, release
+work, or whenever the user asks for full verification. Run the package build
 after metadata, dependency, entry-point, package-data, Docker, or release
 changes. Do not run `tests/live/` or the examples E2E smoke against real
 services unless explicitly requested and safely configured.

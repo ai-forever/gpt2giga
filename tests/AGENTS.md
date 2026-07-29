@@ -3,8 +3,8 @@
 ## Scope
 
 The root pytest configuration collects the entire `tests/` tree: gateway,
-Harness, compatibility/golden, integration, smoke, live, scripts, and workspace
-packaging contracts. Do not infer coverage from an old directory inventory.
+compatibility/golden, integration, smoke, live, scripts, and packaging
+contracts. Do not infer coverage from an old directory inventory.
 
 ## Test design
 
@@ -19,16 +19,14 @@ packaging contracts. Do not infer coverage from an old directory inventory.
   `@pytest.mark.asyncio` unless a test needs explicit plugin options.
 - Use `create_app()` plus an explicit `ProxyConfig` for app-wide gateway
   behavior. Avoid ambient env and singleton state.
-- Use `tmp_path`, isolated Git repositories, temporary homes, and a temporary
-  Harness data dir. Never read or mutate real `.giga/`,
-  `~/.gpt2giga/harness`, or native agent state.
+- Use `tmp_path`, isolated repositories, and temporary homes. Never read or
+  mutate real credentials or provider state.
 - Assert redaction whenever request bodies, tool arguments, credentials,
   environment values, stored events, previews, or provenance are involved.
 - Change golden fixtures only for an intentional client-visible wire contract;
   review the human-readable diff.
-- Keep package-boundary tests strict: gateway-only installs must not expose
-  Harness surfaces, and Harness artifacts must include their commands, entry
-  points, dependencies, and no-build UI assets.
+- Keep package-boundary tests strict: gateway installs must not expose
+  GigaLoom or `gpt2giga_harness` surfaces.
 - Files/Batches modules exist without public aggregator mounts; tests must not
   assume that importing a router makes its API public.
 - Admin, debug, replay, and metrics route tests must explicitly enable the
@@ -43,17 +41,11 @@ During iteration, run the narrowest relevant pytest node with
 Directory and full-suite runs inherit local `-n auto`; GitHub Actions overrides
 it with the workflow's explicit `-n 4`.
 
-Harness-focused gate:
-
-```bash
-uv run pytest tests/harness -q
-```
-
 Full pytest/coverage gate:
 
 ```bash
 uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 ```
 
-Run the full gate after shared fixtures/config, app composition, public protocol,
-durable Harness state, package metadata, or cross-package contracts change.
+Run the full gate after shared fixtures/config, app composition, public
+protocol, package metadata, or artifact contracts change.

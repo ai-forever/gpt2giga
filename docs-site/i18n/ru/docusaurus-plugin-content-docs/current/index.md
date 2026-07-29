@@ -16,11 +16,6 @@ http://localhost:8090
 | Поддерживаемые маршруты OpenAI, Anthropic, Gemini и LiteLLM | [Совместимость API](api-compatibility.md) |
 | Поведение `extra_headers`, `extra_query`, `extra_body` и необязательных полей | [Параметры клиентов](client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и их сопоставление с OpenAI/Anthropic/Gemini | [Встроенные инструменты](builtin-tools.md) |
-| Альфа-превью локального cockpit для запусков, сравнений, approvals и workflows | [Unified Harness](harness.md) |
-| Direct Chat, Coding Agents, нативные subagents Codex, Arena и Workflows | [Agents и multi-agent поведение](agents-and-multi-agent.md) |
-| Компоненты Unified Harness, поток выполнения, хранение и API управляющего слоя | [Архитектура Harness](architecture/harness.md) |
-| Provider-owned login, status, logout, revoke и headless-границы | [Матрица аутентификации провайдеров](architecture/provider-authentication-capability-matrix.md) |
-| Реализованная граница remote UI identity и внешние deployment gates | [ADR удалённого UI](architecture/remote-ui-identity-adr.md) |
 | Переменные окружения, аутентификация, лимиты, метрики, наблюдаемость | [Конфигурация](configuration.md) |
 | Профили Compose, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развёртывание](deployment.md) |
 | Журналы выполнения, журналы трафика, admin API, отладочная трансляция | [Операции](operations.md) |
@@ -51,15 +46,9 @@ OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подг
 3. Запустите `docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d`.
 4. Проверьте `curl http://localhost:8090/health`.
 5. Подключите SDK к `http://localhost:8090/v1` или `http://localhost:8090/v2` для явного контракта бэкенда, либо к `http://localhost:8090`, если корень должен следовать `GPT2GIGA_GIGACHAT_API_MODE`.
-6. Чтобы попробовать локальный project cockpit в статусе альфа-превью,
-   следуйте [руководству Unified Harness](harness.md), запустите `giga doctor`
-   и `giga ui`, затем откройте `http://127.0.0.1:8091/`.
 
 ## Для разработчиков
 
-- [Архитектура Harness](architecture/harness.md) описывает локальный управляющий слой, durable runtime, границы хранения и назначение каждого семейства API.
-- [Матрица аутентификации провайдеров](architecture/provider-authentication-capability-matrix.md) фиксирует версионированные provider-owned возможности без копирования credentials.
-- [ADR удалённого UI](architecture/remote-ui-identity-adr.md) определяет реализованный single-issuer OIDC/BFF profile; live IdP и deployment остаются явными gates.
 - [Нормализованные сообщения](architecture/normalized-messages.md) описывают экспериментальный слой моделей, не зависящих от протокола.
 - [Логирование и наблюдаемость](architecture/logging-and-observability.md) фиксирует границы между журналами выполнения, журналами трафика, метриками и трейсами.
 - [Добавление провайдера или протокола](architecture/how-to-add-provider.md) даёт чек-лист для расширения набора публичных протоколов и вышестоящих провайдеров.

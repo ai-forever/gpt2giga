@@ -1,2 +1,0 @@
-{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Claude fixture"}},"future_field":"ignored"}
-{"type":"result","subtype":"success","result":"Claude fixture","usage":{"input_tokens":3,"output_tokens":2}}

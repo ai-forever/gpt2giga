@@ -26,20 +26,6 @@ client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
 ## Быстрые ссылки
 
-- Нативные команды Codex/Claude/Gemini с единственным префиксом `giga`,
-  pipe/redirect/CI/resume и L1/L2 degradation:
-  [`examples/harness/native-cli-prefix/README.md`](harness/native-cli-prefix/README.md)
-- Unified Harness, полностью локальный first-run без credentials и proxy:
-  [`examples/harness/first-run-demo/README.md`](harness/first-run-demo/README.md)
-- Unified Harness, issue-to-reviewed-patch с изолированным worktree, review и
-  post-apply eval:
-  [`examples/harness/issue-to-reviewed-patch/README.md`](harness/issue-to-reviewed-patch/README.md)
-- Unified Harness, nightly compatibility guardian с pinned matrix, baseline и
-  durable schedule:
-  [`examples/harness/nightly-compatibility-guardian/README.md`](harness/nightly-compatibility-guardian/README.md)
-- Unified Harness, cross-harness review team с read-only fan-out, retained
-  child evidence и одним synthesis-шагом:
-  [`examples/harness/cross-harness-review-team/README.md`](harness/cross-harness-review-team/README.md)
 - OpenAI Python SDK:
   - Chat Completions API: [`examples/openai/chat_completions/README.md`](openai/chat_completions/README.md)
   - Responses API: [`examples/openai/responses/README.md`](openai/responses/README.md)
