@@ -80,9 +80,7 @@ def test_stale_gateway_release_instructions_are_rejected(tmp_path: Path) -> None
 
 def test_package_urls_reject_non_gateway_project_identity(tmp_path: Path) -> None:
     docs_module = load_docs_module()
-    package = tmp_path / "packages/gpt2giga"
-    package.mkdir(parents=True)
-    (package / "pyproject.toml").write_text(
+    (tmp_path / "pyproject.toml").write_text(
         """
 [project]
 name = "gpt2giga"

@@ -8,28 +8,6 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 
-[manifest]
-members = [
-    "gpt2giga",
-]
-
-[manifest.dependency-groups]
-dev = [
-    { name = "black", specifier = ">=26.3.1,<27.0.0" },
-    { name = "pre-commit", specifier = ">=4.3.0,<5.0.0" },
-    { name = "pytest", specifier = ">=9.0.3,<10.0.0" },
-    { name = "pytest-asyncio", specifier = ">=1.2.0,<2.0.0" },
-    { name = "pytest-cov", specifier = ">=7.0.0,<8.0.0" },
-    { name = "pytest-mock", specifier = ">=3.15.1,<4.0.0" },
-    { name = "pytest-xdist", specifier = ">=3.8.0,<4.0.0" },
-    { name = "ruff", specifier = ">=0.15,<1" },
-]
-integrations = [
-    { name = "openai-agents", specifier = ">=0.17,<1" },
-    { name = "pyjwt", specifier = ">=2.12.0" },
-    { name = "python-multipart", specifier = ">=0.0.27,<0.1.0" },
-]
-
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.7.1"
@@ -1055,7 +1033,7 @@ wheels = [
 [[package]]
 name = "gpt2giga"
 version = "0.2.6a1"
-source = { editable = "packages/gpt2giga" }
+source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "aioitertools" },
@@ -1091,6 +1069,23 @@ postgres = [
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "black" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "pytest-xdist" },
+    { name = "ruff" },
+]
+integrations = [
+    { name = "openai-agents" },
+    { name = "pyjwt" },
+    { name = "python-multipart" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.3,<4" },
@@ -1119,6 +1114,23 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.51.0,<1" },
 ]
 provides-extras = ["postgres", "opensearch", "phoenix"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "black", specifier = ">=26.3.1,<27.0.0" },
+    { name = "pre-commit", specifier = ">=4.3.0,<5.0.0" },
+    { name = "pytest", specifier = ">=9.0.3,<10.0.0" },
+    { name = "pytest-asyncio", specifier = ">=1.2.0,<2.0.0" },
+    { name = "pytest-cov", specifier = ">=7.0.0,<8.0.0" },
+    { name = "pytest-mock", specifier = ">=3.15.1,<4.0.0" },
+    { name = "pytest-xdist", specifier = ">=3.8.0,<4.0.0" },
+    { name = "ruff", specifier = ">=0.15,<1" },
+]
+integrations = [
+    { name = "openai-agents", specifier = ">=0.17,<1" },
+    { name = "pyjwt", specifier = ">=2.12.0" },
+    { name = "python-multipart", specifier = ">=0.0.27,<0.1.0" },
+]
 
 [[package]]
 name = "greenlet"

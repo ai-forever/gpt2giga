@@ -37,7 +37,7 @@ jobs:
         from pathlib import Path
 
         pyproject = tomllib.loads(
-            Path("packages/gpt2giga/pyproject.toml").read_text(encoding="utf-8")
+            Path("pyproject.toml").read_text(encoding="utf-8")
         )
         print(pyproject["project"]["version"])
         PY

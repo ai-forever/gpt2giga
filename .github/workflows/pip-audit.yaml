@@ -23,14 +23,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: |
             pyproject.toml
-            packages/gpt2giga/pyproject.toml
             uv.lock
 
       - name: Set up Python 3.13
         run: uv python install 3.13
 
       - name: Install gateway dependencies
-        run: uv sync --package gpt2giga --all-extras --dev
+        run: uv sync --all-extras --dev
 
       - name: Seed pip for the audit action
         run: uv pip install --python .venv/bin/python pip

@@ -2,6 +2,11 @@
 
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
+
 from workspace_split_contract_support import (
     test_gateway_owned_modules_do_not_import_harness as _check_no_harness_imports,
 )
@@ -14,11 +19,16 @@ def test_gateway_owned_modules_do_not_import_gigaloom():
     _check_no_harness_imports()
 
 
-def test_source_repository_contains_only_the_gateway_workspace_member():
+def test_source_repository_is_a_root_level_gateway_project():
     root = Path(__file__).resolve().parents[1]
-    workspace = (root / "pyproject.toml").read_text(encoding="utf-8")
 
-    assert 'members = ["packages/gpt2giga"]' in workspace
+    with (root / "pyproject.toml").open("rb") as file:
+        metadata = tomllib.load(file)
+
+    assert metadata["project"]["name"] == "gpt2giga"
+    assert metadata["project"]["description"]
+    assert "workspace" not in metadata.get("tool", {}).get("uv", {})
+    assert not (root / "packages/gpt2giga/pyproject.toml").exists()
     assert not (root / "packages/gpt2giga-harness").exists()
     assert not (root / "tests/harness").exists()
     assert not (root / "examples/harness").exists()

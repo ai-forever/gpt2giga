@@ -151,7 +151,7 @@ Per-request GigaChat authorization через клиентский `Authorizatio
 ```sh
 uv sync --all-packages --all-extras --dev
 uv run gpt2giga
-uv build --package gpt2giga --no-sources
+uv build --no-sources
 ```
 
 Полный репозиторный workflow, правила contribution и тестирования описаны в

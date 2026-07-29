@@ -14,17 +14,19 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 GATEWAY_MEMBER = REPO_ROOT / "packages/gpt2giga"
 
 
-def _project_version(member: Path) -> str:
-    with (member / "pyproject.toml").open("rb") as file:
+def _project_metadata(root: Path) -> dict:
+    with (root / "pyproject.toml").open("rb") as file:
         try:
             import tomllib
         except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
             import tomli as tomllib
 
-        return tomllib.load(file)["project"]["version"]
+        return tomllib.load(file)["project"]
 
 
-GATEWAY_VERSION = _project_version(GATEWAY_MEMBER)
+_GATEWAY_METADATA = _project_metadata(REPO_ROOT)
+GATEWAY_VERSION = _GATEWAY_METADATA["version"]
+GATEWAY_DESCRIPTION = _GATEWAY_METADATA["description"]
 
 
 @dataclass(frozen=True)
@@ -50,8 +52,6 @@ def _build_artifacts(tmp_path_factory) -> BuiltArtifacts:
     _run(
         "uv",
         "build",
-        "--package",
-        "gpt2giga",
         "--wheel",
         "--sdist",
         "--no-sources",
@@ -97,6 +97,7 @@ sys.path.extend(json.loads(sys.argv[2]))
     )
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
+    env["EXPECTED_GATEWAY_DESCRIPTION"] = GATEWAY_DESCRIPTION
     env["EXPECTED_GATEWAY_VERSION"] = GATEWAY_VERSION
     subprocess.run(
         [
@@ -131,6 +132,7 @@ assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
 assert importlib.util.find_spec("gpt2giga_harness") is None
 distribution = importlib.metadata.distribution("gpt2giga")
 assert distribution.version == os.environ["EXPECTED_GATEWAY_VERSION"]
+assert distribution.metadata["Summary"] == os.environ["EXPECTED_GATEWAY_DESCRIPTION"]
 scripts = {
     entry.name: entry.value
     for entry in distribution.entry_points
@@ -158,6 +160,6 @@ def _artifact_members(path: Path) -> tuple[str, ...]:
 
 
 def test_workspace_lock_is_current() -> None:
-    """Require the checked-in lock to match the gateway-only workspace."""
+    """Require the checked-in lock to match the standalone gateway project."""
 
     _run("uv", "lock", "--check")

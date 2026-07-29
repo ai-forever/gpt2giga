@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--metadata",
         type=Path,
-        default=Path("packages/gpt2giga/pyproject.toml"),
+        default=Path("pyproject.toml"),
     )
     parser.add_argument("--event-name", required=True)
     parser.add_argument("--ref-name", required=True)

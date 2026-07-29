@@ -67,10 +67,10 @@ gpt2giga
 
 ## Запуск из репозитория
 
-Установите editable gateway workspace member и зависимости разработки:
+Установите gateway как editable-проект вместе с зависимостями разработки:
 
 ```sh
-uv sync --all-packages --all-extras --dev
+uv sync --all-extras --dev
 uv run gpt2giga
 ```
 

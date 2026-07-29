@@ -3,11 +3,11 @@
 ## Scope and boundary
 
 These rules apply to `packages/gpt2giga/**` in addition to the root contract.
-This member must build and install as a standalone gateway distribution.
+This source tree must build and install as a standalone gateway distribution.
 
 - Keep the Python namespace `gpt2giga` and the `gpt2giga` command independent
   of Harness code, commands, package data, and optional control-plane behavior.
-- Read metadata and dependencies from this member's `pyproject.toml`. Add an
+- Read metadata and dependencies from the repository-root `pyproject.toml`. Add an
   optional backend dependency to the correct extra and update `uv.lock`.
 - The mounted public surface is defined by
   `src/gpt2giga/app/factory.py` and `src/gpt2giga/api/*/routes.py`.
@@ -60,7 +60,7 @@ duplicating them in routes. Put shared application state in lifecycle wiring and
 ```bash
 uv run ruff check packages/gpt2giga/src/gpt2giga
 uv run ruff format --check packages/gpt2giga/src/gpt2giga
-uv build --package gpt2giga --no-sources
+uv build --no-sources
 ```
 
 Run focused gateway tests while iterating. Run the full root coverage gate after
