@@ -20,7 +20,7 @@ def test_gigaloom_is_the_only_workspace_member():
     assert not (REPOSITORY_ROOT / "packages/gpt2giga").exists()
 
 
-def test_standalone_metadata_has_no_gateway_source_override_or_lock():
+def test_standalone_metadata_has_exact_gateway_and_committed_lock():
     with (HARNESS_MEMBER / "pyproject.toml").open("rb") as file:
         metadata = tomllib.load(file)
 
@@ -29,18 +29,19 @@ def test_standalone_metadata_has_no_gateway_source_override_or_lock():
         "gpt2giga==0.2.6a1"
     )
     assert "sources" not in metadata.get("tool", {}).get("uv", {})
-    assert not (REPOSITORY_ROOT / "uv.lock").exists()
+    assert (REPOSITORY_ROOT / "uv.lock").is_file()
 
 
 def test_standalone_bootstrap_scripts_are_target_owned():
     base = (REPOSITORY_ROOT / "scripts/ci-base.sh").read_text(encoding="utf-8")
-    candidate = (REPOSITORY_ROOT / "scripts/ci-candidate-gateway.sh").read_text(
+    public_gateway = (REPOSITORY_ROOT / "scripts/ci-public-gateway.sh").read_text(
         encoding="utf-8"
     )
 
     assert "packages/gpt2giga-harness" in base
-    assert "uv sync" not in base
-    assert "uv.lock is deferred" in base
-    assert "expected_sha256" in candidate
-    assert "gpt2giga-harness" in candidate
-    assert "uv.lock" in candidate
+    assert 'uv sync "${sync_args[@]}"' in base
+    assert "--locked" in base
+    assert "--all-extras" in base
+    assert "gpt2giga-harness" in public_gateway
+    assert "https://pypi.org/simple" in public_gateway
+    assert "uv.lock" in public_gateway

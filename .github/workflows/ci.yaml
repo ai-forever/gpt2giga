@@ -9,6 +9,7 @@ on:
       - "benchmarks/gigaloom_performance/**"
       - "scripts/ci-*.sh"
       - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/ci.yaml"
   pull_request:
     branches: [main]
@@ -60,8 +61,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: |
-            pyproject.toml
-            packages/gpt2giga-harness/pyproject.toml
+            uv.lock
 
       - name: Install standalone browser-QA runtime
         env:
@@ -122,8 +122,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: |
-            pyproject.toml
-            packages/gpt2giga-harness/pyproject.toml
+            uv.lock
 
       - name: Install standalone test environment
         env:
@@ -172,8 +171,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: |
-            pyproject.toml
-            packages/gpt2giga-harness/pyproject.toml
+            uv.lock
 
       - name: Install artifact-test environment
         env:
@@ -279,8 +277,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: |
-            pyproject.toml
-            packages/gpt2giga-harness/pyproject.toml
+            uv.lock
 
       - name: Install standalone performance environment
         env:
@@ -300,22 +297,32 @@ jobs:
           retention-days: 7
 
   registry-readiness:
-    name: Public registry / blocked_pending_S5_03B
+    name: Public registry / exact gateway lock
     runs-on: ubuntu-latest
+    needs: frontend
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Assert fail-closed public-registry readiness
-        shell: bash
-        run: |
-          set -euo pipefail
-          test ! -e uv.lock
-          test -e .github/workflows/publish-pypi.yml
-          test -e .github/release-policy.json
-          test -x scripts/ci-candidate-gateway.sh
-          echo "status=blocked_pending_S5_03B"
-          echo "Trusted Publisher registration and the public gateway pin remain absent until S5-03B."
+      - name: Download verified frontend assets
+        uses: actions/download-artifact@v7
+        with:
+          name: gigaloom-assets-${{ github.sha }}
+          path: packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Sync every locked optional integration
+        env:
+          GIGALOOM_PYTHON: "3.13"
+        run: ./scripts/ci-base.sh sync-all-extras
+
+      - name: Verify exact public gateway resolution and runtime
+        run: ./scripts/ci-public-gateway.sh

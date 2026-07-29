@@ -65,7 +65,7 @@
         "Terminal / windows-latest / 3.13",
         "Terminal / windows-latest / 3.14",
         "Performance / ci-smoke",
-        "Public registry / blocked_pending_S5_03B"
+        "Public registry / exact gateway lock"
       ],
       "required_review_count": 1,
       "require_code_owner_review": true,

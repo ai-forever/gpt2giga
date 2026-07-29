@@ -29,12 +29,12 @@ work merely because it is present in the checkout.
   `gpt2giga_harness` Python namespace.
 - The base distribution must install, test, and build without a gateway source
   checkout.
-- Optional gateway compatibility consumes only the exact public dependency or
-  an explicitly checksum-bound candidate artifact. Never add an editable
-  sibling, local source override, submodule, or branch dependency.
-- The release-ready target `uv.lock` is intentionally absent until the
-  repository-split roadmap reaches S5-03B. Bootstrap and candidate scripts must
-  not create or persist a lockfile.
+- Optional gateway compatibility consumes only the exact public dependency
+  resolved in the committed target `uv.lock`. Never add an editable sibling,
+  local source override, submodule, branch dependency, candidate URL, or
+  temporary index.
+- Keep the release-ready target `uv.lock` current and registry-resolved. Normal
+  sync and release paths must use it in locked mode.
 - Treat `packages/gpt2giga-harness/pyproject.toml` as the source of truth for
   version, dependencies, entry points, and the supported Python range.
 - Use absolute imports, Ruff formatting, and concise Google-style docstrings.
@@ -86,6 +86,8 @@ Produce frontend assets and install standalone development dependencies:
 npm --prefix packages/gpt2giga-harness/frontend ci --ignore-scripts
 npm --prefix packages/gpt2giga-harness/frontend run build
 ./scripts/ci-base.sh sync
+./scripts/ci-base.sh sync-all-extras
+./scripts/ci-public-gateway.sh
 ```
 
 The frontend producer must run before the first clean-checkout `uv sync`;

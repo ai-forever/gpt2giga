@@ -5,10 +5,11 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 environment="${GIGALOOM_VENV:-${repository_root}/.venv}"
 python="${environment}/bin/python"
 export UV_CACHE_DIR="${GIGALOOM_UV_CACHE_DIR:-${repository_root}/.cache/uv}"
+export UV_PROJECT_ENVIRONMENT="${environment}"
 
-require_unlocked_workspace() {
-  if [[ -e "${repository_root}/uv.lock" ]]; then
-    echo "uv.lock is deferred until repository-split gate S5-03B" >&2
+require_lock() {
+  if [[ ! -f "${repository_root}/uv.lock" ]]; then
+    echo "committed uv.lock is required" >&2
     exit 1
   fi
 }
@@ -22,29 +23,27 @@ require_environment() {
 
 command="${1:-}"
 if [[ -z "${command}" ]]; then
-  echo "usage: $0 {sync|ruff-check|ruff-format-check|pytest} [args...]" >&2
+  echo "usage: $0 {sync|sync-all-extras|ruff-check|ruff-format-check|pytest} [args...]" >&2
   exit 2
 fi
 shift
 
 cd "${repository_root}"
-require_unlocked_workspace
+require_lock
 
 case "${command}" in
-  sync)
-    uv venv \
-      --clear \
-      --no-project \
-      --python "${GIGALOOM_PYTHON:-3.13}" \
-      "${environment}"
+  sync | sync-all-extras)
+    sync_args=(
+      --locked
+      --all-groups
+      --python "${GIGALOOM_PYTHON:-3.13}"
+    )
+    if [[ "${command}" == "sync-all-extras" ]]; then
+      sync_args+=(--all-extras)
+    fi
+    uv sync "${sync_args[@]}"
     "${python}" packages/gpt2giga-harness/asset_contract.py --require-clean
-    uv pip install \
-      --python "${python}" \
-      --no-sources \
-      --group dev \
-      --group integrations \
-      --editable packages/gpt2giga-harness
-    require_unlocked_workspace
+    require_lock
     ;;
   ruff-check)
     require_environment
