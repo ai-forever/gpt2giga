@@ -1,4 +1,4 @@
-name: Nightly smoke tests
+name: Gateway nightly smoke
 
 on:
   schedule:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   smoke:
-    name: Run local app smoke tests
+    name: Gateway API / nightly smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -22,34 +22,16 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: |
+            pyproject.toml
+            packages/gpt2giga/pyproject.toml
+            uv.lock
 
       - name: Set up Python 3.13
         run: uv python install 3.13
 
-      - name: Install dependencies
-        run: uv sync --all-packages --all-extras --dev
+      - name: Install gateway dependencies
+        run: uv sync --package gpt2giga --all-extras --dev
 
-      - name: Run smoke tests
-        run: uv run pytest tests/test_api_server/test_ci_smoke.py
-
-      - name: Capture bounded local detail profile
-        if: always()
-        run: uv run giga benchmark performance --profile local-detail --samples 5 --output performance-artifacts/local-detail.json
-
-      - name: Capture bounded TUI detail profile
-        if: always()
-        run: uv run giga benchmark performance --profile tui-detail --samples 5 --output performance-artifacts/tui-detail.json
-
-      - name: Capture bounded runtime detail profile
-        if: always()
-        run: uv run giga benchmark performance --profile runtime-detail --samples 5 --output performance-artifacts/runtime-detail.json
-
-      - name: Upload bounded performance detail reports
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: gigaloom-performance-detail
-          path: performance-artifacts/*.json
-          if-no-files-found: error
-          retention-days: 14
+      - name: Run gateway API smoke tests
+        run: uv run pytest tests/test_api_server/test_ci_smoke.py -q -n 0

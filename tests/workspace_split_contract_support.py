@@ -51,10 +51,10 @@ def test_code_workflows_skip_documentation_only_changes() -> None:
         )
     )
 
-    assert "- 'packages/**/*.py'" in codeql
-    assert "- 'packages/*/pyproject.toml'" in codeql
-    assert "- 'packages/**'" not in codeql
-    assert "- 'packages/*/pyproject.toml'" in dependency_review
+    assert "- 'packages/gpt2giga/**/*.py'" in codeql
+    assert "- 'packages/gpt2giga/pyproject.toml'" in codeql
+    assert "- 'packages/**/*.py'" not in codeql
+    assert "- 'packages/gpt2giga/pyproject.toml'" in dependency_review
     assert "- 'docs-site/package-lock.json'" in dependency_review
     assert all(
         "- '!packages/gpt2giga/**/*.md'" in workflow for workflow in docker_workflows

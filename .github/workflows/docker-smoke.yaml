@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   docker-smoke:
-    name: Build and boot Docker image
+    name: Gateway image / build and boot
     runs-on: ubuntu-latest
     timeout-minutes: 20
 

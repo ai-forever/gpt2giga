@@ -1,4 +1,4 @@
-name: Pull request labeler
+name: Gateway pull request labeler
 
 on:
   pull_request_target:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   labeler:
-    name: Apply path labels
+    name: Gateway automation / path labels
     runs-on: ubuntu-latest
 
     steps:

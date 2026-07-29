@@ -13,3 +13,37 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: ci
+
+  - package-ecosystem: pip
+    directory: "/packages/gpt2giga"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:15"
+      timezone: "Europe/Moscow"
+    labels:
+      - dependencies
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+    groups:
+      gateway-runtime:
+        dependency-type: production
+
+  - package-ecosystem: npm
+    directory: "/docs-site"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:30"
+      timezone: "Europe/Moscow"
+    labels:
+      - dependencies
+      - docs
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: docs
+    groups:
+      documentation:
+        patterns:
+          - "*"

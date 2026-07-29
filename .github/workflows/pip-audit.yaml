@@ -1,4 +1,4 @@
-name: Python dependency audit
+name: Gateway Python dependency audit
 
 on:
   schedule:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   pip-audit:
-    name: Audit Python dependencies
+    name: Gateway security / pip audit
     runs-on: ubuntu-latest
 
     steps:
@@ -21,13 +21,16 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: |
+            pyproject.toml
+            packages/gpt2giga/pyproject.toml
+            uv.lock
 
       - name: Set up Python 3.13
         run: uv python install 3.13
 
-      - name: Install dependencies
-        run: uv sync --all-packages --all-extras --dev
+      - name: Install gateway dependencies
+        run: uv sync --package gpt2giga --all-extras --dev
 
       - name: Seed pip for the audit action
         run: uv pip install --python .venv/bin/python pip

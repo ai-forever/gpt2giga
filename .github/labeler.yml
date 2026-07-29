@@ -18,18 +18,6 @@ protocol:
       - any-glob-to-any-file:
           - 'packages/gpt2giga/src/gpt2giga/protocols/**'
 
-harness:
-  - changed-files:
-      - any-glob-to-any-file:
-          - 'packages/gpt2giga-harness/**'
-          - 'tests/harness/**'
-          - 'tests/package_isolation_support.py'
-          - 'tests/workspace_split_contract_support.py'
-          - 'tests/test_gigaloom_*.py'
-          - 'tests/test_cross_repository_artifact_smoke.py'
-          - 'docs/harness.md'
-          - 'docs-site/i18n/**/docusaurus-plugin-content-docs/current/harness.md'
-
 docker:
   - changed-files:
       - any-glob-to-any-file:
@@ -67,5 +55,7 @@ dependencies:
   - changed-files:
       - any-glob-to-any-file:
           - 'pyproject.toml'
-          - 'packages/*/pyproject.toml'
+          - 'packages/gpt2giga/pyproject.toml'
+          - 'docs-site/package.json'
+          - 'docs-site/package-lock.json'
           - 'uv.lock'
