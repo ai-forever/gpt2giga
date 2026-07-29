@@ -178,31 +178,28 @@ def check_proxy_settings(root: Path) -> list[Issue]:
 
 
 def check_package_versions(root: Path) -> list[Issue]:
-    """Require each shipped changelog to begin with its package metadata version."""
+    """Require gateway changelogs to begin with the root metadata version."""
     issues: list[Issue] = []
-    for package in ("gpt2giga",):
-        package_root = root / "packages" / package
-        metadata = tomllib.loads(
-            (package_root / "pyproject.toml").read_text(encoding="utf-8")
-        )
-        version = metadata["project"]["version"]
-        for filename in ("CHANGELOG.md", "CHANGELOG_en.md"):
-            path = package_root / filename
-            match = CHANGELOG_VERSION_RE.search(path.read_text(encoding="utf-8"))
-            if not match or match.group(1) != version:
-                actual = match.group(1) if match else "missing"
-                issues.append(
-                    Issue(
-                        path,
-                        f"top changelog version {actual!r} does not match {version!r}",
-                    )
+    package_root = root / "packages/gpt2giga"
+    metadata = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    version = metadata["project"]["version"]
+    for filename in ("CHANGELOG.md", "CHANGELOG_en.md"):
+        path = package_root / filename
+        match = CHANGELOG_VERSION_RE.search(path.read_text(encoding="utf-8"))
+        if not match or match.group(1) != version:
+            actual = match.group(1) if match else "missing"
+            issues.append(
+                Issue(
+                    path,
+                    f"top changelog version {actual!r} does not match {version!r}",
                 )
+            )
     return issues
 
 
 def check_package_urls(root: Path) -> list[Issue]:
     """Require gateway-only project links in the published package metadata."""
-    path = root / "packages/gpt2giga/pyproject.toml"
+    path = root / "pyproject.toml"
     metadata = tomllib.loads(path.read_text(encoding="utf-8"))
     urls = metadata["project"].get("urls", {})
     expected = {

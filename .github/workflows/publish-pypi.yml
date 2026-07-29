@@ -69,7 +69,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Build gateway wheel and sdist
-        run: uv build --package gpt2giga --wheel --sdist --no-sources --out-dir dist/gpt2giga
+        run: uv build --wheel --sdist --no-sources --out-dir dist/gpt2giga
 
       - name: Guard gateway artifacts and write checksums
         env:

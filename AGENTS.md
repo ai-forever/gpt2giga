@@ -24,10 +24,11 @@ work merely because it is present in the checkout.
 
 ## Repository contract
 
-- This is a one-member `uv` workspace. `packages/gpt2giga/` owns the
-  compatibility gateway and `gpt2giga` Python namespace.
+- This is a standalone `uv` project. The root `pyproject.toml` owns the
+  `gpt2giga` distribution, while `packages/gpt2giga/src/gpt2giga/` owns the
+  compatibility gateway Python namespace.
 - The gateway must never import or package `gpt2giga_harness`.
-- Treat `packages/gpt2giga/pyproject.toml` as the source of truth for the
+- Treat the root `pyproject.toml` as the source of truth for the
   version, dependencies, entry point, and supported Python range.
 - Keep gateway FastAPI handlers and network upstream calls async-first. Use
   absolute imports, Ruff formatting, and concise Google-style docstrings.
@@ -70,10 +71,10 @@ When continuing a named local roadmap:
 
 ## Commands and validation
 
-Install workspace runtime and development dependencies:
+Install project runtime and development dependencies:
 
 ```bash
-uv sync --all-packages --all-extras --dev
+uv sync --all-extras --dev
 ```
 
 Repository quality gate:
@@ -87,7 +88,7 @@ uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 Independent package build:
 
 ```bash
-uv build --package gpt2giga --no-sources
+uv build --no-sources
 ```
 
 Documentation build:

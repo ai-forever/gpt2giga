@@ -55,7 +55,6 @@ dependencies:
   - changed-files:
       - any-glob-to-any-file:
           - 'pyproject.toml'
-          - 'packages/gpt2giga/pyproject.toml'
           - 'docs-site/package.json'
           - 'docs-site/package-lock.json'
           - 'uv.lock'

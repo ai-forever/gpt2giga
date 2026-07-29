@@ -24,14 +24,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: |
             pyproject.toml
-            packages/gpt2giga/pyproject.toml
             uv.lock
 
       - name: Set up Python 3.13
         run: uv python install 3.13
 
       - name: Install gateway dependencies
-        run: uv sync --package gpt2giga --all-extras --dev
+        run: uv sync --all-extras --dev
 
       - name: Run gateway API smoke tests
         run: uv run pytest tests/test_api_server/test_ci_smoke.py -q -n 0

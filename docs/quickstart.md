@@ -67,10 +67,10 @@ gpt2giga
 
 ## Run from the repository
 
-Install the editable gateway workspace member and development dependencies:
+Install the editable gateway project and development dependencies:
 
 ```sh
-uv sync --all-packages --all-extras --dev
+uv sync --all-extras --dev
 uv run gpt2giga
 ```
 

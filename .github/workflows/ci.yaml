@@ -52,14 +52,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: |
             pyproject.toml
-            packages/gpt2giga/pyproject.toml
             uv.lock
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install gateway dependencies
-        run: uv sync --package gpt2giga --all-extras --dev
+        run: uv sync --all-extras --dev
 
       - name: Lint with Ruff
         if: matrix.python-version == '3.13'
@@ -99,7 +98,6 @@ jobs:
           enable-cache: true
           cache-dependency-glob: |
             pyproject.toml
-            packages/gpt2giga/pyproject.toml
             uv.lock
 
       - name: Set up Python 3.13
@@ -107,10 +105,10 @@ jobs:
 
       - name: Resolve gateway version
         id: version
-        run: echo "value=$(uv version --package gpt2giga --short --frozen)" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(uv version --short --frozen)" >> "$GITHUB_OUTPUT"
 
       - name: Build gateway wheel and sdist
-        run: uv build --package gpt2giga --wheel --sdist --no-sources --out-dir dist/gpt2giga
+        run: uv build --wheel --sdist --no-sources --out-dir dist/gpt2giga
 
       - name: Upload gateway artifacts
         uses: actions/upload-artifact@v7
@@ -140,7 +138,6 @@ jobs:
           enable-cache: true
           cache-dependency-glob: |
             pyproject.toml
-            packages/gpt2giga/pyproject.toml
             uv.lock
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -148,10 +145,10 @@ jobs:
 
       - name: Resolve gateway version
         id: version
-        run: echo "value=$(uv version --package gpt2giga --short --frozen)" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(uv version --short --frozen)" >> "$GITHUB_OUTPUT"
 
       - name: Build gateway wheel
-        run: uv build --package gpt2giga --wheel --no-sources --out-dir dist/smoke
+        run: uv build --wheel --no-sources --out-dir dist/smoke
 
       - name: Create clean artifact environment
         run: uv venv --python ${{ matrix.python-version }} .venv-artifact

@@ -6,7 +6,6 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'pyproject.toml'
-      - 'packages/gpt2giga/pyproject.toml'
       - 'uv.lock'
       - 'docs-site/package.json'
       - 'docs-site/package-lock.json'

@@ -208,7 +208,7 @@ uv run gpt2giga
 Сборка дистрибутива выполняется явно:
 
 ```sh
-uv build --package gpt2giga
+uv build
 ```
 
 Проверки перед PR:

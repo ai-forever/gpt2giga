@@ -71,7 +71,7 @@ def test_gateway_ci_has_stable_bounded_required_check_names():
     assert "Gateway artifact / Python ${{ matrix.python-version }}" in workflow
     assert "uv run ruff check ." in workflow
     assert "uv run ruff format --check ." in workflow
-    assert "uv build --package gpt2giga --wheel --sdist --no-sources" in workflow
+    assert "uv build --wheel --sdist --no-sources" in workflow
 
 
 def test_gateway_release_workflow_has_one_package_and_one_publish_contract():
@@ -96,4 +96,4 @@ def test_gateway_security_and_docs_filters_are_member_specific():
 
     for workflow in (codeql, dependency_review, docs):
         assert "'packages/*/pyproject.toml'" not in workflow
-        assert "'packages/gpt2giga/pyproject.toml'" in workflow
+        assert "'pyproject.toml'" in workflow
