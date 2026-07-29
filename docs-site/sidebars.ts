@@ -8,6 +8,7 @@ const sidebars: SidebarsConfig = {
       collapsible: false,
       items: [
         'index',
+        'gigaloom-migration',
         'quickstart',
         'configuration',
       ],

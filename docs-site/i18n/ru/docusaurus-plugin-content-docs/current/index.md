@@ -8,6 +8,15 @@
 http://localhost:8090
 ```
 
+:::info[GigaLoom перенесён]
+
+Agentic workbench GigaLoom (ранее Unified Harness) теперь развивается в
+[`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom). Этот сайт —
+каноническая документация compatibility gateway `gpt2giga`. Старые URL
+перечислены в [уведомлении о переносе](gigaloom-migration.md).
+
+:::
+
 ## Что закрывает прокси
 
 | Возможность | Где читать |
@@ -49,6 +58,8 @@ OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подг
 
 ## Для разработчиков
 
-- [Нормализованные сообщения](architecture/normalized-messages.md) описывают экспериментальный слой моделей, не зависящих от протокола.
+- [Нормализованные сообщения](architecture/normalized-messages.md) описывают
+  версионированный внутренний bridge и его fail-closed контракт потери
+  семантики.
 - [Логирование и наблюдаемость](architecture/logging-and-observability.md) фиксирует границы между журналами выполнения, журналами трафика, метриками и трейсами.
 - [Добавление провайдера или протокола](architecture/how-to-add-provider.md) даёт чек-лист для расширения набора публичных протоколов и вышестоящих провайдеров.

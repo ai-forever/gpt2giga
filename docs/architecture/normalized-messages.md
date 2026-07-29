@@ -135,11 +135,13 @@ body, and obtains a request-specific network authorization. The transport
 revalidates the serialized body, connected peer, and bounded response size.
 Redirects and automatic retries are disabled.
 
-Harness owns the provider profile, model route, `SecretRef`, TLS/proxy policy
+When the adapter is orchestrated by
+[GigaLoom](https://github.com/krakenalt/gigaloom), that standalone workbench
+owns the provider profile, model route, `SecretRef`, TLS/proxy policy
 references, and scoped network ticket. A credential is resolved and revealed
 only to the exact `provider-execution:openai-compatible` boundary; profiles,
 logs, persisted settings, network intents, and receipts retain only the
-reference identity. vLLM has a versioned
+reference identity. GigaLoom defines a versioned
 `gigaloom.vllm-openai-compatible.v1` profile, while other compatible servers
 must provide an explicitly reviewed profile and normalized capability/limit
 contract.
@@ -159,7 +161,9 @@ uv run pytest -n 0 tests/live/test_vllm_openai_compatible_smoke.py
 ```
 
 Set `GPT2GIGA_VLLM_API_KEY` only when the reviewed server requires it. The live
-smoke requires a remote HTTPS endpoint and a scoped Harness network grant.
+smoke belongs to GigaLoom and requires a remote HTTPS endpoint plus its scoped
+network grant; this gateway repository does not expose a public arbitrary-vLLM
+switch.
 
 ### Protocol bridge closure
 
@@ -181,7 +185,8 @@ partial; missing token counts are not invented.
 This closes the internal normalized v1 composition contract. It does not add a
 gateway environment switch that accepts an arbitrary upstream URL or secret.
 OpenAI-compatible profiles, credentials, TLS/proxy policy, and network grants
-remain owned by the reviewed Harness execution boundary. Batches, files,
+remain owned by the reviewed standalone GigaLoom execution boundary. Batches,
+files,
 embeddings, prompt caching, computer use, audio, and unsupported multimodal
 forms remain outside bridge v1.
 

@@ -139,11 +139,13 @@ normalized v1 для Chat Completions. До любого запроса он с�
 подключённый адрес и ограниченный размер ответа. Redirect и автоматические
 retry отключены.
 
-Harness владеет профилем провайдера, маршрутом модели, `SecretRef`, ссылками на
+Когда adapter оркестрируется
+[GigaLoom](https://github.com/krakenalt/gigaloom), этот отдельный workbench
+владеет профилем провайдера, маршрутом модели, `SecretRef`, ссылками на
 TLS/proxy policy и scoped network ticket. Секрет разрешается и раскрывается
 только границе `provider-execution:openai-compatible`; профили, логи,
 сохранённые настройки, сетевые intents и receipts содержат лишь идентичность
-ссылки. Для vLLM есть версионированный профиль
+ссылки. GigaLoom определяет версионированный профиль
 `gigaloom.vllm-openai-compatible.v1`; другие совместимые серверы требуют явно
 проверенный профиль и контракт normalized capabilities/limits.
 
@@ -162,7 +164,9 @@ uv run pytest -n 0 tests/live/test_vllm_openai_compatible_smoke.py
 ```
 
 Задавайте `GPT2GIGA_VLLM_API_KEY` только если он нужен проверенному серверу.
-Live smoke требует удалённый HTTPS endpoint и scoped network grant Harness.
+Live smoke принадлежит GigaLoom и требует удалённый HTTPS endpoint и его
+scoped network grant; этот gateway-репозиторий не предоставляет публичный
+переключатель произвольного vLLM.
 
 ### Закрытие protocol bridge
 
@@ -184,7 +188,8 @@ cancellation, retryability, error class, code и parameter. Partial usage
 Это закрывает внутренний normalized v1 composition contract. Оно не добавляет
 gateway environment switch для произвольного upstream URL или secret.
 OpenAI-compatible profiles, credentials, TLS/proxy policy и network grants
-по-прежнему принадлежат проверенной Harness execution boundary. Batches, files,
+по-прежнему принадлежат проверенной standalone GigaLoom execution boundary.
+Batches, files,
 embeddings, prompt caching, computer use, audio и неподдерживаемые multimodal
 формы остаются вне bridge v1.
 

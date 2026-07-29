@@ -8,6 +8,15 @@ Default local address:
 http://localhost:8090
 ```
 
+:::info[GigaLoom moved]
+
+The GigaLoom agentic workbench (formerly Unified Harness) now lives in
+[`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom). This site is the
+canonical documentation for the `gpt2giga` compatibility gateway. See the
+[migration notice](gigaloom-migration.md) for old documentation URLs.
+
+:::
+
 ## What the proxy covers
 
 | Capability | Where to read |
@@ -49,6 +58,7 @@ OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are pr
 
 ## For developers
 
-- [Normalized messages](architecture/normalized-messages.md) describes the experimental layer of protocol-independent models.
+- [Normalized messages](architecture/normalized-messages.md) describes the
+  versioned internal bridge and its fail-closed semantic-loss contract.
 - [Logging and observability](architecture/logging-and-observability.md) sets the boundaries between runtime logs, traffic logs, metrics, and traces.
 - [Adding a provider or protocol](architecture/how-to-add-provider.md) gives a checklist for extending the public protocol surface and upstream providers.

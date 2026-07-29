@@ -76,3 +76,27 @@ def test_stale_gateway_release_instructions_are_rejected(tmp_path: Path) -> None
     assert [issue.message for issue in issues] == [
         "line 1: obsolete 'gpt2giga==0.2.3a1\"'; do not pin the previous gateway alpha in current install docs",
     ]
+
+
+def test_package_urls_reject_non_gateway_project_identity(tmp_path: Path) -> None:
+    docs_module = load_docs_module()
+    package = tmp_path / "packages/gpt2giga"
+    package.mkdir(parents=True)
+    (package / "pyproject.toml").write_text(
+        """
+[project]
+name = "gpt2giga"
+version = "1.0.0"
+
+[project.urls]
+Homepage = "https://github.com/krakenalt/gigaloom"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    issues = docs_module.check_package_urls(tmp_path)
+
+    assert any("project.urls.Repository" in issue.message for issue in issues)
+    assert any(
+        "must not identify the GigaLoom project" in issue.message for issue in issues
+    )

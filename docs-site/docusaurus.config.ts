@@ -3,7 +3,7 @@ import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
-  title: 'gpt2giga',
+  title: 'gpt2giga gateway',
   tagline: 'FastAPI gateway from OpenAI, Anthropic and Gemini clients to GigaChat',
   future: {
     v4: true,
@@ -73,7 +73,7 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'gpt2giga',
+      title: 'gpt2giga gateway',
       items: [
         {
           type: 'docSidebar',
@@ -85,6 +85,11 @@ const config: Config = {
         {to: '/api-compatibility', label: 'Compatibility', position: 'left'},
         {to: '/operations', label: 'Operations', position: 'left'},
         {type: 'localeDropdown', position: 'right'},
+        {
+          href: 'https://github.com/krakenalt/gigaloom',
+          label: 'GigaLoom',
+          position: 'right',
+        },
         {
           href: 'https://github.com/ai-forever/gpt2giga',
           label: 'GitHub',
@@ -116,6 +121,7 @@ const config: Config = {
           items: [
             {label: 'GitHub', href: 'https://github.com/ai-forever/gpt2giga'},
             {label: 'Examples', href: 'https://github.com/ai-forever/gpt2giga/tree/main/examples'},
+            {label: 'GigaLoom workbench', href: 'https://github.com/krakenalt/gigaloom'},
           ],
         },
       ],

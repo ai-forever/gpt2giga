@@ -6,14 +6,18 @@
 [![GitHub Repo stars](https://img.shields.io/github/stars/ai-forever/gpt2giga?style=flat-square)](https://star-history.com/#ai-forever/gpt2giga)
 [![GitHub Open Issues](https://img.shields.io/github/issues-raw/ai-forever/gpt2giga?style=flat-square)](https://github.com/ai-forever/gpt2giga/issues)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-111827?style=flat-square)](https://ai-forever.github.io/gpt2giga/)
-[![Telegram](https://img.shields.io/badge/Maintainer-chat-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/krakenalt)
-[![Telegram Group](https://img.shields.io/badge/GigaChain-group-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/+7owoBivn9xY3NWYy)
+[![GigaLoom](https://img.shields.io/badge/agentic_workbench-GigaLoom-7c3aed?style=flat-square)](https://github.com/krakenalt/gigaloom)
 
-![Coverage](./badges/coverage.svg)
+![Gateway coverage](./badges/coverage.svg)
 
 `gpt2giga` — FastAPI-прокси, который принимает OpenAI-, Anthropic- и Gemini-like запросы и отправляет их в GigaChat. Он нужен, когда клиент, редактор, агентный фреймворк или SDK умеет работать с OpenAI/Anthropic/Gemini API, а реальный backend должен быть GigaChat.
 
 Локальный адрес по умолчанию: `http://localhost:8090`.
+
+> GigaLoom, локальный agentic workbench и бывший Unified Harness, развивается
+> отдельно в [`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom).
+> Этот репозиторий и пакет `gpt2giga` содержат только compatibility gateway.
+> Старые ссылки собраны в [уведомлении о переносе](./docs/gigaloom-migration.md).
 
 ## Зачем Нужен
 
@@ -124,6 +128,7 @@ make docs-dev-ru
 | Редакторы, агенты, SDK examples, reverse proxies | [docs/integrations.md](./docs/integrations.md) |
 | Runnable-примеры | [examples/README.md](./examples/README.md) |
 | История изменений gateway | [RU](./packages/gpt2giga/CHANGELOG.md) · [EN](./packages/gpt2giga/CHANGELOG_en.md) |
+| GigaLoom и старые Harness URL | [Уведомление о переносе](./docs/gigaloom-migration.md) |
 
 ## Текущая API-Поверхность
 

@@ -14,6 +14,11 @@
 - **Gemini bridge contracts**: function calls/results, JSON Schema output, typed inline image references, streaming, usage, safety errors, model discovery и `countTokens` закреплены golden fixtures и общей normalized моделью.
 
 ### Изменено
+- **Разделение репозиториев**: source-репозиторий, сайт документации,
+  automation, metadata пакета и coverage baseline теперь описывают только
+  compatibility gateway `gpt2giga`. GigaLoom (ранее Unified Harness) перенесён
+  в [`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom), а старые URL
+  документации source-репозитория сохраняют уведомления о миграции.
 - **Normalized mode**: `GPT2GIGA_NORMALIZATION_MODE=on` теперь охватывает принятый Anthropic Messages v1 subset и Gemini token counting; неактивный `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` удалён.
 - **Runtime dependencies**: `httpx` объявлен прямой зависимостью gateway для OpenAI-compatible upstream transport.
 
