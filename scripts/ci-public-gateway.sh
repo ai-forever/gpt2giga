@@ -34,11 +34,11 @@ assert "sources" not in metadata.get("tool", {}).get("uv", {})
 packages = {package["name"]: package for package in lock["package"]}
 assert packages["gpt2giga"]["version"] == expected_version
 assert packages["gpt2giga"]["source"] == {"registry": "https://pypi.org/simple"}
-assert packages["gpt2giga-harness"]["source"] == {
+assert packages["gigaloom"]["source"] == {
     "editable": "packages/gpt2giga-harness"
 }
 for name, package in packages.items():
-    if name == "gpt2giga-harness":
+    if name == "gigaloom":
         continue
     assert package["source"] == {"registry": "https://pypi.org/simple"}, (
         name,

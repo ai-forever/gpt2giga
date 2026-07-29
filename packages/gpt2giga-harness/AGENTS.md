@@ -62,7 +62,7 @@ npm --prefix packages/gpt2giga-harness/frontend run build
 ./scripts/ci-base.sh ruff-check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness
 ./scripts/ci-base.sh ruff-format-check packages/gpt2giga-harness/src/gpt2giga_harness tests/harness
 ./scripts/ci-base.sh pytest tests/harness -q
-uv build --package gpt2giga-harness --no-sources
+uv build --package gigaloom --no-sources
 ```
 
 `uv run giga doctor` is an environment smoke check, not a hermetic quality

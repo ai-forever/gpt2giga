@@ -59,7 +59,7 @@ def build_worker_fingerprint(registry: HarnessRegistry) -> dict[str, Any]:
         "machine": platform.machine(),
         "python": platform.python_version(),
         "gpt2giga": _distribution_version("gpt2giga"),
-        "gpt2giga_harness": _distribution_version("gpt2giga-harness"),
+        "gpt2giga_harness": _distribution_version("gigaloom"),
         "harnesses": harnesses,
     }
 

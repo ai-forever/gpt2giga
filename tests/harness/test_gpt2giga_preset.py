@@ -46,7 +46,7 @@ def test_optional_preset_loader_fails_with_bounded_install_guidance(monkeypatch)
         require_gpt2giga_preset()
 
     assert str(caught.value) == (
-        "optional gpt2giga preset is unavailable; install gpt2giga-harness[gpt2giga]"
+        "optional gpt2giga preset is unavailable; install gigaloom[gpt2giga]"
     )
 
 

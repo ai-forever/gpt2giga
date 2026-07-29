@@ -222,7 +222,7 @@ def test_cockpit_v2_manifest_failure_has_package_recovery_guidance(
     assert failed.json() == {
         "detail": (
             "Cockpit packaged assets are unavailable. Reinstall the "
-            "gpt2giga-harness package or restore its verified build artifact."
+            "gigaloom package or restore its verified build artifact."
         )
     }
     assert client.get("/legacy", follow_redirects=False).status_code == 404

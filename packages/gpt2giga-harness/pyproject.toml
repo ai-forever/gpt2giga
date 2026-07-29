@@ -1,5 +1,5 @@
 [project]
-name = "gpt2giga-harness"
+name = "gigaloom"
 version = "0.5.1a1"
 description = "GigaLoom local, provider-neutral control plane for coding agents"
 authors = [{ name = "Ruslan Yakupov", email = "rusyak1999@gmail.com" }]

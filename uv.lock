@@ -12,7 +12,7 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "gpt2giga-harness",
+    "gigaloom",
 ]
 
 [manifest.dependency-groups]
@@ -922,6 +922,50 @@ wheels = [
 ]
 
 [[package]]
+name = "gigaloom"
+version = "0.5.1a1"
+source = { editable = "packages/gpt2giga-harness" }
+dependencies = [
+    { name = "anyio" },
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "python-dateutil" },
+    { name = "pyyaml" },
+    { name = "starlette" },
+    { name = "textual" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "uvicorn" },
+]
+
+[package.optional-dependencies]
+claude-sdk = [
+    { name = "claude-agent-sdk" },
+]
+gpt2giga = [
+    { name = "gigachat" },
+    { name = "gpt2giga" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyio", specifier = ">=4.10,<5" },
+    { name = "claude-agent-sdk", marker = "extra == 'claude-sdk'", specifier = ">=0.2.122,<0.3" },
+    { name = "fastapi", specifier = ">=0.133.0,<1" },
+    { name = "gigachat", marker = "extra == 'gpt2giga'", specifier = ">=0.2.2a1,<0.3.0" },
+    { name = "gpt2giga", marker = "extra == 'gpt2giga'", specifier = "==0.2.6a1" },
+    { name = "pydantic", specifier = ">=2.12.0,<3" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.12.0,<3" },
+    { name = "python-dateutil", specifier = ">=2.9.0,<3" },
+    { name = "pyyaml", specifier = ">=6.0,<7" },
+    { name = "starlette", specifier = ">=1.1,<2" },
+    { name = "textual", specifier = ">=8.2.8,<9" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0,<3" },
+    { name = "uvicorn", specifier = ">=0.41.0,<1" },
+]
+provides-extras = ["gpt2giga", "claude-sdk"]
+
+[[package]]
 name = "google-auth"
 version = "2.56.2"
 source = { registry = "https://pypi.org/simple" }
@@ -986,50 +1030,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/78/06/545e9e3dfee97838d
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/fb/529983226a416d04a2b3eac0f7b0ee4724deaf90066c0b813a307975032f/gpt2giga-0.2.6a1-py3-none-any.whl", hash = "sha256:dbff94acd5837182942599cee4c7c0686d571574a02733e5680bd143d3d1bcd9", size = 296270, upload-time = "2026-07-29T08:42:15.458Z" },
 ]
-
-[[package]]
-name = "gpt2giga-harness"
-version = "0.5.1a1"
-source = { editable = "packages/gpt2giga-harness" }
-dependencies = [
-    { name = "anyio" },
-    { name = "fastapi" },
-    { name = "pydantic" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "python-dateutil" },
-    { name = "pyyaml" },
-    { name = "starlette" },
-    { name = "textual" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
-    { name = "uvicorn" },
-]
-
-[package.optional-dependencies]
-claude-sdk = [
-    { name = "claude-agent-sdk" },
-]
-gpt2giga = [
-    { name = "gigachat" },
-    { name = "gpt2giga" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anyio", specifier = ">=4.10,<5" },
-    { name = "claude-agent-sdk", marker = "extra == 'claude-sdk'", specifier = ">=0.2.122,<0.3" },
-    { name = "fastapi", specifier = ">=0.133.0,<1" },
-    { name = "gigachat", marker = "extra == 'gpt2giga'", specifier = ">=0.2.2a1,<0.3.0" },
-    { name = "gpt2giga", marker = "extra == 'gpt2giga'", specifier = "==0.2.6a1" },
-    { name = "pydantic", specifier = ">=2.12.0,<3" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.12.0,<3" },
-    { name = "python-dateutil", specifier = ">=2.9.0,<3" },
-    { name = "pyyaml", specifier = ">=6.0,<7" },
-    { name = "starlette", specifier = ">=1.1,<2" },
-    { name = "textual", specifier = ">=8.2.8,<9" },
-    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0,<3" },
-    { name = "uvicorn", specifier = ">=0.41.0,<1" },
-]
-provides-extras = ["gpt2giga", "claude-sdk"]
 
 [[package]]
 name = "griffelib"

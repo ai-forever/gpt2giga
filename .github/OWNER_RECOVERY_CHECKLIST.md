@@ -13,7 +13,7 @@ repository.
       private vulnerability reports.
 - [ ] Default workflow token permission is read-only and Actions cannot approve
       pull requests.
-- [ ] `protect-main` and `protect-gpt2giga-harness-release-tags` match
+- [ ] `protect-main` and `protect-gigaloom-release-tags` match
       `.github/repository-policy.json`.
 - [ ] Required checks exactly match the successful job names emitted by
       `.github/workflows/ci.yaml`.
@@ -30,10 +30,11 @@ repository.
       named `primary-pypi-owner` role; no GitHub-to-PyPI username inference is
       used.
 - [ ] A human account distinct from the primary owner has accepted the named
-      `backup-pypi-owner` role for `gpt2giga-harness`.
+      `backup-pypi-owner` role for `gigaloom`.
 - [ ] The backup PyPI owner has 2FA enabled.
-- [ ] The Trusted Publisher binding names only `krakenalt/gigaloom`, the exact
-      publish workflow, and the protected release environment.
+- [ ] The pending Trusted Publisher names PyPI project `gigaloom` and binds
+      only `krakenalt/gigaloom`, the exact publish workflow, and the protected
+      release environment.
 - [ ] Manual workflow dispatch cannot publish.
 - [ ] The source workflow is incapable of publishing before the target
       publisher is used.

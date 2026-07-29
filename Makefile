@@ -21,7 +21,7 @@ test:
 	./scripts/ci-base.sh pytest tests/harness --cov=. --cov-report=term --cov-fail-under=80
 
 build: frontend-assets
-	UV_CACHE_DIR=$(UV_CACHE_DIR) uv build --package gpt2giga-harness --no-sources
+	UV_CACHE_DIR=$(UV_CACHE_DIR) uv build --package gigaloom --no-sources
 
 public-gateway: sync-all-extras
 	./scripts/ci-public-gateway.sh

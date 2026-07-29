@@ -84,10 +84,7 @@ def test_cli_version_reports_distribution_version(capsys):
         cli.main(["--version"])
 
     assert raised.value.code == 0
-    assert (
-        capsys.readouterr().out
-        == f"GigaLoom {version('gpt2giga-harness')} (gpt2giga-harness)\n"
-    )
+    assert capsys.readouterr().out == f"GigaLoom {version('gigaloom')} (gigaloom)\n"
 
 
 @pytest.mark.parametrize("shell", ("bash", "zsh", "fish", "powershell"))
@@ -110,10 +107,7 @@ def test_console_entrypoint_reports_version_without_importing_full_cli(
     assert entrypoint.main(["--version"]) == 0
 
     assert "gpt2giga_harness.cli" not in sys.modules
-    assert (
-        capsys.readouterr().out
-        == f"GigaLoom {version('gpt2giga-harness')} (gpt2giga-harness)\n"
-    )
+    assert capsys.readouterr().out == f"GigaLoom {version('gigaloom')} (gigaloom)\n"
 
 
 def test_cli_ui_starts_and_stops_worker_when_none_is_online(

@@ -25,7 +25,7 @@ work merely because it is present in the checkout.
 ## Repository contract
 
 - This is the standalone GigaLoom repository and a one-member `uv` workspace.
-- `packages/gpt2giga-harness/` owns the `gpt2giga-harness` distribution and
+- `packages/gpt2giga-harness/` owns the `gigaloom` distribution and
   `gpt2giga_harness` Python namespace.
 - The base distribution must install, test, and build without a gateway source
   checkout.
@@ -105,7 +105,7 @@ Repository quality gate:
 Standalone package build:
 
 ```bash
-uv build --package gpt2giga-harness --no-sources
+uv build --package gigaloom --no-sources
 ```
 
 Documentation build:

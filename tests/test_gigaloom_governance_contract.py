@@ -174,8 +174,8 @@ def test_ruleset_checks_match_the_always_running_quality_workflow():
     assert main_ruleset["require_last_push_approval"] is True
 
     tag_ruleset = policy["rulesets"]["release_tags"]
-    assert tag_ruleset["name"] == "protect-gpt2giga-harness-release-tags"
-    assert tag_ruleset["target"] == "refs/tags/gpt2giga-harness-v*"
+    assert tag_ruleset["name"] == "protect-gigaloom-release-tags"
+    assert tag_ruleset["target"] == "refs/tags/gigaloom-v*"
     assert tag_ruleset["restrict_creation"] is True
     assert tag_ruleset["restrict_updates"] is True
 

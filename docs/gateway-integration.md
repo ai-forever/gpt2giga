@@ -7,7 +7,7 @@ Install the optional released integration only when using Direct Chat or the
 legacy local-gateway preset:
 
 ```sh
-uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom[gpt2giga]==0.5.1a1'
 ```
 
 This extra pins the reviewed public `gpt2giga` distribution. Candidate testing

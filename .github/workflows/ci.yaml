@@ -179,7 +179,7 @@ jobs:
         run: ./scripts/ci-base.sh sync
 
       - name: Build standalone wheel and sdist
-        run: uv build --package gpt2giga-harness --wheel --sdist --no-sources --out-dir dist/gigaloom
+        run: uv build --package gigaloom --wheel --sdist --no-sources --out-dir dist/gigaloom
 
       - name: Verify base isolation and installed artifact evidence
         run: >-
@@ -193,7 +193,7 @@ jobs:
       - name: Upload standalone distribution
         uses: actions/upload-artifact@v7
         with:
-          name: gpt2giga-harness-${{ github.sha }}
+          name: gigaloom-${{ github.sha }}
           path: dist/gigaloom/*
           if-no-files-found: error
           retention-days: 7
@@ -234,13 +234,13 @@ jobs:
 
       - name: Build and install standard wheel
         run: |
-          uv build --package gpt2giga-harness --wheel --no-sources --out-dir dist/terminal
+          uv build --package gigaloom --wheel --no-sources --out-dir dist/terminal
           uv venv --python ${{ matrix.python-version }} .venv-terminal
-          uv pip install --python .venv-terminal dist/terminal/gpt2giga_harness-*.whl
+          uv pip install --python .venv-terminal dist/terminal/gigaloom-*.whl
 
       - name: Smoke terminal dispatch and CLI
         run: |
-          uv run --python .venv-terminal --no-project python -I -c "import importlib.metadata as m; assert any(r.casefold().startswith('textual') for r in m.requires('gpt2giga-harness')); assert all(x != 'tui' for x in (m.metadata('gpt2giga-harness').get_all('Provides-Extra') or ()))"
+          uv run --python .venv-terminal --no-project python -I -c "import importlib.metadata as m; assert any(r.casefold().startswith('textual') for r in m.requires('gigaloom')); assert all(x != 'tui' for x in (m.metadata('gigaloom').get_all('Provides-Extra') or ()))"
           uv run --python .venv-terminal --no-project python -I -c "from gpt2giga_harness.terminal_dispatch import TerminalContext, plan_terminal_dispatch; from gpt2giga_harness.terminal_intent import parse_tui_launch_intent; p=plan_terminal_dispatch(('run','--agent','codex','inspect'), context=TerminalContext(True,True,True,'xterm-256color')); i,_=parse_tui_launch_intent(('run','--agent','codex','inspect')); assert p.initialize_textual and i.harness_id == 'codex-cli' and i.prompt == 'inspect'"
           uv run --python .venv-terminal --no-project giga --help
           uv run --python .venv-terminal --no-project giga --version
@@ -248,11 +248,11 @@ jobs:
 
       - name: Smoke reinstall, rollback, and uninstall mechanics
         run: |
-          uv pip install --python .venv-terminal --reinstall dist/terminal/gpt2giga_harness-*.whl
-          uv pip uninstall --python .venv-terminal gpt2giga-harness
-          uv pip install --python .venv-terminal dist/terminal/gpt2giga_harness-*.whl
+          uv pip install --python .venv-terminal --reinstall dist/terminal/gigaloom-*.whl
+          uv pip uninstall --python .venv-terminal gigaloom
+          uv pip install --python .venv-terminal dist/terminal/gigaloom-*.whl
           uv run --python .venv-terminal --no-project giga --version
-          uv pip uninstall --python .venv-terminal gpt2giga-harness
+          uv pip uninstall --python .venv-terminal gigaloom
           uv run --python .venv-terminal --no-project python -I -c "import importlib.util; assert importlib.util.find_spec('gpt2giga_harness') is None"
 
   performance:

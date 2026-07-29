@@ -165,7 +165,7 @@ name = "{distribution}"
 version = "0.1.0"
 description = "Out-of-tree provider-neutral Harness adapter"
 requires-python = ">=3.10,<4"
-dependencies = ["gpt2giga-harness>=0.1.0b1,<0.2"]
+dependencies = ["gigaloom>=0.5.1a1,<0.6"]
 
 [project.entry-points."agent_workbench.harness_adapters.v1"]
 {adapter_id} = "{entry_point}"

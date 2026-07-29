@@ -12,7 +12,7 @@ contracts below.
 | Repository administration, rulesets, Actions and incidents | [`@krakenalt`](https://github.com/krakenalt) | `backup-github-maintainer` | A distinct GitHub account must accept admin access and enable 2FA before S5-02. |
 | Vulnerability intake and coordinated disclosure | [`@krakenalt`](https://github.com/krakenalt) | `backup-github-maintainer` | Private vulnerability reporting and backup access must both be verified before public use. |
 | Release approval, tags and GitHub Releases | [`@krakenalt`](https://github.com/krakenalt) | `backup-github-maintainer` | The main and release-tag rulesets must be active before the first tag. |
-| PyPI project ownership and compromised-publisher recovery | Ruslan Yakupov (`primary-pypi-owner`; exact service account verified at S5-04) | `backup-pypi-owner` | A distinct PyPI owner must accept the invitation and enable 2FA before S5-04. |
+| PyPI `gigaloom` project ownership and compromised-publisher recovery | Ruslan Yakupov (`primary-pypi-owner`; exact service account verified at S5-04) | `backup-pypi-owner` | A distinct PyPI owner must accept the invitation and enable 2FA before S5-04. |
 | Documentation, triage and ordinary maintenance | [`@krakenalt`](https://github.com/krakenalt) | `backup-github-maintainer` | Backup acceptance is required before public cutover. |
 
 The backup names above are stable governance roles, not claims that an

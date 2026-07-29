@@ -962,7 +962,7 @@ def _first_present(value: Mapping[str, Any], *keys: str) -> Any:
 
 def _adapter_version() -> str:
     try:
-        value = metadata.version("gpt2giga-harness")
+        value = metadata.version("gigaloom")
     except metadata.PackageNotFoundError:
         value = "unknown"
     return str(value).strip() or "unknown"

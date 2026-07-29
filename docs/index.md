@@ -38,5 +38,5 @@ contracts, linked from [Gateway integration](gateway-integration.md).
 
 - [Source, issues, and releases](https://github.com/krakenalt/gigaloom)
 - [Published documentation](https://krakenalt.github.io/gigaloom/)
-- [Package](https://pypi.org/project/gpt2giga-harness/)
+- [Package](https://pypi.org/project/gigaloom/)
 - Historical extraction context: [Source history](source-history.md)

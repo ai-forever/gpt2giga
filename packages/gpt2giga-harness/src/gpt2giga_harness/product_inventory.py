@@ -130,7 +130,7 @@ def build_product_inventory(
         "kind": PRODUCT_INVENTORY_KIND,
         "product": {
             "name": "GigaLoom",
-            "distribution": "gpt2giga-harness",
+            "distribution": "gigaloom",
             "version": __version__,
             "repository": "https://github.com/krakenalt/gigaloom",
         },
@@ -139,7 +139,7 @@ def build_product_inventory(
             "product_capabilities.capability_manifest",
             "HarnessRegistry.with_builtins",
             "ProviderCompatibilityRegistry.with_builtins",
-            "installed gpt2giga-harness entry points",
+            "installed GigaLoom entry points",
             "cli.build_parser",
             "tui.commands.COMMAND_REGISTRY",
             "ui.app.create_app routes",
@@ -343,7 +343,7 @@ def _distribution_entry_points() -> list[dict[str, str]]:
         PROVIDER_ADAPTER_ENTRY_POINTS.primary_group,
     }
     try:
-        distribution = metadata.distribution("gpt2giga-harness")
+        distribution = metadata.distribution("gigaloom")
     except metadata.PackageNotFoundError:
         return []
     return [

@@ -680,7 +680,7 @@
       }
     ]
   },
-  "content_sha256": "5e49ab5b435faf1a8af8e792dc7126559f189a059216e1bf7b9805db5c2288cf",
+  "content_sha256": "3a6d3ce9dec81322c49784e31b95fb894824d15fe14136a6e858bca8099cb852",
   "contract_tests": [
     "tests/harness/test_capability_matrix.py",
     "tests/harness/test_cli_capabilities.py",
@@ -2534,7 +2534,7 @@
     ]
   },
   "product": {
-    "distribution": "gpt2giga-harness",
+    "distribution": "gigaloom",
     "name": "GigaLoom",
     "repository": "https://github.com/krakenalt/gigaloom",
     "version": "0.5.1a1"
@@ -2900,7 +2900,7 @@
     "product_capabilities.capability_manifest",
     "HarnessRegistry.with_builtins",
     "ProviderCompatibilityRegistry.with_builtins",
-    "installed gpt2giga-harness entry points",
+    "installed GigaLoom entry points",
     "cli.build_parser",
     "tui.commands.COMMAND_REGISTRY",
     "ui.app.create_app routes",

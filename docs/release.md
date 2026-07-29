@@ -1,7 +1,7 @@
 # Release
 
-GigaLoom releases the `gpt2giga-harness` distribution from exact tags shaped
-as `gpt2giga-harness-vX.Y.Z`.
+GigaLoom releases the `gigaloom` distribution from exact tags shaped as
+`gigaloom-vX.Y.Z`.
 
 ## Maintainer checklist
 
@@ -14,7 +14,9 @@ as `gpt2giga-harness-vX.Y.Z`.
 5. Verify package metadata, included assets, checksums, and isolated install.
 6. Ensure the release commit is on `main` and the documented main/tag rulesets
    are active.
-7. Create the exact immutable tag only after external publication prerequisites
+7. Confirm the pending Trusted Publisher names the exact PyPI project
+   `gigaloom`, workflow, repository, and protected environment.
+8. Create the exact immutable tag only after external publication prerequisites
    are authorized and ready.
 
 The release workflow validates repository identity, tag/version agreement,

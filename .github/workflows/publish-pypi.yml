@@ -65,12 +65,12 @@ jobs:
             curl --proto '=https' --tlsv1.2 \
               --output /dev/null --silent --show-error \
               --write-out '%{http_code}' \
-              "https://pypi.org/pypi/gpt2giga-harness/${RELEASE_VERSION}/json"
+              "https://pypi.org/pypi/gigaloom/${RELEASE_VERSION}/json"
           )"
           case "${status}" in
             404) ;;
             200)
-              echo "gpt2giga-harness ${RELEASE_VERSION} already exists on PyPI" >&2
+              echo "gigaloom ${RELEASE_VERSION} already exists on PyPI" >&2
               exit 1
               ;;
             *)
@@ -149,7 +149,7 @@ jobs:
 
       - name: Build target-only wheel and sdist
         run: >-
-          uv build --package gpt2giga-harness --wheel --sdist --no-sources
+          uv build --package gigaloom --wheel --sdist --no-sources
           --out-dir dist/gigaloom
 
       - name: Verify artifacts, assets, SBOM, licenses, and hashes
@@ -158,8 +158,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(find dist/gigaloom -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' \) | wc -l | tr -d ' ')" = "2"
-          test "$(find dist/gigaloom -maxdepth 1 -type f -name "gpt2giga_harness-${RELEASE_VERSION}-*.whl" | wc -l | tr -d ' ')" = "1"
-          test "$(find dist/gigaloom -maxdepth 1 -type f -name "gpt2giga_harness-${RELEASE_VERSION}.tar.gz" | wc -l | tr -d ' ')" = "1"
+          test "$(find dist/gigaloom -maxdepth 1 -type f -name "gigaloom-${RELEASE_VERSION}-*.whl" | wc -l | tr -d ' ')" = "1"
+          test "$(find dist/gigaloom -maxdepth 1 -type f -name "gigaloom-${RELEASE_VERSION}.tar.gz" | wc -l | tr -d ' ')" = "1"
           python3 packages/gpt2giga-harness/asset_contract.py --require-clean
           cp packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/_build/sbom.cdx.json dist/gigaloom/
           cp packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/_build/licenses.json dist/gigaloom/

@@ -2,7 +2,7 @@
 
 :::warning[Альфа-превью — prerelease]
 
-Линейка `gpt2giga-harness` 0.5.x — alpha-preview для тестирования и обратной
+Линейка `gigaloom` 0.5.x — alpha-preview для тестирования и обратной
 связи. UI, CLI, YAML-файлы проекта, схема runtime-хранилища и процесс обновления
 могут меняться. Используйте Harness локально, для контролируемой работы под
 наблюдением, а не как критичный production-сервис или удалённую multi-user
@@ -16,8 +16,9 @@ Gemini CLI или plugin harness, сравнить результаты, раз�
 решить, какие изменения разрешено вернуть в проект.
 
 В Web UI, TUI и человекочитаемом выводе CLI продукт называется
-**GigaLoom**. Команда `giga` и имя дистрибутива `gpt2giga-harness` сохранены
-для совместимости.
+**GigaLoom**. Дистрибутив называется `gigaloom`; namespace
+`gpt2giga_harness` и команды `giga` и `gpt2giga-harness` сохранены для
+совместимости.
 
 ### Визуальная идентичность и политика иконок
 
@@ -120,8 +121,8 @@ Node.js runtime, credentials или provider config. `uv tool` и `pipx` соз�
 изолированное окружение Harness:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.5.1a1'
-pipx install 'gpt2giga-harness==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a1'
+pipx install 'gigaloom==0.5.1a1'
 ```
 
 Существующий prerelease с optional TUI обновляйте на месте без extra `[tui]`.
@@ -131,10 +132,10 @@ pipx install 'gpt2giga-harness==0.5.1a1'
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool install --force 'gpt2giga-harness==0.5.1a1'
-uv tool install --force 'gpt2giga-harness==<previous-version>'
-uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.5.1a1'
+uv tool install --force 'gigaloom==0.5.1a1'
+uv tool install --force 'gpt2giga-harness==0.5.0a1'
+uv tool uninstall gigaloom
+uv tool install 'gigaloom==0.5.1a1'
 ```
 
 Удаление пакета не удаляет `~/.gpt2giga/harness`, проектные `.giga/` или
@@ -193,17 +194,17 @@ giga harness list
 короткий вариант:
 
 ```bash
-uv tool install 'gpt2giga-harness==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a1'
 giga doctor
 ```
 
 Для Direct Chat и provider preset `gpt2giga` установите явный extra:
 
 ```bash
-uv tool install 'gpt2giga-harness[gpt2giga]==0.5.1a1'
+uv tool install 'gigaloom[gpt2giga]==0.5.1a1'
 ```
 
-Текущий дистрибутив `gpt2giga-harness==0.5.1a1` добавляет команды `giga` и
+Текущий дистрибутив `gigaloom==0.5.1a1` добавляет команды `giga` и
 `gpt2giga-harness`; его явный extra `gpt2giga` закрепляет
 `gpt2giga==0.2.6a1`.
 
@@ -269,15 +270,16 @@ bytes, exit code и разделение stdout/stderr CLI.
 пакет и удалите `[tui]` из команд установки:
 
 ```bash
-uv tool install --force 'gpt2giga-harness==0.5.1a1'
+uv tool install --force 'gigaloom==0.5.1a1'
 giga --version
 giga
 ```
 
-Для rollback установите точную ранее проверенную версию: `uv tool install
---force 'gpt2giga-harness==<previous-version>'`. Команда `uv tool uninstall
-gpt2giga-harness` удаляет пакет и команды, но не удаляет пользовательские
-runtime-данные Harness.
+Для первого release с новым именем rollback использует последний проверенный
+исторический artifact: `uv tool install --force
+'gpt2giga-harness==0.5.0a1'`. Последующие версии `gigaloom` откатываются на
+точную предыдущую версию `gigaloom`. Команда `uv tool uninstall gigaloom`
+удаляет пакет и команды, но не удаляет пользовательские runtime-данные Harness.
 
 ### 2. Инициализируйте тестовый проект
 
@@ -1692,11 +1694,11 @@ project state:
 ```bash
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a1'
 giga doctor
 ```
 
-Текущая metadata `gpt2giga-harness==0.5.1a1` сохраняет
+Текущая metadata `gigaloom==0.5.1a1` сохраняет
 `gpt2giga==0.2.6a1` в явном optional extra `gpt2giga`. Старый import
 `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не

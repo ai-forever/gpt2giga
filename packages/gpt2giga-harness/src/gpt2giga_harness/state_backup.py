@@ -806,6 +806,6 @@ def _canonical_json(value: object) -> bytes:
 
 def _harness_version() -> str:
     try:
-        return version("gpt2giga-harness")
+        return version("gigaloom")
     except PackageNotFoundError:
         return "unknown"

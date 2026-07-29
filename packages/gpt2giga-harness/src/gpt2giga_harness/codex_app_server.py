@@ -2408,7 +2408,7 @@ def _structured_link_id(session_id: str) -> str:
 
 def _adapter_version() -> str:
     try:
-        value = metadata.version("gpt2giga-harness")
+        value = metadata.version("gigaloom")
     except metadata.PackageNotFoundError:
         value = "unknown"
     return _driver_version(value)

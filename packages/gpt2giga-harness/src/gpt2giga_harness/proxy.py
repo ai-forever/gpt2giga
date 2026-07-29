@@ -374,7 +374,7 @@ def sidecar_preflight(context: HarnessContext) -> SidecarPreflight:
             ok=False,
             reason=(
                 "optional gpt2giga preset is not installed; install "
-                f"gpt2giga-harness[{GPT2GIGA_PRESET_EXTRA}]"
+                f"gigaloom[{GPT2GIGA_PRESET_EXTRA}]"
             ),
         )
     if not _has_upstream_credentials(os.environ):

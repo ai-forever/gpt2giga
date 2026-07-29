@@ -149,7 +149,7 @@ def build_doctor_report(
         "environment": {
             "packages": {
                 "gpt2giga": _package_version("gpt2giga"),
-                "gpt2giga-harness": _package_version("gpt2giga-harness"),
+                "gigaloom": _package_version("gigaloom"),
             },
             "python": {
                 "implementation": platform.python_implementation(),

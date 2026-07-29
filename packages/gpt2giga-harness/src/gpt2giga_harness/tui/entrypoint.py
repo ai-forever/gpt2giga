@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"GigaLoom {__version__} (gpt2giga-harness)",
+        version=f"GigaLoom {__version__} (gigaloom)",
     )
     parser.add_argument("--workspace", default=None)
     parser.add_argument("--session", dest="session_id", default=None)
@@ -66,7 +66,7 @@ def main(
     """Run the built-in TUI or report an incomplete installation."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments == ["--version"]:
-        print(f"GigaLoom {__version__} (gpt2giga-harness)")
+        print(f"GigaLoom {__version__} (gigaloom)")
         return 0
     args = build_parser().parse_args(arguments)
     with _presentation_environment(
@@ -79,7 +79,7 @@ def main(
             if exc.name == "textual":
                 print(
                     "The standard Harness installation is incomplete: Textual is "
-                    "missing. Reinstall 'gpt2giga-harness' and retry.",
+                    "missing. Reinstall 'gigaloom' and retry.",
                     file=sys.stderr,
                 )
                 return 2
