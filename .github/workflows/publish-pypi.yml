@@ -97,8 +97,31 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  publish:
+    name: Gateway release / protected PyPI upload
+    needs: [metadata, build]
+    if: needs.metadata.outputs.mode == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    environment:
+      name: pypi-gateway
+
+    steps:
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Download attested gateway artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: gateway-release-${{ needs.metadata.outputs.version }}
+          path: dist
+
       - name: Publish gateway to PyPI
-        if: needs.metadata.outputs.mode == 'publish'
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_API_KEY }}
-        run: uv publish --token "${PYPI_TOKEN}" dist/gpt2giga/*
+        run: >-
+          uv publish --token "${PYPI_TOKEN}"
+          dist/gpt2giga/*.whl
+          dist/gpt2giga/*.tar.gz
