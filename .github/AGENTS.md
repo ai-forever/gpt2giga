@@ -8,14 +8,15 @@ their behavior deliberately and verify claims against the YAML itself.
 
 ## Invariants
 
-- Keep the CI Python matrix aligned with both package `requires-python`
-  declarations. CI must continue to run Ruff check, Ruff format check, pytest
-  coverage, both member builds, and installed-artifact smoke checks.
+- Keep the CI Python matrix aligned with the gateway `requires-python`
+  declaration. CI must continue to run Ruff check, Ruff format check, pytest
+  coverage, the gateway wheel/sdist build, and installed-artifact smoke checks.
 - Keep the production Docker image gateway-only. Harness commands, namespace,
   dependencies, and UI assets must not enter `Dockerfile` or Docker workflows.
-- Treat `publish-pypi.yml` package selection, tag filters, attestations, and
-  manual-dispatch behavior as release policy. Do not widen publishing scope or
-  trigger a release as part of validation.
+- Treat `publish-pypi.yml` and `scripts/gateway_release_guard.py` as the
+  gateway-only release policy. The only publishing tag is the exact
+  `v<gateway-version>` tag; manual dispatch builds and attests without
+  publishing.
 - Minimize `permissions:`; never expose secrets to untrusted pull-request code
   or print secret values.
 - Keep action versions explicit. Review third-party actions and permission
@@ -38,6 +39,6 @@ their behavior deliberately and verify claims against the YAML itself.
 - Run the exact local commands represented by a changed workflow when feasible.
 - Run `actionlint` if it is installed; otherwise inspect the complete workflow
   diff and rely on repository contract tests plus GitHub validation.
-- For release or packaging changes, run the full root quality gate, both
-  `--no-sources` package builds, and the relevant package-isolation tests.
+- For release or packaging changes, run the full root quality gate, the gateway
+  `--no-sources` build, and the relevant package-isolation tests.
 - For docs workflow changes, run `npm --prefix docs-site run build`.

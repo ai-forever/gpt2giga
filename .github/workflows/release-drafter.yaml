@@ -1,4 +1,4 @@
-name: Update release draft
+name: Gateway release draft
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   update-release-draft:
-    name: Refresh release notes
+    name: Gateway release / draft notes
     runs-on: ubuntu-latest
 
     steps:

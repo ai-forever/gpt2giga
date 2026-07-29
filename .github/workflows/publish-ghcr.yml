@@ -21,7 +21,7 @@ env:
 
 jobs:
   build-and-push:
-    name: Build and push (Python ${{ matrix.python }})
+    name: Gateway GHCR / Python ${{ matrix.python }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

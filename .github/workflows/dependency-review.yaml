@@ -1,4 +1,4 @@
-name: Dependency review
+name: Gateway dependency review
 
 on:
   pull_request:
@@ -6,9 +6,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'pyproject.toml'
-      - 'packages/*/pyproject.toml'
-      - 'packages/gpt2giga-harness/frontend/package.json'
-      - 'packages/gpt2giga-harness/frontend/package-lock.json'
+      - 'packages/gpt2giga/pyproject.toml'
       - 'uv.lock'
       - 'docs-site/package.json'
       - 'docs-site/package-lock.json'
@@ -19,7 +17,7 @@ permissions:
 
 jobs:
   dependency-review:
-    name: Review dependency changes
+    name: Gateway security / dependency review
     runs-on: ubuntu-latest
     if: github.event.pull_request.draft == false
 

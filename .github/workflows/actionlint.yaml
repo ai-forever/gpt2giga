@@ -1,4 +1,4 @@
-name: Lint GitHub Actions
+name: Gateway workflow lint
 
 on:
   push:
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   actionlint:
-    name: Validate workflow files
+    name: Gateway automation / actionlint
     runs-on: ubuntu-latest
 
     steps:

@@ -14,8 +14,12 @@ env:
   REGISTRY: docker.io
   IMAGE_NAME: gigateam/gpt2giga
 
+permissions:
+  contents: read
+
 jobs:
   build-and-push:
+    name: Gateway Docker Hub / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
