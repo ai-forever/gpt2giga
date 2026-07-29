@@ -37,7 +37,7 @@ gpt2giga = "gpt2giga:run"
 
 [project.optional-dependencies]
 postgres = [
-    "asyncpg>=0.30.0,<1",
+    "asyncpg>=0.31.0,<1",
     "sqlalchemy[asyncio]>=2.0.0,<3",
     "alembic>=1.17.0,<2",
 ]
