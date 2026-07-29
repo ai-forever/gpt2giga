@@ -39,7 +39,7 @@ gpt2giga = "gpt2giga:run"
 postgres = [
     "asyncpg>=0.30.0,<1",
     "sqlalchemy[asyncio]>=2.0.0,<3",
-    "alembic>=1.17.0,<2",
+    "alembic>=1.18.5,<2",
 ]
 opensearch = [
     "opensearch-py>=2.8.0,<3",
