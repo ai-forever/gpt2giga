@@ -78,8 +78,8 @@
     "release_tags": {
       "bypass": "release_workflow_and_repository_admin_emergency_only_with_audit",
       "enforcement": "active_after_S5-02",
-      "name": "protect-gpt2giga-harness-release-tags",
-      "target": "refs/tags/gpt2giga-harness-v*",
+      "name": "protect-gigaloom-release-tags",
+      "target": "refs/tags/gigaloom-v*",
       "block_deletions": true,
       "block_force_pushes": true,
       "restrict_creation": true,

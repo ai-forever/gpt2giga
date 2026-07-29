@@ -40,7 +40,7 @@ def release_repository(tmp_path: Path) -> dict[str, str | Path]:
 
     metadata = root / "pyproject.toml"
     metadata.write_text(
-        '[project]\nname = "gpt2giga-harness"\nversion = "0.5.1a1"\n',
+        '[project]\nname = "gigaloom"\nversion = "0.5.1a1"\n',
         encoding="utf-8",
     )
     git(root, "add", "pyproject.toml")
@@ -57,14 +57,14 @@ def release_repository(tmp_path: Path) -> dict[str, str | Path]:
         json.dumps(
             {
                 "default_branch": "main",
-                "distribution": "gpt2giga-harness",
+                "distribution": "gigaloom",
                 "first_target_release": {
                     "history_floor": floor,
-                    "tag": "gpt2giga-harness-v0.5.1a1",
+                    "tag": "gigaloom-v0.5.1a1",
                     "version": "0.5.1a1",
                 },
                 "repository": "krakenalt/gigaloom",
-                "tag_prefix": "gpt2giga-harness-v",
+                "tag_prefix": "gigaloom-v",
             }
         ),
         encoding="utf-8",
@@ -72,7 +72,7 @@ def release_repository(tmp_path: Path) -> dict[str, str | Path]:
     git(root, "add", "release-policy.json")
     git(root, "commit", "-m", "release policy")
     commit = git(root, "rev-parse", "HEAD")
-    tag = "gpt2giga-harness-v0.5.1a1"
+    tag = "gigaloom-v0.5.1a1"
     git(root, "tag", tag)
     return {
         "commit": commit,
@@ -108,7 +108,7 @@ def test_release_guard_accepts_exact_release_and_main_manual_run(tmp_path: Path)
 
     assert validate(module, repository) == {
         "mode": "publish",
-        "tag": "gpt2giga-harness-v0.5.1a1",
+        "tag": "gigaloom-v0.5.1a1",
         "version": "0.5.1a1",
     }
     assert (
@@ -165,7 +165,7 @@ def test_release_guard_rejects_version_before_first_target_release(tmp_path: Pat
     module = load_release_guard_module()
     repository = release_repository(tmp_path)
     repository["metadata"].write_text(
-        '[project]\nname = "gpt2giga-harness"\nversion = "0.5.0a1"\n',
+        '[project]\nname = "gigaloom"\nversion = "0.5.0a1"\n',
         encoding="utf-8",
     )
 

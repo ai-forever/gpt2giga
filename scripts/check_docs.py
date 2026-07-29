@@ -164,6 +164,10 @@ def check_standalone_identity(root: Path, files: list[Path]) -> list[Issue]:
     issues: list[Issue] = []
     package_path = root / "packages/gpt2giga-harness/pyproject.toml"
     package = tomllib.loads(package_path.read_text(encoding="utf-8"))["project"]
+    if package.get("name") != "gigaloom":
+        issues.append(
+            Issue(package_path, "project distribution name must be 'gigaloom'")
+        )
     expected_urls = {
         "Homepage": TARGET_DOCUMENTATION,
         "Repository": TARGET_REPOSITORY,
@@ -223,6 +227,7 @@ def check_stale_instructions(root: Path, files: list[Path]) -> list[Issue]:
         "feature/unified_harness": "use the current Harness preview branch",
         "feature/harness_enrichment": "use the current Harness preview branch",
         "gpt2giga-harness==0.0.1a4": "the next Harness release is 0.1.0b1",
+        "gpt2giga-harness==0.5.1a1": "install the renamed gigaloom distribution",
         'gpt2giga==0.2.3a1"': "do not pin the previous gateway alpha in current install docs",
         'gpt2giga-harness==0.0.1"': "do not pin the pre-split Harness version",
     }

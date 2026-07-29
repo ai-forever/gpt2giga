@@ -54,7 +54,7 @@ def test_editable_gigaloom_member_resolves_to_gigaloom_source():
     assert (
         Path(gpt2giga_harness.__file__).resolve().is_relative_to(HARNESS_MEMBER / "src")
     )
-    assert importlib.metadata.version("gpt2giga-harness") == HARNESS_VERSION
+    assert importlib.metadata.version("gigaloom") == HARNESS_VERSION
 
 
 def test_gigaloom_imports_only_declared_distributions():

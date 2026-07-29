@@ -114,7 +114,7 @@ def _cockpit_unavailable(exc: CockpitV2UnavailableError) -> HTTPException:
         status_code=503,
         detail=(
             "Cockpit packaged assets are unavailable. Reinstall the "
-            "gpt2giga-harness package or restore its verified build artifact."
+            "gigaloom package or restore its verified build artifact."
         ),
     )
 

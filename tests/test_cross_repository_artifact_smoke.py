@@ -22,13 +22,11 @@ def test_target_lock_resolves_exact_gateway_from_public_registry():
     packages = _locked_packages()
     assert packages["gpt2giga"]["version"] == GATEWAY_VERSION
     assert packages["gpt2giga"]["source"] == {"registry": "https://pypi.org/simple"}
-    assert packages["gpt2giga-harness"]["source"] == {
-        "editable": "packages/gpt2giga-harness"
-    }
+    assert packages["gigaloom"]["source"] == {"editable": "packages/gpt2giga-harness"}
     assert all(
         package["source"] == {"registry": "https://pypi.org/simple"}
         for name, package in packages.items()
-        if name != "gpt2giga-harness"
+        if name != "gigaloom"
     )
 
 

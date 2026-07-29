@@ -39,5 +39,5 @@ Gateway совместимость подключается через необ�
 
 - [Исходный код, issues и releases](https://github.com/krakenalt/gigaloom)
 - [Опубликованная документация](https://krakenalt.github.io/gigaloom/)
-- [Пакет](https://pypi.org/project/gpt2giga-harness/)
+- [Пакет](https://pypi.org/project/gigaloom/)
 - Контекст извлечения: [История исходников](source-history.md)

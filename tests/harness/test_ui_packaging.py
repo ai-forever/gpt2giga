@@ -15,7 +15,7 @@ def test_packaged_ui_assets_survive_wheel_install(tmp_path):
             "uv",
             "build",
             "--package",
-            "gpt2giga-harness",
+            "gigaloom",
             "--wheel",
             "--out-dir",
             str(dist_dir),
@@ -25,7 +25,7 @@ def test_packaged_ui_assets_survive_wheel_install(tmp_path):
         capture_output=True,
         text=True,
     )
-    harness_wheel_path = next(dist_dir.glob("gpt2giga_harness-*.whl"))
+    harness_wheel_path = next(dist_dir.glob("gigaloom-*.whl"))
     installed_root = tmp_path / "installed"
     with zipfile.ZipFile(harness_wheel_path) as wheel:
         harness_members = set(wheel.namelist())
@@ -77,7 +77,7 @@ def test_harness_sdist_seals_assets_and_rebuilds_identical_node_free_wheel(tmp_p
             "uv",
             "build",
             "--package",
-            "gpt2giga-harness",
+            "gigaloom",
             "--wheel",
             "--sdist",
             "--no-sources",
@@ -89,8 +89,8 @@ def test_harness_sdist_seals_assets_and_rebuilds_identical_node_free_wheel(tmp_p
         capture_output=True,
         text=True,
     )
-    archive = next(dist_dir.glob("gpt2giga_harness-*.tar.gz"))
-    direct_wheel = next(dist_dir.glob("gpt2giga_harness-*.whl"))
+    archive = next(dist_dir.glob("gigaloom-*.tar.gz"))
+    direct_wheel = next(dist_dir.glob("gigaloom-*.whl"))
 
     with tarfile.open(archive, "r:gz") as source:
         members = source.getnames()
@@ -121,7 +121,7 @@ def test_harness_sdist_seals_assets_and_rebuilds_identical_node_free_wheel(tmp_p
         capture_output=True,
         text=True,
     )
-    rebuilt_wheel = next(rebuilt.glob("gpt2giga_harness-*.whl"))
+    rebuilt_wheel = next(rebuilt.glob("gigaloom-*.whl"))
     assert (
         hashlib.sha256(direct_wheel.read_bytes()).hexdigest()
         == hashlib.sha256(rebuilt_wheel.read_bytes()).hexdigest()

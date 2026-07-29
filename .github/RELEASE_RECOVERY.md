@@ -1,14 +1,15 @@
 # GigaLoom release recovery
 
 The release workflow is intentionally fail-closed. It accepts only a published
-GitHub release whose exact `gpt2giga-harness-v<version>` tag points at a commit
+GitHub release whose exact `gigaloom-v<version>` tag points at a commit
 on target `main` after the history floor in `release-policy.json`. Manual
 dispatch builds and attests the same artifacts but cannot publish them.
 
 The committed target lock resolves the exact optional gateway dependency from
 the public package index. Do not add a token secret, candidate artifact,
-temporary index, or publisher bypass. Trusted Publisher configuration remains
-an external S5-04 gate.
+temporary index, or publisher bypass. The pending Trusted Publisher must name
+the exact new PyPI project `gigaloom`; its configuration remains an external
+S5-04 gate.
 
 The primary release and recovery owner is `@krakenalt`. The named
 `backup-github-maintainer` and `backup-pypi-owner` roles, their distinct-account

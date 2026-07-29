@@ -1,7 +1,7 @@
 # Релиз
 
-GigaLoom выпускает дистрибутив `gpt2giga-harness` по точным тегам
-`gpt2giga-harness-vX.Y.Z`.
+GigaLoom выпускает дистрибутив `gigaloom` по точным тегам
+`gigaloom-vX.Y.Z`.
 
 ## Checklist maintainer
 

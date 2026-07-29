@@ -42,9 +42,11 @@ def test_release_workflow_is_target_only_and_manual_runs_cannot_publish():
     text = (REPOSITORY_ROOT / ".github/workflows/publish-pypi.yml").read_text(
         encoding="utf-8"
     )
-    assert "uv build --package gpt2giga-harness" in text
+    assert "uv build --package gigaloom" in text
     assert "uv build --package gpt2giga " not in text
     assert "gpt2giga-harness-v" not in text
+    assert "https://pypi.org/pypi/gigaloom/" in text
+    assert 'name "gigaloom-${RELEASE_VERSION}-*.whl"' in text
     assert "actions/attest-build-provenance@v4" in text
     assert "uv publish --trusted-publishing always" in text
     assert "assets/_build/licenses.json dist/gigaloom/" in text
@@ -63,14 +65,14 @@ def test_release_policy_freezes_target_identity_and_first_release():
     )
     assert policy == {
         "default_branch": "main",
-        "distribution": "gpt2giga-harness",
+        "distribution": "gigaloom",
         "first_target_release": {
             "history_floor": "b6983b5036a70061a3f436e6a28f9a56fcd64bdc",
-            "tag": "gpt2giga-harness-v0.5.1a1",
+            "tag": "gigaloom-v0.5.1a1",
             "version": "0.5.1a1",
         },
         "repository": "krakenalt/gigaloom",
-        "tag_prefix": "gpt2giga-harness-v",
+        "tag_prefix": "gigaloom-v",
     }
     assert (REPOSITORY_ROOT / "uv.lock").is_file()
     ignore = (REPOSITORY_ROOT / ".gitignore").read_text(encoding="utf-8")
@@ -107,7 +109,7 @@ def test_release_recovery_is_fail_closed_and_preserves_immutable_versions():
     )
     for contract in (
         "Manual\ndispatch builds and attests",
-        "Trusted Publisher configuration remains",
+        "pending Trusted Publisher must name",
         "Published versions are immutable",
         "do not rerun publication",
         "previous deployment",

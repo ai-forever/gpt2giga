@@ -1114,7 +1114,7 @@ def _legacy_protocol(harness_id: str) -> ProviderProtocol:
 
 def _adapter_version() -> str:
     try:
-        value = metadata.version("gpt2giga-harness")
+        value = metadata.version("gigaloom")
     except metadata.PackageNotFoundError:
         return "source"
     return value.strip() or "source"

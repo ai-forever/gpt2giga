@@ -68,7 +68,7 @@ def test_source_repository_links_are_limited_to_history_and_gateway_docs(
     package.mkdir(parents=True)
     (package / "pyproject.toml").write_text(
         "[project]\n"
-        "name='gpt2giga-harness'\n"
+        "name='gigaloom'\n"
         "version='0.5.1a1'\n"
         "[project.urls]\n"
         "Homepage='https://krakenalt.github.io/gigaloom/'\n"

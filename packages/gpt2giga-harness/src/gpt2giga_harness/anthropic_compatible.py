@@ -733,7 +733,7 @@ def _semantic_revision(value: Mapping[str, Any]) -> str:
 
 def _adapter_version() -> str:
     try:
-        return metadata.version("gpt2giga-harness")
+        return metadata.version("gigaloom")
     except metadata.PackageNotFoundError:  # pragma: no cover - source checkout only
         return "0"
 

@@ -7,7 +7,7 @@ gateway и не требует checkout его репозитория.
 preset локального gateway:
 
 ```sh
-uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom[gpt2giga]==0.5.1a1'
 ```
 
 Extra закрепляет проверенный публичный дистрибутив `gpt2giga`. Candidate testing

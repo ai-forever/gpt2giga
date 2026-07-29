@@ -692,7 +692,7 @@ def _managed_mcp_reference(request: HarnessRequest) -> Mapping[str, Any] | None:
 
 def _adapter_version() -> str:
     try:
-        value = metadata.version("gpt2giga-harness")
+        value = metadata.version("gigaloom")
     except metadata.PackageNotFoundError:
         value = "unknown"
     normalized = str(value).strip()

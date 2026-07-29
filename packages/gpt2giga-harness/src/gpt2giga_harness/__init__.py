@@ -5,7 +5,7 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 try:
-    __version__ = version("gpt2giga-harness")
+    __version__ = version("gigaloom")
 except PackageNotFoundError:  # pragma: no cover - source tree without installation
     __version__ = "0+unknown"
 

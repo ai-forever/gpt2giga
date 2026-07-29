@@ -6,7 +6,7 @@ from gpt2giga_harness.runtime import fingerprint
 def test_worker_fingerprint_reports_both_distribution_versions(monkeypatch):
     versions = {
         "gpt2giga": "0.2.2a1",
-        "gpt2giga-harness": "0.0.1",
+        "gigaloom": "0.5.1a1",
     }
     monkeypatch.setattr(fingerprint.metadata, "version", versions.__getitem__)
 
@@ -16,7 +16,7 @@ def test_worker_fingerprint_reports_both_distribution_versions(monkeypatch):
     result = fingerprint.build_worker_fingerprint(registry)
 
     assert result["gpt2giga"] == "0.2.2a1"
-    assert result["gpt2giga_harness"] == "0.0.1"
+    assert result["gpt2giga_harness"] == "0.5.1a1"
 
 
 def test_worker_fingerprint_uses_resolved_user_executable(tmp_path):

@@ -114,7 +114,7 @@ def audit_base_install(
 ) -> dict[str, Any]:
     """Audit direct metadata and an installed clean-environment inventory."""
     if harness_requirements is None:
-        distribution = importlib.metadata.distribution("gpt2giga-harness")
+        distribution = importlib.metadata.distribution("gigaloom")
         harness_requirements = tuple(distribution.requires or ())
     if installed_distributions is None:
         installed = _installed_distribution_names()
@@ -165,7 +165,7 @@ def audit_base_install(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Audit a clean gpt2giga-harness base installation."
+        description="Audit a clean GigaLoom base installation."
     )
     parser.add_argument(
         "--json",

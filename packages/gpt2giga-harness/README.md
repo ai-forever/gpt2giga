@@ -1,7 +1,7 @@
-# gpt2giga-harness
+# GigaLoom
 
-Local agentic control plane for the `gpt2giga` compatibility gateway. The
-distribution provides the `giga` and `gpt2giga-harness` commands, the
+Local agentic control plane with optional `gpt2giga` gateway integration. The
+`gigaloom` distribution provides the `giga` and `gpt2giga-harness` commands, the
 `gpt2giga_harness` Python namespace, a durable local worker, and the packaged
 Project Cockpit web UI.
 
@@ -15,7 +15,7 @@ Project Cockpit web UI.
 Install the published prerelease from your package index:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a1'
 giga doctor
 giga --version
 giga
@@ -25,7 +25,7 @@ giga ui
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```sh
-uv tool install 'gpt2giga-harness[gpt2giga]==0.5.1a1'
+uv tool install 'gigaloom[gpt2giga]==0.5.1a1'
 ```
 
 The standard install includes the terminal workbench. Start it from the project
@@ -99,15 +99,16 @@ If you installed the earlier optional-TUI prerelease, upgrade the existing tool;
 do not keep or add a `[tui]` extra:
 
 ```sh
-uv tool install --force 'gpt2giga-harness==0.5.1a1'
+uv tool install --force 'gigaloom==0.5.1a1'
 giga --version
 giga
 ```
 
-Rollback uses the exact previously reviewed version, for example `uv tool
-install --force 'gpt2giga-harness==<previous-version>'`. Remove the preview with
-`uv tool uninstall gpt2giga-harness`; runtime state remains under the user-owned
-Harness data directory and is not deleted by package uninstall.
+For this first renamed release, rollback uses the last reviewed historical
+artifact: `uv tool install --force 'gpt2giga-harness==0.5.0a1'`. Later
+`gigaloom` releases roll back to an exact previously reviewed `gigaloom`
+version. `uv tool uninstall gigaloom` removes the current distribution but
+does not delete runtime state under the user-owned Harness data directory.
 
 For development or when the prerelease is not yet mirrored by your package
 index, run it from a source checkout:
@@ -126,7 +127,7 @@ giga ui
 Keep that environment active when you `cd` to the project you want to manage.
 On Windows PowerShell, activate `.venv\Scripts\Activate.ps1` instead.
 
-The current `gpt2giga-harness==0.5.1a1` metadata keeps
+The current `gigaloom==0.5.1a1` metadata keeps
 `gpt2giga==0.2.6a1` in the `gpt2giga` optional extra. Installing only
 `gpt2giga` never adds Harness commands or the `gpt2giga_harness` namespace.
 
@@ -622,7 +623,7 @@ migration:
 ```sh
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a1'
 giga doctor
 ```
 
@@ -646,7 +647,7 @@ npm --prefix packages/gpt2giga-harness/frontend run build
 python packages/gpt2giga-harness/asset_contract.py
 ./scripts/ci-base.sh sync
 ./scripts/ci-base.sh pytest tests/harness -q
-uv build --package gpt2giga-harness --no-sources
+uv build --package gigaloom --no-sources
 ```
 
 Compiled Cockpit bundles are ignored build inputs, not tracked source. The

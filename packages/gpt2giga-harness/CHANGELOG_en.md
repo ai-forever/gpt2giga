@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to gpt2giga-harness are documented in this file.
+All notable changes to GigaLoom are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **OpenAI-compatible upstream bridge**: Harness-owned provider profiles can execute the reviewed normalized v1 subset through exact model/profile binding, `SecretRef`, and scoped network authority.
 
 ### Changed
+- **Distribution identity**: the first standalone target release publishes as
+  `gigaloom==0.5.1a1` from `gigaloom-v0.5.1a1`; the
+  `gpt2giga_harness` namespace, `giga` and `gpt2giga-harness` commands,
+  entry-point groups, and state paths remain compatible. Historical
+  `gpt2giga-harness` releases remain immutable and migration is an explicit
+  uninstall/install rather than a dual-published shim.
 - **Durable runtime performance**: the worker now uses demand-driven wakeup and bounded idle backoff, `update_run` is bounded to one normal-path JSONL scan, and deterministic in-memory projections have CI regression gates.
 - **Cockpit packaging**: the legacy UI was removed; the frontend producer now creates an ignored commit-bound asset tree with integrity, SBOM, and license evidence, while the Python build validates it without Node.js or network access.
 - **Adapter ownership**: the production Claude Agent SDK module is now the canonical owner, while the proof-only Gemini ACP and temporary compatibility paths were removed after imports, routes, tests, and package artifacts were verified.
@@ -199,7 +205,7 @@ considered stable.
 
 ---
 
-[0.5.1a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.5.0a1...gpt2giga-harness-v0.5.1a1
+[0.5.1a1]: https://github.com/krakenalt/gigaloom/compare/gpt2giga-harness-v0.5.0a1...gigaloom-v0.5.1a1
 [0.5.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.4.0a1...gpt2giga-harness-v0.5.0a1
 [0.4.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.3.0a1...gpt2giga-harness-v0.4.0a1
 [0.3.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.2.0a1...gpt2giga-harness-v0.3.0a1

@@ -205,7 +205,7 @@ def test_doctor_report_is_redacted_actionable_and_workspace_scoped(
     secret = "doctor-secret-value"
     package_versions = {
         "gpt2giga": "0.2.3a2",
-        "gpt2giga-harness": "0.0.1a4",
+        "gigaloom": "0.5.1a1",
     }
     monkeypatch.setattr(doctor, "_package_version", package_versions.__getitem__)
     monkeypatch.setenv("GIGACHAT_CREDENTIALS", secret)
@@ -265,7 +265,7 @@ def test_doctor_report_is_redacted_actionable_and_workspace_scoped(
     assert len(report["export"]["content_sha256"]) == 64
     assert report["environment"]["packages"] == {
         "gpt2giga": "0.2.3a2",
-        "gpt2giga-harness": "0.0.1a4",
+        "gigaloom": "0.5.1a1",
     }
     assert report["ok"] is False
     assert secret not in serialized

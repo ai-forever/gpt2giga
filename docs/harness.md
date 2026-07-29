@@ -2,7 +2,7 @@
 
 :::warning[Alpha preview — prerelease]
 
-The `gpt2giga-harness` 0.5.x line is an alpha preview for testing and feedback.
+The `gigaloom` 0.5.x line is an alpha preview for testing and feedback.
 The UI, CLI, project YAML, runtime schema, and upgrade behavior can change while
 the product is being developed. Use it for local evaluation and supervised
 workflows, not as a production-critical or unattended multi-user service.
@@ -15,8 +15,9 @@ CLI, or a plugin harness; compare the results; inspect what happened; and decide
 which changes are allowed back into your project.
 
 The product name shown by the Web UI, TUI, and human-facing CLI output is
-**GigaLoom**. The `giga` command and `gpt2giga-harness` distribution names stay
-unchanged for compatibility.
+**GigaLoom**. The distribution is `gigaloom`; the
+`gpt2giga_harness` namespace and the `giga` and `gpt2giga-harness` commands
+remain stable for compatibility.
 
 ### Visual identity and icon policy
 
@@ -120,8 +121,8 @@ binary, Node.js runtime, credentials, or provider configuration. Both `uv tool`
 and `pipx` create an isolated Harness environment:
 
 ```sh
-uv tool install 'gpt2giga-harness==0.5.1a1'
-pipx install 'gpt2giga-harness==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a1'
+pipx install 'gigaloom==0.5.1a1'
 ```
 
 Upgrade an existing optional-TUI prerelease in place; do not retain or add a
@@ -131,10 +132,10 @@ archive when a state migration occurred:
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool install --force 'gpt2giga-harness==0.5.1a1'
-uv tool install --force 'gpt2giga-harness==<previous-version>'
-uv tool uninstall gpt2giga-harness
-uv tool install 'gpt2giga-harness==0.5.1a1'
+uv tool install --force 'gigaloom==0.5.1a1'
+uv tool install --force 'gpt2giga-harness==0.5.0a1'
+uv tool uninstall gigaloom
+uv tool install 'gigaloom==0.5.1a1'
 ```
 
 Uninstalling the package does not delete `~/.gpt2giga/harness`, project
@@ -190,17 +191,17 @@ If the standalone preview is available in your package index, the shorter
 install path is:
 
 ```bash
-uv tool install 'gpt2giga-harness==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a1'
 giga doctor
 ```
 
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```bash
-uv tool install 'gpt2giga-harness[gpt2giga]==0.5.1a1'
+uv tool install 'gigaloom[gpt2giga]==0.5.1a1'
 ```
 
-The current `gpt2giga-harness==0.5.1a1` distribution provides the `giga` and
+The current `gigaloom==0.5.1a1` distribution provides the `giga` and
 `gpt2giga-harness` commands; its explicit `gpt2giga` extra pins
 `gpt2giga==0.2.6a1`.
 
@@ -265,14 +266,15 @@ To migrate from the optional-TUI prerelease, upgrade the standard package and
 remove `[tui]` from install commands:
 
 ```bash
-uv tool install --force 'gpt2giga-harness==0.5.1a1'
+uv tool install --force 'gigaloom==0.5.1a1'
 giga --version
 giga
 ```
 
-Rollback installs the exact previously reviewed version with `uv tool install
---force 'gpt2giga-harness==<previous-version>'`. `uv tool uninstall
-gpt2giga-harness` removes the package and commands but does not delete the
+For this first renamed release, rollback installs the last reviewed historical
+artifact with `uv tool install --force 'gpt2giga-harness==0.5.0a1'`. Later
+`gigaloom` releases use an exact previous `gigaloom` version. `uv tool
+uninstall gigaloom` removes the package and commands but does not delete the
 user-owned Harness runtime data.
 
 ### 2. Initialize a disposable or test project
@@ -2844,7 +2846,7 @@ Remove the old combined wheel before installing the split packages so stale
 
 ```bash
 python -m pip uninstall -y gpt2giga gpt2giga-harness
-python -m pip install 'gpt2giga-harness==0.5.1a1'
+python -m pip install 'gigaloom==0.5.1a1'
 ```
 
 For `uv` tool installations, recreate both tool environments:
@@ -2853,10 +2855,10 @@ For `uv` tool installations, recreate both tool environments:
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
 uv tool install --prerelease allow gpt2giga
-uv tool install 'gpt2giga-harness==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a1'
 ```
 
-The current `gpt2giga-harness==0.5.1a1` metadata keeps
+The current `gigaloom==0.5.1a1` metadata keeps
 `gpt2giga==0.2.6a1` in the explicit `gpt2giga` optional extra.
 
 This package migration does not move or rewrite Harness state. Existing

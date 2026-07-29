@@ -48,7 +48,7 @@ def require_gpt2giga_preset() -> Gpt2GigaPresetRuntime:
     if missing:
         raise Gpt2GigaPresetUnavailableError(
             "optional gpt2giga preset is unavailable; install "
-            f"gpt2giga-harness[{GPT2GIGA_PRESET_EXTRA}]"
+            f"gigaloom[{GPT2GIGA_PRESET_EXTRA}]"
         )
     gigachat_module = import_module("gigachat")
     gateway_cli = import_module("gpt2giga.cli")

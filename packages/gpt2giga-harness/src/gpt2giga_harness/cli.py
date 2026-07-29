@@ -338,7 +338,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"GigaLoom {__version__} (gpt2giga-harness)",
+        version=f"GigaLoom {__version__} (gigaloom)",
     )
     subparsers = parser.add_subparsers(dest="command")
 

@@ -175,7 +175,7 @@ def test_sidecar_preflight_requires_optional_gpt2giga_preset(monkeypatch):
 
     assert result.ok is False
     assert result.reason == (
-        "optional gpt2giga preset is not installed; install gpt2giga-harness[gpt2giga]"
+        "optional gpt2giga preset is not installed; install gigaloom[gpt2giga]"
     )
 
 

@@ -2,7 +2,7 @@
 
 [![Quality](https://img.shields.io/github/actions/workflow/status/krakenalt/gigaloom/quality.yaml?branch=main&style=flat-square&label=quality)](https://github.com/krakenalt/gigaloom/actions/workflows/quality.yaml)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-111827?style=flat-square)](https://krakenalt.github.io/gigaloom/)
-[![PyPI](https://img.shields.io/pypi/v/gpt2giga-harness?style=flat-square&label=preview)](https://pypi.org/project/gpt2giga-harness/)
+[![PyPI](https://img.shields.io/pypi/v/gigaloom?style=flat-square&label=preview)](https://pypi.org/project/gigaloom/)
 [![License](https://img.shields.io/github/license/krakenalt/gigaloom?style=flat-square)](LICENSE)
 [![GigaLoom coverage baseline](./badges/gigaloom-coverage.svg)](./docs/operations.md#quality-baseline)
 
@@ -20,7 +20,7 @@ authority that has not been granted.
 Python 3.10–3.14 and an installed provider CLI are required:
 
 ```sh
-uv tool install --prerelease allow 'gpt2giga-harness==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom==0.5.1a1'
 giga doctor
 giga --version
 ```
@@ -60,12 +60,12 @@ The published English and Russian documentation is at
 
 ## Gateway integration
 
-The base `gpt2giga-harness` distribution is independently installable and does
+The base `gigaloom` distribution is independently installable and does
 not require a gateway source checkout. Direct Chat and the legacy local-gateway
 preset are optional:
 
 ```sh
-uv tool install --prerelease allow 'gpt2giga-harness[gpt2giga]==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom[gpt2giga]==0.5.1a1'
 ```
 
 The optional extra consumes the released `gpt2giga` distribution. Its
@@ -86,7 +86,7 @@ npm --prefix packages/gpt2giga-harness/frontend run build
 Build the standalone distribution with:
 
 ```sh
-uv build --package gpt2giga-harness --no-sources
+uv build --package gigaloom --no-sources
 ```
 
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before submitting changes and

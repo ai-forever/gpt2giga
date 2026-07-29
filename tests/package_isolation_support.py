@@ -106,7 +106,7 @@ def _build_artifacts(tmp_path_factory) -> BuiltArtifacts:
     gateway_wheel = gateway_sdist = None
     if GATEWAY_MEMBER.is_dir():
         gateway_wheel, gateway_sdist = _build_member("gpt2giga", direct)
-    harness_wheel, harness_sdist = _build_member("gpt2giga-harness", direct)
+    harness_wheel, harness_sdist = _build_member("gigaloom", direct)
     return BuiltArtifacts(
         gateway_wheel=gateway_wheel,
         gateway_sdist=gateway_sdist,
@@ -261,7 +261,7 @@ from gpt2giga_harness.types import HarnessContext, HarnessRequest
 assert Path(gpt2giga_harness.__file__).resolve().is_relative_to(installed_root)
 assert "gpt2giga" not in sys.modules
 assert "gigachat" not in sys.modules
-harness_distribution = importlib.metadata.distribution("gpt2giga-harness")
+harness_distribution = importlib.metadata.distribution("gigaloom")
 assert harness_distribution.version == os.environ["EXPECTED_HARNESS_VERSION"]
 requirements = harness_distribution.requires or ()
 assert not any(
@@ -558,7 +558,7 @@ def test_editable_workspace_members_resolve_to_member_sources():
         Path(gpt2giga_harness.__file__).resolve().is_relative_to(HARNESS_MEMBER / "src")
     )
     assert importlib.metadata.version("gpt2giga") == GATEWAY_VERSION
-    assert importlib.metadata.version("gpt2giga-harness") == HARNESS_VERSION
+    assert importlib.metadata.version("gigaloom") == HARNESS_VERSION
 
 
 def _declared_distribution_names(metadata: dict) -> set[str]:
@@ -698,7 +698,7 @@ def _write_minimal_plugin(source_root: Path) -> None:
 name = "example-harness-plugin"
 version = "1.0.0"
 requires-python = ">=3.10"
-dependencies = ["gpt2giga-harness=={HARNESS_VERSION}"]
+dependencies = ["gigaloom=={HARNESS_VERSION}"]
 
 [project.entry-points."gpt2giga.harnesses"]
 third-party-smoke = "example_harness_plugin:ThirdPartyHarness"

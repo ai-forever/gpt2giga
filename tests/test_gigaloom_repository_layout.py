@@ -24,7 +24,7 @@ def test_standalone_metadata_has_exact_gateway_and_committed_lock():
     with (HARNESS_MEMBER / "pyproject.toml").open("rb") as file:
         metadata = tomllib.load(file)
 
-    assert metadata["project"]["name"] == "gpt2giga-harness"
+    assert metadata["project"]["name"] == "gigaloom"
     assert metadata["project"]["optional-dependencies"]["gpt2giga"][0] == (
         "gpt2giga==0.2.6a1"
     )
@@ -42,6 +42,6 @@ def test_standalone_bootstrap_scripts_are_target_owned():
     assert 'uv sync "${sync_args[@]}"' in base
     assert "--locked" in base
     assert "--all-extras" in base
-    assert "gpt2giga-harness" in public_gateway
+    assert "gigaloom" in public_gateway
     assert "https://pypi.org/simple" in public_gateway
     assert "uv.lock" in public_gateway
