@@ -162,7 +162,7 @@ jobs:
           test "$(find dist/gigaloom -maxdepth 1 -type f -name "gpt2giga_harness-${RELEASE_VERSION}.tar.gz" | wc -l | tr -d ' ')" = "1"
           python3 packages/gpt2giga-harness/asset_contract.py --require-clean
           cp packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/_build/sbom.cdx.json dist/gigaloom/
-          cp packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/_build/THIRD_PARTY_LICENSES.txt dist/gigaloom/
+          cp packages/gpt2giga-harness/src/gpt2giga_harness/ui/cockpit_v2/assets/_build/licenses.json dist/gigaloom/
           sha256sum dist/gigaloom/* > dist/gigaloom/SHA256SUMS
           cat dist/gigaloom/SHA256SUMS
 
@@ -207,6 +207,7 @@ jobs:
        needs.release-assets.result == 'success')
     needs: [metadata, build, release-assets]
     runs-on: ubuntu-latest
+    environment: pypi-harness
     timeout-minutes: 15
     permissions:
       attestations: write
