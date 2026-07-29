@@ -7,6 +7,7 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 
 _CONTRACT_PATH = Path(__file__).with_name("asset_contract.py")
+_PACKAGE_ROOT = Path(__file__).resolve().parent
 _SPECIFICATION = importlib.util.spec_from_file_location(
     "_gpt2giga_harness_asset_contract",
     _CONTRACT_PATH,
@@ -24,7 +25,9 @@ class CustomBuildHook(BuildHookInterface):
 
     def initialize(self, version, build_data):
         """Validate the injected tree without invoking Node or the network."""
-        _CONTRACT.verify_asset_tree(self.root)
-        pattern = f"{_CONTRACT.ASSET_RELATIVE_ROOT.as_posix()}/**"
+        _CONTRACT.verify_asset_tree(_PACKAGE_ROOT)
+        pattern = (
+            f"packages/gpt2giga-harness/{_CONTRACT.ASSET_RELATIVE_ROOT.as_posix()}/**"
+        )
         if pattern not in build_data["artifacts"]:
             build_data["artifacts"].append(pattern)

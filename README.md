@@ -20,7 +20,7 @@ authority that has not been granted.
 Python 3.10–3.14 and an installed provider CLI are required:
 
 ```sh
-uv tool install --prerelease allow 'gigaloom==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom==0.5.1a2'
 giga doctor
 giga --version
 ```
@@ -65,7 +65,7 @@ not require a gateway source checkout. Direct Chat and the legacy local-gateway
 preset are optional:
 
 ```sh
-uv tool install --prerelease allow 'gigaloom[gpt2giga]==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom[gpt2giga]==0.5.1a2'
 ```
 
 The optional extra consumes the released `gpt2giga` distribution. Its
@@ -86,7 +86,7 @@ npm --prefix packages/gpt2giga-harness/frontend run build
 Build the standalone distribution with:
 
 ```sh
-uv build --package gigaloom --no-sources
+uv build --no-sources
 ```
 
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before submitting changes and

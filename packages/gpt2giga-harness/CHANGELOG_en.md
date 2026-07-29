@@ -5,6 +5,13 @@ All notable changes to GigaLoom are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1a2] - 2026-07-29
+
+### Fixed
+- **Root project metadata**: restored the standalone `gigaloom` project, description, dependencies, entry points, and Hatch build contract in the repository-root `pyproject.toml`, so ordinary root-level `uv version`, `uv sync`, and `uv build` commands work without a hidden one-member workspace or `--package` selector.
+- **Artifact test runtime**: declared the Starlette 1.x `httpx2` TestClient dependency in the development group and kept it out of the base runtime dependency surface.
+- **Release identity**: replaced the unpublished, immutable `gigaloom-v0.5.1a1` candidate with the new `gigaloom-v0.5.1a2` release line instead of moving or overwriting the existing tag.
+
 ## [0.5.1a1] - 2026-07-28
 
 ### Added
@@ -205,6 +212,7 @@ considered stable.
 
 ---
 
+[0.5.1a2]: https://github.com/krakenalt/gigaloom/compare/gigaloom-v0.5.1a1...gigaloom-v0.5.1a2
 [0.5.1a1]: https://github.com/krakenalt/gigaloom/compare/gpt2giga-harness-v0.5.0a1...gigaloom-v0.5.1a1
 [0.5.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.4.0a1...gpt2giga-harness-v0.5.0a1
 [0.4.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.3.0a1...gpt2giga-harness-v0.4.0a1

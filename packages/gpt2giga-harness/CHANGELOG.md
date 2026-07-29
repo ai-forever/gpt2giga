@@ -5,6 +5,13 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.5.1a2] - 2026-07-29
+
+### Исправлено
+- **Метаданные корневого проекта**: самостоятельный проект `gigaloom`, его описание, зависимости, entry points и Hatch build contract восстановлены в корневом `pyproject.toml`, поэтому обычные команды `uv version`, `uv sync` и `uv build` из корня работают без скрытого workspace из одного member и селектора `--package`.
+- **Среда artifact-тестов**: зависимость `httpx2`, требуемая `TestClient` в Starlette 1.x, объявлена в development group и не добавлена в базовую runtime-поверхность.
+- **Release identity**: вместо перемещения или перезаписи существующего неопубликованного тега-кандидата `gigaloom-v0.5.1a1` создана новая release-линия `gigaloom-v0.5.1a2`.
+
 ## [0.5.1a1] - 2026-07-28
 
 ### Добавлено
@@ -204,6 +211,7 @@
 - **Диагностика и документация**: добавлены `giga doctor`, inspect/config/session/native команды, alpha quickstart, migration guide и описание ограничений первого релиза.
 ---
 
+[0.5.1a2]: https://github.com/krakenalt/gigaloom/compare/gigaloom-v0.5.1a1...gigaloom-v0.5.1a2
 [0.5.1a1]: https://github.com/krakenalt/gigaloom/compare/gpt2giga-harness-v0.5.0a1...gigaloom-v0.5.1a1
 [0.5.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.4.0a1...gpt2giga-harness-v0.5.0a1
 [0.4.0a1]: https://github.com/ai-forever/gpt2giga/compare/gpt2giga-harness-v0.3.0a1...gpt2giga-harness-v0.4.0a1

@@ -45,7 +45,7 @@ jobs:
         run: >-
           python3 scripts/release_guard.py
           --policy .github/release-policy.json
-          --metadata packages/gpt2giga-harness/pyproject.toml
+          --metadata pyproject.toml
           --event-name "${GITHUB_EVENT_NAME}"
           --repository "${GITHUB_REPOSITORY}"
           --ref "${GITHUB_REF}"
@@ -149,7 +149,7 @@ jobs:
 
       - name: Build target-only wheel and sdist
         run: >-
-          uv build --package gigaloom --wheel --sdist --no-sources
+          uv build --wheel --sdist --no-sources
           --out-dir dist/gigaloom
 
       - name: Verify artifacts, assets, SBOM, licenses, and hashes

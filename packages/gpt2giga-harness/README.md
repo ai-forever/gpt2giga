@@ -15,7 +15,7 @@ Project Cockpit web UI.
 Install the published prerelease from your package index:
 
 ```sh
-uv tool install 'gigaloom==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a2'
 giga doctor
 giga --version
 giga
@@ -25,7 +25,7 @@ giga ui
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```sh
-uv tool install 'gigaloom[gpt2giga]==0.5.1a1'
+uv tool install 'gigaloom[gpt2giga]==0.5.1a2'
 ```
 
 The standard install includes the terminal workbench. Start it from the project
@@ -99,7 +99,7 @@ If you installed the earlier optional-TUI prerelease, upgrade the existing tool;
 do not keep or add a `[tui]` extra:
 
 ```sh
-uv tool install --force 'gigaloom==0.5.1a1'
+uv tool install --force 'gigaloom==0.5.1a2'
 giga --version
 giga
 ```
@@ -127,7 +127,7 @@ giga ui
 Keep that environment active when you `cd` to the project you want to manage.
 On Windows PowerShell, activate `.venv\Scripts\Activate.ps1` instead.
 
-The current `gigaloom==0.5.1a1` metadata keeps
+The current `gigaloom==0.5.1a2` metadata keeps
 `gpt2giga==0.2.6a1` in the `gpt2giga` optional extra. Installing only
 `gpt2giga` never adds Harness commands or the `gpt2giga_harness` namespace.
 
@@ -623,7 +623,7 @@ migration:
 ```sh
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install 'gigaloom==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a2'
 giga doctor
 ```
 
@@ -647,7 +647,7 @@ npm --prefix packages/gpt2giga-harness/frontend run build
 python packages/gpt2giga-harness/asset_contract.py
 ./scripts/ci-base.sh sync
 ./scripts/ci-base.sh pytest tests/harness -q
-uv build --package gigaloom --no-sources
+uv build --no-sources
 ```
 
 Compiled Cockpit bundles are ignored build inputs, not tracked source. The

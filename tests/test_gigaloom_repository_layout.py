@@ -2,26 +2,30 @@
 
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
 
 REPOSITORY_OWNER = "krakenalt/gigaloom"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 HARNESS_MEMBER = REPOSITORY_ROOT / "packages/gpt2giga-harness"
 
 
-def test_gigaloom_is_the_only_workspace_member():
+def test_gigaloom_is_a_root_level_project():
     with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as file:
-        root_metadata = tomllib.load(file)
+        metadata = tomllib.load(file)
 
-    assert root_metadata["tool"]["uv"]["workspace"]["members"] == [
-        "packages/gpt2giga-harness"
-    ]
+    assert metadata["project"]["name"] == "gigaloom"
+    assert metadata["project"]["description"]
+    assert "workspace" not in metadata.get("tool", {}).get("uv", {})
     assert HARNESS_MEMBER.is_dir()
+    assert not (HARNESS_MEMBER / "pyproject.toml").exists()
     assert not (REPOSITORY_ROOT / "packages/gpt2giga").exists()
 
 
 def test_standalone_metadata_has_exact_gateway_and_committed_lock():
-    with (HARNESS_MEMBER / "pyproject.toml").open("rb") as file:
+    with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as file:
         metadata = tomllib.load(file)
 
     assert metadata["project"]["name"] == "gigaloom"

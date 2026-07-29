@@ -6,11 +6,10 @@ on:
     paths:
       - 'packages/gpt2giga-harness/**/*.py'
       - 'packages/gpt2giga-harness/frontend/**/*.{js,jsx,ts,tsx}'
-      - 'packages/gpt2giga-harness/pyproject.toml'
+      - 'pyproject.toml'
       - 'packages/gpt2giga-harness/frontend/package.json'
       - 'packages/gpt2giga-harness/frontend/package-lock.json'
       - 'tests/**/*.py'
-      - 'pyproject.toml'
       - '.github/workflows/codeql.yaml'
   pull_request:
     branches: [ main ]
@@ -18,11 +17,10 @@ on:
     paths:
       - 'packages/gpt2giga-harness/**/*.py'
       - 'packages/gpt2giga-harness/frontend/**/*.{js,jsx,ts,tsx}'
-      - 'packages/gpt2giga-harness/pyproject.toml'
+      - 'pyproject.toml'
       - 'packages/gpt2giga-harness/frontend/package.json'
       - 'packages/gpt2giga-harness/frontend/package-lock.json'
       - 'tests/**/*.py'
-      - 'pyproject.toml'
       - '.github/workflows/codeql.yaml'
   schedule:
     - cron: "0 2 * * 1"

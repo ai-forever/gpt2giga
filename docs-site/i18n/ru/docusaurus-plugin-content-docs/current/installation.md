@@ -8,13 +8,13 @@ provider-native CLI и завершите собственный flow аутен
 Через `uv`:
 
 ```sh
-uv tool install --prerelease allow 'gigaloom==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom==0.5.1a2'
 ```
 
 Или в изолированном Python-окружении:
 
 ```sh
-python -m pip install --pre 'gigaloom==0.5.1a1'
+python -m pip install --pre 'gigaloom==0.5.1a2'
 ```
 
 Проверьте установленный артефакт:
@@ -35,7 +35,7 @@ prompts и не обращаясь к провайдерам.
 
 ```sh
 uv tool uninstall gpt2giga-harness
-uv tool install --prerelease allow 'gigaloom==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom==0.5.1a2'
 ```
 
 Python namespace `gpt2giga_harness`, команды `giga` и
@@ -48,7 +48,7 @@ Dual-published shim не требуется.
 legacy preset локального gateway:
 
 ```sh
-uv tool install --prerelease allow 'gigaloom[gpt2giga]==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom[gpt2giga]==0.5.1a2'
 ```
 
 Устанавливается закреплённый публичный дистрибутив gateway. Репозиторий gateway,

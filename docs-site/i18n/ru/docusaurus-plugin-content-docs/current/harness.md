@@ -121,8 +121,8 @@ Node.js runtime, credentials или provider config. `uv tool` и `pipx` соз�
 изолированное окружение Harness:
 
 ```sh
-uv tool install 'gigaloom==0.5.1a1'
-pipx install 'gigaloom==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a2'
+pipx install 'gigaloom==0.5.1a2'
 ```
 
 Существующий prerelease с optional TUI обновляйте на месте без extra `[tui]`.
@@ -132,10 +132,10 @@ pipx install 'gigaloom==0.5.1a1'
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool install --force 'gigaloom==0.5.1a1'
+uv tool install --force 'gigaloom==0.5.1a2'
 uv tool install --force 'gpt2giga-harness==0.5.0a1'
 uv tool uninstall gigaloom
-uv tool install 'gigaloom==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a2'
 ```
 
 Удаление пакета не удаляет `~/.gpt2giga/harness`, проектные `.giga/` или
@@ -178,7 +178,7 @@ uv tool install 'gigaloom==0.5.1a1'
 ```bash
 git clone https://github.com/krakenalt/gigaloom.git
 cd gigaloom
-uv sync --all-packages --all-extras --dev
+uv sync --all-extras --dev
 source .venv/bin/activate
 giga doctor
 giga --version
@@ -194,17 +194,17 @@ giga harness list
 короткий вариант:
 
 ```bash
-uv tool install 'gigaloom==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a2'
 giga doctor
 ```
 
 Для Direct Chat и provider preset `gpt2giga` установите явный extra:
 
 ```bash
-uv tool install 'gigaloom[gpt2giga]==0.5.1a1'
+uv tool install 'gigaloom[gpt2giga]==0.5.1a2'
 ```
 
-Текущий дистрибутив `gigaloom==0.5.1a1` добавляет команды `giga` и
+Текущий дистрибутив `gigaloom==0.5.1a2` добавляет команды `giga` и
 `gpt2giga-harness`; его явный extra `gpt2giga` закрепляет
 `gpt2giga==0.2.6a1`.
 
@@ -245,7 +245,7 @@ base-install environment. Окружение с намеренно устано�
 python -I -m gpt2giga_harness.base_install --json
 ```
 
-Команда source-checkout `uv sync --all-packages --all-extras --dev`
+Команда source-checkout `uv sync --all-extras --dev`
 устанавливает development tooling и repository integration fixtures, поэтому
 не измеряет footprint базовой установки.
 
@@ -270,7 +270,7 @@ bytes, exit code и разделение stdout/stderr CLI.
 пакет и удалите `[tui]` из команд установки:
 
 ```bash
-uv tool install --force 'gigaloom==0.5.1a1'
+uv tool install --force 'gigaloom==0.5.1a2'
 giga --version
 giga
 ```
@@ -1694,11 +1694,11 @@ project state:
 ```bash
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
-uv tool install 'gigaloom==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a2'
 giga doctor
 ```
 
-Текущая metadata `gigaloom==0.5.1a1` сохраняет
+Текущая metadata `gigaloom==0.5.1a2` сохраняет
 `gpt2giga==0.2.6a1` в явном optional extra `gpt2giga`. Старый import
 `gpt2giga.harness` больше не является
 публичным; используйте `gpt2giga_harness`. Миграция package не переносит и не
