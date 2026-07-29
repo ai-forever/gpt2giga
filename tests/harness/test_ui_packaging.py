@@ -14,8 +14,6 @@ def test_packaged_ui_assets_survive_wheel_install(tmp_path):
         [
             "uv",
             "build",
-            "--package",
-            "gigaloom",
             "--wheel",
             "--out-dir",
             str(dist_dir),
@@ -76,8 +74,6 @@ def test_harness_sdist_seals_assets_and_rebuilds_identical_node_free_wheel(tmp_p
         [
             "uv",
             "build",
-            "--package",
-            "gigaloom",
             "--wheel",
             "--sdist",
             "--no-sources",

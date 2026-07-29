@@ -141,9 +141,7 @@ def check_package_versions(root: Path) -> list[Issue]:
     """Require Harness changelogs to begin with the package metadata version."""
     issues: list[Issue] = []
     package_root = root / "packages/gpt2giga-harness"
-    metadata = tomllib.loads(
-        (package_root / "pyproject.toml").read_text(encoding="utf-8")
-    )
+    metadata = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     version = metadata["project"]["version"]
     for filename in ("CHANGELOG.md", "CHANGELOG_en.md"):
         path = package_root / filename
@@ -162,7 +160,7 @@ def check_package_versions(root: Path) -> list[Issue]:
 def check_standalone_identity(root: Path, files: list[Path]) -> list[Issue]:
     """Require target-owned metadata and explicitly scoped source links."""
     issues: list[Issue] = []
-    package_path = root / "packages/gpt2giga-harness/pyproject.toml"
+    package_path = root / "pyproject.toml"
     package = tomllib.loads(package_path.read_text(encoding="utf-8"))["project"]
     if package.get("name") != "gigaloom":
         issues.append(

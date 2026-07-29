@@ -8,13 +8,13 @@ separately and complete that provider's own authentication flow.
 With `uv`:
 
 ```sh
-uv tool install --prerelease allow 'gigaloom==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom==0.5.1a2'
 ```
 
 Or in an isolated Python environment:
 
 ```sh
-python -m pip install --pre 'gigaloom==0.5.1a1'
+python -m pip install --pre 'gigaloom==0.5.1a2'
 ```
 
 Confirm the installed artifact:
@@ -35,7 +35,7 @@ existing state directories:
 
 ```sh
 uv tool uninstall gpt2giga-harness
-uv tool install --prerelease allow 'gigaloom==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom==0.5.1a2'
 ```
 
 The Python namespace `gpt2giga_harness`, the `giga` and
@@ -48,7 +48,7 @@ The base package does not require gpt2giga. Install the optional extra only for
 Direct Chat or the legacy local-gateway preset:
 
 ```sh
-uv tool install --prerelease allow 'gigaloom[gpt2giga]==0.5.1a1'
+uv tool install --prerelease allow 'gigaloom[gpt2giga]==0.5.1a2'
 ```
 
 This installs a pinned public gateway distribution. It does not require a

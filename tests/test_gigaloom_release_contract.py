@@ -42,7 +42,7 @@ def test_release_workflow_is_target_only_and_manual_runs_cannot_publish():
     text = (REPOSITORY_ROOT / ".github/workflows/publish-pypi.yml").read_text(
         encoding="utf-8"
     )
-    assert "uv build --package gigaloom" in text
+    assert "uv build --wheel --sdist --no-sources" in text
     assert "uv build --package gpt2giga " not in text
     assert "gpt2giga-harness-v" not in text
     assert "https://pypi.org/pypi/gigaloom/" in text
@@ -68,8 +68,8 @@ def test_release_policy_freezes_target_identity_and_first_release():
         "distribution": "gigaloom",
         "first_target_release": {
             "history_floor": "b6983b5036a70061a3f436e6a28f9a56fcd64bdc",
-            "tag": "gigaloom-v0.5.1a1",
-            "version": "0.5.1a1",
+            "tag": "gigaloom-v0.5.1a2",
+            "version": "0.5.1a2",
         },
         "repository": "krakenalt/gigaloom",
         "tag_prefix": "gigaloom-v",

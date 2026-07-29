@@ -14,16 +14,17 @@ cd "${repository_root}"
 "${python}" -I - <<'PY'
 import importlib.metadata
 from pathlib import Path
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 from gpt2giga_harness.gpt2giga_preset import require_gpt2giga_preset
 
 repository_root = Path.cwd()
 with (repository_root / "uv.lock").open("rb") as file:
     lock = tomllib.load(file)
-with (repository_root / "packages/gpt2giga-harness/pyproject.toml").open(
-    "rb"
-) as file:
+with (repository_root / "pyproject.toml").open("rb") as file:
     metadata = tomllib.load(file)
 
 expected_requirement = metadata["project"]["optional-dependencies"]["gpt2giga"][0]
@@ -35,7 +36,7 @@ packages = {package["name"]: package for package in lock["package"]}
 assert packages["gpt2giga"]["version"] == expected_version
 assert packages["gpt2giga"]["source"] == {"registry": "https://pypi.org/simple"}
 assert packages["gigaloom"]["source"] == {
-    "editable": "packages/gpt2giga-harness"
+    "editable": "."
 }
 for name, package in packages.items():
     if name == "gigaloom":

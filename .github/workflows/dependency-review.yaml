@@ -6,7 +6,6 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'pyproject.toml'
-      - 'packages/gpt2giga-harness/pyproject.toml'
       - 'packages/gpt2giga-harness/frontend/package.json'
       - 'packages/gpt2giga-harness/frontend/package-lock.json'
       - '.github/workflows/**'

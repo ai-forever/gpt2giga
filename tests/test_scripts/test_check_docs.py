@@ -66,7 +66,7 @@ def test_source_repository_links_are_limited_to_history_and_gateway_docs(
     docs_module = load_docs_module()
     package = tmp_path / "packages/gpt2giga-harness"
     package.mkdir(parents=True)
-    (package / "pyproject.toml").write_text(
+    (tmp_path / "pyproject.toml").write_text(
         "[project]\n"
         "name='gigaloom'\n"
         "version='0.5.1a1'\n"

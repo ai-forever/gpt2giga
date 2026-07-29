@@ -3,8 +3,8 @@
   "distribution": "gigaloom",
   "first_target_release": {
     "history_floor": "b6983b5036a70061a3f436e6a28f9a56fcd64bdc",
-    "tag": "gigaloom-v0.5.1a1",
-    "version": "0.5.1a1"
+    "tag": "gigaloom-v0.5.1a2",
+    "version": "0.5.1a2"
   },
   "repository": "krakenalt/gigaloom",
   "tag_prefix": "gigaloom-v"

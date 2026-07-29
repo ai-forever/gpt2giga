@@ -7,7 +7,7 @@ on:
       - '**/*.md'
       - 'docs/**'
       - 'docs-site/**'
-      - 'packages/gpt2giga-harness/pyproject.toml'
+      - 'pyproject.toml'
       - '.github/workflows/docs-pages.yaml'
   pull_request:
     branches: [ main ]
@@ -16,7 +16,7 @@ on:
       - '**/*.md'
       - 'docs/**'
       - 'docs-site/**'
-      - 'packages/gpt2giga-harness/pyproject.toml'
+      - 'pyproject.toml'
       - '.github/workflows/docs-pages.yaml'
   workflow_dispatch:
 

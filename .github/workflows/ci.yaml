@@ -179,7 +179,7 @@ jobs:
         run: ./scripts/ci-base.sh sync
 
       - name: Build standalone wheel and sdist
-        run: uv build --package gigaloom --wheel --sdist --no-sources --out-dir dist/gigaloom
+        run: uv build --wheel --sdist --no-sources --out-dir dist/gigaloom
 
       - name: Verify base isolation and installed artifact evidence
         run: >-
@@ -227,14 +227,14 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-          cache-dependency-glob: packages/gpt2giga-harness/pyproject.toml
+          cache-dependency-glob: pyproject.toml
 
       - name: Set up Python
         run: uv python install ${{ matrix.python-version }}
 
       - name: Build and install standard wheel
         run: |
-          uv build --package gigaloom --wheel --no-sources --out-dir dist/terminal
+          uv build --wheel --no-sources --out-dir dist/terminal
           uv venv --python ${{ matrix.python-version }} .venv-terminal
           uv pip install --python .venv-terminal dist/terminal/gigaloom-*.whl
 

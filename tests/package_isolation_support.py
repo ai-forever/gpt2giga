@@ -28,16 +28,18 @@ HARNESS_SOURCE = HARNESS_MEMBER / "src/gpt2giga_harness"
 NEUTRAL_HARNESS_ENTRY_POINT_GROUP = "agent_workbench.harness_adapters.v1"
 
 
-def _project_version(member: Path) -> str:
-    with (member / "pyproject.toml").open("rb") as file:
-        return tomllib.load(file)["project"]["version"]
+def _project_metadata(root: Path) -> dict:
+    with (root / "pyproject.toml").open("rb") as file:
+        return tomllib.load(file)["project"]
 
 
-HARNESS_VERSION = _project_version(HARNESS_MEMBER)
+_HARNESS_METADATA = _project_metadata(REPO_ROOT)
+HARNESS_VERSION = _HARNESS_METADATA["version"]
+HARNESS_DESCRIPTION = _HARNESS_METADATA["description"]
 
 
 def _optional_gateway_version() -> str:
-    with (HARNESS_MEMBER / "pyproject.toml").open("rb") as file:
+    with (REPO_ROOT / "pyproject.toml").open("rb") as file:
         metadata = tomllib.load(file)
     requirement = metadata["project"]["optional-dependencies"]["gpt2giga"][0]
     prefix = "gpt2giga=="
@@ -72,12 +74,17 @@ class BuiltArtifacts:
 
 
 def _run(*command: str, cwd: Path = REPO_ROOT) -> None:
-    subprocess.run(
+    result = subprocess.run(
         command,
         cwd=cwd,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
+    )
+    assert result.returncode == 0, (
+        f"command {command!r} failed with {result.returncode}\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
     )
 
 
@@ -85,8 +92,6 @@ def _build_member(package: str, output: Path) -> tuple[Path, Path]:
     _run(
         "uv",
         "build",
-        "--package",
-        package,
         "--wheel",
         "--sdist",
         "--no-sources",
@@ -167,8 +172,9 @@ sys.path.extend(json.loads(sys.argv[2]))
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env["EXPECTED_GATEWAY_VERSION"] = GATEWAY_VERSION
+    env["EXPECTED_HARNESS_DESCRIPTION"] = HARNESS_DESCRIPTION
     env["EXPECTED_HARNESS_VERSION"] = HARNESS_VERSION
-    subprocess.run(
+    result = subprocess.run(
         [
             sys.executable,
             "-S",
@@ -179,9 +185,14 @@ sys.path.extend(json.loads(sys.argv[2]))
         ],
         cwd=target.parent,
         env=env,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
+    )
+    assert result.returncode == 0, (
+        f"isolated artifact smoke failed with {result.returncode}\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
     )
 
 
@@ -263,6 +274,10 @@ assert "gpt2giga" not in sys.modules
 assert "gigachat" not in sys.modules
 harness_distribution = importlib.metadata.distribution("gigaloom")
 assert harness_distribution.version == os.environ["EXPECTED_HARNESS_VERSION"]
+assert (
+    harness_distribution.metadata["Summary"]
+    == os.environ["EXPECTED_HARNESS_DESCRIPTION"]
+)
 requirements = harness_distribution.requires or ()
 assert not any(
     requirement.startswith(("gpt2giga", "gigachat"))
@@ -604,7 +619,7 @@ def _external_import_roots(source_root: Path, own_package: str) -> set[str]:
 
 
 def test_harness_imports_only_declared_distributions():
-    with (HARNESS_MEMBER / "pyproject.toml").open("rb") as file:
+    with (REPO_ROOT / "pyproject.toml").open("rb") as file:
         declared = _all_declared_distribution_names(tomllib.load(file))
     imported = _external_import_roots(HARNESS_SOURCE, "gpt2giga_harness")
     unknown_roots = imported - IMPORT_DISTRIBUTIONS.keys()
@@ -615,10 +630,10 @@ def test_harness_imports_only_declared_distributions():
 def test_optional_and_development_dependencies_stay_with_their_owner():
     with (REPO_ROOT / "pyproject.toml").open("rb") as file:
         root_metadata = tomllib.load(file)
-    with (HARNESS_MEMBER / "pyproject.toml").open("rb") as file:
-        harness_metadata = tomllib.load(file)
+    harness_metadata = root_metadata
 
-    assert "project" not in root_metadata
+    assert root_metadata["project"]["name"] == "gigaloom"
+    assert root_metadata["project"]["description"]
     assert set(root_metadata["dependency-groups"]) == {"dev", "integrations"}
     assert "sources" not in harness_metadata.get("tool", {}).get("uv", {})
     assert harness_metadata["project"]["optional-dependencies"] == {

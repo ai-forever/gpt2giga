@@ -5,7 +5,7 @@ CLI, terminal UI, or browser cockpit to run native agents while keeping
 worktrees, approvals, evidence, schedules, and stored state under explicit
 local policy.
 
-The current `0.5.1a1` line is an alpha preview. Begin with
+The current `0.5.1a2` line is an alpha preview. Begin with
 [Installation](installation.md), then complete the [Quickstart](quickstart.md).
 
 ## Choose a path

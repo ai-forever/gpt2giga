@@ -24,9 +24,9 @@ work merely because it is present in the checkout.
 
 ## Repository contract
 
-- This is the standalone GigaLoom repository and a one-member `uv` workspace.
-- `packages/gpt2giga-harness/` owns the `gigaloom` distribution and
-  `gpt2giga_harness` Python namespace.
+- This is a standalone `uv` project. The root `pyproject.toml` owns the
+  `gigaloom` distribution, while `packages/gpt2giga-harness/` owns the
+  `gpt2giga_harness` Python namespace and product sources.
 - The base distribution must install, test, and build without a gateway source
   checkout.
 - Optional gateway compatibility consumes only the exact public dependency
@@ -35,7 +35,7 @@ work merely because it is present in the checkout.
   temporary index.
 - Keep the release-ready target `uv.lock` current and registry-resolved. Normal
   sync and release paths must use it in locked mode.
-- Treat `packages/gpt2giga-harness/pyproject.toml` as the source of truth for
+- Treat the root `pyproject.toml` as the source of truth for
   version, dependencies, entry points, and the supported Python range.
 - Use absolute imports, Ruff formatting, and concise Google-style docstrings.
 - Treat OpenAI-, Anthropic-, Gemini-, and GigaChat-shaped behavior as public
@@ -105,7 +105,7 @@ Repository quality gate:
 Standalone package build:
 
 ```bash
-uv build --package gigaloom --no-sources
+uv build --no-sources
 ```
 
 Documentation build:

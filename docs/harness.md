@@ -121,8 +121,8 @@ binary, Node.js runtime, credentials, or provider configuration. Both `uv tool`
 and `pipx` create an isolated Harness environment:
 
 ```sh
-uv tool install 'gigaloom==0.5.1a1'
-pipx install 'gigaloom==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a2'
+pipx install 'gigaloom==0.5.1a2'
 ```
 
 Upgrade an existing optional-TUI prerelease in place; do not retain or add a
@@ -132,10 +132,10 @@ archive when a state migration occurred:
 
 ```sh
 giga state backup /safe/path/harness-before-upgrade.zip
-uv tool install --force 'gigaloom==0.5.1a1'
+uv tool install --force 'gigaloom==0.5.1a2'
 uv tool install --force 'gpt2giga-harness==0.5.0a1'
 uv tool uninstall gigaloom
-uv tool install 'gigaloom==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a2'
 ```
 
 Uninstalling the package does not delete `~/.gpt2giga/harness`, project
@@ -175,7 +175,7 @@ The source checkout is the current, always-available preview path:
 ```bash
 git clone https://github.com/krakenalt/gigaloom.git
 cd gigaloom
-uv sync --all-packages --all-extras --dev
+uv sync --all-extras --dev
 source .venv/bin/activate
 giga doctor
 giga --version
@@ -191,17 +191,17 @@ If the standalone preview is available in your package index, the shorter
 install path is:
 
 ```bash
-uv tool install 'gigaloom==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a2'
 giga doctor
 ```
 
 For Direct Chat and the `gpt2giga` provider preset, install the explicit extra:
 
 ```bash
-uv tool install 'gigaloom[gpt2giga]==0.5.1a1'
+uv tool install 'gigaloom[gpt2giga]==0.5.1a2'
 ```
 
-The current `gigaloom==0.5.1a1` distribution provides the `giga` and
+The current `gigaloom==0.5.1a2` distribution provides the `giga` and
 `gpt2giga-harness` commands; its explicit `gpt2giga` extra pins
 `gpt2giga==0.2.6a1`.
 
@@ -242,7 +242,7 @@ is expected to fail the base-only audit:
 python -I -m gpt2giga_harness.base_install --json
 ```
 
-The source-checkout `uv sync --all-packages --all-extras --dev` command installs
+The source-checkout `uv sync --all-extras --dev` command installs
 development tooling and repository integration fixtures, so it is not a base
 footprint measurement.
 
@@ -266,7 +266,7 @@ To migrate from the optional-TUI prerelease, upgrade the standard package and
 remove `[tui]` from install commands:
 
 ```bash
-uv tool install --force 'gigaloom==0.5.1a1'
+uv tool install --force 'gigaloom==0.5.1a2'
 giga --version
 giga
 ```
@@ -2846,7 +2846,7 @@ Remove the old combined wheel before installing the split packages so stale
 
 ```bash
 python -m pip uninstall -y gpt2giga gpt2giga-harness
-python -m pip install 'gigaloom==0.5.1a1'
+python -m pip install 'gigaloom==0.5.1a2'
 ```
 
 For `uv` tool installations, recreate both tool environments:
@@ -2855,10 +2855,10 @@ For `uv` tool installations, recreate both tool environments:
 uv tool uninstall gpt2giga
 uv tool uninstall gpt2giga-harness
 uv tool install --prerelease allow gpt2giga
-uv tool install 'gigaloom==0.5.1a1'
+uv tool install 'gigaloom==0.5.1a2'
 ```
 
-The current `gigaloom==0.5.1a1` metadata keeps
+The current `gigaloom==0.5.1a2` metadata keeps
 `gpt2giga==0.2.6a1` in the explicit `gpt2giga` optional extra.
 
 This package migration does not move or rewrite Harness state. Existing

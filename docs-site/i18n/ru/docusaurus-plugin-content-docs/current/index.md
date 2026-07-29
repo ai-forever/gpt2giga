@@ -5,7 +5,7 @@ agents. CLI, терминальный интерфейс и браузерный
 агентов, а worktrees, approvals, evidence, schedules и сохранённое состояние
 остаются под явной локальной политикой.
 
-Линия `0.5.1a1` — alpha preview. Начните с [Установки](installation.md), затем
+Линия `0.5.1a2` — alpha preview. Начните с [Установки](installation.md), затем
 пройдите [Быстрый старт](quickstart.md).
 
 ## Выберите путь
