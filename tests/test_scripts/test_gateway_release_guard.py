@@ -80,3 +80,21 @@ def test_non_gateway_distribution_fails_closed(tmp_path: Path):
             ref_name="main",
             release_tag="",
         )
+
+
+def test_cli_failure_path_exits_before_using_release_result(tmp_path: Path):
+    with pytest.raises(SystemExit) as error:
+        MODULE.main(
+            [
+                "--metadata",
+                str(_metadata(tmp_path)),
+                "--event-name",
+                "release",
+                "--ref-name",
+                "v1.2.3",
+                "--release-tag",
+                "v1.2.3",
+            ]
+        )
+
+    assert error.value.code == 2

@@ -78,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (KeyError, OSError, ValueError, ReleaseGuardError) as error:
         parser.error(str(error))
+        return 2
 
     if args.github_output is not None:
         with args.github_output.open("a", encoding="utf-8") as output:
