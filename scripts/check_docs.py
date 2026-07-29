@@ -23,6 +23,23 @@ FENCE_RE = re.compile(r"^```", re.MULTILINE)
 CHANGELOG_VERSION_RE = re.compile(r"^## \[([^]]+)]", re.MULTILINE)
 PUBLIC_DOC_PREFIX = "docs/"
 RU_DOC_ROOT = Path("docs-site/i18n/ru/docusaurus-plugin-content-docs/current")
+GATEWAY_REPOSITORY_URL = "https://github.com/ai-forever/gpt2giga"
+GATEWAY_DOCS_URL = "https://ai-forever.github.io/gpt2giga/"
+GIGALOOM_REPOSITORY_URL = "https://github.com/krakenalt/gigaloom"
+LEGACY_GIGALOOM_DOCS = (
+    Path("agent-capability-matrix.md"),
+    Path("agents-and-multi-agent.md"),
+    Path("harness.md"),
+    Path("architecture/authority-approval-schema-adr.md"),
+    Path("architecture/frontend-asset-build-architecture-adr.md"),
+    Path("architecture/github-capability-grants-adr.md"),
+    Path("architecture/harness.md"),
+    Path("architecture/product-capability-admission-adr.md"),
+    Path("architecture/provider-authentication-capability-matrix.md"),
+    Path("architecture/provider-native-cli-facade-adr.md"),
+    Path("architecture/remote-ui-identity-adr.md"),
+    Path("architecture/scoped-network-access-adr.md"),
+)
 
 
 @dataclass(frozen=True)
@@ -183,6 +200,65 @@ def check_package_versions(root: Path) -> list[Issue]:
     return issues
 
 
+def check_package_urls(root: Path) -> list[Issue]:
+    """Require gateway-only project links in the published package metadata."""
+    path = root / "packages/gpt2giga/pyproject.toml"
+    metadata = tomllib.loads(path.read_text(encoding="utf-8"))
+    urls = metadata["project"].get("urls", {})
+    expected = {
+        "Homepage": GATEWAY_DOCS_URL,
+        "Documentation": GATEWAY_DOCS_URL,
+        "Repository": GATEWAY_REPOSITORY_URL,
+        "Issues": f"{GATEWAY_REPOSITORY_URL}/issues",
+        "Changelog": (
+            f"{GATEWAY_REPOSITORY_URL}/blob/main/packages/gpt2giga/CHANGELOG_en.md"
+        ),
+    }
+    issues = [
+        Issue(path, f"project.urls.{name} is {urls.get(name)!r}; expected {value!r}")
+        for name, value in expected.items()
+        if urls.get(name) != value
+    ]
+    if any(GIGALOOM_REPOSITORY_URL in str(value) for value in urls.values()):
+        issues.append(
+            Issue(path, "gateway project.urls must not identify the GigaLoom project")
+        )
+    return issues
+
+
+def check_repository_split_docs(root: Path) -> list[Issue]:
+    """Keep the standalone products and every legacy documentation URL explicit."""
+    issues: list[Issue] = []
+    linked_surfaces = (
+        root / "README.md",
+        root / "packages/gpt2giga/README.md",
+        root / "docs/gigaloom-migration.md",
+        root / RU_DOC_ROOT / "gigaloom-migration.md",
+        root / "docs-site/docusaurus.config.ts",
+    )
+    for path in linked_surfaces:
+        if GIGALOOM_REPOSITORY_URL not in path.read_text(encoding="utf-8"):
+            issues.append(
+                Issue(
+                    path, f"missing standalone GigaLoom link {GIGALOOM_REPOSITORY_URL}"
+                )
+            )
+
+    for relative in LEGACY_GIGALOOM_DOCS:
+        for path in (root / "docs" / relative, root / RU_DOC_ROOT / relative):
+            if not path.exists():
+                issues.append(Issue(path, "missing legacy GigaLoom URL tombstone"))
+                continue
+            content = path.read_text(encoding="utf-8")
+            if GIGALOOM_REPOSITORY_URL not in content:
+                issues.append(
+                    Issue(path, "tombstone does not link standalone GigaLoom")
+                )
+            if "migration tombstone" not in content:
+                issues.append(Issue(path, "legacy page is not marked as a tombstone"))
+    return issues
+
+
 def check_stale_instructions(root: Path, files: list[Path]) -> list[Issue]:
     """Reject known obsolete public installation instructions."""
     forbidden = {
@@ -210,6 +286,8 @@ def validate(root: Path) -> list[Issue]:
         *check_locale_coverage(root),
         *check_proxy_settings(root),
         *check_package_versions(root),
+        *check_package_urls(root),
+        *check_repository_split_docs(root),
         *check_stale_instructions(root, files),
     ]
 

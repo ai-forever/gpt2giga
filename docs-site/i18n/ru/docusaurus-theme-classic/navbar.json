@@ -1,6 +1,6 @@
 {
   "title": {
-    "message": "gpt2giga",
+    "message": "gpt2giga gateway",
     "description": "The title in the navbar"
   },
   "item.label.Documentation": {
@@ -22,5 +22,9 @@
   "item.label.GitHub": {
     "message": "GitHub",
     "description": "Navbar item with label GitHub"
+  },
+  "item.label.GigaLoom": {
+    "message": "GigaLoom",
+    "description": "Navbar item with label GigaLoom"
   }
 }
