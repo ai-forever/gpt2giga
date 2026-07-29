@@ -79,8 +79,12 @@ def test_gateway_release_workflow_has_one_package_and_one_publish_contract():
 
     assert "scripts/gateway_release_guard.py" in workflow
     assert workflow.count("uv publish ") == 1
-    assert "secrets.PYPI_API_KEY" in workflow
+    assert workflow.count("secrets.PYPI_API_KEY") == 1
     assert "if: needs.metadata.outputs.mode == 'publish'" in workflow
+    assert "Gateway release / protected PyPI upload" in workflow
+    assert "needs: [metadata, build]" in workflow
+    assert "name: pypi-gateway" in workflow
+    assert "Download attested gateway artifacts" in workflow
 
 
 def test_gateway_security_and_docs_filters_are_member_specific():
