@@ -37,6 +37,9 @@ def test_gateway_release_workflow_has_one_package_and_one_publish_contract():
     workflow = (_WORKFLOW_ROOT / "publish-pypi.yml").read_text(encoding="utf-8")
 
     assert "scripts/gateway_release_guard.py" in workflow
+    assert "RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}" in workflow
+    assert '--release-prerelease "${RELEASE_PRERELEASE}"' in workflow
+    assert "--metadata" not in workflow
     assert workflow.count("uv publish ") == 1
     assert workflow.count("secrets.PYPI_API_KEY") == 1
     assert "if: needs.metadata.outputs.mode == 'publish'" in workflow
