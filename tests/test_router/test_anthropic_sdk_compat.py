@@ -3,6 +3,7 @@ import json
 import httpx
 from anthropic import Anthropic
 from fastapi import FastAPI
+from gigachat.api.utils import build_headers
 from fastapi.testclient import TestClient
 from loguru import logger
 
@@ -42,7 +43,7 @@ class FakeGigachat:
         request = httpx.Request(
             "POST",
             "https://gigachat.example/chat",
-            headers={"content-type": "application/json"},
+            headers={**build_headers(), "content-type": "application/json"},
             content=json.dumps({"model": "GigaChat"}).encode("utf-8"),
         )
         for hook in self._aclient.event_hooks["request"]:

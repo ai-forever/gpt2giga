@@ -1,7 +1,9 @@
+import asyncio
 import json
 from types import SimpleNamespace
 
 import httpx
+import pytest
 from gigachat.api.utils import build_headers
 from starlette.requests import Request
 
@@ -9,6 +11,9 @@ from gpt2giga.common.gigachat_options import (
     GigaRequestOptions,
     extract_gigachat_request_options,
     gigachat_request_options,
+)
+from gpt2giga.providers.gigachat.transport_compat import (
+    GigaChatTransportCompatibilityError,
 )
 
 
@@ -126,7 +131,7 @@ async def test_gigachat_request_options_sets_gigachat_header_contextvars():
     assert headers_after_context == {"User-Agent": "GigaChat-python-lib"}
 
 
-async def test_gigachat_request_options_hook_applies_headers_query_and_body():
+async def test_gigachat_request_options_hook_applies_duplicate_query_and_body():
     captured = {}
 
     async def handler(request):
@@ -141,8 +146,8 @@ async def test_gigachat_request_options_hook_applies_headers_query_and_body():
     ) as client:
         giga_client = SimpleNamespace(_aclient=client)
         options = GigaRequestOptions(
-            headers={"X-Me": "kus"},
-            query=(("beta", "true"),),
+            headers={},
+            query=(("beta", "one"), ("beta", "two")),
             body={"profanity_check": False},
         )
         async with gigachat_request_options(giga_client, options):
@@ -152,8 +157,11 @@ async def test_gigachat_request_options_hook_applies_headers_query_and_body():
             )
 
     assert response.status_code == 200
-    assert captured["headers"]["x-me"] == "kus"
-    assert captured["query"] == (("existing", "1"), ("beta", "true"))
+    assert captured["query"] == (
+        ("existing", "1"),
+        ("beta", "one"),
+        ("beta", "two"),
+    )
     assert captured["body"] == {
         "model": "GigaChat",
         "messages": [],
@@ -161,7 +169,8 @@ async def test_gigachat_request_options_hook_applies_headers_query_and_body():
     }
 
 
-async def test_gigachat_request_options_hook_skips_auth_requests():
+@pytest.mark.parametrize("auth_path", ["/oauth", "/token"])
+async def test_gigachat_request_options_hook_skips_auth_requests(auth_path):
     captured = {}
 
     async def handler(request):
@@ -176,14 +185,117 @@ async def test_gigachat_request_options_hook_skips_auth_requests():
     ) as client:
         giga_client = SimpleNamespace(_aclient=client)
         options = GigaRequestOptions(
-            headers={"X-Me": "kus"},
+            headers={},
             query=(("beta", "true"),),
             body={"profanity_check": False},
         )
         async with gigachat_request_options(giga_client, options):
-            response = await client.post("/oauth", json={"scope": "GIGACHAT_API_PERS"})
+            response = await client.post(auth_path, json={"scope": "GIGACHAT_API_PERS"})
 
     assert response.status_code == 200
-    assert "x-me" not in captured["headers"]
     assert captured["query"] == ()
     assert json.loads(captured["body"]) == {"scope": "GIGACHAT_API_PERS"}
+
+
+async def test_gigachat_request_options_hook_guards_non_json_content():
+    captured = {}
+
+    async def handler(request):
+        captured["body"] = await request.aread()
+        return httpx.Response(200, json={"ok": True})
+
+    async with httpx.AsyncClient(
+        base_url="https://gigachat.test", transport=httpx.MockTransport(handler)
+    ) as client:
+        options = GigaRequestOptions(headers={}, query=(), body={"unsafe": True})
+        async with gigachat_request_options(SimpleNamespace(_aclient=client), options):
+            await client.post("/chat/completions", content=b"original")
+
+    assert captured["body"] == b"original"
+
+
+async def test_gigachat_request_options_reset_after_exception():
+    options = GigaRequestOptions(
+        headers={"x-request-id": "request-before-error"}, query=(), body={}
+    )
+
+    with pytest.raises(RuntimeError, match="request failed"):
+        async with gigachat_request_options(SimpleNamespace(), options):
+            assert build_headers()["X-Request-ID"] == "request-before-error"
+            raise RuntimeError("request failed")
+
+    assert "X-Request-ID" not in build_headers()
+
+
+async def test_gigachat_request_options_isolate_concurrent_tasks():
+    captured = {}
+
+    async def handler(request):
+        await asyncio.sleep(0)
+        captured[request.url.path] = (
+            tuple(request.url.params.multi_items()),
+            json.loads(await request.aread()),
+        )
+        return httpx.Response(200, json={"ok": True})
+
+    async with httpx.AsyncClient(
+        base_url="https://gigachat.test", transport=httpx.MockTransport(handler)
+    ) as client:
+        giga_client = SimpleNamespace(_aclient=client)
+
+        async def send(name):
+            options = GigaRequestOptions(
+                headers={},
+                query=(("task", name),),
+                body={"task": name},
+            )
+            async with gigachat_request_options(giga_client, options):
+                await asyncio.sleep(0)
+                await client.post(f"/{name}", json={"base": name})
+
+        await asyncio.gather(send("first"), send("second"))
+
+    assert captured["/first"] == (
+        (("task", "first"),),
+        {"base": "first", "task": "first"},
+    )
+    assert captured["/second"] == (
+        (("task", "second"),),
+        {"base": "second", "task": "second"},
+    )
+
+
+async def test_gigachat_request_options_hook_unavailable_fails_explicitly():
+    options = GigaRequestOptions(
+        headers={}, query=(("secret-key", "secret-value"),), body={}
+    )
+
+    with pytest.raises(GigaChatTransportCompatibilityError) as exc_info:
+        async with gigachat_request_options(SimpleNamespace(), options):
+            pass
+
+    assert "request hook" in str(exc_info.value)
+    assert "secret-key" not in str(exc_info.value)
+    assert "secret-value" not in str(exc_info.value)
+
+
+async def test_gigachat_request_options_headers_do_not_require_private_hook():
+    options = GigaRequestOptions(
+        headers={"x-request-id": "public-context"}, query=(), body={}
+    )
+
+    async with gigachat_request_options(SimpleNamespace(), options):
+        assert build_headers()["X-Request-ID"] == "public-context"
+
+
+async def test_gigachat_request_options_hook_is_installed_once():
+    http_client = SimpleNamespace(event_hooks={"request": []})
+    giga_client = SimpleNamespace(_aclient=http_client)
+    options = GigaRequestOptions(headers={}, query=(("feature", "on"),), body={})
+
+    async with gigachat_request_options(giga_client, options):
+        pass
+    async with gigachat_request_options(giga_client, options):
+        pass
+
+    assert len(http_client.event_hooks["request"]) == 1
