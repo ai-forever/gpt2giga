@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import Any
 from urllib.parse import unquote
 
 from fastapi import Request
@@ -14,6 +15,19 @@ LEGACY_GIGALOOM_MODEL_SIGNATURE_HEADER = "x-gigaloom-model-signature"
 LEGACY_GIGALOOM_HMAC_DOMAIN = "gigaloom-model/v1"
 PASS_MODEL_HEADER = "x-gpt2giga-pass-model"
 MAX_MODEL_LENGTH = 256
+
+
+def apply_model_override(payload: Any, model: str | None) -> Any:
+    """Apply a trusted request-scoped model after global pass-model handling."""
+    if model is None:
+        return payload
+    if isinstance(payload, Mapping):
+        return {**payload, "model": model}
+    model_copy = getattr(payload, "model_copy", None)
+    if callable(model_copy):
+        return model_copy(update={"model": model})
+    setattr(payload, "model", model)
+    return payload
 
 
 def resolve_signed_model_override(

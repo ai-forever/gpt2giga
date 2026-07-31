@@ -18,8 +18,10 @@ from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
-from gpt2giga.common.signed_model_override import resolve_signed_model_override
-from gpt2giga.common.model_concurrency import resolve_gigachat_model
+from gpt2giga.common.signed_model_override import (
+    apply_model_override,
+    resolve_signed_model_override,
+)
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
@@ -49,6 +51,7 @@ from gpt2giga.protocols.anthropic import (
     normalized_chat_response_to_anthropic,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
+from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.sinks.observability.anthropic import (
     emit_anthropic_message_observability,
     observe_anthropic_message_stream,
@@ -64,19 +67,6 @@ def _claude_cli_model_override(request: Request) -> str | None:
         protocol="anthropic",
         user_agent_prefix="claude-cli/",
     )
-
-
-def apply_model_override(payload: Any, model: str | None) -> Any:
-    """Apply a trusted request-scoped model after global pass-model handling."""
-    if model is None:
-        return payload
-    if isinstance(payload, dict):
-        return {**payload, "model": model}
-    model_copy = getattr(payload, "model_copy", None)
-    if callable(model_copy):
-        return model_copy(update={"model": model})
-    setattr(payload, "model", model)
-    return payload
 
 
 @router.post(
@@ -97,7 +87,16 @@ async def count_tokens(request: Request):
 
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
-    model = _claude_cli_model_override(request) or data.get("model", "unknown")
+    resolution = resolve_upstream_model(
+        data,
+        request.app.state.config,
+        forced_model=_claude_cli_model_override(request),
+        provider="anthropic",
+    )
+    update_request_context(
+        model_effective=resolution.model,
+        metadata={"model_source": resolution.source},
+    )
 
     openai_messages = _convert_anthropic_messages_to_openai(
         data.get("system"), data.get("messages", [])
@@ -111,9 +110,12 @@ async def count_tokens(request: Request):
     if not texts:
         return {"input_tokens": 0}
 
-    async with model_limiter.limit(model, provider="anthropic"):
+    async with model_limiter.limit(resolution.limiter_key, provider="anthropic"):
         async with gigachat_request_options(giga_client, request_options):
-            token_counts = await giga_client.atokens_count(texts, model=model)
+            token_counts = await giga_client.atokens_count(
+                texts,
+                model=resolution.model,
+            )
     total_tokens = sum(token_count.tokens for token_count in token_counts)
     return {"input_tokens": total_tokens}
 
@@ -181,9 +183,22 @@ async def messages(request: Request):
             chat_request = await state.request_transformer.prepare_chat_completion(
                 openai_data, giga_client
             )
-        chat_request = apply_model_override(chat_request, pinned_model)
-        effective_model = resolve_gigachat_model(chat_request, state.config)
-        update_request_context(model_effective=effective_model)
+        resolution = resolve_upstream_model(
+            chat_request,
+            state.config,
+            forced_model=pinned_model,
+            api_mode=mode,
+            provider="anthropic",
+        )
+        chat_request = apply_model_override(
+            chat_request,
+            resolution.model if resolution.source == "forced" else None,
+        )
+        effective_model = resolution.limiter_key
+        update_request_context(
+            model_effective=resolution.model,
+            metadata={"model_source": resolution.source},
+        )
         if not stream:
             async with model_limiter.limit(effective_model, provider="anthropic"):
                 async with gigachat_request_options(giga_client, request_options):
@@ -238,9 +253,22 @@ async def messages(request: Request):
         chat_messages = await state.request_transformer.prepare_chat(
             openai_data, giga_client
         )
-    chat_messages = apply_model_override(chat_messages, pinned_model)
-    effective_model = resolve_gigachat_model(chat_messages, state.config)
-    update_request_context(model_effective=effective_model)
+    resolution = resolve_upstream_model(
+        chat_messages,
+        state.config,
+        forced_model=pinned_model,
+        api_mode=mode,
+        provider="anthropic",
+    )
+    chat_messages = apply_model_override(
+        chat_messages,
+        resolution.model if resolution.source == "forced" else None,
+    )
+    effective_model = resolution.limiter_key
+    update_request_context(
+        model_effective=resolution.model,
+        metadata={"model_source": resolution.source},
+    )
 
     if not stream:
         async with model_limiter.limit(effective_model, provider="anthropic"):

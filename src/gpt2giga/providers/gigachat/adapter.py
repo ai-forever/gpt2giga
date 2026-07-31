@@ -17,6 +17,7 @@ from gpt2giga.common.model_concurrency import (
     ModelConcurrencyTimeoutError,
     ProviderName,
 )
+from gpt2giga.common.signed_model_override import apply_model_override
 from gpt2giga.common.tools import (
     map_tool_name_from_gigachat,
     normalize_gigachat_builtin_tool_type,
@@ -216,7 +217,7 @@ class GigaChatProviderAdapter:
                 self.giga_client,
             )
         resolution = self._resolve_model(chat_payload)
-        chat_payload = _force_payload_model(
+        chat_payload = apply_model_override(
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
@@ -246,7 +247,7 @@ class GigaChatProviderAdapter:
                 self.giga_client,
             )
         resolution = self._resolve_model(chat_payload)
-        chat_payload = _force_payload_model(
+        chat_payload = apply_model_override(
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
@@ -282,7 +283,7 @@ class GigaChatProviderAdapter:
                 self.giga_client,
             )
         resolution = self._resolve_model(chat_payload)
-        chat_payload = _force_payload_model(
+        chat_payload = apply_model_override(
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
@@ -346,7 +347,7 @@ class GigaChatProviderAdapter:
                 self.giga_client,
             )
         resolution = self._resolve_model(chat_payload)
-        chat_payload = _force_payload_model(
+        chat_payload = apply_model_override(
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
@@ -415,19 +416,6 @@ class GigaChatProviderAdapter:
                 include_builtin_tools=self._builtin_tool_mapping_enabled(),
             ),
         )
-
-
-def _force_payload_model(payload: Any, model: str | None) -> Any:
-    """Apply a trusted request-scoped model after global pass-model handling."""
-    if model is None:
-        return payload
-    if isinstance(payload, dict):
-        return {**payload, "model": model}
-    model_copy = getattr(payload, "model_copy", None)
-    if callable(model_copy):
-        return model_copy(update={"model": model})
-    setattr(payload, "model", model)
-    return payload
 
 
 def normalized_chat_to_openai_payload(

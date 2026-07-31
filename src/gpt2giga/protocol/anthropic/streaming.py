@@ -17,7 +17,6 @@ from gpt2giga.common.gigachat_options import (
 from gpt2giga.common.model_concurrency import (
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
-    resolve_gigachat_model,
 )
 from gpt2giga.common.reasoning import ReasoningContentParser
 from gpt2giga.common.sources import (
@@ -28,6 +27,7 @@ from gpt2giga.common.sources import (
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
 from gpt2giga.protocol.response import adapt_chat_completion_chunk_to_chat_chunk_shape
+from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 
 
 async def _stream_anthropic_generator(
@@ -54,9 +54,16 @@ async def _stream_anthropic_generator(
         if model_limiter is None:
             model_limiter = get_model_concurrency_limiter(request)
         if effective_model is None:
-            effective_model = resolve_gigachat_model(
-                chat_messages, getattr(request.app.state, "config", None)
-            )
+            effective_model = resolve_upstream_model(
+                chat_messages,
+                getattr(request.app.state, "config", None),
+                api_mode=getattr(
+                    getattr(request.app.state.config, "proxy_settings", None),
+                    "gigachat_api_mode",
+                    "v1",
+                ),
+                provider="anthropic",
+            ).limiter_key
 
         yield sse(
             "message_start",

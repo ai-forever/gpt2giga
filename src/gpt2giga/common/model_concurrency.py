@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
 
 ProviderName = Literal["openai", "anthropic", "gemini", "internal"]
@@ -110,17 +110,3 @@ class ModelConcurrencyLimiter:
             await asyncio.wait_for(semaphore.acquire(), timeout=self._acquire_timeout)
         except asyncio.TimeoutError as exc:
             raise ModelConcurrencyTimeoutError(model, limit, provider) from exc
-
-
-def resolve_gigachat_model(chat_payload: Any, config: Any) -> str:
-    """Compatibility facade for protocol owners migrating to the typed resolver."""
-    from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
-
-    proxy_settings = getattr(config, "proxy_settings", None)
-    api_mode = getattr(proxy_settings, "gigachat_api_mode", "v1")
-    return resolve_upstream_model(
-        chat_payload,
-        config,
-        api_mode=api_mode,
-        provider="anthropic",
-    ).limiter_key

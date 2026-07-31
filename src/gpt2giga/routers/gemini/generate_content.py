@@ -39,6 +39,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedUsage,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
+from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
     build_llm_chat_completion_attributes,
@@ -316,10 +317,22 @@ async def count_tokens(model: str, request: Request):
     """Count prompt tokens for a Gemini-compatible request."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
-    effective_model = _gemini_cli_model_override(request) or requested_model
+    pinned_model = _gemini_cli_model_override(request)
+    resolution = resolve_upstream_model(
+        {"model": requested_model},
+        request.app.state.config,
+        forced_model=pinned_model,
+        provider="gemini",
+    )
+    effective_model = resolution.model
     update_request_context(
         model_requested=requested_model,
-        metadata={"protocol": "gemini", "api_format": "count_tokens"},
+        model_effective=effective_model,
+        metadata={
+            "protocol": "gemini",
+            "api_format": "count_tokens",
+            "model_source": resolution.source,
+        },
     )
     normalized = await _try_normalized_count_tokens(
         request,
@@ -337,7 +350,7 @@ async def count_tokens(model: str, request: Request):
     model_limiter = get_model_concurrency_limiter(request)
     from gpt2giga.common.gigachat_options import gigachat_request_options
 
-    async with model_limiter.limit(effective_model, provider="gemini"):
+    async with model_limiter.limit(resolution.limiter_key, provider="gemini"):
         async with gigachat_request_options(giga_client, request_options):
             token_counts = await giga_client.atokens_count(
                 texts,
