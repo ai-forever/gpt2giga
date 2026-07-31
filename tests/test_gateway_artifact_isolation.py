@@ -52,8 +52,43 @@ def test_editable_gateway_member_resolves_to_gateway_source():
 def test_gateway_sdist_is_self_contained(built_artifacts: BuiltArtifacts):
     with tarfile.open(built_artifacts.gateway_sdist) as archive:
         names = archive.getnames()
-    assert any(name.endswith("/pyproject.toml") for name in names)
-    assert any(name.endswith("/README.md") for name in names)
+
+    required_members = (
+        "/pyproject.toml",
+        "/README.md",
+        "/CHANGELOG.md",
+        "/CHANGELOG_en.md",
+        "/src/gpt2giga/__init__.py",
+    )
+    assert {
+        member
+        for member in required_members
+        if not any(name.endswith(member) for name in names)
+    } == set()
+    legacy_layout = "packages" + "/gpt2giga/"
+    assert not any(legacy_layout in name for name in names)
+
+
+@pytest.mark.parametrize("artifact_attribute", ["gateway_wheel", "gateway_sdist"])
+def test_gateway_artifacts_include_postgres_migration(
+    built_artifacts: BuiltArtifacts,
+    artifact_attribute: str,
+):
+    artifact = getattr(built_artifacts, artifact_attribute)
+    migration = "gpt2giga/storage/postgres/migrations/0001_traffic_logs.sql"
+
+    assert any(name.endswith(migration) for name in _artifact_members(artifact))
+
+
+def test_production_image_installs_the_root_built_wheel():
+    root = Path(__file__).resolve().parents[1]
+    dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY pyproject.toml README.md ./" in dockerfile
+    assert "COPY src/ src/" in dockerfile
+    assert "RUN uv build --wheel" in dockerfile
+    assert "COPY --from=builder /app/dist/*.whl /tmp/" in dockerfile
+    assert 'pip install --no-cache-dir "${wheel_path}${INSTALL_EXTRAS}"' in dockerfile
 
 
 @pytest.mark.parametrize("artifact_attribute", ["gateway_wheel", "gateway_sdist"])
