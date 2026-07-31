@@ -7,10 +7,15 @@ import pytest
 
 from artifact_contract_support import (
     BuiltArtifacts,
+    GATEWAY_DESCRIPTION,
+    GATEWAY_NAME,
+    GATEWAY_README,
     GATEWAY_SOURCE_ROOT,
     GATEWAY_SMOKE,
     GATEWAY_VERSION,
+    _artifact_member_bytes,
     _artifact_members,
+    _artifact_metadata,
     _build_artifacts,
     _install_artifacts,
     _run_clean_python,
@@ -23,7 +28,7 @@ def built_artifacts(tmp_path_factory) -> BuiltArtifacts:
 
 
 @pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])
-def test_gateway_artifact_is_isolated(
+def test_gateway_artifact_clean_install_smoke(
     built_artifacts: BuiltArtifacts,
     tmp_path,
     artifact_kind: str,
@@ -62,19 +67,42 @@ def test_gateway_sdist_is_self_contained(built_artifacts: BuiltArtifacts):
         for member in required_members
         if not any(name.endswith(member) for name in names)
     } == set()
-    legacy_layout = "packages" + "/gpt2giga/"
-    assert not any(legacy_layout in name for name in names)
 
 
-@pytest.mark.parametrize("artifact_attribute", ["gateway_wheel", "gateway_sdist"])
-def test_gateway_artifacts_include_postgres_migration(
+@pytest.mark.parametrize(
+    ("artifact_attribute", "namespace_suffix"),
+    [
+        ("gateway_wheel", "gpt2giga/__init__.py"),
+        ("gateway_sdist", "src/gpt2giga/__init__.py"),
+    ],
+)
+def test_gateway_artifact_contents_and_metadata(
     built_artifacts: BuiltArtifacts,
     artifact_attribute: str,
+    namespace_suffix: str,
 ):
     artifact = getattr(built_artifacts, artifact_attribute)
-    migration = "gpt2giga/storage/postgres/migrations/0001_traffic_logs.sql"
+    members = _artifact_members(artifact)
+    metadata = _artifact_metadata(artifact)
+    package_data = (
+        "gpt2giga/storage/postgres/migrations/0001_traffic_logs.sql",
+        "gpt2giga/templates/log_viewer.html",
+    )
 
-    assert any(name.endswith(migration) for name in _artifact_members(artifact))
+    assert any(name.endswith(namespace_suffix) for name in members)
+    assert not any(
+        "gpt2giga_harness" in Path(name).parts or "/gpt2giga/harness/" in f"/{name}/"
+        for name in members
+    )
+    assert all(any(name.endswith(data) for name in members) for data in package_data)
+    assert metadata["Name"] == GATEWAY_NAME
+    assert metadata["Version"] == GATEWAY_VERSION
+    assert metadata["Summary"] == GATEWAY_DESCRIPTION
+    assert metadata["Description-Content-Type"] == "text/markdown"
+    metadata_suffix = (
+        ".dist-info/METADATA" if artifact.suffix == ".whl" else "/PKG-INFO"
+    )
+    assert _artifact_member_bytes(artifact, metadata_suffix).endswith(GATEWAY_README)
 
 
 def test_production_image_installs_the_root_built_wheel():
@@ -86,17 +114,3 @@ def test_production_image_installs_the_root_built_wheel():
     assert "RUN uv build --wheel" in dockerfile
     assert "COPY --from=builder /app/dist/*.whl /tmp/" in dockerfile
     assert 'pip install --no-cache-dir "${wheel_path}${INSTALL_EXTRAS}"' in dockerfile
-
-
-@pytest.mark.parametrize("artifact_attribute", ["gateway_wheel", "gateway_sdist"])
-def test_gateway_artifacts_do_not_package_gigaloom(
-    built_artifacts: BuiltArtifacts,
-    artifact_attribute: str,
-):
-    artifact = getattr(built_artifacts, artifact_attribute)
-    violations = [
-        name
-        for name in _artifact_members(artifact)
-        if "gpt2giga_harness" in Path(name).parts
-    ]
-    assert violations == []

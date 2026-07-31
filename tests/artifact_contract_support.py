@@ -1,6 +1,8 @@
 """Gateway artifact helpers shared by repository-owned isolation tests."""
 
 from dataclasses import dataclass
+from email import policy
+from email.parser import BytesParser
 import json
 import os
 from pathlib import Path
@@ -25,8 +27,10 @@ def _project_metadata(root: Path) -> dict:
 
 
 _GATEWAY_METADATA = _project_metadata(REPO_ROOT)
+GATEWAY_NAME = _GATEWAY_METADATA["name"]
 GATEWAY_VERSION = _GATEWAY_METADATA["version"]
 GATEWAY_DESCRIPTION = _GATEWAY_METADATA["description"]
+GATEWAY_README = (REPO_ROOT / _GATEWAY_METADATA["readme"]).read_bytes()
 
 
 @dataclass(frozen=True)
@@ -130,9 +134,12 @@ from gpt2giga.models.config import ProxyConfig
 
 assert Path(gpt2giga.__file__).resolve().is_relative_to(installed_root)
 assert importlib.util.find_spec("gpt2giga_harness") is None
+assert importlib.util.find_spec("gpt2giga.harness") is None
 distribution = importlib.metadata.distribution("gpt2giga")
+assert distribution.metadata["Name"] == "gpt2giga"
 assert distribution.version == os.environ["EXPECTED_GATEWAY_VERSION"]
 assert distribution.metadata["Summary"] == os.environ["EXPECTED_GATEWAY_DESCRIPTION"]
+assert distribution.metadata["Description-Content-Type"] == "text/markdown"
 scripts = {
     entry.name: entry.value
     for entry in distribution.entry_points
@@ -157,6 +164,26 @@ def _artifact_members(path: Path) -> tuple[str, ...]:
             return tuple(archive.namelist())
     with tarfile.open(path) as archive:
         return tuple(archive.getnames())
+
+
+def _artifact_member_bytes(path: Path, suffix: str) -> bytes:
+    matches = [name for name in _artifact_members(path) if name.endswith(suffix)]
+    assert len(matches) == 1
+    member = matches[0]
+    if path.suffix == ".whl":
+        with zipfile.ZipFile(path) as archive:
+            return archive.read(member)
+    with tarfile.open(path) as archive:
+        extracted = archive.extractfile(member)
+        assert extracted is not None
+        return extracted.read()
+
+
+def _artifact_metadata(path: Path):
+    suffix = ".dist-info/METADATA" if path.suffix == ".whl" else "/PKG-INFO"
+    return BytesParser(policy=policy.default).parsebytes(
+        _artifact_member_bytes(path, suffix)
+    )
 
 
 def assert_lock_is_current() -> None:
