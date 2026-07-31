@@ -489,8 +489,10 @@ class RequestTransformer:
             transformed.setdefault("reasoning_effort", "high")
 
         gpt_model = data.get("model", None)
-        if not self.config.proxy_settings.pass_model and gpt_model:
-            del transformed["model"]
+        if isinstance(gpt_model, str) and not gpt_model.strip():
+            transformed.pop("model", None)
+        elif not self.config.proxy_settings.pass_model and gpt_model:
+            transformed.pop("model", None)
 
         temperature = transformed.pop("temperature", None)
         if temperature is not None:

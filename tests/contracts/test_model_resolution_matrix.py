@@ -125,7 +125,7 @@ async def test_model_precedence_reaches_sdk_limiter_and_telemetry(
     if case.source in {"payload", "forced"}:
         assert raw_model == case.expected
     else:
-        assert raw_model is None or not raw_model.strip()
+        assert raw_model is None
     assert stable_sdk_client.effective_models == [case.expected]
     assert recording_limiter.calls == [(case.expected, "openai")]
     assert request_context.model_effective == case.expected
