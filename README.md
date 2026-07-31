@@ -1,6 +1,8 @@
 # gpt2giga
 
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ai-forever/gpt2giga/ci.yaml?&style=flat-square)](https://github.com/ai-forever/gpt2giga/actions/workflows/ci.yaml)
+[![PyPI](https://img.shields.io/pypi/v/gpt2giga?style=flat-square&label=PyPI)](https://pypi.org/project/gpt2giga/)
+[![Python](https://img.shields.io/pypi/pyversions/gpt2giga?style=flat-square)](https://pypi.org/project/gpt2giga/)
 [![GitHub License](https://img.shields.io/github/license/ai-forever/gpt2giga?style=flat-square)](https://opensource.org/licenses/MIT)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/gpt2giga?style=flat-square)](https://pypistats.org/packages/gpt2giga)
 [![GitHub Repo stars](https://img.shields.io/github/stars/ai-forever/gpt2giga?style=flat-square)](https://star-history.com/#ai-forever/gpt2giga)
@@ -8,7 +10,7 @@
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-111827?style=flat-square)](https://ai-forever.github.io/gpt2giga/)
 [![GigaLoom](https://img.shields.io/badge/agentic_workbench-GigaLoom-7c3aed?style=flat-square)](https://github.com/krakenalt/gigaloom)
 
-![Gateway coverage](./badges/coverage.svg)
+![Gateway coverage](https://raw.githubusercontent.com/ai-forever/gpt2giga/main/badges/coverage.svg)
 
 `gpt2giga` — FastAPI-прокси, который принимает OpenAI-, Anthropic- и Gemini-like запросы и отправляет их в GigaChat. Он нужен, когда клиент, редактор, агентный фреймворк или SDK умеет работать с OpenAI/Anthropic/Gemini API, а реальный backend должен быть GigaChat.
 
@@ -17,7 +19,7 @@
 > GigaLoom, локальный agentic workbench и бывший Unified Harness, развивается
 > отдельно в [`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom).
 > Этот репозиторий и пакет `gpt2giga` содержат только compatibility gateway.
-> Старые ссылки собраны в [уведомлении о переносе](./docs/gigaloom-migration.md).
+> Старые ссылки собраны в [уведомлении о переносе](https://ai-forever.github.io/gpt2giga/gigaloom-migration).
 
 ## Зачем Нужен
 
@@ -33,7 +35,7 @@ GigaChat не является drop-in заменой OpenAI или Anthropic AP
 - отдаёт список моделей в OpenAI-, Anthropic-, Gemini- и LiteLLM-совместимом виде;
 - держит batch/file routes отключёнными, пока их нельзя выполнить end-to-end через GigaChat SDK/backend.
 
-Подробная матрица поддержки и список реальных ограничений вынесены в [API Compatibility](./docs/api-compatibility.md).
+Подробная матрица поддержки и список реальных ограничений вынесены в [API Compatibility](https://ai-forever.github.io/gpt2giga/api-compatibility).
 
 ## Быстрый Старт
 
@@ -54,6 +56,19 @@ docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
 ```sh
 uv tool install --prerelease allow gpt2giga
 gpt2giga
+```
+
+Для установки в существующее окружение:
+
+```sh
+python -m pip install --pre gpt2giga
+```
+
+Поддерживается Python 3.10–3.14. Для Postgres, OpenSearch или Phoenix добавьте
+соответствующую extra-зависимость, например:
+
+```sh
+python -m pip install --pre "gpt2giga[postgres]"
 ```
 
 Минимальный OpenAI SDK вызов:
@@ -85,7 +100,7 @@ response = client.messages.create(
 print(response.content[0].text)
 ```
 
-Больше вариантов запуска — в [Quickstart](./docs/quickstart.md).
+Больше вариантов запуска — в [Quickstart](https://ai-forever.github.io/gpt2giga/quickstart).
 
 ## Документация
 
@@ -115,20 +130,20 @@ make docs-dev-ru
 
 | Тема | Документ |
 |---|---|
-| Быстрый запуск и первые запросы | [docs/quickstart.md](./docs/quickstart.md) |
-| Что поддерживается, отключено или намеренно игнорируется | [docs/api-compatibility.md](./docs/api-compatibility.md) |
-| Совместимость SDK `extra_*` и параметров клиентов | [docs/client-parameter-compatibility.md](./docs/client-parameter-compatibility.md) |
-| Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [docs/builtin-tools.md](./docs/builtin-tools.md) |
-| Переменные окружения, CLI flags, backend modes | [docs/configuration.md](./docs/configuration.md) |
-| Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [docs/deployment.md](./docs/deployment.md) |
-| Logs, metrics, traffic logs, admin API, debug translation | [docs/operations.md](./docs/operations.md) |
-| Live GigaChat integration tests | [docs/live-integration-tests.md](./docs/live-integration-tests.md) |
-| Внутренняя архитектура normalized messages | [docs/architecture/normalized-messages.md](./docs/architecture/normalized-messages.md) |
-| Checklist для добавления provider/protocol | [docs/architecture/how-to-add-provider.md](./docs/architecture/how-to-add-provider.md) |
-| Редакторы, агенты, SDK examples, reverse proxies | [docs/integrations.md](./docs/integrations.md) |
-| Runnable-примеры | [examples/README.md](./examples/README.md) |
-| История изменений gateway | [RU](./packages/gpt2giga/CHANGELOG.md) · [EN](./packages/gpt2giga/CHANGELOG_en.md) |
-| GigaLoom и старые Harness URL | [Уведомление о переносе](./docs/gigaloom-migration.md) |
+| Быстрый запуск и первые запросы | [Quickstart](https://ai-forever.github.io/gpt2giga/quickstart) |
+| Что поддерживается, отключено или намеренно игнорируется | [API compatibility](https://ai-forever.github.io/gpt2giga/api-compatibility) |
+| Совместимость SDK `extra_*` и параметров клиентов | [Client parameter compatibility](https://ai-forever.github.io/gpt2giga/client-parameter-compatibility) |
+| Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [Built-in tools](https://ai-forever.github.io/gpt2giga/builtin-tools) |
+| Переменные окружения, CLI flags, backend modes | [Configuration](https://ai-forever.github.io/gpt2giga/configuration) |
+| Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [Deployment](https://ai-forever.github.io/gpt2giga/deployment) |
+| Logs, metrics, traffic logs, admin API, debug translation | [Operations](https://ai-forever.github.io/gpt2giga/operations) |
+| Live GigaChat integration tests | [Live integration tests](https://ai-forever.github.io/gpt2giga/live-integration-tests) |
+| Внутренняя архитектура normalized messages | [Normalized messages](https://ai-forever.github.io/gpt2giga/architecture/normalized-messages) |
+| Checklist для добавления provider/protocol | [How to add a provider](https://ai-forever.github.io/gpt2giga/architecture/how-to-add-provider) |
+| Редакторы, агенты, SDK examples, reverse proxies | [Integrations](https://ai-forever.github.io/gpt2giga/integrations) |
+| Runnable-примеры | [Examples](https://github.com/ai-forever/gpt2giga/tree/main/examples) |
+| История изменений gateway | [RU](https://github.com/ai-forever/gpt2giga/blob/main/CHANGELOG.md) · [EN](https://github.com/ai-forever/gpt2giga/blob/main/CHANGELOG_en.md) |
+| GigaLoom и старые Harness URL | [Уведомление о переносе](https://ai-forever.github.io/gpt2giga/gigaloom-migration) |
 
 ## Текущая API-Поверхность
 
@@ -159,7 +174,7 @@ v1 contract, `/v2` принудительно выбирает GigaChat v2 contr
 
 ## Деплой
 
-Docker Compose manifests лежат в [deploy/](./deploy/):
+Docker Compose manifests лежат в [deploy/](https://github.com/ai-forever/gpt2giga/tree/main/deploy):
 
 ```sh
 docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
@@ -175,13 +190,13 @@ GPT2GIGA_API_KEY="<strong-random-secret>"
 GIGACHAT_VERIFY_SSL_CERTS=True
 ```
 
-Compose profiles, reverse proxies, TLS и hardening описаны в [Deployment](./docs/deployment.md).
+Compose profiles, reverse proxies, TLS и hardening описаны в [Deployment](https://ai-forever.github.io/gpt2giga/deployment).
 
 ## Структура Репозитория
 
 | Path | Назначение |
 |---|---|
-| `packages/gpt2giga/src/gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
+| `src/gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
 | `tests/` | Unit, router, protocol, sink и integration tests |
 | `examples/` | Runnable OpenAI, Anthropic, Gemini, embeddings and agents examples; files/batches examples are prepared but not mounted |
 | `docs/` | Markdown-контент пользовательской документации и architecture notes |
@@ -196,7 +211,7 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 Установить зависимости:
 
 ```sh
-uv sync --all-packages --all-extras --dev
+uv sync --all-extras --dev
 ```
 
 Запустить сервис:
@@ -220,6 +235,6 @@ uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 ```
 
 Live-тесты с реальными вызовами GigaChat запускаются отдельно и требуют
-локальных секретов: см. [Live GigaChat Integration Tests](./docs/live-integration-tests.md).
+локальных секретов: см. [Live GigaChat Integration Tests](https://ai-forever.github.io/gpt2giga/live-integration-tests).
 
-Используйте Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`) и сверяйтесь с `.github/PULL_REQUEST_TEMPLATE.md`.
+Используйте Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`) и сверяйтесь с [PR template](https://github.com/ai-forever/gpt2giga/blob/main/.github/PULL_REQUEST_TEMPLATE.md).

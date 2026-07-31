@@ -180,7 +180,7 @@ def check_proxy_settings(root: Path) -> list[Issue]:
 def check_package_versions(root: Path) -> list[Issue]:
     """Require gateway changelogs to begin with the root metadata version."""
     issues: list[Issue] = []
-    package_root = root / "packages/gpt2giga"
+    package_root = root
     metadata = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     version = metadata["project"]["version"]
     for filename in ("CHANGELOG.md", "CHANGELOG_en.md"):
@@ -207,9 +207,7 @@ def check_package_urls(root: Path) -> list[Issue]:
         "Documentation": GATEWAY_DOCS_URL,
         "Repository": GATEWAY_REPOSITORY_URL,
         "Issues": f"{GATEWAY_REPOSITORY_URL}/issues",
-        "Changelog": (
-            f"{GATEWAY_REPOSITORY_URL}/blob/main/packages/gpt2giga/CHANGELOG_en.md"
-        ),
+        "Changelog": f"{GATEWAY_REPOSITORY_URL}/blob/main/CHANGELOG_en.md",
     }
     issues = [
         Issue(path, f"project.urls.{name} is {urls.get(name)!r}; expected {value!r}")
@@ -228,7 +226,6 @@ def check_repository_split_docs(root: Path) -> list[Issue]:
     issues: list[Issue] = []
     linked_surfaces = (
         root / "README.md",
-        root / "packages/gpt2giga/README.md",
         root / "docs/gigaloom-migration.md",
         root / RU_DOC_ROOT / "gigaloom-migration.md",
         root / "docs-site/docusaurus.config.ts",
