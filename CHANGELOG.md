@@ -5,26 +5,21 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
-## [0.2.6a1] - 2026-07-28
+## [0.2.6] - 2026-07-31
 
 ### Добавлено
-- **Normalized protocol bridge v1**: versioned semantic-loss matrix и обязательный `admit_protocol_bridge_request()` проверяют OpenAI-, Anthropic- и Gemini-shaped запросы до I/O и отклоняют неподдерживаемую или неописанную потерю семантики.
-- **OpenAI-compatible upstream adapter**: внутренний Harness-owned execution path поддерживает exact profile/model binding, strict model discovery, bounded Chat Completions streaming, function tools, usage, cancellation и нормализованные transport/provider errors для проверенных OpenAI-compatible и vLLM profiles.
-- **Anthropic normalization**: Messages, SSE, function tools, stop reasons, usage, errors и `count_tokens` получили прямые request/response projections через normalized core при включённом normalization mode.
-- **Gemini bridge contracts**: function calls/results, JSON Schema output, typed inline image references, streaming, usage, safety errors, model discovery и `countTokens` закреплены golden fixtures и общей normalized моделью.
+- **Автономный source layout**: корневой проект теперь содержит только дистрибутив и namespace compatibility gateway `gpt2giga`; GigaLoom перенесён в отдельный репозиторий.
+- **Normalized protocol bridge v1**: versioned semantic-loss matrix и admission checks проверяют поддерживаемые OpenAI-, Anthropic- и Gemini-shaped subsets до upstream I/O.
 
 ### Изменено
-- **Разделение репозиториев**: source-репозиторий, сайт документации,
-  automation, metadata пакета и coverage baseline теперь описывают только
-  compatibility gateway `gpt2giga`. GigaLoom (ранее Unified Harness) перенесён
-  в [`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom), а старые URL
-  документации source-репозитория сохраняют уведомления о миграции.
-- **Normalized mode**: `GPT2GIGA_NORMALIZATION_MODE=on` теперь охватывает принятый Anthropic Messages v1 subset и Gemini token counting; неактивный `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER` удалён.
-- **Runtime dependencies**: `httpx` объявлен прямой зависимостью gateway для OpenAI-compatible upstream transport.
+- **Стабильная установка**: gateway теперь требует stable `gigachat>=0.2.3,<0.3.0`, поэтому стандартным installer больше не нужны prerelease-флаги.
+- **Детерминированный выбор модели**: explicit request model, signed GigaLoom override, configured default и SDK fallback разрешаются в фиксированном порядке во всех совместимых протоколах.
+- **Transport compatibility**: private SDK access, необходимый request transport, изолирован в compatibility layer gateway, а `httpx` остаётся явной runtime-зависимостью.
+- **Политика совместимости**: релиз намеренно сохраняет public API gateway, route aliases, response shapes и wire-contract signed model override GigaLoom.
 
 ### Исправлено
-- **Streaming closure**: malformed или incomplete SSE, события после terminal choice, некорректная usage ordering, disconnect, timeout и provider failures завершаются стабильными fail-closed error/cancellation contracts без выдуманных token counts.
-- **Gateway security**: request-scoped Harness model override требует protocol-bound HMAC signature; forwarded client IP принимается только от trusted proxy, а error text и protocol extensions попадают в traffic/OTel только при явном content capture с redaction и truncation.
+- **Создание pass-token клиента**: credential-specific клиенты GigaChat создаются без передачи пустой модели в SDK-запросы и сохраняют существующие ограничения lifecycle.
+- **Streaming и security closure**: malformed streams и provider failures завершаются fail closed, signed model overrides остаются protocol-bound, а diagnostic content сохраняется только при opt-in с redaction и truncation.
 
 ## [0.2.5a1] - 2026-07-26
 
@@ -523,7 +518,7 @@
 
 ---
 
-[0.2.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.5a1...v0.2.6a1
+[0.2.6]: https://github.com/ai-forever/gpt2giga/compare/v0.2.5a1...v0.2.6
 [0.2.5a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.4a1...v0.2.5a1
 [0.2.4a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a2...v0.2.4a1
 [0.2.3a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a1...v0.2.3a2
