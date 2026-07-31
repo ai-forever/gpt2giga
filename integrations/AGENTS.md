@@ -7,7 +7,7 @@
 - Use safe placeholders in every `.env.example` and config sample. Never copy
   values from a real `.env`.
 - Verify auth, API mode, base URL, path normalization, and supported API claims
-  against `packages/gpt2giga/src/gpt2giga/app/factory.py`, the relevant
+  against `src/gpt2giga/app/factory.py`, the relevant
   `api/*/routes.py` aggregator, and `.env.example`.
 - Keep tool-specific commands aligned with the tool's current configuration
   format. Preserve useful user-owned settings in migration instructions.

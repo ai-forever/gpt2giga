@@ -162,7 +162,7 @@ def proxy_setting_names(config_path: Path) -> set[str]:
 
 def check_proxy_settings(root: Path) -> list[Issue]:
     """Require the configuration reference to name every public proxy setting."""
-    config_path = root / "packages/gpt2giga/src/gpt2giga/models/config.py"
+    config_path = root / "src/gpt2giga/models/config.py"
     docs_path = root / "docs/configuration.md"
     locale_path = root / RU_DOC_ROOT / "configuration.md"
     names = proxy_setting_names(config_path)

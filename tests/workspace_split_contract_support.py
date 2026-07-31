@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-GATEWAY_MEMBER = REPO_ROOT / "packages/gpt2giga"
+GATEWAY_MEMBER = REPO_ROOT
 
 
 def _forbidden_harness_imports(path: Path) -> list[str]:
@@ -51,14 +51,12 @@ def test_code_workflows_skip_documentation_only_changes() -> None:
         )
     )
 
-    assert "- 'packages/gpt2giga/**/*.py'" in codeql
+    assert "- 'src/gpt2giga/**/*.py'" in codeql
     assert "- 'pyproject.toml'" in codeql
     assert "- 'packages/**/*.py'" not in codeql
     assert "- 'pyproject.toml'" in dependency_review
     assert "- 'docs-site/package-lock.json'" in dependency_review
-    assert all(
-        "- '!packages/gpt2giga/**/*.md'" in workflow for workflow in docker_workflows
-    )
+    assert all("- '!src/gpt2giga/**/*.md'" in workflow for workflow in docker_workflows)
 
 
 def test_production_docker_build_remains_gateway_only() -> None:
@@ -73,7 +71,7 @@ def test_production_docker_build_remains_gateway_only() -> None:
     )
 
     assert "uv build --wheel" in dockerfile
-    assert "COPY packages/gpt2giga/README.md packages/gpt2giga/README.md" in dockerfile
+    assert "COPY src/ src/" in dockerfile
     assert "packages/gpt2giga-harness" not in dockerfile
     assert "gpt2giga_harness" not in dockerfile
     assert "packages/gpt2giga-harness" not in docker_workflows

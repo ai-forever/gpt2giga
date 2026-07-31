@@ -11,7 +11,7 @@ import zipfile
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-GATEWAY_MEMBER = REPO_ROOT / "packages/gpt2giga"
+GATEWAY_MEMBER = REPO_ROOT
 
 
 def _project_metadata(root: Path) -> dict:

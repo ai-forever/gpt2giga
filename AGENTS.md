@@ -25,7 +25,7 @@ work merely because it is present in the checkout.
 ## Repository contract
 
 - This is a standalone `uv` project. The root `pyproject.toml` owns the
-  `gpt2giga` distribution, while `packages/gpt2giga/src/gpt2giga/` owns the
+  `gpt2giga` distribution, while `src/gpt2giga/` owns the
   compatibility gateway Python namespace.
 - The gateway must never import or package `gpt2giga_harness`.
 - Treat the root `pyproject.toml` as the source of truth for the

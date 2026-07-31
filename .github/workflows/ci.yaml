@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/gpt2giga/**'
-      - '!packages/gpt2giga/**/*.md'
+      - 'src/gpt2giga/**'
+      - '!src/gpt2giga/**/*.md'
+      - 'README.md'
       - 'tests/**'
       - 'scripts/**'
       - 'pyproject.toml'
@@ -15,8 +16,9 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'packages/gpt2giga/**'
-      - '!packages/gpt2giga/**/*.md'
+      - 'src/gpt2giga/**'
+      - '!src/gpt2giga/**/*.md'
+      - 'README.md'
       - 'tests/**'
       - 'scripts/**'
       - 'pyproject.toml'

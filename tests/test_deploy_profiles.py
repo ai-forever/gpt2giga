@@ -36,8 +36,7 @@ def test_postgres_profile_initializes_traffic_log_schema():
         in payload
     )
     assert (
-        "../packages/gpt2giga/src/gpt2giga/storage/postgres/migrations:"
-        "/gpt2giga-migrations:ro"
+        "../src/gpt2giga/storage/postgres/migrations:/gpt2giga-migrations:ro"
     ) in payload
     assert "migrate:up" in init_script
     assert "migrate:down" in init_script

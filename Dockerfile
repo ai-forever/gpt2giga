@@ -10,8 +10,7 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml README.md ./
-COPY packages/gpt2giga/README.md packages/gpt2giga/README.md
-COPY packages/gpt2giga/src/ packages/gpt2giga/src/
+COPY src/ src/
 
 RUN uv build --wheel
 

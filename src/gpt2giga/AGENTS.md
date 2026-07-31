@@ -2,7 +2,7 @@
 
 ## Scope and boundary
 
-These rules apply to `packages/gpt2giga/**` in addition to the root contract.
+These rules apply to `src/gpt2giga/**` in addition to the root contract.
 This source tree must build and install as a standalone gateway distribution.
 
 - Keep the Python namespace `gpt2giga` and the `gpt2giga` command independent
@@ -58,8 +58,8 @@ duplicating them in routes. Put shared application state in lifecycle wiring and
 ## Validation
 
 ```bash
-uv run ruff check packages/gpt2giga/src/gpt2giga
-uv run ruff format --check packages/gpt2giga/src/gpt2giga
+uv run ruff check src/gpt2giga
+uv run ruff format --check src/gpt2giga
 uv build --no-sources
 ```
 
