@@ -33,6 +33,21 @@ def test_gateway_ci_has_stable_bounded_required_check_names():
     assert "uv build --wheel --sdist --no-sources" in workflow
 
 
+def test_gateway_ci_tests_minimum_stable_sdk_from_wheel():
+    workflow = (_WORKFLOW_ROOT / "ci.yaml").read_text(encoding="utf-8")
+
+    assert "Gateway minimum SDK / Python ${{ matrix.python-version }}" in workflow
+    assert 'python-version: ["3.10", "3.14"]' in workflow
+    assert "uv venv --python ${{ matrix.python-version }} .venv-min-sdk" in workflow
+    assert '"gigachat==0.2.3"' in workflow
+    assert "dist/min-sdk/gpt2giga-*.whl" in workflow
+    assert 'importlib.metadata.version("gigachat") == "0.2.3"' in workflow
+    assert "TestClient(create_app(ProxyConfig()))" in workflow
+    assert 'client.get("/health").status_code == 200' in workflow
+    assert 'client.get("/openapi.json")' in workflow
+    assert ".venv-min-sdk/bin/gpt2giga --help" in workflow
+
+
 def test_gateway_release_workflow_has_one_package_and_one_publish_contract():
     workflow = (_WORKFLOW_ROOT / "publish-pypi.yml").read_text(encoding="utf-8")
 
