@@ -127,6 +127,21 @@ class FakeRequestTransformer:
         return {"contract": "responses-v2"}
 
 
+class ModelLessThreadTransformer(FakeRequestTransformer):
+    async def prepare_response_chat_completion(
+        self,
+        data,
+        giga_client=None,
+        *,
+        attachment_ids=(),
+    ):
+        self.response_chat_completion_calls.append((data, giga_client, attachment_ids))
+        return {
+            "contract": "responses-v2",
+            "storage": {"thread_id": "thread-1"},
+        }
+
+
 class RecordingObservabilitySink:
     def __init__(self):
         self.events = []
@@ -309,6 +324,49 @@ def test_responses_v2_non_stream_returns_openai_response_object():
     assert body["output"][0]["content"][0]["text"] == "ok-v2"
     assert body["usage"]["input_tokens"] == 2
     assert body["usage"]["output_tokens"] == 3
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_responses_missing_upstream_model_returns_400_without_io(
+    mode: str,
+    stream: bool,
+):
+    app = make_app(mode)
+    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode=mode))
+    client = TestClient(app)
+
+    response = client.post(
+        "/responses",
+        json={"model": "public-client-alias", "input": "hi", "stream": stream},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "model_required"
+    assert app.state.gigachat_client.achat.chat_calls == []
+    assert app.state.gigachat_client.achat.chat_completion_calls == []
+    assert app.state.gigachat_client.achat.stream_calls == []
+
+
+def test_responses_v2_existing_thread_sends_no_model_sentinel():
+    app = make_app("v2")
+    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    app.state.request_transformer = ModelLessThreadTransformer()
+    client = TestClient(app)
+
+    response = client.post(
+        "/responses",
+        json={"model": "public-client-alias", "input": "hi"},
+    )
+
+    assert response.status_code == 200
+    assert app.state.gigachat_client.achat.chat_completion_calls == [
+        {
+            "contract": "responses-v2",
+            "storage": {"thread_id": "thread-1"},
+        }
+    ]
+    assert "model" not in app.state.gigachat_client.achat.chat_completion_calls[0]
 
 
 def test_responses_v1_non_stream_emits_phoenix_llm_span():

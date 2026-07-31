@@ -1,9 +1,11 @@
 import json
 
+import gigachat
 
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.model_concurrency import ModelConcurrencyTimeoutError
 from gpt2giga.logger import rquid_context
+from gpt2giga.providers.gigachat.model_resolution import UpstreamModelRequiredError
 
 
 async def test_exceptions_handler_renders_openai_model_concurrency_timeout() -> None:
@@ -50,3 +52,33 @@ async def test_exceptions_handler_renders_anthropic_model_concurrency_timeout() 
         },
         "request_id": "rq-model-limit",
     }
+
+
+async def test_exceptions_handler_renders_domain_model_required_error() -> None:
+    @exceptions_handler
+    async def boom():
+        raise UpstreamModelRequiredError()
+
+    response = await boom()
+
+    assert response.status_code == 400
+    assert json.loads(response.body) == {
+        "error": {
+            "message": UpstreamModelRequiredError.message,
+            "type": "invalid_request_error",
+            "param": "model",
+            "code": "model_required",
+        }
+    }
+
+
+async def test_exceptions_handler_maps_sdk_model_not_specified_error() -> None:
+    @exceptions_handler
+    async def boom():
+        raise gigachat.exceptions.ModelNotSpecifiedError()
+
+    response = await boom()
+
+    assert response.status_code == 400
+    assert json.loads(response.body)["error"]["code"] == "model_required"
+    assert "GIGACHAT_MODEL" in json.loads(response.body)["error"]["message"]

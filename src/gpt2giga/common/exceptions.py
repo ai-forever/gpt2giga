@@ -17,6 +17,7 @@ from gpt2giga.common.model_concurrency import (
     ModelConcurrencyTimeoutError,
 )
 from gpt2giga.logger import rquid_context
+from gpt2giga.providers.gigachat.model_resolution import UpstreamModelRequiredError
 
 ERROR_MAPPING = {
     gigachat.exceptions.BadRequestError: (400, "invalid_request_error", None),
@@ -63,6 +64,27 @@ def exceptions_handler(func):
                 param=e.param,
                 code=e.code,
                 error_type=e.error_type,
+            )
+        except (
+            UpstreamModelRequiredError,
+            gigachat.exceptions.ModelNotSpecifiedError,
+        ) as e:
+            provider = getattr(e, "provider", "openai")
+            if provider == "anthropic":
+                return anthropic_compatibility_response(
+                    UpstreamModelRequiredError.message,
+                    status_code=400,
+                    error_type="invalid_request_error",
+                    code="model_required",
+                )
+            return JSONResponse(
+                status_code=400,
+                content=openai_error_payload(
+                    UpstreamModelRequiredError.message,
+                    error_type="invalid_request_error",
+                    param="model",
+                    code="model_required",
+                ),
             )
         except ModelConcurrencyTimeoutError as e:
             from loguru import logger

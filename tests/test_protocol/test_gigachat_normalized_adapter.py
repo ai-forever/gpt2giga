@@ -5,7 +5,7 @@ import pytest
 from gigachat.models.chat_completions import ChatCompletionResponse
 
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
-from gpt2giga.core.context import RequestContext
+from gpt2giga.core.context import RequestContext, request_context_var
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocols.normalized import (
@@ -20,6 +20,7 @@ from gpt2giga.providers.gigachat.adapter import (
     GigaChatProviderAdapter,
     normalized_chat_to_openai_payload,
 )
+from gpt2giga.providers.gigachat.model_resolution import UpstreamModelRequiredError
 
 
 class MockResponse:
@@ -198,6 +199,34 @@ async def test_gigachat_provider_counts_normalized_text_tools_and_schema():
     assert "lookup" in client.token_inputs
 
 
+async def test_gigachat_provider_rejects_model_less_token_count_before_io():
+    client = FakeClient()
+    adapter = GigaChatProviderAdapter(
+        config=ProxyConfig(proxy=ProxySettings()),
+        request_transformer=FakeTransformer(),
+        giga_client=client,
+        model_limiter=ModelConcurrencyLimiter({}),
+        provider_label="gemini",
+    )
+    chat = NormalizedChatRequest(
+        protocol="gemini",
+        model=None,
+        messages=[NormalizedMessage(role="user", content="hello world")],
+    )
+
+    with pytest.raises(UpstreamModelRequiredError) as exc_info:
+        await adapter.count_tokens(
+            NormalizedTokenCountRequest(
+                protocol="gemini",
+                model=None,
+                input=chat,
+            )
+        )
+
+    assert exc_info.value.provider == "gemini"
+    assert client.token_inputs == []
+
+
 def test_normalized_chat_to_openai_payload_preserves_builtin_tools():
     request = NormalizedChatRequest(
         protocol="gemini",
@@ -340,6 +369,42 @@ async def test_gigachat_provider_adapter_executes_chat_to_normalized_response():
     assert response.choices[0].message.content == "ok"
     assert response.usage.input_tokens == 2
     assert response.usage.output_tokens == 3
+
+
+async def test_forced_model_is_sent_upstream_and_recorded_as_forced_source():
+    client = FakeClient()
+    adapter = GigaChatProviderAdapter(
+        config=ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1")),
+        request_transformer=FakeTransformer(),
+        giga_client=client,
+        model_limiter=ModelConcurrencyLimiter({}),
+        forced_model="GigaChat-2-Max",
+    )
+    context = RequestContext(
+        request_id="req-forced",
+        trace_id="trace-forced",
+        span_id=None,
+        protocol="openai",
+        route="/chat/completions",
+        method="POST",
+        started_at=datetime.now(timezone.utc),
+    )
+    token = request_context_var.set(context)
+
+    try:
+        await adapter.chat(
+            NormalizedChatRequest(
+                model="public-client-alias",
+                messages=[NormalizedMessage(role="user", content="hello")],
+            ),
+            context=context,
+        )
+    finally:
+        request_context_var.reset(token)
+
+    assert client.achat.calls[0]["model"] == "GigaChat-2-Max"
+    assert context.model_effective == "GigaChat-2-Max"
+    assert context.metadata["model_source"] == "forced"
 
 
 async def test_gigachat_provider_adapter_executes_chat_completion_to_normalized_response():
