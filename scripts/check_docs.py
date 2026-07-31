@@ -26,7 +26,7 @@ RU_DOC_ROOT = Path("docs-site/i18n/ru/docusaurus-plugin-content-docs/current")
 GATEWAY_REPOSITORY_URL = "https://github.com/ai-forever/gpt2giga"
 GATEWAY_DOCS_URL = "https://ai-forever.github.io/gpt2giga/"
 GIGALOOM_REPOSITORY_URL = "https://github.com/krakenalt/gigaloom"
-LEGACY_GIGALOOM_DOCS = (
+MIGRATION_TOMBSTONES = (
     Path("agent-capability-matrix.md"),
     Path("agents-and-multi-agent.md"),
     Path("harness.md"),
@@ -40,6 +40,37 @@ LEGACY_GIGALOOM_DOCS = (
     Path("architecture/remote-ui-identity-adr.md"),
     Path("architecture/scoped-network-access-adr.md"),
 )
+STALE_DOC_PATTERNS = (
+    (
+        re.compile(r"--prerelease\b"),
+        "install the stable gpt2giga release without --prerelease",
+    ),
+    (
+        re.compile(r"\bpip\s+install\s+--pre\s+[\"']?gpt2giga(?=\[|[\"'\s]|$)"),
+        "install the stable gpt2giga release without --pre",
+    ),
+    (
+        re.compile(r"\buv\s+sync\s+--all-packages\b"),
+        "the standalone project must not use workspace-wide sync",
+    ),
+    (
+        re.compile(r"(?<![/\w])packages/gpt2giga(?:/|\b)"),
+        "use root-level standalone paths",
+    ),
+    (
+        re.compile(r"gpt2giga==0\.2\.3a1"),
+        "do not pin the previous gateway alpha in current install docs",
+    ),
+)
+LEGACY_COMPATIBILITY_NAMES = (
+    "GPT2GIGA_HARNESS_MODEL_KEY",
+    "x-gigaloom-model",
+    "x-gigaloom-model-signature",
+)
+LEGACY_COMPATIBILITY_DOCS = {
+    Path("docs/configuration.md"),
+    RU_DOC_ROOT / "configuration.md",
+}
 
 
 @dataclass(frozen=True)
@@ -221,14 +252,36 @@ def check_package_urls(root: Path) -> list[Issue]:
     return issues
 
 
+def check_gigachat_dependency_floor(root: Path) -> list[Issue]:
+    """Require the stable GigaChat SDK compatibility range in root metadata."""
+    path = root / "pyproject.toml"
+    metadata = tomllib.loads(path.read_text(encoding="utf-8"))
+    dependencies = metadata["project"].get("dependencies", [])
+    requirements = [
+        dependency
+        for dependency in dependencies
+        if isinstance(dependency, str)
+        and re.match(r"^gigachat(?:\s|[<>=!~])", dependency, re.IGNORECASE)
+    ]
+    expected = re.compile(r"^gigachat\s*>=\s*0\.2\.3\s*,\s*<\s*0\.3\.0$", re.IGNORECASE)
+    if len(requirements) == 1 and expected.fullmatch(requirements[0]):
+        return []
+    actual = ", ".join(requirements) if requirements else "missing"
+    return [
+        Issue(
+            path,
+            "gigachat dependency must use the stable range "
+            f"'>=0.2.3,<0.3.0'; found {actual!r}",
+        )
+    ]
+
+
 def check_repository_split_docs(root: Path) -> list[Issue]:
     """Keep the standalone products and every legacy documentation URL explicit."""
     issues: list[Issue] = []
     linked_surfaces = (
-        root / "README.md",
         root / "docs/gigaloom-migration.md",
         root / RU_DOC_ROOT / "gigaloom-migration.md",
-        root / "docs-site/docusaurus.config.ts",
     )
     for path in linked_surfaces:
         if GIGALOOM_REPOSITORY_URL not in path.read_text(encoding="utf-8"):
@@ -238,7 +291,7 @@ def check_repository_split_docs(root: Path) -> list[Issue]:
                 )
             )
 
-    for relative in LEGACY_GIGALOOM_DOCS:
+    for relative in MIGRATION_TOMBSTONES:
         for path in (root / "docs" / relative, root / RU_DOC_ROOT / relative):
             if not path.exists():
                 issues.append(Issue(path, "missing legacy GigaLoom URL tombstone"))
@@ -250,25 +303,71 @@ def check_repository_split_docs(root: Path) -> list[Issue]:
                 )
             if "migration tombstone" not in content:
                 issues.append(Issue(path, "legacy page is not marked as a tombstone"))
+
+    sidebar_path = root / "docs-site/sidebars.ts"
+    sidebar = sidebar_path.read_text(encoding="utf-8")
+    sidebar_markers = (
+        "label: 'Migration and legacy'",
+        "collapsed: true",
+        "id: 'gigaloom-migration'",
+    )
+    missing_markers = [marker for marker in sidebar_markers if marker not in sidebar]
+    if missing_markers:
+        issues.append(
+            Issue(
+                sidebar_path,
+                "migration page must remain in a collapsed Migration and legacy "
+                f"category; missing {', '.join(missing_markers)}",
+            )
+        )
+    for relative in MIGRATION_TOMBSTONES:
+        if str(relative.with_suffix("")) in sidebar:
+            issues.append(
+                Issue(sidebar_path, f"migration tombstone {relative} is in the sidebar")
+            )
     return issues
 
 
 def check_stale_instructions(root: Path, files: list[Path]) -> list[Issue]:
     """Reject known obsolete public installation instructions."""
-    forbidden = {
-        'gpt2giga==0.2.3a1"': "do not pin the previous gateway alpha in current install docs",
-    }
     issues: list[Issue] = []
     for path in files:
         if "CHANGELOG" in path.name:
             continue
         content = path.read_text(encoding="utf-8")
-        for needle, guidance in forbidden.items():
-            if needle in content:
-                line = content.count("\n", 0, content.index(needle)) + 1
+        for pattern, guidance in STALE_DOC_PATTERNS:
+            for match in pattern.finditer(content):
+                line = content.count("\n", 0, match.start()) + 1
                 issues.append(
-                    Issue(path, f"line {line}: obsolete {needle!r}; {guidance}")
+                    Issue(path, f"line {line}: obsolete {match.group(0)!r}; {guidance}")
                 )
+    return issues
+
+
+def check_legacy_compatibility_names(root: Path, files: list[Path]) -> list[Issue]:
+    """Keep legacy wire/config names inside explicit compatibility docs."""
+    issues: list[Issue] = []
+    for path in files:
+        if "CHANGELOG" in path.name:
+            continue
+        relative = path.relative_to(root)
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            for name in LEGACY_COMPATIBILITY_NAMES:
+                if name not in line:
+                    continue
+                if relative not in LEGACY_COMPATIBILITY_DOCS or not (
+                    "HMAC" in line
+                    and ("Backward-compatible" in line or "Обратно совместимая" in line)
+                ):
+                    issues.append(
+                        Issue(
+                            path,
+                            f"line {line_number}: legacy name {name!r} requires "
+                            "an explicit HMAC compatibility context",
+                        )
+                    )
     return issues
 
 
@@ -281,8 +380,10 @@ def validate(root: Path) -> list[Issue]:
         *check_proxy_settings(root),
         *check_package_versions(root),
         *check_package_urls(root),
+        *check_gigachat_dependency_floor(root),
         *check_repository_split_docs(root),
         *check_stale_instructions(root, files),
+        *check_legacy_compatibility_names(root, files),
     ]
 
 
