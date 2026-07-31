@@ -5,9 +5,9 @@ import tarfile
 
 import pytest
 
-from package_isolation_support import (
+from artifact_contract_support import (
     BuiltArtifacts,
-    GATEWAY_MEMBER,
+    GATEWAY_SOURCE_ROOT,
     GATEWAY_SMOKE,
     GATEWAY_VERSION,
     _artifact_members,
@@ -15,9 +15,6 @@ from package_isolation_support import (
     _install_artifacts,
     _run_clean_python,
 )
-
-
-FUTURE_REPOSITORY_OWNER = "ai-forever/gpt2giga"
 
 
 @pytest.fixture(scope="module")
@@ -41,11 +38,11 @@ def test_gateway_artifact_is_isolated(
     _run_clean_python(installed, GATEWAY_SMOKE)
 
 
-def test_editable_gateway_member_resolves_to_gateway_source():
+def test_editable_gateway_resolves_to_source_root():
     import gpt2giga
     import importlib.metadata
 
-    assert Path(gpt2giga.__file__).resolve().is_relative_to(GATEWAY_MEMBER / "src")
+    assert Path(gpt2giga.__file__).resolve().is_relative_to(GATEWAY_SOURCE_ROOT)
     assert importlib.metadata.version("gpt2giga") == GATEWAY_VERSION
 
 

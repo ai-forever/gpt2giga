@@ -11,7 +11,7 @@ import zipfile
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-GATEWAY_MEMBER = REPO_ROOT
+GATEWAY_SOURCE_ROOT = REPO_ROOT / "src/gpt2giga"
 
 
 def _project_metadata(root: Path) -> dict:
@@ -159,7 +159,7 @@ def _artifact_members(path: Path) -> tuple[str, ...]:
         return tuple(archive.getnames())
 
 
-def test_workspace_lock_is_current() -> None:
+def assert_lock_is_current() -> None:
     """Require the checked-in lock to match the standalone gateway project."""
 
     _run("uv", "lock", "--check")

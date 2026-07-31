@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-GATEWAY_MEMBER = REPO_ROOT
+GATEWAY_SOURCE_ROOT = REPO_ROOT / "src/gpt2giga"
 
 
 def _forbidden_harness_imports(path: Path) -> list[str]:
@@ -25,19 +25,18 @@ def _forbidden_harness_imports(path: Path) -> list[str]:
     return forbidden
 
 
-def test_gateway_owned_modules_do_not_import_harness() -> None:
+def assert_gateway_runtime_has_no_extracted_namespace_imports() -> None:
     """Keep gateway runtime code independent from extracted GigaLoom code."""
 
-    source_root = GATEWAY_MEMBER / "src/gpt2giga"
     violations = [
         violation
-        for path in source_root.rglob("*.py")
+        for path in GATEWAY_SOURCE_ROOT.rglob("*.py")
         for violation in _forbidden_harness_imports(path)
     ]
     assert violations == []
 
 
-def test_code_workflows_skip_documentation_only_changes() -> None:
+def assert_code_workflows_skip_documentation_only_changes() -> None:
     codeql = (REPO_ROOT / ".github/workflows/codeql.yaml").read_text(encoding="utf-8")
     dependency_review = (
         REPO_ROOT / ".github/workflows/dependency-review.yaml"
@@ -59,7 +58,7 @@ def test_code_workflows_skip_documentation_only_changes() -> None:
     assert all("- '!src/gpt2giga/**/*.md'" in workflow for workflow in docker_workflows)
 
 
-def test_production_docker_build_remains_gateway_only() -> None:
+def assert_production_docker_build_remains_gateway_only() -> None:
     dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
     docker_workflows = "\n".join(
         (REPO_ROOT / path).read_text(encoding="utf-8")

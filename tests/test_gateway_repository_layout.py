@@ -8,16 +8,13 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     import tomli as tomllib
 
-from workspace_split_contract_support import (
-    test_gateway_owned_modules_do_not_import_harness as _check_no_harness_imports,
+from repository_boundary_support import (
+    assert_gateway_runtime_has_no_extracted_namespace_imports,
 )
 
 
-FUTURE_REPOSITORY_OWNER = "ai-forever/gpt2giga"
-
-
 def test_gateway_owned_modules_do_not_import_gigaloom():
-    _check_no_harness_imports()
+    assert_gateway_runtime_has_no_extracted_namespace_imports()
 
 
 def test_source_repository_is_a_root_level_gateway_project():
