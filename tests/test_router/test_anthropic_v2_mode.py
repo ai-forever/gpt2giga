@@ -266,6 +266,7 @@ def make_app(
     app.state.request_transformer = FakeRequestTransformer()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(gigachat_api_mode=mode, **settings),
+        gigachat={"model": "GigaChat"},
     )
     app.state.logger = logger
     return app
