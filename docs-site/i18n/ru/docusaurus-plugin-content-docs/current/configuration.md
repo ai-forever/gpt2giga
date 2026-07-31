@@ -170,15 +170,20 @@ x-api-key: <GPT2GIGA_API_KEY>
 
 ## Настройки GigaChat
 
+Минимальная поддерживаемая версия GigaChat Python SDK — `0.2.3`; gateway
+остаётся в совместимой ветке `0.2.x`. API base URL SDK по умолчанию —
+`https://api.giga.chat/v1`.
+
 Частые настройки вышестоящего сервиса:
 
 | Переменная | По умолчанию | Назначение |
 |---|---:|---|
 | `GIGACHAT_CREDENTIALS` | empty | Ключ авторизации (учётные данные). |
 | `GIGACHAT_SCOPE` | SDK default | Scope GigaChat API, например `GIGACHAT_API_PERS`. |
-| `GIGACHAT_USER` / `GIGACHAT_PASSWORD` | empty | Альтернативная авторизация по логину и паролю. |
+| `GIGACHAT_USER` / `GIGACHAT_PASSWORD` | empty | Альтернативная авторизация по логину и паролю; для этого flow задайте `GIGACHAT_BASE_URL` явно. |
 | `GIGACHAT_ACCESS_TOKEN` | empty | Альтернативная авторизация через готовый access-токен. |
-| `GIGACHAT_MODEL` | SDK default | Модель по умолчанию, если прокси не передаёт клиентскую модель или `GPT2GIGA_PASS_MODEL=False`. |
+| `GIGACHAT_BASE_URL` | `https://api.giga.chat/v1` | API endpoint SDK. Для авторизации по логину и паролю задайте его явно. |
+| `GIGACHAT_MODEL` | empty | Рекомендуемая явная upstream-модель и fallback, если gateway не принимает модель из запроса. |
 | `GIGACHAT_PROFANITY_CHECK` | SDK default | Флаг проверки на нецензурную лексику в вышестоящем сервисе. |
 | `GIGACHAT_VERIFY_SSL_CERTS` | SDK default | В production держите `True`. |
 | `GIGACHAT_TIMEOUT` | SDK default | Таймаут запроса к вышестоящему сервису. |
@@ -187,9 +192,14 @@ x-api-key: <GPT2GIGA_API_KEY>
 
 GigaChat также поддерживает настройки клиентского TLS-сертификата: `GIGACHAT_CA_BUNDLE_FILE`, `GIGACHAT_CERT_FILE`, `GIGACHAT_KEY_FILE`, `GIGACHAT_KEY_FILE_PASSWORD`.
 
-`GPT2GIGA_PASS_MODEL=False` часто полезен для клиентов, совместимых с OpenAI,
-которые отправляют имя модели не из GigaChat. Тогда модель вышестоящего сервиса берётся из
-`GIGACHAT_MODEL`.
+Явно задавайте `GIGACHAT_MODEL` для предсказуемой маршрутизации. При
+`GPT2GIGA_PASS_MODEL=True` gateway может принять непустую модель из запроса;
+иначе он использует заданную `GIGACHAT_MODEL`. Если модели нет ни в
+запросе, ни в конфигурации, gateway вернёт validation error до upstream I/O.
+
+`GPT2GIGA_PASS_MODEL=False` часто полезен для OpenAI-совместимых клиентов,
+которые отправляют public alias вместо модели GigaChat. В этом режиме alias не
+считается upstream-моделью, поэтому `GIGACHAT_MODEL` должна быть задана.
 
 ## Рассуждения и структурированный вывод
 
@@ -236,6 +246,12 @@ GPT2GIGA_GIGACHAT_API_MODE=v1
 
 - `/v1/chat/completions`, `/v1/responses`, `/v1/messages` используют контракт GigaChat v1;
 - `/v2/chat/completions`, `/v2/responses`, `/v2/messages` используют контракт GigaChat v2.
+
+Gateway поддерживает root compatibility methods SDK для v1 и resource methods
+для v2. Вызов без модели — не общий default: он разрешён только для
+поддерживаемого v2 flow с `assistant_id` или уже существующим
+`storage.thread_id`. Это исключение не добавляет в gateway OpenAI-маршруты
+Assistants или Threads.
 
 Сопоставление built-in tools можно выключить отдельно:
 
