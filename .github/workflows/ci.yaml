@@ -164,34 +164,9 @@ jobs:
         env:
           GATEWAY_VERSION: ${{ steps.version.outputs.value }}
         run: |
-          .venv-min-sdk/bin/python -I - <<'PY'
-          import importlib.metadata
-          import importlib.util
-          import os
-          from pathlib import Path
-
-          from fastapi.testclient import TestClient
-
-          import gpt2giga
-          from gpt2giga.app.factory import create_app
-          from gpt2giga.models.config import ProxyConfig
-
-          assert importlib.metadata.version("gpt2giga") == os.environ["GATEWAY_VERSION"]
-          assert importlib.metadata.version("gigachat") == "0.2.3"
-          assert not Path(gpt2giga.__file__).resolve().is_relative_to(
-              Path.cwd() / "src"
-          )
-          assert importlib.util.find_spec("gpt2giga_harness") is None
-
-          client = TestClient(create_app(ProxyConfig()))
-          assert client.get("/health").status_code == 200
-          openapi = client.get("/openapi.json")
-          assert openapi.status_code == 200
-          paths = openapi.json()["paths"]
-          assert "/v1/chat/completions" in paths
-          assert "/v1/messages" in paths
-          assert "/v1beta/models/{model}:generateContent" in paths
-          PY
+          .venv-min-sdk/bin/python -I scripts/gateway_artifact_smoke.py \
+            --expected-gateway-version "${GATEWAY_VERSION}" \
+            --expected-gigachat-version "0.2.3"
           .venv-min-sdk/bin/gpt2giga --help
 
   artifact-smoke:
@@ -236,7 +211,9 @@ jobs:
         env:
           GATEWAY_VERSION: ${{ steps.version.outputs.value }}
         run: |
-          .venv-artifact/bin/python -I -c "import importlib.metadata as m, os, gpt2giga; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']"
+          test ! -e gpt2giga
+          .venv-artifact/bin/python -I scripts/gateway_artifact_smoke.py \
+            --expected-gateway-version "${GATEWAY_VERSION}"
           .venv-artifact/bin/gpt2giga --help
 
   coverage-badge:
