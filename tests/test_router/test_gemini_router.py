@@ -314,7 +314,7 @@ def test_gemini_generate_content_roundtrips_through_gigachat_provider():
     assert payload["max_tokens"] == 64
 
 
-def test_gemini_cli_harness_model_stays_pinned_across_requests():
+def test_gemini_cli_model_override_stays_pinned_across_requests():
     app = make_app(mode="v2", pass_model=False, harness_model_key="model-key")
     app.state.request_transformer = RequestTransformer(app.state.config, logger)
     client = TestClient(app)
@@ -358,7 +358,7 @@ def test_gemini_cli_harness_model_stays_pinned_across_requests():
     )
 
 
-def test_unsigned_gemini_cli_cannot_activate_harness_model_pin():
+def test_unsigned_gemini_cli_cannot_activate_model_override():
     app = make_app(harness_model_key="model-key")
     client = TestClient(app)
 

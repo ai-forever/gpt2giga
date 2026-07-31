@@ -407,7 +407,7 @@ def test_anthropic_normalized_failure_falls_back_before_response():
     ]
 
 
-def test_anthropic_messages_v2_pins_signed_claude_cli_harness_model():
+def test_anthropic_messages_v2_pins_signed_claude_cli_model_override():
     app = make_app("v2", pass_model=False, harness_model_key="model-key")
     client = TestClient(app)
 

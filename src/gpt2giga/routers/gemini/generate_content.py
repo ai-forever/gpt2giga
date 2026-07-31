@@ -60,7 +60,7 @@ async def generate_content(model: str, request: Request):
     """Create a Gemini-compatible content response."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
-    pinned_model = _gemini_cli_harness_model(request)
+    pinned_model = _gemini_cli_model_override(request)
     effective_model = pinned_model or requested_model
     update_request_context(
         model_requested=requested_model,
@@ -118,7 +118,7 @@ async def stream_generate_content(model: str, request: Request):
     """Create a Gemini-compatible content stream."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
-    pinned_model = _gemini_cli_harness_model(request)
+    pinned_model = _gemini_cli_model_override(request)
     effective_model = pinned_model or requested_model
     update_request_context(
         model_requested=requested_model,
@@ -316,7 +316,7 @@ async def count_tokens(model: str, request: Request):
     """Count prompt tokens for a Gemini-compatible request."""
     data = await read_request_json(request)
     requested_model = _normalize_model_name(model)
-    effective_model = _gemini_cli_harness_model(request) or requested_model
+    effective_model = _gemini_cli_model_override(request) or requested_model
     update_request_context(
         model_requested=requested_model,
         metadata={"protocol": "gemini", "api_format": "count_tokens"},
@@ -368,7 +368,7 @@ async def _try_normalized_count_tokens(
         response = await _provider_adapter(
             request,
             request_options=request_options,
-            forced_model=_gemini_cli_harness_model(request),
+            forced_model=_gemini_cli_model_override(request),
         ).count_tokens(normalized_request, context=context)
         return {"totalTokens": response.input_tokens}
     except Exception as exc:
@@ -399,8 +399,8 @@ def _provider_adapter(
     )
 
 
-def _gemini_cli_harness_model(request: Request) -> str | None:
-    """Return an authenticated Harness-pinned Gemini model."""
+def _gemini_cli_model_override(request: Request) -> str | None:
+    """Return an authenticated Gemini CLI model override."""
     return resolve_signed_model_override(
         request,
         protocol="gemini",

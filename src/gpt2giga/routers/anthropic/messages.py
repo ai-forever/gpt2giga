@@ -57,8 +57,8 @@ from gpt2giga.sinks.observability.anthropic import (
 router = APIRouter(tags=[OPENAPI_TAG_ANTHROPIC_MESSAGES])
 
 
-def _claude_cli_harness_model(request: Request) -> str | None:
-    """Return an authenticated Harness-pinned Claude model."""
+def _claude_cli_model_override(request: Request) -> str | None:
+    """Return an authenticated Claude CLI model override."""
     return resolve_signed_model_override(
         request,
         protocol="anthropic",
@@ -66,7 +66,7 @@ def _claude_cli_harness_model(request: Request) -> str | None:
     )
 
 
-def _force_harness_model(payload: Any, model: str | None) -> Any:
+def apply_model_override(payload: Any, model: str | None) -> Any:
     """Apply a trusted request-scoped model after global pass-model handling."""
     if model is None:
         return payload
@@ -97,7 +97,7 @@ async def count_tokens(request: Request):
 
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
-    model = _claude_cli_harness_model(request) or data.get("model", "unknown")
+    model = _claude_cli_model_override(request) or data.get("model", "unknown")
 
     openai_messages = _convert_anthropic_messages_to_openai(
         data.get("system"), data.get("messages", [])
@@ -123,7 +123,7 @@ async def count_tokens(request: Request):
 async def messages(request: Request):
     """Anthropic Messages API compatible endpoint."""
     data = await read_request_json(request)
-    pinned_model = _claude_cli_harness_model(request)
+    pinned_model = _claude_cli_model_override(request)
     request_options = extract_gigachat_request_options(request, data)
     stream = data.get("stream", False)
     current_rquid = rquid_context.get()
@@ -181,7 +181,7 @@ async def messages(request: Request):
             chat_request = await state.request_transformer.prepare_chat_completion(
                 openai_data, giga_client
             )
-        chat_request = _force_harness_model(chat_request, pinned_model)
+        chat_request = apply_model_override(chat_request, pinned_model)
         effective_model = resolve_gigachat_model(chat_request, state.config)
         update_request_context(model_effective=effective_model)
         if not stream:
@@ -238,7 +238,7 @@ async def messages(request: Request):
         chat_messages = await state.request_transformer.prepare_chat(
             openai_data, giga_client
         )
-    chat_messages = _force_harness_model(chat_messages, pinned_model)
+    chat_messages = apply_model_override(chat_messages, pinned_model)
     effective_model = resolve_gigachat_model(chat_messages, state.config)
     update_request_context(model_effective=effective_model)
 
@@ -309,7 +309,7 @@ async def _try_normalized_count_tokens(
         response = await _provider_adapter(
             request,
             request_options=request_options,
-            pinned_model=_claude_cli_harness_model(request),
+            pinned_model=_claude_cli_model_override(request),
         ).count_tokens(normalized_request, context=context)
         return {"input_tokens": response.input_tokens}
     except Exception as exc:
