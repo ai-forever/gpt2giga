@@ -6,10 +6,11 @@ from typing import Any, Mapping, Protocol, TypedDict
 from gigachat import GigaChat
 from gigachat.settings import BASE_URL
 
-from gpt2giga.constants import AUTH_KEYS
 from gpt2giga.providers.gigachat.types import SupportsAclose
 
-_REQUEST_AUTH_FIELDS = frozenset((*AUTH_KEYS, "scope"))
+_REQUEST_AUTH_FIELDS = frozenset(
+    {"access_token", "credentials", "scope", "user", "password"}
+)
 
 
 class SupportsModelDump(Protocol):

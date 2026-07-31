@@ -1,6 +1,13 @@
 from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.responses import JSONResponse
 
-from gpt2giga.providers.gigachat.auth import create_gigachat_client_for_request
+from gpt2giga.providers.gigachat.auth import (
+    PassTokenError,
+    create_gigachat_client_for_request,
+)
+from gpt2giga.providers.gigachat.client import GigaChatClientConfigurationError
+
+_PASS_TOKEN_FAILURE_MESSAGE = "Invalid GigaChat pass-through authentication"
 
 
 class PassTokenMiddleware:
@@ -38,9 +45,15 @@ class PassTokenMiddleware:
             lease = pool.acquire(token)
             try:
                 client = await lease.__aenter__()
-            except Exception as exc:
-                state.logger.warning(f"Failed to pass token to GigaChat: {exc}")
-                await self.app(scope, receive, send)
+            except (PassTokenError, GigaChatClientConfigurationError) as exc:
+                state.logger.warning("Failed to pass token to GigaChat")
+                await _send_pass_token_error(scope, receive, send, str(exc))
+                return
+            except Exception:
+                state.logger.warning("Failed to pass token to GigaChat")
+                await _send_pass_token_error(
+                    scope, receive, send, _PASS_TOKEN_FAILURE_MESSAGE
+                )
                 return
             scope["state"]["gigachat_client"] = client
             try:
@@ -53,9 +66,15 @@ class PassTokenMiddleware:
             client = create_gigachat_client_for_request(
                 state.config.gigachat_settings, token
             )
-        except Exception as exc:
-            state.logger.warning(f"Failed to pass token to GigaChat: {exc}")
-            await self.app(scope, receive, send)
+        except (PassTokenError, GigaChatClientConfigurationError) as exc:
+            state.logger.warning("Failed to pass token to GigaChat")
+            await _send_pass_token_error(scope, receive, send, str(exc))
+            return
+        except Exception:
+            state.logger.warning("Failed to pass token to GigaChat")
+            await _send_pass_token_error(
+                scope, receive, send, _PASS_TOKEN_FAILURE_MESSAGE
+            )
             return
 
         scope["state"]["gigachat_client"] = client
@@ -64,10 +83,8 @@ class PassTokenMiddleware:
         finally:
             try:
                 await client.aclose()
-            except Exception as exc:  # pragma: no cover - best-effort cleanup
-                state.logger.warning(
-                    f"Failed to close request-scoped GigaChat client: {exc}"
-                )
+            except Exception:  # pragma: no cover - best-effort cleanup
+                state.logger.warning("Failed to close request-scoped GigaChat client")
 
 
 def _bearer_token(scope: Scope) -> str | None:
@@ -78,3 +95,13 @@ def _bearer_token(scope: Scope) -> str | None:
         if auth_header.startswith("Bearer "):
             return auth_header.removeprefix("Bearer ")
     return None
+
+
+async def _send_pass_token_error(
+    scope: Scope,
+    receive: Receive,
+    send: Send,
+    message: str,
+) -> None:
+    response = JSONResponse(status_code=400, content={"detail": message})
+    await response(scope, receive, send)
