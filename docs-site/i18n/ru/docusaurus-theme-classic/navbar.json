@@ -22,9 +22,5 @@
   "item.label.GitHub": {
     "message": "GitHub",
     "description": "Navbar item with label GitHub"
-  },
-  "item.label.GigaLoom": {
-    "message": "GigaLoom",
-    "description": "Navbar item with label GigaLoom"
   }
 }

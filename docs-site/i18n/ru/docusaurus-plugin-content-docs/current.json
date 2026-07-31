@@ -22,5 +22,9 @@
   "sidebar.docs.category.Contributing": {
     "message": "Участие",
     "description": "The label for category 'Contributing' in sidebar 'docs'"
+  },
+  "sidebar.docs.category.Migration and legacy": {
+    "message": "Миграция и legacy",
+    "description": "The label for category 'Migration and legacy' in sidebar 'docs'"
   }
 }

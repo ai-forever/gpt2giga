@@ -86,11 +86,6 @@ const config: Config = {
         {to: '/operations', label: 'Operations', position: 'left'},
         {type: 'localeDropdown', position: 'right'},
         {
-          href: 'https://github.com/krakenalt/gigaloom',
-          label: 'GigaLoom',
-          position: 'right',
-        },
-        {
           href: 'https://github.com/ai-forever/gpt2giga',
           label: 'GitHub',
           position: 'right',
@@ -121,7 +116,6 @@ const config: Config = {
           items: [
             {label: 'GitHub', href: 'https://github.com/ai-forever/gpt2giga'},
             {label: 'Examples', href: 'https://github.com/ai-forever/gpt2giga/tree/main/examples'},
-            {label: 'GigaLoom workbench', href: 'https://github.com/krakenalt/gigaloom'},
           ],
         },
       ],

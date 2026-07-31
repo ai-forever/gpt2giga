@@ -8,15 +8,6 @@
 http://localhost:8090
 ```
 
-:::info[GigaLoom перенесён]
-
-Agentic workbench GigaLoom (ранее Unified Harness) теперь развивается в
-[`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom). Этот сайт —
-каноническая документация compatibility gateway `gpt2giga`. Старые URL
-перечислены в [уведомлении о переносе](gigaloom-migration.md).
-
-:::
-
 ## Что закрывает прокси
 
 | Возможность | Где читать |

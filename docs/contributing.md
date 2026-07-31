@@ -45,20 +45,18 @@ The public site includes:
 - user guides from `docs/*.md`;
 - architecture notes from `docs/architecture/`;
 - links to runnable examples and integration guides in the repository;
-- GitHub links to deployment manifests and other files outside `docs/`.
-- migration-only tombstones for the legacy GigaLoom/Harness documentation
-  routes; current GigaLoom product documentation is owned by
-  [`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom).
+- GitHub links to deployment manifests and other files outside `docs/`;
+- migration-only tombstones for legacy documentation routes.
 
 ## Gateway quality and release boundary
 
 The repository coverage badge and the `--cov-fail-under=80` gate measure the
-standalone `gpt2giga` gateway source. They do not aggregate GigaLoom coverage.
+standalone `gpt2giga` gateway source.
 
 Only an exact gateway `v<version>` release may publish `gpt2giga` from this
 repository. A manual release workflow run builds and attests artifacts without
-publishing. GigaLoom and the `gpt2giga-harness` distribution have no publisher
-in this repository.
+publishing. Split-out product distributions have no publisher in this
+repository.
 
 ## Update rules
 

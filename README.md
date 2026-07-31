@@ -8,19 +8,12 @@
 [![GitHub Repo stars](https://img.shields.io/github/stars/ai-forever/gpt2giga?style=flat-square)](https://star-history.com/#ai-forever/gpt2giga)
 [![GitHub Open Issues](https://img.shields.io/github/issues-raw/ai-forever/gpt2giga?style=flat-square)](https://github.com/ai-forever/gpt2giga/issues)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-111827?style=flat-square)](https://ai-forever.github.io/gpt2giga/)
-[![GigaLoom](https://img.shields.io/badge/agentic_workbench-GigaLoom-7c3aed?style=flat-square)](https://github.com/krakenalt/gigaloom)
 
 ![Gateway coverage](https://raw.githubusercontent.com/ai-forever/gpt2giga/main/badges/coverage.svg)
 
 `gpt2giga` — FastAPI-прокси, который принимает OpenAI-, Anthropic- и Gemini-like запросы и отправляет их в GigaChat. Он нужен, когда клиент, редактор, агентный фреймворк или SDK умеет работать с OpenAI/Anthropic/Gemini API, а реальный backend должен быть GigaChat.
 
 Локальный адрес по умолчанию: `http://localhost:8090`.
-
-> GigaLoom, локальный agentic workbench и бывший Unified Harness, развивается
-> отдельно в [`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom).
-> Этот репозиторий и пакет `gpt2giga` содержат только compatibility gateway.
-> Старые ссылки собраны в [уведомлении о переносе](https://ai-forever.github.io/gpt2giga/gigaloom-migration).
-
 ## Зачем Нужен
 
 GigaChat не является drop-in заменой OpenAI или Anthropic API. Прямое подключение существующих SDK часто ломается на формате запросов, streaming-событиях, tool schemas, model discovery, авторизации и optional-параметрах клиентов.
@@ -143,7 +136,6 @@ make docs-dev-ru
 | Редакторы, агенты, SDK examples, reverse proxies | [Integrations](https://ai-forever.github.io/gpt2giga/integrations) |
 | Runnable-примеры | [Examples](https://github.com/ai-forever/gpt2giga/tree/main/examples) |
 | История изменений gateway | [RU](https://github.com/ai-forever/gpt2giga/blob/main/CHANGELOG.md) · [EN](https://github.com/ai-forever/gpt2giga/blob/main/CHANGELOG_en.md) |
-| GigaLoom и старые Harness URL | [Уведомление о переносе](https://ai-forever.github.io/gpt2giga/gigaloom-migration) |
 
 ## Текущая API-Поверхность
 
