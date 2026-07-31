@@ -9,13 +9,17 @@ from datetime import datetime, timezone
 from typing import Any
 
 import pytest
-from gigachat.models import ChatCompletion, ChatCompletionChunk
+from gigachat.models import ChatCompletion, ChatCompletionChunk, TokensCount
 from gigachat.models.chat_completions import (
     ChatCompletionChunk as ChatCompletionV2Chunk,
 )
 from gigachat.models.chat_completions import ChatCompletionResponse
+from loguru import logger
 
 from gpt2giga.core.context import RequestContext
+from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.protocol import RequestTransformer, ResponseProcessor
+from gpt2giga.providers.gigachat.adapter import GigaChatProviderAdapter
 
 
 def payload_dict(payload: Any) -> dict[str, Any]:
@@ -44,6 +48,8 @@ class StableChatResource:
         self.owner = owner
 
     async def __call__(self, payload: Any) -> ChatCompletion:
+        if self.owner.chat_error is not None:
+            raise self.owner.chat_error
         effective_model = self.owner.record("v1.chat", payload)
         return ChatCompletion.model_validate(
             {
@@ -66,6 +72,8 @@ class StableChatResource:
         )
 
     async def create(self, payload: Any) -> ChatCompletionResponse:
+        if self.owner.chat_error is not None:
+            raise self.owner.chat_error
         effective_model = self.owner.record("v2.chat", payload)
         return ChatCompletionResponse.model_validate(
             {
@@ -85,14 +93,23 @@ class StableChatResource:
         effective_model = self.owner.record("v2.stream", payload)
 
         async def generate() -> AsyncIterator[ChatCompletionV2Chunk]:
+            if self.owner.stream_error is not None:
+                raise self.owner.stream_error
             yield ChatCompletionV2Chunk.model_validate(
                 {
-                    "event": "response.message.done",
                     "model": effective_model,
                     "created_at": 1_785_600_000,
                     "messages": [
                         {"role": "assistant", "content": [{"text": "stable-v2"}]}
                     ],
+                }
+            )
+            yield ChatCompletionV2Chunk.model_validate(
+                {
+                    "event": "response.message.done",
+                    "model": effective_model,
+                    "created_at": 1_785_600_000,
+                    "messages": [],
                     "finish_reason": "stop",
                     "usage": {
                         "input_tokens": 2,
@@ -112,6 +129,9 @@ class StableSDKClient:
         self.calls: list[tuple[str, Any]] = []
         self.configured_model: str | None = None
         self.effective_models: list[str | None] = []
+        self.chat_error: BaseException | None = None
+        self.stream_error: BaseException | None = None
+        self.token_calls: list[tuple[list[str], str | None]] = []
         self.achat = StableChatResource(self)
 
     def record(self, operation: str, payload: Any) -> str | None:
@@ -130,6 +150,8 @@ class StableSDKClient:
         effective_model = self.record("v1.stream", payload)
 
         async def generate() -> AsyncIterator[ChatCompletionChunk]:
+            if self.stream_error is not None:
+                raise self.stream_error
             yield ChatCompletionChunk.model_validate(
                 {
                     "choices": [
@@ -152,6 +174,31 @@ class StableSDKClient:
 
         return generate()
 
+    async def atokens_count(
+        self, values: list[str], model: str | None = None
+    ) -> list[TokensCount]:
+        self.token_calls.append((list(values), model))
+        return [
+            TokensCount.model_validate(
+                {
+                    "tokens": max(1, len(value.split())),
+                    "characters": len(value),
+                    "object": "tokens",
+                }
+            )
+            for value in values
+        ]
+
+
+@dataclass
+class ContractStack:
+    """Bundle the real protocol/provider path with observable test doubles."""
+
+    adapter: GigaChatProviderAdapter
+    client: StableSDKClient
+    limiter: RecordingLimiter
+    config: ProxyConfig
+
 
 @pytest.fixture
 def stable_sdk_client() -> StableSDKClient:
@@ -163,6 +210,46 @@ def stable_sdk_client() -> StableSDKClient:
 def recording_limiter() -> RecordingLimiter:
     """Provide a fresh limiter recorder for one contract test."""
     return RecordingLimiter()
+
+
+@pytest.fixture
+def contract_stack(
+    stable_sdk_client: StableSDKClient, recording_limiter: RecordingLimiter
+):
+    """Build protocol-labelled provider stacks on demand."""
+
+    def build(
+        *,
+        provider: str = "openai",
+        api_mode: str = "v2",
+        forced_model: str | None = None,
+        configured_model: str | None = "configured-model",
+        **proxy_overrides: Any,
+    ) -> ContractStack:
+        settings = ProxySettings(gigachat_api_mode=api_mode, **proxy_overrides)
+        config = ProxyConfig(
+            proxy=settings,
+            gigachat={"model": configured_model},
+        )
+        stable_sdk_client.configured_model = configured_model
+        adapter = GigaChatProviderAdapter(
+            config=config,
+            request_transformer=RequestTransformer(config, logger=logger),
+            giga_client=stable_sdk_client,
+            model_limiter=recording_limiter,
+            response_processor=ResponseProcessor(logger=logger),
+            api_mode=api_mode,
+            provider_label=provider,
+            forced_model=forced_model,
+        )
+        return ContractStack(
+            adapter=adapter,
+            client=stable_sdk_client,
+            limiter=recording_limiter,
+            config=config,
+        )
+
+    return build
 
 
 @pytest.fixture
