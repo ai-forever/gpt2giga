@@ -967,16 +967,16 @@ wheels = [
 
 [[package]]
 name = "gigachat"
-version = "0.2.3a1"
+version = "0.2.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8f/f3/6327bd8ad1b7067045ad79d1cbee36523bb2c1e3ea535b38915be00d24cf/gigachat-0.2.3a1.tar.gz", hash = "sha256:ceefa7de0262c17b2bc82e30169c5b3e65bd63b59312c37967693e3234ced9b5", size = 42649, upload-time = "2026-07-24T09:46:42.388Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a9/3e/42105fe7be2aa33907349fd177a2d8a97e14f434cfc1b8cbf3ba7b4a03f8/gigachat-0.2.3.tar.gz", hash = "sha256:b298dc70d28153e83780cdb7f40ec7273462ce497daafb1bee7e08509126aab3", size = 42631, upload-time = "2026-07-31T14:30:32.776Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/26/2b6f07c2e0f00dea4613e8527b8b2a445edcdab9e0967aa1e7dcab553965/gigachat-0.2.3a1-py3-none-any.whl", hash = "sha256:9ca0c39dfdfccba9301937fc3496eacad9552213b0b801a1aa6a662e4388ee14", size = 55355, upload-time = "2026-07-24T09:46:43.809Z" },
+    { url = "https://files.pythonhosted.org/packages/89/c6/cea9fd75f06c4c5a3f00a96c157c183146cb42b20e58b7580cd723c359bb/gigachat-0.2.3-py3-none-any.whl", hash = "sha256:61a51bcb9c3888c7643a9ffabe191695279f7cfca6b9d9d639e60c073a2385da", size = 55335, upload-time = "2026-07-31T14:30:34.101Z" },
 ]
 
 [[package]]
@@ -1095,7 +1095,7 @@ requires-dist = [
     { name = "arize-phoenix-otel", marker = "extra == 'phoenix'", specifier = ">=0.1,<1" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.31.0,<1" },
     { name = "fastapi", specifier = ">=0.140.13,<1" },
-    { name = "gigachat", specifier = ">=0.2.3a1,<0.3.0" },
+    { name = "gigachat", specifier = ">=0.2.3,<0.3.0" },
     { name = "google-genai", specifier = ">=2.14.0,<3" },
     { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
