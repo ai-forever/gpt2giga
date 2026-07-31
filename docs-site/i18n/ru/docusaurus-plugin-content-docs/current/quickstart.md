@@ -61,8 +61,8 @@ curl http://localhost:8090/health
 установите gateway:
 
 ```sh
-uv tool install --prerelease allow gpt2giga
-gpt2giga
+uv tool install gpt2giga
+gpt2giga --help
 ```
 
 ## Запуск из репозитория

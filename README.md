@@ -51,24 +51,24 @@ cp .env.example .env
 docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
 ```
 
-Или локальный запуск только gateway с актуальной prerelease-версией:
+Или локальная установка gateway:
 
 ```sh
-uv tool install --prerelease allow gpt2giga
-gpt2giga
+uv tool install gpt2giga
+gpt2giga --help
 ```
 
 Для установки в существующее окружение:
 
 ```sh
-python -m pip install --pre gpt2giga
+python -m pip install gpt2giga
 ```
 
 Поддерживается Python 3.10–3.14. Для Postgres, OpenSearch или Phoenix добавьте
 соответствующую extra-зависимость, например:
 
 ```sh
-python -m pip install --pre "gpt2giga[postgres]"
+python -m pip install "gpt2giga[postgres]"
 ```
 
 Минимальный OpenAI SDK вызов:

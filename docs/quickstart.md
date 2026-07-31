@@ -61,8 +61,8 @@ Install the compatibility gateway when you need the OpenAI-, Anthropic-, or
 Gemini-shaped HTTP API:
 
 ```sh
-uv tool install --prerelease allow gpt2giga
-gpt2giga
+uv tool install gpt2giga
+gpt2giga --help
 ```
 
 ## Run from the repository
