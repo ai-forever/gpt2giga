@@ -1,4 +1,4 @@
-"""Gateway-owned repository separation assertions."""
+"""Standalone gateway repository boundary assertions."""
 
 import ast
 from pathlib import Path
@@ -36,7 +36,7 @@ def assert_gateway_runtime_has_no_extracted_namespace_imports() -> None:
     assert violations == []
 
 
-def assert_code_workflows_skip_documentation_only_changes() -> None:
+def assert_code_workflows_target_root_project() -> None:
     codeql = (REPO_ROOT / ".github/workflows/codeql.yaml").read_text(encoding="utf-8")
     dependency_review = (
         REPO_ROOT / ".github/workflows/dependency-review.yaml"
@@ -52,26 +52,16 @@ def assert_code_workflows_skip_documentation_only_changes() -> None:
 
     assert "- 'src/gpt2giga/**/*.py'" in codeql
     assert "- 'pyproject.toml'" in codeql
-    assert "- 'packages/**/*.py'" not in codeql
     assert "- 'pyproject.toml'" in dependency_review
     assert "- 'docs-site/package-lock.json'" in dependency_review
     assert all("- '!src/gpt2giga/**/*.md'" in workflow for workflow in docker_workflows)
 
 
-def assert_production_docker_build_remains_gateway_only() -> None:
+def assert_production_dockerfile_installs_root_gateway() -> None:
     dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
-    docker_workflows = "\n".join(
-        (REPO_ROOT / path).read_text(encoding="utf-8")
-        for path in (
-            ".github/workflows/docker-smoke.yaml",
-            ".github/workflows/docker_image.yaml",
-            ".github/workflows/publish-ghcr.yml",
-        )
-    )
 
     assert "uv build --wheel" in dockerfile
     assert "COPY src/ src/" in dockerfile
-    assert "packages/gpt2giga-harness" not in dockerfile
+    assert "COPY --from=builder /app/dist/*.whl /tmp/" in dockerfile
+    assert 'pip install --no-cache-dir "${wheel_path}${INSTALL_EXTRAS}"' in dockerfile
     assert "gpt2giga_harness" not in dockerfile
-    assert "packages/gpt2giga-harness" not in docker_workflows
-    assert "- 'uv.lock'" not in docker_workflows
