@@ -398,7 +398,10 @@ class ProxySettings(BaseSettings):
     )
     harness_model_key: Optional[str] = Field(
         default=None,
-        description="Dedicated HMAC key for authenticated Harness model selection",
+        description=(
+            "Legacy compatibility key used to authenticate signed GigaLoom model "
+            "overrides"
+        ),
         repr=False,
     )
 

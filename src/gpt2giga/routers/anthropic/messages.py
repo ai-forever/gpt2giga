@@ -18,7 +18,7 @@ from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
-from gpt2giga.common.harness_model import trusted_harness_model
+from gpt2giga.common.signed_model_override import resolve_signed_model_override
 from gpt2giga.common.model_concurrency import resolve_gigachat_model
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.context import get_request_context, update_request_context
@@ -59,7 +59,7 @@ router = APIRouter(tags=[OPENAPI_TAG_ANTHROPIC_MESSAGES])
 
 def _claude_cli_harness_model(request: Request) -> str | None:
     """Return an authenticated Harness-pinned Claude model."""
-    return trusted_harness_model(
+    return resolve_signed_model_override(
         request,
         protocol="anthropic",
         user_agent_prefix="claude-cli/",

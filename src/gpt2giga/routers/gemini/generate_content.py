@@ -17,7 +17,7 @@ from gpt2giga.common.conversation import (
 )
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import extract_gigachat_request_options
-from gpt2giga.common.harness_model import trusted_harness_model
+from gpt2giga.common.signed_model_override import resolve_signed_model_override
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.openapi_specs.gemini import (
@@ -401,7 +401,7 @@ def _provider_adapter(
 
 def _gemini_cli_harness_model(request: Request) -> str | None:
     """Return an authenticated Harness-pinned Gemini model."""
-    return trusted_harness_model(
+    return resolve_signed_model_override(
         request,
         protocol="gemini",
         user_agent_prefix="geminicli",
