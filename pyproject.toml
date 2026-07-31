@@ -45,7 +45,7 @@ opensearch = [
     "opensearch-py>=2.8.0,<3",
 ]
 phoenix = [
-    "arize-phoenix-otel>=0.1,<1",
+    "arize-phoenix-otel>=0.16.1,<1",
     "opentelemetry-sdk>=1.28.0,<2",
     "opentelemetry-exporter-otlp>=1.28.0,<2",
     "openinference-semantic-conventions>=0.1.30,<1",
