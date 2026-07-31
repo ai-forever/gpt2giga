@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from loguru import logger
 
-from gpt2giga.common.harness_model import harness_model_signature
+from gpt2giga.common.signed_model_override import _model_override_signature
 from gpt2giga.common.model_concurrency import (
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
@@ -260,7 +260,7 @@ async def test_anthropic_messages_uses_effective_model_but_preserves_display_mod
     ]
 
 
-async def test_claude_cli_harness_model_stays_pinned_for_messages_and_tokens() -> None:
+async def test_claude_cli_model_override_stays_pinned_for_messages_and_tokens() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat-Selected": 1})
     gigachat = GateAnthropicGigachat()
     gigachat.release.set()
@@ -274,7 +274,7 @@ async def test_claude_cli_harness_model_stays_pinned_for_messages_and_tokens() -
         "user-agent": "claude-cli/2.1.197 (external, sdk-cli)",
         "x-gigaloom-model": "GigaChat-Selected",
         "x-gpt2giga-pass-model": "false",
-        "x-gigaloom-model-signature": harness_model_signature(
+        "x-gigaloom-model-signature": _model_override_signature(
             "model-key",
             protocol="anthropic",
             model="GigaChat-Selected",
@@ -302,7 +302,7 @@ async def test_claude_cli_harness_model_stays_pinned_for_messages_and_tokens() -
     assert gigachat.token_models[-1] == "GigaChat-Selected"
 
 
-async def test_non_claude_cli_cannot_activate_harness_model_pin() -> None:
+async def test_non_claude_cli_cannot_activate_model_override() -> None:
     limiter = ModelConcurrencyLimiter({"configured-fallback": 1})
     gigachat = GateAnthropicGigachat()
     gigachat.release.set()

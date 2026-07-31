@@ -1,10 +1,10 @@
 [project]
 name = "gpt2giga"
-version = "0.2.6a1"
+version = "0.2.6"
 description = "Утилита для проксирования OpenAI, Anthropic и Gemini запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
 requires-python = ">=3.10,<4,<3.15"
-readme = "packages/gpt2giga/README.md"
+readme = "README.md"
 license = "MIT"
 dependencies = [
     "python-dotenv>=1.2.2,<2",
@@ -20,7 +20,7 @@ dependencies = [
     "pydantic-settings>=2.14.2,<3",
     "fastapi>=0.140.13,<1",
     "starlette>=1.3.1,<2",
-    "gigachat>=0.2.3a1,<0.3.0",
+    "gigachat>=0.2.3,<0.3.0",
     "anthropic>=0.120.2",
     "google-genai>=2.14.0,<3",
 ]
@@ -30,7 +30,7 @@ Homepage = "https://ai-forever.github.io/gpt2giga/"
 Documentation = "https://ai-forever.github.io/gpt2giga/"
 Repository = "https://github.com/ai-forever/gpt2giga"
 Issues = "https://github.com/ai-forever/gpt2giga/issues"
-Changelog = "https://github.com/ai-forever/gpt2giga/blob/main/packages/gpt2giga/CHANGELOG_en.md"
+Changelog = "https://github.com/ai-forever/gpt2giga/blob/main/CHANGELOG_en.md"
 
 [project.scripts]
 gpt2giga = "gpt2giga:run"
@@ -56,13 +56,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["packages/gpt2giga/src/gpt2giga"]
+packages = ["src/gpt2giga"]
 
 [tool.hatch.build.targets.sdist]
 only-include = [
-    "packages/gpt2giga/src",
-    "packages/gpt2giga/CHANGELOG.md",
-    "packages/gpt2giga/CHANGELOG_en.md",
+    "src",
+    "CHANGELOG.md",
+    "CHANGELOG_en.md",
 ]
 
 [tool.coverage.run]

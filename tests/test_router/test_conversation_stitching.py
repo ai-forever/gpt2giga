@@ -142,7 +142,8 @@ def make_openai_app(**settings):
         proxy=ProxySettings(
             conversation_stitching_enabled=True,
             **settings,
-        )
+        ),
+        gigachat={"model": "GigaChat"},
     )
     return app
 

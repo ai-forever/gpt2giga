@@ -85,10 +85,8 @@ for example with the `X-Goog-Api-Client` or `X-Goog-Api-Key` headers, or with th
 OpenAI-shaped model objects include the gpt2giga extension
 `metadata.type="chat"|"embedder"`. The gateway preserves an upstream type when
 available and otherwise infers embedding models from their model id. Consumers
-such as the standalone
-[GigaLoom workbench](https://github.com/krakenalt/gigaloom) can use this
-metadata to keep embedding-only models out of chat model selectors without
-changing the standard OpenAI model fields.
+can use this metadata to keep embedding-only models out of chat model selectors
+without changing the standard OpenAI model fields.
 
 If proxy API-key authentication is enabled, Gemini-compatible clients can pass
 the key via `x-goog-api-key` or `?key=...`, in addition to the common
@@ -217,10 +215,9 @@ before provider I/O. G7-04 closes the internal v1 bridge with hermetic
 OpenAI/Anthropic/Gemini text, streaming, partial-usage, function-tool, semantic
 loss, cancellation, malformed-stream, timeout, and provider-error contracts.
 It also promotes OpenAI image inputs to typed references. This does not add a
-public arbitrary-upstream environment switch. When this adapter is orchestrated
-by GigaLoom, reviewed profiles, secrets, and network authority remain owned by
-the [standalone workbench](https://github.com/krakenalt/gigaloom), not by this
-gateway repository.
+public arbitrary-upstream environment switch. Reviewed profiles, secrets, and
+network authority remain outside this gateway repository and must be supplied
+by a trusted external controller.
 
 ## Backend modes
 

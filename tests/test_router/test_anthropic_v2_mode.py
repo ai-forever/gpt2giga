@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from gigachat.models.chat_completions import ChatCompletionChunk, ChatCompletionResponse
 from loguru import logger
 
-from gpt2giga.common.harness_model import harness_model_signature
+from gpt2giga.common.signed_model_override import _model_override_signature
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
@@ -266,6 +266,7 @@ def make_app(
     app.state.request_transformer = FakeRequestTransformer()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(gigachat_api_mode=mode, **settings),
+        gigachat={"model": "GigaChat"},
     )
     app.state.logger = logger
     return app
@@ -406,7 +407,7 @@ def test_anthropic_normalized_failure_falls_back_before_response():
     ]
 
 
-def test_anthropic_messages_v2_pins_signed_claude_cli_harness_model():
+def test_anthropic_messages_v2_pins_signed_claude_cli_model_override():
     app = make_app("v2", pass_model=False, harness_model_key="model-key")
     client = TestClient(app)
 
@@ -421,7 +422,7 @@ def test_anthropic_messages_v2_pins_signed_claude_cli_harness_model():
             "user-agent": "claude-cli/2.1.197 (external, sdk-cli)",
             "x-gigaloom-model": "GigaChat-Selected",
             "x-gpt2giga-pass-model": "false",
-            "x-gigaloom-model-signature": harness_model_signature(
+            "x-gigaloom-model-signature": _model_override_signature(
                 "model-key",
                 protocol="anthropic",
                 model="GigaChat-Selected",

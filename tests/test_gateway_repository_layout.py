@@ -1,36 +1,48 @@
 """Repository layout contracts owned by ai-forever/gpt2giga."""
 
 from pathlib import Path
+import subprocess
 
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     import tomli as tomllib
 
-from workspace_split_contract_support import (
-    test_gateway_owned_modules_do_not_import_harness as _check_no_harness_imports,
+from repository_boundary_support import (
+    assert_gateway_runtime_has_no_extracted_namespace_imports,
 )
 
 
-FUTURE_REPOSITORY_OWNER = "ai-forever/gpt2giga"
+def test_gateway_runtime_has_no_extracted_namespace_imports():
+    assert_gateway_runtime_has_no_extracted_namespace_imports()
 
 
-def test_gateway_owned_modules_do_not_import_gigaloom():
-    _check_no_harness_imports()
-
-
-def test_source_repository_is_a_root_level_gateway_project():
+def test_repository_is_a_standalone_gateway_project():
     root = Path(__file__).resolve().parents[1]
 
     with (root / "pyproject.toml").open("rb") as file:
         metadata = tomllib.load(file)
 
-    assert metadata["project"]["name"] == "gpt2giga"
-    assert metadata["project"]["description"]
-    assert "workspace" not in metadata.get("tool", {}).get("uv", {})
-    assert not (root / "packages/gpt2giga/pyproject.toml").exists()
-    assert not (root / "packages/gpt2giga-harness").exists()
-    assert not (root / "tests/harness").exists()
-    assert not (root / "examples/harness").exists()
-    assert not (root / "benchmarks/harness_p0").exists()
-    assert not (root / "benchmarks/harness_p2_5").exists()
+    tracked_metadata = subprocess.run(
+        ["git", "ls-files", "*pyproject.toml"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    project = metadata["project"]
+    build_targets = metadata["tool"]["hatch"]["build"]["targets"]
+
+    assert tracked_metadata == ["pyproject.toml"]
+    assert project["name"] == "gpt2giga"
+    assert project["description"]
+    assert project["readme"] == "README.md"
+    assert project["scripts"] == {"gpt2giga": "gpt2giga:run"}
+    assert build_targets["wheel"]["packages"] == ["src/gpt2giga"]
+    assert build_targets["sdist"]["only-include"] == [
+        "src",
+        "CHANGELOG.md",
+        "CHANGELOG_en.md",
+    ]
+    assert (root / "src/gpt2giga/__init__.py").is_file()
+    assert not (root / "packages").exists()

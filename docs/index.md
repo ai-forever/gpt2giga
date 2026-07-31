@@ -8,15 +8,6 @@ Default local address:
 http://localhost:8090
 ```
 
-:::info[GigaLoom moved]
-
-The GigaLoom agentic workbench (formerly Unified Harness) now lives in
-[`krakenalt/gigaloom`](https://github.com/krakenalt/gigaloom). This site is the
-canonical documentation for the `gpt2giga` compatibility gateway. See the
-[migration notice](gigaloom-migration.md) for old documentation URLs.
-
-:::
-
 ## What the proxy covers
 
 | Capability | Where to read |

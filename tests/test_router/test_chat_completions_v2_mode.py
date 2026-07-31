@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from gigachat.models.chat_completions import ChatCompletionChunk, ChatCompletionResponse
@@ -124,6 +125,12 @@ class FakeRequestTransformer:
         return {"contract": "responses-v1"}
 
 
+class ModelLessAssistantTransformer(FakeRequestTransformer):
+    async def prepare_chat_completion(self, data, giga_client=None):
+        self.chat_completion_calls.append((data, giga_client))
+        return {"contract": "v2", "assistant_id": "assistant-1"}
+
+
 def make_app(mode: str):
     app = FastAPI()
     app.include_router(router)
@@ -154,6 +161,7 @@ def configure_app_state(app: FastAPI, mode: str):
     app.state.request_transformer = FakeRequestTransformer()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(gigachat_api_mode=mode),
+        gigachat={"model": "GigaChat-2-Max"},
     )
 
 
@@ -199,6 +207,56 @@ def test_chat_completions_v2_mode_uses_chat_completion_create():
     assert app.state.request_transformer.chat_completion_calls
     assert app.state.gigachat_client.achat.chat_calls == []
     assert app.state.gigachat_client.achat.chat_completion_calls == [{"contract": "v2"}]
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_chat_completions_missing_upstream_model_returns_400_without_io(
+    mode: str,
+    stream: bool,
+):
+    app = make_app(mode)
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(gigachat_api_mode=mode),
+        gigachat={"model": None},
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat/completions",
+        json={
+            "model": "public-client-alias",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": stream,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "model_required"
+    assert app.state.gigachat_client.achat.chat_calls == []
+    assert app.state.gigachat_client.achat.chat_completion_calls == []
+    assert app.state.gigachat_client.achat.stream_calls == []
+
+
+def test_chat_completions_v2_assistant_path_sends_no_model_sentinel():
+    app = make_app("v2")
+    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    app.state.request_transformer = ModelLessAssistantTransformer()
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat/completions",
+        json={
+            "model": "public-client-alias",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert app.state.gigachat_client.achat.chat_completion_calls == [
+        {"contract": "v2", "assistant_id": "assistant-1"}
+    ]
+    assert "model" not in app.state.gigachat_client.achat.chat_completion_calls[0]
 
 
 def test_chat_completions_v1_prefix_forces_v1_when_default_is_v2():

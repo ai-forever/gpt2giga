@@ -1,22 +1,22 @@
 openai:
   - changed-files:
       - any-glob-to-any-file:
-          - 'packages/gpt2giga/src/gpt2giga/routers/openai/**'
-          - 'packages/gpt2giga/src/gpt2giga/openapi_specs/openai.py'
+          - 'src/gpt2giga/routers/openai/**'
+          - 'src/gpt2giga/openapi_specs/openai.py'
           - 'examples/openai/**'
           - 'examples/weather_agent.py'
 
 anthropic:
   - changed-files:
       - any-glob-to-any-file:
-          - 'packages/gpt2giga/src/gpt2giga/routers/anthropic/**'
-          - 'packages/gpt2giga/src/gpt2giga/openapi_specs/anthropic.py'
+          - 'src/gpt2giga/routers/anthropic/**'
+          - 'src/gpt2giga/openapi_specs/anthropic.py'
           - 'examples/anthropic/**'
 
 protocol:
   - changed-files:
       - any-glob-to-any-file:
-          - 'packages/gpt2giga/src/gpt2giga/protocols/**'
+          - 'src/gpt2giga/protocols/**'
 
 docker:
   - changed-files:

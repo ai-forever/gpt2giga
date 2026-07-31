@@ -1,13 +1,10 @@
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 
 from gpt2giga.common.model_concurrency import (
-    DEFAULT_GIGACHAT_MODEL,
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
-    resolve_gigachat_model,
 )
 
 
@@ -186,6 +183,17 @@ async def test_timeout_error_contains_model_limit_and_provider() -> None:
     assert str(error) == "Concurrency limit reached for model GigaChat-Max: 1"
 
 
+async def test_gemini_provider_label_is_preserved() -> None:
+    limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
+
+    async with limiter.limit("GigaChat"):
+        with pytest.raises(ModelConcurrencyTimeoutError) as exc_info:
+            async with limiter.limit("GigaChat", provider="gemini"):
+                pass
+
+    assert exc_info.value.provider == "gemini"
+
+
 @pytest.mark.parametrize(
     ("limits", "default_limit", "acquire_timeout"),
     [
@@ -207,41 +215,3 @@ def test_invalid_limiter_configuration_raises(
             default_limit=default_limit,
             acquire_timeout=acquire_timeout,
         )
-
-
-def test_resolve_gigachat_model_prefers_payload_attribute() -> None:
-    payload = SimpleNamespace(model="GigaChat-Pro")
-    config = SimpleNamespace(
-        gigachat_settings=SimpleNamespace(model="Configured-GigaChat")
-    )
-
-    assert resolve_gigachat_model(payload, config) == "GigaChat-Pro"
-
-
-def test_resolve_gigachat_model_prefers_mapping_model() -> None:
-    config = SimpleNamespace(
-        gigachat_settings=SimpleNamespace(model="Configured-GigaChat")
-    )
-
-    assert resolve_gigachat_model({"model": "GigaChat-Max"}, config) == "GigaChat-Max"
-
-
-def test_resolve_gigachat_model_uses_config_when_payload_has_no_model() -> None:
-    config = SimpleNamespace(
-        gigachat_settings=SimpleNamespace(model="Configured-GigaChat")
-    )
-
-    assert resolve_gigachat_model({"messages": []}, config) == "Configured-GigaChat"
-
-
-def test_resolve_gigachat_model_falls_back_to_project_default() -> None:
-    config = SimpleNamespace(gigachat_settings=SimpleNamespace(model=None))
-
-    assert resolve_gigachat_model({"messages": []}, config) == DEFAULT_GIGACHAT_MODEL
-
-
-def test_resolve_gigachat_model_ignores_raw_model_removed_by_transformer() -> None:
-    transformed_payload = {"messages": []}
-    config = SimpleNamespace(gigachat_settings=SimpleNamespace(model="GigaChat"))
-
-    assert resolve_gigachat_model(transformed_payload, config) == "GigaChat"

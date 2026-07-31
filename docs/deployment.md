@@ -206,12 +206,9 @@ docker compose --env-file .env \
   < gpt2giga-traffic-logs.dump
 ```
 
-[GigaLoom](https://github.com/krakenalt/gigaloom), formerly Unified Harness,
-is not part of these gateway manifests. If it runs on the same host, follow its
-standalone backup guidance for `~/.gpt2giga/harness/` and project `.giga/`
-while its UI, worker, and native processes are stopped. Protect those backups
-as user content. Never overwrite vendor-owned native CLI homes during
-migration.
+Legacy product data is not part of these gateway manifests. Follow the separate
+[migration and legacy guidance](gigaloom-migration.md) before changing or
+removing data owned by a split-out product.
 
 ## Rollback
 

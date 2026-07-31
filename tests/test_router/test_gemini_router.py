@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from gpt2giga.common.harness_model import harness_model_signature
+from gpt2giga.common.signed_model_override import _model_override_signature
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocol.request.transformer import RequestTransformer
@@ -314,7 +314,7 @@ def test_gemini_generate_content_roundtrips_through_gigachat_provider():
     assert payload["max_tokens"] == 64
 
 
-def test_gemini_cli_harness_model_stays_pinned_across_requests():
+def test_gemini_cli_model_override_stays_pinned_across_requests():
     app = make_app(mode="v2", pass_model=False, harness_model_key="model-key")
     app.state.request_transformer = RequestTransformer(app.state.config, logger)
     client = TestClient(app)
@@ -322,7 +322,7 @@ def test_gemini_cli_harness_model_stays_pinned_across_requests():
         "user-agent": "GeminiCLI/0.46.0/GigaChat-Selected (darwin; arm64; headless)",
         "x-gigaloom-model": "GigaChat-Selected",
         "x-gpt2giga-pass-model": "false",
-        "x-gigaloom-model-signature": harness_model_signature(
+        "x-gigaloom-model-signature": _model_override_signature(
             "model-key",
             protocol="gemini",
             model="GigaChat-Selected",
@@ -358,7 +358,7 @@ def test_gemini_cli_harness_model_stays_pinned_across_requests():
     )
 
 
-def test_unsigned_gemini_cli_cannot_activate_harness_model_pin():
+def test_unsigned_gemini_cli_cannot_activate_model_override():
     app = make_app(harness_model_key="model-key")
     client = TestClient(app)
 

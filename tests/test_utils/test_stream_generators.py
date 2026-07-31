@@ -195,6 +195,9 @@ class FakeAppState:
         self.response_processor = FakeResponseProcessor()
         self.rquid = "rquid-1"
         self.logger = logger
+        self.config = SimpleNamespace(
+            gigachat_settings=SimpleNamespace(model="giga"),
+        )
 
 
 class FakeRequest:

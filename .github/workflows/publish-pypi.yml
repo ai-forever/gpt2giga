@@ -36,12 +36,14 @@ jobs:
       - name: Verify gateway tag and version
         id: guard
         env:
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: >-
           python3 scripts/gateway_release_guard.py
           --event-name "${GITHUB_EVENT_NAME}"
           --ref-name "${GITHUB_REF_NAME}"
           --release-tag "${RELEASE_TAG}"
+          --release-prerelease "${RELEASE_PRERELEASE}"
           --github-output "${GITHUB_OUTPUT}"
 
   build:

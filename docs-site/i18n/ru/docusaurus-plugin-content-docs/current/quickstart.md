@@ -6,6 +6,8 @@ Anthropic и Gemini, и проверить каждый протокол пер�
 ## Требования
 
 - Python 3.10–3.14 для локального запуска.
+- GigaChat Python SDK не ниже 0.2.3 в поддерживаемой ветке 0.2.x;
+  он устанавливается вместе с gateway.
 - `uv` для локальной разработки.
 - Docker с плагином Compose для контейнерного запуска.
 - Учётные данные и scope GigaChat для нужного аккаунта.
@@ -61,8 +63,8 @@ curl http://localhost:8090/health
 установите gateway:
 
 ```sh
-uv tool install --prerelease allow gpt2giga
-gpt2giga
+uv tool install gpt2giga
+gpt2giga --help
 ```
 
 ## Запуск из репозитория

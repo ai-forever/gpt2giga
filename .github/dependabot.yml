@@ -15,7 +15,7 @@ updates:
       prefix: ci
 
   - package-ecosystem: pip
-    directory: "/packages/gpt2giga"
+    directory: "/"
     schedule:
       interval: weekly
       day: monday

@@ -6,7 +6,7 @@ installed `gigachat` SDK, not the website or external documentation.
 
 ## Source of truth
 
-In `pyproject.toml` the package is pinned to the range `gigachat>=0.2.2a1,<0.3.0`.
+In `pyproject.toml` the package is pinned to the stable range `gigachat>=0.2.3,<0.3.0`.
 For this range, the canonical list of built-in tools comes from the SDK models:
 
 - `gigachat.models.chat_completions.ChatTool`;

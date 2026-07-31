@@ -174,12 +174,12 @@ def test_pass_token_middleware(monkeypatch):
     # Mock settings
     config = SimpleNamespace(
         proxy_settings=SimpleNamespace(pass_token=True),
-        gigachat_settings=SimpleNamespace(model_dump=lambda: {}),
+        gigachat_settings=SimpleNamespace(model_dump=lambda **_kwargs: {}),
     )
     test_app.state.config = config
 
     # Ensure middleware stays offline by stubbing GigaChat construction in gigachat module
-    monkeypatch.setattr("gigachat.GigaChat", FakeGigaChat)
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", FakeGigaChat)
 
     # Base (app-scoped) GigaChat client
     test_app.state.gigachat_client = FakeGigaChat()
@@ -204,10 +204,9 @@ def test_pass_token_middleware(monkeypatch):
     # pass_token_to_gigachat logic should put 'mytoken' into access_token on request-scoped client
     assert resp.json()["access_token"] == "mytoken"
 
-    # Test error handling
-    # Mock create_gigachat_client_for_request to raise exception
+    # Invalid pass-through auth fails closed without exposing the error.
     def broken_create(*args, **kwargs):
-        raise ValueError("Boom")
+        raise ValueError("Boom secret-value")
 
     monkeypatch.setattr(
         "gpt2giga.middlewares.pass_token.create_gigachat_client_for_request",
@@ -215,9 +214,10 @@ def test_pass_token_middleware(monkeypatch):
     )
 
     resp = client.get("/check", headers={"Authorization": "Bearer giga-auth-fail"})
-    assert resp.status_code == 200
-    assert resp.json()["access_token"] is None
+    assert resp.status_code == 400
+    assert resp.json() == {"detail": "Invalid GigaChat pass-through authentication"}
     test_app.state.logger.warning.assert_called()
+    assert "secret-value" not in str(test_app.state.logger.warning.call_args)
 
     # Test pass_token disabled
     config.proxy_settings.pass_token = False

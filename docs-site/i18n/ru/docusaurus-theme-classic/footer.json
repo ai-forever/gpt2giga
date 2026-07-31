@@ -43,10 +43,6 @@
     "message": "Примеры",
     "description": "The label of footer link with label=Examples linking to https://github.com/ai-forever/gpt2giga/tree/main/examples"
   },
-  "link.item.label.GigaLoom workbench": {
-    "message": "Workbench GigaLoom",
-    "description": "The label of footer link to the standalone GigaLoom repository"
-  },
   "copyright": {
     "message": "© 2026 участники gpt2giga. Собрано с помощью Docusaurus.",
     "description": "The footer copyright"

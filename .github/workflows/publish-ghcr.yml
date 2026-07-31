@@ -6,8 +6,9 @@ on:
     tags: [ "v*.*.*" ]
     paths:
       - 'Dockerfile'
-      - 'packages/gpt2giga/**'
-      - '!packages/gpt2giga/**/*.md'
+      - 'src/gpt2giga/**'
+      - '!src/gpt2giga/**/*.md'
+      - 'README.md'
       - 'pyproject.toml'
       - '.github/workflows/publish-ghcr.yml'
   workflow_dispatch:

@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/gpt2giga/**'
-      - '!packages/gpt2giga/**/*.md'
+      - 'src/gpt2giga/**'
+      - '!src/gpt2giga/**/*.md'
+      - 'README.md'
       - 'tests/**'
       - 'scripts/**'
       - 'pyproject.toml'
@@ -15,8 +16,9 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'packages/gpt2giga/**'
-      - '!packages/gpt2giga/**/*.md'
+      - 'src/gpt2giga/**'
+      - '!src/gpt2giga/**/*.md'
+      - 'README.md'
       - 'tests/**'
       - 'scripts/**'
       - 'pyproject.toml'
@@ -118,6 +120,55 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  minimum-sdk:
+    name: Gateway minimum SDK / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Resolve gateway version
+        id: version
+        run: echo "value=$(uv version --short --frozen)" >> "$GITHUB_OUTPUT"
+
+      - name: Build gateway wheel
+        run: uv build --wheel --no-sources --out-dir dist/min-sdk
+
+      - name: Create clean minimum SDK environment
+        run: uv venv --python ${{ matrix.python-version }} .venv-min-sdk
+
+      - name: Install minimum stable SDK and gateway wheel
+        run: |
+          uv pip install --python .venv-min-sdk/bin/python "gigachat==0.2.3"
+          uv pip install --python .venv-min-sdk/bin/python dist/min-sdk/gpt2giga-*.whl
+
+      - name: Run minimum-SDK installed contract smoke
+        env:
+          GATEWAY_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          .venv-min-sdk/bin/python -I scripts/gateway_artifact_smoke.py \
+            --expected-gateway-version "${GATEWAY_VERSION}" \
+            --expected-gigachat-version "0.2.3"
+          .venv-min-sdk/bin/gpt2giga --help
+
   artifact-smoke:
     name: Gateway artifact / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
@@ -160,7 +211,9 @@ jobs:
         env:
           GATEWAY_VERSION: ${{ steps.version.outputs.value }}
         run: |
-          .venv-artifact/bin/python -I -c "import importlib.metadata as m, os, gpt2giga; assert m.version('gpt2giga') == os.environ['GATEWAY_VERSION']"
+          test ! -e gpt2giga
+          .venv-artifact/bin/python -I scripts/gateway_artifact_smoke.py \
+            --expected-gateway-version "${GATEWAY_VERSION}"
           .venv-artifact/bin/gpt2giga --help
 
   coverage-badge:

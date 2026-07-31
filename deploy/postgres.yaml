@@ -45,7 +45,7 @@ services:
     volumes:
       - gpt2giga-postgres-data:/var/lib/postgresql/data
       - ./postgres-init/001_apply_traffic_log_migration.sh:/docker-entrypoint-initdb.d/001_apply_traffic_log_migration.sh:ro
-      - ../packages/gpt2giga/src/gpt2giga/storage/postgres/migrations:/gpt2giga-migrations:ro
+      - ../src/gpt2giga/storage/postgres/migrations:/gpt2giga-migrations:ro
     healthcheck:
       test:
         [

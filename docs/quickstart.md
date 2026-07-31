@@ -6,6 +6,8 @@ gateway to GigaChat and verify each protocol with a first request.
 ## Requirements
 
 - Python 3.10–3.14 for a local run.
+- GigaChat Python SDK 0.2.3 or newer in the supported 0.2.x series; it is
+  installed with the gateway.
 - `uv` for local development.
 - Docker with the Compose plugin for a container run.
 - GigaChat credentials and scope for the target account.
@@ -61,8 +63,8 @@ Install the compatibility gateway when you need the OpenAI-, Anthropic-, or
 Gemini-shaped HTTP API:
 
 ```sh
-uv tool install --prerelease allow gpt2giga
-gpt2giga
+uv tool install gpt2giga
+gpt2giga --help
 ```
 
 ## Run from the repository

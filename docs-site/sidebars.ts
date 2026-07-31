@@ -6,12 +6,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Overview',
       collapsible: false,
-      items: [
-        'index',
-        'gigaloom-migration',
-        'quickstart',
-        'configuration',
-      ],
+      items: ['index', 'quickstart', 'configuration'],
     },
     {
       type: 'category',
@@ -45,6 +40,19 @@ const sidebars: SidebarsConfig = {
       label: 'Contributing',
       collapsible: false,
       items: ['contributing'],
+    },
+    {
+      type: 'category',
+      label: 'Migration and legacy',
+      collapsible: true,
+      collapsed: true,
+      items: [
+        {
+          type: 'doc',
+          id: 'gigaloom-migration',
+          label: 'GigaLoom migration',
+        },
+      ],
     },
   ],
 };
