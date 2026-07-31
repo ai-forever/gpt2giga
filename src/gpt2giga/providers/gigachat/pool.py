@@ -92,8 +92,6 @@ class GigaChatClientPool:
         for client in clients:
             try:
                 await client.aclose()
-            except Exception as exc:  # pragma: no cover - best-effort cleanup
+            except Exception:  # pragma: no cover - best-effort cleanup
                 if self.logger is not None:
-                    self.logger.warning(
-                        "Failed to close pooled GigaChat client: {}", exc
-                    )
+                    self.logger.warning("Failed to close pooled GigaChat client")
