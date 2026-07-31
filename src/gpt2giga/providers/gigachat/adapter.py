@@ -15,7 +15,7 @@ from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.common.model_concurrency import (
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
-    resolve_gigachat_model,
+    ProviderName,
 )
 from gpt2giga.common.tools import (
     map_tool_name_from_gigachat,
@@ -41,6 +41,10 @@ from gpt2giga.protocols.normalized import (
     NormalizedUsage,
 )
 from gpt2giga.providers.gigachat.streaming import GigaChatNormalizedStreamMapper
+from gpt2giga.providers.gigachat.model_resolution import (
+    ResolvedUpstreamModel,
+    resolve_upstream_model,
+)
 
 
 class GigaChatProviderAdapter:
@@ -58,7 +62,7 @@ class GigaChatProviderAdapter:
         request_options: Any = None,
         response_processor: Any = None,
         api_mode: Literal["v1", "v2"] | None = None,
-        provider_label: str = "openai",
+        provider_label: ProviderName = "openai",
         forced_model: str | None = None,
     ) -> None:
         self.config = config
@@ -94,14 +98,25 @@ class GigaChatProviderAdapter:
                 input_tokens=0,
             )
 
-        model = self.forced_model or request.model or request.input.model or "unknown"
-        update_request_context(model_effective=model)
-        async with self.model_limiter.limit(model, provider=self.provider_label):
+        resolution = resolve_upstream_model(
+            {"model": request.model or request.input.model},
+            self.config,
+            forced_model=self.forced_model,
+            provider=self.provider_label,
+        )
+        self._record_model_resolution(resolution)
+        async with self.model_limiter.limit(
+            resolution.limiter_key,
+            provider=self.provider_label,
+        ):
             async with gigachat_request_options(
                 self.giga_client,
                 self.request_options,
             ):
-                counts = await self.giga_client.atokens_count(texts, model=model)
+                counts = await self.giga_client.atokens_count(
+                    texts,
+                    model=resolution.model,
+                )
         return NormalizedTokenCountResponse(
             model=request.model or request.input.model,
             input_tokens=sum(int(getattr(item, "tokens", 0)) for item in counts),
@@ -172,6 +187,22 @@ class GigaChatProviderAdapter:
             False,
         )
 
+    def _resolve_model(self, payload: Any) -> ResolvedUpstreamModel:
+        return resolve_upstream_model(
+            payload,
+            self.config,
+            forced_model=self.forced_model,
+            api_mode=self._resolve_api_mode(),
+            provider=self.provider_label,
+        )
+
+    @staticmethod
+    def _record_model_resolution(resolution: ResolvedUpstreamModel) -> None:
+        update_request_context(
+            model_effective=resolution.model,
+            metadata={"model_source": resolution.source},
+        )
+
     async def _chat(
         self,
         payload: dict[str, Any],
@@ -184,11 +215,14 @@ class GigaChatProviderAdapter:
                 payload,
                 self.giga_client,
             )
-        chat_payload = _force_payload_model(chat_payload, self.forced_model)
-        effective_model = resolve_gigachat_model(chat_payload, self.config)
-        update_request_context(model_effective=effective_model)
+        resolution = self._resolve_model(chat_payload)
+        chat_payload = _force_payload_model(
+            chat_payload,
+            resolution.model if resolution.source == "forced" else None,
+        )
+        self._record_model_resolution(resolution)
         async with self.model_limiter.limit(
-            effective_model,
+            resolution.limiter_key,
             provider=self.provider_label,
         ):
             async with gigachat_request_options(self.giga_client, self.request_options):
@@ -211,18 +245,21 @@ class GigaChatProviderAdapter:
                 payload,
                 self.giga_client,
             )
-        chat_payload = _force_payload_model(chat_payload, self.forced_model)
-        effective_model = resolve_gigachat_model(chat_payload, self.config)
-        update_request_context(model_effective=effective_model)
+        resolution = self._resolve_model(chat_payload)
+        chat_payload = _force_payload_model(
+            chat_payload,
+            resolution.model if resolution.source == "forced" else None,
+        )
+        self._record_model_resolution(resolution)
         async with self.model_limiter.limit(
-            effective_model,
+            resolution.limiter_key,
             provider=self.provider_label,
         ):
             async with gigachat_request_options(self.giga_client, self.request_options):
                 response = await self.giga_client.achat.create(chat_payload)
         adapted = adapt_chat_completion_to_chat_shape(
             response,
-            default_model=request.model or effective_model,
+            default_model=request.model or resolution.model or "",
         )
         return gigachat_response_to_normalized(
             _ModelDumpWrapper(adapted),
@@ -244,15 +281,18 @@ class GigaChatProviderAdapter:
                 payload,
                 self.giga_client,
             )
-        chat_payload = _force_payload_model(chat_payload, self.forced_model)
-        effective_model = resolve_gigachat_model(chat_payload, self.config)
-        update_request_context(model_effective=effective_model)
+        resolution = self._resolve_model(chat_payload)
+        chat_payload = _force_payload_model(
+            chat_payload,
+            resolution.model if resolution.source == "forced" else None,
+        )
+        self._record_model_resolution(resolution)
         mapper = self._stream_mapper(request, context)
         yield mapper.message_start()
 
         try:
             async with self.model_limiter.limit(
-                effective_model,
+                resolution.limiter_key,
                 provider=self.provider_label,
             ):
                 async with gigachat_request_options(
@@ -305,15 +345,18 @@ class GigaChatProviderAdapter:
                 payload,
                 self.giga_client,
             )
-        chat_payload = _force_payload_model(chat_payload, self.forced_model)
-        effective_model = resolve_gigachat_model(chat_payload, self.config)
-        update_request_context(model_effective=effective_model)
+        resolution = self._resolve_model(chat_payload)
+        chat_payload = _force_payload_model(
+            chat_payload,
+            resolution.model if resolution.source == "forced" else None,
+        )
+        self._record_model_resolution(resolution)
         mapper = self._stream_mapper(request, context)
         yield mapper.message_start()
 
         try:
             async with self.model_limiter.limit(
-                effective_model,
+                resolution.limiter_key,
                 provider=self.provider_label,
             ):
                 async with gigachat_request_options(
@@ -326,7 +369,7 @@ class GigaChatProviderAdapter:
                             break
                         adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
                             chunk,
-                            default_model=request.model or effective_model,
+                            default_model=request.model or resolution.model or "",
                         )
                         yield mapper.chunk_to_event(
                             SimpleNamespace(model_dump=lambda: adapted)

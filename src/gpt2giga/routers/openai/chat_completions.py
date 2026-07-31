@@ -21,7 +21,6 @@ from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
-from gpt2giga.common.model_concurrency import resolve_gigachat_model
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import (
     stream_chat_completion_generator,
@@ -47,6 +46,7 @@ from gpt2giga.protocols.openai import (
     normalized_stream_event_to_openai_sse,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
+from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.routers.openai.helpers import populate_giga_functions
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
@@ -103,11 +103,18 @@ async def chat_completions(request: Request):
             chat_request = await state.request_transformer.prepare_chat_completion(
                 data, giga_client
             )
-        effective_model = resolve_gigachat_model(chat_request, state.config)
-        update_request_context(model_effective=effective_model)
+        model_resolution = resolve_upstream_model(
+            chat_request,
+            state.config,
+            api_mode="v2",
+        )
+        update_request_context(
+            model_effective=model_resolution.model,
+            metadata={"model_source": model_resolution.source},
+        )
         if stream:
             acquired_model_limit = model_limiter.limit(
-                effective_model,
+                model_resolution.limiter_key,
                 provider="openai",
             )
             await acquired_model_limit.__aenter__()
@@ -120,7 +127,7 @@ async def chat_completions(request: Request):
                 request_options,
                 request_data=request_data,
                 model_limiter=model_limiter,
-                effective_model=effective_model,
+                effective_model=model_resolution.limiter_key,
                 acquired_model_limit=acquired_model_limit,
             )
             return StreamingResponse(
@@ -132,7 +139,10 @@ async def chat_completions(request: Request):
                 ),
                 media_type="text/event-stream",
             )
-        async with model_limiter.limit(effective_model, provider="openai"):
+        async with model_limiter.limit(
+            model_resolution.limiter_key,
+            provider="openai",
+        ):
             async with gigachat_request_options(giga_client, request_options):
                 response = await giga_client.achat.create(chat_request)
         adapted = adapt_chat_completion_to_chat_shape(
@@ -156,10 +166,20 @@ async def chat_completions(request: Request):
 
     async with gigachat_request_options(giga_client, request_options):
         chat_messages = await state.request_transformer.prepare_chat(data, giga_client)
-    effective_model = resolve_gigachat_model(chat_messages, state.config)
-    update_request_context(model_effective=effective_model)
+    model_resolution = resolve_upstream_model(
+        chat_messages,
+        state.config,
+        api_mode="v1",
+    )
+    update_request_context(
+        model_effective=model_resolution.model,
+        metadata={"model_source": model_resolution.source},
+    )
     if not stream:
-        async with model_limiter.limit(effective_model, provider="openai"):
+        async with model_limiter.limit(
+            model_resolution.limiter_key,
+            provider="openai",
+        ):
             async with gigachat_request_options(giga_client, request_options):
                 response = await giga_client.achat(chat_messages)
         result = state.response_processor.process_response(
@@ -174,7 +194,10 @@ async def chat_completions(request: Request):
         )
         return result
 
-    acquired_model_limit = model_limiter.limit(effective_model, provider="openai")
+    acquired_model_limit = model_limiter.limit(
+        model_resolution.limiter_key,
+        provider="openai",
+    )
     await acquired_model_limit.__aenter__()
     stream = stream_chat_generator(
         request,
@@ -185,7 +208,7 @@ async def chat_completions(request: Request):
         request_options,
         request_data=request_data,
         model_limiter=model_limiter,
-        effective_model=effective_model,
+        effective_model=model_resolution.limiter_key,
         acquired_model_limit=acquired_model_limit,
     )
     return StreamingResponse(

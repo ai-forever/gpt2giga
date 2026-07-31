@@ -173,6 +173,7 @@ def configure_app_state(
         proxy=ProxySettings(
             gigachat_api_mode=gigachat_api_mode,
         ),
+        gigachat={"model": "GigaChat-2-Max"},
     )
 
 
@@ -320,6 +321,7 @@ def test_responses_v1_non_stream_emits_phoenix_llm_span():
             observability_capture_messages=True,
             observability_capture_responses=True,
         ),
+        gigachat={"model": "GigaChat-2-Max"},
     )
     app.state.observability_sink = RecordingObservabilitySink()
     client = TestClient(app)
@@ -421,6 +423,7 @@ def test_responses_v2_stream_emits_phoenix_llm_span():
             observability_capture_messages=True,
             observability_capture_responses=True,
         ),
+        gigachat={"model": "GigaChat-2-Max"},
     )
     app.state.observability_sink = RecordingObservabilitySink()
     client = TestClient(app)

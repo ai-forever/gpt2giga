@@ -17,7 +17,6 @@ from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
-from gpt2giga.common.model_concurrency import resolve_gigachat_model
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import (
     stream_responses_generator,
@@ -32,6 +31,7 @@ from gpt2giga.protocol.response import (
     extract_chat_completion_thread_id,
     hydrate_chat_completion_image_files,
 )
+from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.routers.openai.helpers import (
     populate_giga_functions,
     request_attachment_ids,
@@ -70,11 +70,18 @@ async def responses(request: Request):
                     **attachment_kwargs,
                 )
             )
-        effective_model = resolve_gigachat_model(chat_request, state.config)
-        update_request_context(model_effective=effective_model)
+        model_resolution = resolve_upstream_model(
+            chat_request,
+            state.config,
+            api_mode="v2",
+        )
+        update_request_context(
+            model_effective=model_resolution.model,
+            metadata={"model_source": model_resolution.source},
+        )
         if stream:
             acquired_model_limit = model_limiter.limit(
-                effective_model,
+                model_resolution.limiter_key,
                 provider="openai",
             )
             await acquired_model_limit.__aenter__()
@@ -89,7 +96,7 @@ async def responses(request: Request):
                         request_data=data,
                         request_options=request_options,
                         model_limiter=model_limiter,
-                        effective_model=effective_model,
+                        effective_model=model_resolution.limiter_key,
                         acquired_model_limit=acquired_model_limit,
                     ),
                     request_payload=data,
@@ -97,7 +104,10 @@ async def responses(request: Request):
                 ),
                 media_type="text/event-stream",
             )
-        async with model_limiter.limit(effective_model, provider="openai"):
+        async with model_limiter.limit(
+            model_resolution.limiter_key,
+            provider="openai",
+        ):
             async with gigachat_request_options(giga_client, request_options):
                 response = await giga_client.achat.create(chat_request)
         adapted = adapt_chat_completion_to_chat_shape(
@@ -132,10 +142,20 @@ async def responses(request: Request):
             giga_client,
             **attachment_kwargs,
         )
-    effective_model = resolve_gigachat_model(chat_messages, state.config)
-    update_request_context(model_effective=effective_model)
+    model_resolution = resolve_upstream_model(
+        chat_messages,
+        state.config,
+        api_mode="v1",
+    )
+    update_request_context(
+        model_effective=model_resolution.model,
+        metadata={"model_source": model_resolution.source},
+    )
     if not stream:
-        async with model_limiter.limit(effective_model, provider="openai"):
+        async with model_limiter.limit(
+            model_resolution.limiter_key,
+            provider="openai",
+        ):
             async with gigachat_request_options(giga_client, request_options):
                 response = await giga_client.achat(chat_messages)
         result = state.response_processor.process_response_api(
@@ -151,7 +171,7 @@ async def responses(request: Request):
         return result
 
     acquired_model_limit = model_limiter.limit(
-        effective_model,
+        model_resolution.limiter_key,
         provider="openai",
     )
     await acquired_model_limit.__aenter__()
@@ -163,7 +183,7 @@ async def responses(request: Request):
         request_data=data,
         request_options=request_options,
         model_limiter=model_limiter,
-        effective_model=effective_model,
+        effective_model=model_resolution.limiter_key,
         acquired_model_limit=acquired_model_limit,
     )
     return StreamingResponse(

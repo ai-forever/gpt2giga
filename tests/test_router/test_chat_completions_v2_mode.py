@@ -154,6 +154,7 @@ def configure_app_state(app: FastAPI, mode: str):
     app.state.request_transformer = FakeRequestTransformer()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(gigachat_api_mode=mode),
+        gigachat={"model": "GigaChat-2-Max"},
     )
 
 

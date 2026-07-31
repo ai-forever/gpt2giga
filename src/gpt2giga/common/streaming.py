@@ -23,7 +23,6 @@ from gpt2giga.common.model_concurrency import (
     MODEL_CONCURRENCY_LIMIT_MESSAGE,
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
-    resolve_gigachat_model,
 )
 from gpt2giga.common.reasoning import ReasoningContentParser
 from gpt2giga.common.sources import (
@@ -40,6 +39,7 @@ from gpt2giga.protocol.response import (
     hydrate_chat_completion_image_files,
 )
 from gpt2giga.protocol.response.processor import ResponseProcessor
+from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 
 
 async def stream_chat_generator(
@@ -64,9 +64,11 @@ async def stream_chat_generator(
         if model_limiter is None:
             model_limiter = get_model_concurrency_limiter(request)
         if effective_model is None:
-            effective_model = resolve_gigachat_model(
-                chat_messages, getattr(request.app.state, "config", None)
-            )
+            effective_model = resolve_upstream_model(
+                chat_messages,
+                getattr(request.app.state, "config", None),
+                api_mode="v1",
+            ).limiter_key
         logger = getattr(request.app.state, "logger", None)
 
         async def emit_stream() -> AsyncGenerator[str, None]:
@@ -222,9 +224,11 @@ async def stream_chat_completion_generator(
         if model_limiter is None:
             model_limiter = get_model_concurrency_limiter(request)
         if effective_model is None:
-            effective_model = resolve_gigachat_model(
-                chat_request, getattr(request.app.state, "config", None)
-            )
+            effective_model = resolve_upstream_model(
+                chat_request,
+                getattr(request.app.state, "config", None),
+                api_mode="v2",
+            ).limiter_key
         logger = getattr(request.app.state, "logger", None)
 
         async def emit_stream() -> AsyncGenerator[str, None]:
@@ -409,6 +413,12 @@ async def stream_responses_chat_completion_generator(
 ) -> AsyncGenerator[str, None]:
     if giga_client is None:
         giga_client = get_gigachat_client(request)
+    if effective_model is None:
+        effective_model = resolve_upstream_model(
+            chat_request,
+            getattr(request.app.state, "config", None),
+            api_mode="v2",
+        ).limiter_key
     model = request_data.get("model", "unknown") if request_data else "unknown"
     adapter_client = _ChatCompletionResponsesStreamClient(
         giga_client,
@@ -710,9 +720,11 @@ async def stream_responses_generator(
         if model_limiter is None:
             model_limiter = get_model_concurrency_limiter(request)
         if effective_model is None:
-            effective_model = resolve_gigachat_model(
-                chat_messages, getattr(request.app.state, "config", None)
-            )
+            effective_model = resolve_upstream_model(
+                chat_messages,
+                getattr(request.app.state, "config", None),
+                api_mode="v1",
+            ).limiter_key
         logger = getattr(request.app.state, "logger", None)
 
         full_text = ""

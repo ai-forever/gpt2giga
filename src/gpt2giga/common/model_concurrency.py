@@ -4,8 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal, Optional
 
 
-ProviderName = Literal["openai", "anthropic"]
-DEFAULT_GIGACHAT_MODEL = "GigaChat"
+ProviderName = Literal["openai", "anthropic", "gemini", "internal"]
 MODEL_CONCURRENCY_LIMIT_MESSAGE = "Concurrency limit reached for the requested model"
 
 
@@ -114,19 +113,14 @@ class ModelConcurrencyLimiter:
 
 
 def resolve_gigachat_model(chat_payload: Any, config: Any) -> str:
-    """Resolve the effective upstream model from transformed GigaChat payload."""
-    payload_model = getattr(chat_payload, "model", None)
-    if payload_model:
-        return str(payload_model)
+    """Compatibility facade for protocol owners migrating to the typed resolver."""
+    from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 
-    if isinstance(chat_payload, Mapping):
-        payload_model = chat_payload.get("model")
-        if payload_model:
-            return str(payload_model)
-
-    gigachat_settings = getattr(config, "gigachat_settings", None)
-    configured_model = getattr(gigachat_settings, "model", None)
-    if configured_model:
-        return str(configured_model)
-
-    return DEFAULT_GIGACHAT_MODEL
+    proxy_settings = getattr(config, "proxy_settings", None)
+    api_mode = getattr(proxy_settings, "gigachat_api_mode", "v1")
+    return resolve_upstream_model(
+        chat_payload,
+        config,
+        api_mode=api_mode,
+        provider="anthropic",
+    ).limiter_key
