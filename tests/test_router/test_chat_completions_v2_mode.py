@@ -216,7 +216,10 @@ def test_chat_completions_missing_upstream_model_returns_400_without_io(
     stream: bool,
 ):
     app = make_app(mode)
-    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode=mode))
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(gigachat_api_mode=mode),
+        gigachat={"model": None},
+    )
     client = TestClient(app)
 
     response = client.post(
