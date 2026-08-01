@@ -20,6 +20,9 @@ from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.request_validation import RequestValidationMiddleware
 from gpt2giga.sinks.logs.emission import wrap_traffic_log_body_iterator
+from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
+from gpt2giga.sinks.metrics.noop import NoopMetricsSink
+from gpt2giga.sinks.observability.noop import NoopObservabilitySink
 
 app = FastAPI()
 app.add_middleware(PathNormalizationMiddleware, valid_roots=["v1"])
@@ -362,6 +365,39 @@ def test_read_request_json_updates_request_context_model():
     assert response.json() == {"model_requested": "GigaChat-2-Max"}
 
 
+def test_rquid_middleware_skips_noop_sink_dispatch(monkeypatch):
+    test_app = FastAPI()
+    test_app.state.traffic_log_sink = NoopTrafficLogSink()
+    test_app.state.observability_sink = NoopObservabilitySink()
+    test_app.state.metrics_sink = NoopMetricsSink()
+    test_app.add_middleware(RquidMiddleware)
+
+    def unexpected_dispatch(*args, **kwargs):
+        raise AssertionError("no-op sinks must not enter the event-building hot path")
+
+    monkeypatch.setattr(
+        "gpt2giga.middlewares.rquid_context.emit_request_traffic_event",
+        unexpected_dispatch,
+    )
+    monkeypatch.setattr(
+        "gpt2giga.middlewares.rquid_context.emit_request_observability_event",
+        unexpected_dispatch,
+    )
+    monkeypatch.setattr(
+        "gpt2giga.middlewares.rquid_context.emit_request_metrics",
+        unexpected_dispatch,
+    )
+
+    @test_app.get("/health")
+    async def health():
+        return {"ok": True}
+
+    response = TestClient(test_app).get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
 class RecordingTrafficSink:
     def __init__(self):
         self.events = []
@@ -559,11 +595,21 @@ def test_rquid_middleware_emits_observability_event_for_completed_request():
     assert event["attributes"]["metadata"]["lifecycle"] == "request_completed"
 
 
-def test_rquid_middleware_skips_lifecycle_observability_when_llm_span_exists():
+def test_rquid_middleware_skips_lifecycle_observability_when_llm_span_exists(
+    monkeypatch,
+):
     test_app = FastAPI()
     sink = RecordingObservabilitySink()
     test_app.state.observability_sink = sink
     test_app.add_middleware(RquidMiddleware)
+
+    def unexpected_dispatch(*args, **kwargs):
+        raise AssertionError("completed LLM spans must skip lifecycle dispatch")
+
+    monkeypatch.setattr(
+        "gpt2giga.middlewares.rquid_context.emit_request_observability_event",
+        unexpected_dispatch,
+    )
 
     @test_app.get("/v1/chat/completions")
     async def chat():

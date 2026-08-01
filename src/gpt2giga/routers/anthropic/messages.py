@@ -99,7 +99,9 @@ async def count_tokens(request: Request):
     )
 
     openai_messages = _convert_anthropic_messages_to_openai(
-        data.get("system"), data.get("messages", [])
+        data.get("system"),
+        data.get("messages", []),
+        content_validated=True,
     )
     texts: List[str] = _extract_text_from_openai_messages(openai_messages)
 

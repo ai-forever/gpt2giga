@@ -8,6 +8,8 @@ from typing import Any
 class NoopTrafficLogSink:
     """Ignore traffic log events."""
 
+    is_noop = True
+
     async def emit(self, event: Any) -> None:
         """Drop a traffic log event."""
         return None

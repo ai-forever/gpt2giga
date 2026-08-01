@@ -7,6 +7,7 @@ from typing import Any
 
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.normalized import NormalizedEmbeddingRequest
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
     EMBEDDINGS_SPAN_NAME,
@@ -24,7 +25,7 @@ async def emit_openai_embeddings_observability(
 ) -> None:
     """Emit one OpenInference-style span for an OpenAI Embeddings exchange."""
     sink = getattr(state, "observability_sink", None)
-    if sink is None or sink.__class__.__name__ == "NoopObservabilitySink":
+    if not is_sink_active(sink):
         return
 
     logger = getattr(state, "logger", None)

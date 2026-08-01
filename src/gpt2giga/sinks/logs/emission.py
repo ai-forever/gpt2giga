@@ -12,6 +12,7 @@ import json
 from gpt2giga.core.context import RequestContext
 from gpt2giga.core.context import get_request_context
 from gpt2giga.core.redaction import redact_traffic_payload
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.logs.factory import emit_traffic_log
 from gpt2giga.sinks.logs.models import TrafficLogEvent
 
@@ -83,7 +84,7 @@ async def emit_request_traffic_event(
     redact_extra_keys: list[str] | None = None,
 ) -> None:
     """Emit one request traffic event without propagating sink failures."""
-    if sink is None:
+    if not is_sink_active(sink):
         return
     safe_error_message = None
     if capture_content and error_message is not None:

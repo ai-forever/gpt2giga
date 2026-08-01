@@ -1,6 +1,7 @@
 """Anthropic Messages request parameter compatibility policy."""
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from gpt2giga.common.client_params import ClientCompatibilityError, ClientParamStatus
 from gpt2giga.common.json_schema import normalize_tool_parameters_schema

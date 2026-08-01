@@ -6,6 +6,7 @@ from typing import Any
 
 from gpt2giga.core.interfaces import TrafficLogSink
 from gpt2giga.models.config import ProxySettings
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.logs.composite import CompositeTrafficLogSink
 from gpt2giga.sinks.logs.jsonl import JsonlTrafficLogSink
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
@@ -106,6 +107,8 @@ async def emit_traffic_log(
     logger: Any | None = None,
 ) -> None:
     """Emit a traffic event without allowing sink errors to break requests."""
+    if not is_sink_active(sink):
+        return
     try:
         await sink.emit(event)
     except Exception as exc:  # pragma: no cover - log branch covered by no-raise tests

@@ -1,6 +1,7 @@
 """OpenAI request parameter compatibility policy."""
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from gpt2giga.common.client_params import ClientCompatibilityError, ClientParamStatus
 from gpt2giga.common.tools import normalize_gigachat_builtin_tool_type

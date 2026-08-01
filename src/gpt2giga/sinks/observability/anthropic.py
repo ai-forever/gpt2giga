@@ -14,6 +14,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedToolCall,
     NormalizedUsage,
 )
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
     MESSAGES_SPAN_NAME,
@@ -33,7 +34,7 @@ async def emit_anthropic_message_observability(
 ) -> None:
     """Emit one OpenInference-style span for an Anthropic Messages exchange."""
     sink = getattr(state, "observability_sink", None)
-    if sink is None or sink.__class__.__name__ == "NoopObservabilitySink":
+    if not is_sink_active(sink):
         return
     logger = getattr(state, "logger", None)
     try:
@@ -81,7 +82,7 @@ async def observe_anthropic_message_stream(
 ) -> AsyncIterator[str]:
     """Observe Anthropic SSE chunks and emit one final LLM span."""
     sink = getattr(state, "observability_sink", None)
-    if sink is None or sink.__class__.__name__ == "NoopObservabilitySink":
+    if not is_sink_active(sink):
         async for chunk in body_iterator:
             yield chunk
         return

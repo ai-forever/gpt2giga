@@ -12,6 +12,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from gpt2giga.core.context import build_request_context, request_context_var
 from gpt2giga.logger import logger, rquid_context
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.logs.emission import (
     MAX_CAPTURED_RESPONSE_BODY_BYTES,
     capture_traffic_request_headers,
@@ -20,7 +21,10 @@ from gpt2giga.sinks.logs.emission import (
     is_streaming_content_type,
 )
 from gpt2giga.sinks.metrics.emission import emit_request_metrics
-from gpt2giga.sinks.observability.emission import emit_request_observability_event
+from gpt2giga.sinks.observability.emission import (
+    emit_request_observability_event,
+    should_emit_request_observability,
+)
 
 
 class RquidMiddleware:
@@ -182,37 +186,54 @@ class _ResponseLifecycle:
     ) -> None:
         state = self.request.app.state
         app_logger = getattr(state, "logger", None)
-        await asyncio.gather(
-            emit_request_traffic_event(
-                getattr(state, "traffic_log_sink", None),
-                self.context,
-                status_code=status_code,
-                lifecycle=lifecycle,
-                logger=app_logger,
-                error_type=error_type,
-                error_message=error_message,
-                capture_content=self.capture_content,
-                redact_sensitive=self.redact_sensitive,
-                redact_extra_keys=self.redact_extra_keys,
-            ),
-            emit_request_observability_event(
-                getattr(state, "observability_sink", None),
-                self.context,
-                status_code=status_code,
-                lifecycle=lifecycle,
-                logger=app_logger,
-                error_type=error_type,
-                error_message=error_message,
-                is_streaming=self.is_streaming,
-            ),
-            emit_request_metrics(
-                getattr(state, "metrics_sink", None),
-                self.context,
-                status_code=status_code,
-                lifecycle=lifecycle,
-                logger=app_logger,
-                error_type=error_type,
-                error_message=error_message,
-                is_streaming=self.is_streaming,
-            ),
-        )
+        emissions = []
+        traffic_log_sink = getattr(state, "traffic_log_sink", None)
+        if is_sink_active(traffic_log_sink):
+            emissions.append(
+                emit_request_traffic_event(
+                    traffic_log_sink,
+                    self.context,
+                    status_code=status_code,
+                    lifecycle=lifecycle,
+                    logger=app_logger,
+                    error_type=error_type,
+                    error_message=error_message,
+                    capture_content=self.capture_content,
+                    redact_sensitive=self.redact_sensitive,
+                    redact_extra_keys=self.redact_extra_keys,
+                )
+            )
+        observability_sink = getattr(state, "observability_sink", None)
+        if is_sink_active(observability_sink) and should_emit_request_observability(
+            self.context, lifecycle
+        ):
+            emissions.append(
+                emit_request_observability_event(
+                    observability_sink,
+                    self.context,
+                    status_code=status_code,
+                    lifecycle=lifecycle,
+                    logger=app_logger,
+                    error_type=error_type,
+                    error_message=error_message,
+                    is_streaming=self.is_streaming,
+                )
+            )
+        metrics_sink = getattr(state, "metrics_sink", None)
+        if is_sink_active(metrics_sink):
+            emissions.append(
+                emit_request_metrics(
+                    metrics_sink,
+                    self.context,
+                    status_code=status_code,
+                    lifecycle=lifecycle,
+                    logger=app_logger,
+                    error_type=error_type,
+                    error_message=error_message,
+                    is_streaming=self.is_streaming,
+                )
+            )
+        if len(emissions) == 1:
+            await emissions[0]
+        elif emissions:
+            await asyncio.gather(*emissions)

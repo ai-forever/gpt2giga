@@ -6,6 +6,7 @@ from typing import Any
 
 from gpt2giga.core.interfaces import MetricsSink
 from gpt2giga.models.config import ProxySettings
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.metrics.noop import NoopMetricsSink
 from gpt2giga.sinks.metrics.prometheus import PrometheusMetricsSink
 
@@ -26,7 +27,7 @@ async def emit_metric_increment(
     logger: Any | None = None,
 ) -> None:
     """Increment a metric without allowing sink errors to break requests."""
-    if sink is None:
+    if not is_sink_active(sink):
         return
     try:
         await sink.increment(name, value, attributes)
@@ -44,7 +45,7 @@ async def emit_metric_observation(
     logger: Any | None = None,
 ) -> None:
     """Record a metric observation without propagating sink failures."""
-    if sink is None:
+    if not is_sink_active(sink):
         return
     try:
         await sink.observe(name, value, attributes)
