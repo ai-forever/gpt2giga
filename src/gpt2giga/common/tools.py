@@ -248,13 +248,11 @@ def build_namespaced_tool_name_map(
 
 def iter_function_tool_payloads(data: dict, *, require_parameters: bool = True):
     """Yield flat function definitions from OpenAI function and namespace tools."""
-    source, tools = _tool_source(data)
-    if tools is None:
-        return
+    tools = _tool_definitions(data)
     if not isinstance(tools, list):
         return
 
-    for index, tool in enumerate(tools):
+    for tool in tools:
         if not isinstance(tool, Mapping):
             continue
         if normalize_gigachat_builtin_tool_type(tool.get("type")) is not None:
@@ -262,8 +260,6 @@ def iter_function_tool_payloads(data: dict, *, require_parameters: bool = True):
         if tool.get("type") == "namespace":
             yield from _iter_namespace_function_payloads(
                 tool,
-                source,
-                index,
                 require_parameters=require_parameters,
             )
             continue
@@ -283,8 +279,6 @@ def iter_function_tool_payloads(data: dict, *, require_parameters: bool = True):
 
 def _iter_namespace_function_payloads(
     tool: Mapping[str, Any],
-    source: str,
-    index: int,
     *,
     require_parameters: bool = True,
 ):
@@ -336,14 +330,14 @@ def _function_tool_payload(
     return None
 
 
-def _tool_source(data: dict) -> tuple[str, Any]:
+def _tool_definitions(data: dict) -> Any:
     if "tools" in data:
         tools = data.get("tools")
         if tools not in (None, []):
-            return "tools", tools
+            return tools
         if "functions" not in data:
-            return "tools", tools
-    return "functions", data.get("functions", [])
+            return tools
+    return data.get("functions", [])
 
 
 def _optional_tool_name(definition: Mapping) -> str | None:

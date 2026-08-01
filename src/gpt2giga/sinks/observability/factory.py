@@ -23,7 +23,11 @@ def create_observability_sink(
     logger: Any | None = None,
 ) -> ObservabilitySink:
     """Create the configured observability sink."""
-    if not settings.observability_enabled or settings.observability_backend == "noop":
+    if (
+        not settings.observability_enabled
+        or settings.observability_backend == "noop"
+        or settings.observability_sample_rate <= 0
+    ):
         return NoopObservabilitySink()
     if settings.observability_backend == "phoenix":
         try:

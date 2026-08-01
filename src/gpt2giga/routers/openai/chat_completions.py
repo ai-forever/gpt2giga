@@ -512,6 +512,9 @@ async def _emit_chat_completion_observability(
     settings=None,
     events: list[dict[str, Any]] | None = None,
 ) -> None:
+    sink = getattr(state, "observability_sink", None)
+    if not is_sink_active(sink):
+        return
     if settings is None:
         settings = getattr(getattr(state, "config", None), "proxy_settings", None)
     logger = getattr(state, "logger", None)
@@ -526,7 +529,7 @@ async def _emit_chat_completion_observability(
             settings=settings,
         )
         emitted = await emit_observability_event(
-            getattr(state, "observability_sink", None),
+            sink,
             CHAT_COMPLETION_SPAN_NAME,
             attributes,
             context=context,

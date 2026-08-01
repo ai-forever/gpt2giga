@@ -89,40 +89,7 @@ def sanitize_anthropic_messages_parameters(data: Mapping[str, Any]) -> dict[str,
     _normalize_gigachat_extra_fields(sanitized)
     _sanitize_tool_choice(sanitized)
     _sanitize_tools(sanitized)
-    validate_anthropic_content_blocks(
-        sanitized.get("system"), sanitized.get("messages")
-    )
     return sanitized
-
-
-def validate_anthropic_content_blocks(system: Any, messages: Any) -> None:
-    """Validate Anthropic request content blocks against the supported matrix."""
-    _validate_system_content_blocks(system)
-
-    if not isinstance(messages, list):
-        return
-
-    for message_index, message in enumerate(messages):
-        if not isinstance(message, Mapping):
-            continue
-        role = message.get("role", "user")
-        content = message.get("content")
-        if not isinstance(content, list):
-            continue
-
-        if role == "user":
-            allowed = frozenset({"text", "image", "tool_result"})
-        elif role == "assistant":
-            allowed = frozenset({"text", "tool_use"})
-        else:
-            continue
-
-        for block_index, block in enumerate(content):
-            _validate_content_block(
-                block,
-                allowed,
-                path=f"messages[{message_index}].content[{block_index}]",
-            )
 
 
 def _sanitize_top_level_params(data: dict[str, Any]) -> None:
@@ -228,74 +195,6 @@ def _sanitize_tools(data: dict[str, Any]) -> None:
 
 def _is_non_empty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value)
-
-
-def _validate_system_content_blocks(system: Any) -> None:
-    if system is None or isinstance(system, str):
-        return
-    if not isinstance(system, list):
-        return
-
-    for block_index, block in enumerate(system):
-        _validate_content_block(
-            block,
-            frozenset({"text"}),
-            path=f"system[{block_index}]",
-        )
-
-
-def _validate_content_block(
-    block: Any,
-    allowed_types: frozenset[str],
-    *,
-    path: str,
-) -> None:
-    if not isinstance(block, Mapping):
-        return
-
-    block_type = block.get("type")
-    if block_type not in allowed_types:
-        return
-
-    if block_type == "text":
-        _validate_text_block(block, path)
-    elif block_type == "image":
-        _validate_image_block(block, path)
-    elif block_type == "tool_use":
-        _validate_tool_use_block(block, path)
-    elif block_type == "tool_result":
-        _validate_tool_result_block(block, path)
-
-
-def _validate_text_block(_block: Mapping[str, Any], _path: str) -> None:
-    return
-
-
-def _validate_image_block(block: Mapping[str, Any], path: str) -> None:
-    source = block.get("source")
-    if not isinstance(source, Mapping):
-        return
-
-    source_type = source.get("type")
-    if source_type not in {"base64", "url"}:
-        return
-
-
-def _validate_tool_use_block(_block: Mapping[str, Any], _path: str) -> None:
-    return
-
-
-def _validate_tool_result_block(block: Mapping[str, Any], path: str) -> None:
-    content = block.get("content")
-    if not isinstance(content, list):
-        return
-
-    for part_index, part in enumerate(content):
-        _validate_content_block(
-            part,
-            frozenset({"text"}),
-            path=f"{path}.content[{part_index}]",
-        )
 
 
 def _raise_anthropic_param_error(param: str, message: str) -> None:

@@ -1,6 +1,5 @@
 """GigaChat provider client construction and lifecycle helpers."""
 
-from types import MappingProxyType
 from typing import Any, Mapping, Protocol, TypedDict
 
 from gigachat import GigaChat
@@ -44,9 +43,8 @@ def build_gigachat_client(
     *,
     request_auth: GigaChatRequestAuth | None = None,
 ) -> GigaChat:
-    """Build a client from immutable base settings and optional request auth."""
-    base_kwargs = MappingProxyType(settings.model_dump(exclude_none=True))
-    client_kwargs = dict(base_kwargs)
+    """Build a client from base settings and optional request auth."""
+    client_kwargs = settings.model_dump(exclude_none=True)
     if request_auth is not None:
         for key in _REQUEST_AUTH_FIELDS:
             client_kwargs.pop(key, None)

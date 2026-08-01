@@ -48,7 +48,6 @@ class RquidMiddleware:
         response = _ResponseLifecycle(
             request=request,
             context=context,
-            request_id=request_id,
         )
 
         async def send_with_lifecycle(message: Message) -> None:
@@ -89,10 +88,9 @@ class RquidMiddleware:
 
 
 class _ResponseLifecycle:
-    def __init__(self, *, request: Request, context: Any, request_id: str) -> None:
+    def __init__(self, *, request: Request, context: Any) -> None:
         self.request = request
         self.context = context
-        self.request_id = request_id
         self.started = False
         self.completed = False
         self.status_code = 500

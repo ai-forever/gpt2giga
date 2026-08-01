@@ -5,11 +5,9 @@ from loguru import logger
 from gpt2giga.common.client_params import ClientParamStatus
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import RequestTransformer
-from gpt2giga.protocol.anthropic import request as anthropic_request
 from gpt2giga.protocol.anthropic.params import classify_anthropic_messages_parameter
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
-    _convert_anthropic_messages_to_openai,
 )
 
 
@@ -27,45 +25,6 @@ def test_build_openai_data_from_anthropic_request_preserves_literal_extra_option
     assert openai_data["extra_body"] == {"profanity_check": False}
     assert openai_data["extra_headers"] == {"x-me": "kus"}
     assert openai_data["extra_query"] == {"beta": "true"}
-
-
-def test_convert_anthropic_messages_validates_direct_calls(monkeypatch):
-    calls = []
-
-    def record_validation(system, messages):
-        calls.append((system, messages))
-
-    monkeypatch.setattr(
-        anthropic_request,
-        "validate_anthropic_content_blocks",
-        record_validation,
-    )
-    messages = [{"role": "user", "content": "hi"}]
-
-    _convert_anthropic_messages_to_openai(None, messages)
-
-    assert calls == [(None, messages)]
-
-
-def test_anthropic_request_builder_skips_converter_revalidation(monkeypatch):
-    def unexpected_validation(*args, **kwargs):
-        raise AssertionError("sanitized content must not be validated twice")
-
-    monkeypatch.setattr(
-        anthropic_request,
-        "validate_anthropic_content_blocks",
-        unexpected_validation,
-    )
-
-    result = _build_openai_data_from_anthropic_request(
-        {
-            "model": "claude-x",
-            "messages": [{"role": "user", "content": "hi"}],
-        },
-        logger,
-    )
-
-    assert result["messages"] == [{"role": "user", "content": "hi"}]
 
 
 def test_anthropic_messages_parameter_classifier_marks_known_states():
