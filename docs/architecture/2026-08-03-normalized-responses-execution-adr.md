@@ -51,9 +51,8 @@ bridge route also selects the native owner until normalized parity is proven
 and separately promoted. Ordinary GigaChat use requires no compatibility flag.
 
 The normalized bridge is route-selected for cross-provider execution. It is
-not the global minimum denominator for every route. The
-`GPT2GIGA_LEGACY_RESPONSES` workaround is not part of the corrected 0.3 public
-contract and must be removed before release approval.
+not the global minimum denominator for every route. No Responses compatibility
+workaround is part of the corrected 0.3 public contract.
 
 ### Request admission
 

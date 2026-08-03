@@ -17,10 +17,9 @@ GigaLoom. Supervisor запускает установленный артефа�
 | Native GigaChat compatibility | Нет `--config` и `GPT2GIGA_CONFIG` | Built-in GigaChat route использует существующие `GIGACHAT_*` и proxy settings. Native Responses, hosted tools, attachments, v1/v2 и public routes сохраняются. Models приходят из provider discovery. |
 | Universal provider bridge | `--config <path>` или `GPT2GIGA_CONFIG=<path>` | Profiles владеют destinations, credentials, immutable aliases и route policy. GigaChat inventory остаётся dynamic; requests не меняют routes. |
 
-`GPT2GIGA_LEGACY_RESPONSES` не является migration input исправленного релиза.
-Удалите его, если добавили при тестировании раннего 0.3 preview. Executor, route
-и model выбираются до provider I/O. Ошибка после dispatch или начала response
-bytes не переключает executor, provider, account или model.
+В исправленном релизе нет Responses compatibility flag. Executor, route и model
+выбираются до provider I/O. Ошибка после dispatch или начала response bytes не
+переключает executor, provider, account или model.
 
 Контракт пути точный:
 

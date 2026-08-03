@@ -51,13 +51,6 @@ class ProxySettings(BaseSettings):
     pass_token: bool = Field(
         default=False, description="Передавать токен из запроса в API"
     )
-    legacy_responses: bool = Field(
-        default=False,
-        description=(
-            "Use the deprecated pre-0.3 Responses execution path when no "
-            "provider config is supplied."
-        ),
-    )
     shutdown_timeout_seconds: float = Field(
         default=10.0,
         gt=0,

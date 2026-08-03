@@ -7,7 +7,6 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_HOST", raising=False)
     monkeypatch.delenv("GPT2GIGA_PASS_MODEL", raising=False)
     monkeypatch.delenv("GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE", raising=False)
-    monkeypatch.delenv("GPT2GIGA_LEGACY_RESPONSES", raising=False)
     monkeypatch.delenv("GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("GPT2GIGA_ENABLE_REASONING", raising=False)
     monkeypatch.delenv("GPT2GIGA_DISABLE_REASONING", raising=False)
@@ -63,7 +62,6 @@ def test_proxy_settings_defaults(monkeypatch):
     assert isinstance(s.log_level, str)
     assert s.pass_model is True
     assert s.pass_token_client_cache_size == 32
-    assert s.legacy_responses is False
     assert s.shutdown_timeout_seconds == 10.0
     assert s.enable_reasoning is False
     assert s.disable_reasoning is False

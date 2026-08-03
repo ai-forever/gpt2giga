@@ -116,12 +116,11 @@ def test_reserved_custom_web_search_and_codex_imagegen_remain_custom_tools() -> 
     assert find_imagegen_tool(imagegen_tools) == ("imagegen", "image_gen")
 
 
-def test_native_corpus_is_hermetic_bounded_and_contains_no_workaround() -> None:
+def test_native_corpus_is_hermetic_and_bounded() -> None:
     raw = CORPUS.read_bytes()
 
     assert 0 < len(raw) < 32 * 1024
     assert raw.endswith(b"\n")
-    assert b"GPT2GIGA_LEGACY_RESPONSES" not in raw
     assert b"Bearer " not in raw
     assert b"sk-" not in raw
     assert _load()["cases"][14]["headers"] == {

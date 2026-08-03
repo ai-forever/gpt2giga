@@ -42,9 +42,8 @@ native-владельца, пока normalized parity не доказана и �
 Обычному GigaChat deployment не нужен compatibility flag.
 
 Normalized bridge выбирается route-решением для cross-provider исполнения, а
-не задаёт глобальный минимальный знаменатель. Workaround
-`GPT2GIGA_LEGACY_RESPONSES` не входит в исправленный public contract 0.3 и
-должен быть удалён до одобрения релиза.
+не задаёт глобальный минимальный знаменатель. Responses compatibility
+workaround не входит в исправленный public contract 0.3.
 
 ### Admission запроса
 

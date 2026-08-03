@@ -111,7 +111,6 @@ def test_hosted_tool_uses_native_default_without_normalized_decode(
             },
         )
 
-    assert not hasattr(app.state, "legacy_responses_enabled")
     assert adapter.responses_requests == []
     assert response.status_code == 200
     assert response.json()["output"][0]["content"][0]["text"] == "native"
@@ -131,7 +130,6 @@ def test_attachment_uses_native_default_without_normalized_decode(
             json={"model": "GigaChat", "input": "Summarize the attachment."},
         )
 
-    assert not hasattr(app.state, "legacy_responses_enabled")
     assert adapter.responses_requests == []
     assert response.status_code == 200
     assert response.json()["output"][0]["content"][0]["text"] == "native"

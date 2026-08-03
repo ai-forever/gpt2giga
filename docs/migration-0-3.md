@@ -17,11 +17,10 @@ and HTTP contracts, and never imports private gateway modules.
 | Native GigaChat compatibility | No `--config` and no `GPT2GIGA_CONFIG` | The built-in GigaChat route uses existing `GIGACHAT_*` and proxy settings. Native Responses, hosted tools, attachments, v1/v2, and existing public routes remain available. Models come from provider discovery. |
 | Universal provider bridge | `--config <path>` or `GPT2GIGA_CONFIG=<path>` | The profile file is authoritative for destinations, credentials, immutable aliases, and route policy. GigaChat inventory remains dynamic; requests cannot add or alter routes. |
 
-`GPT2GIGA_LEGACY_RESPONSES` is not a migration input for the corrected release.
-Unset it if it was added while testing an earlier 0.3 preview. Executor, route,
-and model selection complete before provider I/O. An error after dispatch or
-after response bytes begin never switches executor, provider, account, or
-model.
+No Responses compatibility flag is part of the corrected release. Executor,
+route, and model selection complete before provider I/O. An error after
+dispatch or after response bytes begin never switches executor, provider,
+account, or model.
 
 The provider path contract is exact:
 

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gpt2giga.app.factory import create_app
-from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.models.config import ProxyConfig
 from gpt2giga.providers.profiles import ProviderProfileError
 from gpt2giga.providers.network import ProviderNetworkAuthorizer
 
@@ -125,50 +125,6 @@ def test_invalid_explicit_profile_fails_before_app_is_returned(tmp_path) -> None
         create_app(ProxyConfig(config=str(path)))
 
     assert raised.value.code == "invalid_profile_schema"
-
-
-def test_deprecated_responses_setting_does_not_control_profiles(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    path = tmp_path / "providers.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": "gpt2giga.provider-profiles.v1",
-                "profiles": [
-                    {
-                        "profile_id": "anthropic-main",
-                        "provider_kind": "anthropic",
-                        "base_url": "https://api.anthropic.com",
-                        "credential_env": "ANTHROPIC_API_KEY",
-                        "network_policy_ref": "public-anthropic",
-                        "tls_policy_ref": "system-default",
-                        "models": [
-                            {
-                                "public_alias": "anthropic/opus",
-                                "upstream_model": "claude-reviewed",
-                                "capability_profile": "anthropic-opus-v1",
-                                "support_status": "technical_preview",
-                            }
-                        ],
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "startup-secret")
-
-    app = create_app(
-        ProxyConfig(
-            config=str(path),
-            proxy=ProxySettings(legacy_responses=True),
-        )
-    )
-
-    assert app.state.provider_registry.public_aliases() == ("anthropic/opus",)
-    assert not hasattr(app.state, "legacy_responses_enabled")
 
 
 def test_lifespan_composes_normalized_responses_adapter_once(monkeypatch) -> None:
