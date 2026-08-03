@@ -1,0 +1,126 @@
+{
+  "schema_version": "gpt2giga.gigachat-capability-overlays.v1",
+  "overlays": [
+    {
+      "overlay_id": "gigachat-2-chat-family-v1",
+      "selector_kind": "family",
+      "selector": "^GigaChat-2-(?:Lite|Pro|Max)$",
+      "api_modes": ["v1", "v2"],
+      "capabilities": {
+        "text_input": {
+          "state": "supported",
+          "reason_id": "reviewed_chat_model_text",
+          "evidence_ids": []
+        },
+        "streaming": {
+          "state": "supported",
+          "reason_id": "reviewed_chat_model_streaming",
+          "evidence_ids": []
+        },
+        "function_tools": {
+          "state": "supported",
+          "reason_id": "reviewed_chat_model_functions",
+          "evidence_ids": []
+        },
+        "usage_tokens": {
+          "state": "supported",
+          "reason_id": "reviewed_chat_model_usage",
+          "evidence_ids": []
+        }
+      },
+      "evidence_ids": ["GIGA-CHAT-CONFORMANCE-2026-08-03"]
+    },
+    {
+      "overlay_id": "gigachat-2-max-attachments-v1",
+      "selector_kind": "exact",
+      "selector": "GigaChat-2-Max",
+      "api_modes": ["v1", "v2"],
+      "capabilities": {
+        "file_input": {
+          "state": "supported",
+          "reason_id": "reviewed_max_attachment_flow",
+          "evidence_ids": ["GIGACHAT-SDK-VISION-ATTACHMENT"]
+        },
+        "image_input": {
+          "state": "supported",
+          "reason_id": "reviewed_max_image_attachment",
+          "evidence_ids": ["GIGACHAT-SDK-VISION-ATTACHMENT"]
+        }
+      },
+      "evidence_ids": ["GIGA-RESPONSES-ATTACHMENT-2026-08-03"]
+    },
+    {
+      "overlay_id": "gigachat-2-max-v2-hosted-tools",
+      "selector_kind": "exact",
+      "selector": "GigaChat-2-Max",
+      "api_modes": ["v2"],
+      "capabilities": {
+        "hosted_web_search": {
+          "state": "supported",
+          "reason_id": "reviewed_v2_hosted_web_search",
+          "evidence_ids": []
+        },
+        "hosted_url_extraction": {
+          "state": "supported",
+          "reason_id": "reviewed_v2_url_extraction",
+          "evidence_ids": []
+        },
+        "hosted_code_interpreter": {
+          "state": "supported",
+          "reason_id": "reviewed_v2_code_interpreter",
+          "evidence_ids": []
+        },
+        "hosted_image_generation": {
+          "state": "supported",
+          "reason_id": "reviewed_v2_image_generation",
+          "evidence_ids": []
+        },
+        "hosted_3d_generation": {
+          "state": "supported",
+          "reason_id": "reviewed_v2_3d_generation",
+          "evidence_ids": []
+        },
+        "previous_response_state": {
+          "state": "supported",
+          "reason_id": "reviewed_v2_previous_response",
+          "evidence_ids": []
+        },
+        "conversation_state": {
+          "state": "supported",
+          "reason_id": "reviewed_v2_conversation_state",
+          "evidence_ids": []
+        }
+      },
+      "evidence_ids": ["GIGA-V2-HOSTED-TOOLS-2026-08-03"]
+    },
+    {
+      "overlay_id": "gigachat-2-reasoning-family-v1",
+      "selector_kind": "family",
+      "selector": "^GigaChat-2-Reasoning(?:-[A-Za-z0-9._-]+)?$",
+      "api_modes": ["v1", "v2"],
+      "capabilities": {
+        "text_input": {
+          "state": "supported",
+          "reason_id": "reviewed_reasoning_model_text",
+          "evidence_ids": []
+        },
+        "streaming": {
+          "state": "supported",
+          "reason_id": "reviewed_reasoning_model_stream",
+          "evidence_ids": []
+        },
+        "reasoning_controls": {
+          "state": "supported",
+          "reason_id": "reviewed_reasoning_effort_control",
+          "evidence_ids": ["GIGACHAT-SDK-REASONING-EXAMPLE"]
+        },
+        "usage_tokens": {
+          "state": "supported",
+          "reason_id": "reviewed_reasoning_model_usage",
+          "evidence_ids": []
+        }
+      },
+      "evidence_ids": ["GIGACHAT-SDK-REASONING-CONTENT"]
+    }
+  ]
+}
