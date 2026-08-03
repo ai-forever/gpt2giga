@@ -6,6 +6,7 @@ from gpt2giga.capabilities.admission import (
     resolve_gigachat_route_capabilities,
 )
 from gpt2giga.capabilities.models import (
+    CAPABILITY_KEYS_V1,
     CapabilityDecision,
     CapabilityEvidence,
     CapabilityKey,
@@ -31,6 +32,7 @@ from gpt2giga.capabilities.resolver import (
 
 __all__ = [
     "AmbiguousCapabilityOverlayError",
+    "CAPABILITY_KEYS_V1",
     "CapabilityDecision",
     "CapabilityEvidence",
     "CapabilityKey",

@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from gpt2giga.capabilities import (
+    CAPABILITY_KEYS_V1,
     CapabilityDecision,
     CapabilityKey,
     CapabilityLayer,
@@ -34,32 +35,12 @@ def _decision(
 
 
 def test_capability_vocabulary_is_complete_and_tri_state() -> None:
-    assert {item.value for item in CapabilityState} == {
-        "supported",
-        "unsupported",
-        "unknown",
-    }
-    assert {item.value for item in CapabilityKey} == {
-        "text_input",
-        "streaming",
-        "function_tools",
-        "hosted_web_search",
-        "hosted_url_extraction",
-        "hosted_code_interpreter",
-        "hosted_image_generation",
-        "hosted_3d_generation",
-        "parallel_tool_calls",
-        "json_schema_output",
-        "reasoning_controls",
-        "reasoning_summary",
-        "previous_response_state",
-        "conversation_state",
-        "file_input",
-        "image_input",
-        "usage_tokens",
-        "cancellation",
-        "disconnect",
-    }
+    assert CapabilityState.SUPPORTED.value == "supported"
+    assert CapabilityState.UNSUPPORTED.value == "unsupported"
+    assert CapabilityState.UNKNOWN.value == "unknown"
+    assert tuple(item.name for item in CAPABILITY_KEYS_V1) == tuple(
+        CapabilityKey.__members__
+    )
 
 
 def test_decision_canonicalizes_evidence_and_forbids_unknown_fields() -> None:
@@ -76,7 +57,7 @@ def test_decision_canonicalizes_evidence_and_forbids_unknown_fields() -> None:
 
 
 def test_layer_requires_one_explicit_decision_per_capability() -> None:
-    decisions = {key: _decision(key) for key in CapabilityKey}
+    decisions = {key: _decision(key) for key in CAPABILITY_KEYS_V1}
     layer = CapabilityLayer(
         scope=CapabilityScope.MODEL,
         scope_id="GigaChat-2-Max",
@@ -85,7 +66,7 @@ def test_layer_requires_one_explicit_decision_per_capability() -> None:
     )
 
     assert tuple(layer.capabilities) == tuple(
-        sorted(CapabilityKey, key=lambda item: item.value)
+        sorted(CAPABILITY_KEYS_V1, key=lambda item: item.value)
     )
     decisions.pop(CapabilityKey.TEXT_INPUT)
     with pytest.raises(ValidationError, match="text_input"):

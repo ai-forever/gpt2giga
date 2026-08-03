@@ -136,6 +136,7 @@ GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch
 | `GPT2GIGA_HARNESS_MODEL_KEY` | empty | Обратно совместимая HMAC-настройка только для доверенного внешнего controller, например standalone GigaLoom, когда gateway должен принимать request-scoped model pins Claude/Gemini. |
 | `GPT2GIGA_PASS_MODEL` | `True` | Передавать `model` из запроса в GigaChat. Поставьте `False`, чтобы всегда использовать настроенную модель GigaChat. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Разбирать клиентский `Authorization` как учётные данные GigaChat для авторизации в вышестоящем сервисе для каждого запроса. |
+| `GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS` | `10.0` | Максимальное время graceful drain при остановке до отмены активных запросов. |
 | `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Максимум неактивных клиентов для отдельных учётных данных, сохраняемых для переиспользования соединений. |
 | `GPT2GIGA_EMBEDDINGS` | `EmbeddingsGigaR` | Модель эмбеддингов по умолчанию, если модель из запроса не используется. |
 | `GPT2GIGA_ENABLE_IMAGES` | `True` | Принимать и преобразовывать поддержанные входные изображения. Отключите, если развёртывание должно запрещать обработку изображений. |

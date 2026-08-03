@@ -8,6 +8,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from gpt2giga.capabilities.models import (
+    CAPABILITY_KEYS_V1,
     CapabilityKey,
     CapabilityScope,
     CapabilitySource,
@@ -124,7 +125,7 @@ def resolve_gigachat_route_capabilities(
             if api_mode == "v1" and key in _V1_UNSUPPORTED
             else CapabilityState.SUPPORTED
         )
-        for key in CapabilityKey
+        for key in CAPABILITY_KEYS_V1
     }
     api_layer = build_capability_layer(
         scope=CapabilityScope.API_MODE,

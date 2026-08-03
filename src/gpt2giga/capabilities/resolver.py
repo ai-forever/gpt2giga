@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from gpt2giga.capabilities.models import (
+    CAPABILITY_KEYS_V1,
     CapabilityDecision,
     CapabilityEvidence,
     CapabilityKey,
@@ -41,7 +42,13 @@ class EffectiveCapabilityResolver:
             api_mode_layer,
             route_policy_layer,
         )
-        expected_scopes = tuple(CapabilityScope)
+        expected_scopes = (
+            CapabilityScope.PUBLIC_PROTOCOL,
+            CapabilityScope.PROVIDER_ADAPTER,
+            CapabilityScope.MODEL,
+            CapabilityScope.API_MODE,
+            CapabilityScope.ROUTE_POLICY,
+        )
         actual_scopes = tuple(layer.scope for layer in layers)
         if actual_scopes != expected_scopes:
             raise ValueError(
@@ -51,7 +58,9 @@ class EffectiveCapabilityResolver:
         if model_layer.scope_id != model_id:
             raise ValueError("model capability layer does not match selected model")
 
-        effective = {key: _intersect_decisions(key, layers) for key in CapabilityKey}
+        effective = {
+            key: _intersect_decisions(key, layers) for key in CAPABILITY_KEYS_V1
+        }
         evidence_by_id = {
             item.evidence_id: item for layer in layers for item in layer.evidence
         }
@@ -119,7 +128,7 @@ def build_capability_layer(
                 }
             ),
         )
-        for key in CapabilityKey
+        for key in CAPABILITY_KEYS_V1
     }
     evidence = tuple(
         CapabilityEvidence(

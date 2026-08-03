@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gpt2giga.capabilities.models import (
+    CAPABILITY_KEYS_V1,
     CapabilityDecision,
     CapabilityEvidence,
     CapabilityKey,
@@ -138,7 +139,7 @@ def resolve_gigachat_model_layer(
     decisions: dict[CapabilityKey, CapabilityDecision] = {}
     evidence: dict[str, CapabilityEvidence] = {}
 
-    for key in CapabilityKey:
+    for key in CAPABILITY_KEYS_V1:
         candidates = [item for item in family if key in item.capabilities]
         if len({item.capabilities[key].state for item in candidates}) > 1:
             raise AmbiguousCapabilityOverlayError(

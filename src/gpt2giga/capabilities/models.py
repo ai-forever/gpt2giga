@@ -54,6 +54,29 @@ class CapabilityKey(str, Enum):
     DISCONNECT = "disconnect"
 
 
+CAPABILITY_KEYS_V1 = (
+    CapabilityKey.TEXT_INPUT,
+    CapabilityKey.STREAMING,
+    CapabilityKey.FUNCTION_TOOLS,
+    CapabilityKey.HOSTED_WEB_SEARCH,
+    CapabilityKey.HOSTED_URL_EXTRACTION,
+    CapabilityKey.HOSTED_CODE_INTERPRETER,
+    CapabilityKey.HOSTED_IMAGE_GENERATION,
+    CapabilityKey.HOSTED_3D_GENERATION,
+    CapabilityKey.PARALLEL_TOOL_CALLS,
+    CapabilityKey.JSON_SCHEMA_OUTPUT,
+    CapabilityKey.REASONING_CONTROLS,
+    CapabilityKey.REASONING_SUMMARY,
+    CapabilityKey.PREVIOUS_RESPONSE_STATE,
+    CapabilityKey.CONVERSATION_STATE,
+    CapabilityKey.FILE_INPUT,
+    CapabilityKey.IMAGE_INPUT,
+    CapabilityKey.USAGE_TOKENS,
+    CapabilityKey.CANCELLATION,
+    CapabilityKey.DISCONNECT,
+)
+
+
 class CapabilitySource(str, Enum):
     """Reviewed source that produced one capability decision."""
 
@@ -125,7 +148,7 @@ class CapabilityLayer(_CapabilityModel):
 
     @model_validator(mode="after")
     def _validate_complete_layer(self) -> CapabilityLayer:
-        missing = set(CapabilityKey) - set(self.capabilities)
+        missing = set(CAPABILITY_KEYS_V1) - set(self.capabilities)
         if missing:
             names = ", ".join(sorted(item.value for item in missing))
             raise ValueError(f"capability layer is missing decisions: {names}")
@@ -160,7 +183,7 @@ class EffectiveModelCapabilities(_CapabilityModel):
 
     @model_validator(mode="after")
     def _validate_complete_result(self) -> EffectiveModelCapabilities:
-        missing = set(CapabilityKey) - set(self.capabilities)
+        missing = set(CAPABILITY_KEYS_V1) - set(self.capabilities)
         if missing:
             names = ", ".join(sorted(item.value for item in missing))
             raise ValueError(f"effective result is missing decisions: {names}")
