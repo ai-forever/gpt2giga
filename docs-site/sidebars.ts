@@ -33,6 +33,19 @@ const sidebars: SidebarsConfig = {
         'architecture/normalized-messages',
         'architecture/logging-and-observability',
         'architecture/how-to-add-provider',
+        {
+          type: 'category',
+          label: '0.3 universal bridge ADRs',
+          collapsible: true,
+          collapsed: true,
+          items: [
+            'architecture/2026-08-03-normalized-responses-execution-adr',
+            'architecture/2026-08-03-provider-profiles-model-aliases-adr',
+            'architecture/2026-08-03-bridge-status-loss-matrix-adr',
+            'architecture/2026-08-03-supervisor-machine-contract-adr',
+            'architecture/2026-08-03-provider-security-boundary-adr',
+          ],
+        },
       ],
     },
     {
