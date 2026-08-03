@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from typing import Any, NoReturn
 
 from gpt2giga.common.client_params import ClientCompatibilityError
-from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
@@ -14,8 +13,11 @@ from gpt2giga.protocols.normalized import (
     NormalizedGenerationConfig,
     NormalizedMessage,
     NormalizedResponseFormat,
-    NormalizedTool,
     NormalizedToolCall,
+)
+from gpt2giga.protocols.openai.responses_tools import (
+    normalize_responses_tool_choice,
+    normalize_responses_tools,
 )
 
 
@@ -71,8 +73,8 @@ def responses_request_to_normalized(
 
     messages = _normalize_instructions(data.get("instructions"))
     messages.extend(_normalize_input(data["input"]))
-    tools = _normalize_responses_tools(data.get("tools"))
-    tool_choice = _normalize_responses_tool_choice(data.get("tool_choice"), tools)
+    tools = normalize_responses_tools(data.get("tools"))
+    tool_choice = normalize_responses_tool_choice(data.get("tool_choice"), tools)
 
     stream = data.get("stream", False)
     if not isinstance(stream, bool):
@@ -216,71 +218,6 @@ def _normalize_function_output(
         content=output,
         tool_call_id=call_id,
     )
-
-
-def _normalize_responses_tools(value: Any) -> list[NormalizedTool]:
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        _invalid("tools")
-
-    tools: list[NormalizedTool] = []
-    names: set[str] = set()
-    for index, item in enumerate(value):
-        path = f"tools[{index}]"
-        if not isinstance(item, Mapping):
-            _invalid(path)
-        if item.get("type") != "function":
-            _unsupported(f"{path}.type")
-        _reject_unknown_fields(
-            item,
-            {"description", "name", "parameters", "strict", "type"},
-            path=path,
-        )
-        name = _required_string(item.get("name"), f"{path}.name")
-        if name in names:
-            _invalid(f"{path}.name")
-        names.add(name)
-        description = item.get("description")
-        if description is not None and not isinstance(description, str):
-            _invalid(f"{path}.description")
-        parameters = item.get("parameters", {})
-        if not isinstance(parameters, Mapping):
-            _invalid(f"{path}.parameters")
-        strict = item.get("strict")
-        if strict is not None and not isinstance(strict, bool):
-            _invalid(f"{path}.strict")
-        tools.append(
-            NormalizedTool(
-                type="function",
-                name=name,
-                description=description,
-                parameters=normalize_tool_parameters_schema(parameters),
-                raw_extensions=(
-                    {"function": {"strict": strict}} if strict is not None else {}
-                ),
-            )
-        )
-    return tools
-
-
-def _normalize_responses_tool_choice(
-    value: Any,
-    tools: list[NormalizedTool],
-) -> Any | None:
-    if value is None:
-        return None
-    if isinstance(value, str) and value in {"auto", "none", "required"}:
-        return value
-    if not isinstance(value, Mapping):
-        _invalid("tool_choice")
-    _reject_unknown_fields(value, {"name", "type"}, path="tool_choice")
-    if value.get("type") != "function":
-        _unsupported("tool_choice.type")
-    name = _required_string(value.get("name"), "tool_choice.name")
-    if name not in {tool.name for tool in tools}:
-        _invalid("tool_choice.name")
-    return {"type": "function", "function": {"name": name}}
 
 
 def _normalize_text_format(value: Any) -> NormalizedResponseFormat | None:

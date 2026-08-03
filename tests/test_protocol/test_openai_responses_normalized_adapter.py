@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from gpt2giga.common.client_params import ClientCompatibilityError
+from gpt2giga.protocols.normalized.models import NormalizedToolKind
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 
 
@@ -138,6 +139,134 @@ def test_responses_adapter_decodes_json_schema_and_named_tool_choice() -> None:
 
 
 @pytest.mark.parametrize(
+    ("tool", "expected_configuration"),
+    [
+        (
+            {
+                "type": "web_search_preview",
+                "search_context_size": "high",
+                "user_location": {"type": "approximate", "country": "RU"},
+            },
+            {
+                "search_context_size": "high",
+                "user_location": {"type": "approximate", "country": "RU"},
+            },
+        ),
+        (
+            {
+                "type": "code_interpreter",
+                "container": {"type": "auto", "file_ids": ["file-1"]},
+            },
+            {"container": {"type": "auto", "file_ids": ["file-1"]}},
+        ),
+        (
+            {
+                "type": "image_generation",
+                "output_format": "png",
+                "quality": "high",
+                "size": "1024x1024",
+            },
+            {
+                "output_format": "png",
+                "quality": "high",
+                "size": "1024x1024",
+            },
+        ),
+        (
+            {
+                "type": "computer_use_preview",
+                "display_height": 768,
+                "display_width": 1024,
+                "environment": "browser",
+            },
+            {
+                "display_height": 768,
+                "display_width": 1024,
+                "environment": "browser",
+            },
+        ),
+        (
+            {
+                "type": "file_search",
+                "vector_store_ids": ["vs-1"],
+                "max_num_results": 10,
+            },
+            {"vector_store_ids": ["vs-1"], "max_num_results": 10},
+        ),
+    ],
+)
+def test_responses_adapter_decodes_known_hosted_tools_before_admission(
+    tool: dict,
+    expected_configuration: dict,
+) -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/codex-test",
+            "input": "Use the tool.",
+            "tools": [tool],
+        }
+    )
+
+    assert len(normalized.tools) == 1
+    assert normalized.tools[0].kind is NormalizedToolKind.HOSTED
+    assert normalized.tools[0].type == tool["type"]
+    assert normalized.tools[0].name is None
+    assert normalized.tools[0].configuration == expected_configuration
+
+
+def test_responses_adapter_preserves_versioned_hosted_tool_alias_and_choice() -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/codex-test",
+            "input": "Search.",
+            "tools": [{"type": "web_search_preview_2025_03_11"}],
+            "tool_choice": {"type": "web_search_preview_2025_03_11"},
+        }
+    )
+
+    assert normalized.tools[0].kind is NormalizedToolKind.HOSTED
+    assert normalized.tools[0].type == "web_search_preview_2025_03_11"
+    assert normalized.tool_choice == {"type": "web_search_preview_2025_03_11"}
+
+
+def test_responses_adapter_preserves_namespace_and_nested_function_tools() -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/codex-test",
+            "input": "Open the page.",
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "mcp__playwright",
+                    "description": "Browser tools.",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "browser_navigate",
+                            "description": "Navigate to a URL.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"url": {"type": "string"}},
+                            },
+                            "strict": True,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    namespace = normalized.tools[0]
+    nested = namespace.configuration["tools"][0]
+    assert namespace.kind is NormalizedToolKind.NAMESPACE
+    assert namespace.name == "mcp__playwright"
+    assert namespace.description == "Browser tools."
+    assert nested["kind"] == "function"
+    assert nested["name"] == "browser_navigate"
+    assert nested["raw_extensions"] == {"function": {"strict": True}}
+
+
+@pytest.mark.parametrize(
     "field",
     [
         "api_key",
@@ -186,9 +315,17 @@ def test_responses_adapter_rejects_unsupported_semantics(field: str) -> None:
             {
                 "model": "bridge/codex-test",
                 "input": "hello",
-                "tools": [{"type": "web_search_preview"}],
+                "tools": [{"type": "unknown_hosted_tool"}],
             },
             "tools[0].type",
+        ),
+        (
+            {
+                "model": "bridge/codex-test",
+                "input": "hello",
+                "tools": [{"type": "code_interpreter"}],
+            },
+            "tools[0].container",
         ),
         (
             {
