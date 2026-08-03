@@ -18,6 +18,11 @@ from gpt2giga.capabilities.overlays import (
     load_gigachat_capability_overlays,
     resolve_gigachat_model_layer,
 )
+from gpt2giga.capabilities.resolver import (
+    EffectiveCapabilityResolver,
+    apply_provider_capability_metadata,
+    build_capability_layer,
+)
 
 __all__ = [
     "AmbiguousCapabilityOverlayError",
@@ -28,9 +33,12 @@ __all__ = [
     "CapabilityScope",
     "CapabilitySource",
     "CapabilityState",
+    "EffectiveCapabilityResolver",
     "EffectiveModelCapabilities",
     "GigaChatCapabilityOverlaySet",
     "ModelCapabilityOverlay",
+    "apply_provider_capability_metadata",
+    "build_capability_layer",
     "capability_revision",
     "load_gigachat_capability_overlays",
     "resolve_gigachat_model_layer",
