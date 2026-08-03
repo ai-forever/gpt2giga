@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from enum import Enum
 import hashlib
 import json
 from types import MappingProxyType
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, TypeVar
 
 from pydantic import Field, model_validator
 
@@ -124,6 +124,14 @@ EvidenceId = Annotated[
     str,
     Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{2,127}$"),
 ]
+MachineId = Annotated[
+    str,
+    Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"),
+]
+PublicFieldPath = Annotated[
+    str,
+    Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.\[\]-]{0,127}$"),
+]
 
 
 class BridgeSemanticRule(NormalizedBaseModel):
@@ -236,6 +244,74 @@ class BridgeLossMatrix(NormalizedBaseModel):
         """Return the exact SHA-256 revision of canonical semantic content."""
         digest = hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
         return f"sha256:{digest}"
+
+
+class BridgeRequestedSemantic(NormalizedBaseModel):
+    """Bind one content-free semantic requirement to its public field path."""
+
+    semantic: BridgeSemantic
+    public_field_path: PublicFieldPath
+
+
+class _BridgeRouteIdentity(NormalizedBaseModel):
+    public_alias: MachineId
+    profile_id: MachineId
+    config_revision: MachineId
+    capability_profile_revision: MachineId
+
+
+class BridgeAdmissionDecision(NormalizedBaseModel):
+    """Record one exact route decision before provider dispatch."""
+
+    schema_version: Literal["gpt2giga.bridge-admission.v1"] = (
+        "gpt2giga.bridge-admission.v1"
+    )
+    public_protocol: PublicProtocol
+    public_alias: MachineId
+    upstream_provider: UpstreamProvider
+    profile_id: MachineId
+    config_revision: MachineId
+    capability_profile_revision: MachineId
+    loss_matrix_revision: MachineId
+    support_status: BridgeSupportStatus
+    requested_semantics: tuple[BridgeRequestedSemantic, ...]
+    satisfied_capability_predicates: tuple[MachineId, ...]
+    evidence_ids: tuple[EvidenceId, ...]
+
+
+class BridgeMatrixAdmissionError(ValueError):
+    """Stable fail-closed error raised before provider construction or I/O."""
+
+    code = "unsupported_semantic"
+    public_message = "The selected bridge route cannot preserve this semantic."
+
+    def __init__(
+        self,
+        *,
+        public_protocol: PublicProtocol,
+        upstream_provider: UpstreamProvider,
+        public_alias: str,
+        public_field_path: str,
+        reason_id: str,
+    ) -> None:
+        self.public_protocol = public_protocol
+        self.upstream_provider = upstream_provider
+        self.public_alias = public_alias
+        self.public_field_path = public_field_path
+        self.reason_id = reason_id
+        super().__init__(
+            f"{self.code}: {public_protocol.value}/{upstream_provider.value}: "
+            f"{public_field_path}: {reason_id}"
+        )
+
+    def as_public_error(self) -> dict[str, str]:
+        """Return the frozen OpenAI-shaped public rejection envelope."""
+        return {
+            "code": self.code,
+            "message": self.public_message,
+            "param": self.public_field_path,
+            "type": "invalid_request_error",
+        }
 
 
 class NormalizedProtocolCapabilities(NormalizedBaseModel):
@@ -545,6 +621,123 @@ def bridge_loss_matrix_json() -> dict[str, Any]:
         **BRIDGE_LOSS_MATRIX_V1.canonical_payload(),
         "matrix_revision": BRIDGE_LOSS_MATRIX_V1.revision,
     }
+
+
+def admit_bridge_route(
+    *,
+    public_protocol: PublicProtocol,
+    public_alias: str,
+    upstream_provider: UpstreamProvider,
+    profile_id: str,
+    config_revision: str,
+    capability_profile_revision: str,
+    requested_semantics: Mapping[BridgeSemantic, str],
+    capability_predicates: Collection[str] = (),
+    matrix: BridgeLossMatrix = BRIDGE_LOSS_MATRIX_V1,
+) -> BridgeAdmissionDecision:
+    """Admit one exact route without constructing a provider client."""
+    identity = _BridgeRouteIdentity(
+        public_alias=public_alias,
+        profile_id=profile_id,
+        config_revision=config_revision,
+        capability_profile_revision=capability_profile_revision,
+    )
+    cell = next(
+        cell
+        for cell in matrix.cells
+        if cell.public_protocol is public_protocol
+        and cell.upstream_provider is upstream_provider
+    )
+    if cell.status is BridgeSupportStatus.BLOCKED:
+        raise BridgeMatrixAdmissionError(
+            public_protocol=public_protocol,
+            upstream_provider=upstream_provider,
+            public_alias=identity.public_alias,
+            public_field_path="model",
+            reason_id=cell.reason_ids[0],
+        )
+
+    requested = tuple(
+        BridgeRequestedSemantic(
+            semantic=semantic,
+            public_field_path=public_field_path,
+        )
+        for semantic, public_field_path in sorted(
+            requested_semantics.items(),
+            key=lambda item: item[0].value,
+        )
+    )
+    predicates = frozenset(capability_predicates)
+    rules = {row.semantic: row for row in cell.semantics}
+    satisfied: set[str] = set()
+    evidence = set(cell.evidence_ids)
+    for item in requested:
+        rule = rules[item.semantic]
+        if rule.disposition is LossDisposition.UNSUPPORTED:
+            raise BridgeMatrixAdmissionError(
+                public_protocol=public_protocol,
+                upstream_provider=upstream_provider,
+                public_alias=identity.public_alias,
+                public_field_path=item.public_field_path,
+                reason_id=rule.reason_id,
+            )
+        if rule.disposition is LossDisposition.CONDITIONAL:
+            predicate = rule.capability_predicate
+            if predicate is None or predicate not in predicates:
+                raise BridgeMatrixAdmissionError(
+                    public_protocol=public_protocol,
+                    upstream_provider=upstream_provider,
+                    public_alias=identity.public_alias,
+                    public_field_path=item.public_field_path,
+                    reason_id=rule.reason_id,
+                )
+            satisfied.add(predicate)
+        evidence.update(rule.evidence_ids)
+
+    return BridgeAdmissionDecision(
+        public_protocol=public_protocol,
+        public_alias=identity.public_alias,
+        upstream_provider=upstream_provider,
+        profile_id=identity.profile_id,
+        config_revision=identity.config_revision,
+        capability_profile_revision=identity.capability_profile_revision,
+        loss_matrix_revision=matrix.revision,
+        support_status=cell.status,
+        requested_semantics=requested,
+        satisfied_capability_predicates=tuple(sorted(satisfied)),
+        evidence_ids=tuple(sorted(evidence)),
+    )
+
+
+_DispatchResult = TypeVar("_DispatchResult")
+
+
+async def admit_then_dispatch_bridge_route(
+    *,
+    dispatch: Callable[[BridgeAdmissionDecision], Awaitable[_DispatchResult]],
+    public_protocol: PublicProtocol,
+    public_alias: str,
+    upstream_provider: UpstreamProvider,
+    profile_id: str,
+    config_revision: str,
+    capability_profile_revision: str,
+    requested_semantics: Mapping[BridgeSemantic, str],
+    capability_predicates: Collection[str] = (),
+    matrix: BridgeLossMatrix = BRIDGE_LOSS_MATRIX_V1,
+) -> _DispatchResult:
+    """Run fail-closed matrix admission before exact provider dispatch."""
+    decision = admit_bridge_route(
+        public_protocol=public_protocol,
+        public_alias=public_alias,
+        upstream_provider=upstream_provider,
+        profile_id=profile_id,
+        config_revision=config_revision,
+        capability_profile_revision=capability_profile_revision,
+        requested_semantics=requested_semantics,
+        capability_predicates=capability_predicates,
+        matrix=matrix,
+    )
+    return await dispatch(decision)
 
 
 def admit_protocol_bridge_request(
