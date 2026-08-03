@@ -57,6 +57,7 @@ GEMINI_SPAN_NAME = "Gemini-Content"
     "/models/{model}:generateContent",
     openapi_extra=gemini_generate_content_openapi_extra(streaming=False),
 )
+@router.post("/models/{model:path}:generateContent", include_in_schema=False)
 @exceptions_handler
 async def generate_content(model: str, request: Request):
     """Create a Gemini-compatible content response."""
@@ -115,6 +116,7 @@ async def generate_content(model: str, request: Request):
     "/models/{model}:streamGenerateContent",
     openapi_extra=gemini_generate_content_openapi_extra(streaming=True),
 )
+@router.post("/models/{model:path}:streamGenerateContent", include_in_schema=False)
 @exceptions_handler
 async def stream_generate_content(model: str, request: Request):
     """Create a Gemini-compatible content stream."""
@@ -313,6 +315,7 @@ def _stream_empty_end_event(
     "/models/{model}:countTokens",
     openapi_extra=gemini_count_tokens_openapi_extra(),
 )
+@router.post("/models/{model:path}:countTokens", include_in_schema=False)
 @exceptions_handler
 async def count_tokens(model: str, request: Request):
     """Count prompt tokens for a Gemini-compatible request."""
