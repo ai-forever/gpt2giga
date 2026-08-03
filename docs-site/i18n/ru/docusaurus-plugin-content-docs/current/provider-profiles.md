@@ -145,3 +145,5 @@ evidence привязываются к этим ревизиям. Значени
 
 Решение о поддержке каждой комбинации client protocol/provider описано в
 [Совместимости bridge, потерях и ошибках](bridge-compatibility.md).
+Startup preflight, supervisor lifecycle, migration и rollback описаны в
+[Миграции 0.3 и supervisor integration](migration-0-3.md).

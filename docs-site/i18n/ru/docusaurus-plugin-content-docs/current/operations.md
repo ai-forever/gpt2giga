@@ -17,6 +17,11 @@
 
 Эндпоинты `/logs*` отключены в `PROD`.
 
+Universal bridge deployments дополнительно используют `/ready`,
+`/bridge/models` и `/bridge/capabilities`. Их startup, liveness/readiness,
+shutdown и rollback semantics описаны в
+[Миграции 0.3 и supervisor integration](migration-0-3.md).
+
 ## Журналы выполнения
 
 Журналы выполнения — это журналы процесса. Они пишутся в stdout и настроенный файл журнала.

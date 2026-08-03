@@ -2,6 +2,10 @@
 
 `gpt2giga` рассчитан на клиентов, которые умеют указывать произвольный base URL для SDK и CLI, совместимых с OpenAI, Anthropic или Gemini.
 
+Для внешнего supervisor или GigaLoom-compatible sidecar используйте
+версионированный контракт preflight, readiness, models, capabilities, shutdown
+и rollback из [Миграции 0.3 и supervisor integration](migration-0-3.md).
+
 ## Базовые адреса
 
 Клиенты, совместимые с OpenAI, обычно используют:

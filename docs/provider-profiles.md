@@ -143,3 +143,5 @@ manifests.
 
 The support decision for each client-protocol/provider combination is described
 in [Bridge compatibility, loss, and errors](bridge-compatibility.md).
+Startup preflight, supervisor lifecycle, migration, and rollback are described
+in [0.3 migration and supervisor integration](migration-0-3.md).

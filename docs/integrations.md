@@ -2,6 +2,10 @@
 
 `gpt2giga` is designed for clients that can set a custom base URL for OpenAI-, Anthropic-, or Gemini-compatible SDKs and CLIs.
 
+For an external supervisor or GigaLoom-compatible sidecar, use the versioned
+preflight, readiness, model, capability, shutdown, and rollback contract in
+[0.3 migration and supervisor integration](migration-0-3.md).
+
 ## Base URLs
 
 OpenAI-compatible clients usually use:

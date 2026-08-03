@@ -17,6 +17,11 @@ Always mounted:
 
 The `/logs*` endpoints are disabled in `PROD`.
 
+Universal bridge deployments additionally use `/ready`, `/bridge/models`, and
+`/bridge/capabilities`. Their startup, liveness/readiness, shutdown, and rollback
+semantics are documented in
+[0.3 migration and supervisor integration](migration-0-3.md).
+
 ## Runtime logs
 
 Runtime logs are process logs. They are written to stdout and the configured log file.
