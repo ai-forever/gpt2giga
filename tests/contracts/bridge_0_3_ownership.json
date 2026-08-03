@@ -1,0 +1,59 @@
+{
+  "integration_exclusive": [
+    "CHANGELOG.md",
+    "CHANGELOG_en.md",
+    "README.md",
+    "docs-site/sidebars.ts",
+    "pyproject.toml",
+    "src/gpt2giga/__init__.py",
+    "src/gpt2giga/api_server.py",
+    "src/gpt2giga/app/",
+    "src/gpt2giga/cli.py",
+    "uv.lock"
+  ],
+  "lanes": {
+    "anthropic-upstream": [
+      "src/gpt2giga/providers/anthropic/"
+    ],
+    "bridge-matrix": [
+      "src/gpt2giga/protocols/normalized/loss_matrix.py",
+      "tests/corpora/bridge/"
+    ],
+    "gemini-upstream": [
+      "src/gpt2giga/providers/gemini/"
+    ],
+    "openai-upstream": [
+      "src/gpt2giga/providers/openai_compatible/"
+    ],
+    "provider-profiles": [
+      "src/gpt2giga/providers/profiles/"
+    ],
+    "responses-normalized": [
+      "src/gpt2giga/protocols/openai/",
+      "src/gpt2giga/routers/openai/responses.py"
+    ]
+  },
+  "machine_contract": {
+    "capability_schema": "gpt2giga.bridge-capabilities.v1",
+    "endpoints": [
+      "/bridge/capabilities",
+      "/bridge/models",
+      "/health",
+      "/ready"
+    ],
+    "error_codes": [
+      "client_disconnected",
+      "credential_unavailable",
+      "destination_mismatch",
+      "invalid_request",
+      "provider_failure",
+      "provider_protocol_error",
+      "provider_timeout",
+      "unknown_model_alias",
+      "unsupported_semantic"
+    ],
+    "execution_context_schema": "gpt2giga.execution-context.v1",
+    "fallback_policy": "none"
+  },
+  "schema_version": "gpt2giga.bridge-ownership.v1"
+}
