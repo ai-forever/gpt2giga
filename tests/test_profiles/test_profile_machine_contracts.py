@@ -11,6 +11,7 @@ import pytest
 from gpt2giga.providers.profiles import (
     BRIDGE_CAPABILITIES_SCHEMA_VERSION,
     BRIDGE_CATALOG_MODELS_SCHEMA_VERSION,
+    EFFECTIVE_CAPABILITIES_SCHEMA_VERSION,
     INSPECT_SCHEMA_VERSION,
     READINESS_SCHEMA_VERSION,
     LoadedProviderProfileSet,
@@ -119,6 +120,33 @@ def _catalog_snapshot() -> dict[str, Any]:
     }
 
 
+def _effective_capability_result() -> dict[str, Any]:
+    return {
+        "model_id": "model-a",
+        "provider_kind": "openai_compatible",
+        "public_protocol": "openai_responses",
+        "api_mode": "v2",
+        "revision": f"sha256:{'a' * 64}",
+        "evidence": [{"response_body": SECRET}],
+        "capabilities": {
+            "hosted_web_search": {
+                "state": "unknown",
+                "reason_id": "no_model_evidence",
+                "source": "unknown",
+                "evidence_ids": [],
+                "revision": f"sha256:{'1' * 64}",
+            },
+            "text_input": {
+                "state": "supported",
+                "reason_id": "provider_invariant",
+                "source": "provider_invariant",
+                "evidence_ids": ["evidence-b", "evidence-a"],
+                "revision": f"sha256:{'2' * 64}",
+            },
+        },
+    }
+
+
 def test_inspect_models_and_readiness_are_deterministic_and_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -219,6 +247,61 @@ def test_capability_projection_binds_revisions_sorts_cells_and_is_content_free()
     source["cells"][0]["credential"] = SECRET
     with pytest.raises(ProviderProfileError):
         contracts.capabilities_manifest(source)
+
+
+def test_effective_capability_projection_is_model_specific_and_content_free() -> None:
+    descriptor = _catalog_snapshot()["models"][1]
+    manifest = _contracts().effective_capabilities_manifest(
+        model=descriptor,
+        resolution=_effective_capability_result(),
+        public_protocol="openai_responses",
+        api_mode="v2",
+    )
+
+    assert manifest["schema_version"] == EFFECTIVE_CAPABILITIES_SCHEMA_VERSION
+    assert manifest["model"] == "model-a"
+    assert manifest["provider_profile_id"] == "openai-main"
+    assert manifest["public_protocol"] == "openai_responses"
+    assert manifest["api_mode"] == "v2"
+    assert manifest["inventory_revision"] == descriptor["inventory_revision"]
+    assert manifest["capability_revision"] == f"sha256:{'a' * 64}"
+    assert list(manifest["capabilities"]) == ["hosted_web_search", "text_input"]
+    assert manifest["capabilities"]["hosted_web_search"]["state"] == "unknown"
+    assert manifest["capabilities"]["text_input"]["evidence_ids"] == [
+        "evidence-a",
+        "evidence-b",
+    ]
+    serialized = json.dumps(manifest).lower()
+    assert SECRET.lower() not in serialized
+    assert "response_body" not in serialized
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["model", "protocol", "api_mode", "state", "missing_capabilities"],
+)
+def test_invalid_effective_capability_results_are_rejected(mutation: str) -> None:
+    descriptor = _catalog_snapshot()["models"][1]
+    resolution = _effective_capability_result()
+    if mutation == "model":
+        resolution["model_id"] = "another-model"
+    elif mutation == "protocol":
+        resolution["public_protocol"] = "anthropic_messages"
+    elif mutation == "api_mode":
+        resolution["api_mode"] = "v1"
+    elif mutation == "state":
+        resolution["capabilities"]["text_input"]["state"] = "maybe"
+    else:
+        resolution["capabilities"] = {}
+
+    with pytest.raises(ProviderProfileError) as raised:
+        _contracts().effective_capabilities_manifest(
+            model=descriptor,
+            resolution=resolution,
+            public_protocol="openai_responses",
+            api_mode="v2",
+        )
+    assert raised.value.code == "invalid_profile_schema"
 
 
 @pytest.mark.parametrize(

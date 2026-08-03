@@ -52,6 +52,22 @@ class _ModelCatalog:
         self.contexts.append(context)
         return self.snapshot
 
+    async def get_model(self, model_id, context):
+        self.contexts.append(context)
+        return next(
+            model for model in self.snapshot["models"] if model["id"] == model_id
+        )
+
+
+class _CapabilityResolver:
+    def __init__(self, result: dict) -> None:
+        self.result = result
+        self.calls = []
+
+    def resolve(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
 
 def test_app_owns_one_immutable_synthesized_registry() -> None:
     app = create_app(ProxyConfig())
@@ -261,6 +277,88 @@ def test_bridge_models_does_not_fall_back_to_static_profile_aliases() -> None:
 
     assert response.status_code == 503
     assert response.json()["detail"] == {"reason_id": "model_catalog_unavailable"}
+
+
+def test_bridge_capabilities_queries_selected_catalog_model() -> None:
+    app = create_app(ProxyConfig())
+    inventory_revision = f"sha256:{'d' * 64}"
+    descriptor = {
+        "id": "GigaChat-3-Pro",
+        "provider_kind": "gigachat",
+        "provider_profile_id": "legacy-gigachat",
+        "owned_by": "gigachat",
+        "model_type": "chat",
+        "available": True,
+        "deprecated": False,
+        "stale": False,
+        "inventory_revision": inventory_revision,
+    }
+    app.state.model_discovery_context = object()
+    app.state.model_catalog = _ModelCatalog(
+        {
+            "schema_version": "gpt2giga.model-catalog.v1",
+            "provider_profile_id": "legacy-gigachat",
+            "inventory_revision": inventory_revision,
+            "discovered_at": "2026-08-03T08:00:00Z",
+            "expires_at": "2026-08-03T08:01:00Z",
+            "stale": False,
+            "models": [descriptor],
+        }
+    )
+    resolver = _CapabilityResolver(
+        {
+            "model_id": "GigaChat-3-Pro",
+            "provider_kind": "gigachat",
+            "public_protocol": "openai_responses",
+            "api_mode": "v2",
+            "revision": f"sha256:{'a' * 64}",
+            "capabilities": {
+                "hosted_web_search": {
+                    "state": "supported",
+                    "reason_id": "gigachat_model_overlay",
+                    "source": "reviewed_exact_model",
+                    "evidence_ids": ["gigachat-v2-web-search"],
+                    "revision": f"sha256:{'b' * 64}",
+                }
+            },
+        }
+    )
+    app.state.effective_capability_resolver = resolver
+
+    response = TestClient(app).get(
+        "/bridge/capabilities",
+        params={
+            "model": "GigaChat-3-Pro",
+            "protocol": "openai_responses",
+            "api_mode": "v2",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["schema_version"] == ("gpt2giga.effective-capabilities.v1")
+    assert response.json()["model"] == "GigaChat-3-Pro"
+    assert response.json()["capabilities"]["hosted_web_search"]["state"] == (
+        "supported"
+    )
+    assert resolver.calls[0]["model"] is descriptor
+
+
+def test_bridge_capabilities_rejects_partial_or_unwired_queries() -> None:
+    app = create_app(ProxyConfig())
+    client = TestClient(app)
+
+    partial = client.get("/bridge/capabilities", params={"model": "GigaChat"})
+    unwired = client.get(
+        "/bridge/capabilities",
+        params={"model": "GigaChat", "protocol": "openai_responses"},
+    )
+
+    assert partial.status_code == 400
+    assert partial.json()["detail"] == {"reason_id": "incomplete_capability_query"}
+    assert unwired.status_code == 503
+    assert unwired.json()["detail"] == {
+        "reason_id": "effective_capabilities_unavailable"
+    }
 
 
 def test_readiness_is_unavailable_before_lifespan_start() -> None:

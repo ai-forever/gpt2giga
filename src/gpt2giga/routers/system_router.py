@@ -1,3 +1,5 @@
+from inspect import isawaitable
+
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import JSONResponse, Response
 
@@ -67,8 +69,46 @@ async def bridge_models(request: Request) -> dict:
 
 @system_router.get("/bridge/capabilities")
 @exceptions_handler
-async def bridge_capabilities(request: Request) -> dict:
-    """Return the complete frozen protocol/provider capability matrix."""
-    return request.app.state.provider_machine_contracts.capabilities_manifest(
-        bridge_loss_matrix_json()
+async def bridge_capabilities(
+    request: Request,
+    model: str | None = None,
+    protocol: str | None = None,
+    api_mode: str | None = None,
+) -> dict:
+    """Return a coarse route matrix or one model's effective capabilities."""
+    if model is None and protocol is None and api_mode is None:
+        return request.app.state.provider_machine_contracts.capabilities_manifest(
+            bridge_loss_matrix_json()
+        )
+    if model is None or protocol is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_id": "incomplete_capability_query"},
+        )
+
+    catalog = getattr(request.app.state, "model_catalog", None)
+    resolver = getattr(request.app.state, "effective_capability_resolver", None)
+    context = getattr(
+        request.state,
+        "model_discovery_context",
+        getattr(request.app.state, "model_discovery_context", None),
+    )
+    if catalog is None or resolver is None or context is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"reason_id": "effective_capabilities_unavailable"},
+        )
+    descriptor = await catalog.get_model(model, context)
+    resolution = resolver.resolve(
+        model=descriptor,
+        public_protocol=protocol,
+        api_mode=api_mode,
+    )
+    if isawaitable(resolution):
+        resolution = await resolution
+    return request.app.state.provider_machine_contracts.effective_capabilities_manifest(
+        model=descriptor,
+        resolution=resolution,
+        public_protocol=protocol,
+        api_mode=api_mode,
     )

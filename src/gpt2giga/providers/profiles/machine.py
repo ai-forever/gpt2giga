@@ -14,7 +14,9 @@ INSPECT_SCHEMA_VERSION = "gpt2giga.inspect.v1"
 READINESS_SCHEMA_VERSION = "gpt2giga.readiness.v1"
 BRIDGE_CAPABILITIES_SCHEMA_VERSION = "gpt2giga.bridge-capabilities.v1"
 BRIDGE_CATALOG_MODELS_SCHEMA_VERSION = "gpt2giga.bridge-models.v2"
+EFFECTIVE_CAPABILITIES_SCHEMA_VERSION = "gpt2giga.effective-capabilities.v1"
 _CAPABILITY_STATUSES = {"blocked", "stable", "technical_preview"}
+_CAPABILITY_STATES = {"supported", "unsupported", "unknown"}
 _CAPABILITY_PROTOCOLS = {
     "anthropic_messages",
     "gemini_generate_content",
@@ -217,6 +219,79 @@ class ProviderMachineContracts:
         self._capability_template = manifest
         return deepcopy(manifest)
 
+    def effective_capabilities_manifest(
+        self,
+        *,
+        model: Any,
+        resolution: Any,
+        public_protocol: str,
+        api_mode: str | None,
+    ) -> dict[str, Any]:
+        """Project one selected model's effective tri-state capabilities."""
+        descriptor = _capability_mapping(model)
+        resolved = _capability_mapping(resolution)
+        model_id = _capability_string(descriptor, "id")
+        provider_kind = _capability_string(descriptor, "provider_kind")
+        provider_profile_id = _capability_string(
+            descriptor,
+            "provider_profile_id",
+        )
+        inventory_revision = _capability_string(
+            descriptor,
+            "inventory_revision",
+        )
+        capability_revision = _capability_string(resolved, "revision")
+        if (
+            resolved.get("model_id") != model_id
+            or resolved.get("provider_kind") != provider_kind
+            or resolved.get("public_protocol") != public_protocol
+            or resolved.get("api_mode") != api_mode
+        ):
+            raise _invalid_effective_capabilities()
+
+        raw_capabilities = resolved.get("capabilities")
+        if not isinstance(raw_capabilities, Mapping) or not raw_capabilities:
+            raise _invalid_effective_capabilities()
+        capabilities: dict[str, dict[str, Any]] = {}
+        for raw_name, raw_decision in raw_capabilities.items():
+            if not isinstance(raw_name, str) or not raw_name or len(raw_name) > 128:
+                raise _invalid_effective_capabilities()
+            decision = _capability_mapping(raw_decision)
+            state = _capability_string(decision, "state")
+            if state not in _CAPABILITY_STATES:
+                raise _invalid_effective_capabilities()
+            raw_evidence_ids = decision.get("evidence_ids")
+            if not isinstance(raw_evidence_ids, Sequence) or isinstance(
+                raw_evidence_ids,
+                (str, bytes),
+            ):
+                raise _invalid_effective_capabilities()
+            evidence_ids = [
+                _bounded_capability_string(value) for value in raw_evidence_ids
+            ]
+            capabilities[raw_name] = {
+                "state": state,
+                "reason_id": _capability_string(decision, "reason_id"),
+                "source": _capability_string(decision, "source"),
+                "evidence_ids": sorted(evidence_ids),
+                "revision": _capability_string(decision, "revision"),
+            }
+
+        manifest = {
+            "schema_version": EFFECTIVE_CAPABILITIES_SCHEMA_VERSION,
+            "model": model_id,
+            "provider_kind": provider_kind,
+            "provider_profile_id": provider_profile_id,
+            "public_protocol": public_protocol,
+            "api_mode": api_mode,
+            "inventory_revision": inventory_revision,
+            "capability_revision": capability_revision,
+            "capabilities": {key: capabilities[key] for key in sorted(capabilities)},
+        }
+        if _contains_forbidden_machine_key(manifest):
+            raise _invalid_effective_capabilities()
+        return manifest
+
 
 def not_ready_manifest(reason_id: str = "registry_not_loaded") -> dict[str, Any]:
     """Return the pre-registry readiness document used during startup failure."""
@@ -299,4 +374,33 @@ def _invalid_catalog_snapshot() -> ProviderProfileError:
     return ProviderProfileError(
         "invalid_profile_schema",
         "Model catalog snapshot is incomplete or unsafe.",
+    )
+
+
+def _capability_mapping(value: Any) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        if isinstance(dumped, Mapping):
+            return dumped
+    raise _invalid_effective_capabilities()
+
+
+def _capability_string(value: Mapping[str, Any], key: str) -> str:
+    raw = value.get(key)
+    return _bounded_capability_string(raw)
+
+
+def _bounded_capability_string(value: Any) -> str:
+    if not isinstance(value, str) or not value or len(value) > 512:
+        raise _invalid_effective_capabilities()
+    return value
+
+
+def _invalid_effective_capabilities() -> ProviderProfileError:
+    return ProviderProfileError(
+        "invalid_profile_schema",
+        "Effective capability result is incomplete or unsafe.",
     )
