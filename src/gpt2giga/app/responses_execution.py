@@ -381,6 +381,7 @@ async def _normalized_provider_adapter(
     state = request.app.state
     injected = getattr(state, "responses_provider_adapter", None)
     if injected is not None:
+        _reject_unprofiled_injected_semantics(normalized_request)
         return injected
     runtime = getattr(state, "bridge_provider_runtime", None)
     if runtime is not None:
@@ -408,6 +409,33 @@ async def _normalized_provider_adapter(
         api_mode=resolve_gigachat_api_mode(request),
         forced_model=configured_model,
     )
+
+
+def _reject_unprofiled_injected_semantics(normalized_request) -> None:
+    """Fail closed when a test-only route has no capability evidence."""
+    response_state = normalized_request.response_state
+    if response_state is not None:
+        if response_state.previous_response_id is not None:
+            param = "previous_response_id"
+        elif response_state.conversation_id is not None:
+            param = "conversation"
+        elif response_state.include:
+            param = "include"
+        elif response_state.store is not None:
+            param = "store"
+        else:
+            param = "background"
+        raise ClientCompatibilityError(
+            "The selected bridge route cannot preserve this semantic.",
+            param=param,
+            code="unsupported_semantic",
+        )
+    if normalized_request.reasoning is not None:
+        raise ClientCompatibilityError(
+            "The selected bridge route cannot preserve this semantic.",
+            param="reasoning",
+            code="unsupported_semantic",
+        )
 
 
 async def _bind_catalog_model(request: Request, *, normalized_request) -> None:

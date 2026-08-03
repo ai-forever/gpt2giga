@@ -141,11 +141,18 @@ def test_responses_nonstream_uses_normalized_protocol_and_provider_owners() -> N
 
 
 @pytest.mark.parametrize(
-    "field",
-    ["conversation", "previous_response_id", "reasoning", "reasoning_effort"],
+    ("field", "value", "error_param"),
+    [
+        ("conversation", "fixture", "conversation"),
+        ("previous_response_id", "fixture", "previous_response_id"),
+        ("reasoning", {"effort": "high"}, "reasoning"),
+        ("reasoning_effort", "high", "reasoning"),
+    ],
 )
 def test_responses_normalized_rejects_state_and_reasoning_before_provider_io(
     field: str,
+    value: object,
+    error_param: str,
 ) -> None:
     app, giga_client, transformer = _app()
 
@@ -154,7 +161,7 @@ def test_responses_normalized_rejects_state_and_reasoning_before_provider_io(
         json={
             "input": "hello",
             "model": "bridge/codex-test",
-            field: "fixture",
+            field: value,
         },
     )
 
@@ -162,7 +169,7 @@ def test_responses_normalized_rejects_state_and_reasoning_before_provider_io(
     assert response.json()["error"] == {
         "code": "unsupported_semantic",
         "message": "The selected bridge route cannot preserve this semantic.",
-        "param": field,
+        "param": error_param,
         "type": "invalid_request_error",
     }
     assert transformer.chat_calls == []
