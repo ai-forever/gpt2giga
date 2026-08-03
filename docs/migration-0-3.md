@@ -1,8 +1,9 @@
 # 0.3 migration and supervisor integration
 
 Version 0.3 adds the universal provider bridge without requiring a persistent
-data migration. Existing GigaChat-only deployments can upgrade without a
-provider file. Multi-provider deployments opt in with one immutable,
+data migration. The corrective release is additive: existing GigaChat-only
+deployments keep native Responses behavior and upgrade without a provider file
+or compatibility flag. Multi-provider deployments opt in with one immutable,
 startup-owned profile document.
 
 This page is also the process contract for an external supervisor such as
@@ -13,14 +14,14 @@ and HTTP contracts, and never imports private gateway modules.
 
 | Mode | Configuration | Behavior |
 |---|---|---|
-| Existing GigaChat compatibility | No `--config` and no `GPT2GIGA_CONFIG` | The gateway synthesizes one GigaChat profile from the existing `GIGACHAT_*` and proxy settings. Existing public routes remain available. |
-| Universal provider bridge | `--config <path>` or `GPT2GIGA_CONFIG=<path>` | The profile file is authoritative for provider destinations, credentials, aliases, models, and capabilities. Requests cannot add or alter routes. |
-| Temporary legacy Responses | `GPT2GIGA_LEGACY_RESPONSES=true`, no provider file | The old direct GigaChat Responses path is selected explicitly. This mode is deprecated in 0.3 and is never an automatic fallback. |
+| Native GigaChat compatibility | No `--config` and no `GPT2GIGA_CONFIG` | The built-in GigaChat route uses existing `GIGACHAT_*` and proxy settings. Native Responses, hosted tools, attachments, v1/v2, and existing public routes remain available. Models come from provider discovery. |
+| Universal provider bridge | `--config <path>` or `GPT2GIGA_CONFIG=<path>` | The profile file is authoritative for destinations, credentials, immutable aliases, and route policy. GigaChat inventory remains dynamic; requests cannot add or alter routes. |
 
-Legacy Responses mode cannot be combined with `--config` or
-`GPT2GIGA_CONFIG`. Such a combination fails startup. An error after normalized
-admission or after response bytes begin never switches to the legacy path or a
-different provider.
+`GPT2GIGA_LEGACY_RESPONSES` is not a migration input for the corrected release.
+Unset it if it was added while testing an earlier 0.3 preview. Executor, route,
+and model selection complete before provider I/O. An error after dispatch or
+after response bytes begin never switches executor, provider, account, or
+model.
 
 The provider path contract is exact:
 
@@ -32,6 +33,25 @@ GPT2GIGA_CONFIG=/etc/gpt2giga/providers.yaml gpt2giga
 The same path through both sources is valid. Different paths fail validation;
 documents are never merged. See [Provider profiles and model aliases](provider-profiles.md)
 for the schema and secure examples.
+
+## Provider-profile schema compatibility
+
+Existing `gpt2giga.provider-profiles.v1` files remain valid. Every declared
+public alias keeps its exact provider route and upstream-model binding; the
+correction never rewrites or guesses aliases. For `provider_kind: gigachat`, the
+`models` entries are explicit alias/default policy, not an exhaustive inventory.
+The shared model catalog still returns every credential-visible GigaChat model.
+
+The current v1 schema requires a non-empty `models` list. Keep that list when a
+profile must also run on an older 0.3 preview. The corrected release introduces
+`gpt2giga.provider-profiles.v2`, where `model_inventory: dynamic` allows a
+GigaChat route without enumerating aliases. Do not select v2 until
+`--inspect-config` reports that schema revision; older binaries reject unknown
+fields. Static aliases remain authoritative for providers that cannot or must
+not be discovered dynamically.
+
+No ordinary GigaChat deployment must enumerate every provider model, change an
+existing alias, or rewrite persistent state for this correction.
 
 ## Preflight before binding a socket
 
@@ -60,14 +80,19 @@ these endpoints:
 | Endpoint | Ready response | Not-ready behavior | Purpose |
 |---|---:|---:|---|
 | `GET /health` | `200` | Process unavailable | Liveness only. Do not use it as a traffic-readiness signal. |
-| `GET /ready` | `200` `gpt2giga.readiness.v1` | `503` with the same versioned shape | Registry loaded, routes mounted, and all enabled provider clients initialized. |
-| `GET /bridge/models` | `200` `gpt2giga.bridge-models.v1` | `503` | Lexically ordered public aliases and safe provider/capability/profile metadata. |
-| `GET /bridge/capabilities` | `200` `gpt2giga.bridge-capabilities.v1` | `503` | Complete content-free 16-cell protocol/provider manifest. |
+| `GET /ready` | `200` `gpt2giga.readiness.v1` | `503` with the same versioned shape | Route, client, and model-catalog readiness. |
+| `GET /models` | `200` protocol response | Protocol error | Protocol projection of the shared model catalog. |
+| `GET /bridge/models` | `200` `gpt2giga.bridge-models.v1` | `503` | Machine projection of the same catalog snapshot and inventory revision. |
+| `GET /bridge/capabilities` | `200` `gpt2giga.bridge-capabilities.v1` | `503` | Coarse content-free 16-cell route manifest. |
+| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | `200` effective capability response | `400`/`404`/`503` | Model-aware tri-state capability decisions and revisions. |
 
-These endpoints never perform provider network calls. Cache a document only
-with its `config_revision` and `matrix_revision`; a revision change after a
-process restart invalidates earlier route planning. Details of the 16-cell
-manifest are in [Bridge compatibility, loss, and errors](bridge-compatibility.md).
+Preflight, `/health`, and the coarse route matrix never perform provider network
+calls. Model catalog projections may perform a bounded discovery refresh and
+surface fresh or stale state honestly. Cache a document only with its
+`config_revision`, `inventory_revision`, `matrix_revision`, and
+`capability_revision` as applicable. A revision change invalidates earlier
+route planning. Details of the coarse matrix are in
+[Bridge compatibility, loss, and errors](bridge-compatibility.md).
 
 Readiness is stricter than liveness. Common content-free reason ids include
 `registry_not_loaded`, `provider_clients_not_ready`, and
@@ -88,8 +113,9 @@ For a GigaLoom-compatible or other external supervisor:
    values;
 5. wait for `/health`, then require `/ready.ready == true` within a bounded
    deadline;
-6. fetch `/bridge/models` and `/bridge/capabilities`, verify their schema and
-   matching revisions, then route client traffic;
+6. fetch `/bridge/models` and the effective `/bridge/capabilities` query for the
+   selected model, verify their schema and matching revisions, then route
+   client traffic;
 7. retain only content-free revisions/statuses in supervisor evidence unless a
    separate content-capture policy explicitly permits more.
 
@@ -120,10 +146,11 @@ No profile migration writes application or conversation state. Rollback is
 therefore configuration/package based:
 
 1. stop new traffic and terminate the 0.3 process gracefully;
-2. either remove the profile path and restart 0.3 in synthesized GigaChat mode,
+2. either remove the profile path and restart 0.3 on the built-in native
+   GigaChat route,
    or reinstall the pinned 0.2.x artifact;
 3. restore the previously pinned client base URL and environment settings;
-4. verify liveness and the legacy public route before restoring traffic.
+4. verify liveness and the native public route before restoring traffic.
 
 Profile YAML/JSON files remain inert when not selected. Downgrading to 0.2.x
 does not interpret them. Removing or disabling an alias must produce an unknown
