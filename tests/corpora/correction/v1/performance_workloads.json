@@ -1,0 +1,103 @@
+{
+  "case_id": "corrective-performance-workloads-v1",
+  "corpus_revision": "performance-workloads-2026-08-03",
+  "baseline_sha": "e14fc5d4d547da57745bbc1b47dfa8dcf1dd3d25",
+  "measurement_status": "awaiting_integrated_correction",
+  "performance_claim_allowed": false,
+  "workloads": [
+    {
+      "id": "models-cold",
+      "operation": "GET /models",
+      "workload": {
+        "cache_state": "empty",
+        "iterations": 50,
+        "model_count": 128,
+        "parallelism": 1,
+        "warmup_iterations": 5
+      },
+      "guardrails": {"max_p95_ms": 25.0, "max_p95_regression_ratio": 1.20}
+    },
+    {
+      "id": "models-warm",
+      "operation": "GET /models",
+      "workload": {
+        "cache_state": "warm",
+        "iterations": 500,
+        "model_count": 128,
+        "parallelism": 1,
+        "warmup_iterations": 50
+      },
+      "guardrails": {"max_p95_ms": 2.0, "max_p95_regression_ratio": 1.15}
+    },
+    {
+      "id": "catalog-concurrent-refresh",
+      "operation": "ModelCatalog explicit refresh",
+      "workload": {
+        "cache_state": "expired",
+        "iterations": 50,
+        "model_count": 128,
+        "parallelism": 32,
+        "warmup_iterations": 5
+      },
+      "guardrails": {"max_p95_ms": 50.0, "max_p95_regression_ratio": 1.20}
+    },
+    {
+      "id": "capability-resolution",
+      "operation": "EffectiveCapabilityResolver.resolve",
+      "workload": {
+        "capabilities_per_model": 32,
+        "iterations": 5000,
+        "model_count": 128,
+        "parallelism": 1,
+        "warmup_iterations": 500
+      },
+      "guardrails": {"max_p95_ms": 0.5, "max_p95_regression_ratio": 1.20}
+    },
+    {
+      "id": "responses-native-admission",
+      "operation": "POST /responses native pre-dispatch",
+      "workload": {
+        "api_mode": "v2",
+        "iterations": 500,
+        "parallelism": 1,
+        "request_case": "web-search-preview",
+        "warmup_iterations": 50
+      },
+      "guardrails": {"max_p95_ms": 5.0, "max_p95_regression_ratio": 1.15}
+    },
+    {
+      "id": "responses-normalized-admission",
+      "operation": "POST /responses normalized pre-dispatch",
+      "workload": {
+        "iterations": 1000,
+        "parallelism": 1,
+        "request_case": "custom-function",
+        "warmup_iterations": 100
+      },
+      "guardrails": {"max_p95_ms": 1.0, "max_p95_regression_ratio": 1.20}
+    },
+    {
+      "id": "catalog-memory-growth",
+      "operation": "ModelCatalog snapshot retention",
+      "workload": {
+        "iterations": 20,
+        "model_counts": [0, 64, 256, 1024],
+        "parallelism": 1,
+        "warmup_iterations": 2
+      },
+      "guardrails": {
+        "max_fixed_peak_bytes": 2097152,
+        "max_peak_bytes_per_model": 4096,
+        "max_p95_regression_ratio": 1.20
+      }
+    }
+  ],
+  "rules": {
+    "clock": "monotonic_ns",
+    "identical_workload_fingerprint_required": true,
+    "live_provider_traffic": false,
+    "memory_meter": "tracemalloc_peak",
+    "percentiles": [50, 95]
+  },
+  "schema_version": "gpt2giga.corrective-conformance.v1"
+}
