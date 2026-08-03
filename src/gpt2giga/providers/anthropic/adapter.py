@@ -397,6 +397,27 @@ class AnthropicProviderAdapter:
         started = False
         terminal_emitted = False
 
+        if await _is_disconnected(is_disconnected):
+            yield NormalizedStreamEvent(
+                type="message_start",
+                model=self.profile.model,
+                sequence=sequence,
+                message=NormalizedMessage(role="assistant", content=[]),
+                provider_metadata=_response_provider_metadata(
+                    self.profile,
+                    admission=admission,
+                    stop_sequence=None,
+                ),
+            )
+            sequence += 1
+            yield NormalizedStreamEvent(
+                type="cancelled",
+                model=self.profile.model,
+                sequence=sequence,
+                cancellation=request.cancellation,
+                stop_reason="cancelled",
+            )
+            return
         try:
             async for raw_event in self._stream_events(
                 url=self.profile.messages_url,

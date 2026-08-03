@@ -805,9 +805,12 @@ async def test_reordered_and_unsupported_streams_end_in_protocol_error(
     ]
     await client.aclose()
 
-    assert events[-1].type == "error"
-    assert events[-1].error.code == error_code
-    assert events[-1].error.retryable is False
+    terminals = [
+        event for event in events if event.type in {"message_end", "cancelled", "error"}
+    ]
+    assert [event.type for event in terminals] == ["error"]
+    assert terminals[0].error.code == error_code
+    assert terminals[0].error.retryable is False
 
 
 async def test_malformed_stream_json_ends_in_protocol_error():
@@ -841,6 +844,61 @@ async def test_malformed_stream_json_ends_in_protocol_error():
     assert events[-1].error.code == "invalid_stream_json"
 
 
+async def test_client_loss_after_terminal_is_one_error_without_hidden_retry():
+    calls = 0
+    terminal = json.dumps(
+        {
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {"parts": []},
+                    "finishReason": "STOP",
+                }
+            ]
+        }
+    ).encode()
+
+    class LostStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b"data: " + terminal + b"\n\n"
+            raise httpx.ReadError("fixture provider process loss")
+
+    async def handler(_request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=LostStream(),
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            _request(stream=True),
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    ]
+    await client.aclose()
+
+    terminals = [
+        event for event in events if event.type in {"message_end", "cancelled", "error"}
+    ]
+    assert [event.type for event in terminals] == ["error"]
+    assert terminals[0].error.code == "connection_error"
+    assert calls == 1
+
+
 async def test_disconnect_projects_cancellation_and_stops_stream():
     chunks = [
         {"candidates": [{"index": 0, "content": {"parts": [{"text": "unobserved"}]}}]}
@@ -848,10 +906,11 @@ async def test_disconnect_projects_cancellation_and_stops_stream():
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=_streaming_app(chunks))
     )
+    network = _NetworkAuthorizer()
     adapter = GeminiProviderAdapter(
         _profile(credential=False),
         credential=None,
-        authorize_network=_NetworkAuthorizer(),
+        authorize_network=network,
         http_client=client,
     )
 
@@ -869,6 +928,7 @@ async def test_disconnect_projects_cancellation_and_stops_stream():
 
     assert [event.type for event in events] == ["message_start", "cancelled"]
     assert events[-1].stop_reason == "cancelled"
+    assert network.intents == []
 
 
 async def test_redirect_peer_evidence_and_response_limit_fail_closed():

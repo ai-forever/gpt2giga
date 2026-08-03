@@ -301,6 +301,7 @@ class GeminiProviderAdapter:
         terminal_seen = False
         usage_seen = False
         started_tool_calls: set[str] = set()
+        pending_terminal_events: list[NormalizedStreamEvent] = []
 
         yield _stream_event(
             "message_start",
@@ -311,6 +312,14 @@ class GeminiProviderAdapter:
             ),
         )
         sequence += 1
+        if await _is_disconnected(is_disconnected):
+            yield _stream_event(
+                "cancelled",
+                sequence=sequence,
+                cancellation=request.cancellation,
+                stop_reason="cancelled",
+            )
+            return
         try:
             async for chunk in self._stream_json(
                 url=self.profile.stream_generate_content_url,
@@ -336,7 +345,10 @@ class GeminiProviderAdapter:
                 usage_seen = usage_seen or chunk_usage
                 for event in events:
                     sequence = (event.sequence or sequence) + 1
-                    yield event
+                    if event.type in {"message_end", "usage"}:
+                        pending_terminal_events.append(event)
+                    else:
+                        yield event
             if not terminal_seen:
                 raise _protocol_error(
                     "incomplete_stream",
@@ -351,6 +363,9 @@ class GeminiProviderAdapter:
                 error=exc.error,
                 stop_reason="error",
             )
+            return
+        for event in pending_terminal_events:
+            yield event
 
     def _admit(
         self,

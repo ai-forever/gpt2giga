@@ -569,10 +569,11 @@ async def test_stream_preserves_cache_usage_and_refusal_category():
 async def test_stream_disconnect_emits_cancellation_and_closes_upstream():
     app = _streaming_app(_stream_events())
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app))
+    network = _NetworkAuthorizer()
     adapter = AnthropicProviderAdapter(
         _profile(),
         credential="secret-value-canary",
-        authorize_network=_NetworkAuthorizer(),
+        authorize_network=network,
         http_client=client,
     )
     request = _request()
@@ -592,6 +593,8 @@ async def test_stream_disconnect_emits_cancellation_and_closes_upstream():
 
     assert [event.type for event in events] == ["message_start", "cancelled"]
     assert events[-1].stop_reason == "cancelled"
+    assert network.intents == []
+    assert app.state.requests == []
 
 
 @pytest.mark.parametrize(
