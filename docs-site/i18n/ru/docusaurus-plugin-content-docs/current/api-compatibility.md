@@ -199,32 +199,32 @@ GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests
 
 Справочник по каждому параметру: [Совместимость параметров клиентов](./client-parameter-compatibility.md).
 
-Статусы multi-provider маршрутов 0.3, semantic dispositions, machine capability
-contract и стабильные ошибки bridge описаны в
-[Совместимости bridge, потерях и ошибках](bridge-compatibility.md).
+Статусы маршрутов 0.3, правила проверки отдельных возможностей и стабильные
+коды ошибок описаны в разделе
+[«Совместимость провайдеров»](bridge-compatibility.md).
 
 Внутренний нормализованный слой, который отделяет публичные форматы протоколов от
 выполнения у провайдера, описан в [Нормализованных сообщениях](./architecture/normalized-messages.md).
-G7-00 публикует версионированную матрицу семантических потерь для
-OpenAI-compatible upstream × OpenAI/Anthropic/Gemini и обязательный fail-closed
-guard допуска до I/O. G7-01 добавляет внутренний upstream-адаптер Chat
-Completions для OpenAI-compatible/vLLM с точной привязкой профиля/модели,
-сетевым разрешением на каждый запрос, владением `SecretRef`, строгим model
-discovery, ограниченным streaming и нормализованными errors/usage. G7-02
-добавляет прямую проекцию Anthropic request, response, SSE, tools, usage,
-stop-reason, errors и count-token через нормализованное ядро при включённом
-режиме нормализации. G7-03 фиксирует принятые Gemini-контракты request/response/
-SSE/function/safety-error/usage/model-list/count-token, переводит inline-
-изображения в типизированные ссылки и доказывает отказ bridge admission для
-несмоделированной Gemini-семантики до provider I/O. G7-04 закрывает внутренний
-bridge v1 герметичными контрактами OpenAI/Anthropic/Gemini для text, streaming,
-partial usage, function tools, semantic loss, cancellation, malformed streams,
-timeouts и provider errors. Он также переводит входные OpenAI-изображения в
-типизированные ссылки. Публичный environment switch для произвольного upstream
-не добавляется. Профили 0.3 являются startup-owned конфигурацией gateway;
-значения credentials остаются в окружении, а ссылки на network/TLS policies
-задаёт доверенный application owner. См.
-[Профили провайдеров и алиасы моделей](provider-profiles.md).
+
+В нормализованный путь входят:
+
+- версионированная матрица потерь для OpenAI-совместимых, Anthropic- и
+  Gemini-маршрутов; неподдерживаемые запросы отклоняются до обращения к сети;
+- адаптер Chat Completions для OpenAI-совместимых API и vLLM с точной привязкой
+  профиля и модели, сетевым разрешением на каждый запрос, `SecretRef`, строгим
+  каталогом моделей и ограниченным потоком SSE;
+- преобразование запросов, ответов, SSE, инструментов, сведений о токенах и
+  ошибок Anthropic;
+- поддерживаемая часть Gemini API, включая функции, ошибки безопасности, список
+  моделей и подсчёт токенов; встроенные изображения переводятся в
+  типизированные ссылки;
+- единая проверка обычных и потоковых ответов OpenAI, Anthropic и Gemini,
+  функций, отмены, тайм-аутов и некорректных ответов провайдера.
+
+Публичного переключателя на произвольный внешний адрес нет. Маршруты задаются
+профилями, секреты остаются в окружении, а сетевые и TLS-политики выбирает
+владелец приложения. Подробнее — в разделе
+[«Настройка провайдеров и моделей»](provider-profiles.md).
 
 ## Режимы бэкенда
 

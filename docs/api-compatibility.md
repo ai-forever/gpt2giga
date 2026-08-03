@@ -203,26 +203,28 @@ capability contract, and stable bridge errors are documented in
 [Bridge compatibility, loss, and errors](bridge-compatibility.md).
 
 The internal normalized layer that separates public protocol formats from
-provider execution is described in [Normalized messages architecture](./architecture/normalized-messages.md).
-G7-00 publishes the versioned OpenAI-compatible upstream ×
-OpenAI/Anthropic/Gemini semantic-loss matrix and its mandatory fail-closed
-pre-I/O admission guard. G7-01 adds the internal OpenAI-compatible/vLLM
-upstream Chat Completions adapter with exact profile/model binding,
-request-specific network authorization, `SecretRef` ownership, strict model
-discovery, bounded streaming, and normalized errors/usage. G7-02 adds direct
-Anthropic request, response, SSE, tool, usage, stop-reason, error, and
-count-token projection through the normalized core when normalization mode is
-on. G7-03 freezes the admitted Gemini request/response/SSE/function/safety-error/
-usage/model-list/count-token contracts, promotes inline images to typed
-references, and proves that unmodeled Gemini semantics fail bridge admission
-before provider I/O. G7-04 closes the internal v1 bridge with hermetic
-OpenAI/Anthropic/Gemini text, streaming, partial-usage, function-tool, semantic
-loss, cancellation, malformed-stream, timeout, and provider-error contracts.
-It also promotes OpenAI image inputs to typed references. This does not add a
-public arbitrary-upstream environment switch. Version 0.3 profiles are
-startup-owned gateway configuration; credential values remain environment-owned
-and network/TLS policy references must be supplied by the trusted application
-owner. See [Provider profiles and model aliases](provider-profiles.md).
+provider execution is described in
+[Normalized messages architecture](./architecture/normalized-messages.md).
+
+The normalized bridge includes:
+
+- a versioned semantic-loss matrix for OpenAI-compatible, Anthropic, and Gemini
+  routes, with unsupported requests rejected before provider I/O;
+- an OpenAI-compatible/vLLM Chat Completions adapter with exact profile/model
+  binding, request-specific network authorization, `SecretRef`, strict model
+  discovery, and bounded streaming;
+- direct Anthropic request, response, SSE, tool, usage, error, and token-count
+  projection through the normalized core;
+- the admitted Gemini request, response, SSE, function, safety, usage, model,
+  and token-count contracts, including typed inline-image references;
+- hermetic coverage for text, streaming, partial usage, function tools,
+  cancellation, malformed streams, timeouts, and provider errors across the
+  three public protocol families.
+
+This does not add a public switch for arbitrary upstream addresses. Version 0.3
+profiles define routes, credential values remain in the environment, and the
+trusted application owner supplies network/TLS policy references. See
+[Provider profiles and model aliases](provider-profiles.md).
 
 ## Backend modes
 

@@ -1,4 +1,4 @@
-# 0.3 migration and supervisor integration
+# Upgrade to gpt2giga 0.3
 
 Version 0.3 adds the universal provider bridge without requiring a persistent
 data migration. The corrective release is additive: existing GigaChat-only

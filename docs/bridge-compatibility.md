@@ -134,4 +134,4 @@ Use this endpoint for route planning and diagnostics; do not infer support from
 HTTP route presence, an installed SDK, or a provider adapter class. Protocol
 surface details remain in [API compatibility](api-compatibility.md), and the
 normative matrix decision is recorded in the
-[bridge status/loss ADR](architecture/2026-08-03-bridge-status-loss-matrix-adr.md).
+[bridge status/loss ADR](architecture/bridge-compatibility-matrix.md).

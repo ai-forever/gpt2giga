@@ -1,4 +1,4 @@
-# ADR: protocol/provider support status and loss matrix
+# Bridge compatibility matrix
 
 - Date: 2026-08-03
 - Status: accepted for gpt2giga 0.3

@@ -1,85 +1,83 @@
-# Совместимость bridge, потери и ошибки
+# Совместимость провайдеров
 
-Bridge 0.3 не утверждает, что каждый клиентский протокол эквивалентен каждому
-upstream-провайдеру. Он публикует версионированное machine-readable решение для
-каждого маршрута и отклоняет семантику, которую нельзя сохранить, до provider
-I/O.
+gpt2giga 0.3 не обещает, что любой клиентский протокол можно без потерь
+перевести в API любого провайдера. Вместо этого шлюз публикует матрицу
+проверенных маршрутов и заранее отклоняет запросы, смысл которых сохранить
+нельзя.
 
-Схема матрицы — `gpt2giga.bridge-loss-matrix.v1`. Она содержит ровно 16 ячеек:
-четыре публичных протокола, умноженные на четыре upstream provider kinds.
+Матрица `gpt2giga.bridge-loss-matrix.v1` состоит из 16 ячеек — по одной для
+каждой пары из четырёх публичных протоколов и четырёх типов провайдеров.
 
 | Измерение | Значения |
 |---|---|
-| Public protocol | `openai_responses`, `openai_chat_completions`, `anthropic_messages`, `gemini_generate_content` |
-| Upstream provider | `gigachat`, `openai_compatible`, `anthropic`, `gemini` |
+| Публичный протокол | `openai_responses`, `openai_chat_completions`, `anthropic_messages`, `gemini_generate_content` |
+| Провайдер | `gigachat`, `openai_compatible`, `anthropic`, `gemini` |
 
-Само наличие адаптера в пакете ещё не доказывает, что ячейку можно выполнять.
-Используйте ревизию матрицы, которую публикует запущенный gateway.
+Само наличие адаптера в пакете ещё не означает, что маршрут готов к работе.
+Ориентируйтесь на матрицу и её ревизию, которые возвращает запущенный шлюз.
 
-Route matrix описывает зрелость normalized bridge. Native GigaChat Responses —
-stable compatibility owner и не проходит через normalized matrix. Ячейка
-normalized OpenAI Responses → GigaChat остаётся `technical_preview`: hosted
-tools допускаются по model и API mode, а attachments и другие native-only
-semantics ещё не нормализованы end to end.
+Нативная реализация GigaChat Responses находится вне нормализованной матрицы и
+имеет статус `stable`. Нормализованный маршрут OpenAI Responses → GigaChat пока
+остаётся `technical_preview`: встроенные инструменты разрешаются с учётом
+модели и режима API, а вложения и часть нативных возможностей ещё не
+поддерживаются от начала до конца.
 
-## Статусы поддержки ячеек
+## Статусы маршрутов
 
-У каждой ячейки ровно один статус. `unknown`, пропущенная ячейка или неявное
-значение по умолчанию делают manifest невалидным.
+Каждая ячейка имеет один обязательный статус. Значение `unknown`, пропущенная
+ячейка или неявный статус делают матрицу недействительной.
 
-| Статус | Значение |
+| Статус | Что он означает |
 |---|---|
-| `stable` | Объявленный subset покрыт зафиксированными окнами версий клиента/провайдера, hermetic conformance и release E2E evidence. Это не заявление о полном vendor API parity. |
-| `technical_preview` | Объявленный subset протестирован, но остаётся как минимум одна документированная семантическая потеря или повышенный риск upstream drift. Caller должен проверить semantic rows. |
-| `blocked` | Безопасного проверенного маршрута нет. Admission отклоняет его до credentials, создания provider client или network dispatch. |
+| `stable` | Заявленное подмножество проверено на зафиксированных версиях клиента и провайдера, а также в изолированных E2E-тестах релиза. Это не обещание полной совместимости со всем API провайдера. |
+| `technical_preview` | Основные сценарии проверены, но остаются известные семантические потери или риск изменений со стороны провайдера. Перед использованием нужно изучить список отдельных возможностей. |
+| `blocked` | Безопасного проверенного маршрута нет. Запрос отклоняется до чтения учётных данных и обращения к сети. |
 
-Ячейка также содержит bounded reason ids, evidence ids, окна версий клиента и
-провайдера и полную таблицу семантик. Таблица покрывает roles, multimodal input,
-tool definitions/call ids/choice/results, parallel calls, JSON Schema output,
-stream lifecycle, input/output/cache/reasoning usage, stop reasons,
-safety/refusal, reasoning controls, previous-response state, files/images,
-hosted/provider-native tools, cancellation, timeout, malformed streams и
-disconnect.
+В ячейке также хранятся короткие идентификаторы причин и подтверждений,
+проверенные диапазоны версий и таблица возможностей. Она охватывает роли,
+мультимодальные данные, инструменты и их вызовы, JSON Schema, потоковые ответы,
+сведения о токенах, причины остановки и отказа, рассуждения (`reasoning`), состояние
+предыдущего ответа, файлы, изображения, встроенные инструменты, отмену,
+тайм-ауты и ошибки потока.
 
-## Диспозиции семантик
+## Оценка отдельных возможностей
 
-У каждой semantic row одна диспозиция:
+Каждая возможность получает одну из трёх оценок:
 
-- `exact`: выбранный маршрут сохраняет объявленную семантику;
-- `conditional`: семантика допускается только при наличии точного именованного
-  capability predicate в разрешённом capability profile;
-- `unsupported`: запрос, которому нужна эта семантика, отклоняется до dispatch.
+- `exact` — выбранный маршрут сохраняет смысл полностью;
+- `conditional` — поддержка зависит от явно указанной возможности модели или
+  режима API;
+- `unsupported` — запрос с такой возможностью отклоняется до сетевого вызова.
 
-`technical_preview` не превращает строки `unsupported` в best-effort behavior.
-А строка `exact` не повышает всю ячейку до `stable`. Ячейку, semantic row,
-зафиксированные окна версий и evidence ids нужно оценивать совместно.
+Статус `technical_preview` не отменяет ограничения `unsupported`. И наоборот,
+одна возможность с оценкой `exact` не делает весь маршрут стабильным. При
+проверке учитываются сама ячейка, нужная возможность, диапазоны версий и
+подтверждающие тесты.
 
-Каноническая матрица без секретов имеет ревизию `sha256:<lowercase-hex>`.
-Успешная admission record использует схему `gpt2giga.bridge-admission.v1` и
-связывает public protocol и alias, точные provider/profile, config revision,
-capability profile revision, matrix revision, запрошенные semantic paths и
-evidence ids. В ней нет prompt, credential или response content.
+Матрица без секретов имеет ревизию `sha256:<lowercase-hex>`. Успешное решение
+по схеме `gpt2giga.bridge-admission.v1` связывает протокол и публичный алиас с
+точным профилем, провайдером и ревизиями конфигурации, возможностей и матрицы.
+Пользовательского содержимого и секретов в этой записи нет.
 
-## Admission выполняется до I/O
+## Проверка до обращения к провайдеру
 
-Для каждого bridge request gateway выполняет следующий порядок:
+Для каждого запроса gpt2giga:
 
-1. разрешает точный публичный алиас из immutable
-   [реестра провайдеров](provider-profiles.md);
-2. выбирает точную ячейку public-protocol/upstream-provider;
-3. отклоняет ячейку `blocked`;
-4. выводит запрошенные semantic rows из нормализованного запроса;
-5. требует для каждой строки `exact` или выполнение её именованного capability
-   predicate;
-6. записывает content-free admission decision с привязкой к ревизиям;
-7. вызывает ровно выбранный provider adapter.
+1. находит точный публичный алиас в
+   [конфигурации провайдеров](provider-profiles.md);
+2. выбирает ячейку протокола и провайдера;
+3. отклоняет маршрут со статусом `blocked`;
+4. определяет, какие возможности нужны запросу;
+5. проверяет для каждой возможности оценку `exact` или соответствующее условие;
+6. записывает решение с привязкой к ревизиям, но без пользовательских данных;
+7. вызывает один выбранный адаптер.
 
-Gateway не понижает семантику, не выбирает похожий алиас и не повторяет запрос
-через другой provider/model/account. Переданные в request provider,
-destination, upstream model, credential, TLS control или произвольный
-authorization header не являются routing override.
+Шлюз не упрощает запрос молча, не подбирает похожий алиас и не повторяет
+операцию с другим провайдером, аккаунтом или моделью. Провайдер, адрес,
+внутренняя модель, учётные данные, параметры TLS и заголовок авторизации из
+клиентского запроса не могут изменить маршрут.
 
-OpenAI-shaped semantic rejection стабилен и указывает публичное поле:
+Для OpenAI-совместимого API отказ содержит публичное поле:
 
 ```json
 {
@@ -92,46 +90,45 @@ OpenAI-shaped semantic rejection стабилен и указывает публ
 }
 ```
 
-Anthropic- и Gemini-shaped public routes сохраняют native error envelopes там,
-где это требуется, и bounded machine code там, где он представим. Ошибка не
-может повторять credentials, authorization headers, prompt content или
-неочищенный upstream body.
+Маршруты Anthropic и Gemini сохраняют принятый в этих API формат ошибок. Ни
+один ответ об ошибке не должен содержать учётные данные, заголовки авторизации,
+промпт или необработанное тело ответа провайдера.
 
-## Стабильные коды ошибок bridge
+## Коды ошибок
 
 | Код | Значение |
 |---|---|
-| `invalid_request` | Public request некорректен в рамках допустимого синтаксиса. |
-| `unknown_model_alias` | Точный публичный алиас отсутствует, отключён или недоступен. |
-| `unsupported_semantic` | Выбранная ячейка или semantic row не может сохранить запрос. |
-| `credential_unavailable` | Startup credential reference выбранного профиля не разрешается. |
-| `destination_mismatch` | Transport destination отличается от проверенного профиля. |
-| `provider_timeout` | Операция точного провайдера превысила свой bound. |
-| `provider_protocol_error` | Точный upstream вернул malformed response или stream. |
-| `provider_failure` | Выбранный провайдер вернул другую отображённую ошибку. |
-| `client_disconnected` | Клиент отключился до завершения, и точная upstream-операция была отменена. |
+| `invalid_request` | Запрос не соответствует принятому синтаксису. |
+| `unknown_model_alias` | Публичный алиас отсутствует, отключён или временно недоступен. |
+| `unsupported_semantic` | Выбранный маршрут не может сохранить требуемый смысл. |
+| `credential_unavailable` | Не удалось получить учётные данные выбранного профиля. |
+| `destination_mismatch` | Фактический сетевой адрес не совпал с проверенным профилем. |
+| `provider_timeout` | Провайдер не ответил за отведённое время. |
+| `provider_protocol_error` | Провайдер вернул некорректный ответ или поток. |
+| `provider_failure` | Провайдер вернул другую сопоставленную ошибку. |
+| `client_disconnected` | Клиент отключился, и операция провайдера была отменена. |
 
-Startup/profile validation дополнительно использует `invalid_profile_schema`,
+При проверке профилей также используются `invalid_profile_schema`,
 `duplicate_profile_id`, `duplicate_model_alias`, `invalid_destination` и
-`invalid_policy_reference`. Ошибки machine endpoints используют
-версионированный envelope `gpt2giga.error.v1` с bounded content-free reason ids
-в `details`.
+`invalid_policy_reference`. Методы управления возвращают ошибки по схеме
+`gpt2giga.error.v1` с короткими идентификаторами причин в `details`.
 
-## Machine contracts route и effective capabilities
+## API матрицы
 
 `GET /bridge/capabilities` возвращает
-`gpt2giga.route-support-matrix.v1`. Документ связывает текущие
-`config_revision` и `matrix_revision` и содержит все 16 ячеек в стабильном
-лексикографическом порядке. Он не содержит пользовательский контент и не
-обращается к провайдерам. Неполная, не совпадающая по ревизии, содержащая
-`unknown`, дубли или секреты проекция отклоняется, а не публикуется.
+`gpt2giga.route-support-matrix.v1`: все 16 ячеек в стабильном
+лексикографическом порядке, а также текущие `config_revision` и
+`matrix_revision`. Метод не обращается к провайдерам и не возвращает
+пользовательское содержимое. Неполная матрица, дубли, секреты, несовпадающие
+ревизии или значение `unknown` считаются ошибкой.
 
-С query-параметрами `model`, `protocol` и опциональным `api_mode` тот же endpoint
-возвращает `gpt2giga.effective-capabilities.v1` для точной model и route.
-Effective projection имеет tri-state решения и inventory/capability revisions.
+Если передать `model`, `protocol` и при необходимости `api_mode`, тот же метод
+вернёт `gpt2giga.effective-capabilities.v1` для выбранной модели и маршрута. В
+ответе будут состояния `supported`, `unsupported` или `unknown`, а также
+ревизии каталога и возможностей.
 
-Используйте этот endpoint для route planning и диагностики; не выводите
-поддержку из наличия HTTP route, установленного SDK или класса provider adapter.
-Детали protocol surface остаются в [Совместимости API](api-compatibility.md), а
-нормативное решение матрицы записано в
-[ADR статусов и потерь bridge](architecture/2026-08-03-bridge-status-loss-matrix-adr.md).
+Используйте этот API для выбора маршрута и диагностики. Наличие HTTP-метода,
+установленного SDK или класса адаптера само по себе не доказывает поддержку.
+Форматы публичных запросов описаны в [Совместимости API](api-compatibility.md),
+а обоснование матрицы — в архитектурном решении
+[«Матрица совместимости протоколов и провайдеров»](architecture/bridge-compatibility-matrix.md).

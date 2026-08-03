@@ -1,4 +1,4 @@
-# ADR: startup-owned provider profiles and public model aliases
+# Provider routing and model aliases
 
 - Date: 2026-08-03
 - Status: accepted for gpt2giga 0.3

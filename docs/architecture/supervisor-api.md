@@ -1,4 +1,4 @@
-# ADR: machine contract for external supervisors
+# Gateway control API
 
 - Date: 2026-08-03
 - Status: accepted for gpt2giga 0.3

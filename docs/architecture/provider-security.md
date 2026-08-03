@@ -1,4 +1,4 @@
-# ADR: provider credential, destination, TLS, and no-fallback boundary
+# Provider connection security
 
 - Date: 2026-08-03
 - Status: accepted for gpt2giga 0.3

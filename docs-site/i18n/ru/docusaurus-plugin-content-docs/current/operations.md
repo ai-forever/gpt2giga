@@ -17,10 +17,10 @@
 
 Эндпоинты `/logs*` отключены в `PROD`.
 
-Universal bridge deployments дополнительно используют `/ready`,
-`/bridge/models` и `/bridge/capabilities`. Их startup, liveness/readiness,
-shutdown и rollback semantics описаны в
-[Миграции 0.3 и supervisor integration](migration-0-3.md).
+При работе с несколькими провайдерами дополнительно используйте `/ready`,
+`/bridge/models` и `/bridge/capabilities`. Порядок запуска, проверки готовности,
+завершения и отката описан в разделе
+[«Переход на gpt2giga 0.3»](migration-0-3.md).
 
 ## Журналы выполнения
 

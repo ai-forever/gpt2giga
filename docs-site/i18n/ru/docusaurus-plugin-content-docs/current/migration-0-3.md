@@ -1,155 +1,161 @@
-# Миграция 0.3 и supervisor integration
+# Переход на gpt2giga 0.3
 
-Версия 0.3 добавляет universal provider bridge без обязательной миграции
-постоянных данных. Исправленный релиз остаётся additive: GigaChat-only
-deployments сохраняют native Responses и обновляются без файла провайдеров или
-compatibility flag. Multi-provider deployment включается одним immutable,
-startup-owned документом профилей.
+В версии 0.3 можно подключить несколько провайдеров без миграции постоянных
+данных. Если вы работаете только с GigaChat, обновление не требует файла
+профилей или дополнительного флага: нативная реализация Responses продолжит
+работать как раньше.
 
-Эта страница также задаёт process contract для внешнего supervisor, например
-GigaLoom. Supervisor запускает установленный артефакт `gpt2giga`, использует
-публичные CLI/HTTP contracts и никогда не импортирует приватные модули gateway.
+Эта страница также описывает запуск gpt2giga из внешней системы управления,
+например GigaLoom. Такая система использует только публичные команды и HTTP
+API, не импортируя внутренние модули шлюза.
 
-## Выбор режима миграции
+## Выбор режима
 
 | Режим | Конфигурация | Поведение |
 |---|---|---|
-| Native GigaChat compatibility | Нет `--config` и `GPT2GIGA_CONFIG` | Built-in GigaChat route использует существующие `GIGACHAT_*` и proxy settings. Native Responses, hosted tools, attachments, v1/v2 и public routes сохраняются. Models приходят из provider discovery. |
-| Universal provider bridge | `--config <path>` или `GPT2GIGA_CONFIG=<path>` | Profiles владеют destinations, credentials, immutable aliases и route policy. GigaChat inventory остаётся dynamic; requests не меняют routes. |
+| Только GigaChat | Нет `--config` и `GPT2GIGA_CONFIG` | Встроенный маршрут читает существующие `GIGACHAT_*` и настройки прокси. Нативные Responses, встроенные инструменты, вложения, API v1/v2 и остальные публичные маршруты сохраняются. Список моделей запрашивается у GigaChat. |
+| Несколько провайдеров | `--config <path>` или `GPT2GIGA_CONFIG=<path>` | Файл профилей задаёт адреса, учётные данные, алиасы и политики маршрутов. Каталог GigaChat остаётся динамическим, а клиентские запросы не могут менять маршруты. |
 
-В исправленном релизе нет Responses compatibility flag. Executor, route и model
-выбираются до provider I/O. Ошибка после dispatch или начала response bytes не
-переключает executor, provider, account или model.
+Дополнительного флага совместимости Responses в 0.3 нет. Обработчик, маршрут и
+модель выбираются до обращения к провайдеру. Ошибка после начала операции или
+отправки первых байтов клиенту не приводит к переключению на другой маршрут.
 
-Контракт пути точный:
+Путь к файлу можно передать двумя способами:
 
 ```text
 gpt2giga --config /etc/gpt2giga/providers.yaml
 GPT2GIGA_CONFIG=/etc/gpt2giga/providers.yaml gpt2giga
 ```
 
-Одинаковый путь из обоих источников допустим. Разные пути не проходят
-валидацию; документы никогда не объединяются. Схема и безопасные примеры — в
-[Профилях провайдеров и алиасах моделей](provider-profiles.md).
+Если указаны оба варианта, пути должны совпадать. Файлы не объединяются.
+Описание схемы и безопасный пример находятся в разделе
+[«Настройка провайдеров и моделей»](provider-profiles.md).
 
-## Совместимость схемы provider profiles
+## Совместимость файлов профилей
 
-Существующие `gpt2giga.provider-profiles.v1` остаются валидными. Каждый public
-alias сохраняет exact provider route и upstream-model binding; correction не
-переписывает и не угадывает aliases. Для `provider_kind: gigachat` элементы
-`models` задают explicit alias/default policy, а не полный inventory. Общий
-model catalog всё равно возвращает все credential-visible GigaChat models.
+Существующие файлы `gpt2giga.provider-profiles.v1` остаются рабочими. Каждый
+алиас по-прежнему связан с одним точным маршрутом и одной моделью провайдера.
+Шлюз не исправляет алиасы автоматически и не пытается подобрать похожий.
 
-Текущая v1 schema требует непустой `models`. Сохраняйте этот список, если profile
-должен работать и на старом 0.3 preview. Исправленный релиз вводит
-`gpt2giga.provider-profiles.v2`, где `model_inventory: dynamic` разрешает
-GigaChat route без перечисления aliases. Не выбирайте v2, пока
-`--inspect-config` не сообщает поддержку этой revision: старые binaries
-отклоняют unknown fields. Static aliases остаются authoritative для providers
-без dynamic discovery.
+Для GigaChat список `models` задаёт явные алиасы и модель по умолчанию, но не
+ограничивает полный каталог. Общий каталог всё равно возвращает все модели,
+которые видны выбранной учётной записи.
 
-Обычному GigaChat deployment не нужно перечислять все provider models, менять
-existing alias или переписывать persistent state.
+В схеме v1 список `models` обязателен. Оставьте его, если профиль должен
+работать с ранними предварительными сборками 0.3. Схема
+`gpt2giga.provider-profiles.v2` поддерживает `model_inventory: dynamic`, поэтому
+в профиле GigaChat можно не перечислять все модели.
 
-## Preflight до bind socket
+Перед переходом на v2 убедитесь, что `--inspect-config` сообщает о поддержке
+этой версии: старые сборки отклоняют неизвестные поля. Для провайдеров без
+динамического каталога статические алиасы остаются обязательными.
 
-Используйте тот же parser в inspect mode:
+## Проверка перед запуском
+
+Проверьте тот же файл, с которым будет запущен сервер:
 
 ```sh
 gpt2giga --config /etc/gpt2giga/providers.yaml --inspect-config
 ```
 
-Успешный preflight пишет в stdout один JSON-документ `gpt2giga.inspect.v1` и
-завершается с кодом `0`. Он проверяет schema, destination и policy references,
-наличие credential, aliases, capability profiles и matrix revision. Socket не
-открывается, запрос к провайдеру не выполняется. Документ может содержать имя
-`credential_env`, но никогда не значение, его hash или authorization header.
+Команда использует обычный разборщик конфигурации, но не открывает порт и не
+обращается к провайдеру. При успехе она печатает в stdout один JSON-документ
+`gpt2giga.inspect.v1` и завершается с кодом `0`.
 
-Ошибка validation пишет bounded-документ `gpt2giga.error.v1`, направляет логи в
-stderr и завершается с кодом `2`. Считайте preflight неуспешным при non-JSON в
-stdout, content-bearing details или нулевом exit code при `valid != true`.
+Проверяются схема, адреса, ссылки на политики и учётные данные, алиасы, профили
+возможностей и ревизия матрицы. В ответе может быть имя `credential_env`, но не
+значение секрета, его хеш или заголовок авторизации.
 
-## Runtime machine contract
+При ошибке команда печатает `gpt2giga.error.v1` и возвращает код `2`; логи идут
+в stderr. Считайте проверку неуспешной, если stdout содержит данные не в формате
+JSON, в `details` появились пользовательские данные или команда завершилась с
+нулевым кодом при `valid != true`.
 
-После успешного preflight запустите тот же установленный артефакт обычным
-способом и используйте endpoints:
+## API для внешней системы управления
 
-| Endpoint | Ready response | Not-ready behavior | Назначение |
+После успешной проверки запустите тот же установленный пакет с тем же файлом
+профилей.
+
+| Метод | Готов | Не готов | Назначение |
 |---|---:|---:|---|
-| `GET /health` | `200` | Процесс недоступен | Только liveness, не traffic readiness. |
-| `GET /ready` | `200` `gpt2giga.readiness.v1` | `503` той же формы | Готовность route, clients и model catalog. |
-| `GET /models` | `200` protocol response | Protocol error | Protocol projection общего model catalog. |
-| `GET /bridge/models` | `200` `gpt2giga.bridge-models.v2` | `503` | Machine projection того же catalog snapshot и inventory revision. |
-| `GET /bridge/capabilities` | `200` `gpt2giga.route-support-matrix.v1` | `503` | Coarse content-free route manifest из 16 ячеек. |
-| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | `200` `gpt2giga.effective-capabilities.v1` | `400`/`404`/`503` | Model-aware tri-state decisions и revisions. |
+| `GET /health` | `200` | Процесс недоступен | Проверяет только работу процесса. |
+| `GET /ready` | `200` `gpt2giga.readiness.v1` | `503` той же формы | Показывает готовность маршрутов, клиентов и каталога моделей. |
+| `GET /models` | `200` в формате публичного протокола | Ошибка протокола | Возвращает общий каталог в формате выбранного API. |
+| `GET /bridge/models` | `200` `gpt2giga.bridge-models.v2` | `503` | Возвращает машиночитаемый снимок каталога и его ревизию. |
+| `GET /bridge/capabilities` | `200` `gpt2giga.route-support-matrix.v1` | `503` | Возвращает матрицу из 16 маршрутов без пользовательского содержимого. |
+| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | `200` `gpt2giga.effective-capabilities.v1` | `400`/`404`/`503` | Возвращает возможности выбранной модели и маршрута. |
 
-Preflight, `/health` и coarse route matrix не обращаются к provider. Model
-catalog projections могут выполнить bounded discovery refresh и честно сообщают
-fresh/stale state. Кэшируйте документы с `config_revision`,
-`inventory_revision`, `matrix_revision` и `capability_revision`, где применимо.
-Смена revision инвалидирует прежний route planning. Coarse matrix описана в
-[Совместимости bridge, потерях и ошибках](bridge-compatibility.md).
+Предварительная проверка, `/health` и общая матрица не вызывают API
+провайдеров. Методы каталога моделей могут обновить снимок и сообщают, свежие
+ли данные. При кэшировании сохраняйте `config_revision`, `inventory_revision`,
+`matrix_revision` и `capability_revision`: после смены ревизии прежнее решение
+о маршруте нужно пересчитать. Подробнее — в разделе
+[«Совместимость провайдеров»](bridge-compatibility.md).
 
-Readiness строже liveness. Типичные content-free reason ids:
-`registry_not_loaded`, `provider_clients_not_ready` и `gateway_shutting_down`.
-Supervisor может сохранить живой процесс для диагностики, пока `/health`
-доступен, но `/ready` ложен, с учётом собственного bounded startup deadline.
+`/ready` строже, чем `/health`. Например, причины
+`registry_not_loaded`, `provider_clients_not_ready` и
+`gateway_shutting_down` означают, что процесс работает, но принимать трафик
+ещё нельзя. Его можно оставить запущенным для диагностики до истечения
+отведённого на запуск времени.
 
-## Последовательность запуска sidecar
+## Запуск рядом с управляющей системой
 
-Для GigaLoom-compatible или другого внешнего supervisor:
+Для GigaLoom или другой внешней системы:
 
-1. установите pinned wheel в окружение sidecar, без editable sibling checkout;
-2. запишите profiles document в защищённый supervisor-owned path и передайте
-   credentials через защищённое окружение процесса;
-3. выполните `--inspect-config` и принимайте только exit `0` плюс валидный
-   redacted JSON;
-4. запустите `gpt2giga --config <same-path>` без shell interpolation секретов;
-5. дождитесь `/health`, затем потребуйте `/ready.ready == true` за bounded
-   deadline;
-6. получите `/bridge/models` и effective `/bridge/capabilities` query выбранной
-   model, проверьте schema и совпадение revisions, затем направьте трафик;
-7. сохраняйте в supervisor evidence только content-free revisions/statuses,
-   если отдельная policy явно не разрешает content capture.
+1. установите зафиксированную версию wheel-пакета в отдельное окружение, а не
+   из соседней рабочей копии в editable-режиме;
+2. сохраните файл профилей в защищённом пути и передайте секреты через
+   защищённое окружение процесса;
+3. выполните `--inspect-config` и продолжайте только при коде `0` и корректном
+   очищенном JSON;
+4. запустите `gpt2giga --config <same-path>`, не подставляя секреты в командную
+   строку;
+5. дождитесь `/health`, затем потребуйте `/ready.ready == true` до истечения
+   заданного срока;
+6. получите `/bridge/models` и `/bridge/capabilities` для выбранной модели,
+   проверьте версии схем и ревизии, затем направьте трафик;
+7. сохраняйте только ревизии и статусы без пользовательского содержимого, если
+   отдельная политика явно не разрешает его запись.
 
-GigaLoom владеет project/session/workbench state и process supervision.
-`gpt2giga` владеет validation профилей, публичными protocol routes, admission
-decisions и provider clients внутри gateway process. Продукты не импортируют
-приватные Python-модули друг друга.
+GigaLoom управляет проектами, сессиями и процессом. gpt2giga проверяет профили,
+обслуживает публичные протоколы, принимает решения о маршруте и управляет
+клиентами провайдеров. Продукты не должны импортировать внутренние
+Python-модули друг друга.
 
-## Graceful shutdown
+## Корректное завершение
 
-По SIGTERM или interrupt контракт 0.3 требует:
+После SIGTERM или сигнала прерывания gpt2giga:
 
-1. установить readiness false и отклонять новые model requests;
-2. прекратить приём новых connections;
-3. дренировать активные requests до configured shutdown deadline;
-4. отменить оставшуюся upstream work;
-5. закрыть каждый owned provider client, sink, store, iterator и network
-   authorization;
-6. завершиться non-zero только при нарушении cleanup bound.
+1. помечает себя как неготовый и отклоняет новые запросы к моделям;
+2. перестаёт принимать новые соединения;
+3. ждёт завершения активных запросов до заданного срока;
+4. отменяет оставшиеся операции провайдеров;
+5. закрывает клиентов, приёмники событий, хранилища, итераторы и сетевые
+   разрешения;
+6. возвращает ненулевой код, если не удалось освободить ресурсы за отведённое
+   время.
 
-Перед SIGKILL дождитесь graceful exit. Supervisor может послать SIGKILL только
-после своего deadline. Shutdown не должен приводить к retry через другой alias,
-provider, model, account или credential.
+Отправляйте SIGKILL только после истечения срока корректного завершения.
+Завершение не должно повторять запрос с другим алиасом, провайдером, аккаунтом,
+набором учётных данных или моделью.
 
-## Rollback
+## Откат
 
-Миграция профилей не записывает application или conversation state. Поэтому
-rollback выполняется конфигурацией или пакетом:
+Профили не изменяют состояние приложения или диалога, поэтому отдельная
+миграция данных для отката не нужна:
 
-1. остановите новый трафик и graceful-завершите процесс 0.3;
-2. удалите путь профилей и перезапустите 0.3 на built-in native GigaChat route
-   либо переустановите pinned-артефакт 0.2.x;
-3. восстановите прежние pinned client base URL и environment settings;
-4. проверьте liveness и native public route до возврата трафика.
+1. остановите новый трафик и корректно завершите процесс 0.3;
+2. уберите путь к профилям и перезапустите 0.3 со встроенным маршрутом GigaChat
+   либо установите зафиксированную версию 0.2.x;
+3. восстановите прежние адреса клиентов и переменные окружения;
+4. проверьте `/health` и нативный публичный маршрут, затем верните трафик.
 
-YAML/JSON-файлы профилей инертны, пока не выбраны. Версия 0.2.x их не
-интерпретирует. Удаление или отключение alias должно после рестарта дать unknown
-alias error, но никогда не скрытый remap. Неуспешный startup 0.3 не должен
-открывать частично настроенный server, поэтому после исправления файла и
-рестарта data repair не требуется.
+Файлы YAML/JSON не действуют, пока не выбраны при запуске; версия 0.2.x их не
+читает. Удалённый или отключённый алиас после перезапуска должен вернуть
+`unknown_model_alias`, а не незаметно переключиться на другую модель. Если
+запуск 0.3 не прошёл проверку, достаточно исправить файл и перезапустить
+процесс.
 
-Rollback на 0.2.x удаляет контракты 0.3 inspect, readiness, bridge-models и
-bridge-capabilities. Supervisor должен вернуться к pinned 0.2.x процедуре
-health/routing, а не считать отсутствие endpoints ошибкой провайдера.
+После отката на 0.2.x исчезнут предварительная проверка, `/ready`,
+`/bridge/models` и `/bridge/capabilities`. Внешней системе нужно вернуться к
+процедуре запуска и маршрутизации, принятой для 0.2.x.

@@ -1,10 +1,12 @@
 # Интеграции
 
-`gpt2giga` рассчитан на клиентов, которые умеют указывать произвольный base URL для SDK и CLI, совместимых с OpenAI, Anthropic или Gemini.
+`gpt2giga` рассчитан на клиентов, в которых можно задать базовый URL для SDK или
+CLI, совместимых с OpenAI, Anthropic или Gemini.
 
-Для внешнего supervisor или GigaLoom-compatible sidecar используйте
-версионированный контракт preflight, readiness, models, capabilities, shutdown
-и rollback из [Миграции 0.3 и supervisor integration](migration-0-3.md).
+Если gpt2giga запускает GigaLoom или другая управляющая система, используйте
+публичные команды проверки и завершения, а также API готовности, моделей и
+возможностей. Порядок интеграции описан в разделе
+[«Переход на gpt2giga 0.3»](migration-0-3.md).
 
 ## Базовые адреса
 

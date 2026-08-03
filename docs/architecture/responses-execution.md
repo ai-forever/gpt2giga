@@ -1,4 +1,4 @@
-# ADR: normalized OpenAI Responses execution
+# OpenAI Responses execution
 
 - Date: 2026-08-03
 - Status: accepted for gpt2giga 0.3
