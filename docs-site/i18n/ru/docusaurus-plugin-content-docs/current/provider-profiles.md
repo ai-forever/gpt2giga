@@ -142,3 +142,6 @@ Gateway канонизирует документ без секретов и н�
 каждому профилю ревизии `sha256:<lowercase-hex>`. Model discovery и execution
 evidence привязываются к этим ревизиям. Значения credentials не участвуют в
 ревизии и не возвращаются в model/capability manifests.
+
+Решение о поддержке каждой комбинации client protocol/provider описано в
+[Совместимости bridge, потерях и ошибках](bridge-compatibility.md).

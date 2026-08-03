@@ -199,6 +199,10 @@ GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests
 
 Справочник по каждому параметру: [Совместимость параметров клиентов](./client-parameter-compatibility.md).
 
+Статусы multi-provider маршрутов 0.3, semantic dispositions, machine capability
+contract и стабильные ошибки bridge описаны в
+[Совместимости bridge, потерях и ошибках](bridge-compatibility.md).
+
 Внутренний нормализованный слой, который отделяет публичные форматы протоколов от
 выполнения у провайдера, описан в [Нормализованных сообщениях](./architecture/normalized-messages.md).
 G7-00 публикует версионированную матрицу семантических потерь для
@@ -217,9 +221,10 @@ bridge v1 герметичными контрактами OpenAI/Anthropic/Gemin
 partial usage, function tools, semantic loss, cancellation, malformed streams,
 timeouts и provider errors. Он также переводит входные OpenAI-изображения в
 типизированные ссылки. Публичный environment switch для произвольного upstream
-не добавляется. Проверенные profiles, secrets и network authority остаются за
-границами этого gateway-репозитория и должны передаваться доверенным
-внешним controller.
+не добавляется. Профили 0.3 являются startup-owned конфигурацией gateway;
+значения credentials остаются в окружении, а ссылки на network/TLS policies
+задаёт доверенный application owner. См.
+[Профили провайдеров и алиасы моделей](provider-profiles.md).
 
 ## Режимы бэкенда
 

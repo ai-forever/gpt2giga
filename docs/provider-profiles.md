@@ -140,3 +140,6 @@ The gateway canonicalizes the secret-free document and assigns
 discovery and execution evidence bind decisions to those revisions. Credential
 values are not part of a revision and are never returned by model or capability
 manifests.
+
+The support decision for each client-protocol/provider combination is described
+in [Bridge compatibility, loss, and errors](bridge-compatibility.md).

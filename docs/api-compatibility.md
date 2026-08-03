@@ -198,6 +198,10 @@ in `llm.invocation_parameters`.
 
 A reference for each parameter: [Client parameter compatibility](./client-parameter-compatibility.md).
 
+The 0.3 multi-provider route statuses, semantic dispositions, machine
+capability contract, and stable bridge errors are documented in
+[Bridge compatibility, loss, and errors](bridge-compatibility.md).
+
 The internal normalized layer that separates public protocol formats from
 provider execution is described in [Normalized messages architecture](./architecture/normalized-messages.md).
 G7-00 publishes the versioned OpenAI-compatible upstream ×
@@ -215,9 +219,10 @@ before provider I/O. G7-04 closes the internal v1 bridge with hermetic
 OpenAI/Anthropic/Gemini text, streaming, partial-usage, function-tool, semantic
 loss, cancellation, malformed-stream, timeout, and provider-error contracts.
 It also promotes OpenAI image inputs to typed references. This does not add a
-public arbitrary-upstream environment switch. Reviewed profiles, secrets, and
-network authority remain outside this gateway repository and must be supplied
-by a trusted external controller.
+public arbitrary-upstream environment switch. Version 0.3 profiles are
+startup-owned gateway configuration; credential values remain environment-owned
+and network/TLS policy references must be supplied by the trusted application
+owner. See [Provider profiles and model aliases](provider-profiles.md).
 
 ## Backend modes
 
