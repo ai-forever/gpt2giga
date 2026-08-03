@@ -137,6 +137,26 @@ class NormalizedGenerationConfig(NormalizedBaseModel):
     seed: Optional[int] = None
 
 
+class NormalizedReasoningIntent(NormalizedBaseModel):
+    """Preserve requested reasoning controls for later capability admission."""
+
+    effort: Optional[str] = None
+    summary: Optional[str] = None
+    generate_summary: Optional[str] = None
+    context: Optional[str] = None
+    mode: Optional[str] = None
+
+
+class NormalizedStateIntent(NormalizedBaseModel):
+    """Preserve requested response state semantics for later admission."""
+
+    previous_response_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    include: list[str] = Field(default_factory=list)
+    store: Optional[bool] = None
+    background: Optional[bool] = None
+
+
 class NormalizedRequest(NormalizedBaseModel):
     """Represent a normalized provider request envelope."""
 
@@ -165,6 +185,8 @@ class NormalizedChatRequest(NormalizedRequest):
     generation_config: NormalizedGenerationConfig = Field(
         default_factory=NormalizedGenerationConfig
     )
+    reasoning: Optional[NormalizedReasoningIntent] = None
+    response_state: Optional[NormalizedStateIntent] = None
     cancellation: Optional[NormalizedCancellation] = None
     user: Optional[str] = None
 

@@ -266,20 +266,74 @@ def test_responses_adapter_preserves_namespace_and_nested_function_tools() -> No
     assert nested["raw_extensions"] == {"function": {"strict": True}}
 
 
+def test_responses_adapter_preserves_reasoning_and_state_intent() -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/codex-test",
+            "input": "Think carefully.",
+            "reasoning": {
+                "context": "all_turns",
+                "effort": "high",
+                "mode": "pro",
+                "summary": "concise",
+            },
+            "reasoning_effort": "high",
+            "conversation": {"id": "conv-1"},
+            "include": [
+                "reasoning.encrypted_content",
+                "web_search_call.action.sources",
+            ],
+            "store": False,
+            "background": True,
+        }
+    )
+
+    assert normalized.reasoning is not None
+    assert normalized.reasoning.to_json_dict() == {
+        "effort": "high",
+        "summary": "concise",
+        "context": "all_turns",
+        "mode": "pro",
+        "raw_extensions": {},
+        "provider_metadata": {},
+    }
+    assert normalized.response_state is not None
+    assert normalized.response_state.to_json_dict() == {
+        "conversation_id": "conv-1",
+        "include": [
+            "reasoning.encrypted_content",
+            "web_search_call.action.sources",
+        ],
+        "store": False,
+        "background": True,
+        "raw_extensions": {},
+        "provider_metadata": {},
+    }
+
+
+def test_responses_adapter_preserves_previous_response_state() -> None:
+    normalized = OpenAIProtocolAdapter().responses_to_normalized(
+        {
+            "model": "bridge/codex-test",
+            "input": "Continue.",
+            "previous_response_id": "resp-1",
+            "store": True,
+        }
+    )
+
+    assert normalized.response_state is not None
+    assert normalized.response_state.previous_response_id == "resp-1"
+    assert normalized.response_state.conversation_id is None
+    assert normalized.response_state.store is True
+
+
 @pytest.mark.parametrize(
     "field",
     [
         "api_key",
         "base_url",
-        "background",
-        "conversation",
-        "include",
         "parallel_tool_calls",
-        "previous_response_id",
         "provider",
-        "reasoning",
-        "reasoning_effort",
-        "store",
         "web_search_options",
     ],
 )
@@ -326,6 +380,32 @@ def test_responses_adapter_rejects_unsupported_semantics(field: str) -> None:
                 "tools": [{"type": "code_interpreter"}],
             },
             "tools[0].container",
+        ),
+        (
+            {
+                "model": "bridge/codex-test",
+                "input": "hello",
+                "reasoning": "high",
+            },
+            "reasoning",
+        ),
+        (
+            {
+                "model": "bridge/codex-test",
+                "input": "hello",
+                "reasoning": {"effort": "low"},
+                "reasoning_effort": "high",
+            },
+            "reasoning_effort",
+        ),
+        (
+            {
+                "model": "bridge/codex-test",
+                "input": "hello",
+                "previous_response_id": "resp-1",
+                "conversation": "conv-1",
+            },
+            "conversation",
         ),
         (
             {

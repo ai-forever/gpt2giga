@@ -15,6 +15,10 @@ from gpt2giga.protocols.normalized import (
     NormalizedResponseFormat,
     NormalizedToolCall,
 )
+from gpt2giga.protocols.normalized.models import (
+    NormalizedReasoningIntent,
+    NormalizedStateIntent,
+)
 from gpt2giga.protocols.openai.responses_tools import (
     normalize_responses_tool_choice,
     normalize_responses_tools,
@@ -24,10 +28,17 @@ from gpt2giga.protocols.openai.responses_tools import (
 _RESPONSES_FIELDS = frozenset(
     {
         "input",
+        "background",
+        "conversation",
+        "include",
         "instructions",
         "max_output_tokens",
         "metadata",
         "model",
+        "previous_response_id",
+        "reasoning",
+        "reasoning_effort",
+        "store",
         "stream",
         "temperature",
         "text",
@@ -36,15 +47,21 @@ _RESPONSES_FIELDS = frozenset(
         "top_p",
     }
 )
-_UNSUPPORTED_STATE_AND_REASONING_FIELDS = frozenset(
+_REASONING_EFFORTS = frozenset(
+    {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+)
+_REASONING_SUMMARIES = frozenset({"auto", "concise", "detailed"})
+_REASONING_CONTEXTS = frozenset({"auto", "current_turn", "all_turns"})
+_RESPONSE_INCLUDES = frozenset(
     {
-        "background",
-        "conversation",
-        "include",
-        "previous_response_id",
-        "reasoning",
-        "reasoning_effort",
-        "store",
+        "code_interpreter_call.outputs",
+        "computer_call_output.output.image_url",
+        "file_search_call.results",
+        "message.input_image.image_url",
+        "message.output_text.logprobs",
+        "reasoning.encrypted_content",
+        "web_search_call.action.sources",
+        "web_search_call.results",
     }
 )
 _UNSUPPORTED_MESSAGE = "The selected bridge route cannot preserve this semantic."
@@ -60,9 +77,6 @@ def responses_request_to_normalized(
     if not isinstance(payload, Mapping):
         _invalid("request")
     data = dict(payload)
-    for field in _UNSUPPORTED_STATE_AND_REASONING_FIELDS:
-        if field in data:
-            _unsupported(field)
     _reject_unknown_fields(data, _RESPONSES_FIELDS)
 
     model = data.get("model")
@@ -94,6 +108,8 @@ def responses_request_to_normalized(
         tool_choice=tool_choice,
         response_format=_normalize_text_format(data.get("text")),
         generation_config=_normalize_generation_config(data),
+        reasoning=_normalize_reasoning_intent(data),
+        response_state=_normalize_state_intent(data),
         metadata=dict(metadata) if isinstance(metadata, Mapping) else {},
     )
 
@@ -267,6 +283,108 @@ def _normalize_generation_config(
         temperature=temperature,
         top_p=top_p,
         max_tokens=max_tokens,
+    )
+
+
+def _normalize_reasoning_intent(
+    data: Mapping[str, Any],
+) -> NormalizedReasoningIntent | None:
+    reasoning = data.get("reasoning")
+    effort_alias = data.get("reasoning_effort")
+    if reasoning is None and effort_alias is None:
+        return None
+    if reasoning is not None and not isinstance(reasoning, Mapping):
+        _invalid("reasoning")
+    reasoning_data = dict(reasoning) if isinstance(reasoning, Mapping) else {}
+    _reject_unknown_fields(
+        reasoning_data,
+        {"context", "effort", "generate_summary", "mode", "summary"},
+        path="reasoning",
+    )
+
+    effort = reasoning_data.get("effort")
+    if effort is not None and effort not in _REASONING_EFFORTS:
+        _invalid("reasoning.effort")
+    if effort_alias is not None:
+        if effort_alias not in _REASONING_EFFORTS:
+            _invalid("reasoning_effort")
+        if effort is not None and effort_alias != effort:
+            _invalid("reasoning_effort")
+        effort = effort_alias
+    summary = reasoning_data.get("summary")
+    if summary is not None and summary not in _REASONING_SUMMARIES:
+        _invalid("reasoning.summary")
+    generate_summary = reasoning_data.get("generate_summary")
+    if generate_summary is not None and generate_summary not in _REASONING_SUMMARIES:
+        _invalid("reasoning.generate_summary")
+    context = reasoning_data.get("context")
+    if context is not None and context not in _REASONING_CONTEXTS:
+        _invalid("reasoning.context")
+    mode = reasoning_data.get("mode")
+    if mode is not None:
+        _required_string(mode, "reasoning.mode")
+    return NormalizedReasoningIntent(
+        effort=effort,
+        summary=summary,
+        generate_summary=generate_summary,
+        context=context,
+        mode=mode,
+    )
+
+
+def _normalize_state_intent(data: Mapping[str, Any]) -> NormalizedStateIntent | None:
+    state_fields = {
+        "background",
+        "conversation",
+        "include",
+        "previous_response_id",
+        "store",
+    }
+    if not any(field in data for field in state_fields):
+        return None
+
+    previous_response_id = data.get("previous_response_id")
+    if previous_response_id is not None:
+        previous_response_id = _required_string(
+            previous_response_id,
+            "previous_response_id",
+        )
+    conversation = data.get("conversation")
+    conversation_id: str | None = None
+    if isinstance(conversation, str):
+        conversation_id = _required_string(conversation, "conversation")
+    elif isinstance(conversation, Mapping):
+        _reject_unknown_fields(conversation, {"id"}, path="conversation")
+        conversation_id = _required_string(conversation.get("id"), "conversation.id")
+    elif conversation is not None:
+        _invalid("conversation")
+    if previous_response_id is not None and conversation_id is not None:
+        _invalid("conversation")
+
+    include = data.get("include")
+    include_values: list[str] = []
+    if include is not None:
+        if not isinstance(include, list) or any(
+            not isinstance(value, str) or not value for value in include
+        ):
+            _invalid("include")
+        unknown_includes = sorted(set(include) - _RESPONSE_INCLUDES)
+        if unknown_includes:
+            _unsupported("include")
+        include_values = list(include)
+
+    store = data.get("store")
+    if store is not None and not isinstance(store, bool):
+        _invalid("store")
+    background = data.get("background")
+    if background is not None and not isinstance(background, bool):
+        _invalid("background")
+    return NormalizedStateIntent(
+        previous_response_id=previous_response_id,
+        conversation_id=conversation_id,
+        include=include_values,
+        store=store,
+        background=background,
     )
 
 
