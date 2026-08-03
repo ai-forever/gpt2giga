@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import JSONResponse, Response
 
 from gpt2giga.common.exceptions import exceptions_handler
@@ -49,8 +49,20 @@ async def ready(request: Request) -> JSONResponse:
 @system_router.get("/bridge/models")
 @exceptions_handler
 async def bridge_models(request: Request) -> dict:
-    """Return deterministic public aliases without provider discovery I/O."""
-    return request.app.state.provider_machine_contracts.models_manifest()
+    """Project the compatibility endpoint from the shared model catalog."""
+    catalog = getattr(request.app.state, "model_catalog", None)
+    context = getattr(
+        request.state,
+        "model_discovery_context",
+        getattr(request.app.state, "model_discovery_context", None),
+    )
+    if catalog is None or context is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"reason_id": "model_catalog_unavailable"},
+        )
+    snapshot = await catalog.list_models(context)
+    return request.app.state.provider_machine_contracts.models_manifest(snapshot)
 
 
 @system_router.get("/bridge/capabilities")

@@ -13,6 +13,7 @@ from gpt2giga.providers.profiles.registry import ProviderRegistry
 INSPECT_SCHEMA_VERSION = "gpt2giga.inspect.v1"
 READINESS_SCHEMA_VERSION = "gpt2giga.readiness.v1"
 BRIDGE_CAPABILITIES_SCHEMA_VERSION = "gpt2giga.bridge-capabilities.v1"
+BRIDGE_CATALOG_MODELS_SCHEMA_VERSION = "gpt2giga.bridge-models.v2"
 _CAPABILITY_STATUSES = {"blocked", "stable", "technical_preview"}
 _CAPABILITY_PROTOCOLS = {
     "anthropic_messages",
@@ -84,9 +85,69 @@ class ProviderMachineContracts:
             "profiles": profiles,
         }
 
-    def models_manifest(self) -> dict[str, Any]:
-        """Return the deterministic `/bridge/models` document."""
-        return self._registry.models_manifest()
+    def models_manifest(self, catalog_snapshot: Any) -> dict[str, Any]:
+        """Project `/bridge/models` from the shared model catalog snapshot."""
+        snapshot = _as_mapping(catalog_snapshot)
+        inventory_revision = _machine_string(snapshot, "inventory_revision")
+        provider_profile_id = _machine_string(snapshot, "provider_profile_id")
+        raw_models = snapshot.get("models")
+        if not isinstance(raw_models, Sequence) or isinstance(
+            raw_models,
+            (str, bytes),
+        ):
+            raise _invalid_catalog_snapshot()
+
+        models: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for raw_model in raw_models:
+            model = _as_mapping(raw_model)
+            model_id = _machine_string(model, "id")
+            if model_id in seen_ids:
+                raise _invalid_catalog_snapshot()
+            seen_ids.add(model_id)
+            model_revision = _machine_string(model, "inventory_revision")
+            if model_revision != inventory_revision:
+                raise _invalid_catalog_snapshot()
+            model_profile_id = _machine_string(model, "provider_profile_id")
+            if model_profile_id != provider_profile_id:
+                raise _invalid_catalog_snapshot()
+            models.append(
+                {
+                    "id": model_id,
+                    "provider_kind": _machine_string(model, "provider_kind"),
+                    "provider_profile_id": model_profile_id,
+                    "owned_by": _optional_machine_string(model, "owned_by"),
+                    "model_type": _optional_machine_string(model, "model_type"),
+                    "available": _machine_bool(model, "available", default=True),
+                    "deprecated": _machine_bool(
+                        model,
+                        "deprecated",
+                        default=False,
+                    ),
+                    "stale": _machine_bool(
+                        model,
+                        "stale",
+                        default=_machine_bool(snapshot, "stale", default=False),
+                    ),
+                    "inventory_revision": model_revision,
+                }
+            )
+
+        return {
+            "schema_version": BRIDGE_CATALOG_MODELS_SCHEMA_VERSION,
+            "source": "shared_model_catalog",
+            "deprecated_endpoint": True,
+            "replacement": "/models",
+            "config_revision": self._registry.config_revision,
+            "matrix_revision": self._registry.loss_matrix_revision,
+            "catalog_schema_version": _machine_string(snapshot, "schema_version"),
+            "provider_profile_id": provider_profile_id,
+            "inventory_revision": inventory_revision,
+            "discovered_at": _machine_string(snapshot, "discovered_at"),
+            "expires_at": _machine_string(snapshot, "expires_at"),
+            "stale": _machine_bool(snapshot, "stale", default=False),
+            "models": sorted(models, key=lambda item: item["id"]),
+        }
 
     def readiness_manifest(
         self,
@@ -192,4 +253,50 @@ def _invalid_capability_manifest() -> ProviderProfileError:
     return ProviderProfileError(
         "invalid_profile_schema",
         "Bridge capability manifest is incomplete or unsafe.",
+    )
+
+
+def _as_mapping(value: Any) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        if isinstance(dumped, Mapping):
+            return dumped
+    raise _invalid_catalog_snapshot()
+
+
+def _machine_string(value: Mapping[str, Any], key: str) -> str:
+    raw = value.get(key)
+    if not isinstance(raw, str) or not raw or len(raw) > 512:
+        raise _invalid_catalog_snapshot()
+    return raw
+
+
+def _optional_machine_string(value: Mapping[str, Any], key: str) -> str | None:
+    raw = value.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw or len(raw) > 512:
+        raise _invalid_catalog_snapshot()
+    return raw
+
+
+def _machine_bool(
+    value: Mapping[str, Any],
+    key: str,
+    *,
+    default: bool,
+) -> bool:
+    raw = value.get(key, default)
+    if not isinstance(raw, bool):
+        raise _invalid_catalog_snapshot()
+    return raw
+
+
+def _invalid_catalog_snapshot() -> ProviderProfileError:
+    return ProviderProfileError(
+        "invalid_profile_schema",
+        "Model catalog snapshot is incomplete or unsafe.",
     )

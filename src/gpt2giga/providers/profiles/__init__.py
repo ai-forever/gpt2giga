@@ -15,6 +15,7 @@ from gpt2giga.providers.profiles.loader import (
 )
 from gpt2giga.providers.profiles.machine import (
     BRIDGE_CAPABILITIES_SCHEMA_VERSION,
+    BRIDGE_CATALOG_MODELS_SCHEMA_VERSION,
     INSPECT_SCHEMA_VERSION,
     READINESS_SCHEMA_VERSION,
     ProviderMachineContracts,
@@ -41,8 +42,9 @@ from gpt2giga.providers.profiles.registry import (
 
 __all__ = [
     "BRIDGE_CAPABILITIES_SCHEMA_VERSION",
-    "CONFIG_ENV_NAME",
+    "BRIDGE_CATALOG_MODELS_SCHEMA_VERSION",
     "BRIDGE_MODELS_SCHEMA_VERSION",
+    "CONFIG_ENV_NAME",
     "EXECUTION_CONTEXT_SCHEMA_VERSION",
     "INSPECT_SCHEMA_VERSION",
     "MAX_PROFILE_CONFIG_BYTES",

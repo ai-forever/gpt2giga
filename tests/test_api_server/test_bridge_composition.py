@@ -43,6 +43,16 @@ class _GigaChat:
         self.closed = True
 
 
+class _ModelCatalog:
+    def __init__(self, snapshot: dict) -> None:
+        self.snapshot = snapshot
+        self.contexts = []
+
+    async def list_models(self, context):
+        self.contexts.append(context)
+        return self.snapshot
+
+
 def test_app_owns_one_immutable_synthesized_registry() -> None:
     app = create_app(ProxyConfig())
 
@@ -50,16 +60,7 @@ def test_app_owns_one_immutable_synthesized_registry() -> None:
     assert registry.schema_version == "gpt2giga.provider-profiles.v1"
     assert registry.immutable is True
     assert registry.public_aliases() == ("GigaChat",)
-    assert app.state.provider_machine_contracts.models_manifest()["models"] == [
-        {
-            "public_alias": "GigaChat",
-            "provider_kind": "gigachat",
-            "capability_profile": "legacy-gigachat-v1",
-            "support_status": "stable",
-            "deprecated": False,
-            "profile_revision": registry.resolve("GigaChat").profile_revision,
-        }
-    ]
+    assert registry.resolve("GigaChat").provider_kind.value == "gigachat"
 
 
 def test_app_loads_explicit_profiles_before_serving(tmp_path, monkeypatch) -> None:
@@ -201,6 +202,33 @@ def test_machine_endpoints_are_deterministic_and_do_not_call_provider(
         lambda _settings: giga_client,
     )
     app = create_app(ProxyConfig())
+    inventory_revision = f"sha256:{'d' * 64}"
+    app.state.model_discovery_context = object()
+    app.state.model_catalog = _ModelCatalog(
+        {
+            "schema_version": "gpt2giga.model-catalog.v1",
+            "provider_profile_id": "legacy-gigachat",
+            "credential_scope_digest": f"sha256:{'e' * 64}",
+            "inventory_revision": inventory_revision,
+            "discovered_at": "2026-08-03T08:00:00Z",
+            "expires_at": "2026-08-03T08:01:00Z",
+            "stale": False,
+            "source": "provider",
+            "models": [
+                {
+                    "id": "GigaChat-3-Pro",
+                    "provider_kind": "gigachat",
+                    "provider_profile_id": "legacy-gigachat",
+                    "owned_by": "gigachat",
+                    "model_type": "chat",
+                    "available": True,
+                    "deprecated": False,
+                    "stale": False,
+                    "inventory_revision": inventory_revision,
+                }
+            ],
+        }
+    )
 
     with TestClient(app) as client:
         readiness = client.get("/ready")
@@ -210,7 +238,8 @@ def test_machine_endpoints_are_deterministic_and_do_not_call_provider(
     assert readiness.status_code == 200
     assert readiness.json()["ready"] is True
     assert readiness.json()["config_revision"] == models.json()["config_revision"]
-    assert models.json()["models"][0]["public_alias"] == "GigaChat"
+    assert models.json()["models"][0]["id"] == "GigaChat-3-Pro"
+    assert models.json()["source"] == "shared_model_catalog"
     assert len(capabilities.json()["cells"]) == 16
     assert capabilities.json()["matrix_revision"] == models.json()["matrix_revision"]
     serialized = json.dumps(
@@ -223,6 +252,15 @@ def test_machine_endpoints_are_deterministic_and_do_not_call_provider(
     assert "credential" not in serialized
     assert "prompt" not in serialized
     assert giga_client.calls == []
+
+
+def test_bridge_models_does_not_fall_back_to_static_profile_aliases() -> None:
+    app = create_app(ProxyConfig())
+
+    response = TestClient(app).get("/bridge/models")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {"reason_id": "model_catalog_unavailable"}
 
 
 def test_readiness_is_unavailable_before_lifespan_start() -> None:

@@ -10,6 +10,7 @@ import pytest
 
 from gpt2giga.providers.profiles import (
     BRIDGE_CAPABILITIES_SCHEMA_VERSION,
+    BRIDGE_CATALOG_MODELS_SCHEMA_VERSION,
     INSPECT_SCHEMA_VERSION,
     READINESS_SCHEMA_VERSION,
     LoadedProviderProfileSet,
@@ -79,6 +80,45 @@ def _matrix_manifest() -> dict[str, Any]:
     return {"matrix_revision": MATRIX_REVISION, "cells": cells}
 
 
+def _catalog_snapshot() -> dict[str, Any]:
+    inventory_revision = f"sha256:{'d' * 64}"
+    return {
+        "schema_version": "gpt2giga.model-catalog.v1",
+        "provider_profile_id": "openai-main",
+        "credential_scope_digest": f"sha256:{'e' * 64}",
+        "inventory_revision": inventory_revision,
+        "discovered_at": "2026-08-03T08:00:00Z",
+        "expires_at": "2026-08-03T08:01:00Z",
+        "stale": False,
+        "source": "provider",
+        "models": [
+            {
+                "id": "model-b",
+                "provider_kind": "openai_compatible",
+                "provider_profile_id": "openai-main",
+                "owned_by": "provider",
+                "model_type": "chat",
+                "available": True,
+                "deprecated": False,
+                "stale": False,
+                "inventory_revision": inventory_revision,
+                "provider_metadata": {"secret": SECRET},
+            },
+            {
+                "id": "model-a",
+                "provider_kind": "openai_compatible",
+                "provider_profile_id": "openai-main",
+                "owned_by": None,
+                "model_type": None,
+                "available": True,
+                "deprecated": False,
+                "stale": False,
+                "inventory_revision": inventory_revision,
+            },
+        ],
+    }
+
+
 def test_inspect_models_and_readiness_are_deterministic_and_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -88,11 +128,15 @@ def test_inspect_models_and_readiness_are_deterministic_and_redacted(
     monkeypatch.setattr(socket, "getaddrinfo", no_network)
     contracts = _contracts()
     inspect = contracts.inspect_manifest()
-    models = contracts.models_manifest()
+    models = contracts.models_manifest(_catalog_snapshot())
     waiting = contracts.readiness_manifest(adapters_ready=False)
     ready = contracts.readiness_manifest(adapters_ready=True)
 
     assert inspect["schema_version"] == INSPECT_SCHEMA_VERSION
+    assert models["schema_version"] == BRIDGE_CATALOG_MODELS_SCHEMA_VERSION
+    assert models["source"] == "shared_model_catalog"
+    assert models["deprecated_endpoint"] is True
+    assert [model["id"] for model in models["models"]] == ["model-a", "model-b"]
     assert inspect["valid"] is True
     assert inspect["config_revision"] == models["config_revision"]
     assert inspect["matrix_revision"] == MATRIX_REVISION
@@ -114,6 +158,26 @@ def test_inspect_models_and_readiness_are_deterministic_and_redacted(
     assert "OPENAI_API_KEY" in serialized
     assert "authorization" not in serialized.lower()
     assert contracts.inspect_manifest() == inspect
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing_models", "duplicate_model", "revision_mismatch", "profile_mismatch"],
+)
+def test_models_manifest_rejects_invalid_catalog_snapshots(mutation: str) -> None:
+    snapshot = _catalog_snapshot()
+    if mutation == "missing_models":
+        snapshot.pop("models")
+    elif mutation == "duplicate_model":
+        snapshot["models"].append(dict(snapshot["models"][0]))
+    elif mutation == "revision_mismatch":
+        snapshot["models"][0]["inventory_revision"] = f"sha256:{'f' * 64}"
+    else:
+        snapshot["models"][0]["provider_profile_id"] = "another-profile"
+
+    with pytest.raises(ProviderProfileError) as raised:
+        _contracts().models_manifest(snapshot)
+    assert raised.value.code == "invalid_profile_schema"
 
 
 def test_shutdown_and_pre_registry_readiness_are_distinct() -> None:
