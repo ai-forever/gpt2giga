@@ -67,9 +67,14 @@ def test_provider_client_is_closed_on_lifespan_shutdown(monkeypatch) -> None:
         lambda _settings: giga_client,
     )
 
-    with TestClient(
-        create_app(ProxyConfig(proxy=ProxySettings(shutdown_timeout_seconds=0.01)))
-    ) as client:
+    app = create_app(ProxyConfig(proxy=ProxySettings(shutdown_timeout_seconds=0.01)))
+    app.state.model_catalog_readiness = {
+        "state": "fresh",
+        "provider_profile_id": "legacy-gigachat",
+        "inventory_revision": f"sha256:{'d' * 64}",
+    }
+
+    with TestClient(app) as client:
         assert client.get("/ready").status_code == 200
         assert giga_client.closed is False
 

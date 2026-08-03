@@ -148,6 +148,20 @@ def _effective_capability_result() -> dict[str, Any]:
     }
 
 
+def _catalog_readiness(state: str = "fresh") -> dict[str, Any]:
+    if state == "unavailable":
+        return {
+            "state": state,
+            "provider_profile_id": None,
+            "inventory_revision": None,
+        }
+    return {
+        "state": state,
+        "provider_profile_id": "openai-main",
+        "inventory_revision": f"sha256:{'d' * 64}",
+    }
+
+
 def test_inspect_models_and_readiness_are_deterministic_and_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -158,8 +172,14 @@ def test_inspect_models_and_readiness_are_deterministic_and_redacted(
     contracts = _contracts()
     inspect = contracts.inspect_manifest()
     models = contracts.models_manifest(_catalog_snapshot())
-    waiting = contracts.readiness_manifest(adapters_ready=False)
-    ready = contracts.readiness_manifest(adapters_ready=True)
+    waiting = contracts.readiness_manifest(
+        adapters_ready=False,
+        catalog_readiness=_catalog_readiness(),
+    )
+    ready = contracts.readiness_manifest(
+        adapters_ready=True,
+        catalog_readiness=_catalog_readiness(),
+    )
 
     assert inspect["schema_version"] == INSPECT_SCHEMA_VERSION
     assert models["schema_version"] == BRIDGE_CATALOG_MODELS_SCHEMA_VERSION
@@ -172,12 +192,24 @@ def test_inspect_models_and_readiness_are_deterministic_and_redacted(
     assert waiting == {
         "schema_version": READINESS_SCHEMA_VERSION,
         "ready": False,
+        "process_alive": True,
+        "provider_routes_configured": True,
+        "provider_adapters_ready": False,
+        "model_catalog": {
+            "state": "fresh",
+            "usable": True,
+            "discovery_available": True,
+            "provider_profile_id": "openai-main",
+            "inventory_revision": f"sha256:{'d' * 64}",
+        },
         "config_revision": inspect["config_revision"],
         "matrix_revision": MATRIX_REVISION,
         "reasons": [{"reason_id": "provider_clients_not_ready"}],
+        "warnings": [],
     }
     assert ready["ready"] is True
     assert ready["reasons"] == []
+    assert ready["warnings"] == []
 
     serialized = json.dumps(
         {"inspect": inspect, "models": models, "readiness": ready},
@@ -213,13 +245,67 @@ def test_shutdown_and_pre_registry_readiness_are_distinct() -> None:
     contracts = _contracts()
     assert contracts.readiness_manifest(
         adapters_ready=True,
+        catalog_readiness=_catalog_readiness(),
         shutting_down=True,
     )["reasons"] == [{"reason_id": "gateway_shutting_down"}]
     assert not_ready_manifest() == {
         "schema_version": READINESS_SCHEMA_VERSION,
         "ready": False,
+        "process_alive": True,
+        "provider_routes_configured": False,
+        "provider_adapters_ready": False,
+        "model_catalog": {
+            "state": "unavailable",
+            "usable": False,
+            "discovery_available": False,
+            "provider_profile_id": None,
+            "inventory_revision": None,
+        },
         "reasons": [{"reason_id": "registry_not_loaded"}],
+        "warnings": [],
     }
+
+
+def test_readiness_distinguishes_fresh_stale_and_unavailable_inventory() -> None:
+    contracts = _contracts()
+
+    fresh = contracts.readiness_manifest(
+        adapters_ready=True,
+        catalog_readiness=_catalog_readiness("fresh"),
+    )
+    stale = contracts.readiness_manifest(
+        adapters_ready=True,
+        catalog_readiness=_catalog_readiness("stale"),
+    )
+    unavailable = contracts.readiness_manifest(
+        adapters_ready=True,
+        catalog_readiness=_catalog_readiness("unavailable"),
+    )
+
+    assert fresh["ready"] is True
+    assert fresh["model_catalog"]["discovery_available"] is True
+    assert stale["ready"] is True
+    assert stale["model_catalog"]["usable"] is True
+    assert stale["model_catalog"]["discovery_available"] is False
+    assert stale["warnings"] == [{"reason_id": "model_inventory_stale_but_usable"}]
+    assert unavailable["ready"] is False
+    assert unavailable["reasons"] == [{"reason_id": "model_inventory_unavailable"}]
+
+
+@pytest.mark.parametrize("state", ["invalid", "fresh", "unavailable"])
+def test_invalid_catalog_readiness_is_rejected(state: str) -> None:
+    readiness = _catalog_readiness(state)
+    if state == "fresh":
+        readiness["inventory_revision"] = None
+    elif state == "unavailable":
+        readiness["inventory_revision"] = f"sha256:{'d' * 64}"
+
+    with pytest.raises(ProviderProfileError) as raised:
+        _contracts().readiness_manifest(
+            adapters_ready=True,
+            catalog_readiness=readiness,
+        )
+    assert raised.value.code == "invalid_profile_schema"
 
 
 def test_capability_projection_binds_revisions_sorts_cells_and_is_content_free() -> (

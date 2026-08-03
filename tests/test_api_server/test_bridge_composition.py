@@ -220,6 +220,11 @@ def test_machine_endpoints_are_deterministic_and_do_not_call_provider(
     app = create_app(ProxyConfig())
     inventory_revision = f"sha256:{'d' * 64}"
     app.state.model_discovery_context = object()
+    app.state.model_catalog_readiness = {
+        "state": "fresh",
+        "provider_profile_id": "legacy-gigachat",
+        "inventory_revision": inventory_revision,
+    }
     app.state.model_catalog = _ModelCatalog(
         {
             "schema_version": "gpt2giga.model-catalog.v1",
@@ -370,4 +375,41 @@ def test_readiness_is_unavailable_before_lifespan_start() -> None:
 
     assert response.status_code == 503
     assert response.json()["ready"] is False
-    assert response.json()["reasons"] == [{"reason_id": "provider_clients_not_ready"}]
+    assert response.json()["process_alive"] is True
+    assert response.json()["provider_routes_configured"] is True
+    assert response.json()["provider_adapters_ready"] is False
+    assert response.json()["model_catalog"]["state"] == "unavailable"
+    assert response.json()["reasons"] == [
+        {"reason_id": "provider_clients_not_ready"},
+        {"reason_id": "model_inventory_unavailable"},
+    ]
+
+
+def test_stale_usable_catalog_keeps_readiness_available(monkeypatch) -> None:
+    giga_client = _GigaChat()
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda _settings: giga_client,
+    )
+    app = create_app(ProxyConfig())
+    app.state.model_catalog_readiness = {
+        "state": "stale",
+        "provider_profile_id": "legacy-gigachat",
+        "inventory_revision": f"sha256:{'d' * 64}",
+    }
+
+    with TestClient(app) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["ready"] is True
+    assert response.json()["model_catalog"] == {
+        "state": "stale",
+        "usable": True,
+        "discovery_available": False,
+        "provider_profile_id": "legacy-gigachat",
+        "inventory_revision": f"sha256:{'d' * 64}",
+    }
+    assert response.json()["warnings"] == [
+        {"reason_id": "model_inventory_stale_but_usable"}
+    ]

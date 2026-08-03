@@ -36,6 +36,11 @@ async def ready(request: Request) -> JSONResponse:
     else:
         manifest = contracts.readiness_manifest(
             adapters_ready=runtime is not None and runtime.adapters_ready,
+            catalog_readiness=getattr(
+                request.app.state,
+                "model_catalog_readiness",
+                None,
+            ),
             shutting_down=getattr(
                 request.app.state,
                 "bridge_shutting_down",

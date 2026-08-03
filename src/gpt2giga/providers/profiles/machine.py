@@ -19,6 +19,7 @@ BRIDGE_CATALOG_MODELS_SCHEMA_VERSION = "gpt2giga.bridge-models.v2"
 EFFECTIVE_CAPABILITIES_SCHEMA_VERSION = "gpt2giga.effective-capabilities.v1"
 _CAPABILITY_STATUSES = {"blocked", "stable", "technical_preview"}
 _CAPABILITY_STATES = {"supported", "unsupported", "unknown"}
+_CATALOG_STATES = {"fresh", "stale", "unavailable"}
 _CAPABILITY_PROTOCOLS = {
     "anthropic_messages",
     "gemini_generate_content",
@@ -157,20 +158,35 @@ class ProviderMachineContracts:
         self,
         *,
         adapters_ready: bool,
+        catalog_readiness: Any | None = None,
         shutting_down: bool = False,
     ) -> dict[str, Any]:
-        """Distinguish loaded configuration from route/client readiness."""
+        """Distinguish process, route, adapter, and catalog readiness."""
         reasons: list[dict[str, str]] = []
+        warnings: list[dict[str, str]] = []
+        routes_configured = bool(self._registry.public_aliases())
+        catalog = _catalog_readiness_manifest(catalog_readiness)
         if shutting_down:
             reasons.append({"reason_id": "gateway_shutting_down"})
-        elif not adapters_ready:
+        if not routes_configured:
+            reasons.append({"reason_id": "provider_routes_not_configured"})
+        if not adapters_ready:
             reasons.append({"reason_id": "provider_clients_not_ready"})
+        if not catalog["usable"]:
+            reasons.append({"reason_id": "model_inventory_unavailable"})
+        elif catalog["state"] == "stale":
+            warnings.append({"reason_id": "model_inventory_stale_but_usable"})
         return {
             "schema_version": READINESS_SCHEMA_VERSION,
             "ready": not reasons,
+            "process_alive": True,
+            "provider_routes_configured": routes_configured,
+            "provider_adapters_ready": adapters_ready,
+            "model_catalog": catalog,
             "config_revision": self._registry.config_revision,
             "matrix_revision": self._registry.loss_matrix_revision,
             "reasons": reasons,
+            "warnings": warnings,
         }
 
     def capabilities_manifest(
@@ -311,7 +327,12 @@ def not_ready_manifest(reason_id: str = "registry_not_loaded") -> dict[str, Any]
     return {
         "schema_version": READINESS_SCHEMA_VERSION,
         "ready": False,
+        "process_alive": True,
+        "provider_routes_configured": False,
+        "provider_adapters_ready": False,
+        "model_catalog": _catalog_readiness_manifest(None),
         "reasons": [{"reason_id": reason_id}],
+        "warnings": [],
     }
 
 
@@ -415,3 +436,57 @@ def _invalid_effective_capabilities() -> ProviderProfileError:
         "invalid_profile_schema",
         "Effective capability result is incomplete or unsafe.",
     )
+
+
+def _catalog_readiness_manifest(value: Any | None) -> dict[str, Any]:
+    if value is None:
+        return {
+            "state": "unavailable",
+            "usable": False,
+            "discovery_available": False,
+            "provider_profile_id": None,
+            "inventory_revision": None,
+        }
+    readiness = _catalog_readiness_mapping(value)
+    state = _catalog_readiness_string(readiness.get("state"))
+    if state not in _CATALOG_STATES:
+        raise _invalid_catalog_readiness()
+    usable = state in {"fresh", "stale"}
+    provider_profile_id = readiness.get("provider_profile_id")
+    inventory_revision = readiness.get("inventory_revision")
+    if usable:
+        provider_profile_id = _catalog_readiness_string(provider_profile_id)
+        inventory_revision = _catalog_readiness_string(inventory_revision)
+    elif provider_profile_id is not None or inventory_revision is not None:
+        raise _invalid_catalog_readiness()
+    return {
+        "state": state,
+        "usable": usable,
+        "discovery_available": state == "fresh",
+        "provider_profile_id": provider_profile_id,
+        "inventory_revision": inventory_revision,
+    }
+
+
+def _invalid_catalog_readiness() -> ProviderProfileError:
+    return ProviderProfileError(
+        "invalid_profile_schema",
+        "Model catalog readiness is incomplete or unsafe.",
+    )
+
+
+def _catalog_readiness_mapping(value: Any) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        if isinstance(dumped, Mapping):
+            return dumped
+    raise _invalid_catalog_readiness()
+
+
+def _catalog_readiness_string(value: Any) -> str:
+    if not isinstance(value, str) or not value or len(value) > 512:
+        raise _invalid_catalog_readiness()
+    return value
