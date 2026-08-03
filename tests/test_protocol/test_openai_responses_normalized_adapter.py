@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -9,11 +10,42 @@ from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 
 
 CORPUS_ROOT = Path(__file__).parents[1] / "corpora" / "bridge" / "v1"
+SEMANTIC_FIXTURES = (
+    Path(__file__).parents[1]
+    / "fixtures"
+    / "openai_responses_normalized"
+    / "semantic_cases.json"
+)
 
 
 def _corpus_request(name: str) -> dict:
     fixture = json.loads(CORPUS_ROOT.joinpath(name).read_text(encoding="utf-8"))
     return fixture["request"]["body"]
+
+
+def _semantic_cases() -> list[dict]:
+    fixture = json.loads(SEMANTIC_FIXTURES.read_text(encoding="utf-8"))
+    assert fixture["schema_version"] == ("gpt2giga.openai-responses-parser-fixtures.v1")
+    return fixture["cases"]
+
+
+def _semantic_projection(normalized) -> dict:
+    projection: dict = {
+        "tools": [tool.to_json_dict() for tool in normalized.tools],
+    }
+    if normalized.tool_choice is not None:
+        projection["tool_choice"] = normalized.tool_choice
+    if normalized.reasoning is not None:
+        projection["reasoning"] = normalized.reasoning.model_dump(
+            exclude_none=True,
+            exclude={"provider_metadata", "raw_extensions"},
+        )
+    if normalized.response_state is not None:
+        projection["response_state"] = normalized.response_state.model_dump(
+            exclude_none=True,
+            exclude={"provider_metadata", "raw_extensions"},
+        )
+    return projection
 
 
 def test_responses_adapter_decodes_pinned_codex_request() -> None:
@@ -436,3 +468,34 @@ async def test_responses_adapter_async_entrypoint_is_explicit() -> None:
 
     assert normalized.operation == "responses"
     assert normalized.messages[0].content == "hello"
+
+
+@pytest.mark.parametrize(
+    "case",
+    _semantic_cases(),
+    ids=lambda case: case["id"],
+)
+def test_responses_semantic_parser_fixtures(case: dict) -> None:
+    request = case["request"]
+    original = deepcopy(request)
+    classification = case["classification"]
+
+    if classification in {"known_supported_later", "known_route_unsupported"}:
+        normalized = OpenAIProtocolAdapter().responses_to_normalized(request)
+        assert _semantic_projection(normalized) == case["normalized"]
+    else:
+        with pytest.raises(ClientCompatibilityError) as exc_info:
+            OpenAIProtocolAdapter().responses_to_normalized(request)
+        assert exc_info.value.code == case["error"]["code"]
+        assert exc_info.value.param == case["error"]["param"]
+
+    assert request == original
+
+
+def test_responses_semantic_parser_fixture_classifications_are_complete() -> None:
+    assert {case["classification"] for case in _semantic_cases()} == {
+        "known_supported_later",
+        "known_route_unsupported",
+        "malformed",
+        "unknown_forbidden",
+    }
