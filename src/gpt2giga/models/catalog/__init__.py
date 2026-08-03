@@ -9,6 +9,11 @@ from gpt2giga.models.catalog.contracts import (
     ModelDiscoveryContext,
     ModelNotFoundError,
 )
+from gpt2giga.models.catalog.selection import (
+    ModelSelection,
+    ModelSelectionPolicy,
+    ModelSelectionSource,
+)
 
 __all__ = [
     "MODEL_CATALOG_SCHEMA_VERSION",
@@ -18,4 +23,7 @@ __all__ = [
     "ModelDescriptor",
     "ModelDiscoveryContext",
     "ModelNotFoundError",
+    "ModelSelection",
+    "ModelSelectionPolicy",
+    "ModelSelectionSource",
 ]

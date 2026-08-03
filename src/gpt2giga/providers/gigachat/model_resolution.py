@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from gpt2giga.common.model_concurrency import ProviderName
+from gpt2giga.models.catalog import ModelSelectionPolicy
 
 ModelSource = Literal["forced", "payload", "settings", "assistant", "thread"]
 GigaChatApiMode = Literal["v1", "v2"]
@@ -43,18 +44,20 @@ def resolve_upstream_model(
     provider: ProviderName = "openai",
 ) -> ResolvedUpstreamModel:
     """Resolve model precedence used by every GigaChat chat-like call."""
-    model = _non_blank_string(forced_model)
-    if model is not None:
-        return ResolvedUpstreamModel(model, model, "forced")
-
-    model = _non_blank_string(_field(payload, "model"))
-    if model is not None:
-        return ResolvedUpstreamModel(model, model, "payload")
-
     settings = getattr(config, "gigachat_settings", None)
-    model = _non_blank_string(getattr(settings, "model", None))
-    if model is not None:
-        return ResolvedUpstreamModel(model, model, "settings")
+    selection = ModelSelectionPolicy(
+        default_model=_non_blank_string(getattr(settings, "model", None)),
+        forced_model=_non_blank_string(forced_model),
+    ).select(_field(payload, "model"))
+    if selection.model is not None:
+        source: ModelSource
+        if selection.source == "requested":
+            source = "payload"
+        elif selection.source == "default":
+            source = "settings"
+        else:
+            source = "forced"
+        return ResolvedUpstreamModel(selection.model, selection.model, source)
 
     if api_mode == "v2":
         assistant_id = _non_blank_string(_field(payload, "assistant_id"))
