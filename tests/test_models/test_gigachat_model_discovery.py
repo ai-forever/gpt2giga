@@ -16,6 +16,14 @@ class FakeModelsResponse:
     def __init__(self, data):
         self.data = data
 
+    def model_dump(self, **kwargs):
+        return {
+            "data": self.data,
+            "object": "list",
+            "request_id": "safe-request-id",
+            "x_headers": {"authorization": "Bearer secret"},
+        }
+
 
 class FakeGigaChat:
     def __init__(self, models):
@@ -61,6 +69,10 @@ async def test_discovery_uses_authenticated_client_and_preserves_safe_extensions
 
     assert client.calls == 1
     assert snapshot.source is CatalogSource.PROVIDER_API
+    assert snapshot.provider_metadata == {
+        "object": "list",
+        "request_id": "safe-request-id",
+    }
     assert snapshot.expires_at.timestamp() - snapshot.discovered_at.timestamp() == 15
     assert [model.id for model in snapshot.models] == [
         "GigaChat-3-Pro",

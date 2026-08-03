@@ -66,6 +66,7 @@ class ModelCatalogSnapshot(BaseModel):
     expires_at: datetime
     stale: bool = False
     source: CatalogSource
+    provider_metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_snapshot(self) -> ModelCatalogSnapshot:

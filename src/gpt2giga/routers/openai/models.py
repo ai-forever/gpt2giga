@@ -4,16 +4,17 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
 
-from gpt2giga.app_state import get_gigachat_client
+from gpt2giga.app_state import get_gigachat_client, get_gigachat_model_catalog
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
+from gpt2giga.models.catalog import ModelDescriptor, ModelNotFoundError
 from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_MODELS
 from gpt2giga.routers.gemini.models import (
     build_gemini_model,
@@ -21,6 +22,17 @@ from gpt2giga.routers.gemini.models import (
 )
 
 router = APIRouter(tags=[OPENAPI_TAG_OPENAI_MODELS])
+
+_MODEL_PROJECTION_QUERY_PARAMS = (
+    "after_id",
+    "before_id",
+    "limit",
+    "page_size",
+    "pageSize",
+    "page_token",
+    "pageToken",
+    "refresh",
+)
 
 
 def _is_anthropic_models_request(request: Request) -> bool:
@@ -44,12 +56,26 @@ def _is_gemini_models_request(request: Request) -> bool:
     )
 
 
-def _dump_model(model: Any) -> dict[str, Any]:
-    if hasattr(model, "model_dump"):
-        return model.model_dump(by_alias=True)
-    if isinstance(model, dict):
-        return dict(model)
-    return {key: value for key, value in vars(model).items() if not key.startswith("_")}
+def _catalog_model_payload(model: ModelDescriptor) -> dict[str, Any]:
+    payload = dict(model.provider_metadata)
+    payload.update(
+        {
+            "id": model.id,
+            "object": payload.get("object") or "model",
+            "owned_by": model.owned_by or model.provider_kind,
+        }
+    )
+    if model.model_type is not None:
+        payload["type"] = model.model_type
+    if not model.available:
+        payload["available"] = False
+    if model.deprecated:
+        payload["deprecated"] = True
+    return payload
+
+
+def _catalog_refresh_requested(request: Request) -> bool:
+    return request.query_params.get("refresh", "").casefold() in {"1", "true", "yes"}
 
 
 def _model_id(model: dict[str, Any]) -> str:
@@ -143,10 +169,17 @@ def _build_anthropic_model_list(
 async def show_available_models(request: Request):
     """List available GigaChat models in OpenAI-compatible form."""
     giga_client = get_gigachat_client(request)
-    request_options = extract_gigachat_request_options(request)
+    catalog = get_gigachat_model_catalog(request)
+    request_options = extract_gigachat_request_options(
+        request,
+        exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
+    )
     async with gigachat_request_options(giga_client, request_options):
-        response = await giga_client.aget_models()
-    models = [_dump_model(item) for item in response.data]
+        snapshot = await catalog.list_models(
+            giga_client,
+            refresh=_catalog_refresh_requested(request),
+        )
+    models = [_catalog_model_payload(item) for item in snapshot.models]
     if _is_anthropic_models_request(request):
         return _build_anthropic_model_list(models, request)
     if _is_gemini_models_request(request):
@@ -158,7 +191,7 @@ async def show_available_models(request: Request):
         model["created"] = current_timestamp
     model_page = AsyncPage(
         data=[OpenAIModel(**model) for model in models],
-        object=response.object_,
+        object=str(snapshot.provider_metadata.get("object") or "list"),
     )
     return model_page
 
@@ -168,10 +201,21 @@ async def show_available_models(request: Request):
 async def get_model(model: str, request: Request):
     """Return a single model."""
     giga_client = get_gigachat_client(request)
-    request_options = extract_gigachat_request_options(request)
+    catalog = get_gigachat_model_catalog(request)
+    request_options = extract_gigachat_request_options(
+        request,
+        exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
+    )
     async with gigachat_request_options(giga_client, request_options):
-        response = await giga_client.aget_model(model=model)
-    model_data = _dump_model(response)
+        try:
+            descriptor = await catalog.get_model(
+                model,
+                giga_client,
+                refresh=_catalog_refresh_requested(request),
+            )
+        except ModelNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Model not found") from exc
+    model_data = _catalog_model_payload(descriptor)
     if _is_anthropic_models_request(request):
         return _build_anthropic_model(model_data)
     if _is_gemini_models_request(request):

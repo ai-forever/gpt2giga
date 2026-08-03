@@ -94,6 +94,7 @@ class GigaChatModelDiscovery:
 
         normalized = [_normalize_model(item) for item in raw_models]
         _reject_duplicate_ids(normalized)
+        provider_metadata = _normalize_response_metadata(response)
         revision = _inventory_revision(context.provider_profile_id, normalized)
         descriptors = tuple(
             ModelDescriptor(
@@ -118,6 +119,7 @@ class GigaChatModelDiscovery:
             discovered_at=discovered_at,
             expires_at=discovered_at + self._ttl,
             source=CatalogSource.PROVIDER_API,
+            provider_metadata=provider_metadata,
         )
 
 
@@ -144,6 +146,15 @@ def _normalize_model(model: Any) -> dict[str, Any]:
         "available": _bool_or_default(payload.get("available"), default=True),
         "deprecated": _bool_or_default(payload.get("deprecated"), default=False),
         "provider_metadata": metadata,
+    }
+
+
+def _normalize_response_metadata(response: Any) -> dict[str, Any]:
+    payload = _dump_model(response)
+    return {
+        str(key): safe_value
+        for key, value in payload.items()
+        if key != "data" and (safe_value := _safe_json_value(key, value)) is not _DROP
     }
 
 
