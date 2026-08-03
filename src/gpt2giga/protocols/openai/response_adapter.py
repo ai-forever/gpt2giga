@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from gpt2giga.core.context import RequestContext
+from gpt2giga.protocol.response.processor import ResponseProcessor
 from gpt2giga.protocols.normalized import (
     NormalizedChoice,
     NormalizedMessage,
@@ -75,8 +76,14 @@ def normalized_chat_response_to_responses(
         message = choice.message
         if message is None:
             continue
+        hosted_items = ResponseProcessor.create_hosted_tool_response_items(
+            message.raw_extensions,
+            response_id,
+            request_data=request_payload,
+        )
+        output.extend(hosted_items)
         text = _responses_message_text(message)
-        if text is not None:
+        if text or not hosted_items:
             output.append(
                 {
                     "type": "message",
@@ -86,7 +93,7 @@ def normalized_chat_response_to_responses(
                     "content": [
                         {
                             "type": "output_text",
-                            "text": text,
+                            "text": text or "",
                             "annotations": [],
                             "logprobs": [],
                         }

@@ -6,6 +6,8 @@ import json
 import time
 from typing import Any
 
+from gpt2giga.common.sources import merge_inline_data
+from gpt2giga.protocol.response.processor import ResponseProcessor
 from gpt2giga.protocols.normalized import (
     NormalizedStreamEvent,
     NormalizedToolCall,
@@ -43,6 +45,12 @@ class ResponsesStreamProjector:
         self._text_output_index: int | None = None
         self._tool_item: dict[str, Any] | None = None
         self._tool_output_index: int | None = None
+        self._hosted_message: dict[str, Any] = {
+            "tool_executions": [],
+            "files": [],
+            "inline_data": {},
+        }
+        self._hosted_items_emitted = False
 
     @property
     def terminal(self) -> bool:
@@ -52,6 +60,7 @@ class ResponsesStreamProjector:
     def project(self, event: NormalizedStreamEvent) -> list[str]:
         """Validate and project one normalized event into zero or more frames."""
         self._validate_sequence(event)
+        self._collect_hosted_tool_metadata(event)
         if self._terminal:
             raise ResponsesStreamProtocolError("event received after terminal")
         if event.type == "message_start":
@@ -246,13 +255,16 @@ class ResponsesStreamProjector:
 
     def _complete(self, reason: str | None) -> list[str]:
         if self._text_item is None and self._tool_item is None:
-            frames = self._ensure_text_item()
+            frames = self._complete_hosted_tools()
+            if not frames:
+                frames = self._ensure_text_item()
         else:
             frames = []
         if self._text_item is not None:
             frames.extend(self._complete_text())
         if self._tool_item is not None:
             frames.extend(self._complete_tool())
+        frames.extend(self._complete_hosted_tools())
 
         if reason in {"max_tokens", "length"}:
             frames.extend(self._incomplete("max_output_tokens"))
@@ -267,6 +279,65 @@ class ResponsesStreamProjector:
                 )
             )
         return frames
+
+    def _complete_hosted_tools(self) -> list[str]:
+        if self._hosted_items_emitted:
+            return []
+        self._hosted_items_emitted = True
+        items = ResponseProcessor.create_hosted_tool_response_items(
+            self._hosted_message,
+            self.response_id,
+            request_data=self.request_payload,
+        )
+        frames: list[str] = []
+        for item in items:
+            output_index = len(self._output)
+            self._output.append(item)
+            added_item = dict(item)
+            added_item["status"] = "in_progress"
+            frames.extend(
+                [
+                    self._frame(
+                        "response.output_item.added",
+                        {
+                            "output_index": output_index,
+                            "item": added_item,
+                        },
+                    ),
+                    self._frame(
+                        "response.output_item.done",
+                        {
+                            "output_index": output_index,
+                            "item": dict(item),
+                        },
+                    ),
+                ]
+            )
+        return frames
+
+    def _collect_hosted_tool_metadata(self, event: NormalizedStreamEvent) -> None:
+        raw_chunk = event.raw_extensions.get("openai_chunk")
+        if not isinstance(raw_chunk, dict):
+            return
+        choices = raw_chunk.get("choices")
+        if not isinstance(choices, list):
+            return
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("delta", choice.get("message"))
+            if not isinstance(message, dict):
+                continue
+            for field in ("tool_executions", "files"):
+                values = message.get(field)
+                if isinstance(values, list):
+                    self._hosted_message[field].extend(
+                        value for value in values if isinstance(value, dict)
+                    )
+            merge_inline_data(
+                self._hosted_message["inline_data"],
+                message.get("inline_data"),
+            )
 
     def _complete_text(self) -> list[str]:
         part = {

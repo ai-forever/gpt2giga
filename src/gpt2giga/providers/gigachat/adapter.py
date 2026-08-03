@@ -28,6 +28,7 @@ from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol.response import (
     adapt_chat_completion_chunk_to_chat_chunk_shape,
     adapt_chat_completion_to_chat_shape,
+    hydrate_chat_completion_image_files,
 )
 from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
@@ -264,6 +265,8 @@ class GigaChatProviderAdapter:
             response,
             default_model=request.model or resolution.model or "",
         )
+        async with gigachat_request_options(self.giga_client, self.request_options):
+            await hydrate_chat_completion_image_files(adapted, self.giga_client)
         return gigachat_response_to_normalized(
             _ModelDumpWrapper(adapted),
             request=request,

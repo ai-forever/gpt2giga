@@ -482,6 +482,20 @@ class ResponseProcessor:
         return items
 
     @staticmethod
+    def create_hosted_tool_response_items(
+        message: Mapping[str, Any],
+        response_id: str,
+        *,
+        request_data: Optional[dict] = None,
+    ) -> list[dict[str, Any]]:
+        """Project GigaChat hosted-tool metadata to public Responses items."""
+        return ResponseProcessor._create_builtin_tool_items(
+            message,
+            response_id,
+            request_data=request_data,
+        )
+
+    @staticmethod
     def _normalize_inline_data(value: Any) -> dict[str, Any]:
         if isinstance(value, Mapping):
             return dict(value)

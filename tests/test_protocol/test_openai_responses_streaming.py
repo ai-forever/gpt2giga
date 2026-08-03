@@ -131,6 +131,72 @@ def test_responses_stream_projector_orders_tool_lifecycle() -> None:
     }
 
 
+def test_responses_stream_projector_projects_gigachat_hosted_results() -> None:
+    projector = ResponsesStreamProjector(
+        request_payload={
+            "input": "Find a source",
+            "model": "bridge/codex-test",
+            "stream": True,
+            "tools": [{"type": "web_search_preview"}],
+        },
+        requested_model="bridge/codex-test",
+        response_id="hosted",
+        created_at=100,
+    )
+    frames = projector.project(NormalizedStreamEvent(type="message_start", sequence=0))
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="heartbeat",
+                sequence=1,
+                raw_extensions={
+                    "openai_chunk": {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_executions": [
+                                        {"name": "web_search", "status": "success"}
+                                    ],
+                                    "inline_data": {
+                                        "sources": {
+                                            "1": {"url": "https://example.test/source"}
+                                        }
+                                    },
+                                }
+                            }
+                        ]
+                    }
+                },
+            )
+        )
+    )
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="message_end",
+                sequence=2,
+                finish_reason="stop",
+            )
+        )
+    )
+    projector.finish()
+
+    assert _event_names(frames) == [
+        "response.created",
+        "response.output_item.added",
+        "response.output_item.done",
+        "response.completed",
+    ]
+    done_item = _event_data(frames[-2])["item"]
+    assert done_item["type"] == "web_search_call"
+    assert done_item["action"] == {
+        "type": "search",
+        "query": "Find a source",
+        "sources": [{"type": "url", "url": "https://example.test/source"}],
+    }
+    assert _event_data(frames[-1])["response"]["output"] == [done_item]
+
+
 @pytest.mark.parametrize(
     "events",
     [

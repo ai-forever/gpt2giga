@@ -198,3 +198,71 @@ def test_normalized_chat_response_to_responses_keeps_partial_usage_honest():
     assert payload["status"] == "incomplete"
     assert payload["incomplete_details"] == {"reason": "max_output_tokens"}
     assert payload["usage"] == {"input_tokens": 4}
+
+
+def test_normalized_chat_response_to_responses_projects_gigachat_hosted_results():
+    response = NormalizedResponse(
+        provider="gigachat",
+        choices=[
+            NormalizedChoice(
+                message=NormalizedMessage(
+                    role="assistant",
+                    content=None,
+                    raw_extensions={
+                        "tool_executions": [
+                            {"name": "web_search", "status": "success"},
+                            {"name": "image_generate", "status": "success"},
+                        ],
+                        "inline_data": {
+                            "sources": {"1": {"url": "https://example.test/source"}}
+                        },
+                        "files": [
+                            {
+                                "id": "image-1",
+                                "mime": "image/png",
+                                "target": "image",
+                                "content": "aW1n",
+                            }
+                        ],
+                    },
+                ),
+                finish_reason="stop",
+            )
+        ],
+    )
+
+    payload = normalized_chat_response_to_responses(
+        response,
+        request_payload={
+            "model": "bridge/codex-test",
+            "input": "Find and draw",
+            "tools": [
+                {"type": "web_search_preview"},
+                {"type": "image_generation"},
+            ],
+        },
+        requested_model="bridge/codex-test",
+        response_id="hosted",
+    )
+
+    assert payload["output"] == [
+        {
+            "id": "ws_hosted",
+            "type": "web_search_call",
+            "status": "completed",
+            "action": {
+                "type": "search",
+                "query": "Find and draw",
+                "sources": [{"type": "url", "url": "https://example.test/source"}],
+            },
+        },
+        {
+            "id": "ig_hosted_0",
+            "type": "image_generation_call",
+            "status": "completed",
+            "result": "aW1n",
+            "file_id": "image-1",
+            "mime": "image/png",
+            "target": "image",
+        },
+    ]
