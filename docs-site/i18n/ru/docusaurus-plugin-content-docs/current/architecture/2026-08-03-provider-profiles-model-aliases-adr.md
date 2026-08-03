@@ -3,7 +3,7 @@
 - Дата: 2026-08-03
 - Статус: принято для gpt2giga 0.3
 - Владельцы решения: направления provider-profiles и integration
-- Ревизия схемы: `gpt2giga.provider-profiles.v1`
+- Ревизии схемы: `gpt2giga.provider-profiles.v1`, `gpt2giga.provider-profiles.v2`
 - Ревизия execution context: `gpt2giga.execution-context.v1`
 
 ## Контекст
@@ -42,26 +42,28 @@ policy. Он не заменяет и не фильтрует provider-visible c
 
 ### Версионированная схема
 
+Версия 1 остаётся compatibility schema со static aliases. Версия 2 добавляет
+явный dynamic inventory mode:
+
 ```yaml
-schema_version: gpt2giga.provider-profiles.v1
+schema_version: gpt2giga.provider-profiles.v2
 profiles:
-  - profile_id: anthropic-main
-    provider_kind: anthropic
-    base_url: https://api.anthropic.com
-    credential_env: ANTHROPIC_API_KEY
-    network_policy_ref: public-anthropic
+  - profile_id: gigachat-main
+    provider_kind: gigachat
+    base_url: https://api.giga.chat/v1
+    credential_env: GIGACHAT_CREDENTIALS
+    network_policy_ref: public-gigachat
     tls_policy_ref: system-default
-    models:
-      - public_alias: anthropic/opus
-        upstream_model: exact-provider-model-id
-        capability_profile: anthropic-opus-v1
-        support_status: technical_preview
+    model_inventory: dynamic
 ```
 
 Неизвестные поля отклоняются. Все показанные identity/destination/policy поля и
-хотя бы одна model обязательны. Plaintext secret-полей нет. `profile_id` и
-`public_alias` глобально уникальны после Unicode/whitespace validation; aliases
-регистрозависимы и не угадываются.
+credential environment name обязательны. Version 1 и static profiles version 2
+требуют хотя бы один model alias. Version 2 разрешает
+`model_inventory: dynamic` только для одного GigaChat profile; aliases в нём
+опциональны и не фильтруют discovery. Plaintext secret-полей нет. `profile_id`
+и `public_alias` глобально уникальны после Unicode/whitespace validation;
+aliases регистрозависимы и не угадываются.
 
 ### Canonical digest и неизменяемость
 

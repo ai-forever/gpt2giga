@@ -13,7 +13,11 @@ from gpt2giga.app.responses_mode import (
     select_responses_execution,
 )
 from gpt2giga.core.context import RequestContext, request_context_var
-from gpt2giga.providers.profiles import ProviderAliasError, ProviderKind
+from gpt2giga.providers.profiles import (
+    ProviderAliasError,
+    ProviderKind,
+    ProviderModelInventory,
+)
 
 
 @dataclass(frozen=True)
@@ -31,17 +35,20 @@ class _Route:
 
 
 class _Registry:
-    def __init__(self, route: _Route | None, *, synthesized: bool = False) -> None:
+    def __init__(self, route: _Route | None, *, dynamic: bool = False) -> None:
         self.route = route
         self.resolve_calls: list[object] = []
         self.config = SimpleNamespace(
             profiles=(
                 SimpleNamespace(
-                    profile_id=("native-gigachat" if synthesized else "profile-1"),
+                    profile_id=("explicit-gigachat" if dynamic else "profile-1"),
                     provider_kind=(
                         ProviderKind.GIGACHAT
-                        if synthesized
+                        if dynamic
                         else ProviderKind.OPENAI_COMPATIBLE
+                    ),
+                    model_inventory=(
+                        ProviderModelInventory.DYNAMIC if dynamic else None
                     ),
                 ),
             )
@@ -81,8 +88,8 @@ def test_exact_provider_route_selects_one_owner(
     assert registry.resolve_calls == ["model-1"]
 
 
-def test_config_free_gigachat_accepts_provider_visible_model() -> None:
-    registry = _Registry(None, synthesized=True)
+def test_dynamic_gigachat_profile_accepts_provider_visible_model() -> None:
+    registry = _Registry(None, dynamic=True)
 
     selection = select_responses_execution(
         SimpleNamespace(provider_registry=registry),
@@ -90,7 +97,7 @@ def test_config_free_gigachat_accepts_provider_visible_model() -> None:
     )
 
     assert selection.mode is ResponsesExecutionMode.NATIVE_GIGACHAT
-    assert selection.reason == "config_free_gigachat_model"
+    assert selection.reason == "dynamic_gigachat_model"
     assert registry.resolve_calls == ["GigaChat-2-Pro"]
 
 

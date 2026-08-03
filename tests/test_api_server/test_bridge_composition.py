@@ -73,10 +73,11 @@ def test_app_owns_one_immutable_dynamic_gigachat_registry() -> None:
     app = create_app(ProxyConfig())
 
     registry = app.state.provider_registry
-    assert registry.schema_version == "gpt2giga.provider-profiles.v1"
+    assert registry.schema_version == "gpt2giga.provider-profiles.v2"
     assert registry.immutable is True
     assert registry.public_aliases() == ()
     assert registry.config.profiles[0].profile_id == "native-gigachat"
+    assert registry.config.profiles[0].model_inventory.value == "dynamic"
     assert registry.config.profiles[0].models == ()
 
 

@@ -3,7 +3,7 @@
 - Date: 2026-08-03
 - Status: accepted for gpt2giga 0.3
 - Decision owners: provider-profiles and integration lanes
-- Schema revision: `gpt2giga.provider-profiles.v1`
+- Schema revisions: `gpt2giga.provider-profiles.v1`, `gpt2giga.provider-profiles.v2`
 - Execution-context revision: `gpt2giga.execution-context.v1`
 
 ## Context
@@ -52,29 +52,29 @@ are still `unknown`.
 
 ### Versioned schema
 
-The logical YAML/JSON shape is:
+Version 1 remains the static-alias compatibility schema. Version 2 adds an
+explicit dynamic inventory mode:
 
 ```yaml
-schema_version: gpt2giga.provider-profiles.v1
+schema_version: gpt2giga.provider-profiles.v2
 profiles:
-  - profile_id: anthropic-main
-    provider_kind: anthropic
-    base_url: https://api.anthropic.com
-    credential_env: ANTHROPIC_API_KEY
-    network_policy_ref: public-anthropic
+  - profile_id: gigachat-main
+    provider_kind: gigachat
+    base_url: https://api.giga.chat/v1
+    credential_env: GIGACHAT_CREDENTIALS
+    network_policy_ref: public-gigachat
     tls_policy_ref: system-default
-    models:
-      - public_alias: anthropic/opus
-        upstream_model: exact-provider-model-id
-        capability_profile: anthropic-opus-v1
-        support_status: technical_preview
+    model_inventory: dynamic
 ```
 
 Unknown schema fields are rejected. `schema_version`, `profile_id`,
-`provider_kind`, destination, policy references, credential environment name,
-and at least one model are required. Plaintext secret fields do not exist in the
-schema. `profile_id` and `public_alias` are globally unique after Unicode and
-whitespace validation; aliases are case-sensitive and are never guessed.
+`provider_kind`, destination, policy references, and credential environment
+name are required. Version 1 and static version 2 profiles require at least one
+model alias. Version 2 permits `model_inventory: dynamic` only for one GigaChat
+profile; its alias list is optional policy and never filters discovery.
+Plaintext secret fields do not exist in the schema. `profile_id` and
+`public_alias` are globally unique after Unicode and whitespace validation;
+aliases are case-sensitive and are never guessed.
 
 ### Canonical digest and immutability
 

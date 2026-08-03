@@ -1,9 +1,9 @@
 # Provider profiles and model aliases
 
 Provider profiles are the startup-owned routing configuration for the 0.3
-universal bridge. A client request selects only a public model alias. The
-gateway resolves that alias to one exact provider profile, upstream model,
-capability profile, and loss-matrix revision before credential or network work.
+universal bridge. A client request selects either a reviewed public alias or a
+model returned by the dynamic GigaChat inventory. The gateway resolves that
+identity to one provider profile and effective model before execution.
 
 Use profile mode when one gateway process must expose reviewed GigaChat,
 OpenAI-compatible, Anthropic, or Gemini upstreams. The existing `GIGACHAT_*`
@@ -35,7 +35,7 @@ the illustrative upstream model ids and policy references with values reviewed
 for your deployment.
 
 ```yaml
-schema_version: gpt2giga.provider-profiles.v1
+schema_version: gpt2giga.provider-profiles.v2
 profiles:
   - profile_id: gigachat-main
     provider_kind: gigachat
@@ -43,11 +43,7 @@ profiles:
     credential_env: GIGACHAT_CREDENTIALS
     network_policy_ref: public-gigachat
     tls_policy_ref: system-default
-    models:
-      - public_alias: giga/max
-        upstream_model: GigaChat-2-Max
-        capability_profile: gigachat-max-v1
-        support_status: stable
+    model_inventory: dynamic
 
   - profile_id: openai-compatible-main
     provider_kind: openai_compatible
@@ -105,7 +101,7 @@ the enabled profile fails preflight when that variable has no value.
 
 | Field | Contract |
 |---|---|
-| `schema_version` | Must be exactly `gpt2giga.provider-profiles.v1`. |
+| `schema_version` | `gpt2giga.provider-profiles.v1` or `gpt2giga.provider-profiles.v2`; new files should use v2. |
 | `profile_id` | Unique lowercase reviewed identifier. |
 | `provider_kind` | `gigachat`, `openai_compatible`, `anthropic`, or `gemini`. |
 | `base_url` | Canonical public HTTPS destination without userinfo, query, or fragment. |
@@ -113,7 +109,8 @@ the enabled profile fails preflight when that variable has no value.
 | `network_policy_ref` | Identifier from the application's reviewed network-policy catalog. |
 | `tls_policy_ref` | Identifier from the application's reviewed TLS-policy catalog. |
 | `allow_loopback` | Defaults to `false`; permits only an explicit HTTP loopback development profile. |
-| `models` | Non-empty list of exact public-alias bindings. |
+| `model_inventory` | v2-only. `dynamic` is allowed only for one GigaChat profile; omitted means static aliases. |
+| `models` | Exact public-alias bindings. Required for static profiles; optional aliases for dynamic GigaChat. |
 | `public_alias` | Globally unique, case-sensitive model name accepted from clients. |
 | `upstream_model` | Exact provider-owned model id; clients cannot override it. |
 | `capability_profile` | Reviewed semantic capability set used during admission. |
@@ -127,6 +124,13 @@ destinations require public HTTPS. Private, link-local, metadata, and loopback
 addresses are rejected unless the profile is the explicit HTTP loopback
 development exception. Redirects and request-supplied destination overrides
 are not routing mechanisms.
+
+Version 1 remains accepted unchanged and requires a non-empty `models` list for
+every profile. It does not accept `model_inventory`. Version 2 makes provider
+discovery explicit: `model_inventory: dynamic` removes the need to enumerate
+every credential-visible GigaChat model, while any configured `models` entries
+remain exact aliases rather than an inventory filter. Static external-provider
+profiles continue to require at least one alias.
 
 ## Alias and revision behavior
 

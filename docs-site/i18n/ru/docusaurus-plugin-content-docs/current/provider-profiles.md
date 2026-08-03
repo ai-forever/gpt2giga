@@ -1,10 +1,9 @@
 # Профили провайдеров и алиасы моделей
 
 Профили провайдеров — это принадлежащая процессу startup-конфигурация
-маршрутизации universal bridge 0.3. Клиентский запрос выбирает только публичный
-алиас модели. До получения credential и сетевой операции gateway разрешает его
-в один точный профиль, upstream-модель, capability profile и ревизию loss
-matrix.
+маршрутизации universal bridge 0.3. Клиентский запрос выбирает проверенный
+публичный алиас или model id из dynamic GigaChat inventory. До исполнения
+gateway разрешает эту identity в один provider profile и effective model.
 
 Используйте режим профилей, когда один процесс gateway должен открыть
 проверенные GigaChat, OpenAI-compatible, Anthropic или Gemini upstream. Если
@@ -37,7 +36,7 @@ hot reload отсутствует.
 развёртывания значения.
 
 ```yaml
-schema_version: gpt2giga.provider-profiles.v1
+schema_version: gpt2giga.provider-profiles.v2
 profiles:
   - profile_id: gigachat-main
     provider_kind: gigachat
@@ -45,11 +44,7 @@ profiles:
     credential_env: GIGACHAT_CREDENTIALS
     network_policy_ref: public-gigachat
     tls_policy_ref: system-default
-    models:
-      - public_alias: giga/max
-        upstream_model: GigaChat-2-Max
-        capability_profile: gigachat-max-v1
-        support_status: stable
+    model_inventory: dynamic
 
   - profile_id: openai-compatible-main
     provider_kind: openai_compatible
@@ -108,7 +103,7 @@ startup завершится ошибкой. `credential_env` должен бы�
 
 | Поле | Контракт |
 |---|---|
-| `schema_version` | Строго `gpt2giga.provider-profiles.v1`. |
+| `schema_version` | `gpt2giga.provider-profiles.v1` или `gpt2giga.provider-profiles.v2`; для новых файлов используйте v2. |
 | `profile_id` | Уникальный проверенный идентификатор в нижнем регистре. |
 | `provider_kind` | `gigachat`, `openai_compatible`, `anthropic` или `gemini`. |
 | `base_url` | Канонический публичный HTTPS destination без userinfo, query или fragment. |
@@ -116,7 +111,8 @@ startup завершится ошибкой. `credential_env` должен бы�
 | `network_policy_ref` | Идентификатор из проверенного каталога network policies приложения. |
 | `tls_policy_ref` | Идентификатор из проверенного каталога TLS policies приложения. |
 | `allow_loopback` | По умолчанию `false`; разрешает только явный HTTP loopback development profile. |
-| `models` | Непустой список точных привязок публичных алиасов. |
+| `model_inventory` | Только v2. `dynamic` разрешён только для одного GigaChat profile; отсутствие поля означает static aliases. |
+| `models` | Точные привязки public aliases. Обязательны для static profiles; опциональны как aliases для dynamic GigaChat. |
 | `public_alias` | Глобально уникальное, регистрозависимое имя модели для клиентов. |
 | `upstream_model` | Точный provider-owned model id; клиент не может его переопределить. |
 | `capability_profile` | Проверенный набор семантик для admission. |
@@ -129,6 +125,13 @@ startup завершится ошибкой. `credential_env` должен бы�
 публичный HTTPS. Private, link-local, metadata и loopback addresses запрещены,
 кроме явного HTTP loopback development exception. Redirect и переданный в
 request destination не являются механизмами маршрутизации.
+
+Версия 1 остаётся валидной без изменений: каждый profile требует непустой
+`models`, а `model_inventory` не принимается. Версия 2 явно задаёт provider
+discovery: `model_inventory: dynamic` снимает требование перечислять все
+credential-visible GigaChat models. Если `models` всё же заданы, они остаются
+точными aliases и не фильтруют inventory. Static profiles внешних providers
+по-прежнему требуют хотя бы один alias.
 
 ## Поведение алиасов и ревизий
 

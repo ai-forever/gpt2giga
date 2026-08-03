@@ -60,7 +60,6 @@ class ResolvedProviderRoute:
 class ProviderRegistry:
     """Immutable and deterministic authority for public model aliases."""
 
-    schema_version = "gpt2giga.provider-profiles.v1"
     immutable = True
 
     def __init__(
@@ -100,6 +99,7 @@ class ProviderRegistry:
                         deprecated=model.deprecated,
                     )
         self._loaded = loaded
+        self.schema_version = loaded.schema_version
         self._config_revision = config_revision
         self._loss_matrix_revision = loss_matrix_revision
         self._entries = MappingProxyType(entries)

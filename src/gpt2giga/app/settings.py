@@ -10,6 +10,7 @@ from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocols.normalized import BRIDGE_LOSS_MATRIX_V1
 from gpt2giga.providers.profiles import (
     LoadedProviderProfileSet,
+    ProviderModelInventory,
     ProviderModelAlias,
     ProviderPolicyCatalog,
     ProviderProfile,
@@ -115,6 +116,7 @@ def _synthesized_gigachat_profiles(config: ProxyConfig) -> LoadedProviderProfile
         credential_env="GIGACHAT_CREDENTIALS",
         network_policy_ref="public-gigachat",
         tls_policy_ref="system-default",
+        model_inventory=ProviderModelInventory.DYNAMIC,
         models=models,
     )
     return LoadedProviderProfileSet(

@@ -182,6 +182,8 @@ def test_inspect_models_and_readiness_are_deterministic_and_redacted(
     )
 
     assert inspect["schema_version"] == INSPECT_SCHEMA_VERSION
+    assert inspect["profile_schema_version"] == "gpt2giga.provider-profiles.v2"
+    assert inspect["profiles"][0]["model_inventory"] == "static"
     assert models["schema_version"] == BRIDGE_CATALOG_MODELS_SCHEMA_VERSION
     assert models["source"] == "shared_model_catalog"
     assert models["deprecated_endpoint"] is True

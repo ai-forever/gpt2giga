@@ -15,7 +15,11 @@ from urllib.parse import urlsplit
 from pydantic import ValidationError
 
 from gpt2giga.providers.profiles.errors import ProviderProfileError
-from gpt2giga.providers.profiles.models import ProviderProfile, ProviderProfileConfig
+from gpt2giga.providers.profiles.models import (
+    ProviderModelInventory,
+    ProviderProfile,
+    ProviderProfileConfig,
+)
 
 
 CONFIG_ENV_NAME = "GPT2GIGA_CONFIG"
@@ -118,7 +122,9 @@ def load_provider_profiles(
     for profile in config.profiles:
         _validate_destination(profile)
         _validate_policy_references(profile, policies)
-        if any(model.enabled for model in profile.models):
+        if profile.model_inventory is ProviderModelInventory.DYNAMIC or any(
+            model.enabled for model in profile.models
+        ):
             credential = environ.get(profile.credential_env)
             if not credential:
                 raise ProviderProfileError(

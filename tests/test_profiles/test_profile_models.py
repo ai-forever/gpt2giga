@@ -9,7 +9,10 @@ import pytest
 
 from gpt2giga.providers.profiles import (
     PROVIDER_KINDS,
+    PROVIDER_PROFILE_SCHEMA_V1,
+    PROVIDER_PROFILE_SCHEMA_V2,
     PROVIDER_PROFILE_SCHEMA_VERSION,
+    ProviderModelInventory,
     ProviderModelAlias,
     ProviderProfile,
     ProviderProfileConfig,
@@ -63,12 +66,64 @@ def test_profile_config_is_strict_immutable_and_secret_free() -> None:
 
 def test_only_gigachat_profile_may_defer_models_to_dynamic_inventory() -> None:
     dynamic = _config().profiles[0].model_dump(mode="json")
-    dynamic.update({"provider_kind": "gigachat", "models": []})
+    dynamic.update(
+        {
+            "provider_kind": "gigachat",
+            "model_inventory": "dynamic",
+            "models": [],
+        }
+    )
 
-    assert ProviderProfile.model_validate(dynamic).models == ()
+    profile = ProviderProfile.model_validate(dynamic)
+    assert profile.model_inventory is ProviderModelInventory.DYNAMIC
+    assert profile.models == ()
 
     with pytest.raises(ValidationError, match="dynamic model inventory"):
         ProviderProfile.model_validate({**dynamic, "provider_kind": "anthropic"})
+
+
+def test_v1_stays_static_while_v2_admits_explicit_dynamic_inventory() -> None:
+    v1_payload = _config().model_dump(mode="json", exclude_none=True)
+    v1_payload["schema_version"] = PROVIDER_PROFILE_SCHEMA_V1
+    v1 = ProviderProfileConfig.model_validate(v1_payload)
+
+    assert v1.schema_version == PROVIDER_PROFILE_SCHEMA_V1
+    assert "model_inventory" not in json.loads(v1.canonical_json())["profiles"][0]
+
+    v1_payload["profiles"][0].update(
+        {
+            "provider_kind": "gigachat",
+            "model_inventory": "dynamic",
+            "models": [],
+        }
+    )
+    with pytest.raises(ValidationError, match="provider-profiles.v2"):
+        ProviderProfileConfig.model_validate(v1_payload)
+
+    v2_payload = {
+        **v1_payload,
+        "schema_version": PROVIDER_PROFILE_SCHEMA_V2,
+    }
+    v2 = ProviderProfileConfig.model_validate(v2_payload)
+    assert v2.schema_version == PROVIDER_PROFILE_SCHEMA_V2
+    assert v2.profiles[0].model_inventory is ProviderModelInventory.DYNAMIC
+    assert v2.profiles[0].models == ()
+
+
+def test_only_one_dynamic_gigachat_inventory_is_unambiguous() -> None:
+    dynamic = ProviderProfile(
+        profile_id="gigachat-one",
+        provider_kind="gigachat",
+        base_url="https://example.com/v1",
+        credential_env="GIGACHAT_CREDENTIALS",
+        network_policy_ref="public-gigachat",
+        tls_policy_ref="system-default",
+        model_inventory="dynamic",
+    )
+    second = dynamic.model_copy(update={"profile_id": "gigachat-two"})
+
+    with pytest.raises(ValidationError, match="multiple dynamic model inventories"):
+        ProviderProfileConfig(profiles=(dynamic, second))
 
 
 def test_canonical_digest_is_key_order_independent_and_array_order_sensitive() -> None:

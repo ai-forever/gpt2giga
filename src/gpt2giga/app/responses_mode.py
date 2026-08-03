@@ -7,7 +7,11 @@ from enum import Enum
 from typing import Any
 
 from gpt2giga.core.context import update_request_context
-from gpt2giga.providers.profiles import ProviderAliasError, ProviderKind
+from gpt2giga.providers.profiles import (
+    ProviderAliasError,
+    ProviderKind,
+    ProviderModelInventory,
+)
 
 
 class ResponsesExecutionMode(str, Enum):
@@ -53,11 +57,11 @@ def select_responses_execution(
     try:
         route = registry.resolve(requested_model)
     except ProviderAliasError:
-        if not _is_config_free_gigachat_registry(registry):
+        if not _has_dynamic_gigachat_route(registry):
             raise
         selection = ResponsesExecutionSelection(
             mode=ResponsesExecutionMode.NATIVE_GIGACHAT,
-            reason="config_free_gigachat_model",
+            reason="dynamic_gigachat_model",
         )
         _record_selection(selection, requested_model=requested_model)
         return selection
@@ -80,12 +84,13 @@ def select_responses_execution(
     return selection
 
 
-def _is_config_free_gigachat_registry(registry: Any) -> bool:
-    """Recognize the config-free dynamic GigaChat route owner."""
+def _has_dynamic_gigachat_route(registry: Any) -> bool:
+    """Recognize the single startup-owned dynamic GigaChat route."""
     profiles = tuple(getattr(getattr(registry, "config", None), "profiles", ()))
-    return len(profiles) == 1 and (
-        profiles[0].profile_id == "native-gigachat"
-        and profiles[0].provider_kind is ProviderKind.GIGACHAT
+    return any(
+        profile.provider_kind is ProviderKind.GIGACHAT
+        and profile.model_inventory is ProviderModelInventory.DYNAMIC
+        for profile in profiles
     )
 
 

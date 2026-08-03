@@ -143,7 +143,7 @@ def test_responses_orchestrates_explicit_execution_owners() -> None:
 def test_profile_registry_is_the_only_route_resolution_authority() -> None:
     app = create_app(ProxyConfig())
     registry = app.state.provider_registry
-    assert registry.schema_version == "gpt2giga.provider-profiles.v1"
+    assert registry.schema_version == "gpt2giga.provider-profiles.v2"
     assert registry.immutable is True
 
 

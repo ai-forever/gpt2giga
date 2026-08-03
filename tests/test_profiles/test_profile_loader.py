@@ -18,7 +18,9 @@ from gpt2giga.providers.profiles import (
 
 
 POLICIES = ProviderPolicyCatalog(
-    network_policy_refs=frozenset({"public-anthropic", "loopback-development"}),
+    network_policy_refs=frozenset(
+        {"public-anthropic", "public-gigachat", "loopback-development"}
+    ),
     tls_policy_refs=frozenset({"system-default"}),
 )
 SECRET = "fixture-credential-value-never-render"
@@ -83,6 +85,32 @@ def test_json_profile_loads_once_and_keeps_credentials_redacted(tmp_path: Path) 
     assert SECRET not in repr(loaded)
     assert "ANTHROPIC_API_KEY" not in repr(loaded)
     assert SECRET not in json.dumps(loaded.redacted())
+
+
+def test_dynamic_gigachat_profile_resolves_credential_without_static_aliases(
+    tmp_path: Path,
+) -> None:
+    payload = _payload(
+        profile_id="gigachat-main",
+        provider_kind="gigachat",
+        credential_env="GIGACHAT_CREDENTIALS",
+        network_policy_ref="public-gigachat",
+        model_inventory="dynamic",
+        models=[],
+    )
+    payload["schema_version"] = "gpt2giga.provider-profiles.v2"
+    path = _write_json(tmp_path / "profiles.json", payload)
+
+    loaded = load_provider_profiles(
+        path,
+        environ={"GIGACHAT_CREDENTIALS": SECRET},
+        policies=POLICIES,
+    )
+
+    profile = loaded.config.profiles[0]
+    assert profile.model_inventory.value == "dynamic"
+    assert profile.models == ()
+    assert loaded.credential_for("gigachat-main") == SECRET
 
 
 def test_yaml_uses_safe_loading_and_rejects_duplicate_keys(tmp_path: Path) -> None:

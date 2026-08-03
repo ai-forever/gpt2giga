@@ -66,6 +66,11 @@ class ProviderMachineContracts:
                     "network_policy_ref": profile.network_policy_ref,
                     "tls_policy_ref": profile.tls_policy_ref,
                     "allow_loopback": profile.allow_loopback,
+                    "model_inventory": (
+                        profile.model_inventory.value
+                        if profile.model_inventory is not None
+                        else "static"
+                    ),
                     "models": [
                         {
                             "public_alias": model.public_alias,
@@ -84,6 +89,7 @@ class ProviderMachineContracts:
             )
         return {
             "schema_version": INSPECT_SCHEMA_VERSION,
+            "profile_schema_version": self._registry.schema_version,
             "valid": True,
             "config_revision": self._registry.config_revision,
             "matrix_revision": self._registry.loss_matrix_revision,
