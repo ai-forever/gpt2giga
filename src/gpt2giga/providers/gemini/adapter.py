@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import AsyncGenerator, Callable, Collection, Mapping
 from dataclasses import dataclass
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -27,6 +28,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedProtocolCapabilities,
     NormalizedResponse,
     NormalizedStopReason,
+    NormalizedStreamEvent,
     NormalizedTokenLimits,
     NormalizedToolCall,
     NormalizedUsage,
@@ -108,6 +110,13 @@ class GeminiUpstreamProfile(NormalizedBaseModel):
         """Return the exact reviewed GenerateContent endpoint."""
         model = quote(self.model, safe="-._~")
         return _endpoint_url(self.base_url, f"models/{model}:generateContent")
+
+    @property
+    def stream_generate_content_url(self) -> str:
+        """Return the exact reviewed streaming GenerateContent endpoint."""
+        model = quote(self.model, safe="-._~")
+        endpoint = _endpoint_url(self.base_url, f"models/{model}:streamGenerateContent")
+        return f"{endpoint}?alt=sse"
 
 
 @dataclass(frozen=True)
@@ -249,6 +258,80 @@ class GeminiProviderAdapter:
             admission=admission,
         )
 
+    async def stream_chat(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        downstream: DownstreamProtocol,
+        downstream_capabilities: Collection[BridgeFeature] = (),
+        input_token_count: int | None = None,
+        is_disconnected: Callable[[], Any] | None = None,
+    ) -> AsyncGenerator[NormalizedStreamEvent, None]:
+        """Execute one admitted streaming GenerateContent request."""
+        if not request.stream:
+            raise ValueError("stream_chat() requires request.stream=true")
+        admission = self._admit(
+            request,
+            downstream=downstream,
+            downstream_capabilities=downstream_capabilities,
+            input_token_count=input_token_count,
+        )
+        payload = normalized_chat_to_gemini_payload(request, profile=self.profile)
+        sequence = 0
+        terminal_seen = False
+        usage_seen = False
+        started_tool_calls: set[str] = set()
+
+        yield _stream_event(
+            "message_start",
+            sequence=sequence,
+            provider_metadata=_response_provider_metadata(
+                self.profile,
+                admission=admission,
+            ),
+        )
+        sequence += 1
+        try:
+            async for chunk in self._stream_json(
+                url=self.profile.stream_generate_content_url,
+                purpose=_REQUEST_PURPOSE_GENERATE,
+                payload=payload,
+            ):
+                if await _is_disconnected(is_disconnected):
+                    yield _stream_event(
+                        "cancelled",
+                        sequence=sequence,
+                        cancellation=request.cancellation,
+                        stop_reason="cancelled",
+                    )
+                    return
+                events, chunk_terminal, chunk_usage = _stream_chunk_to_events(
+                    chunk,
+                    sequence=sequence,
+                    terminal_seen=terminal_seen,
+                    usage_seen=usage_seen,
+                    started_tool_calls=started_tool_calls,
+                )
+                terminal_seen = terminal_seen or chunk_terminal
+                usage_seen = usage_seen or chunk_usage
+                for event in events:
+                    sequence = (event.sequence or sequence) + 1
+                    yield event
+            if not terminal_seen:
+                raise _protocol_error(
+                    "incomplete_stream",
+                    "Gemini upstream stream ended without a terminal state.",
+                )
+        except asyncio.CancelledError:
+            raise
+        except GeminiUpstreamError as exc:
+            yield _stream_event(
+                "error",
+                sequence=sequence,
+                error=exc.error,
+                stop_reason="error",
+            )
+
     def _admit(
         self,
         request: NormalizedChatRequest,
@@ -317,6 +400,68 @@ class GeminiProviderAdapter:
             )
         return parsed
 
+    async def _stream_json(
+        self,
+        *,
+        url: str,
+        purpose: str,
+        payload: Mapping[str, Any],
+    ) -> AsyncGenerator[Mapping[str, Any], None]:
+        body = _json_body(payload)
+        authorization = self._authorize(url, purpose, body)
+        total_bytes = 0
+        buffer = b""
+        try:
+            async with self._client.stream(
+                "POST",
+                url,
+                content=body,
+                headers=self._headers(stream=True),
+            ) as response:
+                self._validate_peer(response, authorization)
+                if response.is_redirect:
+                    await _read_bounded_response(response, authorization)
+                    raise _transport_error(
+                        "destination_mismatch",
+                        "Gemini upstream redirect is forbidden.",
+                    )
+                if response.is_error:
+                    await _read_bounded_response(response, authorization)
+                    raise _http_error(response)
+                async for chunk in response.aiter_bytes():
+                    total_bytes += len(chunk)
+                    if total_bytes > authorization.max_response_bytes:
+                        raise _transport_error(
+                            "response_too_large",
+                            "Gemini upstream response exceeded the reviewed limit.",
+                        )
+                    buffer += chunk
+                    while True:
+                        block, buffer = _pop_sse_block(buffer)
+                        if block is None:
+                            break
+                        parsed = _parse_sse_block(block)
+                        if parsed is not None:
+                            yield parsed
+                if buffer.strip():
+                    parsed = _parse_sse_block(buffer)
+                    if parsed is not None:
+                        yield parsed
+                authorization.validate_response_body(body_bytes=total_bytes)
+        except asyncio.CancelledError:
+            raise
+        except GeminiUpstreamError:
+            raise
+        except httpx.TimeoutException as exc:
+            raise _transport_error(
+                "timeout", "Gemini upstream stream timed out."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise _transport_error(
+                "connection_error",
+                "Gemini upstream stream connection failed.",
+            ) from exc
+
     def _authorize(
         self,
         url: str,
@@ -341,9 +486,9 @@ class GeminiProviderAdapter:
         )
         return authorization
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, *, stream: bool = False) -> dict[str, str]:
         headers = {
-            "Accept": "application/json",
+            "Accept": "text/event-stream" if stream else "application/json",
             "Content-Type": "application/json",
         }
         if self._credential is not None:
@@ -420,22 +565,38 @@ def gemini_response_to_normalized(
 ) -> NormalizedResponse:
     """Normalize a strict Gemini non-streaming response."""
     candidates_value = payload.get("candidates")
-    if not isinstance(candidates_value, list) or not candidates_value:
-        raise _protocol_error(
-            "invalid_candidates",
-            "Gemini upstream response candidates must be a non-empty list.",
-        )
-    choices = [
-        _candidate_to_choice(candidate, fallback_index=index)
-        for index, candidate in enumerate(candidates_value)
-    ]
+    if isinstance(candidates_value, list) and candidates_value:
+        choices = [
+            _candidate_to_choice(candidate, fallback_index=index)
+            for index, candidate in enumerate(candidates_value)
+        ]
+    else:
+        prompt_feedback = _prompt_feedback(payload)
+        if prompt_feedback is None:
+            raise _protocol_error(
+                "invalid_candidates",
+                "Gemini upstream response candidates must be a non-empty list.",
+            )
+        choices = [
+            NormalizedChoice(
+                index=0,
+                message=NormalizedMessage(role="assistant", content=None),
+                finish_reason=prompt_feedback["block_reason"],
+                stop_reason="content_filter",
+                provider_metadata={"gemini": {"prompt_feedback": prompt_feedback}},
+            )
+        ]
     return NormalizedResponse(
         id=_optional_string(payload.get("responseId")),
         model=_optional_string(payload.get("modelVersion")) or profile.model,
         provider=profile.id,
         choices=choices,
         usage=_usage(payload.get("usageMetadata")),
-        provider_metadata=_response_provider_metadata(profile, admission=admission),
+        provider_metadata=_response_provider_metadata(
+            profile,
+            admission=admission,
+            payload=payload,
+        ),
     )
 
 
@@ -657,6 +818,7 @@ def _candidate_to_choice(value: Any, *, fallback_index: int) -> NormalizedChoice
         ),
         finish_reason=finish_reason,
         stop_reason=_normalize_stop_reason(finish_reason),
+        provider_metadata=_candidate_provider_metadata(value),
     )
 
 
@@ -715,19 +877,329 @@ def _normalize_stop_reason(value: str | None) -> NormalizedStopReason | None:
     return None
 
 
+def _stream_chunk_to_events(
+    payload: Mapping[str, Any],
+    *,
+    sequence: int,
+    terminal_seen: bool,
+    usage_seen: bool,
+    started_tool_calls: set[str],
+) -> tuple[list[NormalizedStreamEvent], bool, bool]:
+    events: list[NormalizedStreamEvent] = []
+    candidates = payload.get("candidates")
+    prompt_feedback = _prompt_feedback(payload)
+    if candidates is None:
+        candidate_items: list[Any] = []
+    elif isinstance(candidates, list):
+        candidate_items = candidates
+    else:
+        raise _protocol_error(
+            "invalid_stream_candidates",
+            "Gemini upstream stream candidates must be a list.",
+        )
+    if len(candidate_items) > 1:
+        raise _protocol_error(
+            "unsupported_stream_candidates",
+            "Gemini normalized streaming admits exactly one candidate.",
+        )
+    if usage_seen and (candidate_items or prompt_feedback is not None):
+        raise _protocol_error(
+            "stream_data_after_usage",
+            "Gemini upstream stream continued after its usage summary.",
+        )
+
+    chunk_terminal = False
+    if candidate_items:
+        candidate = candidate_items[0]
+        if not isinstance(candidate, Mapping):
+            raise _protocol_error(
+                "invalid_stream_candidate",
+                "Gemini upstream stream candidate must be an object.",
+            )
+        index = _integer(candidate.get("index"), default=0)
+        if index != 0:
+            raise _protocol_error(
+                "unsupported_stream_candidate_index",
+                "Gemini normalized streaming admits candidate index zero only.",
+            )
+        content = candidate.get("content")
+        finish_reason = _optional_string(candidate.get("finishReason"))
+        if content is None:
+            parts: list[Any] = []
+        elif isinstance(content, Mapping) and isinstance(content.get("parts"), list):
+            parts = content["parts"]
+        else:
+            raise _protocol_error(
+                "invalid_stream_content",
+                "Gemini upstream stream content must contain a parts list.",
+            )
+        if terminal_seen and (parts or finish_reason is not None):
+            raise _protocol_error(
+                "stream_data_after_terminal",
+                "Gemini upstream stream continued after its terminal state.",
+            )
+        for part_index, part in enumerate(parts):
+            if not isinstance(part, Mapping):
+                raise _protocol_error(
+                    "invalid_stream_part",
+                    "Gemini upstream stream part must be an object.",
+                )
+            if "text" in part:
+                text = part.get("text")
+                if not isinstance(text, str):
+                    raise _protocol_error(
+                        "invalid_stream_text",
+                        "Gemini upstream stream text part must contain text.",
+                    )
+                events.append(
+                    _stream_event(
+                        "content_delta",
+                        sequence=sequence + len(events),
+                        choice_index=0,
+                        model=_optional_string(payload.get("modelVersion")),
+                        content_delta=text,
+                    )
+                )
+                continue
+            if "functionCall" in part:
+                call = _response_tool_call(part.get("functionCall"))
+                key = call.id or f"{call.name}:{part_index}"
+                event_type = (
+                    "tool_call_delta"
+                    if key in started_tool_calls
+                    else "tool_call_start"
+                )
+                started_tool_calls.add(key)
+                events.append(
+                    _stream_event(
+                        event_type,
+                        sequence=sequence + len(events),
+                        choice_index=0,
+                        model=_optional_string(payload.get("modelVersion")),
+                        tool_call=call,
+                    )
+                )
+                continue
+            raise _protocol_error(
+                "unsupported_stream_part",
+                "Gemini upstream returned an unsupported stream part.",
+            )
+        if finish_reason is not None:
+            if terminal_seen:
+                raise _protocol_error(
+                    "duplicate_stream_terminal",
+                    "Gemini upstream repeated its terminal state.",
+                )
+            chunk_terminal = True
+            events.append(
+                _stream_event(
+                    "message_end",
+                    sequence=sequence + len(events),
+                    choice_index=0,
+                    model=_optional_string(payload.get("modelVersion")),
+                    finish_reason=finish_reason,
+                    stop_reason=_normalize_stop_reason(finish_reason),
+                    provider_metadata=_candidate_provider_metadata(candidate),
+                )
+            )
+    elif prompt_feedback is not None:
+        if terminal_seen:
+            raise _protocol_error(
+                "duplicate_stream_terminal",
+                "Gemini upstream repeated its terminal state.",
+            )
+        chunk_terminal = True
+        events.append(
+            _stream_event(
+                "message_end",
+                sequence=sequence + len(events),
+                choice_index=0,
+                finish_reason=prompt_feedback["block_reason"],
+                stop_reason="content_filter",
+                provider_metadata={"gemini": {"prompt_feedback": prompt_feedback}},
+            )
+        )
+
+    usage = _usage(payload.get("usageMetadata"))
+    chunk_usage = usage is not None
+    if usage is not None:
+        if usage_seen:
+            raise _protocol_error(
+                "duplicate_stream_usage",
+                "Gemini upstream repeated its usage summary.",
+            )
+        if not (terminal_seen or chunk_terminal):
+            raise _protocol_error(
+                "usage_before_stream_terminal",
+                "Gemini upstream reported usage before its terminal state.",
+            )
+        events.append(
+            _stream_event(
+                "usage",
+                sequence=sequence + len(events),
+                model=_optional_string(payload.get("modelVersion")),
+                usage=usage,
+            )
+        )
+    if not candidate_items and prompt_feedback is None and usage is None:
+        raise _protocol_error(
+            "empty_stream_chunk",
+            "Gemini upstream stream chunk contained no admitted event.",
+        )
+    return events, chunk_terminal, chunk_usage
+
+
+def _stream_event(event_type: Any, **values: Any) -> NormalizedStreamEvent:
+    return NormalizedStreamEvent(type=event_type, **values)
+
+
+def _candidate_provider_metadata(value: Mapping[str, Any]) -> dict[str, Any]:
+    ratings = _safety_ratings(value.get("safetyRatings"))
+    return {"gemini": {"safety_ratings": ratings}} if ratings is not None else {}
+
+
+def _prompt_feedback(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    value = payload.get("promptFeedback")
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise _protocol_error(
+            "invalid_prompt_feedback",
+            "Gemini upstream promptFeedback must be an object.",
+        )
+    block_reason = value.get("blockReason")
+    if not isinstance(block_reason, str) or not block_reason:
+        raise _protocol_error(
+            "invalid_prompt_feedback",
+            "Gemini upstream promptFeedback requires blockReason.",
+        )
+    result: dict[str, Any] = {"block_reason": block_reason}
+    ratings = _safety_ratings(value.get("safetyRatings"))
+    if ratings is not None:
+        result["safety_ratings"] = ratings
+    return result
+
+
+def _safety_ratings(value: Any) -> list[dict[str, Any]] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise _protocol_error(
+            "invalid_safety_ratings",
+            "Gemini upstream safetyRatings must be a list.",
+        )
+    ratings: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise _protocol_error(
+                "invalid_safety_rating",
+                "Gemini upstream safety rating must be an object.",
+            )
+        rating = {
+            key: item[key]
+            for key in ("category", "probability", "probabilityScore", "blocked")
+            if key in item
+        }
+        if not isinstance(rating.get("category"), str):
+            raise _protocol_error(
+                "invalid_safety_rating",
+                "Gemini upstream safety rating requires a category.",
+            )
+        ratings.append(
+            {
+                "category": rating["category"],
+                **(
+                    {"probability": rating["probability"]}
+                    if isinstance(rating.get("probability"), str)
+                    else {}
+                ),
+                **(
+                    {"probability_score": rating["probabilityScore"]}
+                    if isinstance(rating.get("probabilityScore"), (int, float))
+                    and not isinstance(rating.get("probabilityScore"), bool)
+                    else {}
+                ),
+                **(
+                    {"blocked": rating["blocked"]}
+                    if isinstance(rating.get("blocked"), bool)
+                    else {}
+                ),
+            }
+        )
+    return ratings
+
+
 def _response_provider_metadata(
     profile: GeminiUpstreamProfile,
     *,
     admission: ProtocolBridgeAdmission,
+    payload: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
-        "gemini": {
-            "profile_id": profile.id,
-            "profile_revision": profile.revision,
-            "dialect": profile.dialect,
-            "admission_schema_version": admission.schema_version,
-        }
+    metadata: dict[str, Any] = {
+        "profile_id": profile.id,
+        "profile_revision": profile.revision,
+        "dialect": profile.dialect,
+        "admission_schema_version": admission.schema_version,
     }
+    if payload is not None:
+        prompt_feedback = _prompt_feedback(payload)
+        if prompt_feedback is not None:
+            metadata["prompt_feedback"] = prompt_feedback
+    return {"gemini": metadata}
+
+
+def _pop_sse_block(buffer: bytes) -> tuple[bytes | None, bytes]:
+    separators = (
+        (buffer.find(b"\r\n\r\n"), 4),
+        (buffer.find(b"\n\n"), 2),
+        (buffer.find(b"\r\r"), 2),
+    )
+    found = [(index, length) for index, length in separators if index >= 0]
+    if not found:
+        return None, buffer
+    index, length = min(found, key=lambda item: item[0])
+    return buffer[:index], buffer[index + length :]
+
+
+def _parse_sse_block(block: bytes) -> Mapping[str, Any] | None:
+    data_lines: list[bytes] = []
+    for line in block.replace(b"\r\n", b"\n").replace(b"\r", b"\n").split(b"\n"):
+        if line.startswith(b":"):
+            continue
+        if line == b"data":
+            data_lines.append(b"")
+        elif line.startswith(b"data:"):
+            data_lines.append(line[5:].lstrip())
+    if not data_lines:
+        return None
+    raw_event = b"\n".join(data_lines)
+    if raw_event == b"[DONE]":
+        raise _protocol_error(
+            "unexpected_stream_done",
+            "Gemini GenerateContent stream used an unexpected done marker.",
+        )
+    try:
+        parsed = json.loads(raw_event)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _protocol_error(
+            "invalid_stream_json",
+            "Gemini upstream stream contained invalid JSON.",
+        ) from exc
+    if not isinstance(parsed, Mapping):
+        raise _protocol_error(
+            "invalid_stream_chunk",
+            "Gemini upstream stream chunk must be an object.",
+        )
+    return parsed
+
+
+async def _is_disconnected(callback: Callable[[], Any] | None) -> bool:
+    if callback is None:
+        return False
+    result = callback()
+    if hasattr(result, "__await__"):
+        result = await result
+    return bool(result)
 
 
 def _json_body(payload: Mapping[str, Any]) -> bytes:

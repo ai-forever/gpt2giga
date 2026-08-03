@@ -2,7 +2,7 @@ import base64
 import json
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import httpx
 import pytest
 
@@ -203,6 +203,30 @@ def _fake_app():
     return app
 
 
+def _streaming_app(chunks):
+    app = FastAPI()
+    app.state.requests = []
+
+    @app.post("/v1beta/models/gemini-fixture:streamGenerateContent")
+    async def stream(request: Request):
+        app.state.requests.append(
+            {
+                "path": request.url.path,
+                "query": str(request.url.query),
+                "api_key": request.headers.get("x-goog-api-key"),
+                "payload": await request.json(),
+            }
+        )
+
+        async def events():
+            for chunk in chunks:
+                yield f"data: {json.dumps(chunk)}\n\n"
+
+        return StreamingResponse(events(), media_type="text/event-stream")
+
+    return app
+
+
 async def test_adapter_executes_text_image_tools_and_json_schema_through_fake_server():
     app = _fake_app()
     network = _NetworkAuthorizer()
@@ -340,3 +364,146 @@ def test_profile_requires_exact_credential_and_reviewed_client_policies():
             credential=None,
             authorize_network=network,
         )
+
+
+async def test_adapter_streams_text_function_usage_and_one_terminal_event():
+    chunks = [
+        {
+            "responseId": "gemini-stream-1",
+            "modelVersion": "gemini-fixture-001",
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {"role": "model", "parts": [{"text": "Hel"}]},
+                }
+            ],
+        },
+        {
+            "responseId": "gemini-stream-1",
+            "modelVersion": "gemini-fixture-001",
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "id": "call-stream",
+                                    "name": "lookup",
+                                    "args": {"q": "ping"},
+                                }
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+        {
+            "responseId": "gemini-stream-1",
+            "modelVersion": "gemini-fixture-001",
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {"role": "model", "parts": [{"text": "lo"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 7,
+                "candidatesTokenCount": 4,
+                "totalTokenCount": 11,
+            },
+        },
+    ]
+    app = _streaming_app(chunks)
+    network = _NetworkAuthorizer()
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app))
+    adapter = GeminiProviderAdapter(
+        _profile(),
+        credential="secret-value-canary",
+        authorize_network=network,
+        http_client=client,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            _request(stream=True),
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    ]
+    await client.aclose()
+
+    assert [event.type for event in events] == [
+        "message_start",
+        "content_delta",
+        "tool_call_start",
+        "content_delta",
+        "message_end",
+        "usage",
+    ]
+    assert events[1].content_delta == "Hel"
+    assert events[2].tool_call.id == "call-stream"
+    assert events[2].tool_call.arguments == {"q": "ping"}
+    assert events[3].content_delta == "lo"
+    assert events[4].stop_reason == "stop"
+    assert events[5].usage.total_tokens == 11
+    assert len([event for event in events if event.type == "message_end"]) == 1
+    recorded = app.state.requests[0]
+    assert recorded["query"] == "alt=sse"
+    assert recorded["api_key"] == "secret-value-canary"
+    assert network.authorizations[0].response_validations
+
+
+async def test_stream_projects_prompt_safety_block_as_content_filter_terminal():
+    chunks = [
+        {
+            "promptFeedback": {
+                "blockReason": "SAFETY",
+                "safetyRatings": [
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "probability": "HIGH",
+                        "blocked": True,
+                    }
+                ],
+            }
+        }
+    ]
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_streaming_app(chunks))
+    )
+    adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            _request(stream=True),
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    ]
+    await client.aclose()
+
+    assert [event.type for event in events] == ["message_start", "message_end"]
+    assert events[-1].finish_reason == "SAFETY"
+    assert events[-1].stop_reason == "content_filter"
+    assert events[-1].provider_metadata["gemini"]["prompt_feedback"] == {
+        "block_reason": "SAFETY",
+        "safety_ratings": [
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "probability": "HIGH",
+                "blocked": True,
+            }
+        ],
+    }

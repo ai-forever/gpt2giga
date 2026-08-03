@@ -22,3 +22,26 @@
   the reviewed normalized subset. Application composition belongs to the
   integration lane.
 - Shared-file patch request: none for this slice
+
+## GEM-02 — Implement streaming, usage and safety projection
+
+- Status: complete
+- Baseline: `e3adef8debacb8c477a896e601b0c05a3e68be48`
+- Scope: `src/gpt2giga/providers/gemini/adapter.py`,
+  `tests/test_protocol/test_gemini_upstream_adapter.py`, and this lane ledger
+- Contract/evidence: `GEMINI-REST-STREAM-GENERATE-CONTENT-2026-08-03`,
+  `GEMINI-SAFETY-PROJECTION-2026-08-03`
+- Tests:
+  - `.venv/bin/pytest tests/test_protocol/test_gemini_upstream_adapter.py
+    tests/test_protocol/test_gemini_adapter.py
+    tests/contracts/test_gemini_contract.py -n 0 -q`: `62 passed`
+  - `.venv/bin/ruff check src/gpt2giga/providers/gemini
+    tests/test_protocol/test_gemini_upstream_adapter.py`: passed
+  - `.venv/bin/ruff format --check src/gpt2giga/providers/gemini
+    tests/test_protocol/test_gemini_upstream_adapter.py`: `3 files already
+    formatted`
+  - `git diff --check`: passed
+- Known limitations: normalized streaming admits candidate index zero only and
+  does not expose provider-specific thought parts. Safety metadata is restricted
+  to category, probability, score, and blocked flags; provider prose is omitted.
+- Shared-file patch request: none for this slice
