@@ -8,7 +8,7 @@ from enum import Enum
 import hashlib
 import json
 from types import MappingProxyType
-from typing import Annotated, Any, Literal, Self, TypeVar
+from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import Field, model_validator
 
@@ -148,7 +148,7 @@ class BridgeSemanticRule(NormalizedBaseModel):
     )
 
     @model_validator(mode="after")
-    def _validate_predicate(self) -> Self:
+    def _validate_predicate(self) -> BridgeSemanticRule:
         if self.disposition is LossDisposition.CONDITIONAL:
             if self.capability_predicate is None:
                 raise ValueError("conditional semantic rows require a predicate")
@@ -171,7 +171,7 @@ class BridgeLossCell(NormalizedBaseModel):
     semantics: tuple[BridgeSemanticRule, ...]
 
     @model_validator(mode="after")
-    def _validate_complete_cell(self) -> Self:
+    def _validate_complete_cell(self) -> BridgeLossCell:
         semantics = tuple(sorted(self.semantics, key=lambda row: row.semantic.value))
         present = [row.semantic for row in semantics]
         if len(present) != len(set(present)):
@@ -197,7 +197,7 @@ class BridgeLossMatrix(NormalizedBaseModel):
     cells: tuple[BridgeLossCell, ...]
 
     @model_validator(mode="after")
-    def _validate_complete_matrix(self) -> Self:
+    def _validate_complete_matrix(self) -> BridgeLossMatrix:
         cells = tuple(
             sorted(
                 self.cells,
