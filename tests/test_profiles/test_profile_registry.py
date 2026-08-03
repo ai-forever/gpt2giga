@@ -90,6 +90,7 @@ def test_alias_resolves_to_exact_provider_model_and_revisions() -> None:
         "capability_profile": "gemini-current-v1",
         "loss_matrix_revision": MATRIX_REVISION,
     }
+    assert registry.resolve("zeta/current") is route
 
 
 @pytest.mark.parametrize(
@@ -139,6 +140,9 @@ def test_model_manifest_is_lexical_deterministic_and_content_free() -> None:
     assert "base_url" not in serialized
     assert "upstream_model" not in serialized
     assert "hidden/disabled" not in serialized
+
+    first["models"][0]["public_alias"] = "tampered"
+    assert registry.models_manifest() == second
 
 
 def test_registry_rejects_noncanonical_matrix_revision() -> None:

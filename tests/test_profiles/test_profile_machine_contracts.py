@@ -133,7 +133,8 @@ def test_capability_projection_binds_revisions_sorts_cells_and_is_content_free()
     None
 ):
     contracts = _contracts()
-    manifest = contracts.capabilities_manifest(_matrix_manifest())
+    source = _matrix_manifest()
+    manifest = contracts.capabilities_manifest(source)
 
     assert manifest["schema_version"] == BRIDGE_CAPABILITIES_SCHEMA_VERSION
     assert manifest["matrix_revision"] == MATRIX_REVISION
@@ -146,6 +147,14 @@ def test_capability_projection_binds_revisions_sorts_cells_and_is_content_free()
     assert SECRET.lower() not in serialized
     assert "credential" not in serialized
     assert "prompt" not in serialized
+
+    manifest["cells"][0]["status"] = "tampered"
+    repeated = contracts.capabilities_manifest(source)
+    assert repeated["cells"][0]["status"] == "blocked"
+
+    source["cells"][0]["credential"] = SECRET
+    with pytest.raises(ProviderProfileError):
+        contracts.capabilities_manifest(source)
 
 
 @pytest.mark.parametrize(

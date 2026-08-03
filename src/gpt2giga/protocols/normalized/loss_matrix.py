@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Collection, Mapping
+from copy import deepcopy
 from enum import Enum
 import hashlib
 import json
@@ -613,14 +614,27 @@ def _strip_extension_buckets(value: Any) -> Any:
 
 BRIDGE_LOSS_MATRIX_V1 = _build_bridge_loss_matrix()
 BRIDGE_LOSS_MATRIX_SCHEMA_VERSION = "gpt2giga.bridge-loss-matrix.v1"
+_BRIDGE_LOSS_MATRIX_REVISION = BRIDGE_LOSS_MATRIX_V1.revision
+_BRIDGE_LOSS_MATRIX_PAYLOAD = BRIDGE_LOSS_MATRIX_V1.canonical_payload()
+_BRIDGE_LOSS_CELLS = MappingProxyType(
+    {
+        (cell.public_protocol, cell.upstream_provider): cell
+        for cell in BRIDGE_LOSS_MATRIX_V1.cells
+    }
+)
+_BRIDGE_LOSS_RULES = MappingProxyType(
+    {
+        identity: MappingProxyType({row.semantic: row for row in cell.semantics})
+        for identity, cell in _BRIDGE_LOSS_CELLS.items()
+    }
+)
 
 
 def bridge_loss_matrix_json() -> dict[str, Any]:
     """Return the canonical complete matrix with its exact revision digest."""
-    return {
-        **BRIDGE_LOSS_MATRIX_V1.canonical_payload(),
-        "matrix_revision": BRIDGE_LOSS_MATRIX_V1.revision,
-    }
+    payload = deepcopy(_BRIDGE_LOSS_MATRIX_PAYLOAD)
+    payload["matrix_revision"] = _BRIDGE_LOSS_MATRIX_REVISION
+    return payload
 
 
 def admit_bridge_route(
@@ -642,12 +656,20 @@ def admit_bridge_route(
         config_revision=config_revision,
         capability_profile_revision=capability_profile_revision,
     )
-    cell = next(
-        cell
-        for cell in matrix.cells
-        if cell.public_protocol is public_protocol
-        and cell.upstream_provider is upstream_provider
-    )
+    identity_key = (public_protocol, upstream_provider)
+    if matrix is BRIDGE_LOSS_MATRIX_V1:
+        cell = _BRIDGE_LOSS_CELLS[identity_key]
+        rules = _BRIDGE_LOSS_RULES[identity_key]
+        matrix_revision = _BRIDGE_LOSS_MATRIX_REVISION
+    else:
+        cell = next(
+            cell
+            for cell in matrix.cells
+            if cell.public_protocol is public_protocol
+            and cell.upstream_provider is upstream_provider
+        )
+        rules = {row.semantic: row for row in cell.semantics}
+        matrix_revision = matrix.revision
     if cell.status is BridgeSupportStatus.BLOCKED:
         raise BridgeMatrixAdmissionError(
             public_protocol=public_protocol,
@@ -668,7 +690,6 @@ def admit_bridge_route(
         )
     )
     predicates = frozenset(capability_predicates)
-    rules = {row.semantic: row for row in cell.semantics}
     satisfied: set[str] = set()
     evidence = set(cell.evidence_ids)
     for item in requested:
@@ -701,7 +722,7 @@ def admit_bridge_route(
         profile_id=identity.profile_id,
         config_revision=identity.config_revision,
         capability_profile_revision=identity.capability_profile_revision,
-        loss_matrix_revision=matrix.revision,
+        loss_matrix_revision=matrix_revision,
         support_status=cell.status,
         requested_semantics=requested,
         satisfied_capability_predicates=tuple(sorted(satisfied)),

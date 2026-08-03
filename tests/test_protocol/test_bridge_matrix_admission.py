@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from gpt2giga.protocols.normalized.loss_matrix import (
     BRIDGE_LOSS_MATRIX_V1,
     BridgeAdmissionDecision,
+    BridgeLossMatrix,
     BridgeMatrixAdmissionError,
     BridgeSemantic,
     BridgeSupportStatus,
@@ -42,6 +43,14 @@ def test_exact_semantics_produce_content_free_revision_bound_decision() -> None:
     assert "prompt" not in serialized
     assert "credential" not in serialized
     assert "api_key" not in serialized
+
+
+def test_custom_matrix_keeps_its_own_revision_and_admission_rules() -> None:
+    custom = BridgeLossMatrix.model_validate(BRIDGE_LOSS_MATRIX_V1.canonical_payload())
+
+    decision = admit_bridge_route(**_route_kwargs(), matrix=custom)
+
+    assert decision.loss_matrix_revision == custom.revision
 
 
 async def test_blocked_route_rejects_before_provider_dispatch() -> None:

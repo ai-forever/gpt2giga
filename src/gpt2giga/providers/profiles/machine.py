@@ -40,6 +40,8 @@ class ProviderMachineContracts:
 
     def __init__(self, registry: ProviderRegistry) -> None:
         self._registry = registry
+        self._capability_source: Mapping[str, Any] | None = None
+        self._capability_template: dict[str, Any] | None = None
 
     def inspect_manifest(self) -> dict[str, Any]:
         """Return the validated startup config with credential values redacted."""
@@ -111,6 +113,11 @@ class ProviderMachineContracts:
         matrix_manifest: Mapping[str, Any],
     ) -> dict[str, Any]:
         """Bind an A6-owned complete matrix to this exact profile revision."""
+        if (
+            self._capability_template is not None
+            and matrix_manifest == self._capability_source
+        ):
+            return deepcopy(self._capability_template)
         matrix_revision = matrix_manifest.get("matrix_revision")
         if matrix_revision != self._registry.loss_matrix_revision:
             raise _invalid_capability_manifest()
@@ -139,12 +146,15 @@ class ProviderMachineContracts:
                 key=lambda item: item[0],
             )
         ]
-        return {
+        manifest = {
             "schema_version": BRIDGE_CAPABILITIES_SCHEMA_VERSION,
             "config_revision": self._registry.config_revision,
             "matrix_revision": self._registry.loss_matrix_revision,
             "cells": ordered,
         }
+        self._capability_source = deepcopy(matrix_manifest)
+        self._capability_template = manifest
+        return deepcopy(manifest)
 
 
 def not_ready_manifest(reason_id: str = "registry_not_loaded") -> dict[str, Any]:

@@ -52,6 +52,16 @@ def test_bridge_loss_matrix_serialization_and_revision_are_deterministic() -> No
     assert json.dumps(payload, sort_keys=True)
 
 
+def test_bridge_loss_matrix_projection_is_isolated_from_caller_mutation() -> None:
+    first = bridge_loss_matrix_json()
+    first["cells"][0]["status"] = "tampered"
+
+    second = bridge_loss_matrix_json()
+
+    assert second["cells"][0]["status"] != "tampered"
+    assert second["matrix_revision"] == BRIDGE_LOSS_MATRIX_V1.revision
+
+
 def test_bridge_loss_matrix_revision_covers_semantic_evidence() -> None:
     payload = BRIDGE_LOSS_MATRIX_V1.canonical_payload()
     payload["cells"][0]["semantics"][0]["evidence_ids"] = ["changed-evidence"]

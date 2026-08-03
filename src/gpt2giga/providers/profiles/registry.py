@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 import re
 from types import MappingProxyType
@@ -73,8 +74,11 @@ class ProviderRegistry:
                 "invalid_profile_schema",
                 "Loss matrix revision must be a canonical SHA-256 revision.",
             )
+        config_revision = loaded.revision
         entries: dict[str, tuple[ProviderProfile, ProviderModelAlias]] = {}
+        routes: dict[str, ResolvedProviderRoute] = {}
         for profile in loaded.config.profiles:
+            profile_revision = profile.revision
             for model in profile.models:
                 if model.public_alias in entries:
                     raise ProviderProfileError(
@@ -82,14 +86,46 @@ class ProviderRegistry:
                         "Public model aliases must be globally unique.",
                     )
                 entries[model.public_alias] = (profile, model)
+                if model.enabled:
+                    routes[model.public_alias] = ResolvedProviderRoute(
+                        config_revision=config_revision,
+                        profile_revision=profile_revision,
+                        profile_id=profile.profile_id,
+                        public_alias=model.public_alias,
+                        provider_kind=profile.provider_kind,
+                        upstream_model=model.upstream_model,
+                        capability_profile=model.capability_profile,
+                        loss_matrix_revision=loss_matrix_revision,
+                        support_status=model.support_status,
+                        deprecated=model.deprecated,
+                    )
         self._loaded = loaded
+        self._config_revision = config_revision
         self._loss_matrix_revision = loss_matrix_revision
         self._entries = MappingProxyType(entries)
+        self._routes = MappingProxyType(routes)
+        self._public_aliases = tuple(sorted(routes))
+        self._models_manifest = {
+            "schema_version": BRIDGE_MODELS_SCHEMA_VERSION,
+            "config_revision": config_revision,
+            "matrix_revision": loss_matrix_revision,
+            "models": [
+                {
+                    "public_alias": route.public_alias,
+                    "provider_kind": route.provider_kind.value,
+                    "capability_profile": route.capability_profile,
+                    "support_status": route.support_status.value,
+                    "deprecated": route.deprecated,
+                    "profile_revision": route.profile_revision,
+                }
+                for route in (routes[alias] for alias in self._public_aliases)
+            ],
+        }
 
     @property
     def config_revision(self) -> str:
         """Return the exact loaded configuration revision."""
-        return self._loaded.revision
+        return self._config_revision
 
     @property
     def config(self) -> ProviderProfileConfig:
@@ -105,24 +141,16 @@ class ProviderRegistry:
         """Resolve only an exact, enabled public alias without fallback."""
         if not isinstance(public_alias, str):
             raise ProviderAliasError("alias_not_string")
+        route = self._routes.get(public_alias)
+        if route is not None:
+            return route
         entry = self._entries.get(public_alias)
         if entry is None:
             raise ProviderAliasError("alias_unknown")
-        profile, model = entry
+        _, model = entry
         if not model.enabled:
             raise ProviderAliasError("alias_disabled")
-        return ResolvedProviderRoute(
-            config_revision=self.config_revision,
-            profile_revision=profile.revision,
-            profile_id=profile.profile_id,
-            public_alias=model.public_alias,
-            provider_kind=profile.provider_kind,
-            upstream_model=model.upstream_model,
-            capability_profile=model.capability_profile,
-            loss_matrix_revision=self.loss_matrix_revision,
-            support_status=model.support_status,
-            deprecated=model.deprecated,
-        )
+        raise ProviderAliasError("alias_unknown")  # pragma: no cover
 
     def credential_for(self, route: ResolvedProviderRoute) -> str:
         """Resolve a credential only after an exact route has been selected."""
@@ -133,30 +161,8 @@ class ProviderRegistry:
 
     def public_aliases(self) -> tuple[str, ...]:
         """Return enabled aliases in deterministic lexical order."""
-        return tuple(
-            sorted(
-                alias for alias, (_, model) in self._entries.items() if model.enabled
-            )
-        )
+        return self._public_aliases
 
     def models_manifest(self) -> dict[str, Any]:
         """Return deterministic content-free data for `/bridge/models`."""
-        models: list[dict[str, object]] = []
-        for alias in self.public_aliases():
-            route = self.resolve(alias)
-            models.append(
-                {
-                    "public_alias": route.public_alias,
-                    "provider_kind": route.provider_kind.value,
-                    "capability_profile": route.capability_profile,
-                    "support_status": route.support_status.value,
-                    "deprecated": route.deprecated,
-                    "profile_revision": route.profile_revision,
-                }
-            )
-        return {
-            "schema_version": BRIDGE_MODELS_SCHEMA_VERSION,
-            "config_revision": self.config_revision,
-            "matrix_revision": self.loss_matrix_revision,
-            "models": models,
-        }
+        return deepcopy(self._models_manifest)
