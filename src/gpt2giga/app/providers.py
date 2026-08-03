@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Literal
 
+from gpt2giga.capabilities import (
+    capability_predicates_for_semantics,
+    resolve_gigachat_route_capabilities,
+)
 from gpt2giga.core.context import update_request_context
 from gpt2giga.protocols.normalized import (
     BridgeSemantic,
@@ -27,6 +32,11 @@ class BridgeProviderRuntime:
             profile.profile_id: ProviderNetworkAuthorizer(profile)
             for profile in self.registry.config.profiles
         }
+        self._builtin_tools_enabled = not getattr(
+            state.config.proxy_settings,
+            "disable_builtin_tool_mapping",
+            False,
+        )
         for public_alias in self.registry.public_aliases():
             route = self.registry.resolve(public_alias)
             if route.provider_kind is not ProviderKind.GIGACHAT:
@@ -61,6 +71,29 @@ class BridgeProviderRuntime:
     ) -> Any:
         """Admit and return the exact startup-owned adapter for one request."""
         route = self.registry.resolve(request.model)
+        requested_semantics = _requested_semantics(request)
+        capability_predicates: frozenset[str] = frozenset()
+        capability_predicate_reasons: Mapping[str, str] = {}
+        capability_metadata: dict[str, str] = {}
+        if route.provider_kind is ProviderKind.GIGACHAT:
+            effective = resolve_gigachat_route_capabilities(
+                model_id=route.upstream_model,
+                public_protocol=PublicProtocol.OPENAI_RESPONSES.value,
+                api_mode=api_mode,
+                route_id=route.profile_id,
+                builtin_tools_enabled=self._builtin_tools_enabled,
+            )
+            predicate_admission = capability_predicates_for_semantics(
+                effective,
+                requested_semantics,
+            )
+            capability_predicates = predicate_admission.supported
+            capability_predicate_reasons = predicate_admission.failure_reasons
+            capability_metadata = {
+                "effective_capability_revision": (
+                    predicate_admission.capability_revision
+                )
+            }
         admit_bridge_route(
             public_protocol=PublicProtocol.OPENAI_RESPONSES,
             public_alias=route.public_alias,
@@ -68,12 +101,15 @@ class BridgeProviderRuntime:
             profile_id=route.profile_id,
             config_revision=route.config_revision,
             capability_profile_revision=route.capability_profile,
-            requested_semantics=_requested_semantics(request),
+            requested_semantics=requested_semantics,
+            capability_predicates=capability_predicates,
+            capability_predicate_reasons=capability_predicate_reasons,
         )
         update_request_context(
             model_requested=route.public_alias,
             model_effective=route.upstream_model,
             bridge_route=route.execution_context(),
+            metadata=capability_metadata,
         )
         return self._adapters[(route.public_alias, api_mode)]
 
@@ -103,6 +139,21 @@ def _requested_semantics(
         semantics[BridgeSemantic.PARALLEL_TOOL_CALLS] = "parallel_tool_calls"
     if request.response_format is not None:
         semantics[BridgeSemantic.STRUCTURED_OUTPUT_JSON_SCHEMA] = "text.format"
+    if any(
+        part.image_reference is not None or part.type == "image_url"
+        for message in request.messages
+        if isinstance(message.content, list)
+        for part in message.content
+    ):
+        semantics[BridgeSemantic.MULTIMODAL_INPUTS] = "input"
+        semantics[BridgeSemantic.FILES_AND_IMAGES] = "input"
+    elif any(
+        part.type == "file"
+        for message in request.messages
+        if isinstance(message.content, list)
+        for part in message.content
+    ):
+        semantics[BridgeSemantic.FILES_AND_IMAGES] = "input"
     if request.stream:
         semantics[BridgeSemantic.STREAM_LIFECYCLE] = "stream"
         semantics[BridgeSemantic.DISCONNECT] = "stream"

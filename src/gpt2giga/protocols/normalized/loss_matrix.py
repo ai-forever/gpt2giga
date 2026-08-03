@@ -664,6 +664,7 @@ def admit_bridge_route(
     capability_profile_revision: str,
     requested_semantics: Mapping[BridgeSemantic, str],
     capability_predicates: Collection[str] = (),
+    capability_predicate_reasons: Mapping[str, str] | None = None,
     matrix: BridgeLossMatrix = BRIDGE_LOSS_MATRIX_V1,
 ) -> BridgeAdmissionDecision:
     """Admit one exact route without constructing a provider client."""
@@ -722,12 +723,13 @@ def admit_bridge_route(
         if rule.disposition is LossDisposition.CONDITIONAL:
             predicate = rule.capability_predicate
             if predicate is None or predicate not in predicates:
+                predicate_reasons = capability_predicate_reasons or {}
                 raise BridgeMatrixAdmissionError(
                     public_protocol=public_protocol,
                     upstream_provider=upstream_provider,
                     public_alias=identity.public_alias,
                     public_field_path=item.public_field_path,
-                    reason_id=rule.reason_id,
+                    reason_id=predicate_reasons.get(predicate or "", rule.reason_id),
                 )
             satisfied.add(predicate)
         evidence.update(rule.evidence_ids)
@@ -761,6 +763,7 @@ async def admit_then_dispatch_bridge_route(
     capability_profile_revision: str,
     requested_semantics: Mapping[BridgeSemantic, str],
     capability_predicates: Collection[str] = (),
+    capability_predicate_reasons: Mapping[str, str] | None = None,
     matrix: BridgeLossMatrix = BRIDGE_LOSS_MATRIX_V1,
 ) -> _DispatchResult:
     """Run fail-closed matrix admission before exact provider dispatch."""
@@ -773,6 +776,7 @@ async def admit_then_dispatch_bridge_route(
         capability_profile_revision=capability_profile_revision,
         requested_semantics=requested_semantics,
         capability_predicates=capability_predicates,
+        capability_predicate_reasons=capability_predicate_reasons,
         matrix=matrix,
     )
     return await dispatch(decision)
