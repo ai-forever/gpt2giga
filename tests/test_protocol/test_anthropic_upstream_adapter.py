@@ -12,6 +12,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
     NormalizedGenerationConfig,
     NormalizedMessage,
+    NormalizedTokenCountRequest,
     NormalizedTokenLimits,
     NormalizedTool,
     NormalizedToolCall,
@@ -19,11 +20,13 @@ from gpt2giga.protocols.normalized import (
 )
 from gpt2giga.providers.anthropic import (
     ANTHROPIC_API_VERSION,
+    ANTHROPIC_CAPABILITY_EVIDENCE_SCHEMA_VERSION,
     ANTHROPIC_IMPLEMENTED_FEATURES_V1,
     AnthropicProviderAdapter,
     AnthropicProtocolError,
     AnthropicUnsupportedSemanticError,
     AnthropicUpstreamError,
+    anthropic_capability_evidence,
     anthropic_profile,
 )
 
@@ -163,6 +166,19 @@ def _fake_app():
                 "usage": {"input_tokens": 11, "output_tokens": 5},
             }
         )
+
+    @app.post("/v1/messages/count_tokens")
+    async def count_tokens(request: Request):
+        payload = await request.json()
+        app.state.requests.append(
+            {
+                "path": request.url.path,
+                "api_key": request.headers.get("x-api-key"),
+                "anthropic_version": request.headers.get("anthropic-version"),
+                "payload": payload,
+            }
+        )
+        return {"input_tokens": 17}
 
     return app
 
@@ -333,6 +349,104 @@ async def test_adapter_executes_messages_and_tools_through_fake_server():
     assert network.authorizations[0].response_validations
 
 
+async def test_count_tokens_uses_only_the_explicit_anthropic_operation():
+    app = _fake_app()
+    network = _NetworkAuthorizer()
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app))
+    adapter = AnthropicProviderAdapter(
+        _profile(),
+        credential="secret-value-canary",
+        authorize_network=network,
+        http_client=client,
+    )
+    chat = _request()
+    request = NormalizedTokenCountRequest(
+        model="claude-fixture",
+        input=chat,
+    )
+
+    response = await adapter.count_tokens(
+        request,
+        downstream=DownstreamProtocol.ANTHROPIC,
+        downstream_capabilities=frozenset(BridgeFeature),
+        input_token_count=11,
+    )
+    await client.aclose()
+
+    assert response.input_tokens == 17
+    assert response.model == "claude-fixture"
+    assert response.limits.max_input_tokens == 6144
+    assert [intent.purpose for intent in network.intents] == [
+        "provider.anthropic.count-tokens"
+    ]
+    observed = app.state.requests[0]
+    assert observed["path"] == "/v1/messages/count_tokens"
+    assert observed["payload"]["model"] == "claude-fixture"
+    assert "max_tokens" not in observed["payload"]
+    assert "stream" not in observed["payload"]
+    assert observed["payload"]["tools"][0]["name"] == "lookup"
+
+
+async def test_cache_usage_and_refusal_facts_are_normalized_without_explanation():
+    async def handler(_request):
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_refusal",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-fixture",
+                "content": [{"type": "text", "text": "I cannot help."}],
+                "stop_reason": "refusal",
+                "stop_sequence": None,
+                "stop_details": {
+                    "type": "refusal",
+                    "category": "general_harms",
+                    "explanation": "sensitive-explanation-canary",
+                },
+                "usage": {
+                    "input_tokens": 3,
+                    "cache_creation_input_tokens": 2,
+                    "cache_read_input_tokens": 5,
+                    "output_tokens": 4,
+                    "service_tier": "priority",
+                },
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = AnthropicProviderAdapter(
+        _profile(),
+        credential="secret-value-canary",
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    response = await adapter.complete(
+        _request(),
+        downstream=DownstreamProtocol.OPENAI,
+        downstream_capabilities=frozenset(BridgeFeature),
+        input_token_count=10,
+    )
+    await client.aclose()
+
+    assert response.choices[0].stop_reason == "content_filter"
+    assert response.usage.input_tokens == 10
+    assert response.usage.output_tokens == 4
+    assert response.usage.total_tokens == 14
+    assert response.usage.provider_metadata["anthropic"] == {
+        "input_tokens": 3,
+        "output_tokens": 4,
+        "cache_creation_input_tokens": 2,
+        "cache_read_input_tokens": 5,
+        "service_tier": "priority",
+    }
+    assert response.provider_metadata["anthropic"]["refusal_category"] == (
+        "general_harms"
+    )
+    assert "sensitive-explanation-canary" not in response.model_dump_json()
+
+
 async def test_adapter_streams_content_tools_usage_and_one_terminal_state():
     app = _streaming_app(_stream_events())
     network = _NetworkAuthorizer()
@@ -384,6 +498,72 @@ async def test_adapter_streams_content_tools_usage_and_one_terminal_state():
     assert events[6].metadata == {"anthropic_stop_reason": "tool_use"}
     assert app.state.requests[0]["stream"] is True
     assert network.authorizations[0].response_validations
+
+
+async def test_stream_preserves_cache_usage_and_refusal_category():
+    raw_events = _stream_events()
+    raw_events[0]["message"]["usage"] = {
+        "input_tokens": 3,
+        "cache_creation_input_tokens": 2,
+        "cache_read_input_tokens": 5,
+        "output_tokens": 1,
+        "service_tier": "standard",
+    }
+    raw_events = raw_events[:4] + [
+        {
+            "type": "message_delta",
+            "delta": {
+                "stop_reason": "refusal",
+                "stop_sequence": None,
+                "stop_details": {
+                    "type": "refusal",
+                    "category": "cyber",
+                    "explanation": "stream-explanation-canary",
+                },
+            },
+            "usage": {
+                "cache_read_input_tokens": 6,
+                "output_tokens": 4,
+            },
+        },
+        {"type": "message_stop"},
+    ]
+    app = _streaming_app(raw_events)
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app))
+    adapter = AnthropicProviderAdapter(
+        _profile(),
+        credential="secret-value-canary",
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+    request = _request()
+    request.stream = True
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            request,
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=frozenset(BridgeFeature),
+            input_token_count=11,
+        )
+    ]
+    await client.aclose()
+
+    usage = next(event.usage for event in events if event.type == "usage")
+    terminal = events[-1]
+    assert usage.input_tokens == 11
+    assert usage.output_tokens == 4
+    assert usage.total_tokens == 15
+    assert usage.provider_metadata["anthropic"]["cache_read_input_tokens"] == 6
+    assert terminal.stop_reason == "content_filter"
+    assert terminal.metadata == {
+        "anthropic_stop_reason": "refusal",
+        "anthropic_refusal_category": "cyber",
+    }
+    assert "stream-explanation-canary" not in "".join(
+        event.model_dump_json() for event in events
+    )
 
 
 async def test_stream_disconnect_emits_cancellation_and_closes_upstream():
@@ -591,6 +771,62 @@ async def test_timeout_is_normalized_and_task_cancellation_propagates():
     await cancel_client.aclose()
 
 
+@pytest.mark.parametrize(
+    ("status", "error_type", "error_class", "retryable"),
+    [
+        (401, "authentication_error", "authentication", False),
+        (429, "rate_limit_error", "rate_limit", True),
+        (529, "overloaded_error", "upstream", True),
+    ],
+)
+async def test_http_status_errors_preserve_bounded_provider_facts(
+    status,
+    error_type,
+    error_class,
+    retryable,
+):
+    async def handler(_request):
+        return httpx.Response(
+            status,
+            json={
+                "type": "error",
+                "error": {
+                    "type": error_type,
+                    "message": "secret-provider-error-canary",
+                },
+                "request_id": "req_fixture",
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = AnthropicProviderAdapter(
+        _profile(),
+        credential="secret-value-canary",
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    with pytest.raises(AnthropicUpstreamError) as exc_info:
+        await adapter.complete(
+            _request(),
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=frozenset(BridgeFeature),
+            input_token_count=11,
+        )
+    await client.aclose()
+
+    error = exc_info.value.error
+    assert exc_info.value.status_code == status
+    assert error.type == error_type
+    assert error.code == error_type
+    assert error.error_class == error_class
+    assert error.retryable is retryable
+    assert error.provider_metadata == {
+        "anthropic": {"http_status": status, "request_id": "req_fixture"}
+    }
+    assert "secret-provider-error-canary" not in str(exc_info.value)
+
+
 async def test_profile_and_adapter_reject_unreviewed_authority():
     with pytest.raises(ValueError, match="credential"):
         AnthropicProviderAdapter(
@@ -600,6 +836,8 @@ async def test_profile_and_adapter_reject_unreviewed_authority():
         )
     with pytest.raises(ValueError, match="unsupported features"):
         _profile(features={BridgeFeature.IMAGE_REFERENCES})
+    with pytest.raises(ValueError, match="enabled together"):
+        _profile(features={BridgeFeature.STREAM_DELTAS})
     with pytest.raises(ValueError, match="absolute"):
         anthropic_profile(
             profile_id="anthropic-fixture",
@@ -642,3 +880,28 @@ async def test_redacted_runtime_projection_never_contains_credential():
     assert "secret-value-canary" not in repr(adapter)
     assert "secret-value-canary" not in json.dumps(adapter.__gpt2giga_redacted__())
     await client.aclose()
+
+
+def test_capability_evidence_is_complete_content_free_and_deterministic():
+    evidence = anthropic_capability_evidence()
+
+    assert evidence["schema_version"] == (ANTHROPIC_CAPABILITY_EVIDENCE_SCHEMA_VERSION)
+    assert evidence["provider_kind"] == "anthropic"
+    assert evidence["support_status"] == "technical_preview"
+    assert "count_tokens" in evidence["exact_normalized_features"]
+    blocked = {
+        row["semantic"]: row["reason_id"] for row in evidence["blocked_semantics"]
+    }
+    assert blocked["hosted_provider_tools"] == (
+        "anthropic_hosted_tools_not_admitted_v1"
+    )
+    assert blocked["reasoning_controls_and_summaries"] == (
+        "anthropic_reasoning_not_admitted_v1"
+    )
+    assert blocked["structured_output"] == (
+        "anthropic_structured_output_not_admitted_v1"
+    )
+    serialized = json.dumps(evidence, sort_keys=True)
+    assert serialized == json.dumps(anthropic_capability_evidence(), sort_keys=True)
+    assert "credential" not in serialized
+    assert "prompt" not in serialized

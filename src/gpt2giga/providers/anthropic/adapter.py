@@ -27,6 +27,8 @@ from gpt2giga.protocols.normalized import (
     NormalizedResponse,
     NormalizedStopReason,
     NormalizedStreamEvent,
+    NormalizedTokenCountRequest,
+    NormalizedTokenCountResponse,
     NormalizedTokenLimits,
     NormalizedToolCall,
     NormalizedUsage,
@@ -41,6 +43,21 @@ ANTHROPIC_MESSAGES_EXECUTION_OWNER = "provider-execution:anthropic"
 ANTHROPIC_API_VERSION = "2023-06-01"
 DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
 _REQUEST_PURPOSE_MESSAGES = "provider.anthropic.messages"
+_REQUEST_PURPOSE_COUNT_TOKENS = "provider.anthropic.count-tokens"
+_ANTHROPIC_ERROR_TYPES = frozenset(
+    {
+        "api_error",
+        "authentication_error",
+        "billing_error",
+        "gateway_timeout_error",
+        "invalid_request_error",
+        "not_found_error",
+        "overloaded_error",
+        "permission_error",
+        "rate_limit_error",
+        "request_too_large",
+    }
+)
 
 ANTHROPIC_IMPLEMENTED_FEATURES_V1 = frozenset(
     {
@@ -60,6 +77,7 @@ ANTHROPIC_IMPLEMENTED_FEATURES_V1 = frozenset(
         BridgeFeature.CONTEXT_TOKEN_LIMITS,
         BridgeFeature.STREAM_DELTAS,
         BridgeFeature.STREAM_TERMINAL_EVENTS,
+        BridgeFeature.COUNT_TOKENS,
     }
 )
 
@@ -112,6 +130,15 @@ class AnthropicUpstreamProfile(NormalizedBaseModel):
         if unsupported:
             names = ", ".join(sorted(feature.value for feature in unsupported))
             raise ValueError(f"Anthropic profile claims unsupported features: {names}")
+        streaming = {
+            BridgeFeature.STREAM_DELTAS,
+            BridgeFeature.STREAM_TERMINAL_EVENTS,
+        }
+        claimed_streaming = set(self.capabilities.features) & streaming
+        if claimed_streaming and claimed_streaming != streaming:
+            raise ValueError(
+                "Anthropic streaming capabilities must be enabled together"
+            )
         max_output_tokens = (
             self.capabilities.limits.max_output_tokens
             if self.capabilities.limits is not None
@@ -128,6 +155,11 @@ class AnthropicUpstreamProfile(NormalizedBaseModel):
     def messages_url(self) -> str:
         """Return the exact Messages endpoint."""
         return _endpoint_url(self.base_url, "v1/messages")
+
+    @property
+    def count_tokens_url(self) -> str:
+        """Return the exact Messages token-count endpoint."""
+        return _endpoint_url(self.base_url, "v1/messages/count_tokens")
 
 
 @dataclass(frozen=True)
@@ -287,6 +319,47 @@ class AnthropicProviderAdapter:
             admission=admission,
         )
 
+    async def count_tokens(
+        self,
+        request: NormalizedTokenCountRequest,
+        *,
+        downstream: DownstreamProtocol,
+        downstream_capabilities: Collection[BridgeFeature] = (),
+        input_token_count: int | None = None,
+    ) -> NormalizedTokenCountResponse:
+        """Execute only the explicit normalized count-tokens operation."""
+        requested_models = {
+            model for model in (request.model, request.input.model) if model is not None
+        }
+        if requested_models != {self.profile.model}:
+            raise ValueError(
+                "normalized token-count model does not match the admitted Anthropic route"
+            )
+        admit_protocol_bridge_request(
+            request,
+            downstream=downstream,
+            upstream=self.profile.capabilities,
+            downstream_capabilities=downstream_capabilities,
+            input_token_count=input_token_count,
+        )
+        payload = normalized_token_count_to_anthropic_payload(
+            request,
+            profile=self.profile,
+        )
+        response = await self._request_json(
+            url=self.profile.count_tokens_url,
+            purpose=_REQUEST_PURPOSE_COUNT_TOKENS,
+            payload=payload,
+        )
+        return NormalizedTokenCountResponse(
+            model=self.profile.model,
+            input_tokens=_non_negative_integer(
+                response.get("input_tokens"),
+                "input_tokens",
+            ),
+            limits=self.profile.capabilities.limits,
+        )
+
     async def stream_chat(
         self,
         request: NormalizedChatRequest,
@@ -312,7 +385,15 @@ class AnthropicProviderAdapter:
         initial_usage: Mapping[str, Any] | None = None
         active_blocks: dict[int, dict[str, Any]] = {}
         closed_blocks: set[int] = set()
-        pending_end: tuple[str, NormalizedStopReason, NormalizedUsage] | None = None
+        pending_end: (
+            tuple[
+                str,
+                NormalizedStopReason,
+                NormalizedUsage,
+                str | None,
+            ]
+            | None
+        ) = None
         started = False
         terminal_emitted = False
 
@@ -584,6 +665,10 @@ class AnthropicProviderAdapter:
                         delta.get("stop_reason"), field="delta.stop_reason"
                     )
                     normalized_stop_reason = _normalize_stop_reason(raw_stop_reason)
+                    refusal_category = _refusal_category(
+                        raw_stop_reason,
+                        delta.get("stop_details"),
+                    )
                     usage = _stream_usage(initial_usage, raw_event.get("usage"))
                     yield NormalizedStreamEvent(
                         type="usage",
@@ -597,6 +682,7 @@ class AnthropicProviderAdapter:
                         raw_stop_reason,
                         normalized_stop_reason,
                         usage,
+                        refusal_category,
                     )
                     continue
                 if event_type == "message_stop":
@@ -605,7 +691,15 @@ class AnthropicProviderAdapter:
                             "message_stop_without_delta",
                             "Anthropic message_stop requires a terminal message_delta.",
                         )
-                    raw_stop_reason, normalized_stop_reason, usage = pending_end
+                    (
+                        raw_stop_reason,
+                        normalized_stop_reason,
+                        usage,
+                        refusal_category,
+                    ) = pending_end
+                    metadata = {"anthropic_stop_reason": raw_stop_reason}
+                    if refusal_category is not None:
+                        metadata["anthropic_refusal_category"] = refusal_category
                     yield NormalizedStreamEvent(
                         type="message_end",
                         id=message_id,
@@ -614,7 +708,7 @@ class AnthropicProviderAdapter:
                         finish_reason=normalized_stop_reason,
                         stop_reason=normalized_stop_reason,
                         usage=usage,
-                        metadata={"anthropic_stop_reason": raw_stop_reason},
+                        metadata=metadata,
                     )
                     sequence += 1
                     terminal_emitted = True
@@ -843,18 +937,7 @@ def normalized_chat_to_anthropic_payload(
     if system:
         payload["system"] = system
     if request.tools:
-        payload["tools"] = [
-            {
-                "name": tool.name,
-                **(
-                    {"description": tool.description}
-                    if tool.description is not None
-                    else {}
-                ),
-                "input_schema": dict(tool.parameters),
-            }
-            for tool in request.tools
-        ]
+        payload["tools"] = _tools_to_anthropic(request)
     tool_choice = _tool_choice_to_anthropic(
         request.tool_choice,
         parallel_tool_calls=request.parallel_tool_calls,
@@ -875,6 +958,46 @@ def normalized_chat_to_anthropic_payload(
     if metadata:
         payload["metadata"] = metadata
     return payload
+
+
+def normalized_token_count_to_anthropic_payload(
+    request: NormalizedTokenCountRequest,
+    *,
+    profile: AnthropicUpstreamProfile,
+) -> dict[str, Any]:
+    """Serialize only the explicit Anthropic count-tokens operation."""
+    chat = request.input
+    system, messages = _messages_to_anthropic(chat.messages)
+    payload: dict[str, Any] = {
+        "model": profile.model,
+        "messages": messages,
+    }
+    if system:
+        payload["system"] = system
+    if chat.tools:
+        payload["tools"] = _tools_to_anthropic(chat)
+    tool_choice = _tool_choice_to_anthropic(
+        chat.tool_choice,
+        parallel_tool_calls=chat.parallel_tool_calls,
+    )
+    if tool_choice is not None:
+        payload["tool_choice"] = tool_choice
+    return payload
+
+
+def _tools_to_anthropic(request: NormalizedChatRequest) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": tool.name,
+            **(
+                {"description": tool.description}
+                if tool.description is not None
+                else {}
+            ),
+            "input_schema": dict(tool.parameters),
+        }
+        for tool in request.tools
+    ]
 
 
 def anthropic_response_to_normalized(
@@ -904,6 +1027,10 @@ def anthropic_response_to_normalized(
     message = _response_message(content)
     finish_reason = _required_string(payload.get("stop_reason"), field="stop_reason")
     stop_reason = _normalize_stop_reason(finish_reason)
+    refusal_category = _refusal_category(
+        finish_reason,
+        payload.get("stop_details"),
+    )
     usage = _usage(payload.get("usage"))
     return NormalizedResponse(
         id=_required_string(payload.get("id"), field="id"),
@@ -922,6 +1049,7 @@ def anthropic_response_to_normalized(
             profile,
             admission=admission,
             stop_sequence=_optional_string(payload.get("stop_sequence")),
+            refusal_category=refusal_category,
         ),
     )
 
@@ -1149,12 +1277,44 @@ def _response_message(content: list[Any]) -> NormalizedMessage:
 def _usage(value: Any) -> NormalizedUsage:
     if not isinstance(value, Mapping):
         raise _protocol_error("invalid_usage", "Anthropic usage must be an object.")
-    input_tokens = _non_negative_integer(value.get("input_tokens"), "input_tokens")
+    uncached_input_tokens = _non_negative_integer(
+        value.get("input_tokens"), "input_tokens"
+    )
     output_tokens = _non_negative_integer(value.get("output_tokens"), "output_tokens")
+    cache_creation_input_tokens = _optional_non_negative_integer(
+        value.get("cache_creation_input_tokens"),
+        "cache_creation_input_tokens",
+    )
+    cache_read_input_tokens = _optional_non_negative_integer(
+        value.get("cache_read_input_tokens"),
+        "cache_read_input_tokens",
+    )
+    input_tokens = (
+        uncached_input_tokens
+        + (cache_creation_input_tokens or 0)
+        + (cache_read_input_tokens or 0)
+    )
+    facts: dict[str, Any] = {
+        "input_tokens": uncached_input_tokens,
+        "output_tokens": output_tokens,
+    }
+    if cache_creation_input_tokens is not None:
+        facts["cache_creation_input_tokens"] = cache_creation_input_tokens
+    if cache_read_input_tokens is not None:
+        facts["cache_read_input_tokens"] = cache_read_input_tokens
+    service_tier = value.get("service_tier")
+    if service_tier is not None:
+        if service_tier not in {"standard", "priority", "batch"}:
+            raise _protocol_error(
+                "invalid_usage",
+                "Anthropic usage service_tier is invalid.",
+            )
+        facts["service_tier"] = service_tier
     return NormalizedUsage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=input_tokens + output_tokens,
+        provider_metadata={"anthropic": facts},
     )
 
 
@@ -1167,13 +1327,9 @@ def _stream_usage(
             "invalid_usage",
             "Anthropic stream usage is incomplete.",
         )
-    input_tokens = _non_negative_integer(initial.get("input_tokens"), "input_tokens")
-    output_tokens = _non_negative_integer(final.get("output_tokens"), "output_tokens")
-    return NormalizedUsage(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        total_tokens=input_tokens + output_tokens,
-    )
+    merged = dict(initial)
+    merged.update({key: value for key, value in final.items() if value is not None})
+    return _usage(merged)
 
 
 def _normalize_stop_reason(value: str) -> NormalizedStopReason:
@@ -1199,6 +1355,7 @@ def _response_provider_metadata(
     *,
     admission: ProtocolBridgeAdmission,
     stop_sequence: str | None,
+    refusal_category: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "profile_id": profile.id,
@@ -1208,7 +1365,39 @@ def _response_provider_metadata(
     }
     if stop_sequence is not None:
         payload["stop_sequence"] = stop_sequence
+    if refusal_category is not None:
+        payload["refusal_category"] = refusal_category
     return {"anthropic": payload}
+
+
+def _refusal_category(stop_reason: str, value: Any) -> str | None:
+    if value is None:
+        return None
+    if stop_reason != "refusal" or not isinstance(value, Mapping):
+        raise _protocol_error(
+            "invalid_stop_details",
+            "Anthropic stop_details is valid only for a refusal.",
+        )
+    if value.get("type") != "refusal":
+        raise _protocol_error(
+            "invalid_stop_details",
+            "Anthropic refusal stop_details has an invalid type.",
+        )
+    category = value.get("category")
+    if category is None:
+        return None
+    if category not in {
+        "cyber",
+        "bio",
+        "frontier_llm",
+        "reasoning_extraction",
+        "general_harms",
+    }:
+        raise _protocol_error(
+            "invalid_stop_details",
+            "Anthropic refusal category is invalid.",
+        )
+    return category
 
 
 def _stream_index(event: Mapping[str, Any]) -> int:
@@ -1228,8 +1417,8 @@ def _stream_error(event: Mapping[str, Any]) -> AnthropicUpstreamError:
             "invalid_stream_error",
             "Anthropic stream error must contain an error object.",
         )
-    error_type = _optional_string(raw_error.get("type")) or "api_error"
-    message = _optional_string(raw_error.get("message")) or "Anthropic stream failed."
+    error_type = _anthropic_error_type(raw_error.get("type"))
+    message = f"Anthropic stream returned {error_type}."
     error_class = (
         "authentication"
         if error_type == "authentication_error"
@@ -1238,7 +1427,9 @@ def _stream_error(event: Mapping[str, Any]) -> AnthropicUpstreamError:
         else "not_found"
         if error_type == "not_found_error"
         else "rate_limit"
-        if error_type in {"rate_limit_error", "overloaded_error"}
+        if error_type == "rate_limit_error"
+        else "upstream"
+        if error_type == "overloaded_error"
         else "invalid_request"
         if error_type == "invalid_request_error"
         else "upstream"
@@ -1337,8 +1528,8 @@ async def _read_bounded_response(
 
 def _http_error(response: httpx.Response, content: bytes) -> AnthropicUpstreamError:
     status = response.status_code
-    message = f"Anthropic returned HTTP {status}."
     error_type = "api_error"
+    request_id = response.headers.get("request-id")
     try:
         payload = json.loads(content)
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -1346,8 +1537,9 @@ def _http_error(response: httpx.Response, content: bytes) -> AnthropicUpstreamEr
     if isinstance(payload, Mapping):
         raw_error = payload.get("error")
         if isinstance(raw_error, Mapping):
-            message = _optional_string(raw_error.get("message")) or message
-            error_type = _optional_string(raw_error.get("type")) or error_type
+            error_type = _anthropic_error_type(raw_error.get("type"))
+        request_id = _optional_string(payload.get("request_id")) or request_id
+    message = f"Anthropic returned {error_type} (HTTP {status})."
     error_class = (
         "authentication"
         if status == 401
@@ -1360,16 +1552,23 @@ def _http_error(response: httpx.Response, content: bytes) -> AnthropicUpstreamEr
         else "rate_limit"
         if status == 429
         else "upstream"
+        if status == 529
+        else "upstream"
         if status >= 500
         else "invalid_request"
     )
+    provider_metadata: dict[str, Any] = {"anthropic": {"http_status": status}}
+    request_id = _bounded_identifier(request_id)
+    if request_id is not None:
+        provider_metadata["anthropic"]["request_id"] = request_id
     return AnthropicUpstreamError(
         NormalizedError(
             type=error_type,
             message=message,
-            code=status,
+            code=error_type,
             error_class=error_class,
-            retryable=status in {408, 429} or status >= 500,
+            retryable=status in {408, 409, 429, 529} or status >= 500,
+            provider_metadata=provider_metadata,
         ),
         status_code=status,
     )
@@ -1463,6 +1662,18 @@ def _optional_string(value: Any) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _anthropic_error_type(value: Any) -> str:
+    return value if value in _ANTHROPIC_ERROR_TYPES else "api_error"
+
+
+def _bounded_identifier(value: Any) -> str | None:
+    if not isinstance(value, str) or not value or len(value) > 256:
+        return None
+    if any(ord(character) < 32 for character in value):
+        return None
+    return value
+
+
 def _non_negative_integer(value: Any, field: str) -> int:
     if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
         return value
@@ -1470,6 +1681,12 @@ def _non_negative_integer(value: Any, field: str) -> int:
         "invalid_usage",
         f"Anthropic usage field {field} must be a non-negative integer.",
     )
+
+
+def _optional_non_negative_integer(value: Any, field: str) -> int | None:
+    if value is None:
+        return None
+    return _non_negative_integer(value, field)
 
 
 async def _is_disconnected(callback: Callable[[], Any] | None) -> bool:
