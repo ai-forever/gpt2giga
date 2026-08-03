@@ -1,0 +1,157 @@
+{
+  "case_id": "native-gigachat-responses-parity-v1",
+  "corpus_revision": "native-gigachat-responses-2026-08-03",
+  "outcome_matrix": {
+    "non_stream": [
+      "success",
+      "provider_error"
+    ],
+    "stream": [
+      "success",
+      "provider_error",
+      "disconnect",
+      "malformed_provider_event"
+    ]
+  },
+  "cases": [
+    {
+      "id": "plain-text",
+      "semantic": "text",
+      "api_modes": ["v1", "v2"],
+      "request": {"input": "hello"}
+    },
+    {
+      "id": "custom-function",
+      "semantic": "custom_function",
+      "api_modes": ["v1", "v2"],
+      "request": {
+        "input": "weather",
+        "tools": [{"type": "function", "name": "weather", "parameters": {"type": "object"}}]
+      }
+    },
+    {
+      "id": "custom-function-named-web-search",
+      "semantic": "custom_function",
+      "api_modes": ["v1", "v2"],
+      "request": {
+        "input": "search",
+        "tools": [{"type": "function", "name": "web_search", "parameters": {"type": "object"}}]
+      }
+    },
+    {
+      "id": "web-search",
+      "semantic": "hosted_tool",
+      "api_modes": ["v2"],
+      "canonical_gigachat_tool": "web_search",
+      "request": {"input": "search", "tools": [{"type": "web_search"}]}
+    },
+    {
+      "id": "web-search-preview",
+      "semantic": "hosted_tool",
+      "api_modes": ["v2"],
+      "canonical_gigachat_tool": "web_search",
+      "request": {"input": "search", "tools": [{"type": "web_search_preview"}]}
+    },
+    {
+      "id": "url-content-extraction",
+      "semantic": "hosted_tool",
+      "api_modes": ["v2"],
+      "canonical_gigachat_tool": "url_content_extraction",
+      "request": {"input": "fetch", "tools": [{"type": "url_content_extraction"}]}
+    },
+    {
+      "id": "web-fetch",
+      "semantic": "hosted_tool",
+      "api_modes": ["v2"],
+      "canonical_gigachat_tool": "url_content_extraction",
+      "request": {"input": "fetch", "tools": [{"type": "web_fetch"}]}
+    },
+    {
+      "id": "url-context",
+      "semantic": "hosted_tool",
+      "api_modes": ["v2"],
+      "canonical_gigachat_tool": "url_content_extraction",
+      "request": {"input": "fetch", "tools": [{"type": "url_context"}]}
+    },
+    {
+      "id": "code-interpreter",
+      "semantic": "hosted_tool",
+      "api_modes": ["v2"],
+      "canonical_gigachat_tool": "code_interpreter",
+      "request": {"input": "calculate", "tools": [{"type": "code_interpreter"}]}
+    },
+    {
+      "id": "code-execution",
+      "semantic": "hosted_tool",
+      "api_modes": ["v2"],
+      "canonical_gigachat_tool": "code_interpreter",
+      "request": {"input": "calculate", "tools": [{"type": "code_execution"}]}
+    },
+    {
+      "id": "image-generate",
+      "semantic": "hosted_tool",
+      "api_modes": ["v2"],
+      "canonical_gigachat_tool": "image_generate",
+      "request": {"input": "draw", "tools": [{"type": "image_generate"}]}
+    },
+    {
+      "id": "image-generation",
+      "semantic": "hosted_tool",
+      "api_modes": ["v2"],
+      "canonical_gigachat_tool": "image_generate",
+      "request": {"input": "draw", "tools": [{"type": "image_generation"}]}
+    },
+    {
+      "id": "model-3d-generate",
+      "semantic": "hosted_tool",
+      "api_modes": ["v2"],
+      "canonical_gigachat_tool": "model_3d_generate",
+      "request": {"input": "model", "tools": [{"type": "model_3d_generate"}]}
+    },
+    {
+      "id": "codex-image-gen-namespace",
+      "semantic": "custom_function",
+      "api_modes": ["v1", "v2"],
+      "request": {
+        "input": "draw",
+        "tools": [{
+          "type": "namespace",
+          "name": "image_gen",
+          "tools": [{"type": "function", "name": "imagegen", "parameters": {"type": "object"}}]
+        }]
+      }
+    },
+    {
+      "id": "attachments",
+      "semantic": "attachments",
+      "api_modes": ["v1", "v2"],
+      "headers": {"x-gpt2giga-attachment-ids": "file-fixture-1"},
+      "request": {"input": "summarize the attachment"}
+    },
+    {
+      "id": "reasoning-request",
+      "semantic": "reasoning",
+      "api_modes": ["v1", "v2"],
+      "request": {"input": "solve", "reasoning": {"effort": "high"}}
+    },
+    {
+      "id": "previous-response-state",
+      "semantic": "state",
+      "api_modes": ["v2"],
+      "request": {"input": "continue", "previous_response_id": "resp_fixture_1", "store": true}
+    },
+    {
+      "id": "conversation-state",
+      "semantic": "state",
+      "api_modes": ["v2"],
+      "request": {"input": "continue", "conversation": "conv_fixture_1", "store": true}
+    }
+  ],
+  "expected": {
+    "executor": "native_gigachat",
+    "fallback_after_dispatch": false,
+    "network_attempts_after_dispatch": 1,
+    "requires_compatibility_flag": false
+  },
+  "schema_version": "gpt2giga.corrective-conformance.v1"
+}
