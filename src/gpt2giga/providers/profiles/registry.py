@@ -16,6 +16,7 @@ from gpt2giga.providers.profiles.models import (
     ProviderKind,
     ProviderModelAlias,
     ProviderProfile,
+    ProviderProfileConfig,
     ProviderSupportStatus,
 )
 
@@ -89,6 +90,11 @@ class ProviderRegistry:
     def config_revision(self) -> str:
         """Return the exact loaded configuration revision."""
         return self._loaded.revision
+
+    @property
+    def config(self) -> ProviderProfileConfig:
+        """Return the immutable, secret-free loaded configuration."""
+        return self._loaded.config
 
     @property
     def loss_matrix_revision(self) -> str:

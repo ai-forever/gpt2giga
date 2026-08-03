@@ -13,6 +13,13 @@ from gpt2giga.providers.profiles.loader import (
     load_provider_profiles,
     select_provider_config_path,
 )
+from gpt2giga.providers.profiles.machine import (
+    BRIDGE_CAPABILITIES_SCHEMA_VERSION,
+    INSPECT_SCHEMA_VERSION,
+    READINESS_SCHEMA_VERSION,
+    ProviderMachineContracts,
+    not_ready_manifest,
+)
 from gpt2giga.providers.profiles.models import (
     PROVIDER_KINDS,
     PROVIDER_PROFILE_SCHEMA_VERSION,
@@ -33,16 +40,20 @@ from gpt2giga.providers.profiles.registry import (
 )
 
 __all__ = [
+    "BRIDGE_CAPABILITIES_SCHEMA_VERSION",
     "CONFIG_ENV_NAME",
     "BRIDGE_MODELS_SCHEMA_VERSION",
     "EXECUTION_CONTEXT_SCHEMA_VERSION",
+    "INSPECT_SCHEMA_VERSION",
     "MAX_PROFILE_CONFIG_BYTES",
     "PROVIDER_KINDS",
     "PROVIDER_PROFILE_SCHEMA_VERSION",
+    "READINESS_SCHEMA_VERSION",
     "LoadedProviderProfileSet",
     "ProviderKind",
     "ProviderAliasError",
     "ProviderModelAlias",
+    "ProviderMachineContracts",
     "ProviderPolicyCatalog",
     "ProviderProfile",
     "ProviderProfileConfig",
@@ -55,5 +66,6 @@ __all__ = [
     "canonical_json",
     "canonical_revision",
     "load_provider_profiles",
+    "not_ready_manifest",
     "select_provider_config_path",
 ]
