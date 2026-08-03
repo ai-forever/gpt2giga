@@ -191,6 +191,6 @@ def test_responses_route_uses_stable_v2_sdk_shape(stable_sdk_client) -> None:
     assert body["usage"]["input_tokens"] == 2
     assert body["usage"]["output_tokens"] == 1
     assert body["usage"]["total_tokens"] == 3
-    assert body["usage"]["input_tokens_details"]["cached_tokens"] == 0
-    assert body["usage"]["output_tokens_details"]["reasoning_tokens"] == 0
+    assert "input_tokens_details" not in body["usage"]
+    assert "output_tokens_details" not in body["usage"]
     assert stable_sdk_client.calls[0][0] == "v2.chat"

@@ -36,6 +36,7 @@ from gpt2giga.protocol.response import (
     hydrate_chat_completion_image_files,
 )
 from gpt2giga.protocols.openai import (
+    OpenAIProtocolAdapter,
     ResponsesStreamProjector,
     ResponsesStreamProtocolError,
     normalized_chat_response_to_responses,
@@ -57,26 +58,45 @@ router = APIRouter(tags=[OPENAPI_TAG_OPENAI_RESPONSES])
 @router.post("/responses", openapi_extra=responses_openapi_extra())
 @exceptions_handler
 async def responses(request: Request):
-    """Create a Responses API response."""
+    """Create through normalized startup owners.
+
+    The integration-owned ``provider_registry`` supplies the provider adapter.
+    """
     data = await read_request_json(request)
     stream = data.get("stream", False)
     state = request.app.state
-    protocol_adapter = getattr(state, "openai_protocol_adapter", None)
-    if protocol_adapter is not None:
-        try:
-            if stream:
-                return await _normalized_stream_response(
-                    request,
-                    data,
-                    protocol_adapter=protocol_adapter,
-                )
-            return await _normalized_non_stream_response(
+    legacy_responses_enabled = getattr(state, "legacy_responses_enabled", False) is True
+    if legacy_responses_enabled:
+        return await _legacy_responses(request, data)
+
+    protocol_adapter = (
+        getattr(
+            state,
+            "openai_protocol_adapter",
+            None,
+        )
+        or OpenAIProtocolAdapter()
+    )
+    try:
+        if stream:
+            return await _normalized_stream_response(
                 request,
                 data,
                 protocol_adapter=protocol_adapter,
             )
-        except ClientCompatibilityError as exc:
-            return client_compatibility_response(exc)
+        return await _normalized_non_stream_response(
+            request,
+            data,
+            protocol_adapter=protocol_adapter,
+        )
+    except ClientCompatibilityError as exc:
+        return client_compatibility_response(exc)
+
+
+async def _legacy_responses(request: Request, data: dict):
+    """Run the explicitly selected pre-0.3 Responses compatibility path."""
+    stream = data.get("stream", False)
+    state = request.app.state
 
     request_options = extract_gigachat_request_options(request, data)
     current_rquid = rquid_context.get()

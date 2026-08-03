@@ -142,9 +142,15 @@ def test_responses_adapter_decodes_json_schema_and_named_tool_choice() -> None:
     [
         "api_key",
         "base_url",
+        "background",
+        "conversation",
+        "include",
         "parallel_tool_calls",
         "previous_response_id",
         "provider",
+        "reasoning",
+        "reasoning_effort",
+        "store",
         "web_search_options",
     ],
 )
@@ -152,7 +158,9 @@ def test_responses_adapter_rejects_unsupported_semantics(field: str) -> None:
     payload = {
         "model": "bridge/codex-test",
         "input": "hello",
-        field: "fixture" if field != "parallel_tool_calls" else True,
+        field: True
+        if field in {"background", "parallel_tool_calls", "store"}
+        else "fixture",
     }
 
     with pytest.raises(ClientCompatibilityError) as exc_info:

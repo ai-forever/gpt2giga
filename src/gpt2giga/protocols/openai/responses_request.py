@@ -34,6 +34,17 @@ _RESPONSES_FIELDS = frozenset(
         "top_p",
     }
 )
+_UNSUPPORTED_STATE_AND_REASONING_FIELDS = frozenset(
+    {
+        "background",
+        "conversation",
+        "include",
+        "previous_response_id",
+        "reasoning",
+        "reasoning_effort",
+        "store",
+    }
+)
 _UNSUPPORTED_MESSAGE = "The selected bridge route cannot preserve this semantic."
 _INVALID_MESSAGE = "The Responses request is invalid for normalized execution."
 
@@ -47,6 +58,9 @@ def responses_request_to_normalized(
     if not isinstance(payload, Mapping):
         _invalid("request")
     data = dict(payload)
+    for field in _UNSUPPORTED_STATE_AND_REASONING_FIELDS:
+        if field in data:
+            _unsupported(field)
     _reject_unknown_fields(data, _RESPONSES_FIELDS)
 
     model = data.get("model")

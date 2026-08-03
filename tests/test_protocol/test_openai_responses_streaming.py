@@ -3,6 +3,7 @@ import json
 import pytest
 
 from gpt2giga.protocols.normalized import (
+    NormalizedError,
     NormalizedMessage,
     NormalizedStreamEvent,
     NormalizedToolCall,
@@ -164,3 +165,25 @@ def test_responses_stream_projector_rejects_unfinished_stream() -> None:
 
     with pytest.raises(ResponsesStreamProtocolError, match="terminal"):
         projector.finish()
+
+
+def test_responses_stream_provider_error_is_terminal_without_completion() -> None:
+    projector = _projector()
+    frames = projector.project(NormalizedStreamEvent(type="message_start", sequence=0))
+    frames.extend(
+        projector.project(
+            NormalizedStreamEvent(
+                type="error",
+                sequence=1,
+                error=NormalizedError(
+                    type="provider_error",
+                    message="upstream failed",
+                    code="upstream_failure",
+                ),
+            )
+        )
+    )
+    projector.finish()
+
+    assert _event_names(frames) == ["response.created", "error"]
+    assert _event_data(frames[-1])["code"] == "upstream_failure"

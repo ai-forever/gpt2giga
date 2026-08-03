@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
+import pytest
 
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.models.config import ProxyConfig, ProxySettings
@@ -65,9 +66,10 @@ class _GigaChat:
 
 
 class _Transformer:
-    def __init__(self):
+    def __init__(self, *, allow_legacy: bool = False):
         self.chat_calls = []
         self.legacy_responses_calls = []
+        self.allow_legacy = allow_legacy
 
     async def prepare_chat(self, data, giga_client=None):
         self.chat_calls.append(data)
@@ -75,7 +77,9 @@ class _Transformer:
 
     async def prepare_response_chat(self, data, giga_client=None, **kwargs):
         self.legacy_responses_calls.append(data)
-        raise AssertionError("legacy Responses owner must not run")
+        if not self.allow_legacy:
+            raise AssertionError("legacy Responses owner must not run")
+        return {"model": data["model"], "messages": []}
 
 
 def _app() -> tuple[FastAPI, _GigaChat, _Transformer]:
@@ -124,7 +128,13 @@ def test_responses_nonstream_uses_normalized_protocol_and_provider_owners() -> N
     assert giga_client.calls[0]["model"] == "GigaChat-2-Max"
 
 
-def test_responses_normalized_rejects_unknown_field_before_provider_io() -> None:
+@pytest.mark.parametrize(
+    "field",
+    ["conversation", "previous_response_id", "reasoning", "reasoning_effort"],
+)
+def test_responses_normalized_rejects_state_and_reasoning_before_provider_io(
+    field: str,
+) -> None:
     app, giga_client, transformer = _app()
 
     response = TestClient(app).post(
@@ -132,7 +142,7 @@ def test_responses_normalized_rejects_unknown_field_before_provider_io() -> None
         json={
             "input": "hello",
             "model": "bridge/codex-test",
-            "provider": "untrusted",
+            field: "fixture",
         },
     )
 
@@ -140,12 +150,47 @@ def test_responses_normalized_rejects_unknown_field_before_provider_io() -> None
     assert response.json()["error"] == {
         "code": "unsupported_semantic",
         "message": "The selected bridge route cannot preserve this semantic.",
-        "param": "provider",
+        "param": field,
         "type": "invalid_request_error",
     }
     assert transformer.chat_calls == []
     assert transformer.legacy_responses_calls == []
     assert giga_client.calls == []
+
+
+def test_responses_legacy_path_requires_explicit_state_flag() -> None:
+    app, giga_client, _transformer = _app()
+    legacy_transformer = _Transformer(allow_legacy=True)
+    app.state.request_transformer = legacy_transformer
+    app.state.legacy_responses_enabled = True
+
+    response = TestClient(app).post(
+        "/responses",
+        json={
+            "input": "hello",
+            "model": "bridge/codex-test",
+            "reasoning": {"effort": "high"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(legacy_transformer.legacy_responses_calls) == 1
+    assert legacy_transformer.chat_calls == []
+    assert len(giga_client.calls) == 1
+
+
+def test_responses_defaults_to_normalized_without_startup_adapter() -> None:
+    app, giga_client, transformer = _app()
+    del app.state.openai_protocol_adapter
+
+    response = TestClient(app).post(
+        "/responses",
+        json={"input": "hello", "model": "bridge/codex-test"},
+    )
+
+    assert response.status_code == 200
+    assert transformer.legacy_responses_calls == []
+    assert len(giga_client.calls) == 1
 
 
 def test_responses_stream_uses_normalized_events_without_legacy_fallback() -> None:

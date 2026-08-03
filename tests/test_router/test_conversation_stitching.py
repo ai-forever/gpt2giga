@@ -134,6 +134,7 @@ class FakeRequestTransformer:
 def make_openai_app(**settings):
     app = FastAPI()
     app.include_router(openai_router)
+    app.state.legacy_responses_enabled = True
     app.state.gigachat_client = FakeGigachat()
     app.state.logger = logger
     app.state.response_processor = ResponseProcessor(logger=logger)

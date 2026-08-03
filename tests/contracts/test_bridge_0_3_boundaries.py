@@ -87,7 +87,6 @@ def test_path_ownership_and_import_boundaries_are_frozen() -> None:
     assert forbidden == []
 
 
-@FUTURE
 def test_responses_uses_only_the_normalized_execution_owner() -> None:
     source = inspect.getsource(responses)
     assert "openai_protocol_adapter" in source
@@ -123,7 +122,6 @@ def test_unknown_alias_is_rejected_before_provider_io(stable_sdk_client) -> None
     assert stable_sdk_client.calls == []
 
 
-@FUTURE
 def test_request_cannot_override_profile_transport_or_provider(
     stable_sdk_client,
 ) -> None:
@@ -176,7 +174,6 @@ def test_execution_context_carries_exact_bridge_revisions() -> None:
     } <= names
 
 
-@FUTURE
 def test_legacy_responses_mode_is_explicit_and_never_a_fallback() -> None:
     source = inspect.getsource(responses)
     assert "legacy_responses_enabled" in source
@@ -184,7 +181,6 @@ def test_legacy_responses_mode_is_explicit_and_never_a_fallback() -> None:
     assert _contract()["machine_contract"]["fallback_policy"] == "none"
 
 
-@FUTURE
 def test_unsupported_semantic_has_stable_error_before_io(stable_sdk_client) -> None:
     app = _responses_app(stable_sdk_client)
     response = TestClient(app).post(
