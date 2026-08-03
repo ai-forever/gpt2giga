@@ -100,11 +100,13 @@ async def lifespan(app: FastAPI):
         structured_output_mode=config.proxy_settings.structured_output_mode,
     )
     app.state.bridge_provider_runtime = BridgeProviderRuntime(app.state)
+    app.state.bridge_shutting_down = False
 
     logger.info("Application startup complete")
     yield
 
     logger.info("Application shutdown initiated")
+    app.state.bridge_shutting_down = True
     await flush_metrics_sink(getattr(app.state, "metrics_sink", None), logger=logger)
     await flush_observability_sink(
         getattr(app.state, "observability_sink", None), logger=logger

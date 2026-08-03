@@ -171,3 +171,46 @@ def test_runtime_rejects_unknown_alias_before_provider_io(monkeypatch) -> None:
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "unknown_model_alias"
     assert giga_client.calls == []
+
+
+def test_machine_endpoints_are_deterministic_and_do_not_call_provider(
+    monkeypatch,
+) -> None:
+    giga_client = _GigaChat()
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda _settings: giga_client,
+    )
+    app = create_app(ProxyConfig())
+
+    with TestClient(app) as client:
+        readiness = client.get("/ready")
+        models = client.get("/bridge/models")
+        capabilities = client.get("/bridge/capabilities")
+
+    assert readiness.status_code == 200
+    assert readiness.json()["ready"] is True
+    assert readiness.json()["config_revision"] == models.json()["config_revision"]
+    assert models.json()["models"][0]["public_alias"] == "GigaChat"
+    assert len(capabilities.json()["cells"]) == 16
+    assert capabilities.json()["matrix_revision"] == models.json()["matrix_revision"]
+    serialized = json.dumps(
+        {
+            "readiness": readiness.json(),
+            "models": models.json(),
+            "capabilities": capabilities.json(),
+        }
+    ).lower()
+    assert "credential" not in serialized
+    assert "prompt" not in serialized
+    assert giga_client.calls == []
+
+
+def test_readiness_is_unavailable_before_lifespan_start() -> None:
+    app = create_app(ProxyConfig())
+
+    response = TestClient(app).get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["ready"] is False
+    assert response.json()["reasons"] == [{"reason_id": "provider_clients_not_ready"}]

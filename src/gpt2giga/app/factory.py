@@ -106,6 +106,10 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             "model",
             "files",
             "batches",
+            "bridge",
+            "health",
+            "ping",
+            "ready",
         ],
     )
     app.add_middleware(

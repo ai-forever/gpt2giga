@@ -201,7 +201,6 @@ def test_unsupported_semantic_has_stable_error_before_io(stable_sdk_client) -> N
     assert stable_sdk_client.calls == []
 
 
-@FUTURE
 def test_machine_capability_contract_is_complete_and_content_free() -> None:
     app = create_app(ProxyConfig())
     response = TestClient(app).get("/bridge/capabilities")
