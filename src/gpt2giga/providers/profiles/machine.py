@@ -12,7 +12,9 @@ from gpt2giga.providers.profiles.registry import ProviderRegistry
 
 INSPECT_SCHEMA_VERSION = "gpt2giga.inspect.v1"
 READINESS_SCHEMA_VERSION = "gpt2giga.readiness.v1"
-BRIDGE_CAPABILITIES_SCHEMA_VERSION = "gpt2giga.bridge-capabilities.v1"
+ROUTE_SUPPORT_MATRIX_SCHEMA_VERSION = "gpt2giga.route-support-matrix.v1"
+# Backward-compatible import name; the document itself is explicitly route-scoped.
+BRIDGE_CAPABILITIES_SCHEMA_VERSION = ROUTE_SUPPORT_MATRIX_SCHEMA_VERSION
 BRIDGE_CATALOG_MODELS_SCHEMA_VERSION = "gpt2giga.bridge-models.v2"
 EFFECTIVE_CAPABILITIES_SCHEMA_VERSION = "gpt2giga.effective-capabilities.v1"
 _CAPABILITY_STATUSES = {"blocked", "stable", "technical_preview"}
@@ -211,6 +213,15 @@ class ProviderMachineContracts:
         ]
         manifest = {
             "schema_version": BRIDGE_CAPABILITIES_SCHEMA_VERSION,
+            "contract_kind": "route_support_matrix",
+            "scope": "protocol_provider_route",
+            "not_model_inventory": True,
+            "not_effective_model_capabilities": True,
+            "model_inventory_endpoint": "/models",
+            "effective_capabilities_endpoint": (
+                "/bridge/capabilities?model=<model-id>"
+                "&protocol=<public-protocol>&api_mode=<api-mode>"
+            ),
             "config_revision": self._registry.config_revision,
             "matrix_revision": self._registry.loss_matrix_revision,
             "cells": ordered,

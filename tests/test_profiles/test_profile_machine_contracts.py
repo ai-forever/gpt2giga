@@ -14,6 +14,7 @@ from gpt2giga.providers.profiles import (
     EFFECTIVE_CAPABILITIES_SCHEMA_VERSION,
     INSPECT_SCHEMA_VERSION,
     READINESS_SCHEMA_VERSION,
+    ROUTE_SUPPORT_MATRIX_SCHEMA_VERSION,
     LoadedProviderProfileSet,
     ProviderMachineContracts,
     ProviderProfileConfig,
@@ -229,6 +230,13 @@ def test_capability_projection_binds_revisions_sorts_cells_and_is_content_free()
     manifest = contracts.capabilities_manifest(source)
 
     assert manifest["schema_version"] == BRIDGE_CAPABILITIES_SCHEMA_VERSION
+    assert manifest["schema_version"] == ROUTE_SUPPORT_MATRIX_SCHEMA_VERSION
+    assert manifest["contract_kind"] == "route_support_matrix"
+    assert manifest["scope"] == "protocol_provider_route"
+    assert manifest["not_model_inventory"] is True
+    assert manifest["not_effective_model_capabilities"] is True
+    assert manifest["model_inventory_endpoint"] == "/models"
+    assert "?model=" in manifest["effective_capabilities_endpoint"]
     assert manifest["matrix_revision"] == MATRIX_REVISION
     assert len(manifest["cells"]) == 16
     identities = [

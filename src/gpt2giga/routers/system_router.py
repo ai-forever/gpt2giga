@@ -75,7 +75,7 @@ async def bridge_capabilities(
     protocol: str | None = None,
     api_mode: str | None = None,
 ) -> dict:
-    """Return a coarse route matrix or one model's effective capabilities."""
+    """Return route support, or effective capabilities when a model is given."""
     if model is None and protocol is None and api_mode is None:
         return request.app.state.provider_machine_contracts.capabilities_manifest(
             bridge_loss_matrix_json()

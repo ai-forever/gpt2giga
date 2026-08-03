@@ -207,7 +207,10 @@ def test_machine_capability_contract_is_complete_and_content_free() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["schema_version"] == "gpt2giga.bridge-capabilities.v1"
+    assert body["schema_version"] == "gpt2giga.route-support-matrix.v1"
+    assert body["contract_kind"] == "route_support_matrix"
+    assert body["not_model_inventory"] is True
+    assert body["not_effective_model_capabilities"] is True
     assert len(body["cells"]) == 16
     assert {cell["status"] for cell in body["cells"]} <= {
         "blocked",

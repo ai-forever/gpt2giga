@@ -19,6 +19,7 @@ from gpt2giga.providers.profiles.machine import (
     EFFECTIVE_CAPABILITIES_SCHEMA_VERSION,
     INSPECT_SCHEMA_VERSION,
     READINESS_SCHEMA_VERSION,
+    ROUTE_SUPPORT_MATRIX_SCHEMA_VERSION,
     ProviderMachineContracts,
     not_ready_manifest,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "PROVIDER_KINDS",
     "PROVIDER_PROFILE_SCHEMA_VERSION",
     "READINESS_SCHEMA_VERSION",
+    "ROUTE_SUPPORT_MATRIX_SCHEMA_VERSION",
     "LoadedProviderProfileSet",
     "ProviderKind",
     "ProviderAliasError",

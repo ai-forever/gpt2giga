@@ -257,6 +257,8 @@ def test_machine_endpoints_are_deterministic_and_do_not_call_provider(
     assert models.json()["models"][0]["id"] == "GigaChat-3-Pro"
     assert models.json()["source"] == "shared_model_catalog"
     assert len(capabilities.json()["cells"]) == 16
+    assert capabilities.json()["contract_kind"] == "route_support_matrix"
+    assert capabilities.json()["not_effective_model_capabilities"] is True
     assert capabilities.json()["matrix_revision"] == models.json()["matrix_revision"]
     serialized = json.dumps(
         {
