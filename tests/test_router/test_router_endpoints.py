@@ -97,7 +97,6 @@ class RecordingObservabilitySink:
 def make_app(monkeypatch=None):
     app = FastAPI()
     app.include_router(router)
-    app.state.legacy_responses_enabled = True
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()

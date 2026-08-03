@@ -84,10 +84,6 @@ def build_provider_registry(
         environ=environment,
     )
     if path is not None:
-        if config.proxy_settings.legacy_responses:
-            raise RuntimeError(
-                "Legacy Responses mode cannot be combined with a provider config."
-            )
         loaded = load_provider_profiles(path, environ=environment, policies=policies)
     else:
         loaded = _synthesized_gigachat_profiles(config)

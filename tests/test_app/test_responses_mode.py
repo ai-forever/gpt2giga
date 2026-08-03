@@ -107,6 +107,31 @@ def test_explicit_profile_rejects_unknown_alias() -> None:
     assert registry.resolve_calls == ["missing/alias"]
 
 
+@pytest.mark.parametrize(
+    ("injected_adapter", "expected_mode", "expected_reason"),
+    [
+        (None, ResponsesExecutionMode.NATIVE_GIGACHAT, "native_gigachat_default"),
+        (
+            object(),
+            ResponsesExecutionMode.NORMALIZED_BRIDGE,
+            "injected_normalized_adapter",
+        ),
+    ],
+)
+def test_route_fixture_selection_requires_an_explicit_normalized_adapter(
+    injected_adapter: object | None,
+    expected_mode: ResponsesExecutionMode,
+    expected_reason: str,
+) -> None:
+    selection = select_responses_execution(
+        SimpleNamespace(responses_provider_adapter=injected_adapter),
+        requested_model="model-1",
+    )
+
+    assert selection.mode is expected_mode
+    assert selection.reason == expected_reason
+
+
 def test_selection_is_recorded_in_request_context_before_dispatch() -> None:
     context = RequestContext(
         request_id="request-1",

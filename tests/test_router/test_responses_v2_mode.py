@@ -181,7 +181,6 @@ def configure_app_state(
     app: FastAPI,
     gigachat_api_mode: str,
 ):
-    app.state.legacy_responses_enabled = True
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()

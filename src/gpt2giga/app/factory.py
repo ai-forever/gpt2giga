@@ -75,7 +75,6 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     app.state.config = config
     app.state.provider_registry = provider_registry
     app.state.provider_machine_contracts = ProviderMachineContracts(provider_registry)
-    app.state.legacy_responses_enabled = config.proxy_settings.legacy_responses
     app.state.bridge_request_lifecycle = BridgeRequestLifecycle()
     app.state.anthropic_protocol_adapter = AnthropicProtocolAdapter()
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()

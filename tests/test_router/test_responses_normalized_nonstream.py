@@ -7,6 +7,7 @@ from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
+from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.routers.openai.responses import router
 
 
@@ -66,19 +67,19 @@ class _GigaChat:
 
 
 class _Transformer:
-    def __init__(self, *, allow_legacy: bool = False):
+    def __init__(self, *, allow_native: bool = False):
         self.chat_calls = []
-        self.legacy_responses_calls = []
-        self.allow_legacy = allow_legacy
+        self.native_responses_calls = []
+        self.allow_native = allow_native
 
     async def prepare_chat(self, data, giga_client=None):
         self.chat_calls.append(data)
         return data
 
     async def prepare_response_chat(self, data, giga_client=None, **kwargs):
-        self.legacy_responses_calls.append(data)
-        if not self.allow_legacy:
-            raise AssertionError("legacy Responses owner must not run")
+        self.native_responses_calls.append(data)
+        if not self.allow_native:
+            raise AssertionError("native Responses owner must not run")
         return {"model": data["model"], "messages": []}
 
 
@@ -93,10 +94,21 @@ def _app() -> tuple[FastAPI, _GigaChat, _Transformer]:
     )
     app.state.gigachat_client = client
     app.state.logger = logger
-    app.state.model_concurrency_limiter = ModelConcurrencyLimiter({})
+    limiter = ModelConcurrencyLimiter({})
+    app.state.model_concurrency_limiter = limiter
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     app.state.request_transformer = transformer
-    app.state.response_processor = ResponseProcessor(logger=logger)
+    response_processor = ResponseProcessor(logger=logger)
+    app.state.response_processor = response_processor
+    app.state.responses_provider_adapter = GigaChatProviderAdapter(
+        config=app.state.config,
+        request_transformer=transformer,
+        giga_client=client,
+        model_limiter=limiter,
+        response_processor=response_processor,
+        api_mode="v1",
+        forced_model="GigaChat-2-Max",
+    )
     return app, client, transformer
 
 
@@ -120,7 +132,7 @@ def test_responses_nonstream_uses_normalized_protocol_and_provider_owners() -> N
         "output_tokens": 3,
         "total_tokens": 5,
     }
-    assert transformer.legacy_responses_calls == []
+    assert transformer.native_responses_calls == []
     assert transformer.chat_calls[0]["messages"] == [
         {"role": "system", "content": "Be concise."},
         {"role": "user", "content": "hello"},
@@ -154,15 +166,15 @@ def test_responses_normalized_rejects_state_and_reasoning_before_provider_io(
         "type": "invalid_request_error",
     }
     assert transformer.chat_calls == []
-    assert transformer.legacy_responses_calls == []
+    assert transformer.native_responses_calls == []
     assert giga_client.calls == []
 
 
-def test_responses_legacy_path_requires_explicit_state_flag() -> None:
+def test_responses_native_path_requires_no_workaround_flag() -> None:
     app, giga_client, _transformer = _app()
-    legacy_transformer = _Transformer(allow_legacy=True)
-    app.state.request_transformer = legacy_transformer
-    app.state.legacy_responses_enabled = True
+    native_transformer = _Transformer(allow_native=True)
+    app.state.request_transformer = native_transformer
+    del app.state.responses_provider_adapter
 
     response = TestClient(app).post(
         "/responses",
@@ -174,8 +186,8 @@ def test_responses_legacy_path_requires_explicit_state_flag() -> None:
     )
 
     assert response.status_code == 200
-    assert len(legacy_transformer.legacy_responses_calls) == 1
-    assert legacy_transformer.chat_calls == []
+    assert len(native_transformer.native_responses_calls) == 1
+    assert native_transformer.chat_calls == []
     assert len(giga_client.calls) == 1
 
 
@@ -189,11 +201,11 @@ def test_responses_defaults_to_normalized_without_startup_adapter() -> None:
     )
 
     assert response.status_code == 200
-    assert transformer.legacy_responses_calls == []
+    assert transformer.native_responses_calls == []
     assert len(giga_client.calls) == 1
 
 
-def test_responses_stream_uses_normalized_events_without_legacy_fallback() -> None:
+def test_responses_stream_uses_normalized_events_without_native_fallback() -> None:
     app, giga_client, transformer = _app()
 
     with TestClient(app).stream(
@@ -225,6 +237,6 @@ def test_responses_stream_uses_normalized_events_without_legacy_fallback() -> No
     ]
     assert '"text": "normalized"' in body
     assert '"total_tokens": 5' in body
-    assert transformer.legacy_responses_calls == []
+    assert transformer.native_responses_calls == []
     assert giga_client.calls == []
     assert len(giga_client.stream_calls) == 1

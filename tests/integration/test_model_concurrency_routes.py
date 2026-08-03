@@ -74,7 +74,6 @@ def _make_app(
 ) -> tuple[FastAPI, CountingGigachat]:
     app = FastAPI()
     app.include_router(openai_router)
-    app.state.legacy_responses_enabled = True
     gigachat = CountingGigachat()
     app.state.gigachat_client = gigachat
     if limiter is not None:

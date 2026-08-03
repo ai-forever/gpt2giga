@@ -34,9 +34,18 @@ def select_responses_execution(
     """Select one execution owner from the startup-owned provider registry."""
     registry = getattr(state, "provider_registry", None)
     if registry is None:
+        injected_adapter = getattr(state, "responses_provider_adapter", None)
         selection = ResponsesExecutionSelection(
-            mode=ResponsesExecutionMode.NORMALIZED_BRIDGE,
-            reason="route_fixture_without_provider_registry",
+            mode=(
+                ResponsesExecutionMode.NORMALIZED_BRIDGE
+                if injected_adapter is not None
+                else ResponsesExecutionMode.NATIVE_GIGACHAT
+            ),
+            reason=(
+                "injected_normalized_adapter"
+                if injected_adapter is not None
+                else "native_gigachat_default"
+            ),
         )
         _record_selection(selection, requested_model=requested_model)
         return selection

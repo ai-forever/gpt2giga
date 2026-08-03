@@ -126,17 +126,48 @@ def test_invalid_explicit_profile_fails_before_app_is_returned(tmp_path) -> None
     assert raised.value.code == "invalid_profile_schema"
 
 
-def test_legacy_responses_cannot_mix_with_explicit_profiles(tmp_path) -> None:
+def test_deprecated_responses_setting_does_not_control_profiles(
+    tmp_path,
+    monkeypatch,
+) -> None:
     path = tmp_path / "providers.json"
-    path.write_text("{}", encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "gpt2giga.provider-profiles.v1",
+                "profiles": [
+                    {
+                        "profile_id": "anthropic-main",
+                        "provider_kind": "anthropic",
+                        "base_url": "https://api.anthropic.com",
+                        "credential_env": "ANTHROPIC_API_KEY",
+                        "network_policy_ref": "public-anthropic",
+                        "tls_policy_ref": "system-default",
+                        "models": [
+                            {
+                                "public_alias": "anthropic/opus",
+                                "upstream_model": "claude-reviewed",
+                                "capability_profile": "anthropic-opus-v1",
+                                "support_status": "technical_preview",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "startup-secret")
 
-    with pytest.raises(RuntimeError, match="Legacy Responses"):
-        create_app(
-            ProxyConfig(
-                config=str(path),
-                proxy=ProxySettings(legacy_responses=True),
-            )
+    app = create_app(
+        ProxyConfig(
+            config=str(path),
+            proxy=ProxySettings(legacy_responses=True),
         )
+    )
+
+    assert app.state.provider_registry.public_aliases() == ("anthropic/opus",)
+    assert not hasattr(app.state, "legacy_responses_enabled")
 
 
 def test_lifespan_composes_normalized_responses_adapter_once(monkeypatch) -> None:
@@ -190,7 +221,9 @@ def test_runtime_owns_one_network_authorizer_per_loaded_profile(monkeypatch) -> 
     assert isinstance(authorizers["legacy-gigachat"], ProviderNetworkAuthorizer)
 
 
-def test_runtime_rejects_unknown_alias_before_provider_io(monkeypatch) -> None:
+def test_config_free_runtime_dispatches_provider_model_without_static_alias(
+    monkeypatch,
+) -> None:
     giga_client = _GigaChat()
     monkeypatch.setattr(
         "gpt2giga.app.lifecycle.create_gigachat_client",
@@ -204,9 +237,9 @@ def test_runtime_rejects_unknown_alias_before_provider_io(monkeypatch) -> None:
             json={"input": "hello", "model": "missing/alias"},
         )
 
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "unknown_model_alias"
-    assert giga_client.calls == []
+    assert response.status_code == 200
+    assert response.json()["output"][0]["content"][0]["text"] == "composed"
+    assert len(giga_client.calls) == 1
 
 
 def test_machine_endpoints_are_deterministic_and_do_not_call_provider(

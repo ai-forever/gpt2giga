@@ -210,9 +210,9 @@ def test_execution_context_carries_exact_bridge_revisions() -> None:
     } <= names
 
 
-def test_legacy_responses_mode_is_explicit_and_never_a_fallback() -> None:
+def test_responses_dispatch_has_no_workaround_flag_or_fallback() -> None:
     source = inspect.getsource(responses)
-    assert "legacy_responses_enabled" in source
+    assert "legacy_responses_enabled" not in source
     assert "except" not in source or "fallback" not in source
     assert _contract()["machine_contract"]["fallback_policy"] == "none"
 

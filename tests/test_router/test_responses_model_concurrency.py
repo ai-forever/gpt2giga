@@ -122,7 +122,6 @@ def _make_responses_app(
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
-    app.state.legacy_responses_enabled = True
     app.state.gigachat_client = gigachat
     app.state.model_concurrency_limiter = limiter
     app.state.response_processor = ResponseProcessor(logger=logger)

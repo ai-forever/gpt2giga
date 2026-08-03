@@ -30,10 +30,6 @@ async def responses(request: Request):
     """Select and invoke exactly one explicit Responses execution owner."""
     data = await read_request_json(request)
     state = request.app.state
-    legacy_responses_enabled = getattr(state, "legacy_responses_enabled", False) is True
-    if legacy_responses_enabled:
-        return await NativeGigaChatResponsesExecutor().execute(request, data)
-
     try:
         selection = select_responses_execution(
             state,
