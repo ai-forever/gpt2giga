@@ -35,6 +35,10 @@
       "sha256": "5a2e1c5a5566b5359e144393033ac404b6712ca0c36a39400687ea4d913c29d5"
     },
     {
+      "path": "provider_conformance_cases.json",
+      "sha256": "0bc85193985c4b341b566d5ec64eea94c69f8dd7188f5f9743479a0cafaa72ea"
+    },
+    {
       "path": "unsupported_fields.json",
       "sha256": "cf8d380f33d500c1164e81980cda4a3e5def8d331a2d4112096849818a6954e8"
     }
