@@ -564,18 +564,35 @@ def _build_bridge_loss_matrix() -> BridgeLossMatrix:
             if provider is UpstreamProvider.GIGACHAT:
                 status = (
                     BridgeSupportStatus.STABLE
-                    if protocol is PublicProtocol.OPENAI_CHAT_COMPLETIONS
+                    if protocol
+                    in {
+                        PublicProtocol.OPENAI_CHAT_COMPLETIONS,
+                        PublicProtocol.OPENAI_RESPONSES,
+                    }
                     else BridgeSupportStatus.TECHNICAL_PREVIEW
                 )
-                reason_ids = (
-                    ("baseline_gigachat_chat_conformance",)
-                    if status is BridgeSupportStatus.STABLE
-                    else ("legacy_or_cross_protocol_route",)
-                )
-                evidence_ids = (
-                    "P0-BASELINE-2026-08-03",
-                    "P0-RESPONSES-GAPS-2026-08-03",
-                )
+                reason_ids = {
+                    PublicProtocol.OPENAI_CHAT_COMPLETIONS: (
+                        "baseline_gigachat_chat_conformance",
+                    ),
+                    PublicProtocol.OPENAI_RESPONSES: (
+                        "pinned_codex_responses_conformance",
+                    ),
+                    PublicProtocol.ANTHROPIC_MESSAGES: ("cross_protocol_route",),
+                    PublicProtocol.GEMINI_GENERATE_CONTENT: ("cross_protocol_route",),
+                }[protocol]
+                evidence_ids = {
+                    PublicProtocol.OPENAI_CHAT_COMPLETIONS: ("P0-BASELINE-2026-08-03",),
+                    PublicProtocol.OPENAI_RESPONSES: (
+                        "COR-01-CODEX-RESPONSES-2026-08-03",
+                    ),
+                    PublicProtocol.ANTHROPIC_MESSAGES: (
+                        "COR-02-CLAUDE-MESSAGES-2026-08-03",
+                    ),
+                    PublicProtocol.GEMINI_GENERATE_CONTENT: (
+                        "COR-03-GEMINI-CONTENT-2026-08-03",
+                    ),
+                }[protocol]
                 provider_window = "gigachat-python>=0.2.3,<0.3.0"
             else:
                 status = BridgeSupportStatus.BLOCKED

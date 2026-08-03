@@ -1,16 +1,45 @@
+import json
 import sys
 
 import uvicorn
 
 from gpt2giga.app.factory import create_app
 from gpt2giga.app.lifecycle import lifespan
-from gpt2giga.app.settings import load_app_config, setup_app_logger
+from gpt2giga.app.settings import (
+    build_provider_registry,
+    load_app_config,
+    setup_app_logger,
+)
 from gpt2giga.common.app_meta import check_port_available, get_app_version
 from gpt2giga.constants import SECURITY_FIELDS
+from gpt2giga.providers.profiles import ProviderMachineContracts, ProviderProfileError
+
+
+PREFLIGHT_ERROR_SCHEMA_VERSION = "gpt2giga.error.v1"
 
 
 def run():
-    config = load_app_config()
+    try:
+        config = load_app_config()
+    except ProviderProfileError as exc:
+        if "--inspect-config" not in sys.argv:
+            raise
+        _exit_inspect_error(exc.code, exc.message)
+
+    if config.inspect_config:
+        try:
+            registry = build_provider_registry(config)
+        except ProviderProfileError as exc:
+            _exit_inspect_error(exc.code, exc.message)
+        except RuntimeError:
+            _exit_inspect_error(
+                "invalid_profile_schema",
+                "Provider configuration preflight failed.",
+            )
+        manifest = ProviderMachineContracts(registry).inspect_manifest()
+        print(json.dumps(manifest, ensure_ascii=False, separators=(",", ":")))
+        return
+
     proxy_settings = config.proxy_settings
     logger = setup_app_logger(config)
 
@@ -48,6 +77,20 @@ def run():
             proxy_settings.https_cert_file if proxy_settings.use_https else None
         ),
     )
+
+
+def _exit_inspect_error(code: str, message: str) -> None:
+    """Write one bounded machine error to stdout and terminate preflight."""
+    payload = {
+        "schema_version": PREFLIGHT_ERROR_SCHEMA_VERSION,
+        "error": {
+            "code": code,
+            "message": message,
+            "details": [],
+        },
+    }
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    raise SystemExit(2)
 
 
 if __name__ == "__main__":

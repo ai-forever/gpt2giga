@@ -5,6 +5,19 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.3.0] - 2026-08-03
+
+### Добавлено
+- **Universal Provider Bridge**: startup-owned provider profiles и публичные model aliases выбирают точный provider/model/capability/matrix context без request-supplied destination, credential или fallback.
+- **Normalized OpenAI Responses**: закреплённый Codex CLI subset проходит через единый normalized pipeline к GigaChat для non-stream, SSE, tools, structured output, usage и cancellation; соответствующая matrix cell имеет статус `stable`.
+- **Provider adapters**: добавлены bounded OpenAI-compatible, Anthropic и Gemini upstream adapters с hermetic fake-provider conformance, streaming, tools, usage и стабильными ошибками; неинтегрированные public-protocol cells остаются явно `blocked` до provider I/O.
+- **Supervisor contract**: `--config`, redacted `--inspect-config`, `/ready`, `/bridge/models` и `/bridge/capabilities` дают content-free machine contract для установленного sidecar-артефакта.
+
+### Изменено
+- **Безопасность и lifecycle**: immutable alias selection, destination authorization, redirect/private-network guards, graceful bounded shutdown и no-fallback behavior проверяются отдельными security/corpora suites.
+- **Bridge performance**: profile admission и machine manifests материализуются один раз; публичные projections возвращают изолированные копии без повторного parsing provider config.
+- **Документация**: добавлены schema/provider examples, 16-cell loss matrix, migration, rollback и GigaLoom-compatible supervisor sequence.
+
 ## [0.2.7] - 2026-08-02
 
 ### Изменено
@@ -528,6 +541,7 @@
 
 ---
 
+[0.3.0]: https://github.com/ai-forever/gpt2giga/compare/v0.2.7...v0.3.0
 [0.2.7]: https://github.com/ai-forever/gpt2giga/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/ai-forever/gpt2giga/compare/v0.2.5a1...v0.2.6
 [0.2.5a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.4a1...v0.2.5a1

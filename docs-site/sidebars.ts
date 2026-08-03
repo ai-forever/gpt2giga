@@ -6,7 +6,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Overview',
       collapsible: false,
-      items: ['index', 'quickstart', 'configuration'],
+      items: ['index', 'quickstart', 'configuration', 'provider-profiles'],
     },
     {
       type: 'category',
@@ -14,6 +14,7 @@ const sidebars: SidebarsConfig = {
       collapsible: false,
       items: [
         'api-compatibility',
+        'bridge-compatibility',
         'client-parameter-compatibility',
         'builtin-tools',
         'integrations',
@@ -60,6 +61,11 @@ const sidebars: SidebarsConfig = {
       collapsible: true,
       collapsed: true,
       items: [
+        {
+          type: 'doc',
+          id: 'migration-0-3',
+          label: '0.3 universal provider bridge',
+        },
         {
           type: 'doc',
           id: 'gigaloom-migration',

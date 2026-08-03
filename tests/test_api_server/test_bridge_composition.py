@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from gpt2giga.app.factory import create_app
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.providers.profiles import ProviderProfileError
+from gpt2giga.providers.network import ProviderNetworkAuthorizer
 
 
 class _Response:
@@ -154,6 +155,22 @@ def test_lifespan_composes_normalized_responses_adapter_once(monkeypatch) -> Non
     assert response.json()["output"][0]["content"][0]["text"] == "composed"
     assert len(giga_client.calls) == 1
     assert giga_client.closed is True
+
+
+def test_runtime_owns_one_network_authorizer_per_loaded_profile(monkeypatch) -> None:
+    giga_client = _GigaChat()
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda _settings: giga_client,
+    )
+    app = create_app(ProxyConfig())
+
+    with TestClient(app):
+        runtime = app.state.bridge_provider_runtime
+        authorizers = runtime._network_authorizers
+
+    assert tuple(authorizers) == ("legacy-gigachat",)
+    assert isinstance(authorizers["legacy-gigachat"], ProviderNetworkAuthorizer)
 
 
 def test_runtime_rejects_unknown_alias_before_provider_io(monkeypatch) -> None:

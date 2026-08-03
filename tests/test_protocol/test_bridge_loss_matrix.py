@@ -39,6 +39,19 @@ def test_bridge_loss_matrix_is_complete_and_explicit() -> None:
         assert {row.semantic for row in cell.semantics} == set(BridgeSemantic)
 
 
+def test_pinned_codex_responses_cell_is_stable_and_evidence_bound() -> None:
+    cell = next(
+        cell
+        for cell in BRIDGE_LOSS_MATRIX_V1.cells
+        if cell.public_protocol is PublicProtocol.OPENAI_RESPONSES
+        and cell.upstream_provider is UpstreamProvider.GIGACHAT
+    )
+
+    assert cell.status is BridgeSupportStatus.STABLE
+    assert cell.reason_ids == ("pinned_codex_responses_conformance",)
+    assert cell.evidence_ids == ("COR-01-CODEX-RESPONSES-2026-08-03",)
+
+
 def test_bridge_loss_matrix_serialization_and_revision_are_deterministic() -> None:
     reordered = BridgeLossMatrix(cells=tuple(reversed(BRIDGE_LOSS_MATRIX_V1.cells)))
     payload = bridge_loss_matrix_json()

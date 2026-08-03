@@ -12,7 +12,12 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    CliImplicitFlag,
+    NoDecode,
+    SettingsConfigDict,
+)
 
 from gpt2giga.constants import (
     DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES,
@@ -545,6 +550,12 @@ class ProxyConfig(BaseSettings):
         default=None,
         alias="config",
         description="Path to the startup-owned provider profile configuration.",
+    )
+    inspect_config: CliImplicitFlag[bool] = Field(
+        default=False,
+        description=(
+            "Validate provider configuration and print the redacted machine manifest."
+        ),
     )
 
     model_config = SettingsConfigDict(

@@ -13,6 +13,7 @@ from gpt2giga.protocols.normalized import (
     admit_bridge_route,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
+from gpt2giga.providers.network import ProviderNetworkAuthorizer
 from gpt2giga.providers.profiles import ProviderKind, ProviderRegistry
 
 
@@ -22,6 +23,10 @@ class BridgeProviderRuntime:
     def __init__(self, state: Any) -> None:
         self.registry: ProviderRegistry = state.provider_registry
         self._adapters: dict[tuple[str, str], Any] = {}
+        self._network_authorizers = {
+            profile.profile_id: ProviderNetworkAuthorizer(profile)
+            for profile in self.registry.config.profiles
+        }
         for public_alias in self.registry.public_aliases():
             route = self.registry.resolve(public_alias)
             if route.provider_kind is not ProviderKind.GIGACHAT:
