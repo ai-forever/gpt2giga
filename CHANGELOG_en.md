@@ -5,6 +5,20 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-03
+
+### Added
+- **Universal Provider Bridge**: startup-owned provider profiles and public model aliases select an exact provider/model/capability/matrix context without request-supplied destinations, credentials, or fallback.
+- **OpenAI Responses ownership**: native GigaChat Responses remains the stable compatibility path for hosted tools, attachments, state, v1/v2, and SSE. Route-selected normalized Responses is `technical_preview` until its accepted corpus reaches native parity.
+- **Provider adapters**: added bounded OpenAI-compatible, Anthropic, and Gemini upstream adapters with hermetic fake-provider conformance, streaming, tools, usage, and stable errors; public-protocol cells without integrated routes remain explicitly `blocked` before provider I/O.
+- **Supervisor contract**: `--config`, redacted `--inspect-config`, `/ready`, `/bridge/models`, and `/bridge/capabilities` provide a content-free machine contract for an installed sidecar artifact.
+
+### Changed
+- **Security and lifecycle**: immutable alias selection, destination authorization, redirect/private-network guards, graceful bounded shutdown, and no-fallback behavior have dedicated security and corpus coverage.
+- **Bridge performance**: profile admission and machine manifests are materialized once, while public projections return isolated copies without reparsing provider configuration.
+- **Documentation**: added schema/provider examples, the 16-cell loss matrix, migration, rollback, and a GigaLoom-compatible supervisor sequence.
+- **Model inventory**: GigaChat models are discovered dynamically; provider-profile v2 distinguishes `model_inventory: dynamic` from optional exact aliases and static external-provider profiles.
+
 ## [0.2.7] - 2026-08-02
 
 ### Changed
@@ -531,6 +545,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.3.0]: https://github.com/ai-forever/gpt2giga/compare/v0.2.7...v0.3.0
 [0.2.7]: https://github.com/ai-forever/gpt2giga/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/ai-forever/gpt2giga/compare/v0.2.5a1...v0.2.6
 [0.2.5a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.4a1...v0.2.5a1

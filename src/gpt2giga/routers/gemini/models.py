@@ -4,14 +4,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
-from gpt2giga.app_state import get_gigachat_client
+from gpt2giga.app_state import (
+    get_gigachat_client,
+    get_gigachat_model_catalog,
+    get_gigachat_model_catalog_profile_id,
+    record_gigachat_model_catalog_snapshot,
+)
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
+from gpt2giga.models.catalog import ModelDescriptor, ModelNotFoundError
 from gpt2giga.openapi_specs.gemini import gemini_models_openapi_extra
 from gpt2giga.openapi_tags import OPENAPI_TAG_GEMINI_MODELS
 
@@ -27,6 +33,13 @@ _EMBEDDING_METHODS = [
     "batchEmbedContents",
 ]
 _CONSERVATIVE_METHODS = ["countTokens"]
+_MODEL_PROJECTION_QUERY_PARAMS = (
+    "page_size",
+    "pageSize",
+    "page_token",
+    "pageToken",
+    "refresh",
+)
 
 
 @router.get("/models", openapi_extra=gemini_models_openapi_extra(list_models=True))
@@ -34,10 +47,21 @@ _CONSERVATIVE_METHODS = ["countTokens"]
 async def list_models(request: Request):
     """List models in Gemini-compatible form."""
     giga_client = get_gigachat_client(request)
-    request_options = extract_gigachat_request_options(request)
+    catalog = get_gigachat_model_catalog(request)
+    request_options = extract_gigachat_request_options(
+        request,
+        exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
+    )
     async with gigachat_request_options(giga_client, request_options):
-        response = await giga_client.aget_models()
-    return build_gemini_model_list([dump_model_payload(item) for item in response.data])
+        snapshot = await catalog.list_models(
+            giga_client,
+            provider_profile_id=get_gigachat_model_catalog_profile_id(request),
+            refresh=_catalog_refresh_requested(request),
+        )
+    record_gigachat_model_catalog_snapshot(request, snapshot)
+    return build_gemini_model_list(
+        [catalog_model_payload(item) for item in snapshot.models]
+    )
 
 
 @router.get(
@@ -49,10 +73,22 @@ async def get_model(model: str, request: Request):
     """Return one model in Gemini-compatible form."""
     requested_model = model.removeprefix("models/")
     giga_client = get_gigachat_client(request)
-    request_options = extract_gigachat_request_options(request)
+    catalog = get_gigachat_model_catalog(request)
+    request_options = extract_gigachat_request_options(
+        request,
+        exclude_query_params=_MODEL_PROJECTION_QUERY_PARAMS,
+    )
     async with gigachat_request_options(giga_client, request_options):
-        response = await giga_client.aget_model(model=requested_model)
-    return build_gemini_model(dump_model_payload(response))
+        try:
+            descriptor = await catalog.get_model(
+                requested_model,
+                giga_client,
+                provider_profile_id=get_gigachat_model_catalog_profile_id(request),
+                refresh=_catalog_refresh_requested(request),
+            )
+        except ModelNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Model not found") from exc
+    return build_gemini_model(catalog_model_payload(descriptor))
 
 
 def dump_model_payload(model: Any) -> dict[str, Any]:
@@ -62,6 +98,25 @@ def dump_model_payload(model: Any) -> dict[str, Any]:
     if isinstance(model, dict):
         return dict(model)
     return {key: value for key, value in vars(model).items() if not key.startswith("_")}
+
+
+def catalog_model_payload(model: ModelDescriptor) -> dict[str, Any]:
+    """Rebuild a provider-shaped payload from one catalog descriptor."""
+    payload = dict(model.provider_metadata)
+    payload.update(
+        {
+            "id": model.id,
+            "object": payload.get("object") or "model",
+            "owned_by": model.owned_by or model.provider_kind,
+        }
+    )
+    if model.model_type is not None:
+        payload["type"] = model.model_type
+    return payload
+
+
+def _catalog_refresh_requested(request: Request) -> bool:
+    return request.query_params.get("refresh", "").casefold() in {"1", "true", "yes"}
 
 
 def build_gemini_model_list(models: list[dict[str, Any]]) -> dict[str, Any]:

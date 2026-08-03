@@ -26,14 +26,14 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
   типизированных изображений зафиксированы golden-фикстурами Gemini.
 - Debug-эндпоинты умеют переводить между форматами `openai`, `anthropic`, `normalized` и
   `gigachat` для защищённых admin-сценариев.
-- G7-01 предоставляет нормализованный upstream-адаптер OpenAI Chat Completions
-  для явно допущенных профилей OpenAI-compatible/vLLM. Это внутренний компонент
-  исполнения, а не новый публичный переключатель маршрутов. G7-02 добавляет
-  прямую проекцию Anthropic request/response/SSE и count-token. G7-03 делает
-  принятое подмножество Gemini совместимым с bridge: полностью смоделированные
-  поля больше не маскируются под несмоделированные extensions, изображения
-  используют типизированные ссылки, а `countTokens` — контракт
-  `NormalizedTokenCountRequest`. Публичный выбор upstream остаётся за G7-04.
+- Для явно разрешённых OpenAI-совместимых профилей и vLLM доступен
+  нормализованный адаптер Chat Completions. Это внутренний компонент, а не
+  публичный переключатель маршрутов.
+- Запросы, ответы, SSE и подсчёт токенов Anthropic напрямую преобразуются через
+  нормализованный слой.
+- Поддерживаемая часть Gemini использует типизированные ссылки на изображения и
+  контракт `NormalizedTokenCountRequest` для `countTokens`. Выбор внешнего
+  провайдера задаётся профилем, а не клиентским запросом.
 
 ## Основные модели
 
@@ -76,10 +76,8 @@ Gemini GenerateContent, а шлюз приводит совместимые ча
 
 ## OpenAI-compatible protocol bridge v1
 
-G7-00 зафиксировал возможность трансляции. G7-01 добавляет первый upstream
-runtime без изменения матрицы. Машиночитаемый источник —
-`PROTOCOL_LOSS_MATRIX_V1` в `gpt2giga.protocols.normalized`; его
-сериализованный статус теперь равен
+Машиночитаемый контракт хранится в `PROTOCOL_LOSS_MATRIX_V1` из
+`gpt2giga.protocols.normalized`. Его сериализованный статус равен
 `implementation_status="openai_compatible_upstream_adapter"`.
 
 Принятое подмножество запроса содержит ровно четыре роли (`system`, `user`,
@@ -166,13 +164,12 @@ gateway-репозиторий не предоставляет публичны�
 
 ### Закрытие protocol bridge
 
-Герметичный closure-suite G7-04 компонует один и тот же проверенный
-`OpenAICompatibleProviderAdapter` с downstream-адаптерами OpenAI, Anthropic и
-Gemini. Text, streaming, partial usage и function-tool нагрузки превращаются в
-одинаковый upstream payload OpenAI Chat Completions, а затем проецируются в
-запрошенную wire-форму. Входные OpenAI-изображения переводятся в тот же
-типизированный контракт `NormalizedImageReference`, который уже используют
-Anthropic и Gemini.
+Изолированный набор тестов связывает один и тот же проверенный
+`OpenAICompatibleProviderAdapter` с адаптерами OpenAI, Anthropic и Gemini.
+Обычный текст, потоковые ответы, частичные сведения о токенах и вызовы функций
+преобразуются в одну нагрузку OpenAI Chat Completions, а затем — в формат,
+который запросил клиент. Изображения OpenAI переводятся в тот же типизированный
+контракт `NormalizedImageReference`, который используют Anthropic и Gemini.
 
 Streaming parser отклоняет данные после terminal choice, usage до terminal
 choice, данные после usage summary, некорректный JSON и незавершённые потоки

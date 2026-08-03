@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from gpt2giga.core.context import RequestContext
+from gpt2giga.protocol.response.processor import ResponseProcessor
 from gpt2giga.protocols.normalized import (
     NormalizedChoice,
     NormalizedMessage,
@@ -49,6 +50,88 @@ def normalized_chat_response_to_openai(
     if metadata:
         result["metadata"] = metadata
     return result
+
+
+def normalized_chat_response_to_responses(
+    response: NormalizedResponse,
+    *,
+    request_payload: dict[str, Any],
+    requested_model: str,
+    response_id: str,
+) -> dict[str, Any]:
+    """Convert one normalized result to the admitted Responses object shape."""
+    if response.error is not None:
+        return {
+            "error": {
+                "message": response.error.message,
+                "type": response.error.type,
+                "param": response.error.param,
+                "code": response.error.code,
+            }
+        }
+
+    status, incomplete_details = _responses_status(response)
+    output: list[dict[str, Any]] = []
+    for choice_index, choice in enumerate(response.choices):
+        message = choice.message
+        if message is None:
+            continue
+        hosted_items = ResponseProcessor.create_hosted_tool_response_items(
+            message.raw_extensions,
+            response_id,
+            request_data=request_payload,
+        )
+        output.extend(hosted_items)
+        text = _responses_message_text(message)
+        if text or not hosted_items:
+            output.append(
+                {
+                    "type": "message",
+                    "id": f"msg_{response_id}_{choice_index}",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": text or "",
+                            "annotations": [],
+                            "logprobs": [],
+                        }
+                    ],
+                }
+            )
+        output.extend(_responses_tool_calls(message, choice_index=choice_index))
+
+    metadata = dict(request_payload.get("metadata") or {})
+    metadata.update(_metadata_to_openai(response))
+    response_text = request_payload.get("text")
+    if not isinstance(response_text, dict):
+        response_text = {"format": {"type": "text"}}
+    return {
+        "id": f"resp_{response_id}",
+        "object": "response",
+        "created_at": _created_timestamp(response.created_at),
+        "status": status,
+        "error": None,
+        "incomplete_details": incomplete_details,
+        "instructions": request_payload.get("instructions"),
+        "max_output_tokens": request_payload.get("max_output_tokens"),
+        "model": requested_model,
+        "output": output,
+        "parallel_tool_calls": True,
+        "previous_response_id": None,
+        "reasoning": {"effort": None, "summary": None},
+        "store": True,
+        "temperature": request_payload.get("temperature", 1),
+        "text": response_text,
+        "tool_choice": request_payload.get("tool_choice", "auto"),
+        "tools": request_payload.get("tools", []),
+        "top_p": request_payload.get("top_p", 1),
+        "truncation": "disabled",
+        "usage": _responses_usage(response.usage),
+        "user": None,
+        "metadata": metadata,
+    }
 
 
 def _choice_to_openai(choice: NormalizedChoice) -> dict[str, Any]:
@@ -102,6 +185,70 @@ def _tool_arguments_to_json(value: Any) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value or {}, ensure_ascii=False)
+
+
+def _responses_tool_arguments_to_json(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value or {}, ensure_ascii=False, separators=(",", ":"))
+
+
+def _responses_tool_calls(
+    message: NormalizedMessage,
+    *,
+    choice_index: int,
+) -> list[dict[str, Any]]:
+    items = []
+    for call_index, tool_call in enumerate(message.tool_calls):
+        call_id = tool_call.id or f"call_{choice_index}_{call_index}"
+        items.append(
+            {
+                "id": f"fc_{call_id}",
+                "type": "function_call",
+                "status": "completed",
+                "call_id": call_id,
+                "name": tool_call.name or "",
+                "arguments": _responses_tool_arguments_to_json(tool_call.arguments),
+            }
+        )
+    return items
+
+
+def _responses_message_text(message: NormalizedMessage) -> str | None:
+    if isinstance(message.content, str):
+        return message.content
+    if not isinstance(message.content, list):
+        return None
+    parts = [
+        part.text
+        for part in message.content
+        if part.type == "text" and part.text is not None
+    ]
+    return "".join(parts) if parts else None
+
+
+def _responses_status(
+    response: NormalizedResponse,
+) -> tuple[str, dict[str, str] | None]:
+    reasons = {
+        choice.stop_reason or choice.finish_reason for choice in response.choices
+    }
+    if reasons & {"max_tokens", "length"}:
+        return "incomplete", {"reason": "max_output_tokens"}
+    if "content_filter" in reasons:
+        return "incomplete", {"reason": "content_filter"}
+    return "completed", None
+
+
+def _responses_usage(usage: NormalizedUsage | None) -> dict[str, int] | None:
+    if usage is None:
+        return None
+    values = {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "total_tokens": usage.total_tokens,
+    }
+    return {key: value for key, value in values.items() if value is not None}
 
 
 def _usage_to_openai(usage: NormalizedUsage | None) -> dict[str, Any] | None:

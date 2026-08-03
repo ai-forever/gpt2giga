@@ -1,0 +1,61 @@
+{
+  "case_id": "google-genai-generate-content-tools-v1",
+  "client": {
+    "name": "google-genai-python",
+    "version": "2.14.0"
+  },
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Weather in Moscow?"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "generationConfig": {
+        "maxOutputTokens": 64,
+        "temperature": 0
+      },
+      "systemInstruction": {
+        "parts": [
+          {
+            "text": "Be concise."
+          }
+        ],
+        "role": "user"
+      },
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "description": "Return fixture weather.",
+              "name": "weather",
+              "parameters": {
+                "properties": {
+                  "city": {
+                    "type": "STRING"
+                  }
+                },
+                "required": [
+                  "city"
+                ],
+                "type": "OBJECT"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "headers": {
+      "content-type": "application/json",
+      "x-goog-api-key": "__SCRUBBED__"
+    },
+    "method": "POST",
+    "path": "/models/bridge/gemini-test:generateContent"
+  },
+  "schema_version": "gpt2giga.client-corpus.v1"
+}

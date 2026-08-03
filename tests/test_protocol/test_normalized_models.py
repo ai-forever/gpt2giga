@@ -21,6 +21,11 @@ from gpt2giga.protocols.normalized import (
     NormalizedToolCall,
     NormalizedUsage,
 )
+from gpt2giga.protocols.normalized.models import (
+    NormalizedReasoningIntent,
+    NormalizedStateIntent,
+    NormalizedToolKind,
+)
 
 
 def test_normalized_chat_request_preserves_extensions_and_serializes_to_json():
@@ -70,6 +75,77 @@ def test_normalized_chat_request_preserves_extensions_and_serializes_to_json():
     assert payload["raw_extensions"] == {"parallel_tool_calls": False}
     assert payload["provider_metadata"] == {"gigachat": {"profanity_check": False}}
     json.dumps(payload)
+
+
+def test_normalized_tool_ir_represents_function_hosted_and_namespace_tools():
+    function = NormalizedTool(
+        name="lookup",
+        parameters={"type": "object"},
+    )
+    hosted = NormalizedTool(
+        kind=NormalizedToolKind.HOSTED,
+        type="web_search_preview",
+        configuration={"search_context_size": "medium"},
+    )
+    namespace = NormalizedTool(
+        kind=NormalizedToolKind.NAMESPACE,
+        type="namespace",
+        name="mcp__playwright",
+        configuration={"tools": [{"name": "open_page"}]},
+    )
+
+    assert function.kind is NormalizedToolKind.FUNCTION
+    assert function.type == "function"
+    assert function.name == "lookup"
+    assert hosted.to_json_dict()["kind"] == "hosted"
+    assert hosted.name is None
+    assert hosted.configuration == {"search_context_size": "medium"}
+    assert namespace.to_json_dict()["kind"] == "namespace"
+    assert namespace.configuration == {"tools": [{"name": "open_page"}]}
+
+
+def test_normalized_tool_configuration_uses_an_isolated_default_factory():
+    first = NormalizedTool(name="first")
+    second = NormalizedTool(name="second")
+
+    first.configuration["enabled"] = True
+
+    assert second.configuration == {}
+
+
+def test_normalized_request_preserves_reasoning_and_state_intent():
+    request = NormalizedChatRequest(
+        model="GigaChat-2-Max",
+        reasoning=NormalizedReasoningIntent(
+            effort="high",
+            summary="concise",
+            context="all_turns",
+        ),
+        response_state=NormalizedStateIntent(
+            conversation_id="conv-1",
+            include=["reasoning.encrypted_content"],
+            store=False,
+            background=True,
+        ),
+    )
+
+    payload = request.to_json_dict()
+
+    assert payload["reasoning"] == {
+        "effort": "high",
+        "summary": "concise",
+        "context": "all_turns",
+        "raw_extensions": {},
+        "provider_metadata": {},
+    }
+    assert payload["response_state"] == {
+        "conversation_id": "conv-1",
+        "include": ["reasoning.encrypted_content"],
+        "store": False,
+        "background": True,
+        "raw_extensions": {},
+        "provider_metadata": {},
+    }
 
 
 def test_normalized_response_and_stream_event_are_json_serializable():

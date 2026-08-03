@@ -41,7 +41,7 @@ GigaChat v2, а корневые маршруты без версиониров�
 | `GET /models` | Поддерживается | Список моделей GigaChat в форме, совместимой с OpenAI. |
 | `GET /models/{model}` | Поддерживается | Одна модель в форме, совместимой с OpenAI. |
 | `POST /chat/completions` | Поддерживается | Чат без потоковой передачи и потоковый, инструменты/вызов функций, структурированный вывод, вложения там, где поддерживаются. |
-| `POST /responses` | Поддерживается | Сопоставляет input/instructions/tools из Responses с GigaChat. Режим GigaChat v2 даёт более богатый путь для встроенных инструментов. |
+| `POST /responses` | Stable native / normalized preview | Native GigaChat execution сохраняет compatibility surface, включая hosted tools и attachment handoff. Route-selected normalized execution остаётся technical preview и отклоняет semantics, которые выбранные route/model/API mode не сохраняют. |
 | `POST /embeddings` | Поддерживается | Использует модель из запроса или модель прокси по умолчанию для эмбеддингов, в зависимости от конфигурации. |
 | `GET /model/info` | Поддерживается | Эндпоинт информации о модели, совместимый с LiteLLM. |
 | `POST /files`, `GET /files*` | Отключено | Код роутера есть, но он не подключён: files без batches дают неполный пакетный цикл OpenAI. |
@@ -199,27 +199,32 @@ GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests
 
 Справочник по каждому параметру: [Совместимость параметров клиентов](./client-parameter-compatibility.md).
 
+Статусы маршрутов 0.3, правила проверки отдельных возможностей и стабильные
+коды ошибок описаны в разделе
+[«Совместимость провайдеров»](bridge-compatibility.md).
+
 Внутренний нормализованный слой, который отделяет публичные форматы протоколов от
 выполнения у провайдера, описан в [Нормализованных сообщениях](./architecture/normalized-messages.md).
-G7-00 публикует версионированную матрицу семантических потерь для
-OpenAI-compatible upstream × OpenAI/Anthropic/Gemini и обязательный fail-closed
-guard допуска до I/O. G7-01 добавляет внутренний upstream-адаптер Chat
-Completions для OpenAI-compatible/vLLM с точной привязкой профиля/модели,
-сетевым разрешением на каждый запрос, владением `SecretRef`, строгим model
-discovery, ограниченным streaming и нормализованными errors/usage. G7-02
-добавляет прямую проекцию Anthropic request, response, SSE, tools, usage,
-stop-reason, errors и count-token через нормализованное ядро при включённом
-режиме нормализации. G7-03 фиксирует принятые Gemini-контракты request/response/
-SSE/function/safety-error/usage/model-list/count-token, переводит inline-
-изображения в типизированные ссылки и доказывает отказ bridge admission для
-несмоделированной Gemini-семантики до provider I/O. G7-04 закрывает внутренний
-bridge v1 герметичными контрактами OpenAI/Anthropic/Gemini для text, streaming,
-partial usage, function tools, semantic loss, cancellation, malformed streams,
-timeouts и provider errors. Он также переводит входные OpenAI-изображения в
-типизированные ссылки. Публичный environment switch для произвольного upstream
-не добавляется. Проверенные profiles, secrets и network authority остаются за
-границами этого gateway-репозитория и должны передаваться доверенным
-внешним controller.
+
+В нормализованный путь входят:
+
+- версионированная матрица потерь для OpenAI-совместимых, Anthropic- и
+  Gemini-маршрутов; неподдерживаемые запросы отклоняются до обращения к сети;
+- адаптер Chat Completions для OpenAI-совместимых API и vLLM с точной привязкой
+  профиля и модели, сетевым разрешением на каждый запрос, `SecretRef`, строгим
+  каталогом моделей и ограниченным потоком SSE;
+- преобразование запросов, ответов, SSE, инструментов, сведений о токенах и
+  ошибок Anthropic;
+- поддерживаемая часть Gemini API, включая функции, ошибки безопасности, список
+  моделей и подсчёт токенов; встроенные изображения переводятся в
+  типизированные ссылки;
+- единая проверка обычных и потоковых ответов OpenAI, Anthropic и Gemini,
+  функций, отмены, тайм-аутов и некорректных ответов провайдера.
+
+Публичного переключателя на произвольный внешний адрес нет. Маршруты задаются
+профилями, секреты остаются в окружении, а сетевые и TLS-политики выбирает
+владелец приложения. Подробнее — в разделе
+[«Настройка провайдеров и моделей»](provider-profiles.md).
 
 ## Режимы бэкенда
 

@@ -7,11 +7,11 @@ Harness, — теперь развивается в отдельном репо�
 ## Что изменилось
 
 - `ai-forever/gpt2giga` владеет compatibility gateway `gpt2giga`, его
-  публичными OpenAI/Anthropic/Gemini-shaped API, deployment manifests и этим
-  сайтом.
+  публичными OpenAI/Anthropic/Gemini-shaped API, bridge provider profiles 0.3,
+  deployment manifests и этим сайтом.
 - `krakenalt/gigaloom` владеет workbench GigaLoom, дистрибутивом
   `gpt2giga-harness`, оркестрацией native agents, Cockpit UI, approvals,
-  provider profiles и состоянием workbench.
+  workbench provider-launch presets и состоянием workbench.
 - Установка `gpt2giga` не устанавливает GigaLoom. Установка и эксплуатация
   GigaLoom описываются в отдельном репозитории.
 
@@ -29,7 +29,12 @@ migration tombstones. Они не являются актуальной доку
 
 ## Граница совместимости
 
-Gateway сохраняет публичные compatibility contracts и версионированный
-normalized protocol bridge. Некоторые настройки gateway и исторические записи
-changelog сохраняют слово `Harness` ради обратной совместимости. Это не делает
-GigaLoom активно поддерживаемым продуктом этого репозитория.
+В gpt2giga сохраняются публичные API и версионированный нормализованный слой
+протоколов. В некоторых старых настройках и записях журнала изменений всё ещё
+встречается слово `Harness` — оно оставлено для обратной совместимости. Сам
+GigaLoom теперь развивается в отдельном репозитории.
+
+Запуск gpt2giga из GigaLoom описан в разделе
+[«Переход на gpt2giga 0.3»](migration-0-3.md). Интеграция использует только
+установленную CLI-команду и публичный HTTP API. Общих внутренних Python-модулей
+и миграции постоянных данных у проектов нет.

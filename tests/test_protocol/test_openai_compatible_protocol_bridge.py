@@ -60,8 +60,12 @@ def _profile():
     return openai_compatible_profile(
         profile_id="hermetic-vllm",
         revision="closure-r1",
+        config_revision=f"sha256:{'3' * 64}",
+        public_alias="openai/hermetic-vllm",
         base_url="https://upstream.invalid/v1",
         model="fixture-model",
+        capability_profile="openai-hermetic-v1",
+        loss_matrix_revision=f"sha256:{'4' * 64}",
         features=frozenset(BridgeFeature),
         limits=NormalizedTokenLimits(
             context_window=8192,

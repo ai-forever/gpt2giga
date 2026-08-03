@@ -31,6 +31,11 @@ Full CLI reference:
 gpt2giga --help
 ```
 
+Version 0.3 can also load one immutable multi-provider configuration with
+`--config <path>` or `GPT2GIGA_CONFIG=<path>`. See
+[Provider profiles and model aliases](provider-profiles.md) for the versioned
+schema, secure four-provider examples, and exact alias behavior.
+
 An env template to copy: [.env.example](https://github.com/ai-forever/gpt2giga/blob/main/.env.example).
 
 ## How to read this document
@@ -131,6 +136,7 @@ can be visible to other processes.
 | `GPT2GIGA_HARNESS_MODEL_KEY` | empty | Backward-compatible HMAC setting shared only with a trusted external controller, such as standalone GigaLoom, when the gateway must accept request-scoped Claude/Gemini model pins. |
 | `GPT2GIGA_PASS_MODEL` | `True` | Pass the `model` from the request to GigaChat. Set `False` to always use the configured GigaChat model. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Parse the client `Authorization` as GigaChat credentials for per-request upstream authorization. |
+| `GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS` | `10.0` | Maximum graceful drain time before active requests are cancelled during shutdown. |
 | `GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE` | `32` | Maximum idle credential-specific clients retained for connection reuse. |
 | `GPT2GIGA_EMBEDDINGS` | `EmbeddingsGigaR` | Default embeddings model when the model from the request is not used. |
 | `GPT2GIGA_ENABLE_IMAGES` | `True` | Accept and translate supported image inputs. Disable when the deployment must reject image processing. |

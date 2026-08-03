@@ -1,0 +1,194 @@
+{
+  "schema_version": "gpt2giga.openai-responses-parser-fixtures.v1",
+  "cases": [
+    {
+      "id": "known_hosted_reasoning_and_state",
+      "classification": "known_supported_later",
+      "request": {
+        "model": "bridge/codex-test",
+        "input": "Search and summarize.",
+        "tools": [
+          {
+            "type": "web_search_preview",
+            "search_context_size": "medium",
+            "user_location": {
+              "type": "approximate",
+              "country": "RU"
+            }
+          },
+          {
+            "type": "image_generation",
+            "partial_images": 2,
+            "quality": "auto"
+          }
+        ],
+        "reasoning": {
+          "effort": "high",
+          "summary": "concise"
+        },
+        "include": [
+          "reasoning.encrypted_content",
+          "web_search_call.action.sources"
+        ],
+        "store": false
+      },
+      "normalized": {
+        "tools": [
+          {
+            "kind": "hosted",
+            "type": "web_search_preview",
+            "parameters": {},
+            "configuration": {
+              "search_context_size": "medium",
+              "user_location": {
+                "type": "approximate",
+                "country": "RU"
+              }
+            },
+            "raw_extensions": {},
+            "provider_metadata": {}
+          },
+          {
+            "kind": "hosted",
+            "type": "image_generation",
+            "parameters": {},
+            "configuration": {
+              "partial_images": 2,
+              "quality": "auto"
+            },
+            "raw_extensions": {},
+            "provider_metadata": {}
+          }
+        ],
+        "reasoning": {
+          "effort": "high",
+          "summary": "concise"
+        },
+        "response_state": {
+          "include": [
+            "reasoning.encrypted_content",
+            "web_search_call.action.sources"
+          ],
+          "store": false
+        }
+      }
+    },
+    {
+      "id": "known_file_search_for_route_admission",
+      "classification": "known_route_unsupported",
+      "request": {
+        "model": "bridge/codex-test",
+        "input": "Search the files.",
+        "tools": [
+          {
+            "type": "file_search",
+            "vector_store_ids": [
+              "vs-1"
+            ],
+            "max_num_results": 5
+          }
+        ],
+        "tool_choice": {
+          "type": "file_search"
+        }
+      },
+      "normalized": {
+        "tools": [
+          {
+            "kind": "hosted",
+            "type": "file_search",
+            "parameters": {},
+            "configuration": {
+              "vector_store_ids": [
+                "vs-1"
+              ],
+              "max_num_results": 5
+            },
+            "raw_extensions": {},
+            "provider_metadata": {}
+          }
+        ],
+        "tool_choice": {
+          "type": "file_search"
+        }
+      }
+    },
+    {
+      "id": "malformed_code_interpreter_without_container",
+      "classification": "malformed",
+      "request": {
+        "model": "bridge/codex-test",
+        "input": "Run code.",
+        "tools": [
+          {
+            "type": "code_interpreter"
+          }
+        ]
+      },
+      "error": {
+        "code": "invalid_request",
+        "param": "tools[0].container"
+      }
+    },
+    {
+      "id": "malformed_conflicting_response_state",
+      "classification": "malformed",
+      "request": {
+        "model": "bridge/codex-test",
+        "input": "Continue.",
+        "previous_response_id": "resp-1",
+        "conversation": "conv-1"
+      },
+      "error": {
+        "code": "invalid_request",
+        "param": "conversation"
+      }
+    },
+    {
+      "id": "unknown_tool_type_is_forbidden",
+      "classification": "unknown_forbidden",
+      "request": {
+        "model": "bridge/codex-test",
+        "input": "Teleport.",
+        "tools": [
+          {
+            "type": "browser_teleport"
+          }
+        ]
+      },
+      "error": {
+        "code": "unsupported_semantic",
+        "param": "tools[0].type"
+      }
+    },
+    {
+      "id": "unknown_reasoning_field_is_forbidden",
+      "classification": "unknown_forbidden",
+      "request": {
+        "model": "bridge/codex-test",
+        "input": "Think.",
+        "reasoning": {
+          "effort": "high",
+          "trace": true
+        }
+      },
+      "error": {
+        "code": "unsupported_semantic",
+        "param": "reasoning.trace"
+      }
+    },
+    {
+      "id": "unknown_top_level_field_is_forbidden",
+      "classification": "unknown_forbidden",
+      "request": {
+        "model": "bridge/codex-test",
+        "input": "Hello.",
+        "provider": "gigachat"
+      },
+      "error": {
+        "code": "unsupported_semantic",
+        "param": "provider"
+      }
+    }
+  ]
+}

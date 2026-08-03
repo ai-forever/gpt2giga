@@ -6,7 +6,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Overview',
       collapsible: false,
-      items: ['index', 'quickstart', 'configuration'],
+      items: ['index', 'quickstart', 'configuration', 'provider-profiles'],
     },
     {
       type: 'category',
@@ -14,6 +14,7 @@ const sidebars: SidebarsConfig = {
       collapsible: false,
       items: [
         'api-compatibility',
+        'bridge-compatibility',
         'client-parameter-compatibility',
         'builtin-tools',
         'integrations',
@@ -33,6 +34,19 @@ const sidebars: SidebarsConfig = {
         'architecture/normalized-messages',
         'architecture/logging-and-observability',
         'architecture/how-to-add-provider',
+        {
+          type: 'category',
+          label: 'gpt2giga 0.3',
+          collapsible: true,
+          collapsed: true,
+          items: [
+            'architecture/responses-execution',
+            'architecture/provider-routing',
+            'architecture/bridge-compatibility-matrix',
+            'architecture/supervisor-api',
+            'architecture/provider-security',
+          ],
+        },
       ],
     },
     {
@@ -49,8 +63,11 @@ const sidebars: SidebarsConfig = {
       items: [
         {
           type: 'doc',
+          id: 'migration-0-3',
+        },
+        {
+          type: 'doc',
           id: 'gigaloom-migration',
-          label: 'GigaLoom migration',
         },
       ],
     },

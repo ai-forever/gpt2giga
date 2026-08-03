@@ -26,14 +26,14 @@ dedicated Gemini-to-normalized adapter in the main execution path.
   image contracts are frozen by Gemini golden fixtures.
 - Debug endpoints can translate between the `openai`, `anthropic`, `normalized`, and
   `gigachat` formats for protected admin workflows.
-- G7-01 provides a normalized OpenAI Chat Completions upstream adapter for
-  explicitly admitted OpenAI-compatible/vLLM profiles. It is an internal
-  execution component, not a new public route switch. G7-02 adds the direct
-  Anthropic request/response/SSE and count-token projection. G7-03 makes the
-  admitted Gemini subset bridge-compatible: fully modeled fields no longer
-  masquerade as unmodeled extensions, images use typed references, and
-  `countTokens` uses `NormalizedTokenCountRequest`. Public upstream selection
-  remains gated by G7-04.
+- Explicitly admitted OpenAI-compatible and vLLM profiles can use the normalized
+  Chat Completions adapter. It is an internal execution component, not a public
+  route switch.
+- Anthropic requests, responses, SSE, and token counting project directly
+  through the normalized layer.
+- The admitted Gemini subset uses typed image references and
+  `NormalizedTokenCountRequest` for `countTokens`. Provider selection comes
+  from the profile, not the client request.
 
 ## Core models
 
@@ -75,10 +75,9 @@ All normalized models inherit two extension buckets:
 
 ## OpenAI-compatible protocol bridge v1
 
-G7-00 froze translation feasibility. G7-01 adds the first upstream runtime
-without changing the matrix. The machine-readable source is
-`PROTOCOL_LOSS_MATRIX_V1` in `gpt2giga.protocols.normalized`; its serialized
-status is now `implementation_status="openai_compatible_upstream_adapter"`.
+The machine-readable contract is `PROTOCOL_LOSS_MATRIX_V1` in
+`gpt2giga.protocols.normalized`; its serialized status is
+`implementation_status="openai_compatible_upstream_adapter"`.
 
 The accepted request subset has exactly four roles (`system`, `user`,
 `assistant`, `tool`), ordered text and typed image-reference parts, function
@@ -163,7 +162,7 @@ gateway repository does not expose a public arbitrary-vLLM switch.
 
 ### Protocol bridge closure
 
-The G7-04 hermetic closure suite composes the same reviewed
+The hermetic closure suite composes the same reviewed
 `OpenAICompatibleProviderAdapter` with the OpenAI, Anthropic, and Gemini
 downstream adapters. Text, streaming, partial usage, and function-tool
 workloads reach an identical OpenAI Chat Completions upstream payload and are

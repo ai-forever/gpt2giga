@@ -1,0 +1,51 @@
+{
+  "case_id": "openai-sdk-chat-tools-v1",
+  "client": {
+    "name": "openai-python",
+    "version": "2.50.0"
+  },
+  "request": {
+    "body": {
+      "messages": [
+        {
+          "content": "Weather in Moscow?",
+          "role": "user"
+        }
+      ],
+      "model": "bridge/openai-test",
+      "tool_choice": {
+        "function": {
+          "name": "weather"
+        },
+        "type": "function"
+      },
+      "tools": [
+        {
+          "function": {
+            "description": "Return fixture weather.",
+            "name": "weather",
+            "parameters": {
+              "properties": {
+                "city": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "city"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "function"
+        }
+      ]
+    },
+    "headers": {
+      "authorization": "Bearer __SCRUBBED__",
+      "content-type": "application/json"
+    },
+    "method": "POST",
+    "path": "/chat/completions"
+  },
+  "schema_version": "gpt2giga.client-corpus.v1"
+}

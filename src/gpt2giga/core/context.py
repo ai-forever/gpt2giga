@@ -39,6 +39,13 @@ class RequestContext:
     caller_agent_id: Optional[str] = None
     model_requested: Optional[str] = None
     model_effective: Optional[str] = None
+    capability_profile: Optional[str] = None
+    config_revision: Optional[str] = None
+    loss_matrix_revision: Optional[str] = None
+    profile_id: Optional[str] = None
+    provider_kind: Optional[str] = None
+    public_alias: Optional[str] = None
+    upstream_model: Optional[str] = None
     llm_observability_emitted: bool = False
     request_headers_redacted: Any | None = None
     request_body_redacted: Any | None = None
@@ -88,6 +95,7 @@ def update_request_context(
     model_requested: Any = None,
     model_effective: Any = None,
     metadata: Optional[dict[str, Any]] = None,
+    bridge_route: Optional[dict[str, Any]] = None,
 ) -> Optional[RequestContext]:
     """Update optional request context fields when request details become known."""
     context = get_request_context()
@@ -99,6 +107,19 @@ def update_request_context(
         context.model_effective = str(model_effective)
     if metadata:
         context.metadata.update(metadata)
+    if bridge_route:
+        for name in (
+            "capability_profile",
+            "config_revision",
+            "loss_matrix_revision",
+            "profile_id",
+            "provider_kind",
+            "public_alias",
+            "upstream_model",
+        ):
+            value = bridge_route.get(name)
+            if value is not None:
+                setattr(context, name, str(value))
     return context
 
 

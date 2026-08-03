@@ -1,0 +1,206 @@
+{
+  "case_id": "model-capability-admission-v1",
+  "corpus_revision": "capability-admission-2026-08-03",
+  "evidence_source_precedence": [
+    "provider_metadata",
+    "reviewed_exact_model_overlay",
+    "reviewed_model_family_overlay",
+    "hermetic_probe",
+    "provider_invariant",
+    "unknown"
+  ],
+  "unknown_policy": {
+    "dispatch": false,
+    "error_code": "capability_unknown",
+    "http_status": 400,
+    "reason_id": "capability_unknown_requires_review"
+  },
+  "cases": [
+    {
+      "id": "max-v2-web-search-supported",
+      "coordinates": {
+        "public_protocol": "openai_responses",
+        "provider_kind": "gigachat",
+        "model_id": "GigaChat-2-Max",
+        "api_mode": "v2",
+        "route_policy": "native_compatibility",
+        "semantic": "hosted_tool.web_search"
+      },
+      "decision": {
+        "state": "supported",
+        "reason_id": "gigachat_v2_web_search_reviewed_exact_model",
+        "evidence_revision": "gigachat-capabilities-2026-08-03.1",
+        "source": "reviewed_exact_model_overlay"
+      },
+      "expected": {"dispatch": true, "http_status": 200, "network_attempts": 1}
+    },
+    {
+      "id": "max-v1-state-unsupported",
+      "coordinates": {
+        "public_protocol": "openai_responses",
+        "provider_kind": "gigachat",
+        "model_id": "GigaChat-2-Max",
+        "api_mode": "v1",
+        "route_policy": "native_compatibility",
+        "semantic": "state.previous_response_id"
+      },
+      "decision": {
+        "state": "unsupported",
+        "reason_id": "gigachat_v1_previous_response_state_unavailable",
+        "evidence_revision": "gigachat-capabilities-2026-08-03.1",
+        "source": "provider_invariant"
+      },
+      "expected": {"dispatch": false, "http_status": 400, "network_attempts": 0}
+    },
+    {
+      "id": "max-v2-computer-use-unknown",
+      "coordinates": {
+        "public_protocol": "openai_responses",
+        "provider_kind": "gigachat",
+        "model_id": "GigaChat-2-Max",
+        "api_mode": "v2",
+        "route_policy": "native_compatibility",
+        "semantic": "hosted_tool.computer_use"
+      },
+      "decision": {
+        "state": "unknown",
+        "reason_id": "capability_unknown_requires_review",
+        "evidence_revision": "gigachat-capabilities-2026-08-03.1",
+        "source": "unknown"
+      },
+      "expected": {"dispatch": false, "http_status": 400, "network_attempts": 0}
+    },
+    {
+      "id": "pro-v2-custom-function-supported",
+      "coordinates": {
+        "public_protocol": "openai_responses",
+        "provider_kind": "gigachat",
+        "model_id": "GigaChat-2-Pro",
+        "api_mode": "v2",
+        "route_policy": "native_compatibility",
+        "semantic": "custom_function"
+      },
+      "decision": {
+        "state": "supported",
+        "reason_id": "gigachat_custom_functions_provider_invariant",
+        "evidence_revision": "gigachat-capabilities-2026-08-03.1",
+        "source": "provider_invariant"
+      },
+      "expected": {"dispatch": true, "http_status": 200, "network_attempts": 1}
+    },
+    {
+      "id": "pro-v1-hosted-tool-unsupported",
+      "coordinates": {
+        "public_protocol": "openai_responses",
+        "provider_kind": "gigachat",
+        "model_id": "GigaChat-2-Pro",
+        "api_mode": "v1",
+        "route_policy": "native_compatibility",
+        "semantic": "hosted_tool.code_interpreter"
+      },
+      "decision": {
+        "state": "unsupported",
+        "reason_id": "gigachat_v1_hosted_tools_unavailable",
+        "evidence_revision": "gigachat-capabilities-2026-08-03.1",
+        "source": "provider_invariant"
+      },
+      "expected": {"dispatch": false, "http_status": 400, "network_attempts": 0}
+    },
+    {
+      "id": "pro-v2-future-tool-unknown",
+      "coordinates": {
+        "public_protocol": "openai_responses",
+        "provider_kind": "gigachat",
+        "model_id": "GigaChat-2-Pro",
+        "api_mode": "v2",
+        "route_policy": "native_compatibility",
+        "semantic": "hosted_tool.future_tool"
+      },
+      "decision": {
+        "state": "unknown",
+        "reason_id": "capability_unknown_requires_review",
+        "evidence_revision": "gigachat-capabilities-2026-08-03.1",
+        "source": "unknown"
+      },
+      "expected": {"dispatch": false, "http_status": 400, "network_attempts": 0}
+    },
+    {
+      "id": "future-v2-text-supported",
+      "coordinates": {
+        "public_protocol": "openai_responses",
+        "provider_kind": "gigachat",
+        "model_id": "GigaChat-Future-1",
+        "api_mode": "v2",
+        "route_policy": "native_compatibility",
+        "semantic": "text"
+      },
+      "decision": {
+        "state": "supported",
+        "reason_id": "gigachat_text_provider_invariant",
+        "evidence_revision": "gigachat-capabilities-2026-08-03.1",
+        "source": "provider_invariant"
+      },
+      "expected": {"dispatch": true, "http_status": 200, "network_attempts": 1}
+    },
+    {
+      "id": "future-v1-state-unsupported",
+      "coordinates": {
+        "public_protocol": "openai_responses",
+        "provider_kind": "gigachat",
+        "model_id": "GigaChat-Future-1",
+        "api_mode": "v1",
+        "route_policy": "native_compatibility",
+        "semantic": "state.conversation"
+      },
+      "decision": {
+        "state": "unsupported",
+        "reason_id": "gigachat_v1_conversation_state_unavailable",
+        "evidence_revision": "gigachat-capabilities-2026-08-03.1",
+        "source": "provider_invariant"
+      },
+      "expected": {"dispatch": false, "http_status": 400, "network_attempts": 0}
+    },
+    {
+      "id": "future-v2-web-search-unknown",
+      "coordinates": {
+        "public_protocol": "openai_responses",
+        "provider_kind": "gigachat",
+        "model_id": "GigaChat-Future-1",
+        "api_mode": "v2",
+        "route_policy": "native_compatibility",
+        "semantic": "hosted_tool.web_search"
+      },
+      "decision": {
+        "state": "unknown",
+        "reason_id": "capability_unknown_requires_review",
+        "evidence_revision": "gigachat-capabilities-2026-08-03.1",
+        "source": "unknown"
+      },
+      "expected": {"dispatch": false, "http_status": 400, "network_attempts": 0}
+    },
+    {
+      "id": "blocked-route-rejected-before-client-construction",
+      "coordinates": {
+        "public_protocol": "openai_responses",
+        "provider_kind": "gigachat",
+        "model_id": "GigaChat-2-Max",
+        "api_mode": "v2",
+        "route_policy": "blocked",
+        "semantic": "text"
+      },
+      "decision": {
+        "state": "unsupported",
+        "reason_id": "route_policy_blocked",
+        "evidence_revision": "route-policy-2026-08-03.1",
+        "source": "provider_metadata"
+      },
+      "expected": {
+        "client_constructions": 0,
+        "dispatch": false,
+        "http_status": 400,
+        "network_attempts": 0
+      }
+    }
+  ],
+  "schema_version": "gpt2giga.corrective-conformance.v1"
+}

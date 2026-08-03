@@ -1,0 +1,36 @@
+{
+  "case_id": "bridge-lifecycle-failures-v1",
+  "cases": [
+    {
+      "action": "cancel_exact_upstream_operation",
+      "expected_network_attempts": 1,
+      "id": "cancellation-before-terminal",
+      "terminal_public_events": 0
+    },
+    {
+      "action": "cancel_and_release_exact_upstream_operation",
+      "expected_network_attempts": 1,
+      "id": "client-disconnect-after-first-delta",
+      "terminal_public_events": 0
+    },
+    {
+      "action": "provider_protocol_error",
+      "expected_network_attempts": 1,
+      "id": "malformed-json-after-stream-start",
+      "upstream_frames": [
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
+        "data: {not-json}\n\n"
+      ]
+    },
+    {
+      "action": "provider_protocol_error",
+      "expected_network_attempts": 1,
+      "id": "duplicate-terminal",
+      "upstream_frames": [
+        "data: {\"type\":\"response.completed\"}\n\n",
+        "data: {\"type\":\"response.completed\"}\n\n"
+      ]
+    }
+  ],
+  "schema_version": "gpt2giga.client-corpus.v1"
+}

@@ -1,0 +1,21 @@
+{
+  "case_id": "anthropic-messages-stream-sequence-v1",
+  "client": {
+    "name": "anthropic-python",
+    "version": "0.120.2"
+  },
+  "events": [
+    "message_start",
+    "ping",
+    "content_block_start",
+    "content_block_delta",
+    "content_block_stop",
+    "message_delta",
+    "message_stop"
+  ],
+  "terminal": {
+    "event": "message_stop",
+    "max_count": 1
+  },
+  "schema_version": "gpt2giga.client-corpus.v1"
+}

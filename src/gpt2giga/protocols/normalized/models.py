@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -83,13 +84,23 @@ class NormalizedMessage(NormalizedBaseModel):
     tool_calls: list[NormalizedToolCall] = Field(default_factory=list)
 
 
-class NormalizedTool(NormalizedBaseModel):
-    """Represent a callable tool exposed to a model."""
+class NormalizedToolKind(str, Enum):
+    """Classify the provider-neutral execution shape of a normalized tool."""
 
+    FUNCTION = "function"
+    HOSTED = "hosted"
+    NAMESPACE = "namespace"
+
+
+class NormalizedTool(NormalizedBaseModel):
+    """Represent a function, hosted, or namespaced tool exposed to a model."""
+
+    kind: NormalizedToolKind = NormalizedToolKind.FUNCTION
     type: str = "function"
-    name: str
+    name: Optional[str] = None
     description: Optional[str] = None
     parameters: dict[str, Any] = Field(default_factory=dict)
+    configuration: dict[str, Any] = Field(default_factory=dict)
 
 
 class NormalizedResponseFormat(NormalizedBaseModel):
@@ -126,6 +137,26 @@ class NormalizedGenerationConfig(NormalizedBaseModel):
     seed: Optional[int] = None
 
 
+class NormalizedReasoningIntent(NormalizedBaseModel):
+    """Preserve requested reasoning controls for later capability admission."""
+
+    effort: Optional[str] = None
+    summary: Optional[str] = None
+    generate_summary: Optional[str] = None
+    context: Optional[str] = None
+    mode: Optional[str] = None
+
+
+class NormalizedStateIntent(NormalizedBaseModel):
+    """Preserve requested response state semantics for later admission."""
+
+    previous_response_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    include: list[str] = Field(default_factory=list)
+    store: Optional[bool] = None
+    background: Optional[bool] = None
+
+
 class NormalizedRequest(NormalizedBaseModel):
     """Represent a normalized provider request envelope."""
 
@@ -154,6 +185,8 @@ class NormalizedChatRequest(NormalizedRequest):
     generation_config: NormalizedGenerationConfig = Field(
         default_factory=NormalizedGenerationConfig
     )
+    reasoning: Optional[NormalizedReasoningIntent] = None
+    response_state: Optional[NormalizedStateIntent] = None
     cancellation: Optional[NormalizedCancellation] = None
     user: Optional[str] = None
 

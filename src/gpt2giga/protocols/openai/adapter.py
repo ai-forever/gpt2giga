@@ -22,6 +22,9 @@ from gpt2giga.protocols.normalized import (
 from gpt2giga.protocols.openai.response_adapter import (
     normalized_chat_response_to_openai,
 )
+from gpt2giga.protocols.openai.responses_request import (
+    responses_request_to_normalized,
+)
 
 _CHAT_TOP_LEVEL_FIELDS = {
     "additional_fields",
@@ -77,6 +80,24 @@ class OpenAIProtocolAdapter:
             requested_model=getattr(payload, "model", None) or "GigaChat",
             context=context,
         )
+
+    async def responses_to_normalized_async(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        context: RequestContext | None = None,
+    ) -> NormalizedChatRequest:
+        """Convert an admitted OpenAI Responses payload to normalized form."""
+        return self.responses_to_normalized(payload, context=context)
+
+    def responses_to_normalized(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        context: RequestContext | None = None,
+    ) -> NormalizedChatRequest:
+        """Decode the fail-closed Responses subset pinned for the bridge."""
+        return responses_request_to_normalized(payload, context=context)
 
     def chat_to_normalized(
         self,

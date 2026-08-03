@@ -88,7 +88,10 @@ class FakeGigaChat:
         self.embedding_calls = []
 
     async def aget_models(self):
-        return SimpleNamespace(data=[FakeModel()], object_="list")
+        return SimpleNamespace(
+            data=[FakeModel(), FakeModel("GigaChat-2-Max")],
+            object_="list",
+        )
 
     async def aget_model(self, model: str):
         return FakeModel(model)

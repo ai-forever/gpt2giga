@@ -12,7 +12,12 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    CliImplicitFlag,
+    NoDecode,
+    SettingsConfigDict,
+)
 
 from gpt2giga.constants import (
     DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES,
@@ -45,6 +50,12 @@ class ProxySettings(BaseSettings):
     )
     pass_token: bool = Field(
         default=False, description="Передавать токен из запроса в API"
+    )
+    shutdown_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=300,
+        description="Maximum graceful drain time before active requests are cancelled.",
     )
     pass_token_client_cache_size: PositiveInt = Field(
         default=32,
@@ -528,6 +539,17 @@ class ProxyConfig(BaseSettings):
         default_factory=GigaChatCLI, alias="gigachat"
     )
     env_path: Optional[str] = Field(None, description="Path to .env file")
+    provider_config_path: Optional[str] = Field(
+        default=None,
+        alias="config",
+        description="Path to the startup-owned provider profile configuration.",
+    )
+    inspect_config: CliImplicitFlag[bool] = Field(
+        default=False,
+        description=(
+            "Validate provider configuration and print the redacted machine manifest."
+        ),
+    )
 
     model_config = SettingsConfigDict(
         cli_parse_args=True,

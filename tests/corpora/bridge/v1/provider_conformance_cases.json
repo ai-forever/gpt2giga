@@ -1,0 +1,221 @@
+{
+  "case_id": "bridge-provider-conformance-v1",
+  "cases": [
+    {
+      "expected_network_attempts": 1,
+      "expected_public_response": {
+        "output_text": "ok",
+        "status": "completed",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 1,
+          "total_tokens": 3
+        }
+      },
+      "id": "normalized-text-non-stream",
+      "public_protocol": "openai_chat_completions",
+      "request": {
+        "messages": [
+          {
+            "content": "hello",
+            "role": "user"
+          }
+        ],
+        "model": "bridge/conformance",
+        "stream": false
+      },
+      "script": {
+        "response": {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "ok",
+                "role": "assistant"
+              },
+              "stop_reason": "stop"
+            }
+          ],
+          "created_at": "2026-08-03T00:00:00Z",
+          "id": "response_fixture",
+          "model": "bridge/conformance",
+          "usage": {
+            "input_tokens": 2,
+            "output_tokens": 1,
+            "total_tokens": 3
+          }
+        }
+      }
+    },
+    {
+      "expected_network_attempts": 1,
+      "expected_public_response": {
+        "events": [
+          "message_start",
+          "content_delta",
+          "usage",
+          "message_end"
+        ],
+        "output_text": "ok",
+        "status": "completed"
+      },
+      "id": "normalized-text-stream",
+      "public_protocol": "openai_responses",
+      "request": {
+        "messages": [
+          {
+            "content": "hello",
+            "role": "user"
+          }
+        ],
+        "model": "bridge/conformance",
+        "stream": true
+      },
+      "script": {
+        "events": [
+          {
+            "created_at": "2026-08-03T00:00:00Z",
+            "sequence": 0,
+            "type": "message_start"
+          },
+          {
+            "content_delta": "ok",
+            "created_at": "2026-08-03T00:00:00Z",
+            "sequence": 1,
+            "type": "content_delta"
+          },
+          {
+            "created_at": "2026-08-03T00:00:00Z",
+            "sequence": 2,
+            "type": "usage",
+            "usage": {
+              "input_tokens": 2,
+              "output_tokens": 1,
+              "total_tokens": 3
+            }
+          },
+          {
+            "created_at": "2026-08-03T00:00:00Z",
+            "sequence": 3,
+            "stop_reason": "stop",
+            "type": "message_end"
+          }
+        ]
+      }
+    },
+    {
+      "expected_error_code": "provider_protocol_error",
+      "expected_network_attempts": 1,
+      "id": "malformed-stream-frame",
+      "public_protocol": "anthropic_messages",
+      "request": {
+        "messages": [
+          {
+            "content": "hello",
+            "role": "user"
+          }
+        ],
+        "model": "bridge/conformance",
+        "stream": true
+      },
+      "script": {
+        "events": [
+          {
+            "created_at": "2026-08-03T00:00:00Z",
+            "sequence": 0,
+            "type": "message_start"
+          },
+          {
+            "content_delta": "unreachable",
+            "created_at": "2026-08-03T00:00:00Z",
+            "sequence": 1,
+            "type": "content_delta"
+          }
+        ],
+        "malformed_at_event": 1
+      }
+    },
+    {
+      "expected_error_code": "client_disconnected",
+      "expected_network_attempts": 1,
+      "id": "cancel-after-first-event",
+      "public_protocol": "gemini_generate_content",
+      "request": {
+        "messages": [
+          {
+            "content": "hello",
+            "role": "user"
+          }
+        ],
+        "model": "bridge/conformance",
+        "stream": true
+      },
+      "script": {
+        "cancel_after_events": 1,
+        "events": [
+          {
+            "created_at": "2026-08-03T00:00:00Z",
+            "sequence": 0,
+            "type": "message_start"
+          },
+          {
+            "content_delta": "unreachable",
+            "created_at": "2026-08-03T00:00:00Z",
+            "sequence": 1,
+            "type": "content_delta"
+          }
+        ]
+      }
+    },
+    {
+      "expected_network_attempts": 1,
+      "expected_public_response": {
+        "output_text": "ok",
+        "status": "completed",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 1,
+          "total_tokens": 3
+        }
+      },
+      "id": "latency-injection-non-stream",
+      "public_protocol": "openai_chat_completions",
+      "request": {
+        "messages": [
+          {
+            "content": "hello",
+            "role": "user"
+          }
+        ],
+        "model": "bridge/conformance",
+        "stream": false
+      },
+      "script": {
+        "latency_seconds": 0.025,
+        "response": {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "ok",
+                "role": "assistant"
+              },
+              "stop_reason": "stop"
+            }
+          ],
+          "created_at": "2026-08-03T00:00:00Z",
+          "id": "response_fixture_latency",
+          "model": "bridge/conformance",
+          "usage": {
+            "input_tokens": 2,
+            "output_tokens": 1,
+            "total_tokens": 3
+          }
+        }
+      }
+    }
+  ],
+  "schema_version": "gpt2giga.client-corpus.v1"
+}

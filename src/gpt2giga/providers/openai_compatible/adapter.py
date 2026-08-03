@@ -36,7 +36,8 @@ from gpt2giga.protocols.normalized import (
 )
 
 
-OPENAI_COMPATIBLE_UPSTREAM_SCHEMA_VERSION = "gigaloom.openai-compatible-upstream.v1"
+OPENAI_COMPATIBLE_UPSTREAM_SCHEMA_VERSION = "gpt2giga.openai-compatible-upstream.v1"
+OPENAI_COMPATIBLE_ROUTE_SCHEMA_VERSION = "gpt2giga.execution-context.v1"
 OPENAI_CHAT_COMPLETIONS_DIALECT = "openai-chat-completions-v1"
 OPENAI_CHAT_EXECUTION_OWNER = "provider-execution:openai-compatible"
 DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
@@ -44,12 +45,36 @@ MAX_MODEL_DISCOVERY_ITEMS = 500
 MAX_MODEL_ID_CHARS = 256
 _REQUEST_PURPOSE_CHAT = "provider.openai-compatible.chat"
 _REQUEST_PURPOSE_MODELS = "provider.openai-compatible.models"
+_REVISION_PATTERN = r"^sha256:[0-9a-f]{64}$"
+
+
+class OpenAICompatibleRouteBinding(NormalizedBaseModel):
+    """Secret-free identity of one reviewed public-alias route."""
+
+    schema_version: Literal["gpt2giga.execution-context.v1"] = (
+        OPENAI_COMPATIBLE_ROUTE_SCHEMA_VERSION
+    )
+    config_revision: str = Field(pattern=_REVISION_PATTERN)
+    profile_id: str = Field(min_length=1, max_length=256)
+    profile_revision: str = Field(min_length=1, max_length=256)
+    public_alias: str = Field(min_length=1, max_length=256)
+    provider_kind: Literal["openai_compatible"] = "openai_compatible"
+    upstream_model: str = Field(min_length=1, max_length=256)
+    capability_profile: str = Field(min_length=1, max_length=256)
+    loss_matrix_revision: str = Field(pattern=_REVISION_PATTERN)
+
+    def to_execution_context(self) -> dict[str, Any]:
+        """Return the exact machine contract without extension buckets."""
+        return self.model_dump(
+            mode="json",
+            exclude={"provider_metadata", "raw_extensions"},
+        )
 
 
 class OpenAICompatibleUpstreamProfile(NormalizedBaseModel):
     """Versioned execution profile without credential values or grant contents."""
 
-    schema_version: Literal["gigaloom.openai-compatible-upstream.v1"] = (
+    schema_version: Literal["gpt2giga.openai-compatible-upstream.v1"] = (
         OPENAI_COMPATIBLE_UPSTREAM_SCHEMA_VERSION
     )
     id: str = Field(min_length=1, max_length=256)
@@ -73,6 +98,7 @@ class OpenAICompatibleUpstreamProfile(NormalizedBaseModel):
     network_policy_ref: str = Field(min_length=1, max_length=256)
     tls_policy_ref: str | None = Field(default=None, min_length=1, max_length=256)
     proxy_policy_ref: str | None = Field(default=None, min_length=1, max_length=256)
+    route: OpenAICompatibleRouteBinding | None = None
 
     @field_validator("base_url")
     @classmethod
@@ -83,10 +109,28 @@ class OpenAICompatibleUpstreamProfile(NormalizedBaseModel):
     def _validate_profile(self) -> OpenAICompatibleUpstreamProfile:
         if self.raw_extensions or self.provider_metadata:
             raise ValueError("upstream profile extensions are not admitted")
-        if self.capabilities.profile != f"{self.id}@{self.revision}":
+        if (
+            self.route is None
+            and self.capabilities.profile != f"{self.id}@{self.revision}"
+        ):
             raise ValueError("upstream capabilities do not bind the profile revision")
         if self.capabilities.raw_extensions or self.capabilities.provider_metadata:
             raise ValueError("upstream capability extensions are not admitted")
+        if self.route is not None:
+            expected = {
+                "profile_id": self.id,
+                "profile_revision": self.revision,
+                "upstream_model": self.model,
+                "capability_profile": self.capabilities.profile,
+            }
+            actual = {
+                "profile_id": self.route.profile_id,
+                "profile_revision": self.route.profile_revision,
+                "upstream_model": self.route.upstream_model,
+                "capability_profile": self.route.capability_profile,
+            }
+            if actual != expected:
+                raise ValueError("reviewed route does not bind the upstream profile")
         return self
 
     @property
@@ -200,12 +244,15 @@ class OpenAICompatibleProviderAdapter:
 
     def __gpt2giga_redacted__(self) -> dict[str, Any]:
         """Return a content-free runtime projection."""
-        return {
+        projection: dict[str, Any] = {
             "profile_id": self.profile.id,
             "profile_revision": self.profile.revision,
             "credential_reference_id": self.profile.credential_reference_id,
             "network_policy_ref": self.profile.network_policy_ref,
         }
+        if self.profile.route is not None:
+            projection["route"] = self.profile.route.to_execution_context()
+        return projection
 
     async def __aenter__(self) -> OpenAICompatibleProviderAdapter:
         return self
@@ -269,7 +316,8 @@ class OpenAICompatibleProviderAdapter:
         payload = normalized_chat_to_openai_compatible_payload(request)
         sequence = 0
         terminal_choices: set[int] = set()
-        started_tool_calls: set[tuple[int, int]] = set()
+        started_tool_calls: dict[tuple[int, int], tuple[str, str]] = {}
+        pending_terminal_events: list[NormalizedStreamEvent] = []
         saw_done = False
         saw_usage = False
 
@@ -283,6 +331,14 @@ class OpenAICompatibleProviderAdapter:
             ),
         )
         sequence += 1
+        if await _is_disconnected(is_disconnected):
+            yield NormalizedStreamEvent(
+                type="cancelled",
+                sequence=sequence,
+                cancellation=request.cancellation,
+                stop_reason="cancelled",
+            )
+            return
         try:
             async for chunk in self._stream_json(
                 url=self.profile.chat_completions_url,
@@ -320,7 +376,14 @@ class OpenAICompatibleProviderAdapter:
                 saw_usage = bool(usage_events)
                 for event in events:
                     sequence = (event.sequence or sequence) + 1
-                    yield event
+                    if event.type in {"message_end", "usage"}:
+                        pending_terminal_events.append(event)
+                    else:
+                        yield event
+            if not saw_done or not terminal_choices:
+                raise _protocol_error(
+                    "incomplete_stream", "Upstream stream was incomplete."
+                )
         except asyncio.CancelledError:
             raise
         except OpenAICompatibleUpstreamError as exc:
@@ -331,11 +394,8 @@ class OpenAICompatibleProviderAdapter:
                 stop_reason="error",
             )
             return
-
-        if not saw_done or not terminal_choices:
-            raise _protocol_error(
-                "incomplete_stream", "Upstream stream was incomplete."
-            )
+        for event in pending_terminal_events:
+            yield event
 
     async def discover_models(self) -> tuple[str, ...]:
         """Return strict bounded model ids without inferring capabilities."""
@@ -386,6 +446,8 @@ class OpenAICompatibleProviderAdapter:
             ) as response:
                 self._validate_peer(response, authorization)
                 content = await _read_bounded_response(response, authorization)
+                if response.is_redirect:
+                    raise _destination_mismatch(response)
                 if response.is_error:
                     raise _http_error(response, content)
         except httpx.TimeoutException as exc:
@@ -420,6 +482,7 @@ class OpenAICompatibleProviderAdapter:
         authorization = self._authorize(url, "POST", purpose, body)
         total_bytes = 0
         buffer = b""
+        saw_done = False
         try:
             async with self._client.stream(
                 "POST",
@@ -428,6 +491,9 @@ class OpenAICompatibleProviderAdapter:
                 headers=self._headers(has_body=True),
             ) as response:
                 self._validate_peer(response, authorization)
+                if response.is_redirect:
+                    await _read_bounded_response(response, authorization)
+                    raise _destination_mismatch(response)
                 if response.is_error:
                     content = await _read_bounded_response(response, authorization)
                     raise _http_error(response, content)
@@ -447,9 +513,18 @@ class OpenAICompatibleProviderAdapter:
                         if raw_event is None:
                             continue
                         if raw_event == b"[DONE]":
-                            authorization.validate_response_body(body_bytes=total_bytes)
-                            yield None
-                            return
+                            if saw_done:
+                                raise _protocol_error(
+                                    "duplicate_stream_done",
+                                    "Upstream stream repeated its done marker.",
+                                )
+                            saw_done = True
+                            continue
+                        if saw_done:
+                            raise _protocol_error(
+                                "stream_data_after_done",
+                                "Upstream stream continued after its done marker.",
+                            )
                         try:
                             parsed = json.loads(raw_event)
                         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -464,6 +539,8 @@ class OpenAICompatibleProviderAdapter:
                             )
                         yield parsed
                 authorization.validate_response_body(body_bytes=total_bytes)
+                if saw_done:
+                    yield None
         except asyncio.CancelledError:
             raise
         except OpenAICompatibleUpstreamError:
@@ -522,7 +599,15 @@ class OpenAICompatibleProviderAdapter:
                 "peer_evidence_unavailable",
                 "Upstream transport peer evidence is unavailable.",
             )
-        authorization.validate_connected_peer(address)
+        try:
+            authorization.validate_connected_peer(address)
+        except OpenAICompatibleUpstreamError:
+            raise
+        except Exception as exc:
+            raise _transport_error(
+                "destination_mismatch",
+                "Upstream transport peer did not match its network authorization.",
+            ) from exc
 
 
 def normalized_chat_to_openai_compatible_payload(
@@ -608,12 +693,18 @@ def openai_compatible_response_to_normalized(
                 "Upstream response message must be an object.",
             )
         finish_reason = _optional_string(raw_choice.get("finish_reason"))
+        stop_reason = _normalize_stop_reason(finish_reason)
+        if finish_reason is None or stop_reason is None:
+            raise _protocol_error(
+                "invalid_finish_reason",
+                "Upstream finish reason is outside the admitted dialect.",
+            )
         choices.append(
             NormalizedChoice(
                 index=_integer(raw_choice.get("index"), default=len(choices)),
                 message=_response_message(message),
                 finish_reason=finish_reason,
-                stop_reason=_normalize_stop_reason(finish_reason),
+                stop_reason=stop_reason,
             )
         )
     return NormalizedResponse(
@@ -735,11 +826,25 @@ def _response_tool_call(payload: Any) -> NormalizedToolCall:
             "invalid_tool_call",
             "Upstream tool call function must be an object.",
         )
+    call_id = _optional_string(payload.get("id"))
+    call_type = _optional_string(payload.get("type"))
+    name = _optional_string(function.get("name"))
+    arguments = function.get("arguments")
+    if not call_id or call_type != "function" or not name:
+        raise _protocol_error(
+            "invalid_tool_call",
+            "Upstream tool call identity is incomplete.",
+        )
+    if not isinstance(arguments, str):
+        raise _protocol_error(
+            "invalid_tool_call",
+            "Upstream tool call arguments must be JSON text.",
+        )
     return NormalizedToolCall(
-        id=_optional_string(payload.get("id")),
-        type=_optional_string(payload.get("type")) or "function",
-        name=_optional_string(function.get("name")),
-        arguments=function.get("arguments"),
+        id=call_id,
+        type=call_type,
+        name=name,
+        arguments=arguments,
     )
 
 
@@ -747,7 +852,7 @@ def _chunk_to_events(
     payload: Mapping[str, Any],
     *,
     sequence: int,
-    started_tool_calls: set[tuple[int, int]],
+    started_tool_calls: dict[tuple[int, int], tuple[str, str]],
     terminal_choices: set[int],
 ) -> list[NormalizedStreamEvent]:
     events: list[NormalizedStreamEvent] = []
@@ -800,19 +905,23 @@ def _chunk_to_events(
                     "Upstream stream tool calls must be a list.",
                 )
             for fallback_index, raw_call in enumerate(raw_tool_calls):
-                call = _stream_tool_call(raw_call)
                 call_index = (
                     _integer(raw_call.get("index"), default=fallback_index)
                     if isinstance(raw_call, Mapping)
                     else fallback_index
                 )
                 key = (choice_index, call_index)
-                event_type = (
-                    "tool_call_delta"
-                    if key in started_tool_calls
-                    else "tool_call_start"
+                identity = started_tool_calls.get(key)
+                call = _stream_tool_call(
+                    raw_call,
+                    call_index=call_index,
+                    identity=identity,
                 )
-                started_tool_calls.add(key)
+                event_type = (
+                    "tool_call_delta" if identity is not None else "tool_call_start"
+                )
+                if identity is None:
+                    started_tool_calls[key] = (call.id or "", call.name or "")
                 events.append(
                     NormalizedStreamEvent(
                         type=event_type,
@@ -824,6 +933,12 @@ def _chunk_to_events(
                 )
         finish_reason = _optional_string(raw_choice.get("finish_reason"))
         if finish_reason is not None:
+            stop_reason = _normalize_stop_reason(finish_reason)
+            if stop_reason is None:
+                raise _protocol_error(
+                    "invalid_finish_reason",
+                    "Upstream finish reason is outside the admitted dialect.",
+                )
             if choice_index in terminal_choices:
                 raise _protocol_error(
                     "duplicate_stream_terminal",
@@ -837,7 +952,7 @@ def _chunk_to_events(
                     choice_index=choice_index,
                     model=model,
                     finish_reason=finish_reason,
-                    stop_reason=_normalize_stop_reason(finish_reason),
+                    stop_reason=stop_reason,
                 )
             )
     usage = _usage(payload.get("usage"))
@@ -853,7 +968,12 @@ def _chunk_to_events(
     return events
 
 
-def _stream_tool_call(payload: Any) -> NormalizedToolCall:
+def _stream_tool_call(
+    payload: Any,
+    *,
+    call_index: int,
+    identity: tuple[str, str] | None,
+) -> NormalizedToolCall:
     if not isinstance(payload, Mapping):
         raise _protocol_error(
             "invalid_stream_tool_call",
@@ -861,11 +981,41 @@ def _stream_tool_call(payload: Any) -> NormalizedToolCall:
         )
     function = payload.get("function")
     function_payload = function if isinstance(function, Mapping) else {}
+    call_id = _optional_string(payload.get("id"))
+    call_type = _optional_string(payload.get("type"))
+    name = _optional_string(function_payload.get("name"))
+    arguments = function_payload.get("arguments")
+    if arguments is not None and not isinstance(arguments, str):
+        raise _protocol_error(
+            "invalid_stream_tool_call",
+            "Upstream stream tool arguments must be text deltas.",
+        )
+    if identity is None:
+        if not call_id or call_type != "function" or not name:
+            raise _protocol_error(
+                "invalid_stream_tool_call",
+                "Upstream stream tool call start has incomplete identity.",
+            )
+    else:
+        expected_id, expected_name = identity
+        if (call_id is not None and call_id != expected_id) or (
+            name is not None and name != expected_name
+        ):
+            raise _protocol_error(
+                "stream_tool_identity_changed",
+                "Upstream stream changed a tool call identity.",
+            )
+        if call_type is not None and call_type != "function":
+            raise _protocol_error(
+                "stream_tool_identity_changed",
+                "Upstream stream changed a tool call type.",
+            )
     return NormalizedToolCall(
-        id=_optional_string(payload.get("id")),
-        type=_optional_string(payload.get("type")) or "function",
-        name=_optional_string(function_payload.get("name")),
-        arguments=function_payload.get("arguments"),
+        id=call_id,
+        type=call_type or "function",
+        name=name,
+        arguments=arguments,
+        raw_extensions={"index": call_index},
     )
 
 
@@ -906,6 +1056,8 @@ def _response_provider_metadata(
         "dialect": profile.dialect,
         "admission_schema_version": admission.schema_version,
     }
+    if profile.route is not None:
+        payload["route"] = profile.route.to_execution_context()
     if system_fingerprint is not None:
         payload["system_fingerprint"] = system_fingerprint
     return {"openai_compatible": payload}
@@ -1010,6 +1162,19 @@ def _http_error(
             retryable=status in {408, 429} or status >= 500,
         ),
         status_code=status,
+    )
+
+
+def _destination_mismatch(response: httpx.Response) -> OpenAICompatibleUpstreamError:
+    return OpenAICompatibleUpstreamError(
+        NormalizedError(
+            type="transport_error",
+            message=f"Upstream redirect HTTP {response.status_code} was rejected.",
+            code="destination_mismatch",
+            error_class="upstream",
+            retryable=False,
+        ),
+        status_code=response.status_code,
     )
 
 
@@ -1121,8 +1286,12 @@ def openai_compatible_profile(
     *,
     profile_id: str,
     revision: str,
+    config_revision: str,
+    public_alias: str,
     base_url: str,
     model: str,
+    capability_profile: str,
+    loss_matrix_revision: str,
     features: Collection[BridgeFeature],
     limits: NormalizedTokenLimits,
     network_policy_ref: str,
@@ -1134,7 +1303,7 @@ def openai_compatible_profile(
 ) -> OpenAICompatibleUpstreamProfile:
     """Build an exact generic profile after explicit capability review."""
     capabilities = NormalizedProtocolCapabilities(
-        profile=f"{profile_id}@{revision}",
+        profile=capability_profile,
         features=frozenset(features),
         limits=limits,
     )
@@ -1150,4 +1319,13 @@ def openai_compatible_profile(
         network_policy_ref=network_policy_ref,
         tls_policy_ref=tls_policy_ref,
         proxy_policy_ref=proxy_policy_ref,
+        route=OpenAICompatibleRouteBinding(
+            config_revision=config_revision,
+            profile_id=profile_id,
+            profile_revision=revision,
+            public_alias=public_alias,
+            upstream_model=model,
+            capability_profile=capability_profile,
+            loss_matrix_revision=loss_matrix_revision,
+        ),
     )

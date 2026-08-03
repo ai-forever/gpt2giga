@@ -86,6 +86,11 @@ embeddings.
 
 ## OpenAI body parameters
 
+The Responses row below describes the stable native GigaChat owner. A
+route-selected normalized bridge admits a smaller model/API-mode-specific
+subset and remains technical preview; attachment handoff is native-only until
+normalized parity is proven.
+
 | Endpoint | Supported |
 |---|---|
 | Chat Completions | `model`, `messages`, `stream`, `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, function `tools`, `functions`, `function_call`, supported `tool_choice`, built-in tools in GigaChat v2 mode (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`), `response_format`, `reasoning`, `reasoning_effort`, `extra_body` passthrough |

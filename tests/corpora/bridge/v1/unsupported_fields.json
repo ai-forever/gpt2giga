@@ -1,0 +1,24 @@
+{
+  "case_id": "responses-unsupported-request-authority-v1",
+  "expected": {
+    "code": "unsupported_semantic",
+    "network_attempts": 0,
+    "rejected_fields": [
+      "api_key",
+      "base_url",
+      "parallel_tool_calls",
+      "provider",
+      "web_search_options"
+    ]
+  },
+  "request": {
+    "api_key": "__SCRUBBED__",
+    "base_url": "https://untrusted.invalid/v1",
+    "input": "hello",
+    "model": "bridge/codex-test",
+    "parallel_tool_calls": true,
+    "provider": "untrusted",
+    "web_search_options": {}
+  },
+  "schema_version": "gpt2giga.client-corpus.v1"
+}

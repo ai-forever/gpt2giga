@@ -86,6 +86,11 @@ OpenAI Embeddings принимает и игнорирует `extra_body`, не�
 
 ## Параметры тела OpenAI
 
+Строка Responses ниже описывает stable native GigaChat owner. Route-selected
+normalized bridge допускает меньший model/API-mode-specific subset и остаётся
+technical preview; attachment handoff остаётся native-only до доказанной
+normalized parity.
+
 | Эндпоинт | Поддерживается |
 |---|---|
 | Chat Completions | `model`, `messages`, `stream`, `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, функциональные `tools`, `functions`, `function_call`, поддерживаемый `tool_choice`, встроенные инструменты в режиме GigaChat v2 (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`), `response_format`, `reasoning`, `reasoning_effort`, проброс `extra_body` |
