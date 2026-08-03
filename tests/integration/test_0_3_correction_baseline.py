@@ -41,12 +41,29 @@ class _RecordingGigaChatClient:
             ]
         )
 
-    async def achat(self, payload: Any) -> None:
+    async def achat(self, payload: Any) -> Any:
         self.response_calls.append(payload)
-        raise AssertionError("baseline requests must fail before provider execution")
+        return _ProviderResponse()
 
     async def aclose(self) -> None:
         return None
+
+
+class _ProviderResponse:
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "native"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 2,
+                "completion_tokens": 1,
+                "total_tokens": 3,
+            },
+        }
 
 
 class _RecordingOpenAIProtocolAdapter(OpenAIProtocolAdapter):
@@ -79,7 +96,7 @@ def _correction_baseline_app(
     return app, provider, adapter
 
 
-def test_baseline_hosted_tool_is_rejected_on_normalized_default_before_io(
+def test_hosted_tool_uses_native_default_without_normalized_decode(
     monkeypatch,
 ) -> None:
     app, provider, adapter = _correction_baseline_app(monkeypatch)
@@ -95,27 +112,14 @@ def test_baseline_hosted_tool_is_rejected_on_normalized_default_before_io(
         )
 
     assert app.state.legacy_responses_enabled is False
-    assert adapter.responses_requests == [
-        {
-            "model": "GigaChat",
-            "input": "Find current documentation.",
-            "tools": [{"type": "web_search_preview"}],
-        }
-    ]
-    assert response.status_code == 400
-    assert response.json() == {
-        "error": {
-            "code": "unsupported_semantic",
-            "message": "The selected bridge route cannot preserve this semantic.",
-            "param": "tools[0].type",
-            "type": "invalid_request_error",
-        }
-    }
+    assert adapter.responses_requests == []
+    assert response.status_code == 200
+    assert response.json()["output"][0]["content"][0]["text"] == "native"
     assert provider.discovery_calls == []
-    assert provider.response_calls == []
+    assert len(provider.response_calls) == 1
 
 
-def test_baseline_attachment_is_rejected_on_normalized_default_before_io(
+def test_attachment_uses_native_default_without_normalized_decode(
     monkeypatch,
 ) -> None:
     app, provider, adapter = _correction_baseline_app(monkeypatch)
@@ -128,20 +132,11 @@ def test_baseline_attachment_is_rejected_on_normalized_default_before_io(
         )
 
     assert app.state.legacy_responses_enabled is False
-    assert adapter.responses_requests == [
-        {"model": "GigaChat", "input": "Summarize the attachment."}
-    ]
-    assert response.status_code == 400
-    assert response.json() == {
-        "error": {
-            "code": "unsupported_semantic",
-            "message": "The selected bridge route cannot preserve this semantic.",
-            "param": "x-gpt2giga-attachment-ids",
-            "type": "invalid_request_error",
-        }
-    }
+    assert adapter.responses_requests == []
+    assert response.status_code == 200
+    assert response.json()["output"][0]["content"][0]["text"] == "native"
     assert provider.discovery_calls == []
-    assert provider.response_calls == []
+    assert len(provider.response_calls) == 1
 
 
 def test_baseline_models_and_bridge_models_publish_different_inventories(

@@ -2,6 +2,10 @@
 
 from fastapi import APIRouter, Request
 
+from gpt2giga.app.responses_mode import (
+    ResponsesExecutionMode,
+    select_responses_execution,
+)
 from gpt2giga.app.responses_execution import (
     NativeGigaChatResponsesExecutor,
     NormalizedBridgeResponsesExecutor,
@@ -31,7 +35,15 @@ async def responses(request: Request):
         return await NativeGigaChatResponsesExecutor().execute(request, data)
 
     try:
-        return await NormalizedBridgeResponsesExecutor().execute(request, data)
+        selection = select_responses_execution(
+            state,
+            requested_model=data.get("model"),
+        )
+        if selection.mode is ResponsesExecutionMode.NATIVE_GIGACHAT:
+            executor = NativeGigaChatResponsesExecutor()
+        else:
+            executor = NormalizedBridgeResponsesExecutor()
+        return await executor.execute(request, data)
     except (BridgeMatrixAdmissionError, ProviderAliasError) as exc:
         if isinstance(exc, BridgeMatrixAdmissionError):
             error = exc.as_public_error()

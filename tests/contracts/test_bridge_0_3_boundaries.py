@@ -14,14 +14,24 @@ from loguru import logger
 import pytest
 
 from gpt2giga.app.factory import create_app
-from gpt2giga.app.settings import build_provider_registry
 from gpt2giga.core.context import RequestContext
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
-from gpt2giga.protocols.normalized import NormalizedProtocolCapabilities
+from gpt2giga.protocols.normalized import (
+    BRIDGE_LOSS_MATRIX_V1,
+    NormalizedProtocolCapabilities,
+)
 from gpt2giga.providers.openai_compatible import (
     OpenAICompatibleProviderAdapter,
     OpenAICompatibleUpstreamProfile,
+)
+from gpt2giga.providers.profiles import (
+    LoadedProviderProfileSet,
+    ProviderModelAlias,
+    ProviderProfile,
+    ProviderProfileConfig,
+    ProviderRegistry,
+    ProviderSupportStatus,
 )
 from gpt2giga.routers.openai.responses import responses, router as responses_router
 
@@ -44,12 +54,39 @@ def _responses_app(stable_sdk_client) -> FastAPI:
     )
     stable_sdk_client.configured_model = "configured-model"
     app.state.config = config
-    app.state.provider_registry = build_provider_registry(config)
+    app.state.provider_registry = _explicit_openai_registry()
     app.state.gigachat_client = stable_sdk_client
     app.state.request_transformer = RequestTransformer(config, logger=logger)
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.logger = logger
     return app
+
+
+def _explicit_openai_registry() -> ProviderRegistry:
+    profile = ProviderProfile(
+        profile_id="boundary-openai",
+        provider_kind="openai_compatible",
+        base_url="https://upstream.invalid/v1",
+        credential_env="BOUNDARY_OPENAI_KEY",
+        network_policy_ref="public-openai",
+        tls_policy_ref="system-default",
+        models=(
+            ProviderModelAlias(
+                public_alias="bridge/codex-test",
+                upstream_model="fixture-model",
+                capability_profile="boundary-openai-v1",
+                support_status=ProviderSupportStatus.TECHNICAL_PREVIEW,
+            ),
+        ),
+    )
+    loaded = LoadedProviderProfileSet(
+        config=ProviderProfileConfig(profiles=(profile,)),
+        _credentials={"boundary-openai": "fixture-secret"},
+    )
+    return ProviderRegistry(
+        loaded,
+        loss_matrix_revision=BRIDGE_LOSS_MATRIX_V1.revision,
+    )
 
 
 def _openai_compatible_profile(base_url: str) -> OpenAICompatibleUpstreamProfile:
