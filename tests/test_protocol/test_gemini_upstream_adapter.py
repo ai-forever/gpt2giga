@@ -18,10 +18,14 @@ from gpt2giga.protocols.normalized import (
     NormalizedTokenLimits,
     NormalizedTool,
     NormalizedToolCall,
+    ProtocolBridgeAdmission,
     UnsupportedSemanticLossError,
 )
 from gpt2giga.providers.gemini import (
+    GeminiProtocolError,
     GeminiProviderAdapter,
+    GeminiUpstreamError,
+    gemini_response_to_normalized,
     gemini_upstream_profile,
 )
 
@@ -507,3 +511,482 @@ async def test_stream_projects_prompt_safety_block_as_content_filter_terminal():
             }
         ],
     }
+
+
+@pytest.mark.parametrize(
+    ("status_code", "provider_status", "error_class", "retryable"),
+    [
+        (400, "INVALID_ARGUMENT", "invalid_request", False),
+        (401, "UNAUTHENTICATED", "authentication", False),
+        (403, "PERMISSION_DENIED", "permission", False),
+        (429, "RESOURCE_EXHAUSTED", "rate_limit", True),
+        (503, "UNAVAILABLE", "upstream", True),
+        (504, "DEADLINE_EXCEEDED", "timeout", True),
+    ],
+)
+async def test_http_errors_use_stable_safe_taxonomy(
+    status_code,
+    provider_status,
+    error_class,
+    retryable,
+):
+    async def handler(_request):
+        return httpx.Response(
+            status_code,
+            json={
+                "error": {
+                    "code": status_code,
+                    "status": provider_status,
+                    "message": "secret provider prose must not escape",
+                }
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    with pytest.raises(GeminiUpstreamError) as exc_info:
+        await adapter.complete(
+            _request(),
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    await client.aclose()
+
+    error = exc_info.value.error
+    assert exc_info.value.status_code == status_code
+    assert error.code == provider_status
+    assert error.error_class == error_class
+    assert error.retryable is retryable
+    assert "secret provider prose" not in error.message
+
+
+async def test_timeout_is_normalized_without_retry_or_fallback():
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        raise httpx.ReadTimeout("fixture timeout", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    with pytest.raises(GeminiUpstreamError) as exc_info:
+        await adapter.complete(
+            _request(),
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    await client.aclose()
+
+    assert calls == 1
+    assert exc_info.value.error.code == "timeout"
+    assert exc_info.value.error.error_class == "timeout"
+    assert exc_info.value.error.retryable is True
+
+
+async def test_provider_native_tools_and_files_fail_before_network():
+    network = _NetworkAuthorizer()
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=_fake_app()))
+    adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=network,
+        http_client=client,
+    )
+    native_tool_request = _request().model_copy(
+        update={"raw_extensions": {"googleSearch": {}}}
+    )
+    file_request = _request().model_copy(
+        update={
+            "messages": [
+                NormalizedMessage(
+                    role="user",
+                    content=[
+                        NormalizedContentPart(
+                            type="file",
+                            data={"file_uri": "files/provider-owned"},
+                        )
+                    ],
+                )
+            ]
+        }
+    )
+
+    with pytest.raises(UnsupportedSemanticLossError, match="unmodeled semantics"):
+        await adapter.complete(
+            native_tool_request,
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    with pytest.raises(UnsupportedSemanticLossError, match="outside normalized v1"):
+        await adapter.complete(
+            file_request,
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    await client.aclose()
+
+    assert network.intents == []
+
+
+async def test_late_system_instruction_fails_before_network():
+    network = _NetworkAuthorizer()
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=_fake_app()))
+    adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=network,
+        http_client=client,
+    )
+    request = _request().model_copy(
+        update={
+            "messages": [
+                NormalizedMessage(role="user", content="First."),
+                NormalizedMessage(role="system", content="Too late."),
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="must precede"):
+        await adapter.complete(
+            request,
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    await client.aclose()
+
+    assert network.intents == []
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        NormalizedImageReference(
+            source="url",
+            uri="https://images.invalid/unreviewed.png",
+            mime_type="image/png",
+        ),
+        NormalizedImageReference(
+            source="data_url",
+            uri=("data:image/png;base64," + base64.b64encode(b"x" * 65).decode()),
+            mime_type="image/png",
+        ),
+        NormalizedImageReference(
+            source="data_url",
+            uri="data:image/svg+xml;base64,PHN2Zy8+",
+            mime_type="image/svg+xml",
+        ),
+    ],
+)
+async def test_unreviewed_image_sources_types_and_sizes_fail_before_network(reference):
+    network = _NetworkAuthorizer()
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=_fake_app()))
+    adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=network,
+        http_client=client,
+    )
+    request = _request().model_copy(
+        update={
+            "messages": [
+                NormalizedMessage(
+                    role="user",
+                    content=[
+                        NormalizedContentPart(
+                            type="image_reference",
+                            image_reference=reference,
+                        )
+                    ],
+                )
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError):
+        await adapter.complete(
+            request,
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    await client.aclose()
+
+    assert network.intents == []
+
+
+@pytest.mark.parametrize(
+    ("chunks", "error_code"),
+    [
+        (
+            [
+                {
+                    "candidates": [
+                        {
+                            "index": 0,
+                            "content": {"parts": []},
+                            "finishReason": "STOP",
+                        }
+                    ]
+                },
+                {
+                    "candidates": [
+                        {"index": 0, "content": {"parts": [{"text": "late"}]}}
+                    ]
+                },
+            ],
+            "stream_data_after_terminal",
+        ),
+        (
+            [
+                {
+                    "usageMetadata": {
+                        "promptTokenCount": 1,
+                        "totalTokenCount": 1,
+                    }
+                }
+            ],
+            "usage_before_stream_terminal",
+        ),
+        (
+            [
+                {
+                    "candidates": [
+                        {
+                            "index": 0,
+                            "content": {"parts": [{"unknown": {}}]},
+                        }
+                    ]
+                }
+            ],
+            "unsupported_stream_part",
+        ),
+    ],
+)
+async def test_reordered_and_unsupported_streams_end_in_protocol_error(
+    chunks,
+    error_code,
+):
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_streaming_app(chunks))
+    )
+    adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            _request(stream=True),
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    ]
+    await client.aclose()
+
+    assert events[-1].type == "error"
+    assert events[-1].error.code == error_code
+    assert events[-1].error.retryable is False
+
+
+async def test_malformed_stream_json_ends_in_protocol_error():
+    async def handler(_request):
+        return httpx.Response(
+            200,
+            text="data: {not-json}\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            _request(stream=True),
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    ]
+    await client.aclose()
+
+    assert events[-1].type == "error"
+    assert events[-1].error.code == "invalid_stream_json"
+
+
+async def test_disconnect_projects_cancellation_and_stops_stream():
+    chunks = [
+        {"candidates": [{"index": 0, "content": {"parts": [{"text": "unobserved"}]}}]}
+    ]
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_streaming_app(chunks))
+    )
+    adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            _request(stream=True),
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+            is_disconnected=lambda: True,
+        )
+    ]
+    await client.aclose()
+
+    assert [event.type for event in events] == ["message_start", "cancelled"]
+    assert events[-1].stop_reason == "cancelled"
+
+
+async def test_redirect_peer_evidence_and_response_limit_fail_closed():
+    async def redirect_handler(_request):
+        return httpx.Response(307, headers={"location": "https://other.invalid"})
+
+    redirect_client = httpx.AsyncClient(transport=httpx.MockTransport(redirect_handler))
+    redirect_adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=redirect_client,
+    )
+    with pytest.raises(GeminiUpstreamError) as exc_info:
+        await redirect_adapter.complete(
+            _request(),
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    await redirect_client.aclose()
+    assert exc_info.value.error.code == "destination_mismatch"
+
+    peer_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=_fake_app()))
+    peer_adapter = GeminiProviderAdapter(
+        _profile(credential=False),
+        credential=None,
+        authorize_network=_NetworkAuthorizer(peer_validation_required=True),
+        http_client=peer_client,
+    )
+    with pytest.raises(GeminiUpstreamError) as exc_info:
+        await peer_adapter.complete(
+            _request(),
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    await peer_client.aclose()
+    assert exc_info.value.error.code == "peer_evidence_unavailable"
+
+    async def oversized_handler(_request):
+        return httpx.Response(200, content=b"x" * 65)
+
+    limit_profile = _profile(credential=False).model_copy(
+        update={"max_response_bytes": 64}
+    )
+    limit_client = httpx.AsyncClient(transport=httpx.MockTransport(oversized_handler))
+    limit_adapter = GeminiProviderAdapter(
+        limit_profile,
+        credential=None,
+        authorize_network=_NetworkAuthorizer(),
+        http_client=limit_client,
+    )
+    with pytest.raises(GeminiUpstreamError) as exc_info:
+        await limit_adapter.complete(
+            _request(),
+            downstream=DownstreamProtocol.GEMINI,
+            downstream_capabilities=_all_downstream_capabilities(),
+            input_token_count=7,
+        )
+    await limit_client.aclose()
+    assert exc_info.value.error.code == "response_too_large"
+
+
+def test_malformed_non_stream_response_raises_protocol_error():
+    with pytest.raises(GeminiProtocolError) as exc_info:
+        gemini_response_to_normalized(
+            {
+                "candidates": [
+                    {
+                        "index": 0,
+                        "content": {"parts": [{"unknown": "shape"}]},
+                        "finishReason": "STOP",
+                    }
+                ]
+            },
+            profile=_profile(credential=False),
+            admission=ProtocolBridgeAdmission(
+                downstream=DownstreamProtocol.GEMINI,
+                upstream_profile="gemini-fixture@fixture-r1",
+                required_features=(),
+            ),
+        )
+
+    assert exc_info.value.error.code == "unsupported_candidate_part"
+
+
+def test_non_stream_safety_candidate_without_content_is_a_filtered_choice():
+    response = gemini_response_to_normalized(
+        {
+            "candidates": [
+                {
+                    "index": 0,
+                    "finishReason": "SAFETY",
+                    "safetyRatings": [
+                        {
+                            "category": "HARM_CATEGORY_HARASSMENT",
+                            "probability": "HIGH",
+                            "blocked": True,
+                        }
+                    ],
+                }
+            ]
+        },
+        profile=_profile(credential=False),
+        admission=ProtocolBridgeAdmission(
+            downstream=DownstreamProtocol.GEMINI,
+            upstream_profile="gemini-fixture@fixture-r1",
+            required_features=(),
+        ),
+    )
+
+    assert response.choices[0].stop_reason == "content_filter"
+    assert response.choices[0].message.content is None
+    assert response.choices[0].provider_metadata["gemini"]["safety_ratings"] == [
+        {
+            "category": "HARM_CATEGORY_HARASSMENT",
+            "probability": "HIGH",
+            "blocked": True,
+        }
+    ]

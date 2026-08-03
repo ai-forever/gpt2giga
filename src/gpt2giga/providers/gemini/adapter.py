@@ -43,6 +43,26 @@ GEMINI_EXECUTION_OWNER = "provider-execution:gemini"
 DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
 DEFAULT_MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024
 _REQUEST_PURPOSE_GENERATE = "provider.gemini.generate-content"
+_KNOWN_ERROR_STATUSES = frozenset(
+    {
+        "ABORTED",
+        "ALREADY_EXISTS",
+        "CANCELLED",
+        "DATA_LOSS",
+        "DEADLINE_EXCEEDED",
+        "FAILED_PRECONDITION",
+        "INTERNAL",
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "OUT_OF_RANGE",
+        "PERMISSION_DENIED",
+        "RESOURCE_EXHAUSTED",
+        "UNAUTHENTICATED",
+        "UNAVAILABLE",
+        "UNIMPLEMENTED",
+        "UNKNOWN",
+    }
+)
 
 
 class GeminiUpstreamProfile(NormalizedBaseModel):
@@ -376,7 +396,7 @@ class GeminiProviderAdapter:
                         "Gemini upstream redirect is forbidden.",
                     )
                 if response.is_error:
-                    raise _http_error(response)
+                    raise _http_error(response, content)
         except httpx.TimeoutException as exc:
             raise _transport_error(
                 "timeout", "Gemini upstream request timed out."
@@ -426,8 +446,8 @@ class GeminiProviderAdapter:
                         "Gemini upstream redirect is forbidden.",
                     )
                 if response.is_error:
-                    await _read_bounded_response(response, authorization)
-                    raise _http_error(response)
+                    content = await _read_bounded_response(response, authorization)
+                    raise _http_error(response, content)
                 async for chunk in response.aiter_bytes():
                     total_bytes += len(chunk)
                     if total_bytes > authorization.max_response_bytes:
@@ -519,10 +539,16 @@ def normalized_chat_to_gemini_payload(
     """Serialize only the admitted normalized GenerateContent subset."""
     system_parts: list[dict[str, Any]] = []
     contents: list[dict[str, Any]] = []
+    saw_non_system = False
     for message in request.messages:
         if message.role == "system":
+            if saw_non_system:
+                raise ValueError(
+                    "Gemini system instructions must precede conversation content"
+                )
             system_parts.extend(_system_message_parts(message))
         else:
+            saw_non_system = True
             contents.append(_message_to_gemini(message, profile=profile))
     if not contents:
         raise ValueError("Gemini GenerateContent requires non-system content")
@@ -572,7 +598,7 @@ def gemini_response_to_normalized(
         ]
     else:
         prompt_feedback = _prompt_feedback(payload)
-        if prompt_feedback is None:
+        if prompt_feedback is None or "block_reason" not in prompt_feedback:
             raise _protocol_error(
                 "invalid_candidates",
                 "Gemini upstream response candidates must be a non-empty list.",
@@ -772,17 +798,22 @@ def _candidate_to_choice(value: Any, *, fallback_index: int) -> NormalizedChoice
         raise _protocol_error(
             "invalid_candidate", "Gemini upstream candidate must be an object."
         )
+    finish_reason = _optional_string(value.get("finishReason"))
+    if finish_reason is None:
+        raise _protocol_error(
+            "missing_finish_reason",
+            "Gemini upstream candidate requires a finishReason.",
+        )
+    stop_reason = _normalize_stop_reason(finish_reason)
     content = value.get("content")
-    if not isinstance(content, Mapping):
+    if content is None and stop_reason in {"content_filter", "error"}:
+        parts: list[Any] = []
+    elif isinstance(content, Mapping) and isinstance(content.get("parts"), list):
+        parts = content["parts"]
+    else:
         raise _protocol_error(
             "invalid_candidate_content",
-            "Gemini upstream candidate content must be an object.",
-        )
-    parts = content.get("parts")
-    if not isinstance(parts, list):
-        raise _protocol_error(
-            "invalid_candidate_parts",
-            "Gemini upstream candidate parts must be a list.",
+            "Gemini upstream candidate content must contain a parts list.",
         )
     texts: list[str] = []
     tool_calls: list[NormalizedToolCall] = []
@@ -808,7 +839,6 @@ def _candidate_to_choice(value: Any, *, fallback_index: int) -> NormalizedChoice
             "unsupported_candidate_part",
             "Gemini upstream returned an unsupported candidate part.",
         )
-    finish_reason = _optional_string(value.get("finishReason"))
     return NormalizedChoice(
         index=_integer(value.get("index"), default=fallback_index),
         message=NormalizedMessage(
@@ -817,7 +847,7 @@ def _candidate_to_choice(value: Any, *, fallback_index: int) -> NormalizedChoice
             tool_calls=tool_calls,
         ),
         finish_reason=finish_reason,
-        stop_reason=_normalize_stop_reason(finish_reason),
+        stop_reason=stop_reason,
         provider_metadata=_candidate_provider_metadata(value),
     )
 
@@ -857,6 +887,8 @@ def _usage(value: Any) -> NormalizedUsage | None:
 
 
 def _normalize_stop_reason(value: str | None) -> NormalizedStopReason | None:
+    if value is None:
+        return None
     if value == "STOP":
         return "stop"
     if value == "MAX_TOKENS":
@@ -870,11 +902,23 @@ def _normalize_stop_reason(value: str | None) -> NormalizedStopReason | None:
         "IMAGE_SAFETY",
         "IMAGE_PROHIBITED_CONTENT",
         "IMAGE_RECITATION",
+        "LANGUAGE",
     }:
         return "content_filter"
-    if value in {"MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL"}:
+    if value in {
+        "FINISH_REASON_UNSPECIFIED",
+        "IMAGE_OTHER",
+        "MALFORMED_FUNCTION_CALL",
+        "NO_IMAGE",
+        "OTHER",
+        "TOO_MANY_TOOL_CALLS",
+        "UNEXPECTED_TOOL_CALL",
+    }:
         return "error"
-    return None
+    raise _protocol_error(
+        "unknown_finish_reason",
+        "Gemini upstream returned an unknown finishReason.",
+    )
 
 
 def _stream_chunk_to_events(
@@ -1002,7 +1046,7 @@ def _stream_chunk_to_events(
                     provider_metadata=_candidate_provider_metadata(candidate),
                 )
             )
-    elif prompt_feedback is not None:
+    elif prompt_feedback is not None and "block_reason" in prompt_feedback:
         if terminal_seen:
             raise _protocol_error(
                 "duplicate_stream_terminal",
@@ -1068,15 +1112,24 @@ def _prompt_feedback(payload: Mapping[str, Any]) -> dict[str, Any] | None:
             "Gemini upstream promptFeedback must be an object.",
         )
     block_reason = value.get("blockReason")
-    if not isinstance(block_reason, str) or not block_reason:
+    if block_reason is not None and (
+        not isinstance(block_reason, str) or not block_reason
+    ):
         raise _protocol_error(
             "invalid_prompt_feedback",
-            "Gemini upstream promptFeedback requires blockReason.",
+            "Gemini upstream promptFeedback blockReason must be non-empty.",
         )
-    result: dict[str, Any] = {"block_reason": block_reason}
+    result: dict[str, Any] = {}
+    if isinstance(block_reason, str):
+        result["block_reason"] = block_reason
     ratings = _safety_ratings(value.get("safetyRatings"))
     if ratings is not None:
         result["safety_ratings"] = ratings
+    if not result:
+        raise _protocol_error(
+            "invalid_prompt_feedback",
+            "Gemini upstream promptFeedback contained no admitted facts.",
+        )
     return result
 
 
@@ -1228,8 +1281,19 @@ async def _read_bounded_response(
     return b"".join(chunks)
 
 
-def _http_error(response: httpx.Response) -> GeminiUpstreamError:
+def _http_error(response: httpx.Response, content: bytes) -> GeminiUpstreamError:
     status_code = response.status_code
+    provider_status: str | None = None
+    try:
+        payload = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = None
+    if isinstance(payload, Mapping):
+        raw_error = payload.get("error")
+        if isinstance(raw_error, Mapping):
+            candidate_status = _optional_string(raw_error.get("status"))
+            if candidate_status in _KNOWN_ERROR_STATUSES:
+                provider_status = candidate_status
     error_class: Literal[
         "invalid_request",
         "authentication",
@@ -1239,7 +1303,17 @@ def _http_error(response: httpx.Response) -> GeminiUpstreamError:
         "timeout",
         "upstream",
     ]
-    if status_code == 400:
+    if provider_status == "UNAUTHENTICATED":
+        error_class = "authentication"
+    elif provider_status == "PERMISSION_DENIED":
+        error_class = "permission"
+    elif provider_status == "NOT_FOUND":
+        error_class = "not_found"
+    elif provider_status == "RESOURCE_EXHAUSTED":
+        error_class = "rate_limit"
+    elif provider_status == "DEADLINE_EXCEEDED":
+        error_class = "timeout"
+    elif status_code == 400:
         error_class = "invalid_request"
     elif status_code == 401:
         error_class = "authentication"
@@ -1257,7 +1331,7 @@ def _http_error(response: httpx.Response) -> GeminiUpstreamError:
         NormalizedError(
             type="gemini_api_error",
             message=f"Gemini upstream returned HTTP {status_code}.",
-            code=status_code,
+            code=provider_status or status_code,
             error_class=error_class,
             retryable=status_code in {408, 429, 500, 502, 503, 504},
         ),
