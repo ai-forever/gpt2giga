@@ -31,6 +31,11 @@ gpt2giga \
 gpt2giga --help
 ```
 
+Версия 0.3 также может загрузить одну immutable multi-provider конфигурацию
+через `--config <path>` или `GPT2GIGA_CONFIG=<path>`. Версионированная схема,
+безопасные примеры четырёх провайдеров и точное поведение алиасов описаны в
+[Профилях провайдеров и алиасах моделей](provider-profiles.md).
+
 Шаблон env для копирования: [.env.example](https://github.com/ai-forever/gpt2giga/blob/main/.env.example).
 
 ## Как читать этот документ

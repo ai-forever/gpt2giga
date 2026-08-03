@@ -31,6 +31,11 @@ Full CLI reference:
 gpt2giga --help
 ```
 
+Version 0.3 can also load one immutable multi-provider configuration with
+`--config <path>` or `GPT2GIGA_CONFIG=<path>`. See
+[Provider profiles and model aliases](provider-profiles.md) for the versioned
+schema, secure four-provider examples, and exact alias behavior.
+
 An env template to copy: [.env.example](https://github.com/ai-forever/gpt2giga/blob/main/.env.example).
 
 ## How to read this document
