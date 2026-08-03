@@ -35,7 +35,11 @@ from gpt2giga.protocol.response import (
     extract_chat_completion_thread_id,
     hydrate_chat_completion_image_files,
 )
-from gpt2giga.protocols.openai import normalized_chat_response_to_responses
+from gpt2giga.protocols.openai import (
+    ResponsesStreamProjector,
+    ResponsesStreamProtocolError,
+    normalized_chat_response_to_responses,
+)
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.routers.openai.helpers import (
@@ -58,8 +62,14 @@ async def responses(request: Request):
     stream = data.get("stream", False)
     state = request.app.state
     protocol_adapter = getattr(state, "openai_protocol_adapter", None)
-    if protocol_adapter is not None and not stream:
+    if protocol_adapter is not None:
         try:
+            if stream:
+                return await _normalized_stream_response(
+                    request,
+                    data,
+                    protocol_adapter=protocol_adapter,
+                )
             return await _normalized_non_stream_response(
                 request,
                 data,
@@ -264,10 +274,82 @@ async def _normalized_non_stream_response(
     return result
 
 
+async def _normalized_stream_response(
+    request: Request,
+    data: dict,
+    *,
+    protocol_adapter,
+) -> StreamingResponse:
+    state = request.app.state
+    context = get_request_context()
+    normalized_request = await protocol_adapter.responses_to_normalized_async(
+        data,
+        context=context,
+    )
+    if request_attachment_ids(request):
+        raise ClientCompatibilityError(
+            "The selected bridge route cannot preserve this semantic.",
+            param="x-gpt2giga-attachment-ids",
+            code="unsupported_semantic",
+        )
+
+    conversation_turn = await stitch_responses_payload(
+        request,
+        data,
+        mode=resolve_gigachat_api_mode(request),
+    )
+    request_options = extract_gigachat_request_options(request, data)
+    provider_adapter = _normalized_provider_adapter(
+        request,
+        request_options=request_options,
+        require_streaming=True,
+    )
+    response_id = (
+        context.request_id
+        if context is not None and context.request_id
+        else rquid_context.get()
+    )
+    projector = ResponsesStreamProjector(
+        request_payload=data,
+        requested_model=data["model"],
+        response_id=response_id,
+    )
+
+    async def emit_stream():
+        try:
+            async for event in provider_adapter.stream_chat(
+                normalized_request,
+                context=context,
+                is_disconnected=request.is_disconnected,
+                logger=getattr(state, "logger", None),
+            ):
+                for frame in projector.project(event):
+                    yield frame
+            if await request.is_disconnected():
+                return
+            projector.finish()
+        except ResponsesStreamProtocolError:
+            if projector.terminal:
+                raise
+            yield projector.protocol_error_frame()
+
+    stream = stitch_responses_stream(request, conversation_turn, emit_stream())
+    return StreamingResponse(
+        observe_openai_response_stream(
+            state,
+            stream,
+            request_payload=data,
+            context=context,
+        ),
+        media_type="text/event-stream",
+    )
+
+
 def _normalized_provider_adapter(
     request: Request,
     *,
     request_options,
+    require_streaming: bool = False,
 ):
     state = request.app.state
     injected = getattr(state, "responses_provider_adapter", None)
@@ -284,6 +366,7 @@ def _normalized_provider_adapter(
         giga_client=get_gigachat_client(request),
         model_limiter=get_model_concurrency_limiter(request),
         request_options=request_options,
+        response_processor=state.response_processor if require_streaming else None,
         api_mode=resolve_gigachat_api_mode(request),
         forced_model=configured_model,
     )

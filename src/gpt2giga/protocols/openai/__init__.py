@@ -5,6 +5,10 @@ from gpt2giga.protocols.openai.response_adapter import (
     normalized_chat_response_to_openai,
     normalized_chat_response_to_responses,
 )
+from gpt2giga.protocols.openai.responses_streaming import (
+    ResponsesStreamProjector,
+    ResponsesStreamProtocolError,
+)
 from gpt2giga.protocols.openai.streaming import (
     normalized_stream_done_sse,
     normalized_stream_event_to_openai_chunk,
@@ -13,6 +17,8 @@ from gpt2giga.protocols.openai.streaming import (
 
 __all__ = [
     "OpenAIProtocolAdapter",
+    "ResponsesStreamProjector",
+    "ResponsesStreamProtocolError",
     "normalized_chat_response_to_openai",
     "normalized_chat_response_to_responses",
     "normalized_stream_done_sse",
