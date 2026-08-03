@@ -102,7 +102,7 @@ dev = [
 ]
 integrations = [
     "openai-agents (>=0.17,<1)",
-    "pyjwt (>=2.12.0)",
+    "pyjwt (>=2.13.0)",
     "python-multipart (>=0.0.27, <0.1.0)"
 
 ]
