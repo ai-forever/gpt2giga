@@ -5,10 +5,40 @@ from __future__ import annotations
 import json
 
 import pytest
+from fastapi.testclient import TestClient
 
 from gpt2giga.app.factory import create_app
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.providers.profiles import ProviderProfileError
+
+
+class _Response:
+    def model_dump(self):
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "composed"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+        }
+
+
+class _GigaChat:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def achat(self, payload):
+        self.calls.append(payload)
+        return _Response()
+
+    async def aclose(self) -> None:
+        return None
 
 
 def test_app_owns_one_immutable_synthesized_registry() -> None:
@@ -88,3 +118,56 @@ def test_legacy_responses_cannot_mix_with_explicit_profiles(tmp_path) -> None:
                 proxy=ProxySettings(legacy_responses=True),
             )
         )
+
+
+def test_lifespan_composes_normalized_responses_adapter_once(monkeypatch) -> None:
+    giga_client = _GigaChat()
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda _settings: giga_client,
+    )
+    app = create_app(ProxyConfig())
+
+    with TestClient(app) as client:
+        runtime = app.state.bridge_provider_runtime
+        first = runtime.adapter_for(
+            app.state.openai_protocol_adapter.responses_to_normalized(
+                {"input": "hello", "model": "GigaChat"}
+            ),
+            api_mode="v1",
+        )
+        second = runtime.adapter_for(
+            app.state.openai_protocol_adapter.responses_to_normalized(
+                {"input": "again", "model": "GigaChat"}
+            ),
+            api_mode="v1",
+        )
+        response = client.post(
+            "/responses",
+            json={"input": "hello", "model": "GigaChat"},
+        )
+
+    assert runtime.adapters_ready is True
+    assert first is second
+    assert response.status_code == 200
+    assert response.json()["output"][0]["content"][0]["text"] == "composed"
+    assert len(giga_client.calls) == 1
+
+
+def test_runtime_rejects_unknown_alias_before_provider_io(monkeypatch) -> None:
+    giga_client = _GigaChat()
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda _settings: giga_client,
+    )
+    app = create_app(ProxyConfig())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/responses",
+            json={"input": "hello", "model": "missing/alias"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "unknown_model_alias"
+    assert giga_client.calls == []

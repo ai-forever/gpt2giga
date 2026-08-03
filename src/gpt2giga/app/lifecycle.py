@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from gpt2giga.app.settings import load_app_config, setup_app_logger
+from gpt2giga.app.providers import BridgeProviderRuntime
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.protocols.anthropic import AnthropicProtocolAdapter
@@ -98,6 +99,7 @@ async def lifespan(app: FastAPI):
         log_level=config.proxy_settings.log_level,
         structured_output_mode=config.proxy_settings.structured_output_mode,
     )
+    app.state.bridge_provider_runtime = BridgeProviderRuntime(app.state)
 
     logger.info("Application startup complete")
     yield

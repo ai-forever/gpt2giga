@@ -41,7 +41,9 @@ from gpt2giga.protocols.openai import (
     ResponsesStreamProtocolError,
     normalized_chat_response_to_responses,
 )
+from gpt2giga.protocols.normalized import BridgeMatrixAdmissionError
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
+from gpt2giga.providers.profiles import ProviderAliasError
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.routers.openai.helpers import (
     populate_giga_functions,
@@ -89,6 +91,22 @@ async def responses(request: Request):
             data,
             protocol_adapter=protocol_adapter,
         )
+    except (BridgeMatrixAdmissionError, ProviderAliasError) as exc:
+        if isinstance(exc, BridgeMatrixAdmissionError):
+            error = exc.as_public_error()
+            compatibility_error = ClientCompatibilityError(
+                error["message"],
+                param=error["param"],
+                code=error["code"],
+                error_type=error["type"],
+            )
+        else:
+            compatibility_error = ClientCompatibilityError(
+                exc.message,
+                param="model",
+                code=exc.code,
+            )
+        return client_compatibility_response(compatibility_error)
     except ClientCompatibilityError as exc:
         return client_compatibility_response(exc)
 
@@ -271,6 +289,7 @@ async def _normalized_non_stream_response(
     request_options = extract_gigachat_request_options(request, data)
     provider_adapter = _normalized_provider_adapter(
         request,
+        normalized_request=normalized_request,
         request_options=request_options,
     )
     normalized_response = await provider_adapter.chat(
@@ -321,6 +340,7 @@ async def _normalized_stream_response(
     request_options = extract_gigachat_request_options(request, data)
     provider_adapter = _normalized_provider_adapter(
         request,
+        normalized_request=normalized_request,
         request_options=request_options,
         require_streaming=True,
     )
@@ -368,6 +388,7 @@ async def _normalized_stream_response(
 def _normalized_provider_adapter(
     request: Request,
     *,
+    normalized_request,
     request_options,
     require_streaming: bool = False,
 ):
@@ -375,6 +396,16 @@ def _normalized_provider_adapter(
     injected = getattr(state, "responses_provider_adapter", None)
     if injected is not None:
         return injected
+    runtime = getattr(state, "bridge_provider_runtime", None)
+    if runtime is not None:
+        return runtime.adapter_for(
+            normalized_request,
+            api_mode=resolve_gigachat_api_mode(request),
+        )
+    registry = getattr(state, "provider_registry", None)
+    if registry is not None:
+        registry.resolve(normalized_request.model)
+        raise RuntimeError("Bridge provider runtime is not ready.")
     configured_model = getattr(
         getattr(state.config, "gigachat_settings", None),
         "model",

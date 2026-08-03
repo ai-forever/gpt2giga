@@ -14,6 +14,7 @@ from loguru import logger
 import pytest
 
 from gpt2giga.app.factory import create_app
+from gpt2giga.app.settings import build_provider_registry
 from gpt2giga.core.context import RequestContext
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
@@ -43,6 +44,7 @@ def _responses_app(stable_sdk_client) -> FastAPI:
     )
     stable_sdk_client.configured_model = "configured-model"
     app.state.config = config
+    app.state.provider_registry = build_provider_registry(config)
     app.state.gigachat_client = stable_sdk_client
     app.state.request_transformer = RequestTransformer(config, logger=logger)
     app.state.response_processor = ResponseProcessor(logger=logger)
@@ -108,7 +110,6 @@ def test_profile_registry_is_the_only_route_resolution_authority() -> None:
     assert registry.immutable is True
 
 
-@FUTURE
 def test_unknown_alias_is_rejected_before_provider_io(stable_sdk_client) -> None:
     app = _responses_app(stable_sdk_client)
     response = TestClient(app).post(
