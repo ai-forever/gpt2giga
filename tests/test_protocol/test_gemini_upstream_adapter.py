@@ -1,5 +1,6 @@
 import base64
 import json
+import ssl
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -368,6 +369,18 @@ def test_profile_requires_exact_credential_and_reviewed_client_policies():
             credential=None,
             authorize_network=network,
         )
+
+    unverified = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    unverified.check_hostname = False
+    unverified.verify_mode = ssl.CERT_NONE
+    for ssl_context in (False, unverified):
+        with pytest.raises(ValueError, match="TLS.*verif"):
+            GeminiProviderAdapter(
+                profile,
+                credential="secret-value-canary",
+                authorize_network=network,
+                ssl_context=ssl_context,
+            )
 
 
 async def test_adapter_streams_text_function_usage_and_one_terminal_event():

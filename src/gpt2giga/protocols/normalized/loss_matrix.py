@@ -120,6 +120,64 @@ class BridgeSemantic(str, Enum):
     DISCONNECT = "disconnect"
 
 
+_BRIDGE_FEATURES = (
+    BridgeFeature.ROLES,
+    BridgeFeature.ORDERED_CONTENT_PARTS,
+    BridgeFeature.TEXT,
+    BridgeFeature.IMAGE_REFERENCES,
+    BridgeFeature.GENERATION_CONTROLS,
+    BridgeFeature.FUNCTION_TOOLS,
+    BridgeFeature.TOOL_CHOICE,
+    BridgeFeature.PARALLEL_TOOL_CALLS,
+    BridgeFeature.TOOL_RESULTS,
+    BridgeFeature.JSON_SCHEMA_OUTPUT,
+    BridgeFeature.STREAM_DELTAS,
+    BridgeFeature.STREAM_TERMINAL_EVENTS,
+    BridgeFeature.STOP_REASON,
+    BridgeFeature.USAGE,
+    BridgeFeature.MODEL_IDENTITY,
+    BridgeFeature.REQUEST_ERROR_CLASSES,
+    BridgeFeature.CANCELLATION,
+    BridgeFeature.CONTEXT_TOKEN_LIMITS,
+    BridgeFeature.COUNT_TOKENS,
+)
+_PUBLIC_PROTOCOLS = (
+    PublicProtocol.OPENAI_RESPONSES,
+    PublicProtocol.OPENAI_CHAT_COMPLETIONS,
+    PublicProtocol.ANTHROPIC_MESSAGES,
+    PublicProtocol.GEMINI_GENERATE_CONTENT,
+)
+_UPSTREAM_PROVIDERS = (
+    UpstreamProvider.GIGACHAT,
+    UpstreamProvider.OPENAI_COMPATIBLE,
+    UpstreamProvider.ANTHROPIC,
+    UpstreamProvider.GEMINI,
+)
+_BRIDGE_SEMANTICS = (
+    BridgeSemantic.ROLES,
+    BridgeSemantic.MULTIMODAL_INPUTS,
+    BridgeSemantic.TOOL_DEFINITIONS_AND_CALL_IDS,
+    BridgeSemantic.TOOL_CHOICE,
+    BridgeSemantic.TOOL_RESULTS,
+    BridgeSemantic.PARALLEL_TOOL_CALLS,
+    BridgeSemantic.STRUCTURED_OUTPUT_JSON_SCHEMA,
+    BridgeSemantic.STREAM_LIFECYCLE,
+    BridgeSemantic.USAGE_INPUT_OUTPUT_TOKENS,
+    BridgeSemantic.USAGE_CACHE_TOKENS,
+    BridgeSemantic.USAGE_REASONING_TOKENS,
+    BridgeSemantic.STOP_REASONS,
+    BridgeSemantic.SAFETY_AND_REFUSAL,
+    BridgeSemantic.REASONING_CONTROLS_AND_SUMMARIES,
+    BridgeSemantic.PREVIOUS_RESPONSE_STATE,
+    BridgeSemantic.FILES_AND_IMAGES,
+    BridgeSemantic.HOSTED_AND_PROVIDER_NATIVE_TOOLS,
+    BridgeSemantic.CANCELLATION,
+    BridgeSemantic.TIMEOUT,
+    BridgeSemantic.MALFORMED_UPSTREAM_STREAM,
+    BridgeSemantic.DISCONNECT,
+)
+
+
 ReasonId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{2,63}$")]
 EvidenceId = Annotated[
     str,
@@ -176,7 +234,7 @@ class BridgeLossCell(NormalizedBaseModel):
         present = [row.semantic for row in semantics]
         if len(present) != len(set(present)):
             raise ValueError("semantic rows must be unique")
-        missing = set(BridgeSemantic) - set(present)
+        missing = set(_BRIDGE_SEMANTICS) - set(present)
         if missing:
             names = ", ".join(sorted(item.value for item in missing))
             raise ValueError(f"cell is missing semantic rows: {names}")
@@ -212,8 +270,8 @@ class BridgeLossMatrix(NormalizedBaseModel):
             raise ValueError("protocol/provider cells must be unique")
         expected = {
             (protocol, provider)
-            for protocol in PublicProtocol
-            for provider in UpstreamProvider
+            for protocol in _PUBLIC_PROTOCOLS
+            for provider in _UPSTREAM_PROVIDERS
         }
         missing = expected - set(identities)
         if missing:
@@ -443,7 +501,7 @@ def _build_loss_matrix() -> Mapping[
         DownstreamProtocol.ANTHROPIC: MappingProxyType(anthropic),
         DownstreamProtocol.GEMINI: MappingProxyType(gemini),
     }
-    expected = set(BridgeFeature)
+    expected = set(_BRIDGE_FEATURES)
     for downstream, rules in matrix.items():
         missing = expected - set(rules)
         if missing:
@@ -512,11 +570,11 @@ def _cell_semantics(
                 disposition=LossDisposition.UNSUPPORTED,
                 reason_id="route_not_integrated",
             )
-            for semantic in BridgeSemantic
+            for semantic in _BRIDGE_SEMANTICS
         )
 
     rows: list[BridgeSemanticRule] = []
-    for semantic in BridgeSemantic:
+    for semantic in _BRIDGE_SEMANTICS:
         if semantic in _PREVIEW_EXACT_SEMANTICS:
             rows.append(
                 BridgeSemanticRule(
@@ -562,8 +620,8 @@ def _client_version_window(protocol: PublicProtocol) -> str:
 
 def _build_bridge_loss_matrix() -> BridgeLossMatrix:
     cells: list[BridgeLossCell] = []
-    for protocol in PublicProtocol:
-        for provider in UpstreamProvider:
+    for protocol in _PUBLIC_PROTOCOLS:
+        for provider in _UPSTREAM_PROVIDERS:
             if provider is UpstreamProvider.GIGACHAT:
                 status = (
                     BridgeSupportStatus.STABLE

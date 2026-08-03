@@ -183,6 +183,21 @@ class GeminiProtocolError(GeminiUpstreamError):
     """Malformed or incomplete Gemini response."""
 
 
+def _verified_ssl_context(
+    value: ssl.SSLContext | bool | None,
+) -> ssl.SSLContext | Literal[True]:
+    """Return only TLS settings that verify certificates and hostnames."""
+    if value is None or value is True:
+        return True
+    if value is False:
+        raise ValueError("Gemini TLS certificate verification cannot be disabled")
+    if not isinstance(value, ssl.SSLContext):
+        raise TypeError("Gemini TLS context is invalid")
+    if value.verify_mode != ssl.CERT_REQUIRED or not value.check_hostname:
+        raise ValueError("Gemini TLS context must verify certificates and hostnames")
+    return value
+
+
 class GeminiProviderAdapter:
     """Execute normalized chat requests through one admitted Gemini profile."""
 
@@ -217,7 +232,7 @@ class GeminiProviderAdapter:
         self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(
             timeout=httpx.Timeout(profile.timeout_seconds),
-            verify=True if ssl_context is None else ssl_context,
+            verify=_verified_ssl_context(ssl_context),
             follow_redirects=False,
             trust_env=False,
         )

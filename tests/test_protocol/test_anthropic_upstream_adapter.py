@@ -1,5 +1,6 @@
 import asyncio
 import json
+import ssl
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -66,6 +67,22 @@ class _NetworkAuthorizer:
         )
         self.authorizations.append(authorization)
         return authorization
+
+
+def test_adapter_rejects_disabled_or_unverified_tls() -> None:
+    network = _NetworkAuthorizer()
+    unverified = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    unverified.check_hostname = False
+    unverified.verify_mode = ssl.CERT_NONE
+
+    for ssl_context in (False, unverified):
+        with pytest.raises(ValueError, match="TLS.*verif"):
+            AnthropicProviderAdapter(
+                _profile(),
+                credential="secret-value-canary",
+                authorize_network=network,
+                ssl_context=ssl_context,
+            )
 
 
 def _profile(*, credential=True, features=ANTHROPIC_IMPLEMENTED_FEATURES_V1):
