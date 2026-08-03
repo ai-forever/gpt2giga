@@ -21,6 +21,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedToolCall,
     NormalizedUsage,
 )
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
     RESPONSES_SPAN_NAME,
@@ -40,7 +41,7 @@ async def emit_openai_response_observability(
 ) -> None:
     """Emit one OpenInference-style span for an OpenAI Responses exchange."""
     sink = getattr(state, "observability_sink", None)
-    if sink is None or sink.__class__.__name__ == "NoopObservabilitySink":
+    if not is_sink_active(sink):
         return
 
     logger = getattr(state, "logger", None)
@@ -87,7 +88,7 @@ async def observe_openai_response_stream(
 ) -> AsyncIterator[str]:
     """Observe Responses SSE chunks and emit one final LLM span."""
     sink = getattr(state, "observability_sink", None)
-    if sink is None or sink.__class__.__name__ == "NoopObservabilitySink":
+    if not is_sink_active(sink):
         async for chunk in body_iterator:
             yield chunk
         return

@@ -68,8 +68,10 @@ def _normalize_schema_enum(schema: dict) -> None:
         return
 
     string_enum = []
+    seen: set[str] = set()
     for item in enum:
-        if isinstance(item, str) and item not in string_enum:
+        if isinstance(item, str) and item not in seen:
+            seen.add(item)
             string_enum.append(item)
 
     if string_enum:

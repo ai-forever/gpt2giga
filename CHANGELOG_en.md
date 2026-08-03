@@ -5,6 +5,16 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-08-02
+
+### Changed
+- **Gateway simplification**: removed the no-op Anthropic content-block validation graph, dead lifecycle/streaming state, and a redundant GigaChat client settings copy; public route, response, and compatibility contracts remain unchanged.
+
+### Fixed
+- **Disabled subsystem overhead**: middleware and protocol helpers no longer build events for no-op traffic-log, metrics, or observability sinks; `sample_rate=0` skips Phoenix exporter initialization, and protocol-specific LLM spans suppress duplicate lifecycle spans.
+- **Conversation and probe hot paths**: disabled conversation stitching no longer copies history or parses streaming chunks, non-streaming responses are not extracted without a turn, and `/health` plus `/ping` are matched before protocol routers.
+- **Protocol conversion hot paths**: JSON Schema enums are de-duplicated in linear time, streaming tool arguments are buffered without quadratic concatenation, and Anthropic content no longer goes through ineffective repeated scans.
+
 ## [0.2.6] - 2026-07-31
 
 ### Added
@@ -521,6 +531,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.2.7]: https://github.com/ai-forever/gpt2giga/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/ai-forever/gpt2giga/compare/v0.2.5a1...v0.2.6
 [0.2.5a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.4a1...v0.2.5a1
 [0.2.4a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a2...v0.2.4a1

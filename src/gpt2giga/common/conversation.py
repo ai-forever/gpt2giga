@@ -125,18 +125,16 @@ async def stitch_chat_payload(
     protocol: ConversationProtocol,
 ) -> ConversationTurn | None:
     """Apply local conversation history to a Chat Completions-shaped payload."""
+    settings = _settings(request)
+    key = _conversation_key(request, payload, settings=settings, protocol=protocol)
+    if key is None:
+        return None
+
     incoming = _coerce_message_list(payload.get("messages"))
     if incoming is None:
         return None
 
-    turn = await stitch_message_list(
-        request,
-        incoming,
-        payload=payload,
-        protocol=protocol,
-    )
-    if turn is None:
-        return None
+    turn = await _stitch_messages(request, key, incoming, settings=settings)
     payload["messages"] = deepcopy(turn.request_messages)
     return turn
 
@@ -215,6 +213,8 @@ async def commit_chat_completion_response(
     response_payload: Mapping[str, Any],
 ) -> None:
     """Persist a non-streaming Chat Completions response."""
+    if turn is None:
+        return
     await commit_conversation_turn(
         request,
         turn,
@@ -228,6 +228,8 @@ async def commit_responses_response(
     response_payload: Mapping[str, Any],
 ) -> None:
     """Persist a non-streaming OpenAI Responses response."""
+    if turn is None:
+        return
     await commit_conversation_turn(
         request,
         turn,
@@ -241,6 +243,8 @@ async def commit_anthropic_response(
     response_payload: Mapping[str, Any],
 ) -> None:
     """Persist a non-streaming Anthropic Messages response."""
+    if turn is None:
+        return
     await commit_conversation_turn(
         request,
         turn,
@@ -254,6 +258,11 @@ async def stitch_chat_completion_stream(
     body_iterator: AsyncIterator[str],
 ) -> AsyncIterator[str]:
     """Observe Chat Completions SSE and save state after successful completion."""
+    if turn is None:
+        async for chunk in body_iterator:
+            yield chunk
+        return
+
     observer = _ChatCompletionStreamConversationObserver()
     async for chunk in body_iterator:
         observer.observe_chunk(chunk)
@@ -268,6 +277,11 @@ async def stitch_responses_stream(
     body_iterator: AsyncIterator[str],
 ) -> AsyncIterator[str]:
     """Observe Responses SSE and save state after successful completion."""
+    if turn is None:
+        async for chunk in body_iterator:
+            yield chunk
+        return
+
     observer = _ResponsesStreamConversationObserver()
     async for chunk in body_iterator:
         observer.observe_chunk(chunk)
@@ -282,6 +296,11 @@ async def stitch_anthropic_stream(
     body_iterator: AsyncIterator[str],
 ) -> AsyncIterator[str]:
     """Observe Anthropic SSE and save state after successful completion."""
+    if turn is None:
+        async for chunk in body_iterator:
+            yield chunk
+        return
+
     observer = _AnthropicStreamConversationObserver()
     async for chunk in body_iterator:
         observer.observe_chunk(chunk)

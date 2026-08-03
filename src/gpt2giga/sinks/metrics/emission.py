@@ -9,6 +9,7 @@ from typing import Any
 from gpt2giga.core.context import RequestContext
 from gpt2giga.sinks.logs.emission import build_request_traffic_event
 from gpt2giga.sinks.logs.models import TrafficLogEvent
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.metrics.factory import (
     emit_metric_increment,
     emit_metric_observation,
@@ -37,7 +38,7 @@ async def emit_request_metrics(
     is_streaming: bool = False,
 ) -> None:
     """Emit aggregate request metrics without propagating sink failures."""
-    if sink is None:
+    if not is_sink_active(sink):
         return
     event = build_request_traffic_event(
         context,

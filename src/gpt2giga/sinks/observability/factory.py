@@ -9,6 +9,7 @@ from typing import Any
 from gpt2giga.core.context import RequestContext
 from gpt2giga.core.interfaces import ObservabilitySink
 from gpt2giga.models.config import ProxySettings
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.observability.noop import NoopObservabilitySink
 from gpt2giga.sinks.observability.phoenix import create_phoenix_observability_sink
 from gpt2giga.sinks.observability.queue import QueuedObservabilitySink
@@ -22,7 +23,11 @@ def create_observability_sink(
     logger: Any | None = None,
 ) -> ObservabilitySink:
     """Create the configured observability sink."""
-    if not settings.observability_enabled or settings.observability_backend == "noop":
+    if (
+        not settings.observability_enabled
+        or settings.observability_backend == "noop"
+        or settings.observability_sample_rate <= 0
+    ):
         return NoopObservabilitySink()
     if settings.observability_backend == "phoenix":
         try:
@@ -48,7 +53,7 @@ async def emit_observability_event(
     logger: Any | None = None,
 ) -> bool:
     """Emit an observability event and return whether the sink accepted it."""
-    if sink is None:
+    if not is_sink_active(sink):
         return False
     try:
         emit_coro = (

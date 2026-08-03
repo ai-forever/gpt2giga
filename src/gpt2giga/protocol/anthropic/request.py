@@ -9,10 +9,7 @@ from gpt2giga.common.tools import (
     convert_tool_to_giga_functions,
     normalize_gigachat_builtin_tool_type,
 )
-from gpt2giga.protocol.anthropic.params import (
-    sanitize_anthropic_messages_parameters,
-    validate_anthropic_content_blocks,
-)
+from gpt2giga.protocol.anthropic.params import sanitize_anthropic_messages_parameters
 
 
 def _extract_anthropic_output_format(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -162,7 +159,6 @@ def _convert_anthropic_messages_to_openai(
     messages: List[Dict],
 ) -> List[Dict]:
     """Convert Anthropic messages to OpenAI messages format."""
-    validate_anthropic_content_blocks(system, messages)
     openai_messages: List[Dict] = []
     tool_use_names: Dict[str, str] = {}
 

@@ -9,6 +9,8 @@ from typing import Any
 class NoopMetricsSink:
     """Ignore metric updates."""
 
+    is_noop = True
+
     async def increment(
         self,
         name: str,

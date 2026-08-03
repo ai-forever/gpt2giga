@@ -1,11 +1,18 @@
 from types import SimpleNamespace
 
+import pytest
 from starlette.datastructures import Headers, QueryParams
 
 from gpt2giga.common.conversation import (
     MemoryConversationStore,
+    commit_anthropic_response,
+    commit_chat_completion_response,
     commit_conversation_turn,
+    commit_responses_response,
+    stitch_anthropic_stream,
+    stitch_chat_completion_stream,
     stitch_chat_payload,
+    stitch_responses_stream,
 )
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 
@@ -149,3 +156,61 @@ async def test_stitch_chat_payload_uses_session_id_only_when_enabled():
 
     assert turn is not None
     assert turn.key.conversation_id == "session-1"
+
+
+async def test_disabled_stitching_does_not_copy_chat_messages():
+    class CopyTrap:
+        def __deepcopy__(self, memo):
+            raise AssertionError("disabled stitching must not copy message content")
+
+    request = make_request(ProxySettings(conversation_stitching_enabled=False))
+    content = CopyTrap()
+    payload = {"messages": [{"role": "user", "content": content}]}
+
+    turn = await stitch_chat_payload(request, payload, protocol="openai")
+
+    assert turn is None
+    assert payload["messages"][0]["content"] is content
+
+
+class UnreadableResponse(dict):
+    def get(self, key, default=None):
+        raise AssertionError("missing turns must not inspect response payloads")
+
+
+@pytest.mark.parametrize(
+    "commit_response",
+    [
+        commit_chat_completion_response,
+        commit_responses_response,
+        commit_anthropic_response,
+    ],
+)
+async def test_response_commit_skips_payload_without_turn(commit_response):
+    request = make_request(ProxySettings())
+
+    await commit_response(request, None, UnreadableResponse())
+
+
+@pytest.mark.parametrize(
+    "stitch_stream",
+    [
+        stitch_chat_completion_stream,
+        stitch_responses_stream,
+        stitch_anthropic_stream,
+    ],
+)
+async def test_stream_stitching_passes_through_without_turn(stitch_stream):
+    class UnparseableChunk:
+        def __str__(self):
+            raise AssertionError("missing turns must not parse stream chunks")
+
+    chunk = UnparseableChunk()
+
+    async def stream():
+        yield chunk
+
+    request = make_request(ProxySettings())
+    chunks = [item async for item in stitch_stream(request, None, stream())]
+
+    assert chunks == [chunk]

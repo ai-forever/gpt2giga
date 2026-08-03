@@ -48,6 +48,7 @@ from gpt2giga.protocols.openai import (
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.routers.openai.helpers import populate_giga_functions
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
     CHAT_COMPLETION_SPAN_NAME,
@@ -404,7 +405,7 @@ async def _observe_chat_completion_stream(
     stream_span_events: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[str]:
     sink = getattr(state, "observability_sink", None)
-    if sink is None or sink.__class__.__name__ == "NoopObservabilitySink":
+    if not is_sink_active(sink):
         async for chunk in body_iterator:
             yield chunk
         return
@@ -470,7 +471,7 @@ async def _emit_legacy_chat_completion_observability(
 ) -> None:
     settings = getattr(getattr(state, "config", None), "proxy_settings", None)
     sink = getattr(state, "observability_sink", None)
-    if sink is None or sink.__class__.__name__ == "NoopObservabilitySink":
+    if not is_sink_active(sink):
         return
     try:
         protocol_adapter = getattr(state, "openai_protocol_adapter", None)
@@ -511,6 +512,9 @@ async def _emit_chat_completion_observability(
     settings=None,
     events: list[dict[str, Any]] | None = None,
 ) -> None:
+    sink = getattr(state, "observability_sink", None)
+    if not is_sink_active(sink):
+        return
     if settings is None:
         settings = getattr(getattr(state, "config", None), "proxy_settings", None)
     logger = getattr(state, "logger", None)
@@ -525,7 +529,7 @@ async def _emit_chat_completion_observability(
             settings=settings,
         )
         emitted = await emit_observability_event(
-            getattr(state, "observability_sink", None),
+            sink,
             CHAT_COMPLETION_SPAN_NAME,
             attributes,
             context=context,

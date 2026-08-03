@@ -161,6 +161,17 @@ def test_normalize_json_schema_removes_sdk_incompatible_enum_values():
     assert snapshot["version"]["type"] == "integer"
 
 
+def test_normalize_json_schema_deduplicates_string_enums_in_order():
+    schema = {
+        "type": "string",
+        "enum": ["beta", "alpha", "beta", None, "alpha", "stable"],
+    }
+
+    result = normalize_tool_parameters_schema(schema)
+
+    assert result["enum"] == ["beta", "alpha", "stable"]
+
+
 def test_normalize_json_schema_removes_null_from_anyof():
     """Тест: удаляет type: null из anyOf и разворачивает единственный оставшийся тип"""
     schema = {

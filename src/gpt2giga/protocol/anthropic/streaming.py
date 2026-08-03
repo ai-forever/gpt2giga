@@ -203,7 +203,6 @@ async def _stream_anthropic_generator(
                                 "name": map_tool_name_from_gigachat(
                                     delta_function_call.get("name", "")
                                 ),
-                                "arguments": "",
                                 "tool_id": tool_id,
                             }
                             yield sse(
@@ -233,7 +232,6 @@ async def _stream_anthropic_generator(
                                 else str(arguments)
                             )
                             if arguments_str:
-                                function_call_data["arguments"] += arguments_str
                                 yield sse(
                                     "content_block_delta",
                                     {

@@ -65,8 +65,24 @@ async def test_noop_observability_sink_implements_contract():
     await sink.flush()
 
 
-def test_observability_factory_returns_noop_when_enabled():
+def test_observability_factory_returns_noop_when_disabled():
     sink = create_observability_sink(ProxySettings(observability_enabled=False))
+
+    assert isinstance(sink, NoopObservabilitySink)
+
+
+def test_observability_factory_returns_noop_for_zero_sample_rate(monkeypatch):
+    def unexpected_factory(settings):
+        raise AssertionError("zero sampling must not initialize the exporter")
+
+    monkeypatch.setattr(
+        "gpt2giga.sinks.observability.factory.create_phoenix_observability_sink",
+        unexpected_factory,
+    )
+
+    sink = create_observability_sink(
+        ProxySettings(observability_enabled=True, observability_sample_rate=0)
+    )
 
     assert isinstance(sink, NoopObservabilitySink)
 

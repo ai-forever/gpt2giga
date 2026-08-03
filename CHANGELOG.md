@@ -5,6 +5,16 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.2.7] - 2026-08-02
+
+### Изменено
+- **Упрощение gateway**: удалены ничего не проверявший граф валидации Anthropic content blocks, мёртвое lifecycle/streaming state и лишнее копирование настроек GigaChat-клиента; публичные route, response и compatibility contracts сохранены.
+
+### Исправлено
+- **Накладные расходы отключённых подсистем**: middleware и protocol helpers больше не строят события для no-op traffic log, metrics и observability sinks; `sample_rate=0` не инициализирует Phoenix exporter, а protocol-specific LLM span исключает дублирующий lifecycle span.
+- **Горячие пути conversation и probes**: при выключенном conversation stitching запросы не копируют историю, streaming chunks проходят без JSON-разбора, non-streaming ответы не извлекаются для отсутствующего turn, а `/health` и `/ping` проверяются до protocol routers.
+- **Преобразование протоколов**: JSON Schema `enum` дедуплицируются за линейное время, streaming tool arguments накапливаются без квадратичной конкатенации, а Anthropic content больше не проходит бесполезные повторные обходы.
+
 ## [0.2.6] - 2026-07-31
 
 ### Добавлено
@@ -518,6 +528,7 @@
 
 ---
 
+[0.2.7]: https://github.com/ai-forever/gpt2giga/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/ai-forever/gpt2giga/compare/v0.2.5a1...v0.2.6
 [0.2.5a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.4a1...v0.2.5a1
 [0.2.4a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.3a2...v0.2.4a1

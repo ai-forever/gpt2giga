@@ -24,6 +24,7 @@ from gpt2giga.openapi_tags import (
 from gpt2giga.protocols.anthropic import AnthropicProtocolAdapter
 from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
+from gpt2giga.routers.system_router import system_router
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
 from gpt2giga.sinks.metrics.noop import NoopMetricsSink
 from gpt2giga.sinks.observability.noop import NoopObservabilitySink
@@ -38,6 +39,16 @@ def test_root_redirect():
     client = TestClient(app)
     response = client.get("/")
     assert response.status_code == 200
+
+
+def test_system_probe_routes_precede_protocol_routes():
+    first_included_router = next(
+        route.original_router
+        for route in create_app().routes
+        if hasattr(route, "original_router")
+    )
+
+    assert first_included_router is system_router
 
 
 def test_cors_headers_present():

@@ -40,6 +40,7 @@ from gpt2giga.protocols.normalized import (
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
     build_llm_chat_completion_attributes,
@@ -495,6 +496,9 @@ async def _emit_gemini_observability(
     context,
     events: list[dict[str, Any]] | None = None,
 ) -> None:
+    sink = getattr(state, "observability_sink", None)
+    if not is_sink_active(sink):
+        return
     logger = getattr(state, "logger", None)
     try:
         settings = getattr(getattr(state, "config", None), "proxy_settings", None)
@@ -509,7 +513,7 @@ async def _emit_gemini_observability(
         )
         attributes["gpt2giga.api_format"] = "generate_content"
         emitted = await emit_observability_event(
-            getattr(state, "observability_sink", None),
+            sink,
             GEMINI_SPAN_NAME,
             attributes,
             context=context,

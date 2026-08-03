@@ -132,6 +132,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             path=config.proxy_settings.metrics_path,
             dependencies=api_dependencies,
         )
+    app.include_router(system_router)
     app.include_router(openai_router, dependencies=api_dependencies)
     app.include_router(
         openai_router,
@@ -191,7 +192,6 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         dependencies=v2_dependencies,
     )
     app.include_router(litellm_router, dependencies=api_dependencies)
-    app.include_router(system_router)
     if config.proxy_settings.debug_translate_enabled:
         app.include_router(debug_router)
     if config.proxy_settings.admin_api_enabled:

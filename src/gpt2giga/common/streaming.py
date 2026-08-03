@@ -734,6 +734,7 @@ async def stream_responses_generator(
         source_renderer = SourceMarkerStreamRenderer()
         source_rendering_enabled = False
         function_call_data = None  # {"name": ..., "arguments": ...}
+        function_call_argument_parts: list[str] = []
         functions_state_id = None
         output_item_added = False
         is_function_call = False
@@ -1227,7 +1228,7 @@ async def stream_responses_generator(
                                     },
                                 )
                                 sequence_number += 1
-                                function_call_data["arguments"] += args_str
+                                function_call_argument_parts.append(args_str)
 
                     elif delta_content:
                         for event in emit_text_output_start_events():
@@ -1289,6 +1290,7 @@ async def stream_responses_generator(
             reasoning_text += flushed_reasoning.reasoning_content
 
         if is_function_call and function_call_data:
+            function_call_data["arguments"] = "".join(function_call_argument_parts)
             response_metadata["gigachat_called_tools"] = json.dumps(
                 [
                     _stream_called_tool_item(

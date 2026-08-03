@@ -11,6 +11,8 @@ from gpt2giga.core.context import RequestContext
 class NoopObservabilitySink:
     """Ignore observability events."""
 
+    is_noop = True
+
     async def emit(
         self,
         name: str,

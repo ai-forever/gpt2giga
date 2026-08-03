@@ -10,6 +10,7 @@ from typing import Any
 from gpt2giga.core.context import RequestContext
 from gpt2giga.sinks.logs.emission import build_request_traffic_event
 from gpt2giga.sinks.logs.models import TrafficLogEvent
+from gpt2giga.sinks.base import is_sink_active
 from gpt2giga.sinks.observability.factory import emit_observability_event
 
 REQUEST_SPAN_NAME = "gpt2giga.request"
@@ -28,9 +29,9 @@ async def emit_request_observability_event(
     is_streaming: bool = False,
 ) -> None:
     """Emit one request lifecycle observability span best effort."""
-    if sink is None:
+    if not is_sink_active(sink):
         return
-    if _should_skip_request_lifecycle_span(context, lifecycle):
+    if not should_emit_request_observability(context, lifecycle):
         return
     event = build_request_traffic_event(
         context,
@@ -152,13 +153,14 @@ def _stream_lifecycle_events(
     return [{"name": name, "attributes": attributes}]
 
 
-def _should_skip_request_lifecycle_span(
+def should_emit_request_observability(
     context: RequestContext,
     lifecycle: str,
 ) -> bool:
+    """Return whether a generic lifecycle span adds new request information."""
     if not context.llm_observability_emitted:
-        return False
-    return lifecycle in {"request_completed", "streaming_completed"}
+        return True
+    return lifecycle not in {"request_completed", "streaming_completed"}
 
 
 def _caller_observability_attributes(caller: Mapping[str, Any]) -> dict[str, Any]:
