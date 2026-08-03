@@ -1,0 +1,45 @@
+{
+  "case_id": "gemini-generate-content-stream-sequence-v1",
+  "client": {
+    "name": "google-genai-python",
+    "version": "2.14.0"
+  },
+  "chunks": [
+    {
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "Hello"
+              }
+            ],
+            "role": "model"
+          },
+          "index": 0
+        }
+      ],
+      "responseId": "response_fixture_stream"
+    },
+    {
+      "candidates": [
+        {
+          "finishReason": "STOP",
+          "index": 0
+        }
+      ],
+      "responseId": "response_fixture_stream",
+      "usageMetadata": {
+        "candidatesTokenCount": 1,
+        "promptTokenCount": 2,
+        "totalTokenCount": 3
+      }
+    }
+  ],
+  "terminal": {
+    "finishReason": "STOP",
+    "max_count": 1
+  },
+  "transport": "application/json+sse",
+  "schema_version": "gpt2giga.client-corpus.v1"
+}

@@ -1,0 +1,60 @@
+{
+  "case_id": "claude-code-anthropic-gateway-tools-v1",
+  "client": {
+    "compatible_sdk": {
+      "name": "anthropic-python",
+      "version": "0.120.2"
+    },
+    "name": "claude-code",
+    "version": "2.1.212",
+    "wire_api": "anthropic-messages"
+  },
+  "request": {
+    "body": {
+      "max_tokens": 64,
+      "messages": [
+        {
+          "content": [
+            {
+              "text": "Weather in Moscow?",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "model": "bridge/anthropic-test",
+      "stream": true,
+      "system": "Be concise.",
+      "tool_choice": {
+        "name": "weather",
+        "type": "tool"
+      },
+      "tools": [
+        {
+          "description": "Return fixture weather.",
+          "input_schema": {
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "type": "object"
+          },
+          "name": "weather"
+        }
+      ]
+    },
+    "headers": {
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "x-api-key": "__SCRUBBED__"
+    },
+    "method": "POST",
+    "path": "/v1/messages"
+  },
+  "schema_version": "gpt2giga.client-corpus.v1"
+}

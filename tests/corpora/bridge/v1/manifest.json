@@ -1,0 +1,49 @@
+{
+  "captured_on": "2026-08-03",
+  "corpus_version": "bridge-v1",
+  "files": [
+    {
+      "path": "anthropic_stream_sequence.json",
+      "sha256": "2502c8cd81e90eb6c5a5697afa416f5a2f88f7486aa967f1a7234caae5cd83a1"
+    },
+    {
+      "path": "claude_code_anthropic_request.json",
+      "sha256": "73022f2a70be63823bb782b81600f8b890df0ee83423e106b0b2bddea108c512"
+    },
+    {
+      "path": "codex_responses_sequence.json",
+      "sha256": "17ee9fd799308a0e8ebe89098b81ad128ac7765b4b84ee58b8c83be0e32fb35c"
+    },
+    {
+      "path": "gemini_sdk_generate_content_request.json",
+      "sha256": "faed8d3bcc5e9681bdf8cd0cd69c797537f38aaf919999f7fcb9b2d241e89fa8"
+    },
+    {
+      "path": "gemini_stream_sequence.json",
+      "sha256": "e297720217aa0e7dfd289fe818dc809f81bc5db79555e9314123b30be3d60ca7"
+    },
+    {
+      "path": "lifecycle_failures.json",
+      "sha256": "3ed9e84eda95581dfc0e82607152efbc8d98e042792e18fe3c884a7159e11618"
+    },
+    {
+      "path": "openai_sdk_chat_request.json",
+      "sha256": "4b93ad271f1b46babc56284c9fe12ecd78da5cc6368ee0f8406f9c5773620893"
+    },
+    {
+      "path": "openai_sdk_responses_request.json",
+      "sha256": "5a2e1c5a5566b5359e144393033ac404b6712ca0c36a39400687ea4d913c29d5"
+    },
+    {
+      "path": "unsupported_fields.json",
+      "sha256": "cf8d380f33d500c1164e81980cda4a3e5def8d331a2d4112096849818a6954e8"
+    }
+  ],
+  "rules": {
+    "deterministic": true,
+    "max_fixture_bytes": 16384,
+    "provider_traffic": false,
+    "scrub_marker": "__SCRUBBED__"
+  },
+  "schema_version": "gpt2giga.client-corpus-manifest.v1"
+}

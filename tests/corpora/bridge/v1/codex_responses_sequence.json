@@ -1,0 +1,74 @@
+{
+  "case_id": "codex-responses-text-tools-stream-v1",
+  "client": {
+    "name": "codex-cli",
+    "version": "0.146.0",
+    "wire_api": "responses"
+  },
+  "config": {
+    "model": "bridge/codex-test",
+    "model_provider": "gpt2giga",
+    "model_providers.gpt2giga": {
+      "base_url": "http://127.0.0.1:8000/v1",
+      "env_key": "GPT2GIGA_CORPUS_TOKEN",
+      "name": "gpt2giga corpus",
+      "wire_api": "responses"
+    }
+  },
+  "expected_event_types": [
+    "response.created",
+    "response.output_item.added",
+    "response.content_part.added",
+    "response.output_text.delta",
+    "response.output_text.done",
+    "response.content_part.done",
+    "response.output_item.done",
+    "response.completed"
+  ],
+  "request": {
+    "body": {
+      "input": [
+        {
+          "content": [
+            {
+              "text": "Reply with one short sentence.",
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        }
+      ],
+      "instructions": "Be concise.",
+      "model": "bridge/codex-test",
+      "stream": true,
+      "tools": [
+        {
+          "description": "Return fixture weather.",
+          "name": "weather",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "type": "object"
+          },
+          "strict": true,
+          "type": "function"
+        }
+      ]
+    },
+    "headers": {
+      "authorization": "Bearer __SCRUBBED__",
+      "content-type": "application/json"
+    },
+    "method": "POST",
+    "path": "/v1/responses"
+  },
+  "schema_version": "gpt2giga.client-corpus.v1"
+}

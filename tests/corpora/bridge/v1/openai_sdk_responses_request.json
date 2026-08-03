@@ -1,0 +1,27 @@
+{
+  "case_id": "openai-sdk-responses-function-output-v1",
+  "client": {
+    "name": "openai-python",
+    "version": "2.50.0"
+  },
+  "request": {
+    "body": {
+      "input": [
+        {
+          "call_id": "call_fixture_1",
+          "output": "{\"temperature\":20}",
+          "type": "function_call_output"
+        }
+      ],
+      "model": "bridge/openai-test",
+      "previous_response_id": "resp_fixture_1"
+    },
+    "headers": {
+      "authorization": "Bearer __SCRUBBED__",
+      "content-type": "application/json"
+    },
+    "method": "POST",
+    "path": "/responses"
+  },
+  "schema_version": "gpt2giga.client-corpus.v1"
+}
