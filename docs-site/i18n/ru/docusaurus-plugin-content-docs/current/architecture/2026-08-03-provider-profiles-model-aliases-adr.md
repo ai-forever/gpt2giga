@@ -8,10 +8,10 @@
 
 ## Контекст
 
-Bridge должен разделять клиентский протокол, публичный alias, upstream provider,
-upstream model id, capability profile и loss-matrix revision. Запрос выбирает
-только публичный alias. Текущие GigaChat settings и `pass_model` такой границы
-не дают.
+Bridge должен разделять route configuration, public model identity, upstream
+provider, provider-visible inventory, selected model, capability evidence и
+loss-matrix revision. Provider profiles владеют стабильной execution
+configuration, но не полным динамическим model inventory.
 
 ## Решение
 
@@ -23,10 +23,22 @@ GPT2GIGA_CONFIG=<path> gpt2giga
 ```
 
 Явный `--config` приоритетнее `GPT2GIGA_CONFIG`; два разных пути дают
-`invalid_profile`. Без обоих источников 0.3 создаёт один legacy-профиль GigaChat
-из существующих `GIGACHAT_*` settings. Config является единственным владельцем
-destinations, credentials, models, capabilities и aliases; payload, headers и
-`pass_model` их не изменяют.
+`invalid_profile`. Без обоих источников 0.3 создаёт built-in GigaChat route из
+существующих `GIGACHAT_*` connection settings. Config владеет destinations,
+credentials, immutable aliases, route enablement и route policy; payload и
+headers их не изменяют. Dynamic GigaChat inventory остаётся provider-discovered
+даже при настроенных aliases или default model.
+
+### Владелец model catalog
+
+Один `ModelCatalog` владеет snapshot для public `/models`, `/bridge/models`,
+selected-model validation и capability admission. GigaChat discovery использует
+authenticated provider models API. Exact aliases в profile являются routes, а
+не доказательством полного provider inventory.
+
+`GIGACHAT_MODEL` задаёт default-model или явно документированную forced-model
+policy. Он не заменяет и не фильтрует provider-visible catalog. Новая model
+остаётся видимой, даже если её effective capabilities пока `unknown`.
 
 ### Версионированная схема
 
@@ -63,18 +75,19 @@ Execution context `gpt2giga.execution-context.v1` хранит `config_revision`
 `capability_profile` и `loss_matrix_revision`. Разрешено показывать имена env
 переменных, но не values, их hashes или authorization headers.
 
-### Разрешение aliases
+### Разрешение route и model
 
-До semantic admission и I/O выполняется точная цепочка:
+До semantic admission и provider execution выполняется точная цепочка:
 
 ```text
-public alias -> exact profile -> exact upstream model
-             -> capability profile -> loss matrix revision
+public model/alias -> exact provider route -> effective model
+                   -> catalog revision -> effective capability revision
 ```
 
 Unknown, ambiguous, disabled и deprecated aliases не выбирают замену.
-`/bridge/models` выдаёт лексически отсортированные aliases с безопасными
-metadata/revisions; protocol-specific `/models` строятся из того же registry.
+Unavailable model также не выбирает замену. `/bridge/models` и все
+protocol-specific `/models` строятся из одного catalog snapshot и публикуют его
+safe inventory revision.
 
 Startup/preflight использует коды `invalid_profile_schema`,
 `duplicate_profile_id`, `duplicate_model_alias`, `invalid_destination`,
@@ -83,7 +96,7 @@ Startup/preflight использует коды `invalid_profile_schema`,
 
 ## Миграция и откат
 
-- Без config сохраняется текущая установка через synthesized GigaChat profile.
-- `pass_model` остаётся только legacy-механизмом и не меняет bridge aliases.
-- Удаление `--config` после restart возвращает synthesized profile.
+- Без config сохраняется текущая установка через built-in GigaChat route.
+- Existing exact aliases сохраняют route identity и не сужают dynamic discovery.
+- Удаление `--config` после restart возвращает built-in GigaChat route.
 - 0.2.x игнорирует отдельный profile file; миграция данных не нужна.

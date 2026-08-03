@@ -84,10 +84,11 @@ or unrestricted provider error bodies.
 
 ## Migration and rollback
 
-- Existing GigaChat environment settings feed only the synthesized legacy
-  profile when no bridge config is present.
+- Existing GigaChat environment settings feed only the built-in native
+  GigaChat route when no bridge config is present.
 - Request-carried transport/provider fields that were previously ignored or
   forwarded now fail closed in bridge mode; this is an intentional security
   tightening documented by stable error codes.
-- Removing the bridge config restores the legacy compatibility boundary on
-  restart. Downgrading to 0.2.x leaves profile files and policy references inert.
+- Removing the bridge config restores the native GigaChat compatibility
+  boundary on restart. Downgrading to 0.2.x leaves profile files and policy
+  references inert.

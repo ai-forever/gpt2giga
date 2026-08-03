@@ -11,8 +11,8 @@
 The existing normalized v1 matrix describes whether a normalized feature has
 an exact, conditional, or unsupported projection into three downstream wire
 protocols. The release additionally needs a public-protocol by upstream-provider
-matrix. Every cell must state what is safe to execute; absence or `unknown` is
-not a releaseable state.
+matrix. This route matrix is a coarse maturity view; it is not model inventory
+or the effective capability answer for a selected model.
 
 ## Decision
 
@@ -40,8 +40,11 @@ Each of the 16 cells has one status:
   increased upstream drift risk;
 - `blocked`: no safe supported path exists and admission must reject before I/O.
 
-`unknown`, omitted cells, implicit defaults, and marketing claims of general
-equivalence are invalid.
+`unknown` is invalid for route maturity cells because every route must be
+classified before release. This does not remove `unknown` from model-level
+capabilities: lack of model evidence must remain an explicit tri-state result.
+Omitted cells, implicit defaults, and marketing claims of general equivalence
+are invalid.
 
 ### Cell and semantic rows
 
@@ -52,10 +55,12 @@ stream lifecycle, usage/cache/reasoning tokens, stop/refusal/safety, reasoning,
 previous-response state, files/images, hosted tools, cancellation, timeout,
 malformed stream, and disconnect.
 
-Every row uses `exact`, `conditional`, or `unsupported`, matching the existing
-normalized semantic vocabulary. A `conditional` row names the exact capability
-profile predicate. A `blocked` cell may still describe why individual rows are
-unrepresentable, but it cannot be dispatched.
+Every coarse row uses `exact`, `conditional`, or `unsupported`, matching the
+existing normalized semantic vocabulary. A `conditional` row delegates to the
+effective capability resolver for the selected model and API mode. The resolver
+combines public-protocol support, provider-adapter support, model evidence, API
+mode, and route policy. Each effective decision is `supported`, `unsupported`,
+or `unknown` and retains reason, source, evidence, and revision identifiers.
 
 ### Revision
 
@@ -68,14 +73,15 @@ status, reasons, version windows, and evidence ids do.
 
 Admission is deterministic and finishes before credential or network work:
 
-1. resolve the public alias;
-2. select the exact protocol/provider cell;
-3. reject a `blocked` cell;
-4. derive requested semantic rows from the normalized request;
-5. require every row to be exact or satisfy its named capability predicate;
-6. emit a content-free admission record bound to config/profile/matrix
+1. resolve the immutable provider route;
+2. resolve the selected model from the shared catalog;
+3. select the exact protocol/provider cell and reject a `blocked` route;
+4. resolve effective model/API-mode capabilities;
+5. derive requested semantic rows without discarding recognized intent;
+6. apply the explicit policy for `unknown` and reject unsupported semantics;
+7. emit a content-free admission record bound to config/profile/inventory/matrix
    revisions;
-7. dispatch the exact provider adapter.
+8. dispatch the exact provider adapter.
 
 There is no downgrade from exact to lossy behavior and no provider/model
 fallback. Rejection uses `unsupported_semantic` with the public field path and a
@@ -84,10 +90,11 @@ provider output.
 
 ### Machine projection
 
-`GET /bridge/capabilities` returns the complete 16-cell manifest in stable
-lexical order. It contains no prompts, response bodies, credentials,
-destinations with embedded userinfo, or live provider data. The endpoint never
-contacts an upstream service.
+`GET /bridge/capabilities` without a model query returns the complete 16-cell
+route manifest in stable lexical order. A model/protocol/API-mode query returns
+the effective tri-state projection with inventory and capability revisions. No
+projection contains prompts, response bodies, credentials, destinations with
+embedded userinfo, or raw provider data.
 
 ## Migration and rollback
 

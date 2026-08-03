@@ -8,11 +8,10 @@
 
 ## Context
 
-The bridge must separate client protocol, public model alias, upstream provider,
-upstream model id, capability profile, and loss-matrix revision. A request may
-choose only the public alias. Current GigaChat settings and `pass_model` behavior
-do not provide that separation, and the internal OpenAI-compatible profile is
-not yet a process-wide public registry.
+The bridge must separate route configuration, public model identity, upstream
+provider, provider-visible inventory, selected model, capability evidence, and
+loss-matrix revision. Provider profiles are stable execution configuration;
+they must not become the sole owner of dynamic model inventory.
 
 ## Decision
 
@@ -26,13 +25,30 @@ GPT2GIGA_CONFIG=<path> gpt2giga
 ```
 
 An explicit `--config` wins over `GPT2GIGA_CONFIG`. Supplying two different
-paths is an `invalid_profile` error. When neither is present, 0.3 synthesizes one
-legacy GigaChat profile from the existing `GIGACHAT_*` settings; this preserves
-the current default installation but does not enable other providers.
+paths is an `invalid_profile` error. When neither is present, 0.3 creates one
+built-in GigaChat route from the existing `GIGACHAT_*` connection settings;
+this preserves the current default installation but does not enable other
+providers.
 
 When a bridge config is present it is authoritative for provider destinations,
-credentials, models, capabilities, and aliases. Request payloads, compatibility
-headers, and legacy `pass_model` cannot add or mutate profiles.
+credentials, immutable aliases, route enablement, and route policy. Request
+payloads and compatibility headers cannot add or mutate profiles. Dynamic
+GigaChat inventory remains provider-discovered even when route aliases or a
+default model are configured.
+
+### Model catalog ownership
+
+One `ModelCatalog` owns the model snapshot used by public `/models`
+projections, `/bridge/models`, selected-model validation, and capability
+admission. GigaChat discovery uses the authenticated provider models API. A
+provider profile may define exact immutable aliases, but those aliases are
+routes, not proof that the complete provider inventory contains only those
+models.
+
+`GIGACHAT_MODEL` is a default-model or explicitly documented forced-model
+policy. It never replaces or filters the provider-visible catalog. A new model
+returned by the provider remains visible even when its effective capabilities
+are still `unknown`.
 
 ### Versioned schema
 
@@ -85,19 +101,20 @@ The redacted execution context records:
 Credential names may appear in config inspection; values, hashes of values, and
 authorization headers may not.
 
-### Alias resolution
+### Route and model resolution
 
-Alias resolution completes before semantic admission and provider I/O:
+Route and selected-model resolution complete before semantic admission and
+provider execution:
 
 ```text
-public alias -> exact profile -> exact upstream model
-             -> capability profile -> loss matrix revision
+public model/alias -> exact provider route -> effective model
+                   -> catalog revision -> effective capability revision
 ```
 
 Unknown, ambiguous, disabled, or deprecated aliases do not select a replacement.
-`/bridge/models` returns aliases in lexical order with provider kind, support
-status, and safe revisions only. Protocol-specific `/models` projections derive
-from the same registry.
+An unavailable model does not select a replacement. `/bridge/models` and every
+protocol-specific `/models` projection derive from the same catalog snapshot
+and expose its safe inventory revision.
 
 ### Validation errors
 
@@ -108,9 +125,10 @@ uses `unknown_model_alias`. No error contains a credential value.
 
 ## Migration and rollback
 
-- Without a config path, the synthesized GigaChat profile retains the current
-  environment/CLI defaults and documented public routes.
-- `pass_model` remains a legacy-mode concern; it cannot alter bridge aliases.
-- Removing `--config` returns to the synthesized GigaChat profile on restart.
+- Without a config path, the built-in GigaChat route retains the current
+  connection defaults and documented public routes.
+- Existing exact aliases in explicit bridge profiles retain their route
+  identity; they do not narrow dynamic GigaChat discovery.
+- Removing `--config` returns to the built-in GigaChat route on restart.
 - Downgrading to 0.2.x ignores the standalone profile file and requires no data
   migration.

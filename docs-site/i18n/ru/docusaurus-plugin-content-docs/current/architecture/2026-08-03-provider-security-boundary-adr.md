@@ -64,7 +64,8 @@ content по умолчанию и unrestricted provider errors запрещен
 
 ## Миграция и откат
 
-- Existing GigaChat env settings используются только synthesized legacy profile.
+- Existing GigaChat env settings используются только built-in native GigaChat
+  route.
 - Request-carried transport/provider fields теперь fail closed в bridge mode.
-- Удаление config после restart возвращает legacy boundary; 0.2.x оставляет
-  profile files и policy references неактивными.
+- Удаление config после restart возвращает native GigaChat boundary; 0.2.x
+  оставляет profile files и policy references неактивными.

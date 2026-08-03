@@ -7,6 +7,8 @@
 - Readiness schema: `gpt2giga.readiness.v1`
 - Model schema: `gpt2giga.bridge-models.v1`
 - Capability schema: `gpt2giga.bridge-capabilities.v1`
+- Catalog schema: `gpt2giga.model-catalog.v1`
+- Effective capability schema: `gpt2giga.effective-capabilities.v1`
 - Error schema: `gpt2giga.error.v1`
 
 ## Context
@@ -44,18 +46,24 @@ printed.
 | Endpoint | Success | Failure | Meaning |
 |---|---:|---:|---|
 | `GET /health` | 200 empty body | process unavailable | Process liveness; existing contract retained. |
-| `GET /ready` | 200 JSON | 503 JSON | Config loaded, aliases admitted, routes mounted, clients initialized. |
-| `GET /bridge/models` | 200 JSON | 503 JSON | Deterministic public aliases and safe metadata. |
-| `GET /bridge/capabilities` | 200 JSON | 503 JSON | Complete content-free 16-cell manifest. |
+| `GET /ready` | 200 JSON | 503 JSON | Route, client, and model-catalog readiness. |
+| `GET /models` | 200 JSON | protocol error | Protocol projection of the shared model catalog. |
+| `GET /bridge/models` | 200 JSON | 503 JSON | Machine projection of the same catalog snapshot. |
+| `GET /bridge/capabilities` | 200 JSON | 503 JSON | Coarse content-free 16-cell route manifest. |
+| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | 200 JSON | 400/404/503 JSON | Effective tri-state capabilities for one selected model and route. |
 
-These endpoints do not call upstream providers. Arrays are lexically ordered,
-JSON keys are stable, and every document carries its schema/config/matrix
-revision as applicable. `/health` remains usable while readiness is false.
+Preflight, `/health`, and the coarse route matrix do not call upstream
+providers. Model endpoints use the bounded `ModelCatalog`, which may refresh
+through provider discovery and reports whether the returned snapshot is fresh
+or stale. Arrays are lexically ordered, JSON keys are stable, and every
+document carries its applicable config, inventory, matrix, and capability
+revision. `/health` remains usable while readiness is false.
 
-Readiness becomes true only after the immutable registry and every enabled
-adapter client are constructed. Startup failure occurs before the listening
-socket is exposed. During shutdown readiness becomes false before new requests
-are rejected.
+Readiness distinguishes process liveness, route configuration, adapter state,
+fresh inventory, stale-but-usable inventory, and discovery unavailability. A
+temporary refresh failure does not fabricate a model or kill unrelated
+already-admitted work. During shutdown readiness becomes false before new
+requests are rejected.
 
 ### Stable error envelope
 
@@ -93,6 +101,6 @@ step writes prompt content or secrets to the machine contract.
 
 - `/health` and current public protocol routes remain compatible.
 - Supervisors should gate traffic on `/ready`, not replace liveness checks.
-- Removing `--config` activates only the synthesized legacy GigaChat profile.
+- Removing `--config` activates only the built-in native GigaChat route.
 - A 0.2.x rollback loses the new inspect/readiness/bridge endpoints but requires
   no persistent-state conversion.

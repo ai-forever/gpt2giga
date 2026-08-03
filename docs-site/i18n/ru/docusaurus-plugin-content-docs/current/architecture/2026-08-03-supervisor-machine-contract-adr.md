@@ -5,6 +5,7 @@
 - Владелец решения: направление integration
 - Схемы: `gpt2giga.inspect.v1`, `gpt2giga.readiness.v1`,
   `gpt2giga.bridge-models.v1`, `gpt2giga.bridge-capabilities.v1`,
+  `gpt2giga.model-catalog.v1`, `gpt2giga.effective-capabilities.v1`,
   `gpt2giga.error.v1`
 
 ## Контекст
@@ -34,15 +35,19 @@ credential values не разрешаются в документ и не печ
 | Endpoint | Успех | Ошибка | Смысл |
 |---|---:|---:|---|
 | `GET /health` | 200 empty | process unavailable | Существующий liveness contract. |
-| `GET /ready` | 200 JSON | 503 JSON | Config/aliases/routes/clients готовы. |
-| `GET /bridge/models` | 200 JSON | 503 JSON | Детерминированные aliases и safe metadata. |
-| `GET /bridge/capabilities` | 200 JSON | 503 JSON | Полный content-free manifest из 16 ячеек. |
+| `GET /ready` | 200 JSON | 503 JSON | Готовность route, clients и model catalog. |
+| `GET /models` | 200 JSON | protocol error | Protocol projection общего model catalog. |
+| `GET /bridge/models` | 200 JSON | 503 JSON | Machine projection того же catalog snapshot. |
+| `GET /bridge/capabilities` | 200 JSON | 503 JSON | Coarse content-free route manifest из 16 ячеек. |
+| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | 200 JSON | 400/404/503 JSON | Effective tri-state capabilities выбранных model и route. |
 
-Endpoints не вызывают upstream. Arrays лексически отсортированы, JSON keys
-стабильны, документы содержат применимые schema/config/matrix revisions.
-`/health` остаётся доступным при false readiness. Readiness становится true
-только после immutable registry и всех enabled adapter clients; startup failure
-происходит до публикации listening socket.
+Preflight, `/health` и coarse route matrix не вызывают upstream. Model endpoints
+используют bounded `ModelCatalog`, который может обновляться через provider
+discovery и сообщает fresh/stale состояние snapshot. Arrays лексически
+отсортированы, документы содержат config/inventory/matrix/capability revisions.
+Readiness различает liveness, route config, adapters, fresh inventory,
+stale-but-usable inventory и discovery unavailable. Refresh failure не создаёт
+фиктивную model и не останавливает unrelated admitted work.
 
 Machine endpoints используют bounded content-free envelope:
 
@@ -78,5 +83,5 @@ prompt content или secrets.
 
 - `/health` и текущие protocol routes совместимы.
 - Supervisors должны gate traffic по `/ready`.
-- Без `--config` активируется только synthesized GigaChat profile.
+- Без `--config` активируется только built-in native GigaChat route.
 - Откат 0.2.x убирает новые endpoints без persistent-state migration.
