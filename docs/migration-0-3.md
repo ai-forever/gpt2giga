@@ -81,9 +81,9 @@ these endpoints:
 | `GET /health` | `200` | Process unavailable | Liveness only. Do not use it as a traffic-readiness signal. |
 | `GET /ready` | `200` `gpt2giga.readiness.v1` | `503` with the same versioned shape | Route, client, and model-catalog readiness. |
 | `GET /models` | `200` protocol response | Protocol error | Protocol projection of the shared model catalog. |
-| `GET /bridge/models` | `200` `gpt2giga.bridge-models.v1` | `503` | Machine projection of the same catalog snapshot and inventory revision. |
-| `GET /bridge/capabilities` | `200` `gpt2giga.bridge-capabilities.v1` | `503` | Coarse content-free 16-cell route manifest. |
-| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | `200` effective capability response | `400`/`404`/`503` | Model-aware tri-state capability decisions and revisions. |
+| `GET /bridge/models` | `200` `gpt2giga.bridge-models.v2` | `503` | Machine projection of the same catalog snapshot and inventory revision. |
+| `GET /bridge/capabilities` | `200` `gpt2giga.route-support-matrix.v1` | `503` | Coarse content-free 16-cell route manifest. |
+| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | `200` `gpt2giga.effective-capabilities.v1` | `400`/`404`/`503` | Model-aware tri-state capability decisions and revisions. |
 
 Preflight, `/health`, and the coarse route matrix never perform provider network
 calls. Model catalog projections may perform a bounded discovery refresh and

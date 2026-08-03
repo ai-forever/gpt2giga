@@ -567,11 +567,7 @@ def _build_bridge_loss_matrix() -> BridgeLossMatrix:
             if provider is UpstreamProvider.GIGACHAT:
                 status = (
                     BridgeSupportStatus.STABLE
-                    if protocol
-                    in {
-                        PublicProtocol.OPENAI_CHAT_COMPLETIONS,
-                        PublicProtocol.OPENAI_RESPONSES,
-                    }
+                    if protocol is PublicProtocol.OPENAI_CHAT_COMPLETIONS
                     else BridgeSupportStatus.TECHNICAL_PREVIEW
                 )
                 reason_ids = {
@@ -579,7 +575,7 @@ def _build_bridge_loss_matrix() -> BridgeLossMatrix:
                         "baseline_gigachat_chat_conformance",
                     ),
                     PublicProtocol.OPENAI_RESPONSES: (
-                        "pinned_codex_responses_conformance",
+                        "normalized_responses_parity_incomplete",
                     ),
                     PublicProtocol.ANTHROPIC_MESSAGES: ("cross_protocol_route",),
                     PublicProtocol.GEMINI_GENERATE_CONTENT: ("cross_protocol_route",),

@@ -41,7 +41,7 @@ GigaChat v2, а корневые маршруты без версиониров�
 | `GET /models` | Поддерживается | Список моделей GigaChat в форме, совместимой с OpenAI. |
 | `GET /models/{model}` | Поддерживается | Одна модель в форме, совместимой с OpenAI. |
 | `POST /chat/completions` | Поддерживается | Чат без потоковой передачи и потоковый, инструменты/вызов функций, структурированный вывод, вложения там, где поддерживаются. |
-| `POST /responses` | Поддерживается | Сопоставляет input/instructions/tools из Responses с GigaChat. Режим GigaChat v2 даёт более богатый путь для встроенных инструментов. |
+| `POST /responses` | Stable native / normalized preview | Native GigaChat execution сохраняет compatibility surface, включая hosted tools и attachment handoff. Route-selected normalized execution остаётся technical preview и отклоняет semantics, которые выбранные route/model/API mode не сохраняют. |
 | `POST /embeddings` | Поддерживается | Использует модель из запроса или модель прокси по умолчанию для эмбеддингов, в зависимости от конфигурации. |
 | `GET /model/info` | Поддерживается | Эндпоинт информации о модели, совместимый с LiteLLM. |
 | `POST /files`, `GET /files*` | Отключено | Код роутера есть, но он не подключён: files без batches дают неполный пакетный цикл OpenAI. |

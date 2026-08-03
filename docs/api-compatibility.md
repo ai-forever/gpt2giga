@@ -41,7 +41,7 @@ Examples:
 | `GET /models` | Supported | List of GigaChat models in the OpenAI-compatible form. |
 | `GET /models/{model}` | Supported | A single model in the OpenAI-compatible form. |
 | `POST /chat/completions` | Supported | Non-streaming and streaming chat, tools/function calling, structured output, attachments where supported. |
-| `POST /responses` | Supported | Maps Responses input/instructions/tools to GigaChat. GigaChat v2 mode provides a richer built-in-tool path. |
+| `POST /responses` | Stable native / normalized preview | Native GigaChat execution preserves the compatibility surface, including hosted tools and attachment handoff. Route-selected normalized execution is technical preview and rejects semantics that its selected route/model/API mode cannot preserve. |
 | `POST /embeddings` | Supported | Uses the model from the request or the proxy default for embeddings, depending on the configuration. |
 | `GET /model/info` | Supported | LiteLLM-compatible model info endpoint. |
 | `POST /files`, `GET /files*` | Disabled | Router code exists but is not mounted: files without batches give an incomplete OpenAI batch flow. |

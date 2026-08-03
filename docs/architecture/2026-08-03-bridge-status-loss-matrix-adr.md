@@ -4,7 +4,8 @@
 - Status: accepted for gpt2giga 0.3
 - Decision owners: bridge-matrix and integration lanes
 - Matrix schema: `gpt2giga.bridge-loss-matrix.v1`
-- Manifest schema: `gpt2giga.bridge-capabilities.v1`
+- Route manifest schema: `gpt2giga.route-support-matrix.v1`
+- Effective capability schema: `gpt2giga.effective-capabilities.v1`
 
 ## Context
 
@@ -45,6 +46,11 @@ classified before release. This does not remove `unknown` from model-level
 capabilities: lack of model evidence must remain an explicit tri-state result.
 Omitted cells, implicit defaults, and marketing claims of general equivalence
 are invalid.
+
+This matrix describes normalized route maturity. Native GigaChat Responses is
+the stable compatibility owner outside the normalized matrix. The normalized
+OpenAI Responses to GigaChat cell is `technical_preview` until attachments and
+the remaining accepted native corpus have end-to-end normalized parity.
 
 ### Cell and semantic rows
 

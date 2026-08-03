@@ -54,6 +54,10 @@ The normalized bridge is route-selected for cross-provider execution. It is
 not the global minimum denominator for every route. No Responses compatibility
 workaround is part of the corrected 0.3 public contract.
 
+The release status is explicit: native GigaChat Responses is stable;
+route-selected normalized Responses is technical preview until hosted tools,
+attachments, and the complete accepted compatibility corpus reach parity.
+
 ### Request admission
 
 The decoder preserves every recognized top-level field and nested

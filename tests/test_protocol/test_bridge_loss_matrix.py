@@ -39,7 +39,7 @@ def test_bridge_loss_matrix_is_complete_and_explicit() -> None:
         assert {row.semantic for row in cell.semantics} == set(BridgeSemantic)
 
 
-def test_pinned_codex_responses_cell_is_stable_and_evidence_bound() -> None:
+def test_normalized_responses_cell_is_preview_and_evidence_bound() -> None:
     cell = next(
         cell
         for cell in BRIDGE_LOSS_MATRIX_V1.cells
@@ -47,8 +47,8 @@ def test_pinned_codex_responses_cell_is_stable_and_evidence_bound() -> None:
         and cell.upstream_provider is UpstreamProvider.GIGACHAT
     )
 
-    assert cell.status is BridgeSupportStatus.STABLE
-    assert cell.reason_ids == ("pinned_codex_responses_conformance",)
+    assert cell.status is BridgeSupportStatus.TECHNICAL_PREVIEW
+    assert cell.reason_ids == ("normalized_responses_parity_incomplete",)
     assert cell.evidence_ids == ("COR-01-CODEX-RESPONSES-2026-08-03",)
 
 

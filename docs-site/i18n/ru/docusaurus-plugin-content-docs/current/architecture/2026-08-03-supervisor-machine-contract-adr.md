@@ -4,7 +4,7 @@
 - Статус: принято для gpt2giga 0.3
 - Владелец решения: направление integration
 - Схемы: `gpt2giga.inspect.v1`, `gpt2giga.readiness.v1`,
-  `gpt2giga.bridge-models.v1`, `gpt2giga.bridge-capabilities.v1`,
+  `gpt2giga.bridge-models.v2`, `gpt2giga.route-support-matrix.v1`,
   `gpt2giga.model-catalog.v1`, `gpt2giga.effective-capabilities.v1`,
   `gpt2giga.error.v1`
 
@@ -38,8 +38,8 @@ credential values не разрешаются в документ и не печ
 | `GET /ready` | 200 JSON | 503 JSON | Готовность route, clients и model catalog. |
 | `GET /models` | 200 JSON | protocol error | Protocol projection общего model catalog. |
 | `GET /bridge/models` | 200 JSON | 503 JSON | Machine projection того же catalog snapshot. |
-| `GET /bridge/capabilities` | 200 JSON | 503 JSON | Coarse content-free route manifest из 16 ячеек. |
-| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | 200 JSON | 400/404/503 JSON | Effective tri-state capabilities выбранных model и route. |
+| `GET /bridge/capabilities` | 200 `gpt2giga.route-support-matrix.v1` | 503 JSON | Coarse content-free route manifest из 16 ячеек. |
+| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | 200 `gpt2giga.effective-capabilities.v1` | 400/404/503 JSON | Effective tri-state capabilities выбранных model и route. |
 
 Preflight, `/health` и coarse route matrix не вызывают upstream. Model endpoints
 используют bounded `ModelCatalog`, который может обновляться через provider

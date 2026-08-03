@@ -45,6 +45,10 @@ Normalized bridge выбирается route-решением для cross-provi
 не задаёт глобальный минимальный знаменатель. Responses compatibility
 workaround не входит в исправленный public contract 0.3.
 
+Release status указан явно: native GigaChat Responses — stable;
+route-selected normalized Responses — technical preview, пока hosted tools,
+attachments и полный accepted compatibility corpus не достигнут parity.
+
 ### Admission запроса
 
 Decoder сохраняет распознанные поля и вложенные элементы до route/model

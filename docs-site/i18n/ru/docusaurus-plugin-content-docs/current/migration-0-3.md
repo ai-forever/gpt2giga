@@ -79,9 +79,9 @@ stdout, content-bearing details или нулевом exit code при `valid !=
 | `GET /health` | `200` | Процесс недоступен | Только liveness, не traffic readiness. |
 | `GET /ready` | `200` `gpt2giga.readiness.v1` | `503` той же формы | Готовность route, clients и model catalog. |
 | `GET /models` | `200` protocol response | Protocol error | Protocol projection общего model catalog. |
-| `GET /bridge/models` | `200` `gpt2giga.bridge-models.v1` | `503` | Machine projection того же catalog snapshot и inventory revision. |
-| `GET /bridge/capabilities` | `200` `gpt2giga.bridge-capabilities.v1` | `503` | Coarse content-free route manifest из 16 ячеек. |
-| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | `200` effective capability response | `400`/`404`/`503` | Model-aware tri-state decisions и revisions. |
+| `GET /bridge/models` | `200` `gpt2giga.bridge-models.v2` | `503` | Machine projection того же catalog snapshot и inventory revision. |
+| `GET /bridge/capabilities` | `200` `gpt2giga.route-support-matrix.v1` | `503` | Coarse content-free route manifest из 16 ячеек. |
+| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | `200` `gpt2giga.effective-capabilities.v1` | `400`/`404`/`503` | Model-aware tri-state decisions и revisions. |
 
 Preflight, `/health` и coarse route matrix не обращаются к provider. Model
 catalog projections могут выполнить bounded discovery refresh и честно сообщают

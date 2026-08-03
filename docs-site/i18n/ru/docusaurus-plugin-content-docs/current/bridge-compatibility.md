@@ -16,6 +16,12 @@ I/O.
 Само наличие адаптера в пакете ещё не доказывает, что ячейку можно выполнять.
 Используйте ревизию матрицы, которую публикует запущенный gateway.
 
+Route matrix описывает зрелость normalized bridge. Native GigaChat Responses —
+stable compatibility owner и не проходит через normalized matrix. Ячейка
+normalized OpenAI Responses → GigaChat остаётся `technical_preview`: hosted
+tools допускаются по model и API mode, а attachments и другие native-only
+semantics ещё не нормализованы end to end.
+
 ## Статусы поддержки ячеек
 
 У каждой ячейки ровно один статус. `unknown`, пропущенная ячейка или неявное
@@ -111,14 +117,18 @@ Startup/profile validation дополнительно использует `inva
 версионированный envelope `gpt2giga.error.v1` с bounded content-free reason ids
 в `details`.
 
-## Machine contract capabilities
+## Machine contracts route и effective capabilities
 
 `GET /bridge/capabilities` возвращает
-`gpt2giga.bridge-capabilities.v1`. Документ связывает текущие
+`gpt2giga.route-support-matrix.v1`. Документ связывает текущие
 `config_revision` и `matrix_revision` и содержит все 16 ячеек в стабильном
 лексикографическом порядке. Он не содержит пользовательский контент и не
 обращается к провайдерам. Неполная, не совпадающая по ревизии, содержащая
 `unknown`, дубли или секреты проекция отклоняется, а не публикуется.
+
+С query-параметрами `model`, `protocol` и опциональным `api_mode` тот же endpoint
+возвращает `gpt2giga.effective-capabilities.v1` для точной model и route.
+Effective projection имеет tri-state решения и inventory/capability revisions.
 
 Используйте этот endpoint для route planning и диагностики; не выводите
 поддержку из наличия HTTP route, установленного SDK или класса provider adapter.

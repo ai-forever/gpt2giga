@@ -15,6 +15,12 @@ cells: four public protocols multiplied by four upstream provider kinds.
 An adapter existing in the package is not, by itself, proof that a cell is
 executable. Use the matrix revision exposed by the running gateway.
 
+The route matrix describes normalized bridge maturity. Native GigaChat
+Responses is the stable compatibility owner and bypasses the normalized matrix.
+The normalized OpenAI Responses to GigaChat cell remains `technical_preview`:
+hosted-tool coverage is admitted per model and API mode, while attachments and
+other native-only semantics are not yet normalized end to end.
+
 ## Cell support statuses
 
 Every cell has exactly one status. `unknown`, a missing cell, and an implicit
@@ -110,14 +116,19 @@ Startup/profile validation additionally uses `invalid_profile_schema`,
 `invalid_policy_reference`. Machine endpoint failures use the versioned
 `gpt2giga.error.v1` envelope with bounded, content-free `details` reason ids.
 
-## Capability machine contract
+## Route and effective-capability machine contracts
 
 `GET /bridge/capabilities` returns
-`gpt2giga.bridge-capabilities.v1`. The document binds the current
+`gpt2giga.route-support-matrix.v1`. The document binds the current
 `config_revision` and `matrix_revision` and contains all 16 cells in stable
 lexical order. It is content-free and does not contact providers. Incomplete,
 revision-mismatched, `unknown`, duplicate, or secret-bearing projections are
 rejected rather than published.
+
+With `model`, `protocol`, and optional `api_mode` query parameters, the same
+endpoint returns `gpt2giga.effective-capabilities.v1` for that exact model and
+route. The effective projection is tri-state and carries inventory and
+capability revisions.
 
 Use this endpoint for route planning and diagnostics; do not infer support from
 HTTP route presence, an installed SDK, or a provider adapter class. Protocol

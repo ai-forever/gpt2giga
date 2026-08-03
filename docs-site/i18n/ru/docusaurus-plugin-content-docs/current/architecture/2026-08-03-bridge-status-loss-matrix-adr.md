@@ -4,7 +4,8 @@
 - Статус: принято для gpt2giga 0.3
 - Владельцы решения: направления bridge-matrix и integration
 - Схема матрицы: `gpt2giga.bridge-loss-matrix.v1`
-- Схема manifest: `gpt2giga.bridge-capabilities.v1`
+- Схема route manifest: `gpt2giga.route-support-matrix.v1`
+- Схема effective capabilities: `gpt2giga.effective-capabilities.v1`
 
 ## Контекст
 
@@ -33,6 +34,11 @@ effective capability answer выбранной model.
 классифицированы до релиза. Но model-level capability без evidence обязана
 оставаться явным tri-state `unknown`. Пропущенные cells, implicit defaults и
 общие заявления об эквивалентности недопустимы.
+
+Матрица описывает зрелость normalized routes. Native GigaChat Responses —
+stable compatibility owner вне normalized matrix. Ячейка normalized OpenAI
+Responses → GigaChat остаётся `technical_preview`, пока attachments и остаток
+accepted native corpus не получат end-to-end normalized parity.
 
 ### Ячейки и semantic rows
 

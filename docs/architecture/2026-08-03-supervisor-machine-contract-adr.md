@@ -5,8 +5,8 @@
 - Decision owner: integration lane
 - Inspect schema: `gpt2giga.inspect.v1`
 - Readiness schema: `gpt2giga.readiness.v1`
-- Model schema: `gpt2giga.bridge-models.v1`
-- Capability schema: `gpt2giga.bridge-capabilities.v1`
+- Model schema: `gpt2giga.bridge-models.v2`
+- Route support schema: `gpt2giga.route-support-matrix.v1`
 - Catalog schema: `gpt2giga.model-catalog.v1`
 - Effective capability schema: `gpt2giga.effective-capabilities.v1`
 - Error schema: `gpt2giga.error.v1`
@@ -49,8 +49,8 @@ printed.
 | `GET /ready` | 200 JSON | 503 JSON | Route, client, and model-catalog readiness. |
 | `GET /models` | 200 JSON | protocol error | Protocol projection of the shared model catalog. |
 | `GET /bridge/models` | 200 JSON | 503 JSON | Machine projection of the same catalog snapshot. |
-| `GET /bridge/capabilities` | 200 JSON | 503 JSON | Coarse content-free 16-cell route manifest. |
-| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | 200 JSON | 400/404/503 JSON | Effective tri-state capabilities for one selected model and route. |
+| `GET /bridge/capabilities` | 200 `gpt2giga.route-support-matrix.v1` | 503 JSON | Coarse content-free 16-cell route manifest. |
+| `GET /bridge/capabilities?model=...&protocol=...&api_mode=...` | 200 `gpt2giga.effective-capabilities.v1` | 400/404/503 JSON | Effective tri-state capabilities for one selected model and route. |
 
 Preflight, `/health`, and the coarse route matrix do not call upstream
 providers. Model endpoints use the bounded `ModelCatalog`, which may refresh
