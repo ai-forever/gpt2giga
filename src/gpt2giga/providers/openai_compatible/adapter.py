@@ -599,7 +599,15 @@ class OpenAICompatibleProviderAdapter:
                 "peer_evidence_unavailable",
                 "Upstream transport peer evidence is unavailable.",
             )
-        authorization.validate_connected_peer(address)
+        try:
+            authorization.validate_connected_peer(address)
+        except OpenAICompatibleUpstreamError:
+            raise
+        except Exception as exc:
+            raise _transport_error(
+                "destination_mismatch",
+                "Upstream transport peer did not match its network authorization.",
+            ) from exc
 
 
 def normalized_chat_to_openai_compatible_payload(
