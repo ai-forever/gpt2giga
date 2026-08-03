@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from gigachat.exceptions import BadRequestError
 from loguru import logger
 
+from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.protocols.openai import (
@@ -21,6 +22,7 @@ from gpt2giga.protocols.openai import (
     normalized_stream_done_sse,
     normalized_stream_event_to_openai_sse,
 )
+from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.routers.openai.responses import router as responses_router
 
 
@@ -171,10 +173,23 @@ def test_responses_route_uses_stable_v2_sdk_shape(stable_sdk_client) -> None:
         gigachat={"model": "configured-model"},
     )
     stable_sdk_client.configured_model = "configured-model"
+    transformer = RequestTransformer(config, logger=logger)
+    response_processor = ResponseProcessor(logger=logger)
+    model_limiter = ModelConcurrencyLimiter({})
     app.state.config = config
     app.state.gigachat_client = stable_sdk_client
-    app.state.request_transformer = RequestTransformer(config, logger=logger)
-    app.state.response_processor = ResponseProcessor(logger=logger)
+    app.state.request_transformer = transformer
+    app.state.response_processor = response_processor
+    app.state.model_concurrency_limiter = model_limiter
+    app.state.responses_provider_adapter = GigaChatProviderAdapter(
+        config=config,
+        request_transformer=transformer,
+        giga_client=stable_sdk_client,
+        model_limiter=model_limiter,
+        response_processor=response_processor,
+        api_mode="v2",
+        forced_model="configured-model",
+    )
     app.state.logger = logger
 
     response = TestClient(app).post(

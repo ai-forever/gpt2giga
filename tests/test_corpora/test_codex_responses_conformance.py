@@ -112,10 +112,21 @@ def _app() -> tuple[FastAPI, _GigaChat, _Transformer]:
     )
     app.state.gigachat_client = giga_client
     app.state.logger = logger
-    app.state.model_concurrency_limiter = ModelConcurrencyLimiter({})
+    model_limiter = ModelConcurrencyLimiter({})
+    app.state.model_concurrency_limiter = model_limiter
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     app.state.request_transformer = transformer
-    app.state.response_processor = ResponseProcessor(logger=logger)
+    response_processor = ResponseProcessor(logger=logger)
+    app.state.response_processor = response_processor
+    app.state.responses_provider_adapter = GigaChatProviderAdapter(
+        config=app.state.config,
+        request_transformer=transformer,
+        giga_client=giga_client,
+        model_limiter=model_limiter,
+        response_processor=response_processor,
+        api_mode="v1",
+        forced_model="GigaChat-2-Max",
+    )
     return app, giga_client, transformer
 
 
