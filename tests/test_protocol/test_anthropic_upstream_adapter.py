@@ -2,7 +2,7 @@ import asyncio
 import json
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import httpx
 import pytest
 
@@ -21,6 +21,7 @@ from gpt2giga.providers.anthropic import (
     ANTHROPIC_API_VERSION,
     ANTHROPIC_IMPLEMENTED_FEATURES_V1,
     AnthropicProviderAdapter,
+    AnthropicProtocolError,
     AnthropicUnsupportedSemanticError,
     AnthropicUpstreamError,
     anthropic_profile,
@@ -166,6 +167,83 @@ def _fake_app():
     return app
 
 
+def _sse(event):
+    return f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+
+
+def _streaming_app(events):
+    app = FastAPI()
+    app.state.requests = []
+
+    @app.post("/v1/messages")
+    async def messages(request: Request):
+        app.state.requests.append(await request.json())
+
+        async def stream():
+            for event in events:
+                yield _sse(event)
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
+
+    return app
+
+
+def _stream_events():
+    return [
+        {
+            "type": "message_start",
+            "message": {
+                "id": "msg_stream",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-fixture",
+                "content": [],
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {"input_tokens": 11, "output_tokens": 1},
+            },
+        },
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "Calling lookup."},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {
+            "type": "content_block_start",
+            "index": 1,
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_stream",
+                "name": "lookup",
+                "input": {},
+            },
+        },
+        {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": '{"q":'},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": '"ping"}'},
+        },
+        {"type": "content_block_stop", "index": 1},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use", "stop_sequence": None},
+            "usage": {"output_tokens": 5},
+        },
+        {"type": "message_stop"},
+    ]
+
+
 async def test_adapter_executes_messages_and_tools_through_fake_server():
     app = _fake_app()
     network = _NetworkAuthorizer()
@@ -253,6 +331,172 @@ async def test_adapter_executes_messages_and_tools_through_fake_server():
     assert "secret-value-canary" not in repr(network.intents[0])
     assert network.authorizations[0].request_validations
     assert network.authorizations[0].response_validations
+
+
+async def test_adapter_streams_content_tools_usage_and_one_terminal_state():
+    app = _streaming_app(_stream_events())
+    network = _NetworkAuthorizer()
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app))
+    adapter = AnthropicProviderAdapter(
+        _profile(),
+        credential="secret-value-canary",
+        authorize_network=network,
+        http_client=client,
+    )
+    request = _request()
+    request.stream = True
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            request,
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=frozenset(BridgeFeature),
+            input_token_count=11,
+        )
+    ]
+    await client.aclose()
+
+    assert [event.type for event in events] == [
+        "message_start",
+        "content_delta",
+        "tool_call_start",
+        "tool_call_delta",
+        "tool_call_delta",
+        "usage",
+        "message_end",
+    ]
+    assert [event.sequence for event in events] == list(range(len(events)))
+    assert events[0].id == "msg_stream"
+    assert events[1].content_delta == "Calling lookup."
+    assert events[2].tool_call == NormalizedToolCall(
+        id="toolu_stream",
+        name="lookup",
+        raw_extensions={"index": 1},
+    )
+    assert events[3].tool_call.arguments == '{"q":'
+    assert events[4].tool_call.arguments == '"ping"}'
+    assert events[5].usage.input_tokens == 11
+    assert events[5].usage.output_tokens == 5
+    assert events[5].usage.total_tokens == 16
+    assert events[6].stop_reason == "tool_calls"
+    assert events[6].finish_reason == "tool_calls"
+    assert events[6].metadata == {"anthropic_stop_reason": "tool_use"}
+    assert app.state.requests[0]["stream"] is True
+    assert network.authorizations[0].response_validations
+
+
+async def test_stream_disconnect_emits_cancellation_and_closes_upstream():
+    app = _streaming_app(_stream_events())
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app))
+    adapter = AnthropicProviderAdapter(
+        _profile(),
+        credential="secret-value-canary",
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+    request = _request()
+    request.stream = True
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            request,
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=frozenset(BridgeFeature),
+            input_token_count=11,
+            is_disconnected=lambda: True,
+        )
+    ]
+    await client.aclose()
+
+    assert [event.type for event in events] == ["message_start", "cancelled"]
+    assert events[-1].stop_reason == "cancelled"
+
+
+@pytest.mark.parametrize(
+    ("mutate", "error_code"),
+    [
+        (
+            lambda events: events.__setitem__(
+                2,
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": "{}",
+                    },
+                },
+            ),
+            "content_delta_type_mismatch",
+        ),
+        (
+            lambda events: events[6]["delta"].__setitem__("partial_json", '"ping"'),
+            "invalid_stream_tool_input",
+        ),
+        (lambda events: events.pop(), "incomplete_stream"),
+    ],
+)
+async def test_malformed_or_incomplete_stream_ends_in_one_error(mutate, error_code):
+    raw_events = _stream_events()
+    mutate(raw_events)
+    app = _streaming_app(raw_events)
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app))
+    adapter = AnthropicProviderAdapter(
+        _profile(),
+        credential="secret-value-canary",
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+    request = _request()
+    request.stream = True
+
+    events = [
+        event
+        async for event in adapter.stream_chat(
+            request,
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=frozenset(BridgeFeature),
+            input_token_count=11,
+        )
+    ]
+    await client.aclose()
+
+    assert events[-1].type == "error"
+    assert events[-1].error.code == error_code
+    assert [event.type for event in events].count("error") == 1
+    assert "message_end" not in [event.type for event in events]
+
+
+async def test_stream_data_after_message_stop_raises_without_second_terminal():
+    raw_events = _stream_events()
+    raw_events.append({"type": "ping"})
+    app = _streaming_app(raw_events)
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app))
+    adapter = AnthropicProviderAdapter(
+        _profile(),
+        credential="secret-value-canary",
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+    request = _request()
+    request.stream = True
+    events = []
+
+    with pytest.raises(AnthropicProtocolError) as exc_info:
+        async for event in adapter.stream_chat(
+            request,
+            downstream=DownstreamProtocol.OPENAI,
+            downstream_capabilities=frozenset(BridgeFeature),
+            input_token_count=11,
+        ):
+            events.append(event)
+    await client.aclose()
+
+    assert exc_info.value.error.code == "stream_data_after_terminal"
+    assert [event.type for event in events].count("message_end") == 1
+    assert "error" not in [event.type for event in events]
 
 
 async def test_semantic_admission_rejects_before_network_or_fake_server():

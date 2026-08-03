@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping
+import asyncio
+from collections.abc import AsyncGenerator, Callable, Collection, Mapping
 from dataclasses import dataclass
 import hashlib
 import json
@@ -25,6 +26,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedProtocolCapabilities,
     NormalizedResponse,
     NormalizedStopReason,
+    NormalizedStreamEvent,
     NormalizedTokenLimits,
     NormalizedToolCall,
     NormalizedUsage,
@@ -56,6 +58,8 @@ ANTHROPIC_IMPLEMENTED_FEATURES_V1 = frozenset(
         BridgeFeature.REQUEST_ERROR_CLASSES,
         BridgeFeature.CANCELLATION,
         BridgeFeature.CONTEXT_TOKEN_LIMITS,
+        BridgeFeature.STREAM_DELTAS,
+        BridgeFeature.STREAM_TERMINAL_EVENTS,
     }
 )
 
@@ -283,6 +287,372 @@ class AnthropicProviderAdapter:
             admission=admission,
         )
 
+    async def stream_chat(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        downstream: DownstreamProtocol,
+        downstream_capabilities: Collection[BridgeFeature] = (),
+        input_token_count: int | None = None,
+        is_disconnected: Callable[[], Any] | None = None,
+    ) -> AsyncGenerator[NormalizedStreamEvent, None]:
+        """Execute one admitted streaming Messages request."""
+        if not request.stream:
+            raise ValueError("stream_chat() requires request.stream=true")
+        admission = self._admit(
+            request,
+            downstream=downstream,
+            downstream_capabilities=downstream_capabilities,
+            input_token_count=input_token_count,
+        )
+        payload = normalized_chat_to_anthropic_payload(request, profile=self.profile)
+        sequence = 0
+        message_id: str | None = None
+        response_model: str | None = None
+        initial_usage: Mapping[str, Any] | None = None
+        active_blocks: dict[int, dict[str, Any]] = {}
+        closed_blocks: set[int] = set()
+        pending_end: tuple[str, NormalizedStopReason, NormalizedUsage] | None = None
+        started = False
+        terminal_emitted = False
+
+        try:
+            async for raw_event in self._stream_events(
+                url=self.profile.messages_url,
+                purpose=_REQUEST_PURPOSE_MESSAGES,
+                payload=payload,
+            ):
+                event_type = _required_string(raw_event.get("type"), field="type")
+                if terminal_emitted:
+                    raise _protocol_error(
+                        "stream_data_after_terminal",
+                        "Anthropic stream continued after message_stop.",
+                    )
+                if event_type != "message_start" and await _is_disconnected(
+                    is_disconnected
+                ):
+                    yield NormalizedStreamEvent(
+                        type="cancelled",
+                        id=message_id,
+                        model=response_model,
+                        sequence=sequence,
+                        cancellation=request.cancellation,
+                        stop_reason="cancelled",
+                    )
+                    return
+
+                if event_type == "message_start":
+                    if started:
+                        raise _protocol_error(
+                            "duplicate_message_start",
+                            "Anthropic stream repeated message_start.",
+                        )
+                    message = raw_event.get("message")
+                    if not isinstance(message, Mapping):
+                        raise _protocol_error(
+                            "invalid_message_start",
+                            "Anthropic message_start must contain a message.",
+                        )
+                    if (
+                        message.get("type") != "message"
+                        or message.get("role") != "assistant"
+                    ):
+                        raise _protocol_error(
+                            "invalid_message_start",
+                            "Anthropic stream must start with an assistant message.",
+                        )
+                    response_model = _required_string(
+                        message.get("model"), field="message.model"
+                    )
+                    if response_model != self.profile.model:
+                        raise _protocol_error(
+                            "model_mismatch",
+                            "Anthropic stream model differs from the admitted route.",
+                        )
+                    message_id = _required_string(message.get("id"), field="message.id")
+                    initial_usage_value = message.get("usage")
+                    if not isinstance(initial_usage_value, Mapping):
+                        raise _protocol_error(
+                            "invalid_usage",
+                            "Anthropic message_start usage must be an object.",
+                        )
+                    initial_usage = initial_usage_value
+                    started = True
+                    yield NormalizedStreamEvent(
+                        type="message_start",
+                        id=message_id,
+                        model=response_model,
+                        sequence=sequence,
+                        message=NormalizedMessage(role="assistant", content=[]),
+                        provider_metadata=_response_provider_metadata(
+                            self.profile,
+                            admission=admission,
+                            stop_sequence=None,
+                        ),
+                    )
+                    sequence += 1
+                    continue
+
+                if not started:
+                    raise _protocol_error(
+                        "event_before_message_start",
+                        "Anthropic stream event preceded message_start.",
+                    )
+                if event_type == "ping":
+                    yield NormalizedStreamEvent(
+                        type="heartbeat",
+                        id=message_id,
+                        model=response_model,
+                        sequence=sequence,
+                    )
+                    sequence += 1
+                    continue
+                if event_type == "content_block_start":
+                    index = _stream_index(raw_event)
+                    if index in active_blocks or index in closed_blocks:
+                        raise _protocol_error(
+                            "duplicate_content_block",
+                            "Anthropic stream repeated a content block index.",
+                        )
+                    block = raw_event.get("content_block")
+                    if not isinstance(block, Mapping):
+                        raise _protocol_error(
+                            "invalid_content_block",
+                            "Anthropic content_block_start must contain a block.",
+                        )
+                    block_type = _required_string(
+                        block.get("type"), field="content_block.type"
+                    )
+                    state = {"type": block_type}
+                    if block_type == "text":
+                        initial_text = block.get("text", "")
+                        if not isinstance(initial_text, str):
+                            raise _protocol_error(
+                                "invalid_text_block",
+                                "Anthropic text block must contain text.",
+                            )
+                        active_blocks[index] = state
+                        if initial_text:
+                            yield NormalizedStreamEvent(
+                                type="content_delta",
+                                id=message_id,
+                                model=response_model,
+                                sequence=sequence,
+                                content_delta=initial_text,
+                            )
+                            sequence += 1
+                    elif block_type == "tool_use":
+                        tool_id = _required_string(
+                            block.get("id"), field="content_block.id"
+                        )
+                        tool_name = _required_string(
+                            block.get("name"), field="content_block.name"
+                        )
+                        initial_input = block.get("input", {})
+                        if not isinstance(initial_input, Mapping):
+                            raise _protocol_error(
+                                "invalid_tool_input",
+                                "Anthropic tool block input must be an object.",
+                            )
+                        state.update(
+                            {
+                                "id": tool_id,
+                                "name": tool_name,
+                                "initial_input": dict(initial_input),
+                                "json_parts": [],
+                            }
+                        )
+                        active_blocks[index] = state
+                        yield NormalizedStreamEvent(
+                            type="tool_call_start",
+                            id=message_id,
+                            model=response_model,
+                            sequence=sequence,
+                            tool_call=NormalizedToolCall(
+                                id=tool_id,
+                                name=tool_name,
+                                arguments=(
+                                    dict(initial_input) if initial_input else None
+                                ),
+                                raw_extensions={"index": index},
+                            ),
+                        )
+                        sequence += 1
+                    else:
+                        raise _protocol_error(
+                            "unsupported_content_block",
+                            f"Anthropic stream block {block_type!r} is not admitted.",
+                        )
+                    continue
+                if event_type == "content_block_delta":
+                    index = _stream_index(raw_event)
+                    state = active_blocks.get(index)
+                    if state is None:
+                        raise _protocol_error(
+                            "delta_without_content_block",
+                            "Anthropic content delta has no active block.",
+                        )
+                    delta = raw_event.get("delta")
+                    if not isinstance(delta, Mapping):
+                        raise _protocol_error(
+                            "invalid_content_delta",
+                            "Anthropic content delta must be an object.",
+                        )
+                    delta_type = _required_string(delta.get("type"), field="delta.type")
+                    if state["type"] == "text" and delta_type == "text_delta":
+                        yield NormalizedStreamEvent(
+                            type="content_delta",
+                            id=message_id,
+                            model=response_model,
+                            sequence=sequence,
+                            content_delta=_required_text(
+                                delta.get("text"), field="delta.text"
+                            ),
+                        )
+                    elif (
+                        state["type"] == "tool_use" and delta_type == "input_json_delta"
+                    ):
+                        if state["initial_input"]:
+                            raise _protocol_error(
+                                "duplicate_tool_input",
+                                "Anthropic tool input cannot mix initial and delta values.",
+                            )
+                        partial_json = _required_text(
+                            delta.get("partial_json"),
+                            field="delta.partial_json",
+                        )
+                        state["json_parts"].append(partial_json)
+                        yield NormalizedStreamEvent(
+                            type="tool_call_delta",
+                            id=message_id,
+                            model=response_model,
+                            sequence=sequence,
+                            tool_call=NormalizedToolCall(
+                                arguments=partial_json,
+                                raw_extensions={"index": index},
+                            ),
+                        )
+                    else:
+                        raise _protocol_error(
+                            "content_delta_type_mismatch",
+                            "Anthropic content delta does not match its active block.",
+                        )
+                    sequence += 1
+                    continue
+                if event_type == "content_block_stop":
+                    index = _stream_index(raw_event)
+                    state = active_blocks.get(index)
+                    if state is None:
+                        raise _protocol_error(
+                            "stop_without_content_block",
+                            "Anthropic content block stopped without being active.",
+                        )
+                    if state["type"] == "tool_use" and state["json_parts"]:
+                        try:
+                            tool_input = json.loads("".join(state["json_parts"]))
+                        except json.JSONDecodeError as exc:
+                            raise _protocol_error(
+                                "invalid_stream_tool_input",
+                                "Anthropic tool input deltas do not form valid JSON.",
+                            ) from exc
+                        if not isinstance(tool_input, Mapping):
+                            raise _protocol_error(
+                                "invalid_stream_tool_input",
+                                "Anthropic streamed tool input must be an object.",
+                            )
+                    del active_blocks[index]
+                    closed_blocks.add(index)
+                    continue
+                if event_type == "message_delta":
+                    if active_blocks:
+                        raise _protocol_error(
+                            "message_delta_before_block_stop",
+                            "Anthropic message_delta preceded content block stop.",
+                        )
+                    if pending_end is not None:
+                        raise _protocol_error(
+                            "duplicate_message_delta",
+                            "Anthropic stream repeated its terminal message_delta.",
+                        )
+                    delta = raw_event.get("delta")
+                    if not isinstance(delta, Mapping):
+                        raise _protocol_error(
+                            "invalid_message_delta",
+                            "Anthropic message_delta must contain a delta.",
+                        )
+                    raw_stop_reason = _required_string(
+                        delta.get("stop_reason"), field="delta.stop_reason"
+                    )
+                    normalized_stop_reason = _normalize_stop_reason(raw_stop_reason)
+                    usage = _stream_usage(initial_usage, raw_event.get("usage"))
+                    yield NormalizedStreamEvent(
+                        type="usage",
+                        id=message_id,
+                        model=response_model,
+                        sequence=sequence,
+                        usage=usage,
+                    )
+                    sequence += 1
+                    pending_end = (
+                        raw_stop_reason,
+                        normalized_stop_reason,
+                        usage,
+                    )
+                    continue
+                if event_type == "message_stop":
+                    if pending_end is None:
+                        raise _protocol_error(
+                            "message_stop_without_delta",
+                            "Anthropic message_stop requires a terminal message_delta.",
+                        )
+                    raw_stop_reason, normalized_stop_reason, usage = pending_end
+                    yield NormalizedStreamEvent(
+                        type="message_end",
+                        id=message_id,
+                        model=response_model,
+                        sequence=sequence,
+                        finish_reason=normalized_stop_reason,
+                        stop_reason=normalized_stop_reason,
+                        usage=usage,
+                        metadata={"anthropic_stop_reason": raw_stop_reason},
+                    )
+                    sequence += 1
+                    terminal_emitted = True
+                    continue
+                if event_type == "error":
+                    raise _stream_error(raw_event)
+                raise _protocol_error(
+                    "unknown_stream_event",
+                    f"Anthropic stream event {event_type!r} is not admitted.",
+                )
+        except asyncio.CancelledError:
+            raise
+        except AnthropicUpstreamError as exc:
+            if terminal_emitted:
+                raise
+            yield NormalizedStreamEvent(
+                type="error",
+                id=message_id,
+                model=response_model,
+                sequence=sequence,
+                error=exc.error,
+                stop_reason="error",
+            )
+            return
+
+        if not terminal_emitted:
+            yield NormalizedStreamEvent(
+                type="error",
+                id=message_id,
+                model=response_model,
+                sequence=sequence,
+                error=_protocol_error(
+                    "incomplete_stream",
+                    "Anthropic stream ended before message_stop.",
+                ).error,
+                stop_reason="error",
+            )
+
     def _admit(
         self,
         request: NormalizedChatRequest,
@@ -343,6 +713,56 @@ class AnthropicProviderAdapter:
                 "Anthropic JSON response must be an object.",
             )
         return parsed
+
+    async def _stream_events(
+        self,
+        *,
+        url: str,
+        purpose: str,
+        payload: Mapping[str, Any],
+    ) -> AsyncGenerator[Mapping[str, Any], None]:
+        body = _json_body(payload)
+        authorization = self._authorize(url, purpose, body)
+        try:
+            async with self._client.stream(
+                "POST",
+                url,
+                content=body,
+                headers={**self._headers(), "Accept": "text/event-stream"},
+            ) as response:
+                self._validate_peer(response, authorization)
+                if response.is_error:
+                    content = await _read_bounded_response(response, authorization)
+                    raise _http_error(response, content)
+                buffer = b""
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > authorization.max_response_bytes:
+                        raise _transport_error(
+                            "response_too_large",
+                            "Anthropic stream exceeded the reviewed limit.",
+                        )
+                    buffer += chunk
+                    while True:
+                        block, buffer = _pop_sse_block(buffer)
+                        if block is None:
+                            break
+                        event = _parse_sse_block(block)
+                        if event is not None:
+                            yield event
+                if buffer.strip():
+                    event = _parse_sse_block(buffer)
+                    if event is not None:
+                        yield event
+                authorization.validate_response_body(body_bytes=size)
+        except httpx.TimeoutException as exc:
+            raise _transport_error("timeout", "Anthropic stream timed out.") from exc
+        except httpx.RequestError as exc:
+            raise _transport_error(
+                "connection_error",
+                "Anthropic stream connection failed.",
+            ) from exc
 
     def _authorize(
         self,
@@ -418,7 +838,7 @@ def normalized_chat_to_anthropic_payload(
         "model": profile.model,
         "messages": messages,
         "max_tokens": generation.max_tokens or profile.default_max_tokens,
-        "stream": False,
+        "stream": request.stream,
     }
     if system:
         payload["system"] = system
@@ -738,6 +1158,24 @@ def _usage(value: Any) -> NormalizedUsage:
     )
 
 
+def _stream_usage(
+    initial: Mapping[str, Any] | None,
+    final: Any,
+) -> NormalizedUsage:
+    if initial is None or not isinstance(final, Mapping):
+        raise _protocol_error(
+            "invalid_usage",
+            "Anthropic stream usage is incomplete.",
+        )
+    input_tokens = _non_negative_integer(initial.get("input_tokens"), "input_tokens")
+    output_tokens = _non_negative_integer(final.get("output_tokens"), "output_tokens")
+    return NormalizedUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=input_tokens + output_tokens,
+    )
+
+
 def _normalize_stop_reason(value: str) -> NormalizedStopReason:
     normalized = {
         "end_turn": "stop",
@@ -773,12 +1211,110 @@ def _response_provider_metadata(
     return {"anthropic": payload}
 
 
+def _stream_index(event: Mapping[str, Any]) -> int:
+    value = event.get("index")
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    raise _protocol_error(
+        "invalid_content_block_index",
+        "Anthropic stream block index must be a non-negative integer.",
+    )
+
+
+def _stream_error(event: Mapping[str, Any]) -> AnthropicUpstreamError:
+    raw_error = event.get("error")
+    if not isinstance(raw_error, Mapping):
+        return _protocol_error(
+            "invalid_stream_error",
+            "Anthropic stream error must contain an error object.",
+        )
+    error_type = _optional_string(raw_error.get("type")) or "api_error"
+    message = _optional_string(raw_error.get("message")) or "Anthropic stream failed."
+    error_class = (
+        "authentication"
+        if error_type == "authentication_error"
+        else "permission"
+        if error_type == "permission_error"
+        else "not_found"
+        if error_type == "not_found_error"
+        else "rate_limit"
+        if error_type in {"rate_limit_error", "overloaded_error"}
+        else "invalid_request"
+        if error_type == "invalid_request_error"
+        else "upstream"
+    )
+    return AnthropicUpstreamError(
+        NormalizedError(
+            type=error_type,
+            message=message,
+            code=error_type,
+            error_class=error_class,
+            retryable=error_type
+            in {"rate_limit_error", "overloaded_error", "api_error"},
+        )
+    )
+
+
 def _json_body(payload: Mapping[str, Any]) -> bytes:
     return json.dumps(
         payload,
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
+
+
+def _pop_sse_block(buffer: bytes) -> tuple[bytes | None, bytes]:
+    separators = (
+        (buffer.find(b"\r\n\r\n"), 4),
+        (buffer.find(b"\n\n"), 2),
+        (buffer.find(b"\r\r"), 2),
+    )
+    found = [(index, length) for index, length in separators if index >= 0]
+    if not found:
+        return None, buffer
+    index, length = min(found, key=lambda item: item[0])
+    return buffer[:index], buffer[index + length :]
+
+
+def _parse_sse_block(block: bytes) -> Mapping[str, Any] | None:
+    event_name: str | None = None
+    data_lines: list[bytes] = []
+    for line in block.replace(b"\r\n", b"\n").replace(b"\r", b"\n").split(b"\n"):
+        if line.startswith(b":"):
+            continue
+        if line.startswith(b"event:"):
+            try:
+                event_name = line[6:].strip().decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise _protocol_error(
+                    "invalid_stream_event",
+                    "Anthropic stream event name is not UTF-8.",
+                ) from exc
+        elif line == b"data":
+            data_lines.append(b"")
+        elif line.startswith(b"data:"):
+            data_lines.append(line[5:].lstrip())
+    if not data_lines:
+        return None
+    try:
+        payload = json.loads(b"\n".join(data_lines))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _protocol_error(
+            "invalid_stream_json",
+            "Anthropic stream data is not valid JSON.",
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise _protocol_error(
+            "invalid_stream_event",
+            "Anthropic stream data must be an object.",
+        )
+    payload_type = payload.get("type")
+    if event_name and event_name != payload_type:
+        raise _protocol_error(
+            "stream_event_type_mismatch",
+            "Anthropic SSE event name differs from its payload type.",
+        )
+    return payload
 
 
 async def _read_bounded_response(
@@ -914,6 +1450,15 @@ def _required_string(value: Any, *, field: str) -> str:
     return value
 
 
+def _required_text(value: Any, *, field: str) -> str:
+    if not isinstance(value, str):
+        raise _protocol_error(
+            "invalid_content_delta",
+            f"Anthropic stream field {field} must be text.",
+        )
+    return value
+
+
 def _optional_string(value: Any) -> str | None:
     return value if isinstance(value, str) else None
 
@@ -925,6 +1470,15 @@ def _non_negative_integer(value: Any, field: str) -> int:
         "invalid_usage",
         f"Anthropic usage field {field} must be a non-negative integer.",
     )
+
+
+async def _is_disconnected(callback: Callable[[], Any] | None) -> bool:
+    if callback is None:
+        return False
+    result = callback()
+    if hasattr(result, "__await__"):
+        result = await result
+    return bool(result)
 
 
 def anthropic_profile(
