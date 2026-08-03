@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -83,13 +84,23 @@ class NormalizedMessage(NormalizedBaseModel):
     tool_calls: list[NormalizedToolCall] = Field(default_factory=list)
 
 
-class NormalizedTool(NormalizedBaseModel):
-    """Represent a callable tool exposed to a model."""
+class NormalizedToolKind(str, Enum):
+    """Classify the provider-neutral execution shape of a normalized tool."""
 
+    FUNCTION = "function"
+    HOSTED = "hosted"
+    NAMESPACE = "namespace"
+
+
+class NormalizedTool(NormalizedBaseModel):
+    """Represent a function, hosted, or namespaced tool exposed to a model."""
+
+    kind: NormalizedToolKind = NormalizedToolKind.FUNCTION
     type: str = "function"
-    name: str
+    name: Optional[str] = None
     description: Optional[str] = None
     parameters: dict[str, Any] = Field(default_factory=dict)
+    configuration: dict[str, Any] = Field(default_factory=dict)
 
 
 class NormalizedResponseFormat(NormalizedBaseModel):

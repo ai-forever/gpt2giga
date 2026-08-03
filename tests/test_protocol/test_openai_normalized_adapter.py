@@ -119,10 +119,12 @@ def test_openai_adapter_maps_tools_tool_choice_and_response_format():
 
     assert payload["tools"] == [
         {
+            "kind": "function",
             "type": "function",
             "name": "lookup",
             "description": "Lookup data.",
             "parameters": {"type": "object", "properties": {"q": {"type": "string"}}},
+            "configuration": {},
             "raw_extensions": {},
             "provider_metadata": {},
         }
