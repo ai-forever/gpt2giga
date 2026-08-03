@@ -164,7 +164,7 @@ class ProviderMachineContracts:
         """Distinguish process, route, adapter, and catalog readiness."""
         reasons: list[dict[str, str]] = []
         warnings: list[dict[str, str]] = []
-        routes_configured = bool(self._registry.public_aliases())
+        routes_configured = bool(self._registry.config.profiles)
         catalog = _catalog_readiness_manifest(catalog_readiness)
         if shutting_down:
             reasons.append({"reason_id": "gateway_shutting_down"})

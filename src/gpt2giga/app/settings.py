@@ -94,23 +94,28 @@ def build_provider_registry(
 
 
 def _synthesized_gigachat_profiles(config: ProxyConfig) -> LoadedProviderProfileSet:
-    """Preserve the config-free installation as one explicit GigaChat route."""
-    upstream_model = config.gigachat_settings.model or "GigaChat"
+    """Preserve the config-free GigaChat route without inventing inventory."""
+    configured_model = config.gigachat_settings.model
+    models = (
+        (
+            ProviderModelAlias(
+                public_alias=configured_model,
+                upstream_model=configured_model,
+                capability_profile="native-gigachat-v1",
+                support_status=ProviderSupportStatus.STABLE,
+            ),
+        )
+        if configured_model
+        else ()
+    )
     profile = ProviderProfile(
-        profile_id="legacy-gigachat",
+        profile_id="native-gigachat",
         provider_kind="gigachat",
         base_url=str(config.gigachat_settings.base_url),
         credential_env="GIGACHAT_CREDENTIALS",
         network_policy_ref="public-gigachat",
         tls_policy_ref="system-default",
-        models=(
-            ProviderModelAlias(
-                public_alias=upstream_model,
-                upstream_model=upstream_model,
-                capability_profile="legacy-gigachat-v1",
-                support_status=ProviderSupportStatus.STABLE,
-            ),
-        ),
+        models=models,
     )
     return LoadedProviderProfileSet(
         config=ProviderProfileConfig(profiles=(profile,)),

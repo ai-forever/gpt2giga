@@ -139,7 +139,7 @@ def test_attachment_uses_native_default_without_normalized_decode(
     assert len(provider.response_calls) == 1
 
 
-def test_baseline_models_and_bridge_models_publish_different_inventories(
+def test_models_and_bridge_models_share_discovered_inventory(
     monkeypatch,
 ) -> None:
     app, provider, _adapter = _correction_baseline_app(monkeypatch)
@@ -155,14 +155,16 @@ def test_baseline_models_and_bridge_models_publish_different_inventories(
         "GigaChat-2-Lite",
     ]
     assert bridge_response.status_code == 200
-    assert [model["public_alias"] for model in bridge_response.json()["models"]] == [
-        "GigaChat"
+    assert [model["id"] for model in bridge_response.json()["models"]] == [
+        "GigaChat-2-Lite",
+        "GigaChat-2-Max",
+        "GigaChat-2-Pro",
     ]
     assert provider.discovery_calls == ["aget_models"]
     assert provider.response_calls == []
 
 
-def test_baseline_gigachat_model_env_hides_other_models_from_bridge_inventory(
+def test_gigachat_model_env_does_not_filter_discovered_inventory(
     monkeypatch,
 ) -> None:
     monkeypatch.delenv("GPT2GIGA_CONFIG", raising=False)
@@ -182,8 +184,10 @@ def test_baseline_gigachat_model_env_hides_other_models_from_bridge_inventory(
         "GigaChat-2-Lite",
     ]
     assert bridge_response.status_code == 200
-    assert [model["public_alias"] for model in bridge_response.json()["models"]] == [
-        "GigaChat-2-Max"
+    assert [model["id"] for model in bridge_response.json()["models"]] == [
+        "GigaChat-2-Lite",
+        "GigaChat-2-Max",
+        "GigaChat-2-Pro",
     ]
     assert provider.discovery_calls == ["aget_models"]
     assert provider.response_calls == []

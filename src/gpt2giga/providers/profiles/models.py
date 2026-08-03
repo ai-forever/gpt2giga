@@ -69,7 +69,7 @@ class ProviderProfile(_ProfileModel):
     network_policy_ref: str = Field(min_length=1, max_length=256)
     tls_policy_ref: str = Field(min_length=1, max_length=256)
     allow_loopback: bool = False
-    models: tuple[ProviderModelAlias, ...] = Field(min_length=1)
+    models: tuple[ProviderModelAlias, ...] = ()
 
     @field_validator("profile_id", "network_policy_ref", "tls_policy_ref")
     @classmethod
@@ -93,6 +93,8 @@ class ProviderProfile(_ProfileModel):
 
     @model_validator(mode="after")
     def _validate_model_aliases(self) -> ProviderProfile:
+        if not self.models and self.provider_kind is not ProviderKind.GIGACHAT:
+            raise ValueError("only GigaChat profiles may use dynamic model inventory")
         aliases = [model.public_alias for model in self.models]
         if len(aliases) != len(set(aliases)):
             raise ValueError("profile contains duplicate public model aliases")

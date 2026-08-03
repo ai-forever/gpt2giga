@@ -81,10 +81,10 @@ def select_responses_execution(
 
 
 def _is_config_free_gigachat_registry(registry: Any) -> bool:
-    """Recognize the temporary synthesized profile until catalog integration."""
+    """Recognize the config-free dynamic GigaChat route owner."""
     profiles = tuple(getattr(getattr(registry, "config", None), "profiles", ()))
     return len(profiles) == 1 and (
-        profiles[0].profile_id == "legacy-gigachat"
+        profiles[0].profile_id == "native-gigachat"
         and profiles[0].provider_kind is ProviderKind.GIGACHAT
     )
 

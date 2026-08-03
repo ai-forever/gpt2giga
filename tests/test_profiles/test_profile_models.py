@@ -61,6 +61,16 @@ def test_profile_config_is_strict_immutable_and_secret_free() -> None:
         config.profiles[0].profile_id = "changed"  # type: ignore[misc]
 
 
+def test_only_gigachat_profile_may_defer_models_to_dynamic_inventory() -> None:
+    dynamic = _config().profiles[0].model_dump(mode="json")
+    dynamic.update({"provider_kind": "gigachat", "models": []})
+
+    assert ProviderProfile.model_validate(dynamic).models == ()
+
+    with pytest.raises(ValidationError, match="dynamic model inventory"):
+        ProviderProfile.model_validate({**dynamic, "provider_kind": "anthropic"})
+
+
 def test_canonical_digest_is_key_order_independent_and_array_order_sensitive() -> None:
     first = _config()
     reordered_input = {

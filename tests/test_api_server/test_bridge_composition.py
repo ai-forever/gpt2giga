@@ -69,14 +69,15 @@ class _CapabilityResolver:
         return self.result
 
 
-def test_app_owns_one_immutable_synthesized_registry() -> None:
+def test_app_owns_one_immutable_dynamic_gigachat_registry() -> None:
     app = create_app(ProxyConfig())
 
     registry = app.state.provider_registry
     assert registry.schema_version == "gpt2giga.provider-profiles.v1"
     assert registry.immutable is True
-    assert registry.public_aliases() == ("GigaChat",)
-    assert registry.resolve("GigaChat").provider_kind.value == "gigachat"
+    assert registry.public_aliases() == ()
+    assert registry.config.profiles[0].profile_id == "native-gigachat"
+    assert registry.config.profiles[0].models == ()
 
 
 def test_app_loads_explicit_profiles_before_serving(tmp_path, monkeypatch) -> None:
@@ -176,7 +177,7 @@ def test_lifespan_composes_normalized_responses_adapter_once(monkeypatch) -> Non
         "gpt2giga.app.lifecycle.create_gigachat_client",
         lambda _settings: giga_client,
     )
-    app = create_app(ProxyConfig())
+    app = create_app(ProxyConfig(gigachat={"model": "GigaChat"}))
 
     with TestClient(app) as client:
         runtime = app.state.bridge_provider_runtime
@@ -217,8 +218,8 @@ def test_runtime_owns_one_network_authorizer_per_loaded_profile(monkeypatch) -> 
         runtime = app.state.bridge_provider_runtime
         authorizers = runtime._network_authorizers
 
-    assert tuple(authorizers) == ("legacy-gigachat",)
-    assert isinstance(authorizers["legacy-gigachat"], ProviderNetworkAuthorizer)
+    assert tuple(authorizers) == ("native-gigachat",)
+    assert isinstance(authorizers["native-gigachat"], ProviderNetworkAuthorizer)
 
 
 def test_config_free_runtime_dispatches_provider_model_without_static_alias(

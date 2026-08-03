@@ -37,7 +37,7 @@ class _Registry:
         self.config = SimpleNamespace(
             profiles=(
                 SimpleNamespace(
-                    profile_id=("legacy-gigachat" if synthesized else "profile-1"),
+                    profile_id=("native-gigachat" if synthesized else "profile-1"),
                     provider_kind=(
                         ProviderKind.GIGACHAT
                         if synthesized
