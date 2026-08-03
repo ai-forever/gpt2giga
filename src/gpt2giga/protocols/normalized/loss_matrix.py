@@ -503,6 +503,7 @@ def _cell_semantics(
     *,
     status: BridgeSupportStatus,
     evidence_ids: tuple[str, ...],
+    conditional_semantics: Collection[BridgeSemantic] = (),
 ) -> tuple[BridgeSemanticRule, ...]:
     if status is BridgeSupportStatus.BLOCKED:
         return tuple(
@@ -525,7 +526,9 @@ def _cell_semantics(
                     evidence_ids=evidence_ids,
                 )
             )
-        elif semantic in _PREVIEW_CONDITIONAL_SEMANTICS:
+        elif semantic in _PREVIEW_CONDITIONAL_SEMANTICS or semantic in (
+            conditional_semantics
+        ):
             rows.append(
                 BridgeSemanticRule(
                     semantic=semantic,
@@ -611,6 +614,12 @@ def _build_bridge_loss_matrix() -> BridgeLossMatrix:
                     semantics=_cell_semantics(
                         status=status,
                         evidence_ids=evidence_ids,
+                        conditional_semantics=(
+                            (BridgeSemantic.HOSTED_AND_PROVIDER_NATIVE_TOOLS,)
+                            if provider is UpstreamProvider.GIGACHAT
+                            and protocol is PublicProtocol.OPENAI_RESPONSES
+                            else ()
+                        ),
                     ),
                 )
             )

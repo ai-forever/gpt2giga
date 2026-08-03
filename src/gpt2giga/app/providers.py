@@ -9,10 +9,13 @@ from gpt2giga.capabilities import (
     capability_predicates_for_semantics,
     resolve_gigachat_route_capabilities,
 )
+from gpt2giga.capabilities.models import CapabilityKey
+from gpt2giga.common.tools import normalize_gigachat_builtin_tool_type
 from gpt2giga.core.context import update_request_context
 from gpt2giga.protocols.normalized import (
     BridgeSemantic,
     NormalizedChatRequest,
+    NormalizedToolKind,
     PublicProtocol,
     UpstreamProvider,
     admit_bridge_route,
@@ -86,6 +89,7 @@ class BridgeProviderRuntime:
             predicate_admission = capability_predicates_for_semantics(
                 effective,
                 requested_semantics,
+                capability_requirements=_capability_requirements(request),
             )
             capability_predicates = predicate_admission.supported
             capability_predicate_reasons = predicate_admission.failure_reasons
@@ -131,6 +135,18 @@ def _requested_semantics(
     semantics = {BridgeSemantic.ROLES: "input"}
     if request.tools:
         semantics[BridgeSemantic.TOOL_DEFINITIONS_AND_CALL_IDS] = "tools"
+    hosted_tool_index = next(
+        (
+            index
+            for index, tool in enumerate(request.tools)
+            if tool.kind is NormalizedToolKind.HOSTED
+        ),
+        None,
+    )
+    if hosted_tool_index is not None:
+        semantics[BridgeSemantic.HOSTED_AND_PROVIDER_NATIVE_TOOLS] = (
+            f"tools[{hosted_tool_index}].type"
+        )
     if request.tool_choice is not None:
         semantics[BridgeSemantic.TOOL_CHOICE] = "tool_choice"
     if any(message.role == "tool" for message in request.messages):
@@ -139,6 +155,20 @@ def _requested_semantics(
         semantics[BridgeSemantic.PARALLEL_TOOL_CALLS] = "parallel_tool_calls"
     if request.response_format is not None:
         semantics[BridgeSemantic.STRUCTURED_OUTPUT_JSON_SCHEMA] = "text.format"
+    if request.reasoning is not None:
+        semantics[BridgeSemantic.REASONING_CONTROLS_AND_SUMMARIES] = "reasoning"
+    if request.response_state is not None:
+        if request.response_state.previous_response_id is not None:
+            state_field = "previous_response_id"
+        elif request.response_state.conversation_id is not None:
+            state_field = "conversation"
+        elif request.response_state.include:
+            state_field = "include"
+        elif request.response_state.store is not None:
+            state_field = "store"
+        else:
+            state_field = "background"
+        semantics[BridgeSemantic.PREVIOUS_RESPONSE_STATE] = state_field
     if any(
         part.image_reference is not None or part.type == "image_url"
         for message in request.messages
@@ -158,3 +188,34 @@ def _requested_semantics(
         semantics[BridgeSemantic.STREAM_LIFECYCLE] = "stream"
         semantics[BridgeSemantic.DISCONNECT] = "stream"
     return semantics
+
+
+_HOSTED_TOOL_CAPABILITIES = {
+    "web_search": CapabilityKey.HOSTED_WEB_SEARCH,
+    "url_content_extraction": CapabilityKey.HOSTED_URL_EXTRACTION,
+    "code_interpreter": CapabilityKey.HOSTED_CODE_INTERPRETER,
+    "image_generate": CapabilityKey.HOSTED_IMAGE_GENERATION,
+    "model_3d_generate": CapabilityKey.HOSTED_3D_GENERATION,
+}
+
+
+def _capability_requirements(
+    request: NormalizedChatRequest,
+) -> dict[BridgeSemantic, tuple[CapabilityKey, ...]]:
+    hosted_tools = [
+        tool for tool in request.tools if tool.kind is NormalizedToolKind.HOSTED
+    ]
+    if not hosted_tools:
+        return {}
+
+    requirements: list[CapabilityKey] = []
+    for tool in hosted_tools:
+        provider_type = normalize_gigachat_builtin_tool_type(tool.type)
+        capability = _HOSTED_TOOL_CAPABILITIES.get(provider_type or "")
+        if capability is None:
+            return {BridgeSemantic.HOSTED_AND_PROVIDER_NATIVE_TOOLS: ()}
+        if capability not in requirements:
+            requirements.append(capability)
+    return {
+        BridgeSemantic.HOSTED_AND_PROVIDER_NATIVE_TOOLS: tuple(requirements),
+    }

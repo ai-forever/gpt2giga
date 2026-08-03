@@ -156,15 +156,24 @@ def resolve_gigachat_route_capabilities(
 def capability_predicates_for_semantics(
     effective: EffectiveModelCapabilities,
     requested_semantics: Mapping[BridgeSemantic, str],
+    *,
+    capability_requirements: Mapping[BridgeSemantic, tuple[CapabilityKey, ...]]
+    | None = None,
 ) -> CapabilityPredicateAdmission:
     """Translate exact effective decisions into loss-matrix predicates."""
     supported: set[str] = set()
     failures: dict[str, str] = {}
     for semantic in requested_semantics:
-        capability_keys = _SEMANTIC_CAPABILITIES.get(semantic)
+        if capability_requirements is not None and semantic in capability_requirements:
+            capability_keys = capability_requirements[semantic]
+        else:
+            capability_keys = _SEMANTIC_CAPABILITIES.get(semantic)
         if capability_keys is None:
             continue
         predicate = f"capability.{semantic.value}"
+        if not capability_keys:
+            failures[predicate] = "unsupported_hosted_tool_type"
+            continue
         decisions = tuple(effective.capabilities[key] for key in capability_keys)
         if all(decision.state is CapabilityState.SUPPORTED for decision in decisions):
             supported.add(predicate)
