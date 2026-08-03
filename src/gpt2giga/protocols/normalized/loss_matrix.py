@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from enum import Enum
+import hashlib
+import json
 from types import MappingProxyType
-from typing import Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from gpt2giga.protocols.normalized.models import (
     NormalizedBaseModel,
@@ -63,6 +65,177 @@ class LossRule(NormalizedBaseModel):
 
     disposition: LossDisposition
     detail: str
+
+
+class PublicProtocol(str, Enum):
+    """Client-visible protocol identities covered by the 0.3 bridge."""
+
+    OPENAI_RESPONSES = "openai_responses"
+    OPENAI_CHAT_COMPLETIONS = "openai_chat_completions"
+    ANTHROPIC_MESSAGES = "anthropic_messages"
+    GEMINI_GENERATE_CONTENT = "gemini_generate_content"
+
+
+class UpstreamProvider(str, Enum):
+    """Reviewed upstream provider kinds covered by the 0.3 bridge."""
+
+    GIGACHAT = "gigachat"
+    OPENAI_COMPATIBLE = "openai_compatible"
+    ANTHROPIC = "anthropic"
+    GEMINI = "gemini"
+
+
+class BridgeSupportStatus(str, Enum):
+    """Release support status for one protocol/provider route."""
+
+    STABLE = "stable"
+    TECHNICAL_PREVIEW = "technical_preview"
+    BLOCKED = "blocked"
+
+
+class BridgeSemantic(str, Enum):
+    """Required semantic rows in every public protocol/provider cell."""
+
+    ROLES = "roles"
+    MULTIMODAL_INPUTS = "multimodal_inputs"
+    TOOL_DEFINITIONS_AND_CALL_IDS = "tool_definitions_and_call_ids"
+    TOOL_CHOICE = "tool_choice"
+    TOOL_RESULTS = "tool_results"
+    PARALLEL_TOOL_CALLS = "parallel_tool_calls"
+    STRUCTURED_OUTPUT_JSON_SCHEMA = "structured_output_json_schema"
+    STREAM_LIFECYCLE = "stream_lifecycle"
+    USAGE_INPUT_OUTPUT_TOKENS = "usage_input_output_tokens"
+    USAGE_CACHE_TOKENS = "usage_cache_tokens"
+    USAGE_REASONING_TOKENS = "usage_reasoning_tokens"
+    STOP_REASONS = "stop_reasons"
+    SAFETY_AND_REFUSAL = "safety_and_refusal"
+    REASONING_CONTROLS_AND_SUMMARIES = "reasoning_controls_and_summaries"
+    PREVIOUS_RESPONSE_STATE = "previous_response_state"
+    FILES_AND_IMAGES = "files_and_images"
+    HOSTED_AND_PROVIDER_NATIVE_TOOLS = "hosted_and_provider_native_tools"
+    CANCELLATION = "cancellation"
+    TIMEOUT = "timeout"
+    MALFORMED_UPSTREAM_STREAM = "malformed_upstream_stream"
+    DISCONNECT = "disconnect"
+
+
+ReasonId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{2,63}$")]
+EvidenceId = Annotated[
+    str,
+    Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{2,127}$"),
+]
+
+
+class BridgeSemanticRule(NormalizedBaseModel):
+    """Describe one semantic decision in a protocol/provider cell."""
+
+    semantic: BridgeSemantic
+    disposition: LossDisposition
+    reason_id: ReasonId
+    evidence_ids: tuple[EvidenceId, ...] = ()
+    capability_predicate: str | None = Field(
+        default=None,
+        pattern=r"^[a-z][a-z0-9_.:-]{2,127}$",
+    )
+
+    @model_validator(mode="after")
+    def _validate_predicate(self) -> Self:
+        if self.disposition is LossDisposition.CONDITIONAL:
+            if self.capability_predicate is None:
+                raise ValueError("conditional semantic rows require a predicate")
+        elif self.capability_predicate is not None:
+            raise ValueError("only conditional semantic rows may name a predicate")
+        object.__setattr__(self, "evidence_ids", tuple(sorted(set(self.evidence_ids))))
+        return self
+
+
+class BridgeLossCell(NormalizedBaseModel):
+    """Describe one complete public protocol/upstream provider route."""
+
+    public_protocol: PublicProtocol
+    upstream_provider: UpstreamProvider
+    status: BridgeSupportStatus
+    reason_ids: tuple[ReasonId, ...] = Field(min_length=1)
+    evidence_ids: tuple[EvidenceId, ...]
+    client_version_window: str = Field(min_length=1)
+    provider_version_window: str = Field(min_length=1)
+    semantics: tuple[BridgeSemanticRule, ...]
+
+    @model_validator(mode="after")
+    def _validate_complete_cell(self) -> Self:
+        semantics = tuple(sorted(self.semantics, key=lambda row: row.semantic.value))
+        present = [row.semantic for row in semantics]
+        if len(present) != len(set(present)):
+            raise ValueError("semantic rows must be unique")
+        missing = set(BridgeSemantic) - set(present)
+        if missing:
+            names = ", ".join(sorted(item.value for item in missing))
+            raise ValueError(f"cell is missing semantic rows: {names}")
+        if self.status is not BridgeSupportStatus.BLOCKED and not self.evidence_ids:
+            raise ValueError("executable cells require evidence")
+        object.__setattr__(self, "semantics", semantics)
+        object.__setattr__(self, "reason_ids", tuple(sorted(set(self.reason_ids))))
+        object.__setattr__(self, "evidence_ids", tuple(sorted(set(self.evidence_ids))))
+        return self
+
+
+class BridgeLossMatrix(NormalizedBaseModel):
+    """Canonical, complete 4 by 4 bridge compatibility matrix."""
+
+    schema_version: Literal["gpt2giga.bridge-loss-matrix.v1"] = (
+        "gpt2giga.bridge-loss-matrix.v1"
+    )
+    cells: tuple[BridgeLossCell, ...]
+
+    @model_validator(mode="after")
+    def _validate_complete_matrix(self) -> Self:
+        cells = tuple(
+            sorted(
+                self.cells,
+                key=lambda cell: (
+                    cell.public_protocol.value,
+                    cell.upstream_provider.value,
+                ),
+            )
+        )
+        identities = [(cell.public_protocol, cell.upstream_provider) for cell in cells]
+        if len(identities) != len(set(identities)):
+            raise ValueError("protocol/provider cells must be unique")
+        expected = {
+            (protocol, provider)
+            for protocol in PublicProtocol
+            for provider in UpstreamProvider
+        }
+        missing = expected - set(identities)
+        if missing:
+            names = ", ".join(
+                sorted(
+                    f"{protocol.value}/{provider.value}"
+                    for protocol, provider in missing
+                )
+            )
+            raise ValueError(f"matrix is missing cells: {names}")
+        object.__setattr__(self, "cells", cells)
+        return self
+
+    def canonical_payload(self) -> dict[str, Any]:
+        """Return the secret-free content covered by the revision digest."""
+        return _strip_extension_buckets(self.model_dump(mode="json"))
+
+    def canonical_json(self) -> str:
+        """Serialize deterministically for revision and machine projection."""
+        return json.dumps(
+            self.canonical_payload(),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    @property
+    def revision(self) -> str:
+        """Return the exact SHA-256 revision of canonical semantic content."""
+        digest = hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
+        return f"sha256:{digest}"
 
 
 class NormalizedProtocolCapabilities(NormalizedBaseModel):
@@ -224,6 +397,153 @@ def protocol_loss_matrix_json() -> dict[str, object]:
             }
             for downstream, rules in PROTOCOL_LOSS_MATRIX_V1.items()
         },
+    }
+
+
+_PREVIEW_EXACT_SEMANTICS = {
+    BridgeSemantic.ROLES,
+    BridgeSemantic.TOOL_DEFINITIONS_AND_CALL_IDS,
+    BridgeSemantic.TOOL_CHOICE,
+    BridgeSemantic.TOOL_RESULTS,
+    BridgeSemantic.STREAM_LIFECYCLE,
+    BridgeSemantic.USAGE_INPUT_OUTPUT_TOKENS,
+    BridgeSemantic.STOP_REASONS,
+    BridgeSemantic.CANCELLATION,
+    BridgeSemantic.TIMEOUT,
+    BridgeSemantic.MALFORMED_UPSTREAM_STREAM,
+    BridgeSemantic.DISCONNECT,
+}
+_PREVIEW_CONDITIONAL_SEMANTICS = {
+    BridgeSemantic.MULTIMODAL_INPUTS,
+    BridgeSemantic.PARALLEL_TOOL_CALLS,
+    BridgeSemantic.STRUCTURED_OUTPUT_JSON_SCHEMA,
+    BridgeSemantic.SAFETY_AND_REFUSAL,
+    BridgeSemantic.FILES_AND_IMAGES,
+}
+
+
+def _cell_semantics(
+    *,
+    status: BridgeSupportStatus,
+    evidence_ids: tuple[str, ...],
+) -> tuple[BridgeSemanticRule, ...]:
+    if status is BridgeSupportStatus.BLOCKED:
+        return tuple(
+            BridgeSemanticRule(
+                semantic=semantic,
+                disposition=LossDisposition.UNSUPPORTED,
+                reason_id="route_not_integrated",
+            )
+            for semantic in BridgeSemantic
+        )
+
+    rows: list[BridgeSemanticRule] = []
+    for semantic in BridgeSemantic:
+        if semantic in _PREVIEW_EXACT_SEMANTICS:
+            rows.append(
+                BridgeSemanticRule(
+                    semantic=semantic,
+                    disposition=LossDisposition.EXACT,
+                    reason_id="hermetic_facade_evidence",
+                    evidence_ids=evidence_ids,
+                )
+            )
+        elif semantic in _PREVIEW_CONDITIONAL_SEMANTICS:
+            rows.append(
+                BridgeSemanticRule(
+                    semantic=semantic,
+                    disposition=LossDisposition.CONDITIONAL,
+                    reason_id="requires_reviewed_capability",
+                    evidence_ids=evidence_ids,
+                    capability_predicate=f"capability.{semantic.value}",
+                )
+            )
+        else:
+            rows.append(
+                BridgeSemanticRule(
+                    semantic=semantic,
+                    disposition=LossDisposition.UNSUPPORTED,
+                    reason_id="semantic_not_proven",
+                )
+            )
+    return tuple(rows)
+
+
+def _client_version_window(protocol: PublicProtocol) -> str:
+    return {
+        PublicProtocol.OPENAI_RESPONSES: "codex-cli==0.146.0;openai-python==2.50.0",
+        PublicProtocol.OPENAI_CHAT_COMPLETIONS: "openai-python==2.50.0",
+        PublicProtocol.ANTHROPIC_MESSAGES: (
+            "claude-code==2.1.212;anthropic-python==0.120.2"
+        ),
+        PublicProtocol.GEMINI_GENERATE_CONTENT: "google-genai-python==2.14.0",
+    }[protocol]
+
+
+def _build_bridge_loss_matrix() -> BridgeLossMatrix:
+    cells: list[BridgeLossCell] = []
+    for protocol in PublicProtocol:
+        for provider in UpstreamProvider:
+            if provider is UpstreamProvider.GIGACHAT:
+                status = (
+                    BridgeSupportStatus.STABLE
+                    if protocol is PublicProtocol.OPENAI_CHAT_COMPLETIONS
+                    else BridgeSupportStatus.TECHNICAL_PREVIEW
+                )
+                reason_ids = (
+                    ("baseline_gigachat_chat_conformance",)
+                    if status is BridgeSupportStatus.STABLE
+                    else ("legacy_or_cross_protocol_route",)
+                )
+                evidence_ids = (
+                    "P0-BASELINE-2026-08-03",
+                    "P0-RESPONSES-GAPS-2026-08-03",
+                )
+                provider_window = "gigachat-python>=0.2.3,<0.3.0"
+            else:
+                status = BridgeSupportStatus.BLOCKED
+                reason_ids = ("route_not_integrated",)
+                evidence_ids = ()
+                provider_window = "not-integrated"
+            cells.append(
+                BridgeLossCell(
+                    public_protocol=protocol,
+                    upstream_provider=provider,
+                    status=status,
+                    reason_ids=reason_ids,
+                    evidence_ids=evidence_ids,
+                    client_version_window=_client_version_window(protocol),
+                    provider_version_window=provider_window,
+                    semantics=_cell_semantics(
+                        status=status,
+                        evidence_ids=evidence_ids,
+                    ),
+                )
+            )
+    return BridgeLossMatrix(cells=tuple(cells))
+
+
+def _strip_extension_buckets(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_extension_buckets(item)
+            for key, item in value.items()
+            if key not in {"provider_metadata", "raw_extensions"}
+        }
+    if isinstance(value, list):
+        return [_strip_extension_buckets(item) for item in value]
+    return value
+
+
+BRIDGE_LOSS_MATRIX_V1 = _build_bridge_loss_matrix()
+BRIDGE_LOSS_MATRIX_SCHEMA_VERSION = "gpt2giga.bridge-loss-matrix.v1"
+
+
+def bridge_loss_matrix_json() -> dict[str, Any]:
+    """Return the canonical complete matrix with its exact revision digest."""
+    return {
+        **BRIDGE_LOSS_MATRIX_V1.canonical_payload(),
+        "matrix_revision": BRIDGE_LOSS_MATRIX_V1.revision,
     }
 
 
