@@ -98,7 +98,7 @@ class BridgeProviderRuntime:
                     predicate_admission.capability_revision
                 )
             }
-        admit_bridge_route(
+        admission = admit_bridge_route(
             public_protocol=PublicProtocol.OPENAI_RESPONSES,
             public_alias=route.public_alias,
             upstream_provider=UpstreamProvider(route.provider_kind.value),
@@ -113,7 +113,12 @@ class BridgeProviderRuntime:
             model_requested=route.public_alias,
             model_effective=route.upstream_model,
             bridge_route=route.execution_context(),
-            metadata=capability_metadata,
+            metadata={
+                **capability_metadata,
+                "selected_model_id": route.upstream_model,
+                "admission_schema_version": admission.schema_version,
+                "admission_loss_matrix_revision": admission.loss_matrix_revision,
+            },
         )
         return self._adapters[(route.public_alias, api_mode)]
 

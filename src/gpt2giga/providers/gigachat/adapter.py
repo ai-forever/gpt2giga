@@ -108,7 +108,7 @@ class GigaChatProviderAdapter:
             forced_model=self.forced_model,
             provider=self.provider_label,
         )
-        self._record_model_resolution(resolution)
+        self._record_model_resolution(resolution, context)
         async with self.model_limiter.limit(
             resolution.limiter_key,
             provider=self.provider_label,
@@ -201,11 +201,25 @@ class GigaChatProviderAdapter:
         )
 
     @staticmethod
-    def _record_model_resolution(resolution: ResolvedUpstreamModel) -> None:
-        update_request_context(
+    def _record_model_resolution(
+        resolution: ResolvedUpstreamModel,
+        context: RequestContext | None = None,
+    ) -> None:
+        current = update_request_context(
             model_effective=resolution.model,
-            metadata={"model_source": resolution.source},
+            metadata={
+                "model_source": resolution.source,
+                "selected_model_id": resolution.model or resolution.limiter_key,
+            },
         )
+        if context is not None and current is not context:
+            context.model_effective = resolution.model or resolution.limiter_key
+            context.metadata.update(
+                {
+                    "model_source": resolution.source,
+                    "selected_model_id": resolution.model or resolution.limiter_key,
+                }
+            )
 
     async def _chat(
         self,
@@ -224,7 +238,7 @@ class GigaChatProviderAdapter:
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
-        self._record_model_resolution(resolution)
+        self._record_model_resolution(resolution, context)
         async with self.model_limiter.limit(
             resolution.limiter_key,
             provider=self.provider_label,
@@ -235,6 +249,7 @@ class GigaChatProviderAdapter:
             response,
             request=request,
             context=context,
+            effective_model=resolution.model,
         )
 
     async def _chat_completion(
@@ -254,7 +269,7 @@ class GigaChatProviderAdapter:
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
-        self._record_model_resolution(resolution)
+        self._record_model_resolution(resolution, context)
         async with self.model_limiter.limit(
             resolution.limiter_key,
             provider=self.provider_label,
@@ -271,6 +286,7 @@ class GigaChatProviderAdapter:
             _ModelDumpWrapper(adapted),
             request=request,
             context=context,
+            effective_model=resolution.model,
         )
 
     async def _stream_chat(
@@ -292,8 +308,12 @@ class GigaChatProviderAdapter:
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
-        self._record_model_resolution(resolution)
-        mapper = self._stream_mapper(request, context)
+        self._record_model_resolution(resolution, context)
+        mapper = self._stream_mapper(
+            request,
+            context,
+            effective_model=resolution.model or resolution.limiter_key,
+        )
         yield mapper.message_start()
 
         try:
@@ -356,8 +376,12 @@ class GigaChatProviderAdapter:
             chat_payload,
             resolution.model if resolution.source == "forced" else None,
         )
-        self._record_model_resolution(resolution)
-        mapper = self._stream_mapper(request, context)
+        self._record_model_resolution(resolution, context)
+        mapper = self._stream_mapper(
+            request,
+            context,
+            effective_model=resolution.model or resolution.limiter_key,
+        )
         yield mapper.message_start()
 
         try:
@@ -411,10 +435,12 @@ class GigaChatProviderAdapter:
         self,
         request: NormalizedChatRequest,
         context: RequestContext | None,
+        *,
+        effective_model: str,
     ) -> GigaChatNormalizedStreamMapper:
         return GigaChatNormalizedStreamMapper(
             response_processor=self.response_processor,
-            requested_model=request.model or "unknown",
+            requested_model=effective_model,
             response_id=context.request_id if context is not None else "stream",
             request_data=normalized_chat_to_openai_payload(
                 request,
@@ -496,12 +522,13 @@ def gigachat_response_to_normalized(
     *,
     request: NormalizedChatRequest,
     context: RequestContext | None = None,
+    effective_model: str | None = None,
 ) -> NormalizedResponse:
     """Convert a GigaChat-compatible response object to normalized response."""
     data = response.model_dump() if hasattr(response, "model_dump") else dict(response)
     return NormalizedResponse(
         id=context.request_id if context is not None else None,
-        model=request.model,
+        model=effective_model or data.get("model") or request.model,
         provider="gigachat",
         choices=[
             _choice_to_normalized(index, choice)

@@ -5,7 +5,13 @@ from types import SimpleNamespace
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
-from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.app_state import (
+    get_gigachat_client,
+    get_gigachat_model_catalog,
+    get_gigachat_model_catalog_profile_id,
+    get_model_concurrency_limiter,
+    record_gigachat_model_catalog_snapshot,
+)
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.conversation import (
@@ -23,6 +29,7 @@ from gpt2giga.common.streaming import (
 )
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
+from gpt2giga.models.catalog import ModelNotFoundError
 from gpt2giga.protocol.response import (
     adapt_chat_completion_to_chat_shape,
     extract_chat_completion_thread_id,
@@ -254,7 +261,7 @@ class NormalizedBridgeResponsesExecutor:
             mode=resolve_gigachat_api_mode(request),
         )
         request_options = extract_gigachat_request_options(request, data)
-        provider_adapter = _normalized_provider_adapter(
+        provider_adapter = await _normalized_provider_adapter(
             request,
             normalized_request=normalized_request,
             request_options=request_options,
@@ -267,7 +274,11 @@ class NormalizedBridgeResponsesExecutor:
         result = normalized_chat_response_to_responses(
             normalized_response,
             request_payload=data,
-            requested_model=data["model"],
+            requested_model=(
+                context.model_effective
+                if context is not None and context.model_effective
+                else data["model"]
+            ),
             response_id=response_id,
         )
         await commit_responses_response(request, conversation_turn, result)
@@ -305,7 +316,7 @@ class NormalizedBridgeResponsesExecutor:
             mode=resolve_gigachat_api_mode(request),
         )
         request_options = extract_gigachat_request_options(request, data)
-        provider_adapter = _normalized_provider_adapter(
+        provider_adapter = await _normalized_provider_adapter(
             request,
             normalized_request=normalized_request,
             request_options=request_options,
@@ -318,7 +329,11 @@ class NormalizedBridgeResponsesExecutor:
         )
         projector = ResponsesStreamProjector(
             request_payload=data,
-            requested_model=data["model"],
+            requested_model=(
+                context.model_effective
+                if context is not None and context.model_effective
+                else data["model"]
+            ),
             response_id=response_id,
         )
 
@@ -356,7 +371,7 @@ class NormalizedBridgeResponsesExecutor:
         )
 
 
-def _normalized_provider_adapter(
+async def _normalized_provider_adapter(
     request: Request,
     *,
     normalized_request,
@@ -369,6 +384,7 @@ def _normalized_provider_adapter(
         return injected
     runtime = getattr(state, "bridge_provider_runtime", None)
     if runtime is not None:
+        await _bind_catalog_model(request, normalized_request=normalized_request)
         return runtime.adapter_for(
             normalized_request,
             api_mode=resolve_gigachat_api_mode(request),
@@ -391,6 +407,39 @@ def _normalized_provider_adapter(
         response_processor=state.response_processor if require_streaming else None,
         api_mode=resolve_gigachat_api_mode(request),
         forced_model=configured_model,
+    )
+
+
+async def _bind_catalog_model(request: Request, *, normalized_request) -> None:
+    state = request.app.state
+    runtime = state.bridge_provider_runtime
+    route = runtime.registry.resolve(normalized_request.model)
+    if route.provider_kind.value != "gigachat":
+        return
+    catalog = get_gigachat_model_catalog(request)
+    try:
+        descriptor = await catalog.get_model(
+            route.upstream_model,
+            get_gigachat_client(request),
+            provider_profile_id=get_gigachat_model_catalog_profile_id(request),
+        )
+    except ModelNotFoundError as exc:
+        raise ClientCompatibilityError(
+            "The selected model is not available in the provider inventory.",
+            param="model",
+            code="model_not_available",
+        ) from exc
+    snapshot = await catalog.list_models(
+        get_gigachat_client(request),
+        provider_profile_id=get_gigachat_model_catalog_profile_id(request),
+    )
+    record_gigachat_model_catalog_snapshot(request, snapshot)
+    update_request_context(
+        model_effective=descriptor.id,
+        metadata={
+            "selected_model_id": descriptor.id,
+            "inventory_revision": descriptor.inventory_revision,
+        },
     )
 
 

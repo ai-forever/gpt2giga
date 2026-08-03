@@ -3,6 +3,13 @@ from inspect import isawaitable
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import JSONResponse, Response
 
+from gpt2giga.app_state import (
+    get_gigachat_client,
+    get_gigachat_model_catalog,
+    get_gigachat_model_catalog_profile_id,
+    record_gigachat_model_catalog_snapshot,
+)
+from gpt2giga.capabilities import resolve_gigachat_route_capabilities
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.openapi_tags import OPENAPI_TAG_SYSTEM_HEALTH
 from gpt2giga.protocols.normalized import bridge_loss_matrix_json
@@ -57,18 +64,7 @@ async def ready(request: Request) -> JSONResponse:
 @exceptions_handler
 async def bridge_models(request: Request) -> dict:
     """Project the compatibility endpoint from the shared model catalog."""
-    catalog = getattr(request.app.state, "model_catalog", None)
-    context = getattr(
-        request.state,
-        "model_discovery_context",
-        getattr(request.app.state, "model_discovery_context", None),
-    )
-    if catalog is None or context is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"reason_id": "model_catalog_unavailable"},
-        )
-    snapshot = await catalog.list_models(context)
+    snapshot = await _list_model_catalog(request)
     return request.app.state.provider_machine_contracts.models_manifest(snapshot)
 
 
@@ -91,29 +87,81 @@ async def bridge_capabilities(
             detail={"reason_id": "incomplete_capability_query"},
         )
 
-    catalog = getattr(request.app.state, "model_catalog", None)
     resolver = getattr(request.app.state, "effective_capability_resolver", None)
-    context = getattr(
-        request.state,
-        "model_discovery_context",
-        getattr(request.app.state, "model_discovery_context", None),
-    )
-    if catalog is None or resolver is None or context is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"reason_id": "effective_capabilities_unavailable"},
+    descriptor = await _get_catalog_model(request, model)
+    if resolver is None:
+        resolution = resolve_gigachat_route_capabilities(
+            model_id=descriptor.id,
+            public_protocol=protocol,
+            api_mode=api_mode or "v2",
+            route_id=descriptor.provider_profile_id,
         )
-    descriptor = await catalog.get_model(model, context)
-    resolution = resolver.resolve(
-        model=descriptor,
-        public_protocol=protocol,
-        api_mode=api_mode,
-    )
-    if isawaitable(resolution):
-        resolution = await resolution
+    else:
+        resolution = resolver.resolve(
+            model=descriptor,
+            public_protocol=protocol,
+            api_mode=api_mode,
+        )
+        if isawaitable(resolution):
+            resolution = await resolution
     return request.app.state.provider_machine_contracts.effective_capabilities_manifest(
         model=descriptor,
         resolution=resolution,
         public_protocol=protocol,
         api_mode=api_mode,
     )
+
+
+def _injected_catalog_context(request: Request):
+    return getattr(
+        request.state,
+        "model_discovery_context",
+        getattr(request.app.state, "model_discovery_context", None),
+    )
+
+
+async def _list_model_catalog(request: Request):
+    injected_catalog = getattr(request.app.state, "model_catalog", None)
+    injected_context = _injected_catalog_context(request)
+    if injected_catalog is not None and injected_context is not None:
+        return await injected_catalog.list_models(injected_context)
+
+    giga_client = _configured_gigachat_client(
+        request,
+        reason_id="model_catalog_unavailable",
+    )
+    catalog = get_gigachat_model_catalog(request)
+    snapshot = await catalog.list_models(
+        giga_client,
+        provider_profile_id=get_gigachat_model_catalog_profile_id(request),
+    )
+    record_gigachat_model_catalog_snapshot(request, snapshot)
+    return snapshot
+
+
+async def _get_catalog_model(request: Request, model_id: str):
+    injected_catalog = getattr(request.app.state, "model_catalog", None)
+    injected_context = _injected_catalog_context(request)
+    if injected_catalog is not None and injected_context is not None:
+        return await injected_catalog.get_model(model_id, injected_context)
+
+    giga_client = _configured_gigachat_client(
+        request,
+        reason_id="effective_capabilities_unavailable",
+    )
+    catalog = get_gigachat_model_catalog(request)
+    return await catalog.get_model(
+        model_id,
+        giga_client,
+        provider_profile_id=get_gigachat_model_catalog_profile_id(request),
+    )
+
+
+def _configured_gigachat_client(request: Request, *, reason_id: str):
+    try:
+        return get_gigachat_client(request)
+    except AttributeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"reason_id": reason_id},
+        ) from exc

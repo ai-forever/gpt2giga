@@ -6,7 +6,12 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from gpt2giga.app_state import get_gigachat_client, get_gigachat_model_catalog
+from gpt2giga.app_state import (
+    get_gigachat_client,
+    get_gigachat_model_catalog,
+    get_gigachat_model_catalog_profile_id,
+    record_gigachat_model_catalog_snapshot,
+)
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
@@ -50,8 +55,10 @@ async def list_models(request: Request):
     async with gigachat_request_options(giga_client, request_options):
         snapshot = await catalog.list_models(
             giga_client,
+            provider_profile_id=get_gigachat_model_catalog_profile_id(request),
             refresh=_catalog_refresh_requested(request),
         )
+    record_gigachat_model_catalog_snapshot(request, snapshot)
     return build_gemini_model_list(
         [catalog_model_payload(item) for item in snapshot.models]
     )
@@ -76,6 +83,7 @@ async def get_model(model: str, request: Request):
             descriptor = await catalog.get_model(
                 requested_model,
                 giga_client,
+                provider_profile_id=get_gigachat_model_catalog_profile_id(request),
                 refresh=_catalog_refresh_requested(request),
             )
         except ModelNotFoundError as exc:
