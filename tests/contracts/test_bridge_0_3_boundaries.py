@@ -89,18 +89,18 @@ def test_path_ownership_and_import_boundaries_are_frozen() -> None:
     assert forbidden == []
 
 
-def test_responses_uses_only_the_normalized_execution_owner() -> None:
+def test_responses_orchestrates_explicit_execution_owners() -> None:
     source = inspect.getsource(responses)
-    assert "openai_protocol_adapter" in source
-    assert "GigaChatProviderAdapter" in source or "provider_registry" in source
-    for legacy_owner in (
+    assert "NativeGigaChatResponsesExecutor" in source
+    assert "NormalizedBridgeResponsesExecutor" in source
+    for execution_detail in (
         "prepare_response_chat",
         "prepare_response_chat_completion",
         "stream_responses_generator",
         "stream_responses_chat_completion_generator",
         "giga_client.achat",
     ):
-        assert legacy_owner not in source
+        assert execution_detail not in source
 
 
 def test_profile_registry_is_the_only_route_resolution_authority() -> None:
