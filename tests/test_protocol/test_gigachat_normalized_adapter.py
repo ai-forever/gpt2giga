@@ -15,6 +15,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedTokenCountRequest,
     NormalizedTool,
     NormalizedToolCall,
+    NormalizedToolKind,
 )
 from gpt2giga.providers.gigachat.adapter import (
     GigaChatProviderAdapter,
@@ -249,6 +250,58 @@ def test_normalized_chat_to_openai_payload_preserves_builtin_tools():
             "web_search": {"indexes": ["web"]},
         }
     ]
+
+
+def test_normalized_hosted_tools_use_shared_gigachat_v2_mapping() -> None:
+    request = NormalizedChatRequest(
+        protocol="openai",
+        model="GigaChat-2-Max",
+        messages=[NormalizedMessage(role="user", content="search and draw")],
+        tools=[
+            NormalizedTool(
+                kind=NormalizedToolKind.HOSTED,
+                type="web_search_preview",
+                configuration={"search_context_size": "medium"},
+            ),
+            NormalizedTool(
+                kind=NormalizedToolKind.HOSTED,
+                type="image_generation",
+                configuration={"size": "1024x1024"},
+            ),
+        ],
+        tool_choice={"type": "web_search_preview"},
+    )
+
+    payload = normalized_chat_to_openai_payload(request)
+
+    assert payload["tools"] == [
+        {
+            "type": "web_search",
+            "web_search": {"search_context_size": "medium"},
+        },
+        {
+            "type": "image_generate",
+            "image_generate": {"size": "1024x1024"},
+        },
+    ]
+    assert payload["tool_choice"] == {"type": "web_search_preview"}
+
+
+def test_unmapped_normalized_hosted_tool_fails_defensively() -> None:
+    request = NormalizedChatRequest(
+        protocol="openai",
+        model="GigaChat-2-Max",
+        tools=[
+            NormalizedTool(
+                kind=NormalizedToolKind.HOSTED,
+                type="file_search",
+                configuration={"vector_store_ids": ["vs_1"]},
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="cannot map hosted tool type 'file_search'"):
+        normalized_chat_to_openai_payload(request)
 
 
 def test_normalized_chat_to_openai_payload_drops_builtin_tools_when_disabled():

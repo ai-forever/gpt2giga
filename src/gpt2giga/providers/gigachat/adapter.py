@@ -19,6 +19,7 @@ from gpt2giga.common.model_concurrency import (
 )
 from gpt2giga.common.signed_model_override import apply_model_override
 from gpt2giga.common.tools import (
+    build_gigachat_builtin_tool_payload,
     map_tool_name_from_gigachat,
     normalize_gigachat_builtin_tool_type,
 )
@@ -39,6 +40,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedTokenCountResponse,
     NormalizedTool,
     NormalizedToolCall,
+    NormalizedToolKind,
     NormalizedUsage,
 )
 from gpt2giga.providers.gigachat.streaming import GigaChatNormalizedStreamMapper
@@ -569,12 +571,13 @@ def _tool_to_openai(
     if builtin_field_name is not None:
         if not include_builtin_tools:
             return None
-        payload: dict[str, Any] = {"type": builtin_field_name}
-        config = raw_extensions.pop(builtin_field_name, None)
-        if isinstance(config, Mapping):
-            payload[builtin_field_name] = dict(config)
-        payload.update(raw_extensions)
-        return payload
+        source: dict[str, Any] = {"type": tool.type}
+        source.update(tool.configuration)
+        source.update(raw_extensions)
+        builtin_payload = build_gigachat_builtin_tool_payload(source)
+        return {"type": builtin_field_name, **builtin_payload}
+    if tool.kind is NormalizedToolKind.HOSTED:
+        raise ValueError(f"GigaChat cannot map hosted tool type {tool.type!r}")
 
     parameters = normalize_tool_parameters_schema(tool.parameters)
     payload = {
