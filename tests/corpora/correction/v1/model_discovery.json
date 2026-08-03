@@ -1,0 +1,179 @@
+{
+  "case_id": "dynamic-model-discovery-v1",
+  "corpus_revision": "model-discovery-2026-08-03",
+  "cases": [
+    {
+      "id": "zero-models",
+      "operation": "cold_list",
+      "scope": "credential-a",
+      "provider_pages": [[]],
+      "expected": {"model_ids": [], "provider_calls": 1, "stale": false}
+    },
+    {
+      "id": "one-model",
+      "operation": "cold_list",
+      "scope": "credential-a",
+      "provider_pages": [[{"id": "GigaChat-2-Max", "owned_by": "sber"}]],
+      "expected": {"model_ids": ["GigaChat-2-Max"], "provider_calls": 1, "stale": false}
+    },
+    {
+      "id": "multiple-models",
+      "operation": "cold_list",
+      "scope": "credential-a",
+      "provider_pages": [[
+        {"id": "GigaChat-2", "owned_by": "sber"},
+        {"id": "GigaChat-2-Max", "owned_by": "sber"},
+        {"id": "GigaChat-2-Pro", "owned_by": "sber"}
+      ]],
+      "expected": {
+        "model_ids": ["GigaChat-2", "GigaChat-2-Max", "GigaChat-2-Pro"],
+        "provider_calls": 1,
+        "stale": false
+      }
+    },
+    {
+      "id": "new-unknown-model",
+      "operation": "cold_list",
+      "scope": "credential-a",
+      "provider_pages": [[{"id": "GigaChat-Future-1", "model_type": "chat"}]],
+      "expected": {
+        "available": true,
+        "capability_state": "unknown",
+        "model_ids": ["GigaChat-Future-1"],
+        "provider_calls": 1,
+        "stale": false
+      }
+    },
+    {
+      "id": "duplicate-model-ids",
+      "operation": "cold_list",
+      "scope": "credential-a",
+      "provider_pages": [[
+        {"id": "GigaChat-2-Max", "owned_by": "sber", "version": "first"},
+        {"id": "GigaChat-2-Max", "owned_by": "sber", "version": "duplicate"}
+      ]],
+      "expected": {
+        "duplicate_ids": ["GigaChat-2-Max"],
+        "model_ids": ["GigaChat-2-Max"],
+        "provider_calls": 1,
+        "selected_version": "first",
+        "stale": false
+      }
+    },
+    {
+      "id": "malformed-provider-entry",
+      "operation": "cold_list",
+      "scope": "credential-a",
+      "provider_pages": [[
+        {"id": "GigaChat-2-Max"},
+        {"id": ""},
+        {"owned_by": "sber"},
+        "not-an-object"
+      ]],
+      "expected": {
+        "invalid_entries": 3,
+        "model_ids": ["GigaChat-2-Max"],
+        "provider_calls": 1,
+        "stale": false
+      }
+    },
+    {
+      "id": "provider-metadata-extensions",
+      "operation": "cold_list",
+      "scope": "credential-a",
+      "provider_pages": [[{
+        "id": "GigaChat-2-Max",
+        "owned_by": "sber",
+        "vendor_extension": {"context_window": 32768, "hosted_tools": ["web_search"]}
+      }]],
+      "expected": {
+        "metadata_keys": ["vendor_extension"],
+        "model_ids": ["GigaChat-2-Max"],
+        "provider_calls": 1,
+        "stale": false
+      }
+    },
+    {
+      "id": "pagination-and-projection",
+      "operation": "cold_list",
+      "scope": "credential-a",
+      "provider_pages": [
+        [{"id": "GigaChat-2"}],
+        [{"id": "GigaChat-2-Max"}],
+        [{"id": "GigaChat-2-Pro"}]
+      ],
+      "expected": {
+        "model_ids": ["GigaChat-2", "GigaChat-2-Max", "GigaChat-2-Pro"],
+        "projection_ids": {
+          "/bridge/models": ["GigaChat-2", "GigaChat-2-Max", "GigaChat-2-Pro"],
+          "/models": ["GigaChat-2", "GigaChat-2-Max", "GigaChat-2-Pro"]
+        },
+        "provider_calls": 3,
+        "stale": false
+      }
+    },
+    {
+      "id": "credential-scope-isolation",
+      "operation": "multi_scope_list",
+      "scopes": {
+        "credential-a": [[{"id": "GigaChat-A"}]],
+        "credential-b": [[{"id": "GigaChat-B"}]]
+      },
+      "expected": {
+        "models_by_scope": {
+          "credential-a": ["GigaChat-A"],
+          "credential-b": ["GigaChat-B"]
+        },
+        "provider_calls": 2
+      }
+    },
+    {
+      "id": "concurrent-refresh-single-flight",
+      "operation": "concurrent_refresh",
+      "scope": "credential-a",
+      "concurrency": 16,
+      "provider_pages": [[{"id": "GigaChat-2-Max"}]],
+      "expected": {
+        "model_ids": ["GigaChat-2-Max"],
+        "provider_calls": 1,
+        "snapshots": 16,
+        "stale": false
+      }
+    },
+    {
+      "id": "stale-refresh-failure",
+      "operation": "refresh_failure",
+      "scope": "credential-a",
+      "cached_pages": [[{"id": "GigaChat-2-Max"}]],
+      "provider_error": "fixture_timeout",
+      "expected": {
+        "error_reason_id": "model_catalog_refresh_failed",
+        "model_ids": ["GigaChat-2-Max"],
+        "provider_calls": 1,
+        "stale": true
+      }
+    },
+    {
+      "id": "explicit-refresh",
+      "operation": "explicit_refresh",
+      "scope": "credential-a",
+      "provider_sequences": [
+        [[{"id": "GigaChat-2"}]],
+        [[{"id": "GigaChat-2"}, {"id": "GigaChat-2-Max"}]]
+      ],
+      "expected": {
+        "model_ids": ["GigaChat-2", "GigaChat-2-Max"],
+        "provider_calls": 2,
+        "revision_changed": true,
+        "stale": false
+      }
+    }
+  ],
+  "rules": {
+    "cache_key_includes_credential_scope": true,
+    "fabricated_fallback_model": false,
+    "max_models_per_snapshot": 1024,
+    "provider_traffic": false
+  },
+  "schema_version": "gpt2giga.corrective-conformance.v1"
+}
