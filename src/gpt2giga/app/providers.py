@@ -72,6 +72,17 @@ class BridgeProviderRuntime:
         )
         return self._adapters[(route.public_alias, api_mode)]
 
+    async def aclose(self) -> None:
+        """Close each independently owned adapter client exactly once."""
+        closed: set[int] = set()
+        for adapter in self._adapters.values():
+            identity = id(adapter)
+            close = getattr(adapter, "aclose", None)
+            if identity in closed or not callable(close):
+                continue
+            closed.add(identity)
+            await close()
+
 
 def _requested_semantics(
     request: NormalizedChatRequest,

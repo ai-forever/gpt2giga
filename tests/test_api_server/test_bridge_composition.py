@@ -32,13 +32,14 @@ class _Response:
 class _GigaChat:
     def __init__(self) -> None:
         self.calls = []
+        self.closed = False
 
     async def achat(self, payload):
         self.calls.append(payload)
         return _Response()
 
     async def aclose(self) -> None:
-        return None
+        self.closed = True
 
 
 def test_app_owns_one_immutable_synthesized_registry() -> None:
@@ -152,6 +153,7 @@ def test_lifespan_composes_normalized_responses_adapter_once(monkeypatch) -> Non
     assert response.status_code == 200
     assert response.json()["output"][0]["content"][0]["text"] == "composed"
     assert len(giga_client.calls) == 1
+    assert giga_client.closed is True
 
 
 def test_runtime_rejects_unknown_alias_before_provider_io(monkeypatch) -> None:

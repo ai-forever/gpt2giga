@@ -5,6 +5,10 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
 from gpt2giga.app.lifecycle import lifespan
+from gpt2giga.app.request_lifecycle import (
+    BridgeRequestLifecycle,
+    BridgeRequestLifecycleMiddleware,
+)
 from gpt2giga.app.settings import (
     build_cors_settings,
     build_provider_registry,
@@ -72,6 +76,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     app.state.provider_registry = provider_registry
     app.state.provider_machine_contracts = ProviderMachineContracts(provider_registry)
     app.state.legacy_responses_enabled = config.proxy_settings.legacy_responses
+    app.state.bridge_request_lifecycle = BridgeRequestLifecycle()
     app.state.anthropic_protocol_adapter = AnthropicProtocolAdapter()
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     app.state.gemini_protocol_adapter = GeminiProtocolAdapter()
@@ -117,6 +122,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         max_body_bytes=config.proxy_settings.max_request_body_bytes,
     )
     app.add_middleware(RquidMiddleware)
+    app.add_middleware(BridgeRequestLifecycleMiddleware)
 
     if config.proxy_settings.pass_token:
         app.add_middleware(PassTokenMiddleware)

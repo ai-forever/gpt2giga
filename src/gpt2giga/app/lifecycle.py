@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from gpt2giga.app.settings import load_app_config, setup_app_logger
 from gpt2giga.app.providers import BridgeProviderRuntime
+from gpt2giga.app.request_lifecycle import BridgeRequestLifecycle
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.protocols.anthropic import AnthropicProtocolAdapter
@@ -42,6 +43,8 @@ async def lifespan(app: FastAPI):
 
     app.state.config = config
     app.state.logger = logger
+    if not app.state.bridge_request_lifecycle.accepting:
+        app.state.bridge_request_lifecycle = BridgeRequestLifecycle()
     if not hasattr(app.state, "anthropic_protocol_adapter"):
         app.state.anthropic_protocol_adapter = AnthropicProtocolAdapter()
     if not hasattr(app.state, "openai_protocol_adapter"):
@@ -99,14 +102,32 @@ async def lifespan(app: FastAPI):
         log_level=config.proxy_settings.log_level,
         structured_output_mode=config.proxy_settings.structured_output_mode,
     )
-    app.state.bridge_provider_runtime = BridgeProviderRuntime(app.state)
+    try:
+        app.state.bridge_provider_runtime = BridgeProviderRuntime(app.state)
+    except BaseException:
+        app.state.bridge_shutting_down = True
+        await _close_runtime_dependencies(app, attachment_processor)
+        raise
     app.state.bridge_shutting_down = False
 
     logger.info("Application startup complete")
-    yield
+    try:
+        yield
+    finally:
+        logger.info("Application shutdown initiated")
+        app.state.bridge_shutting_down = True
+        await app.state.bridge_request_lifecycle.shutdown(
+            timeout_seconds=config.proxy_settings.shutdown_timeout_seconds
+        )
+        await _close_runtime_dependencies(app, attachment_processor)
 
-    logger.info("Application shutdown initiated")
-    app.state.bridge_shutting_down = True
+
+async def _close_runtime_dependencies(
+    app: FastAPI,
+    attachment_processor: AttachmentProcessor,
+) -> None:
+    """Close every application-owned dependency in deterministic order."""
+    logger = app.state.logger
     await flush_metrics_sink(getattr(app.state, "metrics_sink", None), logger=logger)
     await flush_observability_sink(
         getattr(app.state, "observability_sink", None), logger=logger
@@ -120,6 +141,9 @@ async def lifespan(app: FastAPI):
     await close_traffic_log_query_store(
         getattr(app.state, "traffic_log_query_store", None), logger=logger
     )
+    runtime = getattr(app.state, "bridge_provider_runtime", None)
+    if runtime is not None:
+        await runtime.aclose()
     await close_gigachat_client(getattr(app.state, "gigachat_client", None), logger)
     gigachat_pool = getattr(app.state, "gigachat_pool", None)
     if gigachat_pool is not None:

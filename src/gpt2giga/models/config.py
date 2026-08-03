@@ -53,6 +53,12 @@ class ProxySettings(BaseSettings):
             "provider config is supplied."
         ),
     )
+    shutdown_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=300,
+        description="Maximum graceful drain time before active requests are cancelled.",
+    )
     pass_token_client_cache_size: PositiveInt = Field(
         default=32,
         description="Maximum number of idle credential-specific GigaChat clients.",
