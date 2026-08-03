@@ -7,6 +7,10 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.client_params import (
+    ClientCompatibilityError,
+    client_compatibility_response,
+)
 from gpt2giga.common.conversation import (
     commit_responses_response,
     stitch_responses_payload,
@@ -31,6 +35,8 @@ from gpt2giga.protocol.response import (
     extract_chat_completion_thread_id,
     hydrate_chat_completion_image_files,
 )
+from gpt2giga.protocols.openai import normalized_chat_response_to_responses
+from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.providers.gigachat.model_resolution import resolve_upstream_model
 from gpt2giga.routers.openai.helpers import (
     populate_giga_functions,
@@ -49,10 +55,21 @@ router = APIRouter(tags=[OPENAPI_TAG_OPENAI_RESPONSES])
 async def responses(request: Request):
     """Create a Responses API response."""
     data = await read_request_json(request)
-    request_options = extract_gigachat_request_options(request, data)
     stream = data.get("stream", False)
-    current_rquid = rquid_context.get()
     state = request.app.state
+    protocol_adapter = getattr(state, "openai_protocol_adapter", None)
+    if protocol_adapter is not None and not stream:
+        try:
+            return await _normalized_non_stream_response(
+                request,
+                data,
+                protocol_adapter=protocol_adapter,
+            )
+        except ClientCompatibilityError as exc:
+            return client_compatibility_response(exc)
+
+    request_options = extract_gigachat_request_options(request, data)
+    current_rquid = rquid_context.get()
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
     mode = resolve_gigachat_api_mode(request)
@@ -195,3 +212,91 @@ async def responses(request: Request):
         ),
         media_type="text/event-stream",
     )
+
+
+async def _normalized_non_stream_response(
+    request: Request,
+    data: dict,
+    *,
+    protocol_adapter,
+) -> dict:
+    state = request.app.state
+    context = get_request_context()
+    normalized_request = await protocol_adapter.responses_to_normalized_async(
+        data,
+        context=context,
+    )
+    if request_attachment_ids(request):
+        raise ClientCompatibilityError(
+            "The selected bridge route cannot preserve this semantic.",
+            param="x-gpt2giga-attachment-ids",
+            code="unsupported_semantic",
+        )
+
+    conversation_turn = await stitch_responses_payload(
+        request,
+        data,
+        mode=resolve_gigachat_api_mode(request),
+    )
+    request_options = extract_gigachat_request_options(request, data)
+    provider_adapter = _normalized_provider_adapter(
+        request,
+        request_options=request_options,
+    )
+    normalized_response = await provider_adapter.chat(
+        normalized_request,
+        context=context,
+    )
+    response_id = _normalized_response_id(normalized_response, context=context)
+    result = normalized_chat_response_to_responses(
+        normalized_response,
+        request_payload=data,
+        requested_model=data["model"],
+        response_id=response_id,
+    )
+    await commit_responses_response(request, conversation_turn, result)
+    await emit_openai_response_observability(
+        state,
+        data,
+        result,
+        context=context,
+    )
+    return result
+
+
+def _normalized_provider_adapter(
+    request: Request,
+    *,
+    request_options,
+):
+    state = request.app.state
+    injected = getattr(state, "responses_provider_adapter", None)
+    if injected is not None:
+        return injected
+    configured_model = getattr(
+        getattr(state.config, "gigachat_settings", None),
+        "model",
+        None,
+    )
+    return GigaChatProviderAdapter(
+        config=state.config,
+        request_transformer=state.request_transformer,
+        giga_client=get_gigachat_client(request),
+        model_limiter=get_model_concurrency_limiter(request),
+        request_options=request_options,
+        api_mode=resolve_gigachat_api_mode(request),
+        forced_model=configured_model,
+    )
+
+
+def _normalized_response_id(normalized_response, *, context) -> str:
+    gigachat_metadata = normalized_response.provider_metadata.get("gigachat")
+    if isinstance(gigachat_metadata, dict):
+        thread_id = gigachat_metadata.get("thread_id")
+        if isinstance(thread_id, str) and thread_id:
+            return thread_id
+    if normalized_response.id:
+        return normalized_response.id
+    if context is not None and context.request_id:
+        return context.request_id
+    return rquid_context.get()

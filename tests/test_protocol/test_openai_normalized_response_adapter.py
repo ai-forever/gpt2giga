@@ -8,7 +8,10 @@ from gpt2giga.protocols.normalized import (
     NormalizedToolCall,
     NormalizedUsage,
 )
-from gpt2giga.protocols.openai import normalized_chat_response_to_openai
+from gpt2giga.protocols.openai import (
+    normalized_chat_response_to_openai,
+    normalized_chat_response_to_responses,
+)
 
 
 def test_normalized_chat_response_to_openai_maps_assistant_usage_and_metadata():
@@ -114,3 +117,84 @@ def test_normalized_chat_response_to_openai_maps_errors():
             "code": "invalid_messages",
         }
     }
+
+
+def test_normalized_chat_response_to_responses_maps_text_tools_usage_and_stop():
+    response = NormalizedResponse(
+        id="fixture",
+        model="upstream-model",
+        provider="gigachat",
+        choices=[
+            NormalizedChoice(
+                message=NormalizedMessage(
+                    role="assistant",
+                    content="The answer is 20 C.",
+                    tool_calls=[
+                        NormalizedToolCall(
+                            id="call_weather",
+                            name="weather",
+                            arguments={"city": "Moscow"},
+                        )
+                    ],
+                ),
+                finish_reason="tool_calls",
+                stop_reason="tool_calls",
+            )
+        ],
+        usage=NormalizedUsage(input_tokens=11, output_tokens=7, total_tokens=18),
+    )
+
+    payload = normalized_chat_response_to_responses(
+        response,
+        request_payload={
+            "instructions": "Be concise.",
+            "model": "bridge/codex-test",
+            "text": {"format": {"type": "text"}},
+            "tools": [{"type": "function", "name": "weather"}],
+        },
+        requested_model="bridge/codex-test",
+        response_id="fixture",
+    )
+
+    assert payload["id"] == "resp_fixture"
+    assert payload["model"] == "bridge/codex-test"
+    assert payload["status"] == "completed"
+    assert payload["instructions"] == "Be concise."
+    assert payload["output"][0]["content"][0]["text"] == "The answer is 20 C."
+    assert payload["output"][1] == {
+        "id": "fc_call_weather",
+        "type": "function_call",
+        "status": "completed",
+        "call_id": "call_weather",
+        "name": "weather",
+        "arguments": '{"city":"Moscow"}',
+    }
+    assert payload["usage"] == {
+        "input_tokens": 11,
+        "output_tokens": 7,
+        "total_tokens": 18,
+    }
+
+
+def test_normalized_chat_response_to_responses_keeps_partial_usage_honest():
+    response = NormalizedResponse(
+        choices=[
+            NormalizedChoice(
+                message=NormalizedMessage(role="assistant", content="partial"),
+                finish_reason="length",
+                stop_reason="max_tokens",
+            )
+        ],
+        usage=NormalizedUsage(input_tokens=4),
+    )
+
+    payload = normalized_chat_response_to_responses(
+        response,
+        request_payload={"model": "bridge/codex-test", "input": "hello"},
+        requested_model="bridge/codex-test",
+        response_id="partial",
+    )
+
+    assert payload["status"] == "incomplete"
+    assert payload["incomplete_details"] == {"reason": "max_output_tokens"}
+    assert payload["usage"] == {"input_tokens": 4}
