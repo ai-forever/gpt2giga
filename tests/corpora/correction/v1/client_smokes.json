@@ -1,0 +1,122 @@
+{
+  "case_id": "corrective-client-smokes-v1",
+  "corpus_revision": "client-smokes-2026-08-03",
+  "clients": [
+    {
+      "id": "codex-cli-responses-hosted-tool",
+      "client": "codex-cli",
+      "captured_version": "0.146.0",
+      "supported_window": {"minimum": "0.146.0", "maximum_exclusive": "0.147.0"},
+      "wire_api": "responses",
+      "hosted_tool": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/responses",
+        "body": {
+          "input": "Search for fixture weather.",
+          "model": "GigaChat-2-Max",
+          "stream": true,
+          "tools": [{"type": "web_search_preview"}]
+        }
+      }
+    },
+    {
+      "id": "openai-python-responses-hosted-tool",
+      "client": "openai-python",
+      "captured_version": "2.50.0",
+      "supported_window": {"minimum": "2.50.0", "maximum_exclusive": "3.0.0"},
+      "wire_api": "responses",
+      "hosted_tool": true,
+      "request": {
+        "method": "POST",
+        "path": "/responses",
+        "body": {
+          "input": "Search for fixture weather.",
+          "model": "GigaChat-2-Max",
+          "tools": [{"type": "web_search_preview"}]
+        }
+      }
+    },
+    {
+      "id": "openai-python-chat-completions-reserved-function",
+      "client": "openai-python",
+      "captured_version": "2.50.0",
+      "supported_window": {"minimum": "2.50.0", "maximum_exclusive": "3.0.0"},
+      "wire_api": "chat_completions",
+      "hosted_tool": false,
+      "request": {
+        "method": "POST",
+        "path": "/chat/completions",
+        "body": {
+          "messages": [{"role": "user", "content": "Search the fixture."}],
+          "model": "GigaChat-2-Max",
+          "tools": [{
+            "type": "function",
+            "function": {
+              "name": "web_search",
+              "description": "Fixture custom function, not the hosted tool.",
+              "parameters": {"type": "object", "properties": {}}
+            }
+          }]
+        }
+      }
+    },
+    {
+      "id": "anthropic-python-web-search",
+      "client": "anthropic-python",
+      "captured_version": "0.120.2",
+      "supported_window": {"minimum": "0.120.2", "maximum_exclusive": "1.0.0"},
+      "wire_api": "anthropic_messages",
+      "hosted_tool": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/messages",
+        "body": {
+          "max_tokens": 64,
+          "messages": [{"role": "user", "content": "Search for fixture weather."}],
+          "model": "GigaChat-2-Max",
+          "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}]
+        }
+      }
+    },
+    {
+      "id": "google-genai-google-search",
+      "client": "google-genai-python",
+      "captured_version": "2.14.0",
+      "supported_window": {"minimum": "2.14.0", "maximum_exclusive": "3.0.0"},
+      "wire_api": "gemini_generate_content",
+      "hosted_tool": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1beta/models/GigaChat-2-Max:generateContent",
+        "body": {
+          "contents": [{"role": "user", "parts": [{"text": "Search for fixture weather."}]}],
+          "tools": [{"googleSearch": {}}]
+        }
+      }
+    },
+    {
+      "id": "curl-responses-hosted-tool",
+      "client": "curl",
+      "captured_version": "8.17.0",
+      "supported_window": {"minimum": "8.0.0", "maximum_exclusive": "9.0.0"},
+      "wire_api": "responses",
+      "hosted_tool": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/responses",
+        "body": {
+          "input": "Run fixture code.",
+          "model": "GigaChat-2-Max",
+          "tools": [{"type": "code_interpreter"}]
+        }
+      }
+    }
+  ],
+  "rules": {
+    "authorization": "fixture_only",
+    "provider_traffic": false,
+    "requires_hosted_tool_coverage": true
+  },
+  "schema_version": "gpt2giga.corrective-conformance.v1"
+}
