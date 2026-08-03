@@ -101,7 +101,6 @@ def test_responses_uses_only_the_normalized_execution_owner() -> None:
         assert legacy_owner not in source
 
 
-@FUTURE
 def test_profile_registry_is_the_only_route_resolution_authority() -> None:
     app = create_app(ProxyConfig())
     registry = app.state.provider_registry
@@ -160,7 +159,6 @@ async def test_openai_compatible_adapter_disables_redirects() -> None:
         await adapter.aclose()
 
 
-@FUTURE
 def test_execution_context_carries_exact_bridge_revisions() -> None:
     names = {field.name for field in fields(RequestContext)}
     assert {

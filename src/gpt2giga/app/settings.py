@@ -1,11 +1,38 @@
 """Application settings helpers."""
 
 from dataclasses import dataclass
+import os
 from typing import Any
 
 from gpt2giga.cli import load_config
 from gpt2giga.logger import setup_logger
 from gpt2giga.models.config import ProxyConfig
+from gpt2giga.protocols.normalized import BRIDGE_LOSS_MATRIX_V1
+from gpt2giga.providers.profiles import (
+    LoadedProviderProfileSet,
+    ProviderModelAlias,
+    ProviderPolicyCatalog,
+    ProviderProfile,
+    ProviderProfileConfig,
+    ProviderRegistry,
+    ProviderSupportStatus,
+    load_provider_profiles,
+    select_provider_config_path,
+)
+
+
+DEFAULT_PROVIDER_POLICIES = ProviderPolicyCatalog(
+    network_policy_refs=frozenset(
+        {
+            "loopback-development",
+            "public-anthropic",
+            "public-gemini",
+            "public-gigachat",
+            "public-openai",
+        }
+    ),
+    tls_policy_refs=frozenset({"system-default"}),
+)
 
 
 @dataclass(frozen=True)
@@ -42,6 +69,57 @@ def validate_app_config(config: ProxyConfig) -> None:
             "API key must be configured when auth is enabled or MODE=PROD "
             "(set GPT2GIGA_API_KEY / --proxy.api-key)."
         )
+
+
+def build_provider_registry(
+    config: ProxyConfig,
+    *,
+    environ: dict[str, str] | None = None,
+    policies: ProviderPolicyCatalog = DEFAULT_PROVIDER_POLICIES,
+) -> ProviderRegistry:
+    """Build the one immutable provider registry before the app can serve."""
+    environment = os.environ if environ is None else environ
+    path = select_provider_config_path(
+        config.provider_config_path,
+        environ=environment,
+    )
+    if path is not None:
+        if config.proxy_settings.legacy_responses:
+            raise RuntimeError(
+                "Legacy Responses mode cannot be combined with a provider config."
+            )
+        loaded = load_provider_profiles(path, environ=environment, policies=policies)
+    else:
+        loaded = _synthesized_gigachat_profiles(config)
+    return ProviderRegistry(
+        loaded,
+        loss_matrix_revision=BRIDGE_LOSS_MATRIX_V1.revision,
+    )
+
+
+def _synthesized_gigachat_profiles(config: ProxyConfig) -> LoadedProviderProfileSet:
+    """Preserve the config-free installation as one explicit GigaChat route."""
+    upstream_model = config.gigachat_settings.model or "GigaChat"
+    profile = ProviderProfile(
+        profile_id="legacy-gigachat",
+        provider_kind="gigachat",
+        base_url=str(config.gigachat_settings.base_url),
+        credential_env="GIGACHAT_CREDENTIALS",
+        network_policy_ref="public-gigachat",
+        tls_policy_ref="system-default",
+        models=(
+            ProviderModelAlias(
+                public_alias=upstream_model,
+                upstream_model=upstream_model,
+                capability_profile="legacy-gigachat-v1",
+                support_status=ProviderSupportStatus.STABLE,
+            ),
+        ),
+    )
+    return LoadedProviderProfileSet(
+        config=ProviderProfileConfig(profiles=(profile,)),
+        _credentials={},
+    )
 
 
 def build_cors_settings(config: ProxyConfig) -> CorsSettings:

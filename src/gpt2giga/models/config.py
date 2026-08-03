@@ -46,6 +46,13 @@ class ProxySettings(BaseSettings):
     pass_token: bool = Field(
         default=False, description="Передавать токен из запроса в API"
     )
+    legacy_responses: bool = Field(
+        default=False,
+        description=(
+            "Use the deprecated pre-0.3 Responses execution path when no "
+            "provider config is supplied."
+        ),
+    )
     pass_token_client_cache_size: PositiveInt = Field(
         default=32,
         description="Maximum number of idle credential-specific GigaChat clients.",
@@ -528,6 +535,11 @@ class ProxyConfig(BaseSettings):
         default_factory=GigaChatCLI, alias="gigachat"
     )
     env_path: Optional[str] = Field(None, description="Path to .env file")
+    provider_config_path: Optional[str] = Field(
+        default=None,
+        alias="config",
+        description="Path to the startup-owned provider profile configuration.",
+    )
 
     model_config = SettingsConfigDict(
         cli_parse_args=True,

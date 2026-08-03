@@ -7,6 +7,7 @@ from starlette.responses import RedirectResponse
 from gpt2giga.app.lifecycle import lifespan
 from gpt2giga.app.settings import (
     build_cors_settings,
+    build_provider_registry,
     is_auth_required,
     is_prod_mode,
     load_app_config,
@@ -33,6 +34,7 @@ from gpt2giga.openapi_tags import build_openapi_tags_metadata
 from gpt2giga.protocols.anthropic import AnthropicProtocolAdapter
 from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
+from gpt2giga.providers.profiles import ProviderMachineContracts
 from gpt2giga.routers.litellm import router as litellm_router
 from gpt2giga.routers.logs_router import logs_api_router, logs_router
 from gpt2giga.routers.system_router import system_router
@@ -46,6 +48,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
     config = load_app_config(config)
     validate_app_config(config)
+    provider_registry = build_provider_registry(config)
 
     prod_mode = is_prod_mode(config)
     auth_required = is_auth_required(config)
@@ -66,6 +69,9 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         ),
     )
     app.state.config = config
+    app.state.provider_registry = provider_registry
+    app.state.provider_machine_contracts = ProviderMachineContracts(provider_registry)
+    app.state.legacy_responses_enabled = config.proxy_settings.legacy_responses
     app.state.anthropic_protocol_adapter = AnthropicProtocolAdapter()
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     app.state.gemini_protocol_adapter = GeminiProtocolAdapter()
