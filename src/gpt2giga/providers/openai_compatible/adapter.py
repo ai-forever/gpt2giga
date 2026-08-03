@@ -36,7 +36,8 @@ from gpt2giga.protocols.normalized import (
 )
 
 
-OPENAI_COMPATIBLE_UPSTREAM_SCHEMA_VERSION = "gigaloom.openai-compatible-upstream.v1"
+OPENAI_COMPATIBLE_UPSTREAM_SCHEMA_VERSION = "gpt2giga.openai-compatible-upstream.v1"
+OPENAI_COMPATIBLE_ROUTE_SCHEMA_VERSION = "gpt2giga.execution-context.v1"
 OPENAI_CHAT_COMPLETIONS_DIALECT = "openai-chat-completions-v1"
 OPENAI_CHAT_EXECUTION_OWNER = "provider-execution:openai-compatible"
 DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
@@ -44,12 +45,36 @@ MAX_MODEL_DISCOVERY_ITEMS = 500
 MAX_MODEL_ID_CHARS = 256
 _REQUEST_PURPOSE_CHAT = "provider.openai-compatible.chat"
 _REQUEST_PURPOSE_MODELS = "provider.openai-compatible.models"
+_REVISION_PATTERN = r"^sha256:[0-9a-f]{64}$"
+
+
+class OpenAICompatibleRouteBinding(NormalizedBaseModel):
+    """Secret-free identity of one reviewed public-alias route."""
+
+    schema_version: Literal["gpt2giga.execution-context.v1"] = (
+        OPENAI_COMPATIBLE_ROUTE_SCHEMA_VERSION
+    )
+    config_revision: str = Field(pattern=_REVISION_PATTERN)
+    profile_id: str = Field(min_length=1, max_length=256)
+    profile_revision: str = Field(min_length=1, max_length=256)
+    public_alias: str = Field(min_length=1, max_length=256)
+    provider_kind: Literal["openai_compatible"] = "openai_compatible"
+    upstream_model: str = Field(min_length=1, max_length=256)
+    capability_profile: str = Field(min_length=1, max_length=256)
+    loss_matrix_revision: str = Field(pattern=_REVISION_PATTERN)
+
+    def to_execution_context(self) -> dict[str, Any]:
+        """Return the exact machine contract without extension buckets."""
+        return self.model_dump(
+            mode="json",
+            exclude={"provider_metadata", "raw_extensions"},
+        )
 
 
 class OpenAICompatibleUpstreamProfile(NormalizedBaseModel):
     """Versioned execution profile without credential values or grant contents."""
 
-    schema_version: Literal["gigaloom.openai-compatible-upstream.v1"] = (
+    schema_version: Literal["gpt2giga.openai-compatible-upstream.v1"] = (
         OPENAI_COMPATIBLE_UPSTREAM_SCHEMA_VERSION
     )
     id: str = Field(min_length=1, max_length=256)
@@ -73,6 +98,7 @@ class OpenAICompatibleUpstreamProfile(NormalizedBaseModel):
     network_policy_ref: str = Field(min_length=1, max_length=256)
     tls_policy_ref: str | None = Field(default=None, min_length=1, max_length=256)
     proxy_policy_ref: str | None = Field(default=None, min_length=1, max_length=256)
+    route: OpenAICompatibleRouteBinding | None = None
 
     @field_validator("base_url")
     @classmethod
@@ -83,10 +109,28 @@ class OpenAICompatibleUpstreamProfile(NormalizedBaseModel):
     def _validate_profile(self) -> OpenAICompatibleUpstreamProfile:
         if self.raw_extensions or self.provider_metadata:
             raise ValueError("upstream profile extensions are not admitted")
-        if self.capabilities.profile != f"{self.id}@{self.revision}":
+        if (
+            self.route is None
+            and self.capabilities.profile != f"{self.id}@{self.revision}"
+        ):
             raise ValueError("upstream capabilities do not bind the profile revision")
         if self.capabilities.raw_extensions or self.capabilities.provider_metadata:
             raise ValueError("upstream capability extensions are not admitted")
+        if self.route is not None:
+            expected = {
+                "profile_id": self.id,
+                "profile_revision": self.revision,
+                "upstream_model": self.model,
+                "capability_profile": self.capabilities.profile,
+            }
+            actual = {
+                "profile_id": self.route.profile_id,
+                "profile_revision": self.route.profile_revision,
+                "upstream_model": self.route.upstream_model,
+                "capability_profile": self.route.capability_profile,
+            }
+            if actual != expected:
+                raise ValueError("reviewed route does not bind the upstream profile")
         return self
 
     @property
@@ -200,12 +244,15 @@ class OpenAICompatibleProviderAdapter:
 
     def __gpt2giga_redacted__(self) -> dict[str, Any]:
         """Return a content-free runtime projection."""
-        return {
+        projection: dict[str, Any] = {
             "profile_id": self.profile.id,
             "profile_revision": self.profile.revision,
             "credential_reference_id": self.profile.credential_reference_id,
             "network_policy_ref": self.profile.network_policy_ref,
         }
+        if self.profile.route is not None:
+            projection["route"] = self.profile.route.to_execution_context()
+        return projection
 
     async def __aenter__(self) -> OpenAICompatibleProviderAdapter:
         return self
@@ -906,6 +953,8 @@ def _response_provider_metadata(
         "dialect": profile.dialect,
         "admission_schema_version": admission.schema_version,
     }
+    if profile.route is not None:
+        payload["route"] = profile.route.to_execution_context()
     if system_fingerprint is not None:
         payload["system_fingerprint"] = system_fingerprint
     return {"openai_compatible": payload}
@@ -1121,8 +1170,12 @@ def openai_compatible_profile(
     *,
     profile_id: str,
     revision: str,
+    config_revision: str,
+    public_alias: str,
     base_url: str,
     model: str,
+    capability_profile: str,
+    loss_matrix_revision: str,
     features: Collection[BridgeFeature],
     limits: NormalizedTokenLimits,
     network_policy_ref: str,
@@ -1134,7 +1187,7 @@ def openai_compatible_profile(
 ) -> OpenAICompatibleUpstreamProfile:
     """Build an exact generic profile after explicit capability review."""
     capabilities = NormalizedProtocolCapabilities(
-        profile=f"{profile_id}@{revision}",
+        profile=capability_profile,
         features=frozenset(features),
         limits=limits,
     )
@@ -1150,4 +1203,13 @@ def openai_compatible_profile(
         network_policy_ref=network_policy_ref,
         tls_policy_ref=tls_policy_ref,
         proxy_policy_ref=proxy_policy_ref,
+        route=OpenAICompatibleRouteBinding(
+            config_revision=config_revision,
+            profile_id=profile_id,
+            profile_revision=revision,
+            public_alias=public_alias,
+            upstream_model=model,
+            capability_profile=capability_profile,
+            loss_matrix_revision=loss_matrix_revision,
+        ),
     )

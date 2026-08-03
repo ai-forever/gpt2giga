@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from gpt2giga.protocols.normalized import (
     BridgeFeature,
@@ -63,8 +64,12 @@ def _profile(*, credential=True, features=frozenset(BridgeFeature)):
     return openai_compatible_profile(
         profile_id="vllm-fixture",
         revision="fixture-r1",
+        config_revision=f"sha256:{'1' * 64}",
+        public_alias="openai/fixture",
         base_url="https://upstream.invalid/v1",
         model="fixture-model",
+        capability_profile="openai-fixture-v1",
+        loss_matrix_revision=f"sha256:{'2' * 64}",
         features=features,
         limits=NormalizedTokenLimits(
             context_window=8192,
@@ -75,6 +80,52 @@ def _profile(*, credential=True, features=frozenset(BridgeFeature)):
         network_policy_ref="egress:fixture",
         timeout_seconds=2.0,
     )
+
+
+async def test_reviewed_profile_binds_exact_public_route_without_secret_material():
+    profile = _profile()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: None))
+    adapter = OpenAICompatibleProviderAdapter(
+        profile,
+        credential="secret-value-canary",
+        authorize_network=_NetworkAuthorizer(),
+        http_client=client,
+    )
+
+    redacted = adapter.__gpt2giga_redacted__()
+
+    assert profile.schema_version == "gpt2giga.openai-compatible-upstream.v1"
+    assert redacted["route"] == {
+        "schema_version": "gpt2giga.execution-context.v1",
+        "config_revision": f"sha256:{'1' * 64}",
+        "profile_id": "vllm-fixture",
+        "profile_revision": "fixture-r1",
+        "public_alias": "openai/fixture",
+        "provider_kind": "openai_compatible",
+        "upstream_model": "fixture-model",
+        "capability_profile": "openai-fixture-v1",
+        "loss_matrix_revision": f"sha256:{'2' * 64}",
+    }
+    assert "secret-value-canary" not in repr(adapter)
+    assert "secret-value-canary" not in json.dumps(redacted)
+    await client.aclose()
+
+
+def test_reviewed_profile_rejects_noncanonical_revisions():
+    with pytest.raises(ValidationError, match="config_revision"):
+        openai_compatible_profile(
+            profile_id="vllm-fixture",
+            revision="fixture-r1",
+            config_revision="fixture-config",
+            public_alias="openai/fixture",
+            base_url="https://upstream.invalid/v1",
+            model="fixture-model",
+            capability_profile="openai-fixture-v1",
+            loss_matrix_revision=f"sha256:{'2' * 64}",
+            features=frozenset(BridgeFeature),
+            limits=NormalizedTokenLimits(context_window=8192),
+            network_policy_ref="egress:fixture",
+        )
 
 
 def _request(*, stream=False):
@@ -289,6 +340,17 @@ async def test_adapter_executes_chat_tools_and_model_discovery_through_fake_serv
         "profile_revision": "fixture-r1",
         "dialect": "openai-chat-completions-v1",
         "admission_schema_version": "gigaloom.protocol-bridge-admission.v1",
+        "route": {
+            "schema_version": "gpt2giga.execution-context.v1",
+            "config_revision": f"sha256:{'1' * 64}",
+            "profile_id": "vllm-fixture",
+            "profile_revision": "fixture-r1",
+            "public_alias": "openai/fixture",
+            "provider_kind": "openai_compatible",
+            "upstream_model": "fixture-model",
+            "capability_profile": "openai-fixture-v1",
+            "loss_matrix_revision": f"sha256:{'2' * 64}",
+        },
         "system_fingerprint": "fixture-fingerprint",
     }
     assert models == ("fixture-model", "fixture-model-b")
