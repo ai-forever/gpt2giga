@@ -417,10 +417,9 @@ async def test_prepare_chat_disables_builtin_tools_when_default_mode_is_v2():
     assert "tools" not in request
 
 
-async def test_prepare_chat_completion_maps_native_structured_output_and_reasoning():
+async def test_prepare_chat_completion_maps_native_output_and_explicit_reasoning():
     cfg = ProxyConfig(
         proxy=ProxySettings(
-            enable_reasoning=True,
             structured_output_mode="native",
         )
     )
@@ -430,6 +429,7 @@ async def test_prepare_chat_completion_maps_native_structured_output_and_reasoni
         {
             "model": "GigaChat-2-Max",
             "messages": [{"role": "user", "content": "return json"}],
+            "reasoning_effort": "high",
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
@@ -450,29 +450,8 @@ async def test_prepare_chat_completion_maps_native_structured_output_and_reasoni
     assert request.tools is None
 
 
-async def test_prepare_chat_completion_disable_reasoning_omits_model_option():
-    cfg = ProxyConfig(
-        proxy=ProxySettings(
-            enable_reasoning=True,
-            disable_reasoning=True,
-        )
-    )
-    rt = RequestTransformer(cfg, logger=logger)
-
-    request = await rt.prepare_chat_completion(
-        {
-            "model": "GigaChat-2-Max",
-            "messages": [{"role": "user", "content": "hello"}],
-            "reasoning_effort": "high",
-        }
-    )
-
-    assert request.model_options is None
-    assert "reasoning" not in request.model_dump(exclude_none=True)
-
-
 async def test_prepare_response_chat_completion_omits_explicit_reasoning_none():
-    cfg = ProxyConfig(proxy=ProxySettings(enable_reasoning=True))
+    cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
     request = await rt.prepare_response_chat_completion(

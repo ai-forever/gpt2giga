@@ -29,14 +29,12 @@ GPT2GIGA_ENABLE_API_KEY_AUTH=True
 GPT2GIGA_API_KEY=<ваш_api_ключ>
 GPT2GIGA_GIGACHAT_API_MODE=v2
 GPT2GIGA_PASS_MODEL=False
-GPT2GIGA_DISABLE_REASONING=True
 ```
 
 Рекомендуемые параметры для Codex:
 
 - `GPT2GIGA_GIGACHAT_API_MODE=v2` — включает режим `v2` для root routes без `/v1` или `/v2`; он нужен для встроенных инструментов GigaChat, например `web_search` и `image_generate`.
 - `GPT2GIGA_PASS_MODEL=False` — заставляет прокси использовать модель из `GIGACHAT_MODEL`, даже если Codex передал в запросе имя модели OpenAI.
-- `GPT2GIGA_DISABLE_REASONING=True` — удаляет `reasoning` и `reasoning_effort` из запроса к GigaChat, чтобы клиентские reasoning-поля не мешали обработке.
 
 Запустите прокси-сервер:
 
@@ -227,7 +225,7 @@ trust_level = "trusted"
 
 - **Codex получает 401/403** — проверьте, что `GPT2GIGA_API_KEY` в окружении Codex совпадает со значением на сервере `gpt2giga`.
 - **Codex пытается вызвать OpenAI-модель** — оставьте `GPT2GIGA_PASS_MODEL=False`, чтобы прокси использовал модель из `GIGACHAT_MODEL`.
-- **Появляются ошибки вокруг `reasoning` или `reasoning_effort`** — проверьте `model_reasoning_effort = "none"` в `config.toml` и `GPT2GIGA_DISABLE_REASONING=True` в `.env`.
+- **Появляются ошибки вокруг `reasoning` или `reasoning_effort`** — проверьте `model_reasoning_effort = "none"` в `config.toml`.
 
 ---
 

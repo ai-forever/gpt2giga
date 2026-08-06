@@ -8,8 +8,6 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_PASS_MODEL", raising=False)
     monkeypatch.delenv("GPT2GIGA_PASS_TOKEN_CLIENT_CACHE_SIZE", raising=False)
     monkeypatch.delenv("GPT2GIGA_SHUTDOWN_TIMEOUT_SECONDS", raising=False)
-    monkeypatch.delenv("GPT2GIGA_ENABLE_REASONING", raising=False)
-    monkeypatch.delenv("GPT2GIGA_DISABLE_REASONING", raising=False)
     monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING", raising=False)
@@ -63,8 +61,6 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.pass_model is True
     assert s.pass_token_client_cache_size == 32
     assert s.shutdown_timeout_seconds == 10.0
-    assert s.enable_reasoning is False
-    assert s.disable_reasoning is False
     assert s.structured_output_mode == "function_call"
     assert s.gigachat_api_mode == "v1"
     assert s.disable_builtin_tool_mapping is False
@@ -116,6 +112,11 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.model_max_connections == {}
     assert s.model_max_connections_default is None
     assert s.model_max_connections_acquire_timeout is None
+
+
+def test_proxy_settings_has_no_global_reasoning_toggles():
+    assert "enable_reasoning" not in ProxySettings.model_fields
+    assert "disable_reasoning" not in ProxySettings.model_fields
 
 
 def test_proxy_config_instantiation():
@@ -206,12 +207,6 @@ def test_proxy_settings_bool_cast_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_USE_HTTPS", "true")
     s = ProxySettings()
     assert s.use_https is True
-
-
-def test_proxy_settings_disable_reasoning_from_env(monkeypatch):
-    monkeypatch.setenv("GPT2GIGA_DISABLE_REASONING", "true")
-    s = ProxySettings()
-    assert s.disable_reasoning is True
 
 
 def test_proxy_settings_structured_output_mode_from_env(monkeypatch):

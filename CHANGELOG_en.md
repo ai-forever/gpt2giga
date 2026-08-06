@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Native function-calling schemas**: OpenAI, Responses, Anthropic, and Gemini no longer pass function JSON Schemas through GigaChat-specific workaround transformations. Schemas using `$defs`/`$ref`, composition, union types, mixed `enum` values, boolean subschemas, and extension keywords are forwarded losslessly to GigaChat v1 and v2 through `gigachat>=0.2.4a1`.
+- **Request-scoped reasoning disable**: OpenAI `reasoning.effort="none"` and `reasoning_effort="none"`, including Codex `model_reasoning_effort=none`, now remove reasoning from the upstream payload.
+
+### Removed
+- **Global reasoning workarounds**: removed `GPT2GIGA_ENABLE_REASONING` / `--proxy.enable-reasoning` and `GPT2GIGA_DISABLE_REASONING` / `--proxy.disable-reasoning`; reasoning is now controlled only by explicit client request parameters.
 
 ## [0.3.0] - 2026-08-03
 

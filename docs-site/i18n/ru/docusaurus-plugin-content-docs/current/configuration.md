@@ -211,14 +211,9 @@ GigaChat также поддерживает настройки клиентск
 
 Рассуждения:
 
-```dotenv
-GPT2GIGA_ENABLE_REASONING=False
-GPT2GIGA_DISABLE_REASONING=False
-```
-
-- `GPT2GIGA_ENABLE_REASONING=True` добавляет `reasoning_effort="high"`, если клиент не передал явную настройку рассуждений.
-- `GPT2GIGA_DISABLE_REASONING=True` удаляет `reasoning` и `reasoning_effort`, включая явные клиентские поля и проброс `extra_body`.
-- Клиентские `reasoning.effort="none"` или `reasoning_effort="none"` отключают рассуждения для отдельного запроса и удаляют поля reasoning из GigaChat payload. Глобальная настройка `GPT2GIGA_DISABLE_REASONING` не требуется.
+- Рассуждения управляются каждым клиентским запросом; прокси не добавляет и глобально не переопределяет effort.
+- Клиентские `reasoning.effort="none"` или `reasoning_effort="none"` отключают рассуждения для отдельного запроса и удаляют поля reasoning из GigaChat payload.
+- Другие явно заданные reasoning effort передаются в GigaChat.
 
 Структурированный вывод:
 

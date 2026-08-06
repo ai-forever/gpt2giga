@@ -9,7 +9,10 @@
 
 ### Исправлено
 - **Нативные схемы function calling**: OpenAI, Responses, Anthropic и Gemini больше не пропускают JSON Schema функций через GigaChat-специфичные обходные преобразования. Схемы с `$defs`/`$ref`, композициями, union-типами, mixed `enum`, boolean subschemas и дополнительными keywords передаются без потерь в GigaChat v1 и v2 через SDK `gigachat>=0.2.4a1`.
-- **Отключение reasoning на уровне запроса**: OpenAI `reasoning.effort="none"` и `reasoning_effort="none"`, включая Codex `model_reasoning_effort=none`, теперь удаляют reasoning из upstream payload без обязательного `GPT2GIGA_DISABLE_REASONING` и не переопределяются `GPT2GIGA_ENABLE_REASONING`.
+- **Отключение reasoning на уровне запроса**: OpenAI `reasoning.effort="none"` и `reasoning_effort="none"`, включая Codex `model_reasoning_effort=none`, теперь удаляют reasoning из upstream payload.
+
+### Удалено
+- **Глобальные reasoning workarounds**: удалены `GPT2GIGA_ENABLE_REASONING` / `--proxy.enable-reasoning` и `GPT2GIGA_DISABLE_REASONING` / `--proxy.disable-reasoning`; reasoning теперь управляется только явными параметрами клиентского запроса.
 
 ## [0.3.0] - 2026-08-03
 
